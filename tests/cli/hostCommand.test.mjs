@@ -131,7 +131,7 @@ for (const host of ['codex', 'claude-code', 'openclaw']) {
     const { homeDir, systemHome } = await createProfileHome(`metabot-cli-host-${host}-`);
     t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-    const sharedSkillRoot = await createSharedSkill(systemHome, 'metabot-ask-master');
+    const sharedSkillRoot = await createSharedSkill(systemHome, 'metabot-help');
     await createSharedSkill(systemHome, 'metabot-network-directory');
 
     const result = await runHostCli(homeDir, ['host', 'bind-skills', '--host', host]);
@@ -141,13 +141,13 @@ for (const host of ['codex', 'claude-code', 'openclaw']) {
     assert.equal(result.payload.data.host, host);
     assert.equal(result.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, host));
     assert.equal(result.payload.data.sharedSkillRoot, path.join(systemHome, '.metabot', 'skills'));
-    assert.deepEqual(result.payload.data.boundSkills, ['metabot-ask-master', 'metabot-network-directory']);
+    assert.deepEqual(result.payload.data.boundSkills, ['metabot-help', 'metabot-network-directory']);
     assert.deepEqual(result.payload.data.replacedEntries, []);
     assert.deepEqual(result.payload.data.unchangedEntries, []);
     assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === host && root.status === 'bound'));
 
     await assertSymlinkPointsTo(
-      path.join(expectedHostSkillRoot(systemHome, host), 'metabot-ask-master'),
+      path.join(expectedHostSkillRoot(systemHome, host), 'metabot-help'),
       sharedSkillRoot,
     );
   });
@@ -157,14 +157,14 @@ test('runCli supports registry-derived `metabot host bind-skills --host gemini`'
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-gemini-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-  const sharedSkillRoot = await createSharedSkill(systemHome, 'metabot-ask-master');
+  const sharedSkillRoot = await createSharedSkill(systemHome, 'metabot-help');
   const result = await runHostCli(homeDir, ['host', 'bind-skills', '--host', 'gemini']);
 
   assert.equal(result.exitCode, 0);
   assert.equal(result.payload.ok, true);
   assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'gemini' && root.status === 'bound'));
   await assertSymlinkPointsTo(
-    path.join(expectedHostSkillRoot(systemHome, 'gemini'), 'metabot-ask-master'),
+    path.join(expectedHostSkillRoot(systemHome, 'gemini'), 'metabot-help'),
     sharedSkillRoot,
   );
 });
@@ -173,7 +173,7 @@ test('runCli treats whitespace-only host home overrides as empty and falls back 
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-whitespace-home-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-  const sourceSharedSkillPath = await createSharedSkill(systemHome, 'metabot-ask-master');
+  const sourceSharedSkillPath = await createSharedSkill(systemHome, 'metabot-help');
 
   const result = await runHostCli(
     homeDir,
@@ -185,7 +185,7 @@ test('runCli treats whitespace-only host home overrides as empty and falls back 
   assert.equal(result.payload.ok, true);
   assert.equal(result.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, 'codex'));
   await assertSymlinkPointsTo(
-    path.join(expectedHostSkillRoot(systemHome, 'codex'), 'metabot-ask-master'),
+    path.join(expectedHostSkillRoot(systemHome, 'codex'), 'metabot-help'),
     sourceSharedSkillPath,
   );
 });
@@ -280,7 +280,7 @@ test('runCli returns host_skill_root_unresolved with host and resolved host root
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-root-unresolved-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-  await createSharedSkill(systemHome, 'metabot-ask-master');
+  await createSharedSkill(systemHome, 'metabot-help');
   const blockedCodexHome = path.join(systemHome, 'blocked-codex-home');
   await fs.writeFile(blockedCodexHome, 'not-a-directory', 'utf8');
 
@@ -301,10 +301,10 @@ test('runCli returns host_skill_bind_failed with source and destination path con
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-bind-failed-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-  const sourceSharedSkillPath = await createSharedSkill(systemHome, 'metabot-ask-master');
+  const sourceSharedSkillPath = await createSharedSkill(systemHome, 'metabot-help');
   const hostSkillRoot = expectedHostSkillRoot(systemHome, 'codex');
   await fs.mkdir(hostSkillRoot, { recursive: true });
-  await fs.writeFile(path.join(hostSkillRoot, 'metabot-ask-master'), 'blocking file', 'utf8');
+  await fs.writeFile(path.join(hostSkillRoot, 'metabot-help'), 'blocking file', 'utf8');
 
   const result = await runHostCli(homeDir, ['host', 'bind-skills', '--host', 'codex']);
 
@@ -312,14 +312,14 @@ test('runCli returns host_skill_bind_failed with source and destination path con
   assert.equal(result.payload.ok, false);
   assert.equal(result.payload.code, 'host_skill_bind_failed');
   assert.equal(result.payload.data.sourceSharedSkillPath, sourceSharedSkillPath);
-  assert.equal(result.payload.data.destinationHostPath, path.join(hostSkillRoot, 'metabot-ask-master'));
+  assert.equal(result.payload.data.destinationHostPath, path.join(hostSkillRoot, 'metabot-help'));
 });
 
 test('runCli preflights later blocked destinations so earlier skills are not modified on failure', async (t) => {
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-preflight-blocked-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-  const earlierSkillSourcePath = await createSharedSkill(systemHome, 'metabot-ask-master');
+  const earlierSkillSourcePath = await createSharedSkill(systemHome, 'metabot-help');
   await createSharedSkill(systemHome, 'metabot-network-directory');
   const hostSkillRoot = expectedHostSkillRoot(systemHome, 'codex');
   await fs.mkdir(hostSkillRoot, { recursive: true });
@@ -335,11 +335,11 @@ test('runCli preflights later blocked destinations so earlier skills are not mod
     path.join(hostSkillRoot, 'metabot-network-directory'),
   );
 
-  const earlierSkillHostPath = path.join(hostSkillRoot, 'metabot-ask-master');
+  const earlierSkillHostPath = path.join(hostSkillRoot, 'metabot-help');
   await assert.rejects(fs.lstat(earlierSkillHostPath), { code: 'ENOENT' });
   assert.equal(
     await fs.readFile(path.join(earlierSkillSourcePath, 'SKILL.md'), 'utf8'),
-    '# metabot-ask-master\n',
+    '# metabot-help\n',
   );
 });
 
@@ -347,7 +347,7 @@ test('runCli returns an idempotent bind-skills success envelope shape', async (t
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-idempotent-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-  const sourceSharedSkillPath = await createSharedSkill(systemHome, 'metabot-ask-master');
+  const sourceSharedSkillPath = await createSharedSkill(systemHome, 'metabot-help');
 
   const first = await runHostCli(homeDir, ['host', 'bind-skills', '--host', 'codex']);
   const second = await runHostCli(homeDir, ['host', 'bind-skills', '--host', 'codex']);
@@ -357,24 +357,24 @@ test('runCli returns an idempotent bind-skills success envelope shape', async (t
   assert.equal(first.payload.data.host, 'codex');
   assert.equal(first.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, 'codex'));
   assert.equal(first.payload.data.sharedSkillRoot, path.join(systemHome, '.metabot', 'skills'));
-  assert.deepEqual(first.payload.data.boundSkills, ['metabot-ask-master']);
+  assert.deepEqual(first.payload.data.boundSkills, ['metabot-help']);
   assert.deepEqual(first.payload.data.replacedEntries, []);
   assert.deepEqual(first.payload.data.unchangedEntries, []);
   assert.ok(first.payload.data.boundRoots.some((root) => root.platformId === 'codex' && root.status === 'bound'));
   assert.equal(second.payload.data.host, 'codex');
   assert.equal(second.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, 'codex'));
   assert.equal(second.payload.data.sharedSkillRoot, path.join(systemHome, '.metabot', 'skills'));
-  assert.deepEqual(second.payload.data.boundSkills, ['metabot-ask-master']);
+  assert.deepEqual(second.payload.data.boundSkills, ['metabot-help']);
   assert.deepEqual(second.payload.data.replacedEntries, []);
-  assert.deepEqual(second.payload.data.unchangedEntries, ['metabot-ask-master']);
+  assert.deepEqual(second.payload.data.unchangedEntries, ['metabot-help']);
   assert.ok(second.payload.data.boundRoots.some((root) =>
     root.platformId === 'codex'
       && root.status === 'bound'
-      && root.unchangedEntries.includes('metabot-ask-master')
+      && root.unchangedEntries.includes('metabot-help')
   ));
 
   await assertSymlinkPointsTo(
-    path.join(expectedHostSkillRoot(systemHome, 'codex'), 'metabot-ask-master'),
+    path.join(expectedHostSkillRoot(systemHome, 'codex'), 'metabot-help'),
     sourceSharedSkillPath,
   );
 });
@@ -383,9 +383,9 @@ test('runCli replaces copied legacy `metabot-*` directories with symlinks', asyn
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-legacy-dir-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-  const sourceSharedSkillPath = await createSharedSkill(systemHome, 'metabot-ask-master', '# shared version\n');
+  const sourceSharedSkillPath = await createSharedSkill(systemHome, 'metabot-help', '# shared version\n');
   const hostSkillRoot = expectedHostSkillRoot(systemHome, 'codex');
-  const legacyCopyRoot = path.join(hostSkillRoot, 'metabot-ask-master');
+  const legacyCopyRoot = path.join(hostSkillRoot, 'metabot-help');
   await fs.mkdir(legacyCopyRoot, { recursive: true });
   await fs.writeFile(path.join(legacyCopyRoot, 'SKILL.md'), '# copied legacy version\n', 'utf8');
 
@@ -393,7 +393,7 @@ test('runCli replaces copied legacy `metabot-*` directories with symlinks', asyn
 
   assert.equal(result.exitCode, 0);
   assert.equal(result.payload.ok, true);
-  assert.deepEqual(result.payload.data.replacedEntries, ['metabot-ask-master']);
+  assert.deepEqual(result.payload.data.replacedEntries, ['metabot-help']);
   await assertSymlinkPointsTo(legacyCopyRoot, sourceSharedSkillPath);
 });
 
@@ -401,7 +401,7 @@ test('runCli preserves unrelated host-native skills while binding shared MetaBot
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-preserve-native-');
   t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
 
-  await createSharedSkill(systemHome, 'metabot-ask-master');
+  await createSharedSkill(systemHome, 'metabot-help');
   const hostSkillRoot = expectedHostSkillRoot(systemHome, 'codex');
   const nativeSkillRoot = path.join(hostSkillRoot, 'native-helper');
   await fs.mkdir(nativeSkillRoot, { recursive: true });

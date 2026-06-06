@@ -14,7 +14,6 @@ const SHARED_BUNDLED_CLI = 'runtime/dist/cli/main.js';
 const HOST_WRAPPER_SHARED_INSTALL = 'runtime/shared-install.sh';
 const HOST_WRAPPER_SHARED_SKILLS_ROOT = 'runtime/shared-skills';
 const METABOT_SKILLS = [
-  'metabot-ask-master',
   'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',

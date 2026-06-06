@@ -29,6 +29,8 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+system\s+/m);
   assert.match(output, /^\s+loom\s+/m);
   assert.match(output, /^\s+metaapp\s+/m);
+  assert.doesNotMatch(output, /^\s+master\s+/m);
+  assert.doesNotMatch(output, /^\s+evolution\s+/m);
   assert.equal(output.includes('"ok"'), false);
 });
 
@@ -51,6 +53,25 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'metaapp'));
+  assert.equal(output.subcommands.some((entry) => entry.name === 'master'), false);
+  assert.equal(output.subcommands.some((entry) => entry.name === 'evolution'), false);
+});
+
+test('runCli rejects retired master and evolution commands', async () => {
+  for (const command of ['master', 'evolution']) {
+    const stdout = [];
+
+    const exitCode = await runCli([command], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 1);
+    const output = JSON.parse(stdout.join(''));
+    assert.equal(output.ok, false);
+    assert.equal(output.code, 'unknown_command');
+    assert.match(output.message, new RegExp(`Unknown command: ${command}`));
+  }
 });
 
 test('runCli prints metaapp group help with all leaf commands', async () => {
@@ -395,12 +416,13 @@ test('runCli prints config group help with get and set subcommands', async () =>
   assert.match(output, /^\s+get\s+/m);
   assert.match(output, /^\s+set\s+/m);
   assert.match(output, /chain\.defaultWriteNetwork/);
-  assert.match(output, /askMaster\.enabled/);
-  assert.match(output, /askMaster\.triggerMode suggest/);
+  assert.match(output, /a2a\.simplemsgListenerEnabled/);
+  assert.doesNotMatch(output, /askMaster/);
+  assert.doesNotMatch(output, /evolution_network/);
   assert.match(output, /--from alice/);
 });
 
-test('runCli prints config set help with the public Ask Master trigger modes only', async () => {
+test('runCli prints config set help with active config keys only', async () => {
   const stdout = [];
 
   const exitCode = await runCli(['config', 'set', '--help'], {
@@ -413,42 +435,10 @@ test('runCli prints config set help with the public Ask Master trigger modes onl
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot config set \[--from <bot-slug>\] <key> <value>/m);
   assert.match(output, /--from <bot-slug>/);
-  assert.match(output, /Ask Master trigger mode is intentionally limited to manual or suggest/i);
-  assert.match(output, /Fails when askMaster\.triggerMode is not one of `manual` or `suggest`\./);
-  assert.doesNotMatch(output, /`manual`, `suggest`, or `auto`/);
-});
-
-test('runCli prints master host-action help with both manual_ask and accept_suggest examples', async () => {
-  const stdout = [];
-
-  const exitCode = await runCli(['master', 'host-action', '--help'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(exitCode, 0);
-
-  const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot master host-action --request-file <path>/m);
-  assert.match(output, /manual_ask or accept_suggest/i);
-  assert.match(output, /master-manual-ask\.json/);
-  assert.match(output, /master-accept-suggest\.json/);
-});
-
-test('runCli prints master ask help with confirm limited to the trace-id continuation path', async () => {
-  const stdout = [];
-
-  const exitCode = await runCli(['master', 'ask', '--help'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(exitCode, 0);
-
-  const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot master ask \[--from <bot-slug>\] --request-file <path> \| metabot master ask \[--from <bot-slug>\] --trace-id <trace-id> \[--confirm\]/m);
-  assert.match(output, /--from <bot-slug>/);
-  assert.match(output, /Only valid together with `--trace-id`\./);
+  assert.match(output, /Fails when chain\.defaultWriteNetwork is not one of mvc, btc, doge, or opcat\./);
+  assert.match(output, /metabot config set --from alice a2a\.simplemsgListenerEnabled false/);
+  assert.doesNotMatch(output, /askMaster/);
+  assert.doesNotMatch(output, /evolution_network/);
 });
 
 test('runCli prints wallet group help with balance subcommand', async () => {
@@ -610,39 +600,6 @@ test('runCli prints machine-readable file upload-large help', async () => {
   assert.equal(output.command, 'metabot file upload-large');
   assert.ok(output.requiredFlags.some((flag) => flag.flag === '--request-file'));
   assert.ok(output.optionalFlags.some((flag) => flag.flag === '--verify'));
-});
-
-test('runCli prints master publish help with DOGE and OPCAT chain support', async () => {
-  const stdout = [];
-
-  const exitCode = await runCli(['master', 'publish', '--help'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(exitCode, 0);
-
-  const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot master publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
-  assert.match(output, /--from <bot-slug>/);
-  assert.match(output, /configured `chain\.defaultWriteNetwork`, initially mvc/i);
-  assert.match(output, /master-doge-payload\.json/);
-  assert.match(output, /master-opcat-payload\.json/);
-});
-
-test('runCli prints master trace help with actor selection', async () => {
-  const stdout = [];
-
-  const exitCode = await runCli(['master', 'trace', '--help'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(exitCode, 0);
-
-  const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot master trace \[--from <bot-slug>\] --id <trace-id>/m);
-  assert.match(output, /--from <bot-slug>/);
 });
 
 test('runCli prints system group help with update and uninstall subcommands', async () => {
@@ -989,11 +946,14 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.match(output.usage, /\[--session-id <session-id>\]/);
   assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
   assert.match(output.requiredFlags[0].description, /metaapps/);
+  assert.doesNotMatch(output.requiredFlags[0].description, /chat-viewer/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
   const traceFlag = output.optionalFlags.find((entry) => entry.flag === '--trace-id');
   assert.ok(traceFlag);
   assert.match(traceFlag.description, /Optional/);
-  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--session-id'));
+  const sessionFlag = output.optionalFlags.find((entry) => entry.flag === '--session-id');
+  assert.ok(sessionFlag);
+  assert.doesNotMatch(sessionFlag.description, /chat-viewer/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--service-id'));
   assert.ok(output.successFields.includes('localUiUrl'));
   assert.ok(output.examples.includes('metabot ui open --page publish --from alice'));
@@ -1251,18 +1211,4 @@ test('runCli prints LLM leaf JSON help for actor-scoped binding commands', async
     assert.equal(payload.usage, usage);
     assert.ok(payload.optionalFlags.some((entry) => entry.flag === '--from'));
   }
-});
-
-test('runCli prints evolution help with actor selection', async () => {
-  const stdout = [];
-
-  const exitCode = await runCli(['evolution', 'publish', '--help'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(exitCode, 0);
-  const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot evolution publish \[--from <bot-slug>\] --skill <skill> --variant-id <variant-id>/m);
-  assert.match(output, /--from <bot-slug>/);
 });

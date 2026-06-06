@@ -63,17 +63,16 @@ The current implementation defaults many chain writes to MVC when no network is 
 - `src/core/buzz/postBuzz.ts` defaults buzz writes to `mvc`.
 - `src/core/files/uploadFile.ts` defaults file upload writes to `mvc`.
 - `src/core/services/servicePublishChain.ts` defaults service publish writes to `mvc`.
-- `src/core/master/masterServicePublish.ts` defaults master publish writes to `mvc`.
 - `src/daemon/defaultHandlers.ts` hardcodes `network: 'mvc'` for several protocol and private message writes.
 - `src/cli/commands/chat.ts` does not parse `--chain`.
-- `src/cli/commandHelp.ts` documents `--chain` for chain write, buzz post, file upload, services publish/rate, and master publish, but not chat private.
+- `src/cli/commandHelp.ts` documents `--chain` for chain write, buzz post, file upload, and services publish/rate, but not chat private.
 
 The project already has the right storage primitive:
 
 - `src/core/config/configTypes.ts` defines profile-scoped runtime config.
 - `src/core/config/configStore.ts` persists config under each profile's `.runtime/config.json`.
 - `metabot config get/set` is implemented in `src/cli/commands/config.ts` and `src/cli/runtime.ts`.
-- Existing config keys include `askMaster.*`, `a2a.simplemsgListenerEnabled`, and `evolution_network.*`.
+- Existing config keys include `chain.*` and `a2a.simplemsgListenerEnabled`.
 
 The UI also has a suitable management surface:
 
@@ -92,7 +91,6 @@ These surfaces must honor `chain.defaultWriteNetwork` when no explicit chain/net
 | `metabot file upload` | `--chain mvc|btc|opcat` | No `--chain` uses default write network, except DOGE fails with a clear unsupported-file-upload message. |
 | `metabot services publish` | `--chain mvc|btc|doge|opcat` | No `--chain` uses default write network. |
 | `metabot services rate` | `--chain mvc|btc|doge|opcat` | No `--chain` uses default write network for the rating pin. |
-| `metabot master publish` | `--chain mvc|btc|doge|opcat` | No `--chain` uses default write network. |
 | `metabot chat private` | none today | Add `--chain mvc|btc|doge|opcat`; no `--chain` uses default write network. |
 
 Daemon/API write calls that already include `network` in the JSON body should keep honoring the request body. Missing `network` should resolve to the stored default.
@@ -107,7 +105,6 @@ The following code paths write to chain but should remain MVC in the first phase
 | Bot profile sync | `src/core/bot/metabotProfileManager.ts` writes `/info/name`, `/info/avatar`, and `/info/bio` with `network: 'mvc'`. | `/ui/bot` profile edits are identity metadata, not generic content publishing. |
 | Provider heartbeat | `src/core/provider/providerHeartbeatLoop.ts` writes heartbeat pins with `network: 'mvc'`. | Directory/presence readers may assume MVC. |
 | Service call/order protocol | `src/daemon/defaultHandlers.ts` writes order private messages and order protocol pins with `network: 'mvc'`. | Needs payment-chain and remote-listener design; `--chain` may be confused with payment chain. |
-| Master ask/receive protocol messages | `src/daemon/defaultHandlers.ts` writes request/response private messages with `network: 'mvc'`. | Needs remote-listener design and protocol compatibility review. |
 | Refund request/finalize | `src/daemon/defaultHandlers.ts` writes refund protocol pins with `network: 'mvc'`. | Must stay aligned with payment/order lookup semantics. |
 | Auto-reply private chat | `src/core/chat/privateChatAutoReply.ts` writes simplemsg replies with `network: 'mvc'`. | Background behavior should be handled with a separate auto-reply/network policy. |
 | Rating follow-up private message | `src/daemon/defaultHandlers.ts` writes the provider follow-up simplemsg with `network: 'mvc'`. | The rating pin itself is covered; follow-up delivery chain needs protocol compatibility review. |
@@ -127,8 +124,6 @@ export interface ChainConfig {
 
 export interface MetabotConfig {
   chain: ChainConfig;
-  evolution_network: EvolutionNetworkConfig;
-  askMaster: AskMasterConfig;
   a2a: A2AConfig;
 }
 ```
@@ -241,7 +236,6 @@ Apply the resolver to covered handlers:
 - `file.upload`
 - `services.publish`
 - `services.rate`
-- `master.publish`
 - `chat.private`
 
 Do not rely only on CLI parsing. Local UI and external daemon clients may call the API directly.
@@ -453,6 +447,5 @@ npm test
 ## Open Follow-Up Questions For Later Specs
 
 - Should `services call` expose a separate write-chain flag for order protocol messages, or should it intentionally stay on MVC because payment-chain semantics are distinct?
-- Should `master ask`, `master receive`, and automatic master protocol messages follow the default write network?
 - Should profile metadata sync and identity bootstrap remain MVC forever for discovery compatibility, or become configurable after readers are proven multi-chain-safe?
 - Should provider heartbeat and refund protocol pins remain MVC, or should provider presence/order directories become multi-chain-aware first?

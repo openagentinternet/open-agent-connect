@@ -1,28 +1,6 @@
 import type { BaseSkillContract, SkillPermissionScope } from './skillContractTypes';
 
 const BASE_SKILL_REGISTRY: Record<string, BaseSkillContract> = {
-  'metabot-ask-master': {
-    skillName: 'metabot-ask-master',
-    title: 'MetaBot Ask Master',
-    summary: 'Preview, confirm, and inspect one Ask Master request across the public manual / suggest flows through the validated master runtime.',
-    instructions: 'Use metabot master list to resolve a target Master. In manual flow, start with metabot master ask --from <bot-slug> --request-file so the runtime can prepare preview metadata for the selected actor. In suggest flow, start with metabot master suggest --request-file so the runtime can evaluate a structured stuck/risk observation and surface one Ask Master suggestion. Accepted suggestions follow the same preview/confirm/send path as manual asks; pass --from <bot-slug> on the confirm step when acting as a specific Bot. Keep the public release contract on preview first, explicit confirm second. Stop on failure instead of falling back to private chat, advisor commands, simplemsg, or services call.',
-    commandTemplate: 'metabot master ask --from <bot-slug> --request-file master-request.json',
-    outputExpectation: 'Return structured JSON. Manual asks surface awaiting_confirmation with preview, traceId, and requestId before send. Suggest flows first surface a structured suggestion, then accepted suggestions enter the same preview/confirm path. After confirm, follow with metabot master trace --from <bot-slug> --id when more evidence is needed.',
-    fallbackPolicy: 'If no matching Master is available, the runtime declines to suggest, or the human declines confirmation, stop and surface the failure. Do not fall back to private chat, simplemsg, advisor commands, or services call.',
-    scope: {
-      allowedCommands: [
-        'metabot master list --online',
-        'metabot master suggest --request-file master-suggest.json',
-        'metabot master ask --from <bot-slug> --request-file master-request.json',
-        'metabot master ask --from <bot-slug> --trace-id trace-master-123 --confirm',
-        'metabot master trace --from <bot-slug> --id trace-master-123',
-      ],
-      chainRead: true,
-      chainWrite: true,
-      localUiOpen: false,
-      remoteDelegation: true,
-    },
-  },
   'metabot-network-directory': {
     skillName: 'metabot-network-directory',
     title: 'MetaBot Network Directory',

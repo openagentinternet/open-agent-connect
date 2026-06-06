@@ -39,7 +39,6 @@ The transport is the same in all cases. The business meaning is derived from mes
 - `src/core/orders/orderMessage.ts` builds the current `[ORDER]` payload.
 - `src/core/orders/serviceOrderProtocols.ts` currently supports legacy unscoped `[DELIVERY]` and `[NEEDSRATING]`.
 - `src/ui/pages/trace/*` is the current trace UI and already renders markdown plus `metafile://` media previews.
-- `src/ui/pages/chat-viewer/*` is the old private-chat viewer and should stop being the primary A2A UI.
 
 ### IDBots reference behavior
 
@@ -314,8 +313,6 @@ The per-peer A2A JSON stores decrypted plaintext. It must not store local privat
 
 Existing `.runtime/sessions/a2a-session-state.json` and `.runtime/state/private-chat-state.json` may be read during transition, but new simplemsg messages should be written through the unified per-peer A2A store. Trace routes should project from the unified store first, then fall back to existing session state only for older records.
 
-The old private-chat viewer and `privateChatStateStore` are legacy surfaces. This design does not require new unified-store traffic to be mirrored back into `privateChatStateStore`. If `/ui/chat-viewer` remains mounted during migration, it is a deprecated legacy viewer and must not be the URL returned by new A2A commands. If product compatibility later requires it to show new messages, add an explicit projection task from unified A2A storage to the chat-viewer API instead of relying on incidental dual writes.
-
 ## Listener Design
 
 ### Socket endpoints
@@ -541,7 +538,7 @@ The existing trace page layout should be retained unless a specific UI issue blo
 - render markdown and `metafile://` previews using the existing trace renderer,
 - show `orderTxid`, `paymentTxid`, and `pinId` as copyable technical metadata where the current layout already supports metadata.
 
-The old `/ui/chat-viewer` route can remain temporarily as a deprecated legacy entrypoint, but new CLI and skill outputs must point to `/ui/trace`. New unified-store traffic is not required to appear in chat-viewer unless a separate projection task is approved.
+New CLI and skill outputs must point to `/ui/trace`.
 
 ## Module Boundaries
 
@@ -605,7 +602,7 @@ Deliverables:
 Deliverables:
 
 - `/ui/trace?sessionId=...` selects exact sessions.
-- Private chat uses trace page, not chat-viewer.
+- Private chat uses the trace page.
 - Delivery markdown and media render in trace and host session.
 - `[NeedsRating:<orderTxid>]` triggers LLM-generated rating and `[ORDER_END:<orderTxid> rated]`.
 - Final success/failure outputs include trace URL again.
@@ -631,4 +628,3 @@ These are the main points to confirm before implementation:
 1. The scoped protocol should use the order simplemsg txid as `orderTxid`, matching IDBots, even though payment verification uses `paymentTxid`.
 2. The runtime directory should use the requested `.runtime/A2A/` casing.
 3. Phase 1 may add the real payment boundary and scoped protocol before the full per-peer listener/store lands, as long as later phases complete the unified storage requirement.
-4. The old `/ui/chat-viewer` route can remain as a deprecated legacy viewer, but no new successful command should point users there and new unified traffic does not need to be mirrored into its old store.

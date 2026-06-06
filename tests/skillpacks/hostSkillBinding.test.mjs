@@ -10,8 +10,8 @@ const {
 } = require('../../dist/core/host/hostSkillBinding.js');
 
 test('host skill binding uses Windows junctions with absolute targets', () => {
-  const source = path.resolve('/tmp/oac-home/.metabot/skills/metabot-ask-master');
-  const destination = path.resolve('/tmp/oac-home/.agents/skills/metabot-ask-master');
+  const source = path.resolve('/tmp/oac-home/.metabot/skills/metabot-help');
+  const destination = path.resolve('/tmp/oac-home/.agents/skills/metabot-help');
 
   assert.equal(resolveHostSkillSymlinkType('win32'), 'junction');
   assert.equal(resolveHostSkillSymlinkType('darwin'), 'dir');

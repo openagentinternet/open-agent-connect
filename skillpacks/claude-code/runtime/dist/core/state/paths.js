@@ -29,15 +29,7 @@ function normalizeProfileHomeDir(homeDir) {
     };
 }
 function buildMetabotPaths(input) {
-    const evolutionRoot = node_path_1.default.join(input.runtimeRoot, 'evolution');
     const a2aRoot = node_path_1.default.join(input.runtimeRoot, 'A2A');
-    const evolutionExecutionsRoot = node_path_1.default.join(evolutionRoot, 'executions');
-    const evolutionAnalysesRoot = node_path_1.default.join(evolutionRoot, 'analyses');
-    const evolutionArtifactsRoot = node_path_1.default.join(evolutionRoot, 'artifacts');
-    const evolutionIndexPath = node_path_1.default.join(evolutionRoot, 'index.json');
-    const evolutionRemoteRoot = node_path_1.default.join(evolutionRoot, 'remote');
-    const evolutionRemoteArtifactsRoot = node_path_1.default.join(evolutionRemoteRoot, 'artifacts');
-    const evolutionRemoteIndexPath = node_path_1.default.join(evolutionRemoteRoot, 'index.json');
     return {
         systemHomeDir: input.systemHomeDir,
         metabotRoot: input.metabotRoot,
@@ -54,14 +46,6 @@ function buildMetabotPaths(input) {
         exportsRoot: input.exportsRoot,
         stateRoot: input.stateRoot,
         locksRoot: input.locksRoot,
-        evolutionRoot,
-        evolutionExecutionsRoot,
-        evolutionAnalysesRoot,
-        evolutionArtifactsRoot,
-        evolutionIndexPath,
-        evolutionRemoteRoot,
-        evolutionRemoteArtifactsRoot,
-        evolutionRemoteIndexPath,
         identityProfilesPath: node_path_1.default.join(input.managerRoot, 'identity-profiles.json'),
         activeHomePath: node_path_1.default.join(input.managerRoot, 'active-home.json'),
         configPath: node_path_1.default.join(input.runtimeRoot, 'config.json'),
@@ -73,10 +57,6 @@ function buildMetabotPaths(input) {
         sessionStatePath: input.sessionStatePath,
         providerPresenceStatePath: input.providerPresenceStatePath,
         ratingDetailStatePath: input.ratingDetailStatePath,
-        masterPendingAskStatePath: input.masterPendingAskStatePath,
-        masterSuggestStatePath: input.masterSuggestStatePath,
-        masterAutoFeedbackStatePath: input.masterAutoFeedbackStatePath,
-        masterPublishedStatePath: input.masterPublishedStatePath,
         directorySeedsPath: input.directorySeedsPath,
         privateChatStatePath: input.privateChatStatePath,
         chatStrategiesPath: input.chatStrategiesPath,
@@ -128,10 +108,6 @@ function resolveMetabotPaths(homeDir) {
         sessionStatePath: node_path_1.default.join(sessionsRoot, 'a2a-session-state.json'),
         providerPresenceStatePath: node_path_1.default.join(stateRoot, 'provider-presence.json'),
         ratingDetailStatePath: node_path_1.default.join(stateRoot, 'rating-detail.json'),
-        masterPendingAskStatePath: node_path_1.default.join(stateRoot, 'master-pending-asks.json'),
-        masterSuggestStatePath: node_path_1.default.join(stateRoot, 'master-suggest-state.json'),
-        masterAutoFeedbackStatePath: node_path_1.default.join(stateRoot, 'master-auto-feedback-state.json'),
-        masterPublishedStatePath: node_path_1.default.join(stateRoot, 'master-service-state.json'),
         directorySeedsPath: node_path_1.default.join(stateRoot, 'directory-seeds.json'),
         privateChatStatePath: node_path_1.default.join(stateRoot, 'private-chat-state.json'),
         chatStrategiesPath: node_path_1.default.join(stateRoot, 'chat-strategies.json'),

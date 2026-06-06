@@ -7,7 +7,6 @@ const SUPPORTED_UI_PAGES = new Set([
   'bot',
   'buzz',
   'chat',
-  'chat-viewer',
   'publish',
   'my-services',
   'trace',

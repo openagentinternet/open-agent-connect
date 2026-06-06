@@ -113,7 +113,6 @@ function createState(overrides = {}) {
         },
         a2a: null,
         providerRuntime: null,
-        askMaster: null,
         artifacts: {
           transcriptMarkdownPath: '',
           traceMarkdownPath: '',

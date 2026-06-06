@@ -3,7 +3,6 @@ import { resolveManualRefundDecision } from '../orders/manualRefund';
 import type { SellerOrderRecord } from '../orders/sellerOrderState';
 import { findRatingDetailByServicePayment } from '../ratings/ratingDetailSync';
 import type { RatingDetailItem } from '../ratings/ratingDetailState';
-import type { PublishedMasterRecord } from '../master/masterTypes';
 import type { PublishedServiceRecord } from '../services/publishService';
 
 type ProviderConsoleTraceOrder = NonNullable<SessionTraceRecord['order']> & {
@@ -80,30 +79,15 @@ export interface ProviderConsoleManualActionRow {
   sessionId: string | null;
 }
 
-export interface ProviderConsoleMasterRequestRow {
-  traceId: string;
-  servicePinId: string;
-  serviceName: string;
-  displayName: string;
-  masterKind: string;
-  callerGlobalMetaId: string | null;
-  callerName: string | null;
-  publicStatus: string | null;
-  latestEvent: string | null;
-  createdAt: number;
-}
-
 export interface ProviderConsoleSnapshot {
   services: ProviderConsoleServiceRow[];
   recentOrders: ProviderConsoleOrderRow[];
   manualActions: ProviderConsoleManualActionRow[];
-  recentMasterRequests: ProviderConsoleMasterRequestRow[];
   totals: {
     serviceCount: number;
     activeServiceCount: number;
     sellerOrderCount: number;
     manualActionCount: number;
-    masterRequestCount: number;
   };
 }
 
@@ -308,7 +292,6 @@ function buildSellerOrderRowWithRating(
       providerSkills: normalizeText(order.providerSkill) ? [normalizeText(order.providerSkill)] : [],
       fallbackSelected: typeof order.fallbackSelected === 'boolean' ? order.fallbackSelected : null,
     },
-    askMaster: null,
     artifacts: {
       transcriptMarkdownPath: '',
       traceMarkdownPath: '',
@@ -406,50 +389,13 @@ function buildSellerOrderManualAction(order: SellerOrderRecord): ProviderConsole
   };
 }
 
-function findPublishedMaster(
-  masters: PublishedMasterRecord[],
-  servicePinId: string,
-): PublishedMasterRecord | null {
-  return masters.find((entry) => (
-    normalizeText(entry.currentPinId) === servicePinId
-    || normalizeText(entry.sourceMasterPinId) === servicePinId
-  )) ?? null;
-}
-
-function buildMasterRequestRow(
-  trace: ProviderConsoleTraceRecord,
-  masters: PublishedMasterRecord[],
-): ProviderConsoleMasterRequestRow | null {
-  const externalConversationId = normalizeText(trace.session?.externalConversationId);
-  const servicePinId = normalizeText(trace.a2a?.servicePinId);
-  if (!externalConversationId.startsWith('master:') || normalizeText(trace.a2a?.role) !== 'provider' || !servicePinId) {
-    return null;
-  }
-
-  const publishedMaster = findPublishedMaster(masters, servicePinId);
-  return {
-    traceId: normalizeText(trace.traceId),
-    servicePinId,
-    serviceName: normalizeText(publishedMaster?.serviceName) || servicePinId,
-    displayName: normalizeText(publishedMaster?.displayName) || normalizeText(trace.session?.title) || servicePinId,
-    masterKind: normalizeText(publishedMaster?.masterKind) || 'unknown',
-    callerGlobalMetaId: normalizeText(trace.a2a?.callerGlobalMetaId) || null,
-    callerName: normalizeText(trace.a2a?.callerName) || null,
-    publicStatus: normalizeText(trace.a2a?.publicStatus) || null,
-    latestEvent: normalizeText(trace.a2a?.latestEvent) || null,
-    createdAt: Number.isFinite(trace.createdAt) ? Number(trace.createdAt) : 0,
-  };
-}
-
 export function buildProviderConsoleSnapshot(input: {
   services: PublishedServiceRecord[];
-  masters?: PublishedMasterRecord[];
   traces: ProviderConsoleTraceRecord[];
   sellerOrders?: SellerOrderRecord[];
   ratingDetails?: RatingDetailItem[];
   ratingSyncState?: ProviderConsoleRatingSyncState;
 }): ProviderConsoleSnapshot {
-  const masters = Array.isArray(input.masters) ? input.masters : [];
   const ratingDetails = Array.isArray(input.ratingDetails) ? input.ratingDetails : [];
   const ratingSyncState = input.ratingSyncState === 'sync_error' ? 'sync_error' : 'ready';
   const services = [...input.services]
@@ -481,22 +427,15 @@ export function buildProviderConsoleSnapshot(input: {
     ...(Array.isArray(input.sellerOrders) ? input.sellerOrders : []).map(buildSellerOrderManualAction),
   ]
     .filter((entry): entry is ProviderConsoleManualActionRow => Boolean(entry));
-  const recentMasterRequests = input.traces
-    .map((trace) => buildMasterRequestRow(trace, masters))
-    .filter((entry): entry is ProviderConsoleMasterRequestRow => Boolean(entry))
-    .sort(sortByUpdatedAtDesc);
-
   return {
     services,
     recentOrders,
     manualActions,
-    recentMasterRequests,
     totals: {
       serviceCount: services.length,
       activeServiceCount: services.filter((entry) => entry.available).length,
       sellerOrderCount: recentOrders.length,
       manualActionCount: manualActions.length,
-      masterRequestCount: recentMasterRequests.length,
     },
   };
 }

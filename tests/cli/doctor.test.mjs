@@ -327,18 +327,20 @@ test('runCli dispatches `metabot ui open --page` and returns the local UI URL', 
   });
 });
 
-test('runCli rejects unknown `metabot ui open --page` values before opening', async () => {
-  const harness = createHarness();
-  const exitCode = await runCli(['ui', 'open', '--page', 'unknown'], harness.context);
+test('runCli rejects unknown and retired `metabot ui open --page` values before opening', async () => {
+  for (const page of ['unknown', 'chat-viewer']) {
+    const harness = createHarness();
+    const exitCode = await runCli(['ui', 'open', '--page', page], harness.context);
 
-  assert.equal(exitCode, 1);
-  assert.deepEqual(harness.calls.ui, []);
-  assert.deepEqual(parseLastJson(harness.stdout), {
-    ok: false,
-    state: 'failed',
-    code: 'unknown_ui_page',
-    message: 'Unknown UI page: unknown',
-  });
+    assert.equal(exitCode, 1);
+    assert.deepEqual(harness.calls.ui, []);
+    assert.deepEqual(parseLastJson(harness.stdout), {
+      ok: false,
+      state: 'failed',
+      code: 'unknown_ui_page',
+      message: `Unknown UI page: ${page}`,
+    });
+  }
 });
 
 test('runCli dispatches `metabot ui open --page trace --trace-id` and returns the trace inspector URL', async () => {

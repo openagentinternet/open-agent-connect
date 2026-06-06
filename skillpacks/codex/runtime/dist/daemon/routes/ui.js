@@ -7,14 +7,13 @@ exports.handleUiRoutes = void 0;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const app_1 = require("../../ui/pages/hub/app");
-const app_2 = require("../../ui/pages/chat-viewer/app");
-const app_3 = require("../../ui/pages/my-services/app");
-const app_4 = require("../../ui/pages/publish/app");
-const app_5 = require("../../ui/pages/refund/app");
-const app_6 = require("../../ui/pages/trace/app");
-const app_7 = require("../../ui/pages/bot/app");
-const app_8 = require("../../ui/pages/loom/app");
-const app_9 = require("../../ui/pages/metaapps/app");
+const app_2 = require("../../ui/pages/my-services/app");
+const app_3 = require("../../ui/pages/publish/app");
+const app_4 = require("../../ui/pages/refund/app");
+const app_5 = require("../../ui/pages/trace/app");
+const app_6 = require("../../ui/pages/bot/app");
+const app_7 = require("../../ui/pages/loom/app");
+const app_8 = require("../../ui/pages/metaapps/app");
 const uiMetaApps_1 = require("./uiMetaApps");
 const UI_ROUTE_PREFIX = '/ui/';
 const PLATFORM_ASSET_PREFIX = '/ui/assets/platforms/';
@@ -27,14 +26,13 @@ const PLATFORM_ASSET_CONTENT_TYPES = {
 };
 const PAGE_BUILDERS = {
     'hub': app_1.buildHubPageDefinition,
-    'publish': app_4.buildPublishPageDefinition,
-    'my-services': app_3.buildMyServicesPageDefinition,
-    'trace': app_6.buildTracePageDefinition,
-    'refund': app_5.buildRefundPageDefinition,
-    'chat-viewer': app_2.buildChatViewerPageDefinition,
-    'bot': app_7.buildBotPageDefinition,
-    'loom': app_8.buildLoomPageDefinition,
-    'metaapps': app_9.buildMetaAppsPageDefinition,
+    'publish': app_3.buildPublishPageDefinition,
+    'my-services': app_2.buildMyServicesPageDefinition,
+    'trace': app_5.buildTracePageDefinition,
+    'refund': app_4.buildRefundPageDefinition,
+    'bot': app_6.buildBotPageDefinition,
+    'loom': app_7.buildLoomPageDefinition,
+    'metaapps': app_8.buildMetaAppsPageDefinition,
 };
 const NAV_ITEMS = [
     { page: 'hub', label: 'Hub' },

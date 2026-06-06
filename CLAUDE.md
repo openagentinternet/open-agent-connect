@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Open Agent Connect is an open-source connector for local AI agents (Codex, Claude Code, OpenClaw, and other host agents). It lets local agents use blockchain as an open communication, coordination, and payment layer. It provides identity, daemon, discovery, encrypted messaging, remote skill-service calls, traces, payments, and host skill packs so that local agents can participate in an open agent network. The current product focus is the first network moment: identity, online Bot discovery, private Bot-to-Bot messages, and remote skill-services. Ask Master exists as a deeper capability, but it is not the current public launch surface unless explicitly requested.
+Open Agent Connect is an open-source connector for local AI agents (Codex, Claude Code, OpenClaw, and other host agents). It lets local agents use blockchain as an open communication, coordination, and payment layer. It provides identity, daemon, discovery, encrypted messaging, remote skill-service calls, traces, payments, and host skill packs so that local agents can participate in an open agent network. The current product focus is the first network moment: identity, online Bot discovery, private Bot-to-Bot messages, Loom, and remote skill-services.
 
 ## Build & Test Commands
 
@@ -57,13 +57,11 @@ Releases are published automatically by GitHub Actions when a version tag is pus
 |---|---|---|
 | **Foundation** | Identity bootstrap, daemon, chain write, file upload, buzz, private messages, inspector pages, host packs | README.md |
 | **DACT** | Remote service discovery → delegation → trace/watch → provider closure → T-stage rating | DACT.md |
-| **Evolution Network** | Chain-backed skill co-evolution: publish/search/import/adopt remote variants | EVOLUTION_NETWORK.md |
-| **Ask Master** | Deeper capability for stuck-agent help flows; not the current public launch surface | docs/superpowers/specs/ |
 
 ### Source Layout (`src/`)
 
 - **`cli/`** — CLI entry point (`main.ts`) and command modules (`commands/`). The `metabot` binary dispatches here.
-- **`daemon/`** — HTTP server with REST + SSE routes (`routes/`). One daemon per home directory, lock-guarded. Each route file maps 1:1 to a domain (identity, chain, buzz, services, master, chat, trace, etc.).
+- **`daemon/`** — HTTP server with REST + SSE routes (`routes/`). One daemon per home directory, lock-guarded. Each route file maps 1:1 to a domain (identity, chain, buzz, services, chat, trace, etc.).
 - **`core/`** — All domain logic, organized by module:
   - `bootstrap/` — Identity creation, subsidy request, chain sync
   - `identity/` — Profile management, name resolution, workspace isolation
@@ -71,13 +69,11 @@ Releases are published automatically by GitHub Actions when a version tag is pus
   - `secrets/` / `signing/` — File-based secret storage, mnemonic-derived signers
   - `discovery/` — Chain-backed service directory, heartbeat, socket-based, ranking
   - `a2a/` — Agent-to-agent delegation engine, session management, reply waiting
-  - `master/` — Ask Master: trigger engine, context collector, auto-policy, provider runtime, trace, selector (~30 files)
-  - `evolution/` — Local/remote variant stores, adoption policy, publish, import
   - `provider/` — Service publishing, heartbeat broadcasting, presence state
   - `buzz/`, `chat/`, `files/`, `orders/`, `ratings/` — Individual network capabilities
   - `contracts/` — `MetabotCommandResult<T>` schema (success | awaiting_confirmation | waiting | manual_action_required | failed)
   - `config/`, `delegation/`, `skills/`, `host/`, `chain/`, `subsidy/`, `services/`
-- **`ui/`** — Local HTML inspection pages (hub, trace inspector, my-services, publish, refund, chat-viewer) and metaapps (chat, buzz)
+- **`ui/`** — Local HTML inspection pages (hub, trace inspector, my-services, publish, refund) and metaapps (chat, buzz)
 
 ### Key Patterns
 
@@ -98,7 +94,7 @@ Releases are published automatically by GitHub Actions when a version tag is pus
 ### Tests
 
 - Framework: Node.js native test runner (`node --test`)
-- Location: `tests/` with subdirs per module (bootstrap, identity, chat, a2a, discovery, master, evolution, cli, contracts, e2e, etc.)
+- Location: `tests/` with subdirs per module (bootstrap, identity, chat, a2a, discovery, cli, contracts, e2e, etc.)
 - Test files are `*.test.mjs` (CommonJS-compiled source, ESM test harness)
 - `tests/cli/runtime.test.mjs` must run last (the npm scripts handle this)
 - `tests/helpers/` contains shared test utilities

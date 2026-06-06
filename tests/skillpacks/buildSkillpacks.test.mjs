@@ -14,7 +14,6 @@ const execFile = promisify(execFileCallback);
 const SHARED_PACK = 'shared';
 const HOSTS = ['codex', 'claude-code', 'openclaw'];
 const EXPECTED_METABOT_SKILLS = [
-  'metabot-ask-master',
   'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',
@@ -31,6 +30,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-wallet-manage',
 ];
 const REMOVED_SKILLS = [
+  'metabot-ask-master',
   'metabot-bootstrap',
   'metabot-network-directory',
   'metabot-network-sources',
@@ -205,24 +205,6 @@ test('buildAgentConnectSkillpacks renders one shared pack plus self-contained ho
   }
 });
 
-test('buildAgentConnectSkillpacks includes the Ask Master skill with only master command semantics in the shared pack', async () => {
-  const { outputRoot } = await getBuiltSkillpacks();
-
-  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-ask-master'), 'utf8');
-  assert.match(content, /^name:\s*metabot-ask-master$/m);
-  assert.match(content, /metabot master list/);
-  assert.match(content, /metabot master suggest --request-file/);
-  assert.match(content, /metabot master ask --from <bot-slug> --request-file/);
-  assert.match(content, /metabot master trace --from <bot-slug> --id/);
-  assert.match(content, /manual \/ suggest|manual and suggest/i);
-  assert.match(content, /preview first, then explicit confirmation|preview\/confirm\/send path/i);
-  assert.match(content, /accepted `suggest` enters the same preview\/confirm\/send path as `manual`/i);
-  assert.match(content, /single-machine two-terminal smoke|single machine dual terminal/i);
-  assert.match(content, /Do not call `services call` directly/i);
-  assert.doesNotMatch(content, /metabot advisor (list|ask|trace)/);
-  assert.doesNotMatch(content, /type":\s*"advisor_request"/);
-});
-
 test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic ability map entrypoint', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
@@ -239,7 +221,9 @@ test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic a
   assert.match(content, /metabot config --help/);
   assert.match(content, /metabot ui --help/);
   assert.match(content, /metabot llm --help/);
-  assert.match(content, /metabot evolution --help/);
+  assert.doesNotMatch(content, /metabot master --help/);
+  assert.doesNotMatch(content, /metabot evolution --help/);
+  assert.doesNotMatch(content, /metabot-ask-master/);
   assert.match(content, /optional `--from <bot-slug>`/);
   assert.match(content, /same language/i);
   assert.match(content, /natural-language examples/i);
@@ -302,14 +286,14 @@ test('buildAgentConnectSkillpacks includes the Wiki creator as a self-contained 
 test('buildAgentConnectSkillpacks renders shared skills without host-specific adapter sections or host override flags', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
-  const askMaster = await readFile(sharedSkillFile(outputRoot, 'metabot-ask-master'), 'utf8');
-  assert.doesNotMatch(askMaster, /## Host Adapter/);
-  assert.doesNotMatch(askMaster, /Generated for (Codex|Claude Code|OpenClaw)/);
-  assert.doesNotMatch(askMaster, /Default skill root:/);
-  assert.doesNotMatch(askMaster, /Host pack id:/);
-  assert.doesNotMatch(askMaster, /--host codex/);
-  assert.doesNotMatch(askMaster, /--host claude-code/);
-  assert.doesNotMatch(askMaster, /--host openclaw/);
+  const helpSkill = await readFile(sharedSkillFile(outputRoot, 'metabot-help'), 'utf8');
+  assert.doesNotMatch(helpSkill, /## Host Adapter/);
+  assert.doesNotMatch(helpSkill, /Generated for (Codex|Claude Code|OpenClaw)/);
+  assert.doesNotMatch(helpSkill, /Default skill root:/);
+  assert.doesNotMatch(helpSkill, /Host pack id:/);
+  assert.doesNotMatch(helpSkill, /--host codex/);
+  assert.doesNotMatch(helpSkill, /--host claude-code/);
+  assert.doesNotMatch(helpSkill, /--host openclaw/);
 });
 
 test('repository tracked shared and host-wrapper skillpack artifacts stay in sync with a fresh build', async (t) => {
@@ -493,7 +477,7 @@ test('cliShimDoctor source and bundled runtime artifacts are tracked in git', as
   }
 });
 
-test('buildAgentConnectSkillpacks host README lists the active metabot skills including Ask Master', async () => {
+test('buildAgentConnectSkillpacks host README lists the active metabot skills only', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
@@ -801,8 +785,8 @@ test('shared install.sh copies shared skills and installs a runnable metabot shi
   const skillDest = path.join(fakeHome, '.metabot', 'skills');
   const binDir = path.join(fakeHome, '.metabot', 'bin');
 
-  await assertFileExists(path.join(skillDest, 'metabot-ask-master', 'SKILL.md'));
   await assertFileExists(path.join(skillDest, 'metabot-network-manage', 'SKILL.md'));
+  await assertFileMissing(path.join(skillDest, 'metabot-ask-master', 'SKILL.md'));
   await assertFileMissing(path.join(skillDest, 'metabot-network-directory', 'SKILL.md'));
   await assertFileExists(path.join(binDir, 'metabot'));
   await assertFileMissing(path.join(binDir, 'agent-connect'));
@@ -820,9 +804,9 @@ test('shared install.sh copies shared skills and installs a runnable metabot shi
   assert.match(shim, /exec "\$NODE_BIN" "\$CLI_ENTRY" "\$@"/);
   assert.doesNotMatch(shim, /exec node "\$CLI_ENTRY"/);
 
-  const installedAskMaster = await readFile(path.join(skillDest, 'metabot-ask-master', 'SKILL.md'), 'utf8');
-  assert.match(installedAskMaster, /metabot master ask --from <bot-slug> --request-file/);
-  assert.doesNotMatch(installedAskMaster, /metabot advisor ask/);
+  const installedNetworkManage = await readFile(path.join(skillDest, 'metabot-network-manage', 'SKILL.md'), 'utf8');
+  assert.match(installedNetworkManage, /metabot network services --online/);
+  assert.doesNotMatch(installedNetworkManage, /metabot master/);
 
   const fakeNodePath = path.join(fakeHome, 'fake-node22');
   const fakeNodeLog = path.join(fakeHome, 'fake-node22.log');
@@ -873,7 +857,7 @@ test('host wrapper install.sh runs the packaged shared install flow and binds ho
     });
 
     const sharedSkillRoot = path.join(fakeHome, '.metabot', 'skills');
-    await assertFileExists(path.join(sharedSkillRoot, 'metabot-ask-master', 'SKILL.md'));
+    await assertFileMissing(path.join(sharedSkillRoot, 'metabot-ask-master', 'SKILL.md'));
 
     for (const skillName of EXPECTED_METABOT_SKILLS) {
       const boundSkillPath = path.join(expectedHostSkillRoot(fakeHome, host), skillName);

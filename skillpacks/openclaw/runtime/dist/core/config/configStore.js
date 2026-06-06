@@ -41,77 +41,26 @@ function normalizeBoolean(value, fallback) {
 function normalizeString(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
-function normalizeStringArray(value) {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-    const seen = new Set();
-    const normalized = [];
-    for (const entry of value) {
-        const text = normalizeString(entry);
-        if (!text || seen.has(text)) {
-            continue;
-        }
-        seen.add(text);
-        normalized.push(text);
-    }
-    return normalized;
-}
-function allowInternalAskMasterAutoTriggerMode() {
-    return process.env.METABOT_INTERNAL_ASK_MASTER_AUTO === '1';
-}
 function normalizeConfig(input) {
     const defaults = (0, configTypes_1.createDefaultConfig)();
     if (!input || typeof input !== 'object') {
         return defaults;
     }
     const root = input;
-    const maybeNetwork = root['evolution_network'];
-    const maybeAskMaster = root['askMaster'];
     const maybeA2A = root['a2a'];
     const maybeChain = root['chain'];
-    const networkSource = maybeNetwork && typeof maybeNetwork === 'object'
-        ? maybeNetwork
-        : {};
-    const askMasterSource = maybeAskMaster && typeof maybeAskMaster === 'object'
-        ? maybeAskMaster
-        : {};
     const a2aSource = maybeA2A && typeof maybeA2A === 'object'
         ? maybeA2A
         : {};
     const chainSource = maybeChain && typeof maybeChain === 'object'
         ? maybeChain
         : {};
-    const triggerMode = normalizeString(askMasterSource.triggerMode);
-    const confirmationMode = normalizeString(askMasterSource.confirmationMode);
-    const contextMode = normalizeString(askMasterSource.contextMode);
     const defaultWriteNetwork = normalizeString(chainSource.defaultWriteNetwork).toLowerCase();
     return {
         chain: {
             defaultWriteNetwork: (0, configTypes_1.isDefaultWriteNetwork)(defaultWriteNetwork)
                 ? defaultWriteNetwork
                 : defaults.chain.defaultWriteNetwork,
-        },
-        evolution_network: {
-            enabled: normalizeBoolean(networkSource.enabled, defaults.evolution_network.enabled),
-            autoAdoptSameSkillSameScope: normalizeBoolean(networkSource.autoAdoptSameSkillSameScope, defaults.evolution_network.autoAdoptSameSkillSameScope),
-            autoRecordExecutions: normalizeBoolean(networkSource.autoRecordExecutions, defaults.evolution_network.autoRecordExecutions)
-        },
-        askMaster: {
-            enabled: normalizeBoolean(askMasterSource.enabled, defaults.askMaster.enabled),
-            triggerMode: triggerMode === 'auto' && !allowInternalAskMasterAutoTriggerMode()
-                ? defaults.askMaster.triggerMode
-                : (0, configTypes_1.isAskMasterTriggerMode)(triggerMode)
-                    ? triggerMode
-                    : defaults.askMaster.triggerMode,
-            confirmationMode: (0, configTypes_1.isAskMasterConfirmationMode)(confirmationMode)
-                ? confirmationMode
-                : defaults.askMaster.confirmationMode,
-            contextMode: (0, configTypes_1.isAskMasterContextMode)(contextMode)
-                ? contextMode
-                : defaults.askMaster.contextMode,
-            trustedMasters: normalizeStringArray(askMasterSource.trustedMasters),
-            autoPolicy: (0, configTypes_1.normalizeAskMasterAutoPolicyConfig)(askMasterSource.autoPolicy),
         },
         a2a: {
             simplemsgListenerEnabled: normalizeBoolean(a2aSource.simplemsgListenerEnabled, defaults.a2a.simplemsgListenerEnabled),

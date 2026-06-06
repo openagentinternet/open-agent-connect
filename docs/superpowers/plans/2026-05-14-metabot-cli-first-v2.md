@@ -17,16 +17,14 @@
 - Modify `src/cli/runtime.ts` for actor-home resolution and daemon route forwarding.
 - Modify `src/daemon/routes/types.ts` for actor-aware daemon handler input types.
 - Modify `src/daemon/defaultHandlers.ts` for actor-scoped signers, stores, config, and private chat state.
-- Modify `src/cli/commands/buzz.ts`, `chain.ts`, `file.ts`, `chat.ts`, `master.ts`, `wallet.ts`, `evolution.ts`, `config.ts`, and `llm.ts` for `--from` parsing.
+- Modify `src/cli/commands/buzz.ts`, `chain.ts`, `file.ts`, `chat.ts`, `wallet.ts`, `config.ts`, and `llm.ts` for `--from` parsing.
 - Modify `src/cli/commandHelp.ts` for help text, usage strings, and examples.
 - Update tests:
   - `tests/cli/buzz.test.mjs`
   - `tests/cli/chain.test.mjs`
   - `tests/cli/file.test.mjs`
   - `tests/cli/chat.test.mjs`
-  - `tests/cli/masterCommand.test.mjs`
   - `tests/cli/wallet.test.mjs`
-  - `tests/cli/evolution.test.mjs`
   - `tests/cli/config.test.mjs`
   - `tests/cli/help.test.mjs`
   - create `tests/cli/llm.test.mjs` if no equivalent focused LLM parser test exists
@@ -72,18 +70,8 @@ chat.conversations
 chat.messages
 chat.autoReplyStatus
 chat.setAutoReply
-master.publish
-master.ask
-master.trace
 wallet.balance
 wallet.transfer
-evolution.status
-evolution.adopt
-evolution.publish
-evolution.rollback
-evolution.search
-evolution.import
-evolution.imported
 config.get
 config.set
 llm.listBindings
@@ -297,81 +285,7 @@ git commit -m "feat: add actor selection to chat cli"
 
 Then use `metabot-post-buzz`.
 
-## Task 4: Master Commands
-
-**Files:**
-- Modify: `src/cli/commands/master.ts`
-- Modify: `src/cli/runtime.ts`
-- Modify: `src/daemon/routes/types.ts`
-- Modify: `src/daemon/defaultHandlers.ts`
-- Modify: `src/cli/commandHelp.ts`
-- Test: `tests/cli/masterCommand.test.mjs`
-- Test: relevant master default-handler tests if they exist
-
-- [ ] **Step 1: Write failing parser tests**
-
-Cover:
-
-```bash
-metabot master publish --from alice --payload-file master.json --chain opcat
-metabot master ask --from alice --request-file ask.json
-metabot master ask --from alice --trace-id trace-1 --confirm
-metabot master trace --from alice --id trace-1
-```
-
-Do not add `--from` to `master list`; it reads public directory data.
-
-- [ ] **Step 2: Run the red tests**
-
-Run:
-
-```bash
-npm run build && node --test tests/cli/masterCommand.test.mjs
-```
-
-Expected: FAIL because master parsers drop `from`.
-
-- [ ] **Step 3: Implement parser and route pass-through**
-
-Pass `from` to `master.publish`, `master.ask`, and `master.trace` dependency inputs.
-
-- [ ] **Step 4: Implement daemon/default-handler actor scoping**
-
-`master.publish` must sign with the selected actor. `master.ask` preview/confirm must resolve the actor before reading state, private chat identity, pending ask state, and simplemsg write dependencies.
-
-- [ ] **Step 5: Update help**
-
-Document:
-
-```bash
-metabot master publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]
-metabot master ask [--from <bot-slug>] --request-file <path>
-metabot master ask [--from <bot-slug>] --trace-id <trace-id> [--confirm]
-metabot master trace [--from <bot-slug>] --id <trace-id>
-```
-
-- [ ] **Step 6: Verify green**
-
-Run:
-
-```bash
-npm run build && node --test tests/cli/masterCommand.test.mjs tests/cli/help.test.mjs
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Commit and post buzz**
-
-Run:
-
-```bash
-git add src/cli/commands/master.ts src/cli/runtime.ts src/daemon/routes/types.ts src/daemon/defaultHandlers.ts src/cli/commandHelp.ts tests/cli/masterCommand.test.mjs tests/cli/help.test.mjs
-git commit -m "feat: add actor selection to master cli"
-```
-
-Then use `metabot-post-buzz`.
-
-## Task 5: Wallet Commands
+## Task 4: Wallet Commands
 
 **Files:**
 - Modify: `src/cli/commands/wallet.ts`
@@ -446,17 +360,15 @@ git commit -m "feat: add actor selection to wallet cli"
 
 Then use `metabot-post-buzz`.
 
-## Task 6: Config, LLM, And Evolution Commands
+## Task 5: Config And LLM Commands
 
 **Files:**
 - Modify: `src/cli/commands/config.ts`
 - Modify: `src/cli/commands/llm.ts`
-- Modify: `src/cli/commands/evolution.ts`
 - Modify: `src/cli/runtime.ts`
 - Modify: `src/cli/commandHelp.ts`
 - Test: `tests/cli/config.test.mjs`
 - Test: create or modify `tests/cli/llm.test.mjs`
-- Test: `tests/cli/evolution.test.mjs`
 - Test: `tests/cli/help.test.mjs`
 
 - [ ] **Step 1: Write failing parser tests**
@@ -471,25 +383,21 @@ metabot llm bind --from alice --runtime-id r1 --role primary
 metabot llm unbind --from alice --binding-id b1
 metabot llm set-preferred --from alice --provider codex
 metabot llm get-preferred --from alice
-metabot evolution status --from alice
-metabot evolution publish --from alice --skill sample --variant-id v1
 ```
-
-Add additional evolution tests for `adopt`, `rollback`, `search`, `import`, and `imported` if existing coverage already exercises those subcommands.
 
 - [ ] **Step 2: Run the red tests**
 
 Run:
 
 ```bash
-npm run build && node --test tests/cli/config.test.mjs tests/cli/llm.test.mjs tests/cli/evolution.test.mjs
+npm run build && node --test tests/cli/config.test.mjs tests/cli/llm.test.mjs
 ```
 
 Expected: FAIL because these parsers drop `from`.
 
 - [ ] **Step 3: Implement parser pass-through**
 
-Add `from` to config, LLM, and evolution dependency inputs.
+Add `from` to config and LLM dependency inputs.
 
 For LLM commands, keep `--slug` compatibility only where it already exists. Canonical examples should use `--from`.
 
@@ -500,21 +408,17 @@ Resolve selected actor home before accessing:
 - config stores;
 - LLM binding stores;
 - preferred runtime state;
-- local evolution stores;
-- evolution publish signer;
-- evolution artifact upload;
-- imported artifact state.
 
 - [ ] **Step 5: Update help**
 
-Document `--from <bot-slug>` for all profile-local config, LLM, and evolution commands. Explain any retained `--slug` option as a compatibility alias.
+Document `--from <bot-slug>` for all profile-local config and LLM commands. Explain any retained `--slug` option as a compatibility alias.
 
 - [ ] **Step 6: Verify green**
 
 Run:
 
 ```bash
-npm run build && node --test tests/cli/config.test.mjs tests/cli/llm.test.mjs tests/cli/evolution.test.mjs tests/cli/help.test.mjs
+npm run build && node --test tests/cli/config.test.mjs tests/cli/llm.test.mjs tests/cli/help.test.mjs
 ```
 
 Expected: PASS.
@@ -524,13 +428,13 @@ Expected: PASS.
 Run:
 
 ```bash
-git add src/cli/commands/config.ts src/cli/commands/llm.ts src/cli/commands/evolution.ts src/cli/runtime.ts src/cli/commandHelp.ts tests/cli/config.test.mjs tests/cli/llm.test.mjs tests/cli/evolution.test.mjs tests/cli/help.test.mjs
+git add src/cli/commands/config.ts src/cli/commands/llm.ts src/cli/runtime.ts src/cli/commandHelp.ts tests/cli/config.test.mjs tests/cli/llm.test.mjs tests/cli/help.test.mjs
 git commit -m "feat: add actor selection to profile tools"
 ```
 
 Then use `metabot-post-buzz`.
 
-## Task 7: Documentation, Skill Examples, And Final Acceptance
+## Task 6: Documentation, Skill Examples, And Final Acceptance
 
 **Files:**
 - Modify: in-repository docs and skill documents only when they contain stale command examples.
@@ -541,7 +445,7 @@ Then use `metabot-post-buzz`.
 Run:
 
 ```bash
-rg "metabot (buzz post|chain write|file upload|chat private|master publish|master ask|wallet|evolution publish|llm .*--slug)" docs src tests release -n
+rg "metabot (buzz post|chain write|file upload|chat private|wallet|llm .*--slug)" docs src tests release -n
 ```
 
 - [ ] **Step 2: Update in-repo examples**
@@ -558,11 +462,9 @@ npm run build && node --test \
   tests/cli/chain.test.mjs \
   tests/cli/file.test.mjs \
   tests/cli/chat.test.mjs \
-  tests/cli/masterCommand.test.mjs \
   tests/cli/wallet.test.mjs \
   tests/cli/config.test.mjs \
   tests/cli/llm.test.mjs \
-  tests/cli/evolution.test.mjs \
   tests/cli/help.test.mjs
 ```
 
@@ -577,9 +479,7 @@ node dist/cli/main.js buzz post --help --json
 node dist/cli/main.js chain write --help --json
 node dist/cli/main.js file upload --help --json
 node dist/cli/main.js chat private --help --json
-node dist/cli/main.js master publish --help --json
 node dist/cli/main.js wallet balance --help --json
-node dist/cli/main.js evolution publish --help --json
 ```
 
 Expected: each actor-scoped command help includes `--from <bot-slug>`.

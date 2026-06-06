@@ -69,8 +69,7 @@
 │                                                      │
 │  调用方（已有）                                        │
 │  ├─ Chat Auto-Reply  ← 私聊自动回复                   │
-│  ├─ Ask Master       ← 向远端求助                     │
-│  └─ (未来) Remote Service ← 远端调用本地技能           │
+│  └─ Remote Service   ← Remote skill execution          │
 │         │                                            │
 │         ▼                                            │
 │  ┌──────────────────────────────────────┐            │

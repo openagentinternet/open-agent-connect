@@ -237,7 +237,7 @@ test('runCli safe uninstall removes guarded symlinks and keeps profiles', async 
   await fs.mkdir(sharedAgentsRoot, { recursive: true });
   await fs.mkdir(geminiRoot, { recursive: true });
   const guarded = path.join(hostSkillRoot, 'metabot-identity-manage');
-  const sharedGuarded = path.join(sharedAgentsRoot, 'metabot-ask-master');
+  const sharedGuarded = path.join(sharedAgentsRoot, 'metabot-help');
   const geminiGuarded = path.join(geminiRoot, 'metabot-network-directory');
   const unguarded = path.join(hostSkillRoot, 'metabot-custom');
   const externalMetabotLink = path.join(hostSkillRoot, 'metabot-external');
@@ -246,7 +246,7 @@ test('runCli safe uninstall removes guarded symlinks and keeps profiles', async 
   const externalSkill = path.join(externalHome, '.metabot', 'skills', 'metabot-external');
   await fs.mkdir(externalSkill, { recursive: true });
   await fs.symlink(path.join(systemHome, '.metabot', 'skills', 'metabot-identity-manage'), guarded);
-  await fs.symlink(path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'), sharedGuarded);
+  await fs.symlink(path.join(systemHome, '.metabot', 'skills', 'metabot-help'), sharedGuarded);
   await fs.symlink(path.join(systemHome, '.metabot', 'skills', 'metabot-network-directory'), geminiGuarded);
   await fs.symlink(path.join(systemHome, '.other', 'skills', 'metabot-custom'), unguarded);
   await fs.symlink(externalSkill, externalMetabotLink);

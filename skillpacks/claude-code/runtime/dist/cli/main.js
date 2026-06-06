@@ -7,7 +7,6 @@ const version_1 = require("./version");
 const daemon_1 = require("./commands/daemon");
 const doctor_1 = require("./commands/doctor");
 const identity_1 = require("./commands/identity");
-const master_1 = require("./commands/master");
 const network_1 = require("./commands/network");
 const provider_1 = require("./commands/provider");
 const services_1 = require("./commands/services");
@@ -21,7 +20,6 @@ const ui_1 = require("./commands/ui");
 const config_1 = require("./commands/config");
 const skills_1 = require("./commands/skills");
 const host_1 = require("./commands/host");
-const evolution_1 = require("./commands/evolution");
 const wallet_1 = require("./commands/wallet");
 const system_1 = require("./commands/system");
 const llm_1 = require("./commands/llm");
@@ -85,9 +83,6 @@ async function runCli(argv, cliContext = {}) {
                 case 'identity':
                     result = await (0, identity_1.runIdentityCommand)(rest, context);
                     break;
-                case 'master':
-                    result = await (0, master_1.runMasterCommand)(rest, context);
-                    break;
                 case 'network':
                     result = await (0, network_1.runNetworkCommand)(rest, context);
                     break;
@@ -120,9 +115,6 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'host':
                     result = await (0, host_1.runHostCommand)(rest, context);
-                    break;
-                case 'evolution':
-                    result = await (0, evolution_1.runEvolutionCommand)(rest, context);
                     break;
                 case 'system':
                     result = await (0, system_1.runSystemCommand)(rest, context);

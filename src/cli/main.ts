@@ -5,7 +5,6 @@ import { CLI_VERSION } from './version';
 import { runDaemonCommand } from './commands/daemon';
 import { runDoctorCommand } from './commands/doctor';
 import { runIdentityCommand } from './commands/identity';
-import { runMasterCommand } from './commands/master';
 import { runNetworkCommand } from './commands/network';
 import { runProviderCommand } from './commands/provider';
 import { runServicesCommand } from './commands/services';
@@ -19,7 +18,6 @@ import { runUiCommand } from './commands/ui';
 import { runConfigCommand } from './commands/config';
 import { runSkillsCommand } from './commands/skills';
 import { runHostCommand } from './commands/host';
-import { runEvolutionCommand } from './commands/evolution';
 import { runWalletCommand } from './commands/wallet';
 import { runSystemCommand } from './commands/system';
 import { runLlmCommand } from './commands/llm';
@@ -91,9 +89,6 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
         case 'identity':
           result = await runIdentityCommand(rest, context);
           break;
-        case 'master':
-          result = await runMasterCommand(rest, context);
-          break;
         case 'network':
           result = await runNetworkCommand(rest, context);
           break;
@@ -126,9 +121,6 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'host':
           result = await runHostCommand(rest, context);
-          break;
-        case 'evolution':
-          result = await runEvolutionCommand(rest, context);
           break;
         case 'system':
           result = await runSystemCommand(rest, context);

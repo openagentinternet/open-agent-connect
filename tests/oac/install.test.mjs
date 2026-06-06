@@ -92,11 +92,11 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
 
   const result = await runOacCli(systemHome, ['install', '--host', 'codex']);
 
-  const sharedSkillPath = path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master');
+  const sharedSkillPath = path.join(systemHome, '.metabot', 'skills', 'metabot-help');
   const sharedSkillFile = path.join(sharedSkillPath, 'SKILL.md');
   const wikiCreatorSkillPath = path.join(systemHome, '.metabot', 'skills', 'metabot-create-wiki');
   const metabotShimPath = path.join(systemHome, '.metabot', 'bin', 'metabot');
-  const hostSkillPath = path.join(systemHome, '.codex', 'skills', 'metabot-ask-master');
+  const hostSkillPath = path.join(systemHome, '.codex', 'skills', 'metabot-help');
   const wikiCreatorHostSkillPath = path.join(systemHome, '.codex', 'skills', 'metabot-create-wiki');
   const evalsPath = path.join(
     systemHome,
@@ -111,16 +111,23 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
   assert.equal(result.payload.ok, true);
   assert.equal(result.payload.data.host, 'codex');
   assert.equal(result.payload.data.metabotShimPath, metabotShimPath);
-  assert.ok(result.payload.data.installedSkills.includes('metabot-ask-master'));
+  assert.ok(result.payload.data.installedSkills.includes('metabot-help'));
+  assert.equal(result.payload.data.installedSkills.includes('metabot-ask-master'), false);
   assert.ok(result.payload.data.installedSkills.includes('metabot-create-wiki'));
   assert.ok(result.payload.data.boundRoots.some((root) =>
     root.platformId === 'codex'
       && root.status === 'bound'
-      && root.boundSkills.includes('metabot-ask-master')
+      && root.boundSkills.includes('metabot-help')
   ));
 
   const sharedSkill = await fs.readFile(sharedSkillFile, 'utf8');
-  assert.equal(sharedSkill.includes('$HOME/.metabot/bin/metabot master ask'), true);
+  assert.match(sharedSkill, /\$HOME\/\.metabot\/bin\/metabot --help/);
+  assert.doesNotMatch(sharedSkill, /metabot master/);
+  assert.doesNotMatch(sharedSkill, /metabot evolution/);
+  await assert.rejects(
+    fs.stat(path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master')),
+    { code: 'ENOENT' },
+  );
   assert.doesNotMatch(
     sharedSkill,
     /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution)\b/,
@@ -190,12 +197,12 @@ test('runOac auto-detects codex when CODEX_HOME is the only host signal', async 
   assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'shared-agents' && root.status === 'bound'));
   assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'codex' && root.status === 'bound'));
   await assertSymlinkPointsTo(
-    path.join(codexHome, 'skills', 'metabot-ask-master'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
+    path.join(codexHome, 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
   );
   await assertSymlinkPointsTo(
-    path.join(systemHome, '.agents', 'skills', 'metabot-ask-master'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
+    path.join(systemHome, '.agents', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
   );
 });
 
@@ -237,11 +244,11 @@ test('runOac install uses Windows user profile fallback when HOME is unavailable
   assert.equal(payload.data.sharedSkillRoot, path.join(userProfile, '.metabot', 'skills'));
   assert.equal(payload.data.metabotShimPath, path.join(userProfile, '.metabot', 'bin', 'metabot'));
   assert.equal(
-    await fs.stat(path.join(userProfile, '.agents', 'skills', 'metabot-ask-master')).then(() => true),
+    await fs.stat(path.join(userProfile, '.agents', 'skills', 'metabot-help')).then(() => true),
     true,
   );
   await assert.rejects(
-    fs.stat(path.join(cwd, '.metabot', 'skills', 'metabot-ask-master')),
+    fs.stat(path.join(cwd, '.metabot', 'skills', 'metabot-help')),
     { code: 'ENOENT' },
   );
 });
@@ -258,10 +265,10 @@ test('bare runOac install binds shared agents root and skips platform roots whos
   assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'shared-agents' && root.status === 'bound'));
   assert.ok(result.payload.data.skippedRoots.some((root) => root.platformId === 'codex' && root.status === 'skipped'));
   await assertSymlinkPointsTo(
-    path.join(systemHome, '.agents', 'skills', 'metabot-ask-master'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
+    path.join(systemHome, '.agents', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
   );
-  await assert.rejects(fs.lstat(path.join(systemHome, '.codex', 'skills', 'metabot-ask-master')), { code: 'ENOENT' });
+  await assert.rejects(fs.lstat(path.join(systemHome, '.codex', 'skills', 'metabot-help')), { code: 'ENOENT' });
 });
 
 test('runOac install --host openclaw force-creates platform-native bindings', async (t) => {
@@ -275,8 +282,8 @@ test('runOac install --host openclaw force-creates platform-native bindings', as
   assert.equal(result.payload.data.host, 'openclaw');
   assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'openclaw' && root.status === 'bound'));
   await assertSymlinkPointsTo(
-    path.join(systemHome, '.openclaw', 'skills', 'metabot-ask-master'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
+    path.join(systemHome, '.openclaw', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
   );
 });
 
@@ -290,8 +297,8 @@ test('runOac install can force-bind CodeBuddy skill roots', async (t) => {
   assert.equal(codebuddy.payload.data.host, 'codebuddy');
   assert.ok(codebuddy.payload.data.boundRoots.some((root) => root.platformId === 'codebuddy' && root.rootId === 'codebuddy-home'));
   await assertSymlinkPointsTo(
-    path.join(systemHome, '.codebuddy', 'skills', 'metabot-ask-master'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master'),
+    path.join(systemHome, '.codebuddy', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
   );
 });
 
@@ -314,7 +321,7 @@ test('runOac doctor verifies an existing install without rewriting installed ski
   const install = await runOacCli(systemHome, ['install']);
   assert.equal(install.exitCode, 0);
 
-  const markerPath = path.join(systemHome, '.metabot', 'skills', 'metabot-ask-master', 'doctor-marker.txt');
+  const markerPath = path.join(systemHome, '.metabot', 'skills', 'metabot-help', 'doctor-marker.txt');
   await fs.writeFile(markerPath, 'must remain\n', 'utf8');
 
   const doctor = await runOacCli(systemHome, ['doctor']);
@@ -334,7 +341,7 @@ test('runOac doctor --host openclaw fails when forced platform bindings are miss
 
   const install = await runOacCli(systemHome, ['install', '--host', 'openclaw']);
   assert.equal(install.exitCode, 0);
-  await fs.rm(path.join(systemHome, '.openclaw', 'skills', 'metabot-ask-master'), {
+  await fs.rm(path.join(systemHome, '.openclaw', 'skills', 'metabot-help'), {
     recursive: true,
     force: true,
   });
@@ -344,7 +351,7 @@ test('runOac doctor --host openclaw fails when forced platform bindings are miss
   assert.equal(doctor.exitCode, 1);
   assert.equal(doctor.payload.ok, false);
   assert.equal(doctor.payload.code, 'doctor_host_bindings_missing');
-  assert.match(doctor.payload.message, /metabot-ask-master/);
+  assert.match(doctor.payload.message, /metabot-help/);
 });
 
 test('runOac uninstall removes guarded registry root symlinks and preserves non-OAC entries', async (t) => {
@@ -355,13 +362,13 @@ test('runOac uninstall removes guarded registry root symlinks and preserves non-
   assert.equal(install.exitCode, 0);
 
   const sharedSkillRoot = path.join(systemHome, '.metabot', 'skills');
-  const sharedAskMaster = path.join(sharedSkillRoot, 'metabot-ask-master');
+  const sharedHelp = path.join(sharedSkillRoot, 'metabot-help');
   const codexRoot = path.join(systemHome, '.codex', 'skills');
   const geminiRoot = path.join(systemHome, '.gemini', 'skills');
   await fs.mkdir(codexRoot, { recursive: true });
   await fs.mkdir(geminiRoot, { recursive: true });
 
-  const codexGuarded = path.join(codexRoot, 'metabot-ask-master');
+  const codexGuarded = path.join(codexRoot, 'metabot-help');
   const geminiGuarded = path.join(geminiRoot, 'metabot-network-directory');
   const unrelatedSymlink = path.join(codexRoot, 'metabot-custom');
   const externalMetabotLink = path.join(codexRoot, 'metabot-external');
@@ -369,7 +376,7 @@ test('runOac uninstall removes guarded registry root symlinks and preserves non-
   const externalHome = path.join(systemHome, '.external-home');
   const externalSkill = path.join(externalHome, '.metabot', 'skills', 'metabot-external');
   await fs.mkdir(externalSkill, { recursive: true });
-  await fs.symlink(sharedAskMaster, codexGuarded);
+  await fs.symlink(sharedHelp, codexGuarded);
   await fs.symlink(path.join(sharedSkillRoot, 'metabot-network-directory'), geminiGuarded);
   await fs.symlink(path.join(systemHome, '.other', 'skills', 'metabot-custom'), unrelatedSymlink);
   await fs.symlink(externalSkill, externalMetabotLink);
@@ -381,12 +388,14 @@ test('runOac uninstall removes guarded registry root symlinks and preserves non-
   assert.equal(uninstall.payload.ok, true);
   assert.equal(uninstall.payload.data.tier, 'safe');
   assert.equal(uninstall.payload.data.removedCliShim, true);
-  await assert.rejects(fs.lstat(path.join(systemHome, '.agents', 'skills', 'metabot-ask-master')), { code: 'ENOENT' });
+  await assert.rejects(fs.lstat(path.join(systemHome, '.agents', 'skills', 'metabot-help')), { code: 'ENOENT' });
   await assert.rejects(fs.lstat(codexGuarded), { code: 'ENOENT' });
   await assert.rejects(fs.lstat(geminiGuarded), { code: 'ENOENT' });
   await assert.rejects(fs.lstat(path.join(systemHome, '.metabot', 'bin', 'metabot')), { code: 'ENOENT' });
   assert.equal((await fs.lstat(unrelatedSymlink)).isSymbolicLink(), true);
   assert.equal((await fs.lstat(externalMetabotLink)).isSymbolicLink(), true);
   assert.equal(await fs.readFile(nativeFile, 'utf8'), 'native helper\n');
-  assert.match(await fs.readFile(path.join(sharedAskMaster, 'SKILL.md'), 'utf8'), /\$HOME\/\.metabot\/bin\/metabot master ask/);
+  const helpSkill = await fs.readFile(path.join(sharedHelp, 'SKILL.md'), 'utf8');
+  assert.match(helpSkill, /\$HOME\/\.metabot\/bin\/metabot --help/);
+  assert.doesNotMatch(helpSkill, /metabot master/);
 });

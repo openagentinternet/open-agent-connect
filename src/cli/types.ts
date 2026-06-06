@@ -37,14 +37,6 @@ export interface CliDependencies {
     list?: () => Awaitable<MetabotCommandResult<unknown>>;
     assign?: (input: { name: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
-  master?: {
-    publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    list?: (input: { online?: boolean; masterKind?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    ask?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    suggest?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    hostAction?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    trace?: (input: { from?: string; traceId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-  };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -139,20 +131,6 @@ export interface CliDependencies {
   };
   host?: {
     bindSkills?: (input: { host: ConcreteSkillHost }) => Awaitable<MetabotCommandResult<unknown>>;
-  };
-  evolution?: {
-    status?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    adopt?: (input: {
-      from?: string;
-      skill: string;
-      variantId: string;
-      source?: 'local' | 'remote';
-    }) => Awaitable<MetabotCommandResult<unknown>>;
-    publish?: (input: { from?: string; skill: string; variantId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    rollback?: (input: { from?: string; skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    search?: (input: { from?: string; skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    import?: (input: { from?: string; pinId: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    imported?: (input: { from?: string; skill: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   system?: {
     update?: (input: {

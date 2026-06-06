@@ -1,7 +1,6 @@
 import type { SessionTraceRecord } from '../chat/sessionTrace';
 import type { SellerOrderRecord } from '../orders/sellerOrderState';
 import type { RatingDetailItem } from '../ratings/ratingDetailState';
-import type { PublishedMasterRecord } from '../master/masterTypes';
 import type { PublishedServiceRecord } from '../services/publishService';
 type ProviderConsoleTraceOrder = NonNullable<SessionTraceRecord['order']> & {
     status?: string | null;
@@ -65,34 +64,19 @@ export interface ProviderConsoleManualActionRow {
     refundRequestPinId: string | null;
     sessionId: string | null;
 }
-export interface ProviderConsoleMasterRequestRow {
-    traceId: string;
-    servicePinId: string;
-    serviceName: string;
-    displayName: string;
-    masterKind: string;
-    callerGlobalMetaId: string | null;
-    callerName: string | null;
-    publicStatus: string | null;
-    latestEvent: string | null;
-    createdAt: number;
-}
 export interface ProviderConsoleSnapshot {
     services: ProviderConsoleServiceRow[];
     recentOrders: ProviderConsoleOrderRow[];
     manualActions: ProviderConsoleManualActionRow[];
-    recentMasterRequests: ProviderConsoleMasterRequestRow[];
     totals: {
         serviceCount: number;
         activeServiceCount: number;
         sellerOrderCount: number;
         manualActionCount: number;
-        masterRequestCount: number;
     };
 }
 export declare function buildProviderConsoleSnapshot(input: {
     services: PublishedServiceRecord[];
-    masters?: PublishedMasterRecord[];
     traces: ProviderConsoleTraceRecord[];
     sellerOrders?: SellerOrderRecord[];
     ratingDetails?: RatingDetailItem[];

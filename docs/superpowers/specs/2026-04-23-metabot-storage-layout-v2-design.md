@@ -134,15 +134,6 @@ The hidden machine-managed layer inside the profile:
         sessions/
           a2a-session-state.json
 
-        evolution/
-          executions/
-          analyses/
-          artifacts/
-          index.json
-          remote/
-            artifacts/
-            index.json
-
         exports/
           chats/
           traces/
@@ -150,10 +141,6 @@ The hidden machine-managed layer inside the profile:
         state/
           provider-presence.json
           rating-detail.json
-          master-pending-asks.json
-          master-suggest-state.json
-          master-auto-feedback-state.json
-          master-service-state.json
           directory-seeds.json
 
         locks/
@@ -370,14 +357,6 @@ V2 minimum file:
 
 Future session transcript files should also live under this root.
 
-#### `evolution/`
-
-Purpose:
-
-- local and imported evolution-network data for this profile
-
-This is the v2 relocation target for the current evolution storage family.
-
 #### `exports/`
 
 Purpose:
@@ -402,10 +381,6 @@ V2 standard files:
 
 - `provider-presence.json`
 - `rating-detail.json`
-- `master-pending-asks.json`
-- `master-suggest-state.json`
-- `master-auto-feedback-state.json`
-- `master-service-state.json`
 - `directory-seeds.json`
 
 #### `locks/`
@@ -433,7 +408,6 @@ The create flow should eagerly create:
 - the `memory/` directory
 - the `.runtime/` root
 - `.runtime/sessions/`
-- `.runtime/evolution/`
 - `.runtime/exports/`
 - `.runtime/state/`
 - `.runtime/locks/`
@@ -738,7 +712,6 @@ The central path layer should expose concepts at least equivalent to:
 - `runtimeRoot`
 - `sessionsRoot`
 - `exportsRoot`
-- `evolutionRoot`
 - `stateRoot`
 - `locksRoot`
 

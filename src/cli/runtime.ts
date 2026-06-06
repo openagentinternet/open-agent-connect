@@ -7,18 +7,8 @@ import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import {
   DEFAULT_WRITE_NETWORKS,
-  type AskMasterTriggerMode,
   type DefaultWriteNetwork,
 } from '../core/config/configTypes';
-import { createNetworkDirectoryEvolutionService } from '../core/evolution/service';
-import { createLocalEvolutionStore, parseSkillActiveVariantRef } from '../core/evolution/localEvolutionStore';
-import { createRemoteEvolutionStore } from '../core/evolution/remoteEvolutionStore';
-import { publishEvolutionArtifact } from '../core/evolution/publish/publishArtifact';
-import { createChainEvolutionReader } from '../core/evolution/import/chainEvolutionReader';
-import { importPublishedEvolutionArtifact } from '../core/evolution/import/importArtifact';
-import { listImportedEvolutionArtifacts } from '../core/evolution/import/listImportedArtifacts';
-import { deriveResolvedScopeHash, searchPublishedEvolutionArtifacts } from '../core/evolution/import/searchArtifacts';
-import { adoptRemoteEvolutionArtifact } from '../core/evolution/remoteAdoption';
 import { bindHostSkills, HostSkillBindingError } from '../core/host/hostSkillBinding';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import {
@@ -30,8 +20,7 @@ import {
 import { resolveIdentityCreateProfileHome } from '../core/identity/profileWorkspace';
 import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
-import type { ConcreteSkillHost, SkillRenderFormat, SkillVariantArtifact } from '../core/skills/skillContractTypes';
-import type { SkillActiveVariantRef } from '../core/evolution/types';
+import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
 import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
@@ -101,8 +90,6 @@ import {
   type A2ASimplemsgPresenceWatchdog,
 } from '../core/a2a/simplemsgPresenceWatchdog';
 import { classifySimplemsgContent } from '../core/a2a/simplemsgClassifier';
-import { createSocketIoMetaWebMasterReplyWaiter, type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
-import { parseMasterResponse } from '../core/master/masterMessageSchema';
 import {
   createPrivateChatAutoReplyOrchestrator,
   type PrivateChatAutoReplyDependencies,
@@ -149,7 +136,6 @@ const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
-const TEST_FAKE_MASTER_REPLY_ENV = 'METABOT_TEST_FAKE_MASTER_REPLY';
 const TEST_FAKE_PROVIDER_LLM_REPLY_ENV = 'METABOT_TEST_FAKE_PROVIDER_LLM_REPLY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
@@ -291,37 +277,6 @@ export function createServiceRefundSyncLoop(input: {
     },
   };
 }
-
-type EvolutionPublishFailureCode =
-  | 'evolution_variant_not_found'
-  | 'evolution_variant_skill_mismatch'
-  | 'evolution_variant_analysis_mismatch'
-  | 'evolution_variant_scope_hash_missing'
-  | 'evolution_variant_not_verified'
-  | 'evolution_publish_not_supported';
-
-type EvolutionRuntimeFailureCode =
-  | 'evolution_search_not_supported'
-  | 'evolution_scope_hash_missing'
-  | 'evolution_chain_query_failed'
-  | 'evolution_search_result_invalid'
-  | 'evolution_search_index_failed'
-  | 'evolution_import_metadata_invalid'
-  | 'evolution_import_pin_not_found'
-  | 'evolution_import_not_supported'
-  | 'evolution_import_scope_mismatch'
-  | 'evolution_import_variant_conflict'
-  | 'evolution_import_artifact_fetch_failed'
-  | 'evolution_import_artifact_invalid'
-  | 'evolution_imported_not_supported'
-  | 'evolution_imported_artifact_invalid'
-  | 'evolution_remote_adopt_not_supported'
-  | 'evolution_remote_variant_not_found'
-  | 'evolution_remote_variant_skill_mismatch'
-  | 'evolution_remote_variant_scope_mismatch'
-  | 'evolution_remote_variant_invalid';
-
-const EVOLUTION_IMPORT_SKILL_NAME = 'metabot-network-directory';
 
 interface MetaletEnvelope<T> {
   code?: number;
@@ -490,27 +445,15 @@ function isAddressInUseError(error: unknown): boolean {
   );
 }
 
-type SupportedBooleanConfigKey =
-  | 'evolution_network.enabled'
-  | 'evolution_network.autoAdoptSameSkillSameScope'
-  | 'evolution_network.autoRecordExecutions'
-  | 'askMaster.enabled'
-  | 'a2a.simplemsgListenerEnabled';
+type SupportedBooleanConfigKey = 'a2a.simplemsgListenerEnabled';
 
-type SupportedEnumConfigKey =
-  | 'askMaster.triggerMode'
-  | 'chain.defaultWriteNetwork';
+type SupportedEnumConfigKey = 'chain.defaultWriteNetwork';
 
 type SupportedConfigKey = SupportedBooleanConfigKey | SupportedEnumConfigKey;
 
-type SupportedConfigValue = boolean | AskMasterTriggerMode | DefaultWriteNetwork;
+type SupportedConfigValue = boolean | DefaultWriteNetwork;
 
 const SUPPORTED_CONFIG_KEYS = new Set<SupportedConfigKey>([
-  'evolution_network.enabled',
-  'evolution_network.autoAdoptSameSkillSameScope',
-  'evolution_network.autoRecordExecutions',
-  'askMaster.enabled',
-  'askMaster.triggerMode',
   'a2a.simplemsgListenerEnabled',
   'chain.defaultWriteNetwork',
 ]);
@@ -519,82 +462,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function compareCodePointStrings(left: string, right: string): number {
-  if (left < right) {
-    return -1;
-  }
-  if (left > right) {
-    return 1;
-  }
-  return 0;
-}
-
-function projectActiveVariantIds(activeVariants: Record<string, unknown>): Record<string, string> {
-  const entries: Array<[string, string]> = [];
-  for (const [skillName, rawRef] of Object.entries(activeVariants)) {
-    const activeRef = parseSkillActiveVariantRef(rawRef);
-    if (!activeRef) {
-      continue;
-    }
-    entries.push([skillName, activeRef.variantId]);
-  }
-  entries.sort(([left], [right]) => compareCodePointStrings(left, right));
-  return Object.fromEntries(entries);
-}
-
-function projectActiveVariantRefs(
-  activeVariants: Record<string, unknown>,
-): Record<string, SkillActiveVariantRef> {
-  const entries: Array<[string, SkillActiveVariantRef]> = [];
-  for (const [skillName, rawRef] of Object.entries(activeVariants)) {
-    const activeRef = parseSkillActiveVariantRef(rawRef);
-    if (!activeRef) {
-      continue;
-    }
-    entries.push([skillName, activeRef]);
-  }
-  entries.sort(([left], [right]) => compareCodePointStrings(left, right));
-  return Object.fromEntries(entries);
-}
-
 function isSupportedConfigKey(key: string): key is SupportedConfigKey {
   return SUPPORTED_CONFIG_KEYS.has(key as SupportedConfigKey);
 }
 
 function isSupportedBooleanConfigKey(key: SupportedConfigKey): key is SupportedBooleanConfigKey {
-  return key === 'evolution_network.enabled'
-    || key === 'evolution_network.autoAdoptSameSkillSameScope'
-    || key === 'evolution_network.autoRecordExecutions'
-    || key === 'askMaster.enabled'
-    || key === 'a2a.simplemsgListenerEnabled';
+  return key === 'a2a.simplemsgListenerEnabled';
 }
 
 function readConfigValue(
   config: Awaited<ReturnType<ConfigStore['read']>>,
   key: SupportedConfigKey,
 ): SupportedConfigValue {
-  if (key === 'evolution_network.enabled') {
-    return config.evolution_network.enabled;
-  }
-  if (key === 'evolution_network.autoAdoptSameSkillSameScope') {
-    return config.evolution_network.autoAdoptSameSkillSameScope;
-  }
-  if (key === 'evolution_network.autoRecordExecutions') {
-    return config.evolution_network.autoRecordExecutions;
-  }
-  if (key === 'askMaster.enabled') {
-    return config.askMaster.enabled;
-  }
-  if (key === 'askMaster.triggerMode') {
-    return config.askMaster.triggerMode;
-  }
   if (key === 'a2a.simplemsgListenerEnabled') {
     return config.a2a.simplemsgListenerEnabled;
   }
   if (key === 'chain.defaultWriteNetwork') {
     return config.chain.defaultWriteNetwork;
   }
-  return config.evolution_network.autoRecordExecutions;
+  return config.chain.defaultWriteNetwork;
 }
 
 function writeConfigValue(
@@ -602,48 +488,12 @@ function writeConfigValue(
   key: SupportedConfigKey,
   value: SupportedConfigValue,
 ): Awaited<ReturnType<ConfigStore['read']>> {
-  if (key === 'askMaster.enabled') {
-    return {
-      ...config,
-      askMaster: {
-        ...config.askMaster,
-        enabled: value === true,
-      },
-    };
-  }
-  if (key === 'askMaster.triggerMode') {
-    return {
-      ...config,
-      askMaster: {
-        ...config.askMaster,
-        triggerMode: value as AskMasterTriggerMode,
-      },
-    };
-  }
   if (key === 'chain.defaultWriteNetwork') {
     return {
       ...config,
       chain: {
         ...config.chain,
         defaultWriteNetwork: value as DefaultWriteNetwork,
-      },
-    };
-  }
-  if (key === 'evolution_network.enabled') {
-    return {
-      ...config,
-      evolution_network: {
-        ...config.evolution_network,
-        enabled: value === true,
-      },
-    };
-  }
-  if (key === 'evolution_network.autoAdoptSameSkillSameScope') {
-    return {
-      ...config,
-      evolution_network: {
-        ...config.evolution_network,
-        autoAdoptSameSkillSameScope: value === true,
       },
     };
   }
@@ -656,13 +506,7 @@ function writeConfigValue(
       },
     };
   }
-  return {
-    ...config,
-    evolution_network: {
-      ...config.evolution_network,
-      autoRecordExecutions: value === true,
-    },
-  };
+  return config;
 }
 
 function normalizeConfigValueForKey(input: {
@@ -680,19 +524,6 @@ function normalizeConfigValueForKey(input: {
       return {
         ok: false,
         message: `Config key ${input.key} requires a boolean value.`,
-      };
-    }
-    return {
-      ok: true,
-      value: input.value,
-    };
-  }
-
-  if (input.key === 'askMaster.triggerMode') {
-    if (input.value !== 'manual' && input.value !== 'suggest') {
-      return {
-        ok: false,
-        message: 'Config value for askMaster.triggerMode must be one of `manual` or `suggest`.',
       };
     }
     return {
@@ -794,7 +625,6 @@ export function buildDaemonConfigHash(
       fakeProviderChatPublicKey: normalizeEnvText(env[TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV]),
       fakeMetaWebReply: normalizeEnvText(env[TEST_FAKE_METAWEB_REPLY_ENV]),
       fakeBuyerRatingReply: normalizeEnvText(env[TEST_FAKE_BUYER_RATING_REPLY_ENV]),
-      fakeMasterReply: normalizeEnvText(env[TEST_FAKE_MASTER_REPLY_ENV]),
     }))
     .digest('hex');
 }
@@ -1336,143 +1166,6 @@ async function requestText(
   return response.text();
 }
 
-async function observeNetworkDirectoryExecutionSafely(
-  context: CliRuntimeContext,
-  observation: Parameters<ReturnType<typeof createNetworkDirectoryEvolutionService>['observeNetworkDirectoryExecution']>[0],
-): Promise<void> {
-  try {
-    const homeDir = normalizeHomeDir(context.env, context.cwd);
-    const evolutionService = createNetworkDirectoryEvolutionService(homeDir);
-    await evolutionService.observeNetworkDirectoryExecution(observation);
-  } catch {
-    // Evolution observation must never block normal CLI command execution.
-  }
-}
-
-type NetworkListServicesHandler = NonNullable<NonNullable<CliDependencies['network']>['listServices']>;
-
-function wrapNetworkListServicesDependency(
-  context: CliRuntimeContext,
-  listServices: NetworkListServicesHandler | undefined,
-): NetworkListServicesHandler | undefined {
-  if (!listServices) {
-    return undefined;
-  }
-
-  return async (input: Parameters<NetworkListServicesHandler>[0]) => {
-    if (input.online !== true) {
-      return listServices(input);
-    }
-
-    const startedAt = Date.now();
-    try {
-      const result = await listServices(input);
-      if (result.state === 'waiting' || result.state === 'manual_action_required') {
-        return result;
-      }
-      const finishedAt = Date.now();
-      await observeNetworkDirectoryExecutionSafely(context, {
-        skillName: 'metabot-network-directory',
-        commandTemplate: 'metabot network services --online',
-        startedAt,
-        finishedAt,
-        envelope: result as Record<string, unknown>,
-        stdout: '',
-        stderr: result.ok ? '' : (result.message ?? ''),
-        usedUiFallback: false,
-        manualRecovery: false,
-      });
-      return result;
-    } catch (error) {
-      const finishedAt = Date.now();
-      const message = error instanceof Error ? error.message : String(error);
-      await observeNetworkDirectoryExecutionSafely(context, {
-        skillName: 'metabot-network-directory',
-        commandTemplate: 'metabot network services --online',
-        startedAt,
-        finishedAt,
-        envelope: commandFailed('network_services_execution_failed', message) as Record<string, unknown>,
-        stdout: '',
-        stderr: message,
-        usedUiFallback: false,
-        manualRecovery: false,
-      });
-      throw error;
-    }
-  };
-}
-
-async function resolveActiveVariantForSkill(
-  context: CliRuntimeContext,
-  skillName: string,
-): Promise<{
-  activeVariant: SkillVariantArtifact | null;
-  activeVariantSource: 'local' | 'remote' | null;
-}> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd);
-  const evolutionStore = createLocalEvolutionStore(homeDir);
-  const index = await evolutionStore.readIndex();
-  const activeVariantRef = parseSkillActiveVariantRef(index.activeVariants[skillName]);
-  if (!activeVariantRef) {
-    return {
-      activeVariant: null,
-      activeVariantSource: null,
-    };
-  }
-
-  let artifact: SkillVariantArtifact | Record<string, unknown> | null;
-  if (activeVariantRef.source === 'local') {
-    const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${activeVariantRef.variantId}.json`);
-    artifact = await readArtifactFile(artifactPath);
-  } else {
-    try {
-      const remoteStore = createRemoteEvolutionStore(homeDir);
-      artifact = await remoteStore.readArtifact(activeVariantRef.variantId);
-    } catch {
-      artifact = null;
-    }
-  }
-  if (!artifact || artifact.skillName !== skillName) {
-    return {
-      activeVariant: null,
-      activeVariantSource: null,
-    };
-  }
-
-  return {
-    activeVariant: {
-      ...(artifact as SkillVariantArtifact),
-      // Active refs are the source of truth even for imported remote artifacts,
-      // which remain stored as inactive bodies in the remote cache.
-      status: 'active',
-    },
-    activeVariantSource: activeVariantRef.source,
-  };
-}
-
-async function clearActiveVariantMapping(
-  context: CliRuntimeContext,
-  skillName: string,
-): Promise<{ removed: boolean; previousVariantId: string | null }> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd);
-  const evolutionStore = createLocalEvolutionStore(homeDir);
-  const index = await evolutionStore.readIndex();
-  const previousVariantRef = parseSkillActiveVariantRef(index.activeVariants[skillName]);
-  if (!previousVariantRef) {
-    return {
-      removed: false,
-      previousVariantId: null,
-    };
-  }
-
-  await evolutionStore.clearActiveVariant(skillName);
-
-  return {
-    removed: true,
-    previousVariantId: previousVariantRef.variantId,
-  };
-}
-
 async function readInjectedRemoteServicesPrompt(context: CliRuntimeContext): Promise<string | null> {
   try {
     const homeDir = normalizeHomeDir(context.env, context.cwd);
@@ -1491,17 +1184,11 @@ async function renderSkillContractWithOnlineServiceContext(input: {
   skill: string;
   host?: ConcreteSkillHost;
   format: SkillRenderFormat;
-  evolutionNetworkEnabled: boolean;
-  activeVariant: SkillVariantArtifact | null;
-  activeVariantSource: SkillActiveVariantRef['source'] | null;
 }) {
   const rendered = renderResolvedSkillContract({
     skillName: input.skill,
     host: input.host,
     format: input.format,
-    evolutionNetworkEnabled: input.evolutionNetworkEnabled,
-    activeVariant: input.activeVariant,
-    activeVariantSource: input.activeVariantSource,
   });
   const remoteServicesPrompt = await readInjectedRemoteServicesPrompt(input.context);
   if (!remoteServicesPrompt) {
@@ -1520,25 +1207,6 @@ async function renderSkillContractWithOnlineServiceContext(input: {
       instructions: `${rendered.contract.instructions}\n\n${remoteServicesPrompt}`,
     },
   };
-}
-
-async function resolveEvolutionScopeHashForSkill(input: {
-  context: CliRuntimeContext;
-  skillName: string;
-  evolutionNetworkEnabled: boolean;
-}): Promise<string> {
-  const resolvedActiveVariant = input.evolutionNetworkEnabled
-    ? await resolveActiveVariantForSkill(input.context, input.skillName)
-    : { activeVariant: null, activeVariantSource: null };
-  const rendered = renderResolvedSkillContract({
-    skillName: input.skillName,
-    host: 'codex',
-    format: 'json',
-    evolutionNetworkEnabled: input.evolutionNetworkEnabled,
-    activeVariant: resolvedActiveVariant.activeVariant,
-    activeVariantSource: resolvedActiveVariant.activeVariantSource,
-  });
-  return deriveResolvedScopeHash(rendered.contract);
 }
 
 function createTestChainWriteSigner(baseSigner: Signer): Signer {
@@ -1583,61 +1251,6 @@ function createTestChainWriteSigner(baseSigner: Signer): Signer {
       };
     },
   };
-}
-
-function isEvolutionPublishFailureCode(value: unknown): value is EvolutionPublishFailureCode {
-  return value === 'evolution_variant_not_found'
-    || value === 'evolution_variant_skill_mismatch'
-    || value === 'evolution_variant_analysis_mismatch'
-    || value === 'evolution_variant_scope_hash_missing'
-    || value === 'evolution_variant_not_verified'
-    || value === 'evolution_publish_not_supported';
-}
-
-function isEvolutionRuntimeFailureCode(value: unknown): value is EvolutionRuntimeFailureCode {
-  return value === 'evolution_search_not_supported'
-    || value === 'evolution_scope_hash_missing'
-    || value === 'evolution_chain_query_failed'
-    || value === 'evolution_search_result_invalid'
-    || value === 'evolution_search_index_failed'
-    || value === 'evolution_import_metadata_invalid'
-    || value === 'evolution_import_pin_not_found'
-    || value === 'evolution_import_not_supported'
-    || value === 'evolution_import_scope_mismatch'
-    || value === 'evolution_import_variant_conflict'
-    || value === 'evolution_import_artifact_fetch_failed'
-    || value === 'evolution_import_artifact_invalid'
-    || value === 'evolution_imported_not_supported'
-    || value === 'evolution_imported_artifact_invalid'
-    || value === 'evolution_remote_adopt_not_supported'
-    || value === 'evolution_remote_variant_not_found'
-    || value === 'evolution_remote_variant_skill_mismatch'
-    || value === 'evolution_remote_variant_scope_mismatch'
-    || value === 'evolution_remote_variant_invalid';
-}
-
-function mapEvolutionRuntimeError(error: unknown): { code: EvolutionRuntimeFailureCode; message: string } | null {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message === 'evolution_search_not_supported') {
-    return { code: 'evolution_search_not_supported', message };
-  }
-  if (message === 'evolution_scope_hash_missing') {
-    return { code: 'evolution_scope_hash_missing', message };
-  }
-  if (message.startsWith('evolution_chain_query_failed:')) {
-    return { code: 'evolution_chain_query_failed', message };
-  }
-  if (message.startsWith('evolution_search_result_invalid:')) {
-    return { code: 'evolution_search_result_invalid', message };
-  }
-  if (message.startsWith('evolution_search_index_failed:')) {
-    return { code: 'evolution_search_index_failed', message };
-  }
-  const explicitCode = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
-  if (isEvolutionRuntimeFailureCode(explicitCode)) {
-    return { code: explicitCode, message };
-  }
-  return null;
 }
 
 function createCliSigner(context: CliRuntimeContext, homeDir: string): Signer {
@@ -2273,85 +1886,6 @@ function createTestBuyerRatingReplyRunner(env: NodeJS.ProcessEnv): ChatReplyRunn
   });
 }
 
-function createTestMasterReplyWaiter(env: NodeJS.ProcessEnv): MetaWebMasterReplyWaiter | undefined {
-  const raw = typeof env[TEST_FAKE_MASTER_REPLY_ENV] === 'string'
-    ? env[TEST_FAKE_MASTER_REPLY_ENV]!.trim()
-    : '';
-  if (!raw) {
-    return undefined;
-  }
-
-  let parsed: {
-    state?: unknown;
-    responseJson?: unknown;
-    deliveryPinId?: unknown;
-    observedAt?: unknown;
-    delayMs?: unknown;
-    sequence?: Array<{
-      state?: unknown;
-      responseJson?: unknown;
-      deliveryPinId?: unknown;
-      observedAt?: unknown;
-      delayMs?: unknown;
-    }> | unknown;
-  };
-  try {
-    parsed = JSON.parse(raw) as typeof parsed;
-  } catch (error) {
-    throw new Error(
-      `Invalid ${TEST_FAKE_MASTER_REPLY_ENV}: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-
-  const sequence = Array.isArray(parsed.sequence) && parsed.sequence.length > 0
-    ? parsed.sequence
-    : [parsed];
-  let replyIndex = 0;
-
-  return {
-    awaitMasterReply: async (input) => {
-      const step = sequence[Math.min(replyIndex, sequence.length - 1)] ?? parsed;
-      replyIndex += 1;
-
-      const delayMs = Number.isFinite(step.delayMs)
-        ? Math.max(0, Math.floor(Number(step.delayMs)))
-        : 0;
-      if (delayMs > 0) {
-        await sleep(Math.min(delayMs, input.timeoutMs));
-      }
-
-      if (step.state === 'timeout') {
-        return {
-          state: 'timeout',
-        };
-      }
-
-      const responseJson = typeof step.responseJson === 'string' ? step.responseJson.trim() : '';
-      if (!responseJson) {
-        throw new Error(`Invalid ${TEST_FAKE_MASTER_REPLY_ENV}: responseJson is required unless state=timeout.`);
-      }
-
-      const parsedResponse = parseMasterResponse(responseJson);
-      if (!parsedResponse.ok) {
-        throw new Error(`Invalid ${TEST_FAKE_MASTER_REPLY_ENV}: ${parsedResponse.message}`);
-      }
-
-      return {
-        state: 'completed',
-        response: parsedResponse.value,
-        responseJson,
-        deliveryPinId: typeof step.deliveryPinId === 'string' ? step.deliveryPinId : null,
-        observedAt: Number.isFinite(step.observedAt)
-          ? Number(step.observedAt)
-          : Date.now(),
-        rawMessage: {
-          source: 'test-fake-master-reply',
-        },
-      };
-    },
-  };
-}
-
 async function runWalletTransferRuntime(
   context: CliRuntimeContext,
   input: { from?: string; toAddress: string; amountRaw: string; confirm: boolean },
@@ -2659,29 +2193,6 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
     },
-    master: {
-      publish: async (input) => requestJson(context, 'POST', '/api/master/publish', input),
-      list: async (input) => {
-        const query = new URLSearchParams();
-        if (input.online !== undefined) {
-          query.set('online', input.online ? 'true' : 'false');
-        }
-        if (typeof input.masterKind === 'string' && input.masterKind.trim()) {
-          query.set('kind', input.masterKind.trim());
-        }
-        const suffix = query.size ? `?${query.toString()}` : '';
-        return requestJson(context, 'GET', `/api/master/list${suffix}`);
-      },
-      ask: async (input) => requestJson(context, 'POST', '/api/master/ask', input),
-      suggest: async (input) => requestJson(context, 'POST', '/api/master/suggest', input),
-      hostAction: async (input) => requestJson(context, 'POST', '/api/master/host-action', input),
-      trace: async (input) => {
-        const params = new URLSearchParams();
-        if (input.from) params.set('from', input.from);
-        const suffix = params.size ? `?${params.toString()}` : '';
-        return requestJson(context, 'GET', `/api/master/trace/${encodeURIComponent(input.traceId)}${suffix}`);
-      },
-    },
     network: {
       listServices: async (input) => {
         const query = new URLSearchParams();
@@ -2922,21 +2433,21 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     skills: {
       resolve: async (input) => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
-        const configStore = createConfigStore(homeDir);
-        const config = await configStore.read();
-        const resolvedActiveVariant = config.evolution_network.enabled
-          ? await resolveActiveVariantForSkill(context, input.skill)
-          : { activeVariant: null, activeVariantSource: null };
-        const rendered = await renderSkillContractWithOnlineServiceContext({
-          context,
-          skill: input.skill,
-          host: input.host as ConcreteSkillHost | undefined,
-          format: input.format as SkillRenderFormat,
-          evolutionNetworkEnabled: config.evolution_network.enabled,
-          activeVariant: resolvedActiveVariant.activeVariant,
-          activeVariantSource: resolvedActiveVariant.activeVariantSource,
-        });
+        let rendered: Awaited<ReturnType<typeof renderSkillContractWithOnlineServiceContext>>;
+        try {
+          rendered = await renderSkillContractWithOnlineServiceContext({
+            context,
+            skill: input.skill,
+            host: input.host as ConcreteSkillHost | undefined,
+            format: input.format as SkillRenderFormat,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (/^Unknown base skill contract:/.test(message)) {
+            return commandFailed('unknown_skill', message);
+          }
+          throw error;
+        }
         if (rendered.format === 'markdown') {
           return commandSuccess(rendered.markdown);
         }
@@ -3057,277 +2568,6 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const actor = await resolveActorProfileSlug(context, input);
         if (!('slug' in actor)) return actor;
         return requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`, { runtimeId: input.runtimeId });
-      },
-    },
-    evolution: {
-      status: async (input = {}) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
-        const homeDir = actor.homeDir;
-        const configStore = createConfigStore(homeDir);
-        const config = await configStore.read();
-        const evolutionStore = createLocalEvolutionStore(homeDir);
-        const index = await evolutionStore.readIndex();
-        return commandSuccess({
-          enabled: config.evolution_network.enabled,
-          executions: index.executions.length,
-          analyses: index.analyses.length,
-          artifacts: index.artifacts.length,
-          activeVariants: projectActiveVariantIds(index.activeVariants),
-          activeVariantRefs: projectActiveVariantRefs(index.activeVariants),
-        });
-      },
-      search: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
-        const homeDir = actor.homeDir;
-        const actorContext = cloneContextWithHomeDir(context, homeDir);
-        const configStore = createConfigStore(homeDir);
-        const config = await configStore.read();
-        if (!config.evolution_network.enabled) {
-          return commandFailed(
-            'evolution_network_disabled',
-            'Evolution network search is disabled.'
-          );
-        }
-        if (input.skill !== EVOLUTION_IMPORT_SKILL_NAME) {
-          return commandFailed(
-            'evolution_search_not_supported',
-            `Evolution search is currently supported only for "${EVOLUTION_IMPORT_SKILL_NAME}".`
-          );
-        }
-
-        try {
-          const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-            context: actorContext,
-            skillName: input.skill,
-            evolutionNetworkEnabled: config.evolution_network.enabled,
-          });
-          const remoteStore = createRemoteEvolutionStore(homeDir);
-          const chainReader = createChainEvolutionReader({
-            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-          });
-          const results = await searchPublishedEvolutionArtifacts({
-            skillName: input.skill,
-            resolvedScopeHash,
-            remoteStore,
-            fetchMetadataRows: chainReader.fetchMetadataRows,
-          });
-          return commandSuccess(results);
-        } catch (error) {
-          const mapped = mapEvolutionRuntimeError(error);
-          if (mapped) {
-            return commandFailed(mapped.code, mapped.message);
-          }
-          throw error;
-        }
-      },
-      publish: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
-        const homeDir = actor.homeDir;
-        const configStore = createConfigStore(homeDir);
-        const config = await configStore.read();
-        if (!config.evolution_network.enabled) {
-          return commandFailed(
-            'evolution_network_disabled',
-            'Evolution network publishing is disabled.'
-          );
-        }
-
-        const evolutionStore = createLocalEvolutionStore(homeDir);
-        const signer = createCliSigner(context, homeDir);
-        const identity = await signer.getIdentity();
-
-        try {
-          const published = await publishEvolutionArtifact({
-            store: evolutionStore,
-            skillName: input.skill,
-            variantId: input.variantId,
-            publisherGlobalMetaId: identity.globalMetaId,
-            uploadArtifactBody: async (filePath) => {
-              const uploaded = await uploadLocalFileToChain({
-                filePath,
-                signer,
-              });
-              return {
-                artifactUri: uploaded.metafileUri,
-              };
-            },
-            writeMetadataPin: async (request) => {
-              const result = await signer.writePin(request);
-              return {
-                pinId: result.pinId,
-                txids: result.txids,
-              };
-            },
-          });
-
-          return commandSuccess(published);
-        } catch (error) {
-          const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
-          const message = error instanceof Error ? error.message : String(error);
-          if (isEvolutionPublishFailureCode(code)) {
-            return commandFailed(code, message);
-          }
-          throw error;
-        }
-      },
-      import: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
-        const homeDir = actor.homeDir;
-        const actorContext = cloneContextWithHomeDir(context, homeDir);
-        const configStore = createConfigStore(homeDir);
-        const config = await configStore.read();
-        if (!config.evolution_network.enabled) {
-          return commandFailed(
-            'evolution_network_disabled',
-            'Evolution network import is disabled.'
-          );
-        }
-
-        try {
-          const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-            context: actorContext,
-            skillName: EVOLUTION_IMPORT_SKILL_NAME,
-            evolutionNetworkEnabled: config.evolution_network.enabled,
-          });
-          const remoteStore = createRemoteEvolutionStore(homeDir);
-          const chainReader = createChainEvolutionReader({
-            chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-          });
-          const imported = await importPublishedEvolutionArtifact({
-            pinId: input.pinId,
-            skillName: EVOLUTION_IMPORT_SKILL_NAME,
-            resolvedScopeHash,
-            remoteStore,
-            readMetadataPinById: chainReader.readMetadataPinById,
-            readArtifactBodyByUri: chainReader.readArtifactBodyByUri,
-          });
-          return commandSuccess(imported);
-        } catch (error) {
-          const mapped = mapEvolutionRuntimeError(error);
-          if (mapped) {
-            return commandFailed(mapped.code, mapped.message);
-          }
-          throw error;
-        }
-      },
-      imported: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
-        const homeDir = actor.homeDir;
-        const configStore = createConfigStore(homeDir);
-        const config = await configStore.read();
-        if (!config.evolution_network.enabled) {
-          return commandFailed(
-            'evolution_network_disabled',
-            'Evolution network imported listing is disabled.'
-          );
-        }
-
-        try {
-          const evolutionStore = createLocalEvolutionStore(homeDir);
-          const index = await evolutionStore.readIndex();
-          const activeRef = parseSkillActiveVariantRef(index.activeVariants[input.skill]);
-          const remoteStore = createRemoteEvolutionStore(homeDir);
-          const imported = await listImportedEvolutionArtifacts({
-            skillName: input.skill,
-            activeRef,
-            remoteStore,
-          });
-          return commandSuccess(imported);
-        } catch (error) {
-          const mapped = mapEvolutionRuntimeError(error);
-          if (mapped) {
-            return commandFailed(mapped.code, mapped.message);
-          }
-          throw error;
-        }
-      },
-      adopt: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
-        const homeDir = actor.homeDir;
-        const actorContext = cloneContextWithHomeDir(context, homeDir);
-        if (input.source === 'remote') {
-          const configStore = createConfigStore(homeDir);
-          const config = await configStore.read();
-          if (!config.evolution_network.enabled) {
-            return commandFailed(
-              'evolution_network_disabled',
-              'Evolution network remote adoption is disabled.'
-            );
-          }
-          if (input.skill !== EVOLUTION_IMPORT_SKILL_NAME) {
-            return commandFailed(
-              'evolution_remote_adopt_not_supported',
-              `Remote adoption is currently supported only for "${EVOLUTION_IMPORT_SKILL_NAME}".`
-            );
-          }
-
-          try {
-            const resolvedScopeHash = await resolveEvolutionScopeHashForSkill({
-              context: actorContext,
-              skillName: input.skill,
-              evolutionNetworkEnabled: config.evolution_network.enabled,
-            });
-            const evolutionStore = createLocalEvolutionStore(homeDir);
-            const remoteStore = createRemoteEvolutionStore(homeDir);
-            const adopted = await adoptRemoteEvolutionArtifact({
-              skillName: input.skill,
-              variantId: input.variantId,
-              resolvedScopeHash,
-              remoteStore,
-              evolutionStore,
-            });
-            return commandSuccess(adopted);
-          } catch (error) {
-            const mapped = mapEvolutionRuntimeError(error);
-            if (mapped) {
-              return commandFailed(mapped.code, mapped.message);
-            }
-            throw error;
-          }
-        }
-
-        const evolutionStore = createLocalEvolutionStore(homeDir);
-        const artifactPath = path.join(evolutionStore.paths.evolutionArtifactsRoot, `${input.variantId}.json`);
-        const artifact = await readArtifactFile(artifactPath);
-        if (!artifact) {
-          return commandFailed('evolution_variant_not_found', `Variant not found: ${input.variantId}`);
-        }
-        if (artifact.skillName !== input.skill) {
-          return commandFailed(
-            'evolution_variant_skill_mismatch',
-            `Variant ${input.variantId} belongs to ${String(artifact.skillName)} and cannot be adopted for ${input.skill}.`,
-          );
-        }
-
-        const updatedArtifact = {
-          ...artifact,
-          status: 'active',
-          adoption: 'active',
-          updatedAt: Date.now(),
-        };
-        await evolutionStore.writeArtifact(updatedArtifact as never);
-        await evolutionStore.setActiveVariant(input.skill, input.variantId);
-        return commandSuccess({
-          skillName: input.skill,
-          variantId: input.variantId,
-          active: true,
-        });
-      },
-      rollback: async (input) => {
-        const actor = await resolveActorHomeDir(context, input.from);
-        if (!('homeDir' in actor)) return actor;
-        const rollback = await clearActiveVariantMapping(cloneContextWithHomeDir(context, actor.homeDir), input.skill);
-        return commandSuccess({
-          skillName: input.skill,
-          rolledBack: rollback.removed,
-          previousVariantId: rollback.previousVariantId,
-        });
       },
     },
     loom: {
@@ -3846,11 +3086,6 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
 export function mergeCliDependencies(context: CliRuntimeContext): CliDependencies {
   const defaults = createDefaultCliDependencies(context);
   const provided = context.dependencies;
-  const defaultNetwork = defaults.network ?? {};
-  const networkListServices = wrapNetworkListServicesDependency(
-    context,
-    provided.network?.listServices ?? defaultNetwork.listServices,
-  );
   return {
     config: { ...defaults.config, ...provided.config },
     buzz: { ...defaults.buzz, ...provided.buzz },
@@ -3859,12 +3094,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
     identity: { ...defaults.identity, ...provided.identity },
-    master: { ...defaults.master, ...provided.master },
-    network: {
-      ...defaultNetwork,
-      ...provided.network,
-      listServices: networkListServices,
-    },
+    network: { ...defaults.network, ...provided.network },
     services: { ...defaults.services, ...provided.services },
     provider: { ...defaults.provider, ...provided.provider },
     chat: { ...defaults.chat, ...provided.chat },
@@ -3878,7 +3108,6 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     llm: { ...defaults.llm, ...provided.llm },
     loom: { ...defaults.loom, ...provided.loom },
     bot: { ...defaults.bot, ...provided.bot },
-    evolution: { ...defaults.evolution, ...provided.evolution },
   };
 }
 
@@ -3904,7 +3133,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
   });
   const callerReplyWaiter = createTestMetaWebReplyWaiter(context.env);
-  const masterReplyWaiter = createTestMasterReplyWaiter(context.env) ?? createSocketIoMetaWebMasterReplyWaiter();
   const servicePaymentExecutor = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
     ? createTestServicePaymentExecutor()
     : undefined;
@@ -3993,7 +3221,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     buyerRatingTextGenerator: orderProtocolTextGenerator.generateBuyerRatingText,
     callerOrderTextGenerator: orderProtocolTextGenerator.generateCallerOrderText,
     providerOrderTextGenerator: orderProtocolTextGenerator.generateProviderOrderText,
-    masterReplyWaiter,
     servicePaymentExecutor,
     requestMvcGasSubsidy,
     createSignerForHome: (profileHomeDir) => {

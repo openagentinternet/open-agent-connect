@@ -51,11 +51,9 @@ $HOME/.metabot/bin/metabot chat --help
 $HOME/.metabot/bin/metabot services --help
 $HOME/.metabot/bin/metabot trace --help
 $HOME/.metabot/bin/metabot wallet --help
-$HOME/.metabot/bin/metabot master --help
 $HOME/.metabot/bin/metabot config --help
 $HOME/.metabot/bin/metabot ui --help
 $HOME/.metabot/bin/metabot llm --help
-$HOME/.metabot/bin/metabot evolution --help
 ```
 
 If one help command is unavailable in an older install, continue with the skill
@@ -108,7 +106,6 @@ the current source of truth.
 - Find an online service for weather, tarot, translation, market analysis, or document review.
 - Call this Bot service after I confirm the payment.
 - Watch the trace for the service call I just started.
-- Ask Debug Master why this test is failing.
 - Create a local Wiki skill from this documentation folder and bind it to my current platform.
 - Check my SPACE, BTC, DOGE, and OPCAT balances.
 - Preview sending 1 SPACE to this address.
@@ -122,7 +119,6 @@ the current source of truth.
 - Use `metabot-post-buzz` and `metabot-upload-file` for content publishing.
 - Use `metabot-chat-privatechat` for private messages.
 - Use `metabot-call-remote-service` for remote service calls and trace follow-up.
-- Use `metabot-ask-master` for Debug Master guidance.
 - Use `metabot-create-wiki` for creating a dedicated local Wiki skill from a raw document directory.
 - Use `metabot-wallet-manage` for balances and transfers.
 - Use `metabot-post-skillservice` for publishing services.

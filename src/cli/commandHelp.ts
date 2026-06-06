@@ -215,7 +215,6 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'chain', summary: 'Write arbitrary MetaID tuples and protocol payloads on-chain.' },
     { name: 'wallet', summary: 'Inspect local wallet balances across supported chains.' },
     { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },
-    { name: 'master', summary: 'Publish, discover, ask, and inspect Ask Master flows.' },
     { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
     { name: 'provider', summary: 'Inspect local provider orders and settle seller-side refunds.' },
     { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
@@ -224,14 +223,13 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
     { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
     { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
-    { name: 'evolution', summary: 'Inspect, publish, import, and adopt skill evolution artifacts.' },
     { name: 'llm', summary: 'Discover local LLM runtimes and manage MetaBot-to-LLM bindings.' },
     { name: 'loom', summary: 'Validate Loom payloads, run workflow commands, sync raw records, and inspect task views.' },
   ],
   optionalFlags: [VERSION_FLAG, HELP_JSON_FLAG],
   examples: [
     'metabot --version',
-    'metabot config get --from alice askMaster.enabled',
+    'metabot config get --from alice chain.defaultWriteNetwork',
     'metabot services call --help',
     'metabot chat private --help --json',
   ],
@@ -802,7 +800,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['config'],
-    summary: 'Read or change supported public runtime switches such as Ask Master availability and default write network.',
+    summary: 'Read or change supported public runtime switches such as the default write network.',
     usage: 'metabot config <subcommand>',
     subcommands: [
       { name: 'get', summary: 'Read one supported config key for one MetaBot actor.' },
@@ -812,14 +810,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot config get --from alice chain.defaultWriteNetwork',
       'metabot config set --from alice chain.defaultWriteNetwork opcat',
-      'metabot config get --from alice askMaster.enabled',
       'metabot config get --from alice a2a.simplemsgListenerEnabled',
-      'metabot config set --from alice askMaster.triggerMode suggest',
     ],
   },
   {
     commandPath: ['config', 'get'],
-    summary: 'Read one supported public config key such as the default write network, Ask Master availability, or trigger mode.',
+    summary: 'Read one supported public config key such as the default write network.',
     usage: 'metabot config get [--from <bot-slug>] <key>',
     successFields: [
       'key',
@@ -831,15 +827,13 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot config get --from alice chain.defaultWriteNetwork',
-      'metabot config get --from alice askMaster.enabled',
-      'metabot config get --from alice askMaster.triggerMode',
       'metabot config get --from alice a2a.simplemsgListenerEnabled',
     ],
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['config', 'set'],
-    summary: 'Persist one supported public config key. Ask Master trigger mode is intentionally limited to manual or suggest for the current release.',
+    summary: 'Persist one supported public config key.',
     usage: 'metabot config set [--from <bot-slug>] <key> <value>',
     successFields: [
       'key',
@@ -849,13 +843,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'Fails with missing_argument when the key or value is omitted.',
       'Fails with unsupported_config_key when the requested key is not in the public CLI allowlist.',
       'Fails when chain.defaultWriteNetwork is not one of mvc, btc, doge, or opcat.',
-      'Fails when askMaster.triggerMode is not one of `manual` or `suggest`.',
     ],
     examples: [
       'metabot config set --from alice chain.defaultWriteNetwork opcat',
-      'metabot config set --from alice askMaster.enabled false',
       'metabot config set --from alice a2a.simplemsgListenerEnabled false',
-      'metabot config set --from alice askMaster.triggerMode suggest',
     ],
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
@@ -1435,100 +1426,6 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot wallet balance --from alice --chain opcat',
     ],
     optionalFlags: [FROM_BOT_FLAG, WALLET_CHAIN_ALL_FLAG, HELP_JSON_FLAG],
-  },
-  {
-    commandPath: ['master'],
-    summary: 'Ask Master commands for publishing, discovering, asking, and tracing remote masters.',
-    usage: 'metabot master <subcommand>',
-    subcommands: [
-      { name: 'publish', summary: 'Publish one master-service record to the chain-backed directory.' },
-      { name: 'list', summary: 'List discoverable master-service entries for the current host.' },
-      { name: 'ask', summary: 'Preview or confirm one Ask Master request.' },
-      { name: 'suggest', summary: 'Evaluate one host-visible stuck/risk frame and surface a suggest result.' },
-      { name: 'host-action', summary: 'Bridge one host-facing Ask Master action into the existing runtime.' },
-      { name: 'trace', summary: 'Inspect one Ask Master trace by trace id.' },
-    ],
-    optionalFlags: [HELP_JSON_FLAG],
-  },
-  {
-    commandPath: ['master', 'publish'],
-    summary: 'Publish one master-service payload for a remote master/provider.',
-    usage: 'metabot master publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
-    requiredFlags: [
-      { flag: '--payload-file', value: '<path>', description: 'JSON master-service payload file.' },
-    ],
-    examples: [
-      'metabot master publish --from alice --payload-file master-payload.json',
-      'metabot master publish --from alice --payload-file master-doge-payload.json --chain doge',
-      'metabot master publish --from alice --payload-file master-opcat-payload.json --chain opcat',
-    ],
-    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
-  },
-  {
-    commandPath: ['master', 'list'],
-    summary: 'List master-service directory entries visible to the current host runtime.',
-    usage: 'metabot master list [--online] [--kind <kind>]',
-    optionalFlags: [
-      { flag: '--online', description: 'Return only currently online masters.' },
-      { flag: '--kind', value: '<kind>', description: 'Filter by master kind, such as debug.' },
-      HELP_JSON_FLAG,
-    ],
-  },
-  {
-    commandPath: ['master', 'ask'],
-    summary: 'Preview or confirm one Ask Master request from a request file or pending trace.',
-    usage: 'metabot master ask [--from <bot-slug>] --request-file <path> | metabot master ask [--from <bot-slug>] --trace-id <trace-id> [--confirm]',
-    requiredFlags: [
-      {
-        flag: '--request-file | --trace-id',
-        value: '<path|trace-id>',
-        description: 'Provide either a new request draft file or an existing pending Ask Master trace id.',
-      },
-    ],
-    optionalFlags: [
-      FROM_BOT_FLAG,
-      { flag: '--confirm', description: 'Send a previously previewed Ask Master request. Only valid together with `--trace-id`.' },
-      HELP_JSON_FLAG,
-    ],
-  },
-  {
-    commandPath: ['master', 'suggest'],
-    summary: 'Evaluate one host-visible Ask Master suggest request through the runtime trigger engine.',
-    usage: 'metabot master suggest --request-file <path>',
-    requiredFlags: [
-      {
-        flag: '--request-file',
-        value: '<path>',
-        description: 'JSON suggest request file containing draft plus host observation.',
-      },
-    ],
-    optionalFlags: [HELP_JSON_FLAG],
-  },
-  {
-    commandPath: ['master', 'host-action'],
-    summary: 'Run one host-facing Ask Master action such as manual_ask or accept_suggest through the local runtime bridge.',
-    usage: 'metabot master host-action --request-file <path>',
-    requiredFlags: [
-      {
-        flag: '--request-file',
-        value: '<path>',
-        description: 'JSON host-action request file.',
-      },
-    ],
-    examples: [
-      'metabot master host-action --request-file master-manual-ask.json',
-      'metabot master host-action --request-file master-accept-suggest.json',
-    ],
-    optionalFlags: [HELP_JSON_FLAG],
-  },
-  {
-    commandPath: ['master', 'trace'],
-    summary: 'Inspect one Ask Master trace record.',
-    usage: 'metabot master trace [--from <bot-slug>] --id <trace-id>',
-    requiredFlags: [
-      { flag: '--id', value: '<trace-id>', description: 'Ask Master trace id.' },
-    ],
-    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
   },
   {
     commandPath: ['network'],
@@ -2378,12 +2275,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Open one local MetaBot runtime HTML page such as hub, bot, buzz, chat, metaapps, publish, my-services, trace, or refund.',
     usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>]',
     requiredFlags: [
-      { flag: '--page', value: '<page>', description: 'Built-in page name: hub, bot, buzz, chat, chat-viewer, metaapps, publish, my-services, trace, or refund.' },
+      { flag: '--page', value: '<page>', description: 'Built-in page name: hub, bot, buzz, chat, metaapps, publish, my-services, trace, or refund.' },
     ],
     optionalFlags: [
       FROM_BOT_FLAG,
       { flag: '--trace-id', value: '<trace-id>', description: 'Optional trace identifier for trace page deep links.' },
-      { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier for trace or chat-viewer pages.' },
+      { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier for trace page deep links.' },
       { flag: '--service-id', value: '<service-pin-id>', description: 'Owned service selector for my-services pages.' },
       HELP_JSON_FLAG,
     ],
@@ -2506,56 +2403,4 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot llm get-preferred',
     ],
   },
-
-  {
-    commandPath: ['evolution'],
-    summary: 'Inspect and manage local or published skill evolution artifacts for one MetaBot actor.',
-    usage: 'metabot evolution <subcommand>',
-    subcommands: [
-      { name: 'status', summary: 'Show local evolution counts and active variants.' },
-      { name: 'adopt', summary: 'Adopt a local or imported remote variant.' },
-      { name: 'publish', summary: 'Publish a verified local variant artifact on-chain.' },
-      { name: 'rollback', summary: 'Clear the active variant for one skill.' },
-      { name: 'search', summary: 'Search compatible published artifacts.' },
-      { name: 'import', summary: 'Import one published artifact by pin id.' },
-      { name: 'imported', summary: 'List imported artifacts for one skill.' },
-    ],
-    optionalFlags: [HELP_JSON_FLAG],
-    examples: [
-      'metabot evolution status --from alice',
-      'metabot evolution publish --from alice --skill metabot-network-directory --variant-id variant-1',
-      'metabot evolution adopt --from alice --skill metabot-network-directory --variant-id variant-1',
-    ],
-  },
-  {
-    commandPath: ['evolution', 'status'],
-    summary: 'Show local evolution state for one MetaBot actor.',
-    usage: 'metabot evolution status [--from <bot-slug>]',
-    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-  },
-  {
-    commandPath: ['evolution', 'publish'],
-    summary: 'Publish one verified local evolution artifact using the selected actor signer.',
-    usage: 'metabot evolution publish [--from <bot-slug>] --skill <skill> --variant-id <variant-id>',
-    requiredFlags: [
-      { flag: '--skill', value: '<skill>', description: 'Skill name.' },
-      { flag: '--variant-id', value: '<variant-id>', description: 'Local variant id.' },
-    ],
-    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-  },
-  {
-    commandPath: ['evolution', 'adopt'],
-    summary: 'Adopt a local or remote evolution variant for one MetaBot actor.',
-    usage: 'metabot evolution adopt [--from <bot-slug>] --skill <skill> --variant-id <variant-id> [--source <local|remote>]',
-    requiredFlags: [
-      { flag: '--skill', value: '<skill>', description: 'Skill name.' },
-      { flag: '--variant-id', value: '<variant-id>', description: 'Variant id.' },
-    ],
-    optionalFlags: [
-      FROM_BOT_FLAG,
-      { flag: '--source', value: '<local|remote>', description: 'Artifact source. Defaults to local.' },
-      HELP_JSON_FLAG,
-    ],
-  },
-
 ];

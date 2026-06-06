@@ -797,7 +797,6 @@ npm run build && node --test tests/llm/llmExecutorCore.test.mjs
 - Modify: `docs/install/open-agent-connect.md`
 - Modify: `README.md`
 - Test: `tests/docs/codexInstallDocs.test.mjs`
-- Test: `tests/docs/askMasterReleaseDocs.test.mjs`
 
 - [ ] Step 1: Add failing docs tests for install command.
 
@@ -828,7 +827,7 @@ Docs must explain:
 - [ ] Step 3: Run docs tests.
 
 ```bash
-npm run build && node --test tests/docs/codexInstallDocs.test.mjs tests/docs/askMasterReleaseDocs.test.mjs
+npm run build && node --test tests/docs/codexInstallDocs.test.mjs
 ```
 
 - [ ] Step 4: Review round with a `gpt-5.5` subagent.

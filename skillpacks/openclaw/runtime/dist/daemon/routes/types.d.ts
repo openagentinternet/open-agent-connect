@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Buffer } from 'node:buffer';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 export type Awaitable<T> = T | Promise<T>;
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot' | 'loom' | 'metaapps';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'loom' | 'metaapps';
 export interface ServiceRefundSyncResponse {
     scanned: {
         requestPins: number;
@@ -67,21 +67,6 @@ export interface MetabotDaemonHttpHandlers {
         } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         refresh?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         actions?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    };
-    master?: {
-        publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-        list?: (input: {
-            online?: boolean;
-            masterKind?: string;
-        }) => Awaitable<MetabotCommandResult<unknown>>;
-        ask?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-        hostAction?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-        suggest?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-        receive?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-        trace?: (input: {
-            from?: string;
-            traceId: string;
-        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     network?: {
         listServices?: (input: {

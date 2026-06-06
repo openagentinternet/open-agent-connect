@@ -4,7 +4,6 @@ This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skill
 
 ## Included MetaBot Skills
 
-- `metabot-ask-master`
 - `metabot-help`
 - `metabot-identity-manage`
 - `metabot-network-manage`

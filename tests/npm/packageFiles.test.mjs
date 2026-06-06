@@ -9,7 +9,6 @@ const execFile = promisify(execFileCallback);
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const MAX_PACKED_SIZE_BYTES = 20 * 1024 * 1024;
 const EXPECTED_NPM_SKILLS = [
-  'metabot-ask-master',
   'metabot-call-remote-service',
   'metabot-chat-privatechat',
   'metabot-help',
@@ -23,9 +22,6 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-upload-file',
   'metabot-upload-largefile',
   'metabot-wallet-manage',
-];
-const NON_DISTRIBUTED_SKILLS = [
-  'new-api-vendor-skill',
 ];
 const OFFICIAL_SKILL_PREFIX = 'metabot-';
 const PACKAGE_SKILL_FILE_PATTERN = /^SKILLs\/([^/]+)\/SKILL\.md$/;
@@ -130,10 +126,6 @@ test('npm package includes runtime install inputs and excludes generated/develop
   assertExcludesPrefix(paths, 'skillpacks/openclaw/runtime/node_modules/');
   assertExcludesPrefix(paths, '.github/');
   assertExcludesSegment(paths, '/evals/');
-  for (const skillName of NON_DISTRIBUTED_SKILLS) {
-    assertExcludesPrefix(paths, `SKILLs/${skillName}/`);
-  }
-
   assert.ok(
     pack.size < MAX_PACKED_SIZE_BYTES,
     `expected packed size below ${MAX_PACKED_SIZE_BYTES} bytes, got ${pack.size}`,

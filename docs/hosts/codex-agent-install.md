@@ -258,7 +258,7 @@ cloning the source repository, not running `npm install`, or not running build
 commands.
 
 Do not single out one installed skill in the user-facing success message. For
-example, avoid wording such as "the `metabot-ask-master` binding exists" unless
+example, avoid wording such as "the `metabot-help` binding exists" unless
 you are diagnosing a specific binding failure. Summarize successful binding as
 "related skills are bound and ready to use" or equivalent wording in the user's
 language.

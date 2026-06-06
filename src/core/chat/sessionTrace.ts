@@ -1,7 +1,6 @@
 import path from 'node:path';
 import type { PublicStatus } from '../a2a/publicStatus';
 import type { A2ASessionRole, A2ATaskRunState } from '../a2a/sessionTypes';
-import type { AskMasterTraceMetadata } from '../master/masterTrace';
 
 export interface SessionTraceSessionInput {
   id: string;
@@ -60,7 +59,6 @@ export interface BuildSessionTraceInput {
   order?: SessionTraceOrderInput | null;
   a2a?: SessionTraceA2AInput | null;
   providerRuntime?: SessionTraceProviderRuntimeInput | null;
-  askMaster?: SessionTraceAskMasterInput | null;
 }
 
 export interface SessionTraceProviderRuntimeInput {
@@ -115,47 +113,6 @@ export interface SessionTraceProviderRuntimeRecord {
   fallbackSelected: boolean | null;
 }
 
-export interface SessionTraceAskMasterInput extends AskMasterTraceMetadata {}
-
-export interface SessionTraceAskMasterRecord {
-  flow: 'master';
-  transport: string | null;
-  canonicalStatus: string | null;
-  triggerMode: string | null;
-  contextMode: string | null;
-  confirmationMode: string | null;
-  requestId: string | null;
-  masterKind: string | null;
-  servicePinId: string | null;
-  providerGlobalMetaId: string | null;
-  displayName: string | null;
-  preview: {
-    userTask: string | null;
-    question: string | null;
-  } | null;
-  response: {
-    status: string | null;
-    summary: string | null;
-    followUpQuestion: string | null;
-    errorCode: string | null;
-  } | null;
-  failure: {
-    code: string | null;
-    message: string | null;
-  } | null;
-  auto: {
-    reason: string | null;
-    confidence: number | null;
-    frictionMode: 'preview_confirm' | 'direct_send' | null;
-    detectorVersion: string | null;
-    selectedMasterTrusted: boolean | null;
-    sensitivity: {
-      isSensitive: boolean;
-      reasons: string[];
-    } | null;
-  } | null;
-}
-
 export interface SessionTraceRecord {
   traceId: string;
   channel: string;
@@ -208,7 +165,6 @@ export interface SessionTraceRecord {
   } | null;
   a2a: SessionTraceA2ARecord | null;
   providerRuntime: SessionTraceProviderRuntimeRecord | null;
-  askMaster: SessionTraceAskMasterRecord | null;
   artifacts: SessionTraceArtifacts;
 }
 
@@ -297,92 +253,6 @@ function buildProviderRuntimeTraceRecord(input?: SessionTraceProviderRuntimeInpu
   return Object.values(record).some((value) => (
     Array.isArray(value) ? value.length > 0 : value !== null && value !== ''
   )) ? record : null;
-}
-
-function buildAskMasterTraceRecord(input?: SessionTraceAskMasterInput | null): SessionTraceAskMasterRecord | null {
-  if (!input || typeof input !== 'object') {
-    return null;
-  }
-
-  const preview = input.preview && typeof input.preview === 'object'
-    ? {
-        userTask: normalizeText(input.preview.userTask) || null,
-        question: normalizeText(input.preview.question) || null,
-      }
-    : null;
-  const response = input.response && typeof input.response === 'object'
-    ? {
-        status: normalizeText(input.response.status) || null,
-        summary: normalizeText(input.response.summary) || null,
-        followUpQuestion: normalizeText(input.response.followUpQuestion) || null,
-        errorCode: normalizeText(input.response.errorCode) || null,
-      }
-    : null;
-  const failure = input.failure && typeof input.failure === 'object'
-    ? {
-        code: normalizeText(input.failure.code) || null,
-        message: normalizeText(input.failure.message) || null,
-      }
-    : null;
-  const auto = input.auto && typeof input.auto === 'object'
-    ? {
-        reason: normalizeText(input.auto.reason) || null,
-        confidence: typeof input.auto.confidence === 'number' && Number.isFinite(input.auto.confidence)
-          ? input.auto.confidence
-          : Number.isFinite(Number(input.auto.confidence))
-            ? Number(input.auto.confidence)
-            : null,
-        frictionMode: normalizeText(input.auto.frictionMode) === 'preview_confirm'
-          || normalizeText(input.auto.frictionMode) === 'direct_send'
-          ? normalizeText(input.auto.frictionMode) as 'preview_confirm' | 'direct_send'
-          : null,
-        detectorVersion: normalizeText(input.auto.detectorVersion) || null,
-        selectedMasterTrusted: typeof input.auto.selectedMasterTrusted === 'boolean'
-          ? input.auto.selectedMasterTrusted
-          : null,
-        sensitivity: input.auto.sensitivity && typeof input.auto.sensitivity === 'object'
-          ? {
-              isSensitive: input.auto.sensitivity.isSensitive === true,
-              reasons: Array.isArray(input.auto.sensitivity.reasons)
-                ? input.auto.sensitivity.reasons
-                  .filter((entry): entry is string => typeof entry === 'string')
-                  .map((entry) => normalizeText(entry))
-                  .filter(Boolean)
-                : [],
-            }
-          : null,
-      }
-    : null;
-
-  const record: SessionTraceAskMasterRecord = {
-    flow: 'master',
-    transport: normalizeText(input.transport) || null,
-    canonicalStatus: normalizeText(input.canonicalStatus) || null,
-    triggerMode: normalizeText(input.triggerMode) || null,
-    contextMode: normalizeText(input.contextMode) || null,
-    confirmationMode: normalizeText(input.confirmationMode) || null,
-    requestId: normalizeText(input.requestId) || null,
-    masterKind: normalizeText(input.masterKind) || null,
-    servicePinId: normalizeText(input.servicePinId) || null,
-    providerGlobalMetaId: normalizeText(input.providerGlobalMetaId) || null,
-    displayName: normalizeText(input.displayName) || null,
-    preview: preview && (preview.userTask || preview.question) ? preview : null,
-    response: response && (response.status || response.summary || response.followUpQuestion || response.errorCode) ? response : null,
-    failure: failure && (failure.code || failure.message) ? failure : null,
-    auto: auto && (
-      auto.reason
-      || auto.confidence !== null
-      || auto.frictionMode
-      || auto.detectorVersion
-      || auto.selectedMasterTrusted !== null
-      || auto.sensitivity
-    ) ? auto : null,
-  };
-
-  return record.canonicalStatus || record.requestId || record.masterKind || record.servicePinId || record.displayName
-    || record.preview || record.response || record.failure || record.auto
-    ? record
-    : null;
 }
 
 export function buildServiceOrderObserverConversationId(
@@ -506,7 +376,6 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
       : null,
     a2a: buildA2ATraceRecord(input.a2a),
     providerRuntime: buildProviderRuntimeTraceRecord(input.providerRuntime),
-    askMaster: buildAskMasterTraceRecord(input.askMaster),
     artifacts: {
       transcriptMarkdownPath,
       traceMarkdownPath,
