@@ -56,6 +56,7 @@ var state = {
   usingSlug: '',
   drawerOpen: false,
   inspectorOpen: false,
+  visits: [],
   status: 'loading',
   error: ''
 };
@@ -175,6 +176,94 @@ function renderCurrent() {
   }
 }
 
+function recordVisit(current) {
+  if (!current) return;
+  state.visits.push({
+    uri: textValue(current.normalizedUri) || textValue(current.uri),
+    title: textValue(current.title) || textValue(current.owner && current.owner.name) || textValue(current.normalizedUri),
+    resourceType: textValue(current.resourceType)
+  });
+}
+
+function uniqueRecent(type) {
+  var seen = {};
+  var output = [];
+  for (var index = state.visits.length - 1; index >= 0; index -= 1) {
+    var visit = state.visits[index];
+    if (type && visit.resourceType !== type) continue;
+    if (!visit.uri || seen[visit.uri]) continue;
+    seen[visit.uri] = true;
+    output.push(visit);
+    if (output.length >= 6) break;
+  }
+  return output;
+}
+
+function renderVisitList(items) {
+  if (!items.length) return '<p class="browser-panel-empty">None</p>';
+  return '<ul>' + items.map(function (item) {
+    return '<li><button type="button" data-browser-visit-uri="' + escapeHtml(item.uri) + '">' + escapeHtml(item.title || item.uri) + '</button><span>' + escapeHtml(item.uri) + '</span></li>';
+  }).join('') + '</ul>';
+}
+
+function renderDrawer() {
+  if (!elements.drawer) return;
+  elements.drawer.innerHTML = '<section class="browser-drawer-panel"><h2>Bookmarks</h2><p class="browser-panel-empty">No bookmarks</p>' +
+    '<h2>Recent Bots</h2>' + renderVisitList(uniqueRecent('bot')) +
+    '<h2>Recent MetaApps</h2>' + renderVisitList(uniqueRecent('metaapp')) +
+    '<h2>Visit History</h2>' + renderVisitList(state.visits.slice().reverse()) + '</section>';
+}
+
+function toggleDrawer() {
+  state.drawerOpen = !state.drawerOpen;
+  if (elements.drawer) {
+    elements.drawer.hidden = !state.drawerOpen;
+  }
+  if (state.drawerOpen) renderDrawer();
+}
+
+function keyValue(label, value) {
+  var text = textValue(value);
+  if (!text) return '';
+  return '<dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(text) + '</dd>';
+}
+
+function renderInspector() {
+  if (!elements.inspector || !state.current) return;
+  var current = state.current;
+  var owner = current.owner || {};
+  var proof = current.proof || {};
+  var source = current.source || {};
+  elements.inspector.innerHTML = '<section class="browser-inspector-panel">' +
+    '<h3>Identity</h3><dl>' +
+    keyValue('name', owner.name || current.title) +
+    keyValue('GlobalMetaId', owner.globalMetaId) +
+    keyValue('metaid', owner.metaid) +
+    keyValue('address', owner.address) +
+    keyValue('verification', owner.verificationState) +
+    '</dl><h3>Proof</h3><dl>' +
+    keyValue('TXID', proof.txid) +
+    keyValue('pin id', proof.pinId) +
+    keyValue('protocol path', proof.protocolPath) +
+    keyValue('content hash', proof.contentHash) +
+    keyValue('publisher GlobalMetaId', proof.publisherGlobalMetaId) +
+    keyValue('block explorer URL', proof.explorerUrl) +
+    keyValue('verification', proof.verificationState) +
+    '</dl><h3>Source</h3><dl>' +
+    keyValue('resolver', source.resolver) +
+    keyValue('URL', source.url) +
+    keyValue('schema', source.schemaVersion) +
+    '</dl><pre>' + escapeHtml(JSON.stringify(source.raw || {}, null, 2)) + '</pre></section>';
+}
+
+function openInspector() {
+  state.inspectorOpen = true;
+  if (elements.inspector) {
+    elements.inspector.hidden = false;
+  }
+  renderInspector();
+}
+
 function renderActionButtons(actions) {
   if (!Array.isArray(actions) || actions.length === 0) return '';
   return '<div class="browser-action-row">' + actions.map(function (action) {
@@ -260,6 +349,7 @@ async function resolveUri(uri, options) {
   try {
     var result = await api(resolveUrl(normalizedUri));
     state.current = result;
+    recordVisit(result);
     setStatus('resolved', '');
     renderCurrent();
     return result;
@@ -313,6 +403,10 @@ async function initialize() {
   if (elements.back) elements.back.addEventListener('click', goBack);
   if (elements.forward) elements.forward.addEventListener('click', goForward);
   if (elements.reload) elements.reload.addEventListener('click', reloadCurrent);
+  if (elements.drawerToggle) elements.drawerToggle.addEventListener('click', toggleDrawer);
+  if (elements.resourceChip) elements.resourceChip.addEventListener('click', openInspector);
+  if (elements.statusProof) elements.statusProof.addEventListener('click', openInspector);
+  if (elements.statusTxid) elements.statusTxid.addEventListener('click', openInspector);
 
   var queryUri = new URLSearchParams(window.location.search || '').get('uri') || '';
   if (queryUri) {
@@ -334,6 +428,9 @@ globalThis.state = state;
 globalThis.api = api;
 globalThis.safeUrl = safeUrl;
 globalThis.renderRenderer = renderRenderer;
+globalThis.renderDrawer = renderDrawer;
+globalThis.openInspector = openInspector;
+globalThis.renderInspector = renderInspector;
 globalThis.loadContext = loadContext;
 globalThis.resolveUri = resolveUri;
 globalThis.navigateTo = navigateTo;

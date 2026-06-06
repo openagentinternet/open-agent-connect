@@ -113,6 +113,74 @@
         right: 0;
         border-right: 0;
       }
+      .browser-drawer-panel,
+      .browser-inspector-panel {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+      .browser-drawer-panel h2,
+      .browser-inspector-panel h3 {
+        margin: 0;
+        color: var(--text);
+        font-size: 12px;
+      }
+      .browser-drawer-panel ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+      }
+      .browser-drawer-panel li {
+        display: grid;
+        gap: 2px;
+        border-top: 1px solid var(--border);
+        padding-top: 6px;
+      }
+      .browser-drawer-panel button {
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        font: 12px var(--mono);
+        padding: 0;
+        text-align: left;
+      }
+      .browser-drawer-panel span,
+      .browser-panel-empty,
+      .browser-inspector-panel dd {
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .browser-panel-empty {
+        margin: 0;
+      }
+      .browser-inspector-panel dl {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 6px 10px;
+        margin: 0;
+      }
+      .browser-inspector-panel dt {
+        color: var(--dim);
+        font: 11px var(--mono);
+      }
+      .browser-inspector-panel dd {
+        margin: 0;
+        font: 11px var(--mono);
+      }
+      .browser-inspector-panel pre {
+        margin: 0;
+        max-height: 220px;
+        overflow: auto;
+        border-top: 1px solid var(--border);
+        padding-top: 10px;
+        color: var(--muted);
+        font: 11px var(--mono);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
       .browser-viewport {
         min-width: 0;
         min-height: 0;
