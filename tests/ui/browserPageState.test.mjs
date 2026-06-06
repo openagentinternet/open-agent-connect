@@ -160,10 +160,11 @@ function createBrowserContext(options = {}) {
 test('Browser query URI is decoded into the address bar and resolved', async () => {
   const { elements, fetchCalls } = createBrowserContext({ search: '?uri=metaid%3A%2F%2Fidq1alice' });
 
-  await waitFor(() => fetchCalls.some((url) => url.startsWith('/api/browser/resolve')), 'initial resolve');
+  await waitFor(() => fetchCalls.length === 2, 'context and initial resolve');
 
   assert.equal(elements['[data-browser-uri-input]'].value, 'metaid://idq1alice');
-  assert.equal(fetchCalls[0], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice');
+  assert.equal(fetchCalls[0], '/api/browser/context');
+  assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&from=worker');
 });
 
 test('Browser loads context and resolves default URI when no query URI is present', async () => {
@@ -188,23 +189,83 @@ test('Browser renders current resource identity separately from using identity',
   assert.equal(elements['[data-browser-using-selector]'].textContent, 'Using: Worker Bot');
 });
 
+test('Browser resource chip prefers MetaApp title over publisher identity', async () => {
+  const { elements, fetchCalls } = createBrowserContext({
+    resolveResponse: (uri) => ({
+      ok: true,
+      data: {
+        uri,
+        normalizedUri: uri.toLowerCase(),
+        resourceType: 'metaapp',
+        title: 'Fixture MetaApp',
+        owner: { kind: 'metaapp-publisher', globalMetaId: 'idq1publisher', name: 'idq1publisher', verificationState: 'partial' },
+        renderer: { type: 'unsupported', contentType: 'application/zip', error: 'Unsupported MetaApp content type.' },
+        status: { state: 'resolved', verificationState: 'partial', message: '' },
+        source: { resolver: 'test' },
+        actions: [],
+      },
+    }),
+  });
+
+  await waitFor(() => fetchCalls.length === 2, 'MetaApp resource render');
+
+  assert.equal(elements['[data-browser-resource-chip]'].textContent, 'Fixture MetaApp');
+});
+
+test('Browser using identity selector switches identity and reloads current URI without history entry', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext({
+    contextResponse: {
+      ok: true,
+      data: {
+        usingIdentities: [
+          { slug: 'worker', name: 'Worker Bot', globalMetaId: 'idq1worker', isDefault: true },
+          { slug: 'reviewer', name: 'Reviewer Bot', globalMetaId: 'idq1reviewer', isDefault: false },
+        ],
+        defaultUsingIdentity: { slug: 'worker', name: 'Worker Bot', globalMetaId: 'idq1worker', isDefault: true },
+        defaultUri: 'metaid://idq1worker',
+      },
+    },
+  });
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  elements['[data-browser-using-selector]'].click();
+
+  assert.equal(elements['[data-browser-modal-root]'].hidden, false);
+  assert.equal(elements['[data-browser-using-selector]'].getAttribute('aria-expanded'), 'true');
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Worker Bot/);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Reviewer Bot/);
+
+  await context.selectUsingIdentity('reviewer');
+  await waitFor(() => fetchCalls.length === 3, 'selected identity reload');
+
+  assert.equal(context.state.context.defaultUsingIdentity.slug, 'reviewer');
+  assert.equal(context.state.usingSlug, 'reviewer');
+  assert.equal(elements['[data-browser-using-selector]'].textContent, 'Using: Reviewer Bot');
+  assert.equal(elements['[data-browser-modal-root]'].hidden, true);
+  assert.equal(elements['[data-browser-using-selector]'].getAttribute('aria-expanded'), 'false');
+  assert.equal(fetchCalls[2], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1worker&from=reviewer');
+  assert.deepEqual(Array.from(context.state.history), ['metaid://idq1worker']);
+  assert.equal(context.state.historyIndex, 0);
+});
+
 test('Browser history controls navigate without replacing Browser chrome', async () => {
   const { context, elements, fetchCalls } = createBrowserContext({ search: '?uri=metaid%3A%2F%2Fidq1one' });
   const topbar = elements['[data-browser-address-form]'];
-  await waitFor(() => fetchCalls.length === 1, 'first resolve');
+  await waitFor(() => fetchCalls.length === 2, 'first resolve');
 
   elements['[data-browser-uri-input]'].value = 'metaid://idq1two';
   elements['[data-browser-address-form]'].submit();
   await waitFor(() => context.state.history.length === 2, 'second history entry');
 
   elements['[data-browser-back]'].click();
-  await waitFor(() => fetchCalls.length === 3, 'back resolve');
+  await waitFor(() => fetchCalls.length === 4, 'back resolve');
 
   elements['[data-browser-forward]'].click();
-  await waitFor(() => fetchCalls.length === 4, 'forward resolve');
+  await waitFor(() => fetchCalls.length === 5, 'forward resolve');
 
   elements['[data-browser-reload]'].click();
-  await waitFor(() => fetchCalls.length === 5, 'reload resolve');
+  await waitFor(() => fetchCalls.length === 6, 'reload resolve');
 
   assert.deepEqual(Array.from(context.state.history), ['metaid://idq1one', 'metaid://idq1two']);
   assert.equal(context.state.historyIndex, 1);

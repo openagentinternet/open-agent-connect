@@ -313,6 +313,69 @@
         inset: 0;
         z-index: 40;
         background: rgba(0, 0, 0, .34);
+        display: grid;
+        place-items: center;
+        padding: 16px;
+      }
+      .browser-modal-panel {
+        width: min(460px, 100%);
+        max-height: min(620px, 92vh);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        overflow: hidden;
+      }
+      .browser-modal-panel header,
+      .browser-modal-panel footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .browser-modal-panel footer {
+        border-top: 1px solid var(--border);
+        border-bottom: 0;
+        justify-content: flex-end;
+      }
+      .browser-modal-panel h2 {
+        margin: 0;
+        font-size: 13px;
+      }
+      .browser-modal-panel button {
+        min-height: 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+        cursor: pointer;
+        font: 11px var(--mono);
+        padding: 5px 9px;
+      }
+      .browser-modal-body {
+        overflow: auto;
+        padding: 12px;
+      }
+      .browser-using-options {
+        display: grid;
+        gap: 8px;
+      }
+      .browser-using-options button {
+        display: grid;
+        gap: 3px;
+        justify-items: start;
+        text-align: left;
+      }
+      .browser-using-options button[aria-current="true"] {
+        border-color: var(--accent);
+      }
+      .browser-using-options span {
+        color: var(--muted);
+        overflow-wrap: anywhere;
       }
       @media (max-width: 760px) {
         .browser-shell {

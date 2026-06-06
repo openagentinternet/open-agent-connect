@@ -139,6 +139,10 @@ function renderUsingIdentity() {
     elements.usingChip.textContent = identity && identity.name
       ? 'Using: ' + identity.name
       : 'Using: No Bot';
+    if (typeof elements.usingChip.setAttribute === 'function') {
+      elements.usingChip.setAttribute('aria-expanded', 'false');
+    }
+    elements.usingChip.disabled = !(state.context && Array.isArray(state.context.usingIdentities) && state.context.usingIdentities.length);
   }
 }
 
@@ -165,7 +169,7 @@ function pushHistory(uri) {
 function renderCurrent() {
   var current = state.current;
   if (!current) return;
-  var ownerName = textValue(current.owner && current.owner.name) || textValue(current.title) || 'Resource';
+  var ownerName = textValue(current.title) || textValue(current.owner && current.owner.name) || 'Resource';
   var rendererType = textValue(current.renderer && current.renderer.type) || 'unsupported';
   var proofState = textValue(current.status && current.status.verificationState) || 'unverified';
   var txid = textValue(current.proof && current.proof.txid);
@@ -345,10 +349,67 @@ function renderModal(title, bodyHtml, confirmLabel, confirmAction) {
 function closeModal() {
   state.pendingPrivateChat = null;
   state.pendingServiceCall = null;
+  if (elements.usingChip && typeof elements.usingChip.setAttribute === 'function') {
+    elements.usingChip.setAttribute('aria-expanded', 'false');
+  }
   if (elements.modalRoot) {
     elements.modalRoot.hidden = true;
     elements.modalRoot.innerHTML = '';
   }
+}
+
+function openUsingIdentitySelector() {
+  var identities = state.context && Array.isArray(state.context.usingIdentities)
+    ? state.context.usingIdentities
+    : [];
+  if (!identities.length) {
+    renderNoLocalBot();
+    return;
+  }
+  if (!elements.modalRoot) return;
+  if (elements.usingChip && typeof elements.usingChip.setAttribute === 'function') {
+    elements.usingChip.setAttribute('aria-expanded', 'true');
+  }
+  elements.modalRoot.hidden = false;
+  elements.modalRoot.innerHTML = '<section class="browser-modal-panel" role="dialog" aria-modal="true">' +
+    '<header><h2>Using Bot</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
+    '<div class="browser-modal-body"><div class="browser-using-options">' + identities.map(function (identity) {
+      var slug = textValue(identity && identity.slug);
+      var name = textValue(identity && identity.name) || slug || 'Bot';
+      var globalMetaId = textValue(identity && identity.globalMetaId);
+      var selected = state.usingSlug && slug === state.usingSlug;
+      return '<button type="button" data-browser-using-slug="' + escapeHtml(slug) + '"' + (selected ? ' aria-current="true"' : '') + '>' +
+        '<strong>' + escapeHtml(name) + '</strong>' +
+        (globalMetaId ? '<span>' + escapeHtml(globalMetaId) + '</span>' : '') +
+        '</button>';
+    }).join('') + '</div></div></section>';
+}
+
+async function selectUsingIdentity(slug) {
+  var selectedSlug = textValue(slug);
+  var identities = state.context && Array.isArray(state.context.usingIdentities)
+    ? state.context.usingIdentities
+    : [];
+  var selected = null;
+  for (var index = 0; index < identities.length; index += 1) {
+    if (textValue(identities[index] && identities[index].slug) === selectedSlug) {
+      selected = identities[index];
+      break;
+    }
+  }
+  if (!selected) {
+    setStatus('error', 'Using Bot not found.');
+    return null;
+  }
+  if (!state.context) state.context = {};
+  state.context.defaultUsingIdentity = selected;
+  state.usingSlug = selectedSlug;
+  renderUsingIdentity();
+  closeModal();
+  var uri = textValue(state.current && (state.current.normalizedUri || state.current.uri)) ||
+    textValue(elements.input && elements.input.value);
+  if (!uri) return null;
+  return resolveUri(uri, { record: false });
 }
 
 function usingLabel() {
@@ -586,6 +647,11 @@ async function initialize() {
         return;
       }
       var action = target.getAttribute('data-browser-modal-action');
+      var usingSlug = target.getAttribute('data-browser-using-slug');
+      if (usingSlug) {
+        selectUsingIdentity(usingSlug);
+        return;
+      }
       if (action === 'private-chat') {
         var input = elements.modalRoot.querySelector('[data-browser-private-chat-message]');
         confirmPrivateChat(input ? input.value : '');
@@ -606,18 +672,19 @@ async function initialize() {
   if (elements.forward) elements.forward.addEventListener('click', goForward);
   if (elements.reload) elements.reload.addEventListener('click', reloadCurrent);
   if (elements.drawerToggle) elements.drawerToggle.addEventListener('click', toggleDrawer);
+  if (elements.usingChip) elements.usingChip.addEventListener('click', openUsingIdentitySelector);
   if (elements.resourceChip) elements.resourceChip.addEventListener('click', openInspector);
   if (elements.statusProof) elements.statusProof.addEventListener('click', openInspector);
   if (elements.statusTxid) elements.statusTxid.addEventListener('click', openInspector);
 
   var queryUri = new URLSearchParams(window.location.search || '').get('uri') || '';
+  var context = await loadContext();
   if (queryUri) {
     if (elements.input) elements.input.value = queryUri;
     await navigateTo(queryUri);
     return;
   }
 
-  var context = await loadContext();
   if (context && context.defaultUri) {
     await navigateTo(context.defaultUri);
     return;
@@ -634,6 +701,8 @@ globalThis.renderRenderer = renderRenderer;
 globalThis.renderDrawer = renderDrawer;
 globalThis.openInspector = openInspector;
 globalThis.renderInspector = renderInspector;
+globalThis.openUsingIdentitySelector = openUsingIdentitySelector;
+globalThis.selectUsingIdentity = selectUsingIdentity;
 globalThis.handleTrustedAction = handleTrustedAction;
 globalThis.confirmPrivateChat = confirmPrivateChat;
 globalThis.confirmServiceCall = confirmServiceCall;
