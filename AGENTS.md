@@ -37,7 +37,7 @@ Key test rules:
 | Dir | Role |
 |---|---|
 | `src/cli/` | `metabot` binary, commands in `commands/` (one file per domain: identity, chat, network, services, etc.) |
-| `src/core/` | Domain logic — 32 modules: `identity/`, `discovery/`, `a2a/`, `master/`, `evolution/`, `secrets/`, `signing/`, `buzz/`, `chat/`, `files/`, `orders/`, `ratings/`, `contracts/`, `state/`, etc. |
+| `src/core/` | Domain logic modules: `identity/`, `discovery/`, `a2a/`, `secrets/`, `signing/`, `buzz/`, `chat/`, `files/`, `orders/`, `ratings/`, `contracts/`, `state/`, etc. |
 | `src/daemon/` | HTTP server (REST + SSE), one route file per domain, file-lock guarded (one instance per `~/.metabot`) |
 | `src/oac/` | `oac` installer CLI entrypoint |
 | `src/ui/` | Local HTML inspection pages (hub, trace, my-services, publish, refund, metaapps) |
@@ -47,8 +47,8 @@ Key test rules:
 All paths resolved centrally by `resolveMetabotPaths()` in `src/core/state/paths.ts`. Profile home must live under `~/.metabot/profiles/<slug>/`. The legacy `.metabot/hot` layout must not be used in new code.
 
 Key paths from a profile home (`~/.metabot/profiles/<slug>/`):
-- `.runtime/` — runtime state (config, secrets, daemon, sessions, A2A, evolution, LLM, locks)
-- `.runtime/state/` — domain state JSON files (provider-presence, rating-detail, private-chat, master-*, etc.)
+- `.runtime/` — runtime state (config, secrets, daemon, sessions, A2A, LLM, locks)
+- `.runtime/state/` — domain state JSON files (provider-presence, rating-detail, private-chat, etc.)
 - `~/.metabot/skills/` — installed host skills
 - `~/.metabot/manager/` — identity profiles, active home pointer
 
@@ -64,7 +64,6 @@ Key paths from a profile home (`~/.metabot/profiles/<slug>/`):
 
 - `CLAUDE.md` — deeper architecture, source layout, behavioral guidelines
 - `DACT.md` — remote service discovery → delegation → trace/watch → rating closure
-- `EVOLUTION_NETWORK.md` — chain-backed skill co-evolution
 - `docs/superpowers/specs/` — design docs
 - `docs/superpowers/plans/` — implementation plans
 

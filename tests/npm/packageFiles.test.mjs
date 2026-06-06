@@ -9,7 +9,6 @@ const execFile = promisify(execFileCallback);
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const MAX_PACKED_SIZE_BYTES = 20 * 1024 * 1024;
 const EXPECTED_NPM_SKILLS = [
-  'metabot-ask-master',
   'metabot-call-remote-service',
   'metabot-chat-privatechat',
   'metabot-help',

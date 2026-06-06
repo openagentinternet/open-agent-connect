@@ -10,12 +10,9 @@ Complete the second CLI-first cleanup pass for the remaining MetaBot CLI surface
 - `chain write`
 - `file upload`
 - `chat private`
-- `master publish`
-- `master ask`
 - `wallet balance`
 - `wallet transfer`
-- `evolution publish`
-- profile-local `chat`, `config`, `llm`, and `evolution` read/write commands where the selected local Bot matters
+- profile-local `chat`, `config`, and `llm` read/write commands where the selected local Bot matters
 
 Every command that creates chain data or consumes a local Bot private key must accept optional `--from <bot-slug>`. If `--from` is omitted, the command continues to use the active identity as the default/fallback Bot.
 
@@ -38,7 +35,7 @@ The selected actor controls:
 - the signer and mnemonic used by chain writes;
 - the private chat identity used by encrypted simplemsg;
 - default chain configuration for that profile;
-- profile-local runtime state, private chat history, auto-reply config, evolution store, and LLM bindings.
+- profile-local runtime state, private chat history, auto-reply config, and LLM bindings.
 
 If `--from` cannot be resolved, commands should fail with a clear profile resolution error before building chain payloads or reading private state.
 
@@ -55,14 +52,8 @@ metabot buzz post [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|do
 metabot chain write [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]
 metabot file upload [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|opcat>]
 metabot chat private [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|doge|opcat>]
-metabot master publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]
-metabot master ask [--from <bot-slug>] --request-file <path>
-metabot master ask [--from <bot-slug>] --trace-id <trace-id> [--confirm]
 metabot wallet transfer [--from <bot-slug>] --to <address> --amount <amount><UNIT> [--confirm]
-metabot evolution publish [--from <bot-slug>] --skill <skill> --variant-id <id>
 ```
-
-`master ask` is included because confirmation sends an on-chain encrypted message. Preview should use the same actor so the pending trace and follow-up are scoped consistently.
 
 ### Profile-Local Read/Mutation Commands
 
@@ -85,13 +76,6 @@ metabot llm bind [--from <bot-slug>] --runtime-id <id> --role <role>
 metabot llm unbind [--from <bot-slug>] --binding-id <id>
 metabot llm set-preferred [--from <bot-slug>] --provider <provider>
 metabot llm get-preferred [--from <bot-slug>]
-
-metabot evolution status [--from <bot-slug>]
-metabot evolution adopt [--from <bot-slug>] --skill <skill> --variant-id <id> [--source <local|remote>]
-metabot evolution rollback [--from <bot-slug>] --skill <skill>
-metabot evolution search [--from <bot-slug>] --skill <skill>
-metabot evolution import [--from <bot-slug>] --pin-id <pin-id>
-metabot evolution imported [--from <bot-slug>] --skill <skill>
 ```
 
 ### Commands That Stay System-Level
@@ -182,9 +166,7 @@ metabot buzz post --help --json
 metabot chain write --help --json
 metabot file upload --help --json
 metabot chat private --help --json
-metabot master publish --help --json
 metabot wallet balance --help --json
-metabot evolution publish --help --json
 ```
 
 If a local test environment has multiple real profiles, run at least one safe read command with `--from` for each profile.

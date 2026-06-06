@@ -1,6 +1,5 @@
 import type { PublicStatus } from '../a2a/publicStatus';
 import type { A2ASessionRole, A2ATaskRunState } from '../a2a/sessionTypes';
-import type { AskMasterTraceMetadata } from '../master/masterTrace';
 export interface SessionTraceSessionInput {
     id: string;
     title?: string | null;
@@ -56,7 +55,6 @@ export interface BuildSessionTraceInput {
     order?: SessionTraceOrderInput | null;
     a2a?: SessionTraceA2AInput | null;
     providerRuntime?: SessionTraceProviderRuntimeInput | null;
-    askMaster?: SessionTraceAskMasterInput | null;
 }
 export interface SessionTraceProviderRuntimeInput {
     runtimeId?: string | null;
@@ -104,46 +102,6 @@ export interface SessionTraceProviderRuntimeRecord {
     providerSkill: string | null;
     providerSkills: string[];
     fallbackSelected: boolean | null;
-}
-export interface SessionTraceAskMasterInput extends AskMasterTraceMetadata {
-}
-export interface SessionTraceAskMasterRecord {
-    flow: 'master';
-    transport: string | null;
-    canonicalStatus: string | null;
-    triggerMode: string | null;
-    contextMode: string | null;
-    confirmationMode: string | null;
-    requestId: string | null;
-    masterKind: string | null;
-    servicePinId: string | null;
-    providerGlobalMetaId: string | null;
-    displayName: string | null;
-    preview: {
-        userTask: string | null;
-        question: string | null;
-    } | null;
-    response: {
-        status: string | null;
-        summary: string | null;
-        followUpQuestion: string | null;
-        errorCode: string | null;
-    } | null;
-    failure: {
-        code: string | null;
-        message: string | null;
-    } | null;
-    auto: {
-        reason: string | null;
-        confidence: number | null;
-        frictionMode: 'preview_confirm' | 'direct_send' | null;
-        detectorVersion: string | null;
-        selectedMasterTrusted: boolean | null;
-        sensitivity: {
-            isSensitive: boolean;
-            reasons: string[];
-        } | null;
-    } | null;
 }
 export interface SessionTraceRecord {
     traceId: string;
@@ -197,7 +155,6 @@ export interface SessionTraceRecord {
     } | null;
     a2a: SessionTraceA2ARecord | null;
     providerRuntime: SessionTraceProviderRuntimeRecord | null;
-    askMaster: SessionTraceAskMasterRecord | null;
     artifacts: SessionTraceArtifacts;
 }
 export type ServiceOrderObserverRole = 'buyer' | 'seller';

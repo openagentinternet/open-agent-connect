@@ -150,10 +150,6 @@ The hidden machine-managed layer inside the profile:
         state/
           provider-presence.json
           rating-detail.json
-          master-pending-asks.json
-          master-suggest-state.json
-          master-auto-feedback-state.json
-          master-service-state.json
           directory-seeds.json
 
         locks/
@@ -402,10 +398,6 @@ V2 standard files:
 
 - `provider-presence.json`
 - `rating-detail.json`
-- `master-pending-asks.json`
-- `master-suggest-state.json`
-- `master-auto-feedback-state.json`
-- `master-service-state.json`
 - `directory-seeds.json`
 
 #### `locks/`

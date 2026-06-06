@@ -3,9 +3,7 @@ import type { PlatformId } from '../platform/platformRegistry';
 export type SkillHost = 'shared' | PlatformId;
 export type ConcreteSkillHost = Exclude<SkillHost, 'shared'>;
 export type SkillRenderFormat = 'json' | 'markdown';
-export type SkillResolutionSource = 'base' | 'merged';
-export type ActiveVariantSource = 'local' | 'remote' | null;
-export type SkillVariantStatus = 'active' | 'inactive';
+export type SkillResolutionSource = 'base';
 export type SkillResolutionMode = 'shared_default' | 'host_override';
 
 export interface SkillPermissionScope {
@@ -27,40 +25,12 @@ export interface BaseSkillContract {
   scope: SkillPermissionScope;
 }
 
-export interface SkillVariantScopeMetadata {
-  sameSkill: boolean;
-  sameScope: boolean;
-  scopeHash: string | null;
-}
-
-export interface SkillContractPatch {
-  instructionsPatch?: string;
-  commandTemplatePatch?: string;
-  outputExpectationPatch?: string;
-  fallbackPolicyPatch?: string;
-}
-
-export interface SkillVariantArtifact {
-  variantId: string;
-  skillName: string;
-  status: SkillVariantStatus;
-  scope: SkillPermissionScope;
-  metadata: SkillVariantScopeMetadata;
-  patch: SkillContractPatch;
-}
-
 export interface ResolveSkillContractInput {
   skillName: string;
-  evolutionNetworkEnabled: boolean;
-  activeVariant?: SkillVariantArtifact | null;
-  activeVariantSource?: ActiveVariantSource;
 }
 
 export interface ResolvedSkillContract extends BaseSkillContract {
   source: SkillResolutionSource;
-  activeVariantId: string | null;
-  activeVariantSource: ActiveVariantSource;
-  scopeMetadata: SkillVariantScopeMetadata;
 }
 
 export interface RenderResolvedSkillContractInput extends ResolveSkillContractInput {

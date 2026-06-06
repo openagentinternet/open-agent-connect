@@ -63,17 +63,16 @@ The current implementation defaults many chain writes to MVC when no network is 
 - `src/core/buzz/postBuzz.ts` defaults buzz writes to `mvc`.
 - `src/core/files/uploadFile.ts` defaults file upload writes to `mvc`.
 - `src/core/services/servicePublishChain.ts` defaults service publish writes to `mvc`.
-- `src/core/master/masterServicePublish.ts` defaults master publish writes to `mvc`.
 - `src/daemon/defaultHandlers.ts` hardcodes `network: 'mvc'` for several protocol and private message writes.
 - `src/cli/commands/chat.ts` does not parse `--chain`.
-- `src/cli/commandHelp.ts` documents `--chain` for chain write, buzz post, file upload, services publish/rate, and master publish, but not chat private.
+- `src/cli/commandHelp.ts` documents `--chain` for chain write, buzz post, file upload, and services publish/rate, but not chat private.
 
 The project already has the right storage primitive:
 
 - `src/core/config/configTypes.ts` defines profile-scoped runtime config.
 - `src/core/config/configStore.ts` persists config under each profile's `.runtime/config.json`.
 - `metabot config get/set` is implemented in `src/cli/commands/config.ts` and `src/cli/runtime.ts`.
-- Existing config keys include `askMaster.*`, `a2a.simplemsgListenerEnabled`, and `evolution_network.*`.
+- Existing config keys include `chain.*` and `a2a.simplemsgListenerEnabled`.
 
 The UI also has a suitable management surface:
 
@@ -92,7 +91,6 @@ These surfaces must honor `chain.defaultWriteNetwork` when no explicit chain/net
 | `metabot file upload` | `--chain mvc|btc|opcat` | No `--chain` uses default write network, except DOGE fails with a clear unsupported-file-upload message. |
 | `metabot services publish` | `--chain mvc|btc|doge|opcat` | No `--chain` uses default write network. |
 | `metabot services rate` | `--chain mvc|btc|doge|opcat` | No `--chain` uses default write network for the rating pin. |
-| `metabot master publish` | `--chain mvc|btc|doge|opcat` | No `--chain` uses default write network. |
 | `metabot chat private` | none today | Add `--chain mvc|btc|doge|opcat`; no `--chain` uses default write network. |
 
 Daemon/API write calls that already include `network` in the JSON body should keep honoring the request body. Missing `network` should resolve to the stored default.
@@ -127,8 +125,6 @@ export interface ChainConfig {
 
 export interface MetabotConfig {
   chain: ChainConfig;
-  evolution_network: EvolutionNetworkConfig;
-  askMaster: AskMasterConfig;
   a2a: A2AConfig;
 }
 ```

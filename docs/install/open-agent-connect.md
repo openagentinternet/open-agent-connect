@@ -625,7 +625,7 @@ build commands. Those are execution rules for the installer agent, not useful
 success-message content for the user.
 
 Do not single out one installed skill in the user-facing success message. For
-example, avoid wording such as "the `metabot-ask-master` binding exists" unless
+example, avoid wording such as "the `metabot-help` binding exists" unless
 you are diagnosing a specific binding failure. Summarize successful binding as
 "related skills are bound and ready to use" or equivalent wording in the user's
 language.

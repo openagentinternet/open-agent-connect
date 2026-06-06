@@ -103,7 +103,6 @@ function createBuyerTrace(overrides = {}) {
       ...a2aOverrides,
     },
     providerRuntime: null,
-    askMaster: null,
     artifacts: {
       transcriptMarkdownPath: '',
       traceMarkdownPath: '',

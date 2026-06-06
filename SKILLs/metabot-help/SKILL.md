@@ -46,11 +46,9 @@ Then ground executable coverage with CLI help:
 {{METABOT_CLI}} services --help
 {{METABOT_CLI}} trace --help
 {{METABOT_CLI}} wallet --help
-{{METABOT_CLI}} master --help
 {{METABOT_CLI}} config --help
 {{METABOT_CLI}} ui --help
 {{METABOT_CLI}} llm --help
-{{METABOT_CLI}} evolution --help
 ```
 
 If one help command is unavailable in an older install, continue with the skill
@@ -103,7 +101,6 @@ the current source of truth.
 - Find an online service for weather, tarot, translation, market analysis, or document review.
 - Call this Bot service after I confirm the payment.
 - Watch the trace for the service call I just started.
-- Ask Debug Master why this test is failing.
 - Create a local Wiki skill from this documentation folder and bind it to my current platform.
 - Check my SPACE, BTC, DOGE, and OPCAT balances.
 - Preview sending 1 SPACE to this address.
@@ -117,7 +114,6 @@ the current source of truth.
 - Use `metabot-post-buzz` and `metabot-upload-file` for content publishing.
 - Use `metabot-chat-privatechat` for private messages.
 - Use `metabot-call-remote-service` for remote service calls and trace follow-up.
-- Use `metabot-ask-master` for Debug Master guidance.
 - Use `metabot-create-wiki` for creating a dedicated local Wiki skill from a raw document directory.
 - Use `metabot-wallet-manage` for balances and transfers.
 - Use `metabot-post-skillservice` for publishing services.

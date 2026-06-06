@@ -22,7 +22,7 @@
 - `src/cli/commands/skills.ts`
 - `src/cli/runtime.ts`
 - `scripts/build-metabot-skillpacks.mjs`
-- `SKILLs/metabot-ask-master/SKILL.md`
+- `SKILLs/metabot-help/SKILL.md`
 - `SKILLs/metabot-identity-manage/SKILL.md`
 - `SKILLs/metabot-network-manage/SKILL.md`
 - `SKILLs/metabot-call-remote-service/SKILL.md`
@@ -153,8 +153,8 @@ Also add help coverage in `src/cli/commandHelp.ts` for:
 Use examples that show both forms:
 
 ```bash
-metabot skills resolve --skill metabot-ask-master --format markdown
-metabot skills resolve --skill metabot-ask-master --host codex --format markdown
+metabot skills resolve --skill metabot-help --format markdown
+metabot skills resolve --skill metabot-help --host codex --format markdown
 ```
 
 - [ ] **Step 4: Make resolver rendering preserve shape while defaulting to shared**
@@ -225,7 +225,7 @@ Expected success payload shape:
   "host": "codex",
   "hostSkillRoot": "/tmp/.codex/skills",
   "sharedSkillRoot": "/tmp/.metabot/skills",
-  "boundSkills": ["metabot-ask-master"],
+  "boundSkills": ["metabot-help"],
   "replacedEntries": [],
   "unchangedEntries": []
 }
@@ -314,7 +314,7 @@ git commit -m "feat: add host bind-skills command"
 
 **Files:**
 - Modify: `scripts/build-metabot-skillpacks.mjs`
-- Modify: `SKILLs/metabot-ask-master/SKILL.md`
+- Modify: `SKILLs/metabot-help/SKILL.md`
 - Modify: `SKILLs/metabot-identity-manage/SKILL.md`
 - Modify: `SKILLs/metabot-network-manage/SKILL.md`
 - Modify: `SKILLs/metabot-call-remote-service/SKILL.md`
@@ -417,7 +417,7 @@ Expected:
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add scripts/build-metabot-skillpacks.mjs SKILLs/metabot-ask-master/SKILL.md SKILLs/metabot-identity-manage/SKILL.md SKILLs/metabot-network-manage/SKILL.md SKILLs/metabot-call-remote-service/SKILL.md SKILLs/metabot-chat-privatechat/SKILL.md SKILLs/metabot-omni-reader/SKILL.md SKILLs/metabot-post-buzz/SKILL.md SKILLs/metabot-post-skillservice/SKILL.md SKILLs/metabot-upload-file/SKILL.md SKILLs/metabot-wallet-manage/SKILL.md tests/skillpacks/buildSkillpacks.test.mjs skillpacks
+git add scripts/build-metabot-skillpacks.mjs SKILLs/metabot-help/SKILL.md SKILLs/metabot-identity-manage/SKILL.md SKILLs/metabot-network-manage/SKILL.md SKILLs/metabot-call-remote-service/SKILL.md SKILLs/metabot-chat-privatechat/SKILL.md SKILLs/metabot-omni-reader/SKILL.md SKILLs/metabot-post-buzz/SKILL.md SKILLs/metabot-post-skillservice/SKILL.md SKILLs/metabot-upload-file/SKILL.md SKILLs/metabot-wallet-manage/SKILL.md tests/skillpacks/buildSkillpacks.test.mjs skillpacks
 git commit -m "refactor: generate shared metabot skillpacks"
 ```
 

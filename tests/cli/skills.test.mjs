@@ -231,32 +231,8 @@ test('runCli rejects unsupported explicit hosts for `metabot skills resolve`', a
   assert.match(result.payload.message, /claude-code, codex, copilot/);
 });
 
-test('runCli supports `metabot skills resolve --skill metabot-ask-master --host codex --format markdown`', async () => {
-  const homeDir = createProfileHome('metabot-cli-skills-ask-master-markdown-');
-  const result = await runSkillsCli(homeDir, [
-    'skills',
-    'resolve',
-    '--skill',
-    'metabot-ask-master',
-    '--host',
-    'codex',
-    '--format',
-    'markdown',
-  ]);
-
-  assert.equal(result.exitCode, 0);
-  assert.equal(result.payload.ok, true);
-  assert.equal(typeof result.payload.data, 'string');
-  assert.equal(result.payload.data.includes('# Resolved Skill Contract: metabot-ask-master'), true);
-  assert.match(result.payload.data, /metabot master ask --from <bot-slug> --request-file/);
-  assert.match(result.payload.data, /metabot master suggest --request-file/);
-  assert.match(result.payload.data, /manual \/ suggest|manual and suggest/i);
-  assert.match(result.payload.data, /preview first, explicit confirm second|preview\/confirm\/send path/i);
-  assert.doesNotMatch(result.payload.data, /metabot advisor ask/);
-});
-
-test('runCli supports `metabot skills resolve --skill metabot-ask-master --host codex --format json`', async () => {
-  const homeDir = createProfileHome('metabot-cli-skills-ask-master-json-');
+test('runCli rejects retired `metabot-ask-master` skill resolution', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-retired-ask-master-');
   const result = await runSkillsCli(homeDir, [
     'skills',
     'resolve',
@@ -268,14 +244,8 @@ test('runCli supports `metabot skills resolve --skill metabot-ask-master --host 
     'json',
   ]);
 
-  assert.equal(result.exitCode, 0);
-  assert.equal(result.payload.ok, true);
-  assert.equal(result.payload.data.format, 'json');
-  assert.equal(result.payload.data.host, 'codex');
-  assert.equal(result.payload.data.contract.skillName, 'metabot-ask-master');
-  assert.match(result.payload.data.contract.summary, /manual \/ suggest|manual and suggest/i);
-  assert.match(result.payload.data.contract.instructions, /metabot master suggest --request-file/);
-  assert.match(result.payload.data.contract.outputExpectation, /suggest flows first surface a structured suggestion/i);
-  assert.match(result.payload.data.contract.commandTemplate, /metabot master ask --from <bot-slug> --request-file/);
-  assert.doesNotMatch(result.payload.data.contract.commandTemplate, /metabot advisor ask/);
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.payload.ok, false);
+  assert.equal(result.payload.code, 'unknown_skill');
+  assert.match(result.payload.message, /metabot-ask-master/);
 });

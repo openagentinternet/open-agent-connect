@@ -170,7 +170,6 @@ test('ensureProfileWorkspace creates the required workspace files and eager runt
     'memory',
     '.runtime',
     '.runtime/sessions',
-    '.runtime/evolution',
     '.runtime/exports',
     '.runtime/state',
     '.runtime/locks',
@@ -180,6 +179,11 @@ test('ensureProfileWorkspace creates the required workspace files and eager runt
     const targetStat = await stat(targetPath);
     assert.equal(Boolean(targetStat), true, `${relativePath} should exist`);
   }
+
+  await assert.rejects(
+    stat(path.join(homeDir, '.runtime/evolution')),
+    { code: 'ENOENT' }
+  );
 
   const agentsMd = await readFile(path.join(homeDir, 'AGENTS.md'), 'utf8');
   assert.match(agentsMd, /profile slug is `alice`/);

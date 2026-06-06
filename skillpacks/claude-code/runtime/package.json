@@ -19,7 +19,6 @@
   },
   "files": [
     "dist/",
-    "SKILLs/metabot-ask-master/SKILL.md",
     "SKILLs/metabot-call-remote-service/SKILL.md",
     "SKILLs/metabot-chat-privatechat/SKILL.md",
     "SKILLs/metabot-help/SKILL.md",

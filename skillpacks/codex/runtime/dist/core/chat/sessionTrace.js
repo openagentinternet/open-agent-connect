@@ -61,86 +61,6 @@ function buildProviderRuntimeTraceRecord(input) {
     };
     return Object.values(record).some((value) => (Array.isArray(value) ? value.length > 0 : value !== null && value !== '')) ? record : null;
 }
-function buildAskMasterTraceRecord(input) {
-    if (!input || typeof input !== 'object') {
-        return null;
-    }
-    const preview = input.preview && typeof input.preview === 'object'
-        ? {
-            userTask: normalizeText(input.preview.userTask) || null,
-            question: normalizeText(input.preview.question) || null,
-        }
-        : null;
-    const response = input.response && typeof input.response === 'object'
-        ? {
-            status: normalizeText(input.response.status) || null,
-            summary: normalizeText(input.response.summary) || null,
-            followUpQuestion: normalizeText(input.response.followUpQuestion) || null,
-            errorCode: normalizeText(input.response.errorCode) || null,
-        }
-        : null;
-    const failure = input.failure && typeof input.failure === 'object'
-        ? {
-            code: normalizeText(input.failure.code) || null,
-            message: normalizeText(input.failure.message) || null,
-        }
-        : null;
-    const auto = input.auto && typeof input.auto === 'object'
-        ? {
-            reason: normalizeText(input.auto.reason) || null,
-            confidence: typeof input.auto.confidence === 'number' && Number.isFinite(input.auto.confidence)
-                ? input.auto.confidence
-                : Number.isFinite(Number(input.auto.confidence))
-                    ? Number(input.auto.confidence)
-                    : null,
-            frictionMode: normalizeText(input.auto.frictionMode) === 'preview_confirm'
-                || normalizeText(input.auto.frictionMode) === 'direct_send'
-                ? normalizeText(input.auto.frictionMode)
-                : null,
-            detectorVersion: normalizeText(input.auto.detectorVersion) || null,
-            selectedMasterTrusted: typeof input.auto.selectedMasterTrusted === 'boolean'
-                ? input.auto.selectedMasterTrusted
-                : null,
-            sensitivity: input.auto.sensitivity && typeof input.auto.sensitivity === 'object'
-                ? {
-                    isSensitive: input.auto.sensitivity.isSensitive === true,
-                    reasons: Array.isArray(input.auto.sensitivity.reasons)
-                        ? input.auto.sensitivity.reasons
-                            .filter((entry) => typeof entry === 'string')
-                            .map((entry) => normalizeText(entry))
-                            .filter(Boolean)
-                        : [],
-                }
-                : null,
-        }
-        : null;
-    const record = {
-        flow: 'master',
-        transport: normalizeText(input.transport) || null,
-        canonicalStatus: normalizeText(input.canonicalStatus) || null,
-        triggerMode: normalizeText(input.triggerMode) || null,
-        contextMode: normalizeText(input.contextMode) || null,
-        confirmationMode: normalizeText(input.confirmationMode) || null,
-        requestId: normalizeText(input.requestId) || null,
-        masterKind: normalizeText(input.masterKind) || null,
-        servicePinId: normalizeText(input.servicePinId) || null,
-        providerGlobalMetaId: normalizeText(input.providerGlobalMetaId) || null,
-        displayName: normalizeText(input.displayName) || null,
-        preview: preview && (preview.userTask || preview.question) ? preview : null,
-        response: response && (response.status || response.summary || response.followUpQuestion || response.errorCode) ? response : null,
-        failure: failure && (failure.code || failure.message) ? failure : null,
-        auto: auto && (auto.reason
-            || auto.confidence !== null
-            || auto.frictionMode
-            || auto.detectorVersion
-            || auto.selectedMasterTrusted !== null
-            || auto.sensitivity) ? auto : null,
-    };
-    return record.canonicalStatus || record.requestId || record.masterKind || record.servicePinId || record.displayName
-        || record.preview || record.response || record.failure || record.auto
-        ? record
-        : null;
-}
 function buildServiceOrderObserverConversationId(input) {
     const txidPart = normalizeText(input.paymentTxid).slice(0, 16) || 'pending';
     return `metaweb_order:${input.role}:${input.metabotId}:${normalizeText(input.peerGlobalMetaId)}:${txidPart}`;
@@ -249,7 +169,6 @@ function buildSessionTrace(input) {
             : null,
         a2a: buildA2ATraceRecord(input.a2a),
         providerRuntime: buildProviderRuntimeTraceRecord(input.providerRuntime),
-        askMaster: buildAskMasterTraceRecord(input.askMaster),
         artifacts: {
             transcriptMarkdownPath,
             traceMarkdownPath,

@@ -68,9 +68,9 @@ Add a test in `tests/oac/install.test.mjs` that creates a temporary `HOME`, runs
 `runOac(['install', '--host', 'codex'])`, and asserts:
 
 - exit code is `0`
-- `~/.metabot/skills/metabot-ask-master/SKILL.md` exists
+- `~/.metabot/skills/metabot-help/SKILL.md` exists
 - `~/.metabot/bin/metabot` exists and points at `dist/cli/main.js`
-- `~/.codex/skills/metabot-ask-master` is a symlink to the shared skill
+- `~/.codex/skills/metabot-help` is a symlink to the shared skill
 - JSON payload includes `host: "codex"`, `installedSkills`, `boundSkills`, and `metabotShimPath`
 
 Run:
@@ -171,7 +171,7 @@ Expected: buzz post returns `ok: true`.
 Create `tests/npm/packageFiles.test.mjs` that runs `npm pack --dry-run --json`
 and asserts:
 
-- included: `dist/cli/main.js`, `dist/oac/main.js`, `SKILLs/metabot-ask-master/SKILL.md`, `docs/install/open-agent-connect.md`, `README.md`, `LICENSE`, `release/compatibility.json`, and required UI static assets
+- included: `dist/cli/main.js`, `dist/oac/main.js`, `SKILLs/metabot-help/SKILL.md`, `docs/install/open-agent-connect.md`, `README.md`, `LICENSE`, `release/compatibility.json`, and required UI static assets
 - excluded: `tests/`, `release/packs/`, `skillpacks/codex/runtime/node_modules/`, and `.github/`
 - packed size is below `20MB`
 

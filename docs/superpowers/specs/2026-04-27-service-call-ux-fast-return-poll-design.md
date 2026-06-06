@@ -220,15 +220,12 @@ When the daemon's `services.call` returns `commandSuccess` directly (e.g., for l
 3. **Manual test — services call:**
    - Run `metabot services call --request-file <file>` against a known online provider.
    - Verify: immediate response with trace URL, poll progress in terminal, final result with `responseText` and `localUiUrl`.
-4. **Manual test — master ask:**
-   - Run `metabot master ask --request-file <file>`.
-   - Verify: same fast-return + poll behavior.
-5. **Manual test — timeout:**
+4. **Manual test — timeout:**
    - Call an offline or slow provider.
    - Verify: after 5 minutes, CLI prints timeout message with trace URL.
-6. **Machine-readable output:**
+5. **Machine-readable output:**
    - Verify that the final JSON on stdout is valid and includes `localUiUrl`.
    - Verify that progress messages go to stderr, not stdout.
-7. **Trace page:**
+6. **Trace page:**
    - Open the returned `localUiUrl` in a browser.
    - Verify the trace inspector shows session events.

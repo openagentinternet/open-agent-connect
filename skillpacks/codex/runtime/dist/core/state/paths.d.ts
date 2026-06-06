@@ -14,14 +14,6 @@ export interface MetabotPaths {
     exportsRoot: string;
     stateRoot: string;
     locksRoot: string;
-    evolutionRoot: string;
-    evolutionExecutionsRoot: string;
-    evolutionAnalysesRoot: string;
-    evolutionArtifactsRoot: string;
-    evolutionIndexPath: string;
-    evolutionRemoteRoot: string;
-    evolutionRemoteArtifactsRoot: string;
-    evolutionRemoteIndexPath: string;
     identityProfilesPath: string;
     activeHomePath: string;
     configPath: string;
@@ -33,10 +25,6 @@ export interface MetabotPaths {
     sessionStatePath: string;
     providerPresenceStatePath: string;
     ratingDetailStatePath: string;
-    masterPendingAskStatePath: string;
-    masterSuggestStatePath: string;
-    masterAutoFeedbackStatePath: string;
-    masterPublishedStatePath: string;
     directorySeedsPath: string;
     privateChatStatePath: string;
     chatStrategiesPath: string;

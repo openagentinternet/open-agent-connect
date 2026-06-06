@@ -273,7 +273,5 @@ The second CLI cleanup pass will apply the same `--from` policy to other chain-w
 - `metabot chain write`
 - `metabot file upload`
 - `metabot chat private`
-- `metabot master publish`
-- `metabot master ask`
 
 V1 only changes the CLI surface needed by the six built-in UI pages.

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a MetaWeb-native managed MetaBot platform that combines `be-metabot`'s cross-host identity, delegation, and evolution architecture with Multica's runtime routing, task visibility, and board-style operational UX.
+**Goal:** Build a MetaWeb-native managed MetaBot platform that combines `be-metabot`'s cross-host identity, delegation, skill-service, and trace architecture with Multica's runtime routing, task visibility, and board-style operational UX.
 
 **Architecture:** Treat `MetaBot` as the durable global actor, `Runtime` as the replaceable execution endpoint, `Host Adapter` as the provider-specific bridge, and `MetaWeb` as the shared state, memory, and coordination substrate. Keep local execution fast and host-native, while progressively moving identity, memory, collaboration, demand, and inter-bot coordination into chain-backed protocols and read models.
 
@@ -116,14 +116,13 @@ Responsible for:
 - remote delegation
 - trace linking
 - shared memory
-- published skill artifacts
+- published skill services
 - task and demand intake from chain-backed protocols
 - global collaboration between MetaBots
 
 Current anchors in `be-metabot`:
 
 - [DACT.md](/Users/tusm/Documents/MetaID_Projects/be-metabot/DACT.md#L21)
-- [EVOLUTION_NETWORK.md](/Users/tusm/Documents/MetaID_Projects/be-metabot/EVOLUTION_NETWORK.md#L21)
 
 ### 4.5 Board Control Plane
 
@@ -517,12 +516,11 @@ Current strong foundation:
 
 - stable skill identity
 - runtime-resolved contract
-- local evolution
-- remote import and adopt
+- host-neutral shared skill contracts
+- remote skill-service publication and invocation
 
 See:
 
-- [EVOLUTION_NETWORK.md](/Users/tusm/Documents/MetaID_Projects/be-metabot/EVOLUTION_NETWORK.md#L37)
 - [skillResolver.ts](/Users/tusm/Documents/MetaID_Projects/be-metabot/src/core/skills/skillResolver.ts)
 - [skillContractTypes.ts](/Users/tusm/Documents/MetaID_Projects/be-metabot/src/core/skills/skillContractTypes.ts)
 
@@ -530,8 +528,7 @@ Recommended direction:
 
 - keep skill identity attached to MetaBot capability
 - allow runtime-specific rendering of the same skill contract
-- separate `base contract`, `local evolved variant`, and `remote adopted variant`
-- add `board-visible skill source` so operators can see whether a MetaBot is using base, local, or remote-evolved behavior
+- expose board-visible skill bindings and service publication state so operators can see what a MetaBot can run or offer
 
 This becomes a major differentiator from Multica.
 

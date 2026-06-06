@@ -21,7 +21,6 @@ import { type ServicePaymentExecutor } from '../core/payments/servicePayment';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { type BuyerRatingProtocolTextGenerator, type CallerOrderProtocolTextGenerator, type ProviderOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
-import { type MetaWebMasterReplyWaiter } from '../core/master/metawebMasterReplyWaiter';
 export declare function createLoomDaemonActionHandler(dependencies: LoomUiActionServiceDependencies): NonNullable<NonNullable<MetabotDaemonHttpHandlers['loom']>['actions']>;
 interface LoomDaemonActionActorContext {
     homeDir: string;
@@ -112,7 +111,6 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
     fetchPrivateChatHistory?: FetchPrivateHistory;
     callerReplyWaiter?: MetaWebServiceReplyWaiter;
-    masterReplyWaiter?: MetaWebMasterReplyWaiter;
     servicePaymentExecutor?: ServicePaymentExecutor;
     ratingFollowupRetryDelaysMs?: number[];
     a2aConversationPersister?: A2AConversationMessagePersister;

@@ -124,7 +124,7 @@ An optional compatibility rendering path of `metabot skills resolve --host <host
     metabot
 
   skills/
-    metabot-ask-master/
+    metabot-help/
       SKILL.md
     metabot-identity-manage/
       SKILL.md
@@ -134,18 +134,18 @@ An optional compatibility rendering path of `metabot skills resolve --host <host
 
 ~/.codex/
   skills/
-    metabot-ask-master -> ~/.metabot/skills/metabot-ask-master
+    metabot-help -> ~/.metabot/skills/metabot-help
     metabot-identity-manage -> ~/.metabot/skills/metabot-identity-manage
     ...
 
 ~/.claude/
   skills/
-    metabot-ask-master -> ~/.metabot/skills/metabot-ask-master
+    metabot-help -> ~/.metabot/skills/metabot-help
     ...
 
 ~/.openclaw/
   skills/
-    metabot-ask-master -> ~/.metabot/skills/metabot-ask-master
+    metabot-help -> ~/.metabot/skills/metabot-help
     ...
 ```
 
@@ -240,13 +240,13 @@ The shared installed `SKILL.md` files must be rendered from the explicit `shared
 The canonical resolve command becomes:
 
 ```bash
-metabot skills resolve --skill metabot-ask-master --format markdown
+metabot skills resolve --skill metabot-help --format markdown
 ```
 
 Not:
 
 ```bash
-metabot skills resolve --skill metabot-ask-master --host codex --format markdown
+metabot skills resolve --skill metabot-help --host codex --format markdown
 ```
 
 ## `metabot skills resolve` Contract

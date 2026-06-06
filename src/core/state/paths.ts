@@ -16,14 +16,6 @@ export interface MetabotPaths {
   exportsRoot: string;
   stateRoot: string;
   locksRoot: string;
-  evolutionRoot: string;
-  evolutionExecutionsRoot: string;
-  evolutionAnalysesRoot: string;
-  evolutionArtifactsRoot: string;
-  evolutionIndexPath: string;
-  evolutionRemoteRoot: string;
-  evolutionRemoteArtifactsRoot: string;
-  evolutionRemoteIndexPath: string;
   identityProfilesPath: string;
   activeHomePath: string;
   configPath: string;
@@ -35,10 +27,6 @@ export interface MetabotPaths {
   sessionStatePath: string;
   providerPresenceStatePath: string;
   ratingDetailStatePath: string;
-  masterPendingAskStatePath: string;
-  masterSuggestStatePath: string;
-  masterAutoFeedbackStatePath: string;
-  masterPublishedStatePath: string;
   directorySeedsPath: string;
   privateChatStatePath: string;
   chatStrategiesPath: string;
@@ -118,10 +106,6 @@ function buildMetabotPaths(input: {
   sessionStatePath: string;
   providerPresenceStatePath: string;
   ratingDetailStatePath: string;
-  masterPendingAskStatePath: string;
-  masterSuggestStatePath: string;
-  masterAutoFeedbackStatePath: string;
-  masterPublishedStatePath: string;
   directorySeedsPath: string;
   privateChatStatePath: string;
   chatStrategiesPath: string;
@@ -139,15 +123,7 @@ function buildMetabotPaths(input: {
   llmExecutorSessionsRoot: string;
   llmExecutorTranscriptsRoot: string;
 }): MetabotPaths {
-  const evolutionRoot = path.join(input.runtimeRoot, 'evolution');
   const a2aRoot = path.join(input.runtimeRoot, 'A2A');
-  const evolutionExecutionsRoot = path.join(evolutionRoot, 'executions');
-  const evolutionAnalysesRoot = path.join(evolutionRoot, 'analyses');
-  const evolutionArtifactsRoot = path.join(evolutionRoot, 'artifacts');
-  const evolutionIndexPath = path.join(evolutionRoot, 'index.json');
-  const evolutionRemoteRoot = path.join(evolutionRoot, 'remote');
-  const evolutionRemoteArtifactsRoot = path.join(evolutionRemoteRoot, 'artifacts');
-  const evolutionRemoteIndexPath = path.join(evolutionRemoteRoot, 'index.json');
 
   return {
     systemHomeDir: input.systemHomeDir,
@@ -165,14 +141,6 @@ function buildMetabotPaths(input: {
     exportsRoot: input.exportsRoot,
     stateRoot: input.stateRoot,
     locksRoot: input.locksRoot,
-    evolutionRoot,
-    evolutionExecutionsRoot,
-    evolutionAnalysesRoot,
-    evolutionArtifactsRoot,
-    evolutionIndexPath,
-    evolutionRemoteRoot,
-    evolutionRemoteArtifactsRoot,
-    evolutionRemoteIndexPath,
     identityProfilesPath: path.join(input.managerRoot, 'identity-profiles.json'),
     activeHomePath: path.join(input.managerRoot, 'active-home.json'),
     configPath: path.join(input.runtimeRoot, 'config.json'),
@@ -184,10 +152,6 @@ function buildMetabotPaths(input: {
     sessionStatePath: input.sessionStatePath,
     providerPresenceStatePath: input.providerPresenceStatePath,
     ratingDetailStatePath: input.ratingDetailStatePath,
-    masterPendingAskStatePath: input.masterPendingAskStatePath,
-    masterSuggestStatePath: input.masterSuggestStatePath,
-    masterAutoFeedbackStatePath: input.masterAutoFeedbackStatePath,
-    masterPublishedStatePath: input.masterPublishedStatePath,
     directorySeedsPath: input.directorySeedsPath,
     privateChatStatePath: input.privateChatStatePath,
     chatStrategiesPath: input.chatStrategiesPath,
@@ -248,10 +212,6 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     sessionStatePath: path.join(sessionsRoot, 'a2a-session-state.json'),
     providerPresenceStatePath: path.join(stateRoot, 'provider-presence.json'),
     ratingDetailStatePath: path.join(stateRoot, 'rating-detail.json'),
-    masterPendingAskStatePath: path.join(stateRoot, 'master-pending-asks.json'),
-    masterSuggestStatePath: path.join(stateRoot, 'master-suggest-state.json'),
-    masterAutoFeedbackStatePath: path.join(stateRoot, 'master-auto-feedback-state.json'),
-    masterPublishedStatePath: path.join(stateRoot, 'master-service-state.json'),
     directorySeedsPath: path.join(stateRoot, 'directory-seeds.json'),
     privateChatStatePath: path.join(stateRoot, 'private-chat-state.json'),
     chatStrategiesPath: path.join(stateRoot, 'chat-strategies.json'),

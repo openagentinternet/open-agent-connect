@@ -100,7 +100,6 @@ async function ensureProfileWorkspace(input) {
         ensureDirectory(node_path_1.default.join(homeDir, 'memory')),
         ensureDirectory(node_path_1.default.join(homeDir, '.runtime')),
         ensureDirectory(node_path_1.default.join(homeDir, '.runtime', 'sessions')),
-        ensureDirectory(node_path_1.default.join(homeDir, '.runtime', 'evolution')),
         ensureDirectory(node_path_1.default.join(homeDir, '.runtime', 'exports')),
         ensureDirectory(node_path_1.default.join(homeDir, '.runtime', 'state')),
         ensureDirectory(node_path_1.default.join(homeDir, '.runtime', 'locks')),

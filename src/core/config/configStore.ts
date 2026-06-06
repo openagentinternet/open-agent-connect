@@ -6,10 +6,6 @@ import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import {
   createDefaultConfig,
   isDefaultWriteNetwork,
-  isAskMasterConfirmationMode,
-  isAskMasterContextMode,
-  isAskMasterTriggerMode,
-  normalizeAskMasterAutoPolicyConfig,
   type MetabotConfig,
 } from './configTypes';
 
@@ -47,28 +43,6 @@ function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (const entry of value) {
-    const text = normalizeString(entry);
-    if (!text || seen.has(text)) {
-      continue;
-    }
-    seen.add(text);
-    normalized.push(text);
-  }
-  return normalized;
-}
-
-function allowInternalAskMasterAutoTriggerMode(): boolean {
-  return process.env.METABOT_INTERNAL_ASK_MASTER_AUTO === '1';
-}
-
 function normalizeConfig(input: unknown): MetabotConfig {
   const defaults = createDefaultConfig();
   if (!input || typeof input !== 'object') {
@@ -76,17 +50,9 @@ function normalizeConfig(input: unknown): MetabotConfig {
   }
 
   const root = input as Record<string, unknown>;
-  const maybeNetwork = root['evolution_network'];
-  const maybeAskMaster = root['askMaster'];
   const maybeA2A = root['a2a'];
   const maybeChain = root['chain'];
 
-  const networkSource = maybeNetwork && typeof maybeNetwork === 'object'
-    ? maybeNetwork as Record<string, unknown>
-    : {};
-  const askMasterSource = maybeAskMaster && typeof maybeAskMaster === 'object'
-    ? maybeAskMaster as Record<string, unknown>
-    : {};
   const a2aSource = maybeA2A && typeof maybeA2A === 'object'
     ? maybeA2A as Record<string, unknown>
     : {};
@@ -94,9 +60,6 @@ function normalizeConfig(input: unknown): MetabotConfig {
     ? maybeChain as Record<string, unknown>
     : {};
 
-  const triggerMode = normalizeString(askMasterSource.triggerMode);
-  const confirmationMode = normalizeString(askMasterSource.confirmationMode);
-  const contextMode = normalizeString(askMasterSource.contextMode);
   const defaultWriteNetwork = normalizeString(chainSource.defaultWriteNetwork).toLowerCase();
 
   return {
@@ -104,33 +67,6 @@ function normalizeConfig(input: unknown): MetabotConfig {
       defaultWriteNetwork: isDefaultWriteNetwork(defaultWriteNetwork)
         ? defaultWriteNetwork
         : defaults.chain.defaultWriteNetwork,
-    },
-    evolution_network: {
-      enabled: normalizeBoolean(networkSource.enabled, defaults.evolution_network.enabled),
-      autoAdoptSameSkillSameScope: normalizeBoolean(
-        networkSource.autoAdoptSameSkillSameScope,
-        defaults.evolution_network.autoAdoptSameSkillSameScope
-      ),
-      autoRecordExecutions: normalizeBoolean(
-        networkSource.autoRecordExecutions,
-        defaults.evolution_network.autoRecordExecutions
-      )
-    },
-    askMaster: {
-      enabled: normalizeBoolean(askMasterSource.enabled, defaults.askMaster.enabled),
-      triggerMode: triggerMode === 'auto' && !allowInternalAskMasterAutoTriggerMode()
-        ? defaults.askMaster.triggerMode
-        : isAskMasterTriggerMode(triggerMode)
-          ? triggerMode
-          : defaults.askMaster.triggerMode,
-      confirmationMode: isAskMasterConfirmationMode(confirmationMode)
-        ? confirmationMode
-        : defaults.askMaster.confirmationMode,
-      contextMode: isAskMasterContextMode(contextMode)
-        ? contextMode
-        : defaults.askMaster.contextMode,
-      trustedMasters: normalizeStringArray(askMasterSource.trustedMasters),
-      autoPolicy: normalizeAskMasterAutoPolicyConfig(askMasterSource.autoPolicy),
     },
     a2a: {
       simplemsgListenerEnabled: normalizeBoolean(
