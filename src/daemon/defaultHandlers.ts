@@ -287,6 +287,7 @@ import { createConfigStore } from '../core/config/configStore';
 import { resolveBrowserConfig } from '../core/browser/config';
 import { resolveBrowserResource } from '../core/browser/browserResolver';
 import { resolveMetaAppPinToRecord } from '../core/browser/metaAppPinResolver';
+import { createMetaAppArtifactCacheStore } from '../core/metaapp/artifactCache';
 import type { BrowserContextResult, BrowserUsingIdentity } from '../core/browser/types';
 import {
   DEFAULT_WRITE_NETWORKS,
@@ -10068,6 +10069,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           metaAppResolve: (pinId) => resolveMetaAppPinToRecord({
             pinId,
             fetch: globalThis.fetch,
+            artifactCache: createMetaAppArtifactCacheStore(actor.homeDir),
             createPreviewSession: ({ artifactDir, indexFile }) => {
               const session = metaAppPreviewSessions.create({ artifactDir, indexFile });
               return {

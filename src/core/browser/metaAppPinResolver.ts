@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../contracts/commandResult';
 import { buildMetafileContentUrls } from '../files/metafileUrls';
+import { normalizeMetaAppModifyHistory, type MetaAppArtifactCacheStore } from '../metaapp/artifactCache';
 import { normalizeMetaAppPinId } from '../metaapp/pinId';
 import type { MetaAppGalleryRecord } from '../metaapp/types';
 import { extractMetaAppZipArchive } from '../metaapp/zipArchive';
@@ -36,6 +37,7 @@ export interface ResolveMetaAppPinToRecordInput {
     previewId?: string;
     localPreviewUrl: string;
   };
+  artifactCache?: MetaAppArtifactCacheStore;
   now?: () => number;
 }
 
@@ -339,14 +341,33 @@ export async function resolveMetaAppPinToRecord(input: ResolveMetaAppPinToRecord
     let localPreviewUrl: string | undefined;
     let rendererContentType = sourceContentType;
     if (isZipContent(sourceContentType, contentReference)) {
-      const archive = await downloadZipArchive({ fetch: fetchImpl, contentReference });
-      if (!archive) {
-        return commandFailed('browser_resolve_failed', 'MetaApp ZIP content could not be downloaded.');
-      }
+      const modifyHistory = normalizeMetaAppModifyHistory(pinRecord.modify_history ?? pinRecord.modifyHistory);
+      const artifactDescriptor = {
+        metaAppPinId: pinId,
+        contentReference,
+        contentType: sourceContentType,
+        indexFile,
+        modifyHistory,
+      };
+      const cachedArtifact = input.artifactCache ? await input.artifactCache.getArtifact(artifactDescriptor) : null;
+      let artifactDir: string;
+      if (cachedArtifact) {
+        artifactDir = cachedArtifact.artifactDir;
+      } else {
+        const archive = await downloadZipArchive({ fetch: fetchImpl, contentReference });
+        if (!archive) {
+          return commandFailed('browser_resolve_failed', 'MetaApp ZIP content could not be downloaded.');
+        }
 
-      const tempDir = await (input.makeTempDir ?? defaultMakeTempDir)();
-      await extractMetaAppZipArchive({ archive, outDir: tempDir });
-      const artifactDir = await findArtifactRootForIndexFile(tempDir, indexFile);
+        if (input.artifactCache) {
+          const cached = await input.artifactCache.writeArtifact({ ...artifactDescriptor, archive });
+          artifactDir = cached.artifactDir;
+        } else {
+          const tempDir = await (input.makeTempDir ?? defaultMakeTempDir)();
+          await extractMetaAppZipArchive({ archive, outDir: tempDir });
+          artifactDir = await findArtifactRootForIndexFile(tempDir, indexFile);
+        }
+      }
       const previewSession = await (input.createPreviewSession ?? defaultCreatePreviewSession)({
         artifactDir,
         indexFile,
