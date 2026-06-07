@@ -10,7 +10,8 @@ export interface ResolveBrowserResourceInput {
   uri: string;
   config: BotBrowserConfig;
   fetch?: typeof fetch;
-  metaAppLookup: (pinId: string) => Promise<MetaAppGalleryRecord | null>;
+  metaAppLookup?: (pinId: string) => Promise<MetaAppGalleryRecord | null>;
+  metaAppResolve?: (pinId: string) => Promise<MetabotCommandResult<MetaAppGalleryRecord>>;
 }
 
 export async function resolveBrowserResource(input: ResolveBrowserResourceInput): Promise<MetabotCommandResult<BrowserResolveResult>> {
@@ -46,7 +47,18 @@ export async function resolveBrowserResource(input: ResolveBrowserResourceInput)
     }));
   }
 
-  const record = await input.metaAppLookup(parsed.id);
+  let record: MetaAppGalleryRecord | null;
+  if (input.metaAppResolve) {
+    const resolved = await input.metaAppResolve(parsed.id);
+    if (!resolved.ok) {
+      return resolved;
+    }
+    record = resolved.data;
+  } else if (input.metaAppLookup) {
+    record = await input.metaAppLookup(parsed.id);
+  } else {
+    record = null;
+  }
   if (!record) {
     return commandFailed('browser_resource_not_found', 'Resource not found.');
   }

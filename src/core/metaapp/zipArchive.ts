@@ -1,13 +1,19 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import { inflateRaw } from 'node:zlib';
 
 const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
 const ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE = 0x02014b50;
 const ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
 const STORE_COMPRESSION_METHOD = 0;
+const DEFLATE_COMPRESSION_METHOD = 8;
+const DEFAULT_MAX_EXTRACTED_ENTRIES = 2_000;
+const DEFAULT_MAX_EXTRACTED_BYTES = 100 * 1024 * 1024;
 
 const SKIP_NAMES = new Set(['.DS_Store', '.git', 'node_modules', '.runtime']);
+const inflateRawAsync = promisify(inflateRaw);
 
 function normalizeEntryName(entryName: string): string {
   return entryName.replace(/\\/g, '/');
@@ -198,4 +204,121 @@ export async function writeMetaAppZipArchive(input: {
     sha256: createHash('sha256').update(archive).digest('hex'),
     entries: entries.map((entry) => entry.entryName),
   };
+}
+
+function findEndOfCentralDirectory(archive: Buffer): number {
+  for (let offset = archive.length - 22; offset >= 0; offset -= 1) {
+    if (archive.readUInt32LE(offset) === ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE) {
+      return offset;
+    }
+  }
+  throw new Error('ZIP end-of-central-directory record was not found.');
+}
+
+function assertInsideDirectory(rootDir: string, filePath: string): void {
+  const relative = path.relative(rootDir, filePath);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`ZIP entry escapes target directory: ${filePath}`);
+  }
+}
+
+async function decompressZipEntry(input: {
+  entryName: string;
+  compressionMethod: number;
+  compressedData: Buffer;
+  uncompressedSize: number;
+}): Promise<Buffer> {
+  if (input.compressionMethod === STORE_COMPRESSION_METHOD) {
+    if (input.compressedData.byteLength !== input.uncompressedSize) {
+      throw new Error(`ZIP entry size mismatch: ${input.entryName}`);
+    }
+    return input.compressedData;
+  }
+  if (input.compressionMethod === DEFLATE_COMPRESSION_METHOD) {
+    const inflated = await inflateRawAsync(input.compressedData);
+    if (inflated.byteLength !== input.uncompressedSize) {
+      throw new Error(`ZIP entry size mismatch: ${input.entryName}`);
+    }
+    return inflated;
+  }
+  throw new Error(`Unsupported ZIP compression method ${input.compressionMethod} for ${input.entryName}.`);
+}
+
+export async function extractMetaAppZipArchive(input: {
+  archive: Buffer;
+  outDir: string;
+  maxEntries?: number;
+  maxUncompressedBytes?: number;
+}): Promise<{ outDir: string; entries: string[] }> {
+  const archive = Buffer.from(input.archive);
+  const outDir = path.resolve(input.outDir);
+  const maxEntries = input.maxEntries ?? DEFAULT_MAX_EXTRACTED_ENTRIES;
+  const maxUncompressedBytes = input.maxUncompressedBytes ?? DEFAULT_MAX_EXTRACTED_BYTES;
+  const eocdOffset = findEndOfCentralDirectory(archive);
+  const entryCount = archive.readUInt16LE(eocdOffset + 10);
+  if (entryCount > maxEntries) {
+    throw new Error(`ZIP archive has too many entries: ${entryCount}.`);
+  }
+
+  let centralOffset = archive.readUInt32LE(eocdOffset + 16);
+  let totalUncompressedBytes = 0;
+  const extractedEntries: string[] = [];
+
+  await fs.mkdir(outDir, { recursive: true });
+
+  for (let index = 0; index < entryCount; index += 1) {
+    if (centralOffset + 46 > archive.length || archive.readUInt32LE(centralOffset) !== ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE) {
+      throw new Error('Invalid ZIP central directory.');
+    }
+
+    const compressionMethod = archive.readUInt16LE(centralOffset + 10);
+    const compressedSize = archive.readUInt32LE(centralOffset + 20);
+    const uncompressedSize = archive.readUInt32LE(centralOffset + 24);
+    const nameLength = archive.readUInt16LE(centralOffset + 28);
+    const extraLength = archive.readUInt16LE(centralOffset + 30);
+    const commentLength = archive.readUInt16LE(centralOffset + 32);
+    const localHeaderOffset = archive.readUInt32LE(centralOffset + 42);
+    const nameStart = centralOffset + 46;
+    const nameEnd = nameStart + nameLength;
+    if (nameEnd > archive.length) {
+      throw new Error('Invalid ZIP entry name bounds.');
+    }
+
+    const entryName = normalizeEntryName(archive.subarray(nameStart, nameEnd).toString('utf8'));
+    centralOffset = nameEnd + extraLength + commentLength;
+    if (!entryName || entryName.endsWith('/')) {
+      continue;
+    }
+    assertSafeEntryName(entryName);
+
+    totalUncompressedBytes += uncompressedSize;
+    if (totalUncompressedBytes > maxUncompressedBytes) {
+      throw new Error('ZIP archive exceeds the maximum extracted size.');
+    }
+
+    if (localHeaderOffset + 30 > archive.length || archive.readUInt32LE(localHeaderOffset) !== ZIP_LOCAL_FILE_HEADER_SIGNATURE) {
+      throw new Error(`Invalid ZIP local header for ${entryName}.`);
+    }
+    const localNameLength = archive.readUInt16LE(localHeaderOffset + 26);
+    const localExtraLength = archive.readUInt16LE(localHeaderOffset + 28);
+    const dataStart = localHeaderOffset + 30 + localNameLength + localExtraLength;
+    const dataEnd = dataStart + compressedSize;
+    if (dataStart > archive.length || dataEnd > archive.length) {
+      throw new Error(`Invalid ZIP data bounds for ${entryName}.`);
+    }
+
+    const body = await decompressZipEntry({
+      entryName,
+      compressionMethod,
+      compressedData: archive.subarray(dataStart, dataEnd),
+      uncompressedSize,
+    });
+    const targetPath = path.resolve(outDir, entryName);
+    assertInsideDirectory(outDir, targetPath);
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, body);
+    extractedEntries.push(entryName);
+  }
+
+  return { outDir, entries: extractedEntries };
 }

@@ -286,6 +286,7 @@ import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
 import { resolveBrowserConfig } from '../core/browser/config';
 import { resolveBrowserResource } from '../core/browser/browserResolver';
+import { resolveMetaAppPinToRecord } from '../core/browser/metaAppPinResolver';
 import type { BrowserContextResult, BrowserUsingIdentity } from '../core/browser/types';
 import {
   DEFAULT_WRITE_NETWORKS,
@@ -10064,7 +10065,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
           uri: request.uri,
           config: browserConfig,
           fetch: globalThis.fetch,
-          metaAppLookup: (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
+          metaAppResolve: (pinId) => resolveMetaAppPinToRecord({
+            pinId,
+            fetch: globalThis.fetch,
+            createPreviewSession: ({ artifactDir, indexFile }) => {
+              const session = metaAppPreviewSessions.create({ artifactDir, indexFile });
+              return {
+                previewId: session.previewId,
+                localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+              };
+            },
+          }),
         });
       },
     },
