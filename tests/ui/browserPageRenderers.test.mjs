@@ -13,10 +13,14 @@ class FakeElement {
     this.textContent = '';
     this.innerHTML = '';
     this.hidden = false;
+    this.attrs = {};
     this.listeners = new Map();
     this.classList = { add() {}, remove() {}, toggle() {} };
   }
   addEventListener(eventName, handler) { this.listeners.set(eventName, handler); }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  getAttribute(name) { return this.attrs[name] || ''; }
+  hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name); }
 }
 
 function waitFor(condition, label) {
@@ -33,6 +37,7 @@ function waitFor(condition, label) {
 
 function elements() {
   return {
+    '[data-browser-shell]': new FakeElement(),
     '[data-browser-uri-input]': new FakeElement(),
     '[data-browser-address-form]': new FakeElement(),
     '[data-browser-back]': new FakeElement(),
@@ -117,6 +122,8 @@ test('bot-page renderer shows profile, services, and trusted buttons from homepa
   assert.match(html, /Fixture Bot/);
   assert.match(html, /idq1fixturebot/);
   assert.match(html, /Builds OAC browser fixtures/);
+  assert.match(html, /Overview/);
+  assert.match(html, /Recent Activity/);
   assert.match(html, /Fixture Review/);
   assert.match(html, /data-browser-action="private-chat"/);
   assert.match(html, /data-browser-action="service-list"/);

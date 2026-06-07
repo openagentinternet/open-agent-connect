@@ -12,14 +12,19 @@ class FakeElement {
     this.textContent = '';
     this.innerHTML = '';
     this.hidden = false;
+    this.attrs = {};
     this.listeners = new Map();
     this.classList = { add() {}, remove() {}, toggle() {} };
   }
   addEventListener(eventName, handler) { this.listeners.set(eventName, handler); }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  getAttribute(name) { return this.attrs[name] || ''; }
+  hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name); }
 }
 
 function elements() {
   return {
+    '[data-browser-shell]': new FakeElement(),
     '[data-browser-uri-input]': new FakeElement(),
     '[data-browser-address-form]': new FakeElement(),
     '[data-browser-back]': new FakeElement(),

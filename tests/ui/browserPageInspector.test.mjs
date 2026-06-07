@@ -12,10 +12,14 @@ class FakeElement {
     this.textContent = '';
     this.innerHTML = '';
     this.hidden = false;
+    this.attrs = {};
     this.listeners = new Map();
     this.classList = { add() {}, remove() {}, toggle() {} };
   }
   addEventListener(eventName, handler) { this.listeners.set(eventName, handler); }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  getAttribute(name) { return this.attrs[name] || ''; }
+  hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name); }
   click() { this.listeners.get('click')?.({ preventDefault() {} }); }
 }
 
@@ -33,6 +37,7 @@ function waitFor(condition, label) {
 
 function elements() {
   return {
+    '[data-browser-shell]': new FakeElement(),
     '[data-browser-uri-input]': new FakeElement(),
     '[data-browser-address-form]': new FakeElement(),
     '[data-browser-back]': new FakeElement(),
@@ -119,6 +124,21 @@ test('Browser drawer and Inspector are hidden by default in the shell', () => {
   assert.match(definition.contentHtml, /data-browser-inspector hidden/);
 });
 
+test('Browser chrome uses icon-only toolbar controls and avoids prototype labels', () => {
+  const definition = buildBrowserPageDefinition();
+  const html = definition.contentHtml;
+  assert.match(html, /aria-label="Back"/);
+  assert.match(html, /aria-label="Forward"/);
+  assert.match(html, /aria-label="Reload"/);
+  assert.match(html, /aria-label="Bookmarks and history"/);
+  assert.doesNotMatch(html, />Back</);
+  assert.doesNotMatch(html, />Forward</);
+  assert.doesNotMatch(html, />Reload</);
+  assert.doesNotMatch(html, />Bookmarks</);
+  assert.doesNotMatch(html, />Open</);
+  assert.doesNotMatch(html, /Browser-owned controls/);
+});
+
 test('Drawer opens from drawer button and shows bookmarks, recents, and visit history', async () => {
   const { context, nodes } = createContext();
   await waitFor(() => context.state.current, 'initial resource');
@@ -131,9 +151,8 @@ test('Drawer opens from drawer button and shows bookmarks, recents, and visit hi
   assert.match(html, /Bookmarks/);
   assert.match(html, /Recent Bots/);
   assert.match(html, /Fixture Bot/);
-  assert.match(html, /Recent MetaApps/);
   assert.match(html, /Fixture MetaApp/);
-  assert.match(html, /Visit History/);
+  assert.match(html, /History/);
   assert.match(html, /metaid:\/\/idq1fixturebot/);
 });
 
@@ -176,5 +195,6 @@ test('Inspector proof labels use TXID and include proof details', async () => {
   assert.match(html, /protocol path/);
   assert.match(html, /content hash/);
   assert.match(html, /publisher GlobalMetaId/);
-  assert.match(html, /block explorer URL/);
+  assert.match(html, /block explorer action/);
+  assert.match(html, /View on Block Explorer/);
 });

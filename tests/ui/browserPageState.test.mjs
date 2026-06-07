@@ -42,6 +42,10 @@ class FakeElement {
     return this.attrs[name] || '';
   }
 
+  hasAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attrs, name);
+  }
+
   click() {
     this.listeners.get('click')?.({ preventDefault() {} });
   }
@@ -71,6 +75,7 @@ function waitFor(condition, label) {
 
 function createElements() {
   return {
+    '[data-browser-shell]': new FakeElement(),
     '[data-browser-uri-input]': new FakeElement(),
     '[data-browser-address-form]': new FakeElement(),
     '[data-browser-back]': new FakeElement(),
@@ -185,8 +190,9 @@ test('Browser renders current resource identity separately from using identity',
 
   await waitFor(() => fetchCalls.length === 2, 'resource render');
 
-  assert.equal(elements['[data-browser-resource-chip]'].textContent, 'Alice Resource');
-  assert.equal(elements['[data-browser-using-selector]'].textContent, 'Using: Worker Bot');
+  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /Alice Resource/);
+  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /idq1alice/);
+  assert.match(elements['[data-browser-using-selector]'].innerHTML, /Using: Worker Bot/);
 });
 
 test('Browser resource chip prefers MetaApp title over publisher identity', async () => {
@@ -209,7 +215,7 @@ test('Browser resource chip prefers MetaApp title over publisher identity', asyn
 
   await waitFor(() => fetchCalls.length === 2, 'MetaApp resource render');
 
-  assert.equal(elements['[data-browser-resource-chip]'].textContent, 'Fixture MetaApp');
+  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /Fixture MetaApp/);
 });
 
 test('Browser using identity selector switches identity and reloads current URI without history entry', async () => {
@@ -241,7 +247,7 @@ test('Browser using identity selector switches identity and reloads current URI 
 
   assert.equal(context.state.context.defaultUsingIdentity.slug, 'reviewer');
   assert.equal(context.state.usingSlug, 'reviewer');
-  assert.equal(elements['[data-browser-using-selector]'].textContent, 'Using: Reviewer Bot');
+  assert.match(elements['[data-browser-using-selector]'].innerHTML, /Using: Reviewer Bot/);
   assert.equal(elements['[data-browser-modal-root]'].hidden, true);
   assert.equal(elements['[data-browser-using-selector]'].getAttribute('aria-expanded'), 'false');
   assert.equal(fetchCalls[2], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1worker&from=reviewer');
