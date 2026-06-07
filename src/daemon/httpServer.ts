@@ -17,6 +17,7 @@ import { handleTraceRoutes } from './routes/trace';
 import { handleUiRoutes } from './routes/ui';
 import { handleLlmRoutes } from './routes/llm';
 import { handleBotRoutes } from './routes/bot';
+import { handleBrowserRoutes } from './routes/browser';
 import type { MetabotDaemonHttpHandlers, RouteContext, RouteHandler } from './routes/types';
 
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
@@ -35,6 +36,7 @@ const ROUTES: RouteHandler[] = [
   handleMetaAppRoutes,
   handleServicesRoutes,
   handleTraceRoutes,
+  handleBrowserRoutes,
   handleUiRoutes,
   handleLlmRoutes,
   handleBotRoutes,

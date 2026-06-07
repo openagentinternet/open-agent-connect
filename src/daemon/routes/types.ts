@@ -1,10 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Buffer } from 'node:buffer';
+import type { BrowserContextResult, BrowserResolveResult } from '../../core/browser/types';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
 export type Awaitable<T> = T | Promise<T>;
 
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'loom' | 'metaapps';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'loom' | 'metaapps' | 'browser';
 
 export interface ServiceRefundSyncResponse {
   scanned: {
@@ -29,6 +30,10 @@ export interface ServiceRefundSyncRequest {
 }
 
 export interface MetabotDaemonHttpHandlers {
+  browser?: {
+    getContext?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<BrowserContextResult>>;
+    resolve?: (input: { uri: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserResolveResult>>;
+  };
   config?: {
     get?: () => Awaitable<MetabotCommandResult<unknown>>;
     set?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

@@ -5,6 +5,7 @@ import { resolveMetabotHomeSelection } from '../state/homeSelection';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import {
   createDefaultConfig,
+  type DefaultWriteNetwork,
   isDefaultWriteNetwork,
   type MetabotConfig,
 } from './configTypes';
@@ -51,18 +52,24 @@ function normalizeConfig(input: unknown): MetabotConfig {
 
   const root = input as Record<string, unknown>;
   const maybeA2A = root['a2a'];
+  const maybeBrowser = root['browser'];
   const maybeChain = root['chain'];
 
   const a2aSource = maybeA2A && typeof maybeA2A === 'object'
     ? maybeA2A as Record<string, unknown>
+    : {};
+  const browserSource = maybeBrowser && typeof maybeBrowser === 'object'
+    ? maybeBrowser as Record<string, unknown>
     : {};
   const chainSource = maybeChain && typeof maybeChain === 'object'
     ? maybeChain as Record<string, unknown>
     : {};
 
   const defaultWriteNetwork = normalizeString(chainSource.defaultWriteNetwork).toLowerCase();
+  const browserDefaultChainName = normalizeString(browserSource.defaultChainName).toLowerCase();
+  const walletApiBaseUrl = normalizeString(browserSource.walletApiBaseUrl) || defaults.browser.walletApiBaseUrl;
 
-  return {
+  const normalizedConfig: MetabotConfig = {
     chain: {
       defaultWriteNetwork: isDefaultWriteNetwork(defaultWriteNetwork)
         ? defaultWriteNetwork
@@ -74,7 +81,22 @@ function normalizeConfig(input: unknown): MetabotConfig {
         defaults.a2a.simplemsgListenerEnabled,
       ),
     },
+    browser: {
+      metasoP2PBaseUrl: normalizeString(browserSource.metasoP2PBaseUrl) || defaults.browser.metasoP2PBaseUrl,
+      metafileContentBaseUrl: normalizeString(browserSource.metafileContentBaseUrl) || defaults.browser.metafileContentBaseUrl,
+      blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,
+      defaultChainName: isDefaultWriteNetwork(browserDefaultChainName)
+        ? browserDefaultChainName as DefaultWriteNetwork
+        : defaults.chain.defaultWriteNetwork,
+      localMode: normalizeBoolean(browserSource.localMode, defaults.browser.localMode),
+    },
   };
+
+  if (walletApiBaseUrl) {
+    normalizedConfig.browser.walletApiBaseUrl = walletApiBaseUrl;
+  }
+
+  return normalizedConfig;
 }
 
 function resolvePaths(homeDirOrPaths?: string | MetabotPaths): MetabotPaths {

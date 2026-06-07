@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "botHomepage.v1",
+  "resolvedAt": 1780760000000,
+  "globalMetaId": "idq1fixturebot",
+  "canonical": {
+    "globalMetaId": "idq1fixturebot",
+    "metaid": "metaid-fixture",
+    "address": "18FixtureAddress",
+    "chainName": "mvc"
+  },
+  "profile": {
+    "name": "Fixture Bot",
+    "avatar": "https://so.example.test/content/avatar-pin",
+    "avatarPinId": "avatar-pin",
+    "background": "",
+    "backgroundPinId": "",
+    "bio": "Builds OAC browser fixtures.",
+    "bioPinId": "bio-pin",
+    "chatPubkey": "04fixture",
+    "chatPubkeyPinId": "chat-pin",
+    "nftAvatar": "",
+    "displayGlobalMetaId": "idq1fixture...bot"
+  },
+  "homepage": {
+    "mode": "default",
+    "title": "Fixture Bot",
+    "summary": "Builds OAC browser fixtures.",
+    "custom": null
+  },
+  "presence": {
+    "state": "online",
+    "updatedAt": 1780760000000,
+    "source": "fixture-presence"
+  },
+  "services": [
+    {
+      "id": "service-current-pin",
+      "currentPinId": "service-current-pin",
+      "sourceServicePinId": "service-source-pin",
+      "displayName": "Fixture Review",
+      "serviceName": "fixture-review",
+      "description": "Review a fixture payload.",
+      "providerSkill": "fixture-review",
+      "price": "0",
+      "currency": "SPACE",
+      "paymentChain": "mvc",
+      "paymentAddress": "18FixtureAddress",
+      "proof": {
+        "txid": "service-txid",
+        "pinId": "service-current-pin",
+        "sourceServicePinId": "service-source-pin",
+        "protocolPath": "/protocols/skill-service",
+        "publisherGlobalMetaId": "idq1fixturebot"
+      }
+    }
+  ],
+  "actions": [
+    { "id": "message", "label": "Message", "kind": "private-chat", "enabled": true, "requiresUsingIdentity": true },
+    { "id": "services", "label": "Services", "kind": "service-list", "enabled": true, "requiresUsingIdentity": true },
+    { "id": "copy-uri", "label": "Copy URI", "kind": "copy", "enabled": true, "uri": "metaid://idq1fixturebot" }
+  ],
+  "proofs": {
+    "verificationState": "partial",
+    "identity": {
+      "txid": "identity-txid",
+      "pinId": "identity-pin",
+      "protocolPath": "/",
+      "publisherGlobalMetaId": "idq1fixturebot",
+      "contentHash": "sha256:identity"
+    },
+    "profile": [
+      {
+        "field": "bio",
+        "txid": "bio-txid",
+        "pinId": "bio-pin",
+        "protocolPath": "/info/bio",
+        "contentHash": "sha256:bio",
+        "publisherGlobalMetaId": "idq1fixturebot"
+      }
+    ],
+    "homepage": null,
+    "services": []
+  },
+  "source": {
+    "resolver": "metaso-p2p",
+    "node": "https://so.example.test",
+    "contentBaseUrl": "https://so.example.test/content/",
+    "fetchedAt": 1780760000000,
+    "stale": false
+  },
+  "warnings": []
+}

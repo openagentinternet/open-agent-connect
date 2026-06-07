@@ -284,6 +284,9 @@ import { btcChainAdapter } from '../core/chain/adapters/btc';
 import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
+import { resolveBrowserConfig } from '../core/browser/config';
+import { resolveBrowserResource } from '../core/browser/browserResolver';
+import type { BrowserContextResult, BrowserUsingIdentity } from '../core/browser/types';
 import {
   DEFAULT_WRITE_NETWORKS,
   type DefaultWriteNetwork,
@@ -9884,6 +9887,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return localRecords.find((record: MetaAppGalleryRecord) => record.pinId === targetPinId) ?? null;
   }
 
+  async function buildBrowserContextResult(rawFrom?: unknown): Promise<MetabotCommandResult<BrowserContextResult>> {
+    const requestedSlug = normalizeText(rawFrom);
+    const activeHomeDir = path.resolve(input.homeDir);
+    const profiles = await listMetabotProfiles(normalizedSystemHomeDir).catch(() => [] as MetabotProfileFull[]);
+    const selectedProfile = requestedSlug
+      ? profiles.find((profile) => profile.slug === requestedSlug)
+      : profiles.find((profile) => path.resolve(profile.homeDir) === activeHomeDir) ?? profiles[0] ?? null;
+
+    if (requestedSlug && !selectedProfile) {
+      return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
+    }
+
+    const selectedHomeDir = selectedProfile ? path.resolve(selectedProfile.homeDir) : '';
+    const usingIdentities: BrowserUsingIdentity[] = profiles.map((profile) => ({
+      slug: profile.slug,
+      name: profile.name,
+      globalMetaId: profile.globalMetaId,
+      ...(profile.avatarDataUrl ? { avatar: profile.avatarDataUrl } : {}),
+      isDefault: Boolean(selectedHomeDir && path.resolve(profile.homeDir) === selectedHomeDir),
+    }));
+    const defaultUsingIdentity = selectedProfile && selectedProfile.globalMetaId
+      ? usingIdentities.find((identity) => identity.slug === selectedProfile.slug) ?? null
+      : null;
+
+    return commandSuccess({
+      usingIdentities,
+      defaultUsingIdentity,
+      defaultUri: defaultUsingIdentity?.globalMetaId
+        ? `metaid://${defaultUsingIdentity.globalMetaId}`
+        : null,
+    });
+  }
+
   async function listMetaAppsForActor(actor: {
     homeDir: string;
     runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
@@ -10017,6 +10053,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }));
 
   return {
+    browser: {
+      getContext: async (request = {}) => buildBrowserContextResult(request.from),
+      resolve: async (request) => {
+        const actor = await resolveActorWriteContext(request.from);
+        if ('failure' in actor) return actor.failure;
+        const config = await createConfigStore(actor.homeDir).read();
+        const browserConfig = resolveBrowserConfig(config, process.env);
+        return resolveBrowserResource({
+          uri: request.uri,
+          config: browserConfig,
+          fetch: globalThis.fetch,
+          metaAppLookup: (pinId) => readMetaAppRecordForUpdate(actor.homeDir, pinId),
+        });
+      },
+    },
     config: {
       get: async () => commandSuccess(await configStore.read()),
       set: async (rawInput) => updateConfigDefaultWriteNetwork(configStore, rawInput),

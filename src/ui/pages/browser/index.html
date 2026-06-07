@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .content:has(.browser-shell) {
+        max-width: none;
+        padding: 0;
+      }
+      .browser-shell {
+        min-height: calc(100vh - 52px);
+        background: var(--bg);
+        color: var(--text);
+        display: grid;
+        grid-template-rows: 48px minmax(0, 1fr) 32px;
+        grid-template-columns: minmax(0, 1fr);
+        overflow: hidden;
+      }
+      @supports (min-height: 100svh) {
+        .browser-shell { min-height: calc(100svh - 52px); }
+      }
+      .browser-shell [hidden] {
+        display: none !important;
+      }
+      .browser-topbar {
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        display: grid;
+        grid-template-columns: auto minmax(180px, 1fr) auto auto;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        min-width: 0;
+      }
+      .browser-nav {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+      .browser-nav button,
+      .browser-address-form button,
+      .browser-resource-chip,
+      .browser-using-chip,
+      .browser-status-strip button {
+        min-height: 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font: 11px var(--mono);
+        padding: 5px 9px;
+        white-space: nowrap;
+      }
+      .browser-nav button:hover,
+      .browser-address-form button:hover,
+      .browser-resource-chip:hover,
+      .browser-using-chip:hover,
+      .browser-status-strip button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .browser-address-form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px;
+        min-width: 0;
+      }
+      .browser-address-form input {
+        width: 100%;
+        min-height: 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+        font: 12px var(--mono);
+        padding: 5px 10px;
+        outline: none;
+        min-width: 0;
+      }
+      .browser-address-form input:focus {
+        border-color: var(--accent);
+      }
+      .browser-resource-chip,
+      .browser-using-chip {
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .browser-drawer,
+      .browser-inspector {
+        position: fixed;
+        top: 52px;
+        bottom: 32px;
+        width: min(360px, 88vw);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        z-index: 20;
+        overflow: auto;
+      }
+      .browser-drawer {
+        left: 0;
+        border-left: 0;
+      }
+      .browser-inspector {
+        right: 0;
+        border-right: 0;
+      }
+      .browser-drawer-panel,
+      .browser-inspector-panel {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+      .browser-drawer-panel h2,
+      .browser-inspector-panel h3 {
+        margin: 0;
+        color: var(--text);
+        font-size: 12px;
+      }
+      .browser-drawer-panel ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+      }
+      .browser-drawer-panel li {
+        display: grid;
+        gap: 2px;
+        border-top: 1px solid var(--border);
+        padding-top: 6px;
+      }
+      .browser-drawer-panel button {
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        font: 12px var(--mono);
+        padding: 0;
+        text-align: left;
+      }
+      .browser-drawer-panel span,
+      .browser-panel-empty,
+      .browser-inspector-panel dd {
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .browser-panel-empty {
+        margin: 0;
+      }
+      .browser-inspector-panel dl {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 6px 10px;
+        margin: 0;
+      }
+      .browser-inspector-panel dt {
+        color: var(--dim);
+        font: 11px var(--mono);
+      }
+      .browser-inspector-panel dd {
+        margin: 0;
+        font: 11px var(--mono);
+      }
+      .browser-inspector-panel pre {
+        margin: 0;
+        max-height: 220px;
+        overflow: auto;
+        border-top: 1px solid var(--border);
+        padding-top: 10px;
+        color: var(--muted);
+        font: 11px var(--mono);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .browser-viewport {
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        background: var(--bg);
+      }
+      .browser-bot-page {
+        min-height: 100%;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-content: start;
+        gap: 18px;
+        padding: 24px;
+      }
+      .browser-bot-avatar {
+        width: 72px;
+        height: 72px;
+        border-radius: var(--radius-md);
+        object-fit: cover;
+        background: var(--surface2);
+      }
+      .browser-bot-main {
+        min-width: 0;
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+      .browser-bot-main h2 {
+        font-size: 22px;
+        line-height: 1.2;
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .browser-globalmetaid,
+      .browser-bot-summary,
+      .browser-service-row p {
+        color: var(--muted);
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .browser-globalmetaid {
+        font: 11px var(--mono);
+      }
+      .browser-action-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .browser-action-row button,
+      .browser-service-row button,
+      .browser-primary-action {
+        min-height: 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+        cursor: pointer;
+        font: 11px var(--mono);
+        padding: 5px 9px;
+        text-decoration: none;
+      }
+      .browser-bot-services {
+        display: grid;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .browser-bot-services h3 {
+        font-size: 12px;
+        margin: 0;
+      }
+      .browser-service-row {
+        border-top: 1px solid var(--border);
+        display: grid;
+        gap: 5px;
+        padding: 10px 0;
+      }
+      .browser-html-frame,
+      .browser-pdf {
+        width: 100%;
+        height: 100%;
+        min-height: calc(100vh - 132px);
+        border: 0;
+        background: var(--surface);
+      }
+      .browser-pdf-wrap {
+        min-height: 100%;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) auto;
+      }
+      .browser-image,
+      .browser-video {
+        display: block;
+        max-width: 100%;
+        max-height: calc(100vh - 132px);
+        margin: 0 auto;
+        background: var(--surface);
+      }
+      .browser-empty-state {
+        min-height: 100%;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: 10px;
+        padding: 24px;
+        text-align: center;
+      }
+      .browser-empty-state h2,
+      .browser-empty-state p {
+        margin: 0;
+      }
+      .browser-status-strip {
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        padding: 0 10px;
+        color: var(--muted);
+        font: 11px var(--mono);
+      }
+      .browser-status-strip span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .browser-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        background: rgba(0, 0, 0, .34);
+        display: grid;
+        place-items: center;
+        padding: 16px;
+      }
+      .browser-modal-panel {
+        width: min(460px, 100%);
+        max-height: min(620px, 92vh);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        overflow: hidden;
+      }
+      .browser-modal-panel header,
+      .browser-modal-panel footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .browser-modal-panel footer {
+        border-top: 1px solid var(--border);
+        border-bottom: 0;
+        justify-content: flex-end;
+      }
+      .browser-modal-panel h2 {
+        margin: 0;
+        font-size: 13px;
+      }
+      .browser-modal-panel button {
+        min-height: 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        color: var(--text);
+        cursor: pointer;
+        font: 11px var(--mono);
+        padding: 5px 9px;
+      }
+      .browser-modal-body {
+        overflow: auto;
+        padding: 12px;
+      }
+      .browser-using-options {
+        display: grid;
+        gap: 8px;
+      }
+      .browser-using-options button {
+        display: grid;
+        gap: 3px;
+        justify-items: start;
+        text-align: left;
+      }
+      .browser-using-options button[aria-current="true"] {
+        border-color: var(--accent);
+      }
+      .browser-using-options span {
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      @media (max-width: 760px) {
+        .browser-shell {
+          grid-template-rows: auto minmax(0, 1fr) auto;
+        }
+        .browser-topbar {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
+        .browser-nav {
+          overflow-x: auto;
+        }
+        .browser-resource-chip,
+        .browser-using-chip {
+          max-width: none;
+          justify-content: flex-start;
+        }
+        .browser-status-strip {
+          flex-wrap: wrap;
+          min-height: 48px;
+          padding: 6px 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    __PAGE_CONTENT__
+    <script>
+      __PAGE_SCRIPT__
+    </script>
+  </body>
+</html>
