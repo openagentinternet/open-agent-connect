@@ -170,7 +170,9 @@ test('sandboxed iframe renderer does not expose side-effect helpers to content',
     actions: [],
   });
 
-  assert.match(html, /<iframe class="browser-html-frame" sandbox src=/);
+  assert.match(html, /<iframe class="browser-html-frame" sandbox="allow-scripts" src=/);
+  assert.doesNotMatch(html, /allow-same-origin/);
+  assert.doesNotMatch(html, /allow-top-navigation/);
   assert.doesNotMatch(html, /api\/chat\/private/);
   assert.doesNotMatch(html, /api\/services\/call/);
 });

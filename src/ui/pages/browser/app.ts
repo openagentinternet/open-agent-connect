@@ -826,7 +826,7 @@ function renderRenderer(current) {
     return renderBlockedRenderer('Renderer URL blocked.');
   }
   if (type === 'html-iframe') {
-    return '<iframe class="browser-html-frame" sandbox src="' + escapeHtml(url) + '"></iframe>';
+    return '<iframe class="browser-html-frame" sandbox="allow-scripts" src="' + escapeHtml(url) + '"></iframe>';
   }
   if (type === 'pdf') {
     return '<section class="browser-pdf-wrap"><iframe class="browser-pdf" src="' + escapeHtml(url) + '"></iframe><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">Open PDF</a></section>';

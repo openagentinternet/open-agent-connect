@@ -50,6 +50,7 @@ async function writePreviewAssetResponse(context: RouteContext, result: { body: 
     'content-type': result.contentType,
     'content-length': Buffer.byteLength(body),
     'cache-control': 'no-store',
+    'access-control-allow-origin': '*',
   });
   context.res.end(body);
 }

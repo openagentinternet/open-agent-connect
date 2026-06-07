@@ -110,6 +110,7 @@ test('GET /api/metaapp/preview-assets/<previewId>/index.html forwards the asset 
   ]);
   assert.equal(body, '<!doctype html><title>MetaApp</title>');
   assert.equal(response.headers.get('content-type'), 'text/html; charset=utf-8');
+  assert.equal(response.headers.get('access-control-allow-origin'), '*');
 });
 
 test('GET /api/metaapp/preview-assets/<previewId>/missing.html maps failed asset results to non-success responses', async (t) => {

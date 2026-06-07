@@ -139,7 +139,7 @@ test('html-iframe renderer is sandboxed without privileged permissions', async (
 
   await waitFor(() => nodes['[data-browser-viewport]'].innerHTML.includes('browser-html-frame'), 'iframe render');
   const html = nodes['[data-browser-viewport]'].innerHTML;
-  assert.match(html, /<iframe class="browser-html-frame" sandbox src="https:\/\/metaweb\.example\/app"/);
+  assert.match(html, /<iframe class="browser-html-frame" sandbox="allow-scripts" src="https:\/\/metaweb\.example\/app"/);
   assert.doesNotMatch(html, /allow-same-origin/);
   assert.doesNotMatch(html, /allow-top-navigation/);
   assert.doesNotMatch(html, /wallet|payment|signing/i);
