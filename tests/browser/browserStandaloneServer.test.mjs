@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { createStandaloneBrowserServer } = require('../../dist/browser/standalone/server.js');
 const { createStandaloneBrowserHostAdapter } = require('../../dist/browser/standalone/adapter.js');
+const { writeMetaAppZipArchive } = require('../../dist/core/metaapp/zipArchive.js');
+
+const METAAPP_PIN_ID = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0';
+const ZIP_PIN_ID = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
 
 async function listen(server) {
   await new Promise((resolve) => {
@@ -18,6 +24,34 @@ async function listen(server) {
 
 async function readJson(response) {
   return response.json();
+}
+
+async function makeZipBuffer(title = 'Standalone Preview') {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), 'oac-standalone-metaapp-project-'));
+  await mkdir(path.join(projectDir, 'app'), { recursive: true });
+  await writeFile(path.join(projectDir, 'app', 'index.html'), `<!doctype html><title>${title}</title>`);
+  await writeFile(path.join(projectDir, 'app', 'app.js'), 'window.__standalonePreviewLoaded = true;');
+  const archivePath = path.join(await mkdtemp(path.join(os.tmpdir(), 'oac-standalone-metaapp-archive-')), 'metaapp.zip');
+  await writeMetaAppZipArchive({ sourceDir: projectDir, outFile: archivePath });
+  return readFile(archivePath);
+}
+
+function jsonResponse(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => 'application/json' },
+    json: async () => body,
+  };
+}
+
+function bufferResponse(buffer, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => 'application/zip' },
+    arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+  };
 }
 
 test('standalone Browser server serves Browser pages and shared CSS', async (t) => {
@@ -108,4 +142,52 @@ test('standalone Browser server resolves metaid resources through adapter fetch'
   assert.equal(payload.ok, true);
   assert.equal(payload.data.resourceType, 'bot');
   assert.equal(payload.data.renderer.type, 'bot-page');
+});
+
+test('standalone Browser server resolves MetaApps and serves preview assets', async (t) => {
+  const zipBuffer = await makeZipBuffer();
+  const adapter = createStandaloneBrowserHostAdapter({
+    fetch: async (url) => {
+      const textUrl = String(url);
+      if (textUrl === `https://manapi.metaid.io/pin/${METAAPP_PIN_ID}`) {
+        return jsonResponse({
+          data: {
+            id: METAAPP_PIN_ID,
+            path: '/protocols/metaapp',
+            address: '1StandalonePublisher',
+            timestamp: 1780833765,
+            contentSummary: JSON.stringify({
+              title: 'Standalone MetaApp',
+              appName: 'standalone-metaapp',
+              version: '1.0.0',
+              runtime: 'browser',
+              content: `metafile://${ZIP_PIN_ID}.zip`,
+              contentType: 'application/zip',
+              indexFile: 'index.html',
+            }),
+          },
+        });
+      }
+      if (textUrl.includes(`/content/${ZIP_PIN_ID}`)) {
+        return bufferResponse(zipBuffer);
+      }
+      throw new Error(`Unexpected fetch URL: ${textUrl}`);
+    },
+  });
+  const server = createStandaloneBrowserServer({ adapter });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = await listen(server);
+
+  const resolveResponse = await fetch(`${baseUrl}/api/browser/resolve?actorId=standalone-wallet&uri=metaapp%3A%2F%2F${METAAPP_PIN_ID}`);
+  const resolved = await readJson(resolveResponse);
+  assert.equal(resolveResponse.status, 200);
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.data.resourceType, 'metaapp');
+  assert.equal(resolved.data.renderer.type, 'html-iframe');
+  assert.match(resolved.data.renderer.url, /^\/api\/browser\/preview-assets\/standalone-/);
+
+  const previewResponse = await fetch(`${baseUrl}${resolved.data.renderer.url}`);
+  assert.equal(previewResponse.status, 200);
+  assert.match(previewResponse.headers.get('content-type'), /text\/html/);
+  assert.match(await previewResponse.text(), /Standalone Preview/);
 });
