@@ -6,10 +6,10 @@ import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
-import { buildBrowserPageDefinition } from '../../ui/pages/browser/app';
 import { buildLoomPageDefinition } from '../../ui/pages/loom/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
+import { renderBrowserPageHtml } from '../../browser/page';
 import type { MetabotUiPageName, RouteHandler } from './types';
 import { handleBundledMetaAppRoutes } from './uiMetaApps';
 
@@ -30,7 +30,6 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, () => LocalUiPageDefiniti
   'trace': buildTracePageDefinition,
   'refund': buildRefundPageDefinition,
   'bot': buildBotPageDefinition,
-  'browser': buildBrowserPageDefinition,
   'loom': buildLoomPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
 };
@@ -170,7 +169,7 @@ export const handleUiRoutes: RouteHandler = async (context) => {
     }
     const html = handlers.ui?.renderPage
       ? await handlers.ui.renderPage('browser')
-      : await renderBuiltInPage('browser');
+      : await renderBrowserPageHtml();
     context.sendHtml(200, html);
     return true;
   }
@@ -211,6 +210,14 @@ export const handleUiRoutes: RouteHandler = async (context) => {
   }
 
   const page = url.pathname.slice(UI_ROUTE_PREFIX.length).trim() as MetabotUiPageName;
+  if (page === 'browser') {
+    const html = handlers.ui?.renderPage
+      ? await handlers.ui.renderPage(page)
+      : await renderBrowserPageHtml();
+    context.sendHtml(200, html);
+    return true;
+  }
+
   if (!(page in PAGE_BUILDERS)) {
     context.sendJson(404, {
       ok: false,
