@@ -92,7 +92,7 @@ function readActionPayload(input: BrowserTrustedActionInput): Record<string, unk
 }
 
 function ownerActorIdFromPayload(payload: Record<string, unknown>): string {
-  return normalizeText(payload.ownerActorId) || normalizeText(payload.actorId);
+  return normalizeText(payload.ownerActorId);
 }
 
 function botManagementHref(slug: string, tab: 'info' | 'history', focus: string): string {

@@ -463,6 +463,43 @@ test('OAC browser host adapter rejects owner trusted actions with unknown owner 
   assert.match(result.code, /^(profile_not_found|invalid_browser_action)$/);
 });
 
+test('OAC browser host adapter rejects owner actions without ownerActorId even when actorId exists in payload', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-owner-action-no-owner-actor');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Active Owner Fallback Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1activefallback',
+    mvcAddress: '18ActiveFallback',
+  });
+  await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Alice Owner Fallback Bot',
+    homeDir: path.join(systemHomeDir, '.metabot', 'profiles', 'alice'),
+    globalMetaId: 'idq1alicefallback',
+    mvcAddress: '18AliceFallback',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1alicefallback',
+    kind: 'edit-profile',
+    payload: {
+      actorId: 'alice',
+      ownerGlobalMetaId: 'idq1alicefallback',
+      currentUri: 'metaid://idq1alicefallback',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_browser_action');
+});
+
 test('OAC browser host adapter rejects incomplete trusted action payloads', async (t) => {
   const profileHome = await createProfileHome('oac-browser-adapter-invalid-action');
   t.after(async () => cleanupProfileHome(profileHome));
