@@ -978,6 +978,54 @@ test('default bot createProfile from UI defaults providers by recent runtime act
   assert.equal(result.data.profile.fallbackProvider, 'codex');
 });
 
+test('default bot createProfile from UI applies METABOT_HOST provider defaults', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const originalHost = process.env.METABOT_HOST;
+  process.env.METABOT_HOST = 'codex';
+  t.after(() => {
+    if (originalHost === undefined) {
+      delete process.env.METABOT_HOST;
+    } else {
+      process.env.METABOT_HOST = originalHost;
+    }
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'ui-host-default-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      {
+        ...runtime('codex', 'runtime-codex', 'healthy'),
+        lastSeenAt: '2026-05-06T00:01:00.000Z',
+        updatedAt: '2026-05-06T00:01:00.000Z',
+      },
+      {
+        ...runtime('claude-code', 'runtime-claude', 'healthy'),
+        lastSeenAt: '2026-05-06T00:05:00.000Z',
+        updatedAt: '2026-05-06T00:05:00.000Z',
+      },
+    ],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'UI Host Default Bot',
+    creationSource: 'ui',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.primaryProvider, 'codex');
+  assert.equal(result.data.profile.fallbackProvider, 'claude-code');
+});
+
 test('default identity create notifies the daemon after registering the profile', async (t) => {
   const homeDir = await createProfileHome('metabot-default-identity-create-', 'callback-bot');
   t.after(async () => {

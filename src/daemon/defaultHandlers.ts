@@ -1161,9 +1161,6 @@ function normalizePreferredCreateProvider(value: unknown): LlmProvider | null {
 }
 
 function resolveMetabotCreatePreferredProvider(input: Record<string, unknown>): LlmProvider | null {
-  if (normalizeText(input.creationSource).toLowerCase() === 'ui') {
-    return null;
-  }
   return normalizePreferredCreateProvider(input.host)
     ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
     ?? normalizePreferredCreateProvider(process.env.OAC_HOST);

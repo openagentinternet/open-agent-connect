@@ -13,6 +13,8 @@ function field(value = '') {
     textContent: '',
     className: '',
     disabled: false,
+    focus: () => {},
+    addEventListener: () => {},
     getAttribute: (name) => attrs.get(name) ?? null,
     setAttribute: (name, next) => attrs.set(name, String(next)),
   };
@@ -504,9 +506,10 @@ test('bot page saveInfo omits allowChatSkills when selected chips are unchanged'
   assert.deepEqual(requestBody, { name: 'Alice Updated' });
 });
 
-test('bot page create flow keeps the new bot request free of chat skill settings', async () => {
+test('bot page create flow sends only public identity fields', async () => {
   const fields = {
-    '[data-field="new-name"]': field('Fanny'),
+    '[data-field="new-name"]': field('Alice'),
+    '[data-field="new-bio"]': field('Builds with Codex.'),
     '[data-add-status]': field(),
     '[data-act="confirm-add"]': field(),
   };
@@ -535,14 +538,87 @@ test('bot page create flow keeps the new bot request free of chat skill settings
   };
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
-  context.state.chatAllowedSkillsBySlug.fanny = ['weather.lookup'];
+  context.state._pendingCreateAvatar = 'data:image/png;base64,...';
+  context.state.chatAllowedSkillsBySlug.alice = ['weather.lookup'];
   context.closeAddModal = () => {};
   context.loadProfiles = () => Promise.resolve();
   context.showChainSuccessModal = () => {};
 
   await context.createMetabot();
 
-  assert.deepEqual(requestBody, { name: 'Fanny', creationSource: 'ui' });
+  assert.deepEqual(requestBody, {
+    name: 'Alice',
+    bio: 'Builds with Codex.',
+    avatarDataUrl: 'data:image/png;base64,...',
+    creationSource: 'ui',
+  });
+  for (const key of [
+    'primaryProvider',
+    'fallbackProvider',
+    'privateChat',
+    'autoReply',
+    'role',
+    'soul',
+    'goal',
+    'allowChatSkills',
+  ]) {
+    assert.equal(Object.hasOwn(requestBody, key), false, `request body should omit ${key}`);
+  }
+});
+
+test('bot page opens the creation modal after initial load when mode=create is requested', async () => {
+  const loaded = deferred();
+  let domReady = null;
+  let focused = false;
+  const classNames = new Set(['hidden']);
+  const modal = {
+    innerHTML: '',
+    onclick: null,
+    addEventListener: () => {},
+    classList: {
+      add: (name) => classNames.add(name),
+      remove: (name) => classNames.delete(name),
+      contains: (name) => classNames.has(name),
+    },
+  };
+  const name = field();
+  name.focus = () => {
+    focused = true;
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-modal="add-metabot"]': modal,
+      '[data-field="new-name"]': name,
+      '[data-add-status]': field(),
+      '[data-act="add-metabot"]': field(),
+      '[data-act="cancel-add"]': field(),
+      '[data-act="confirm-add"]': field(),
+    },
+    globals: {
+      URLSearchParams,
+      window: {
+        location: {
+          search: '?mode=create',
+        },
+      },
+    },
+  });
+  context.document.addEventListener = (event, handler) => {
+    if (event === 'DOMContentLoaded') domReady = handler;
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.loadAll = () => loaded.promise;
+
+  domReady();
+  assert.equal(classNames.has('hidden'), true);
+
+  loaded.resolve();
+  await loaded.promise;
+  await Promise.resolve();
+
+  assert.equal(classNames.has('hidden'), false);
+  assert.equal(focused, true);
 });
 
 test('bot page runtime modal renders healthy and detected runtimes only', () => {
@@ -763,7 +839,7 @@ test('bot page marks profiles whose primary LLM is unavailable in the list', () 
   assert.doesNotMatch(list.innerHTML, /Healthy Bot[\s\S]*\[LLM unavailable\]/);
 });
 
-test('bot page create flow reports chained identity and txids in a success modal', async () => {
+test('bot page create flow navigates to the Bot Page when the created profile has a GlobalMetaID', async () => {
   const fields = {
     '[data-field="new-name"]': field('Fanny'),
     '[data-add-status]': field(),
@@ -797,6 +873,11 @@ test('bot page create flow reports chained identity and txids in a success modal
         }),
       });
     },
+    window: {
+      location: {
+        href: '',
+      },
+    },
   };
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
@@ -810,9 +891,8 @@ test('bot page create flow reports chained identity and txids in a success modal
 
   assert.deepEqual(requestBody, { name: 'Fanny', creationSource: 'ui' });
   assert.equal(context.state.selectedSlug, 'fanny');
-  assert.equal(success.title, 'MetaBot Created On-Chain');
-  assert.equal(success.profile.globalMetaId, 'gm-fanny');
-  assert.deepEqual(success.chainWrites.flatMap((write) => write.txids), ['tx-name', 'tx-chat']);
+  assert.equal(context.window.location.href, '/browser/metaid/gm-fanny');
+  assert.equal(success, null);
 });
 
 test('bot page save flow reports chain txids in a modal instead of inline saved text', async () => {

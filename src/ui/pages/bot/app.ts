@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_pendingCreateAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -33,6 +33,7 @@ function duration(s){var d=s&&s.result&&typeof s.result.durationMs==='number'?s.
 function resultSummary(s){if(!s||!s.result)return'-';if(s.result.output)return s.result.output;if(s.result.error)return s.result.error;return s.result.status||'-'}
 function runtimeLabel(r){var name=r.displayName||r.provider||r.id||'-';var bits=[name];if(r.health)bits.push(r.health);if(r.version)bits.push('v'+r.version);return bits.join(' / ')}
 function shortId(v){v=String(v||'');if(!v)return'-';return v.length>18?v.slice(0,12)+'...'+v.slice(-4):v}
+function botBrowserPath(globalMetaId){return '/browser/metaid/'+encodeURIComponent(String(globalMetaId||'').trim())}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
@@ -417,18 +418,23 @@ function renderAvatarPreview(dataUrl){
   preview.innerHTML=avatarMarkup({name:profile.name,avatarDataUrl:dataUrl},true);
 }
 
-function handleAvatarUpload(file){
-  var status=q('[data-avatar-status]');
+function readAvatarFile(file,status,onReady){
   if(file.size>200*1024){if(status){status.textContent='Avatar must be 200KB or smaller.';status.className='save-status error'}return}
   var reader=new FileReader();
   reader.onload=function(){
-    state._pendingAvatar=String(reader.result||'');
-    renderAvatarPreview(state._pendingAvatar);
-    var remove=q('[data-act="remove-avatar"]');if(remove)remove.hidden=false;
+    onReady(String(reader.result||''));
     if(status){status.textContent='Ready to save';status.className='save-status success'}
   };
   reader.onerror=function(){if(status){status.textContent='Upload failed';status.className='save-status error'}};
   reader.readAsDataURL(file);
+}
+function handleAvatarUpload(file){
+  var status=q('[data-avatar-status]');
+  readAvatarFile(file,status,function(dataUrl){
+    state._pendingAvatar=dataUrl;
+    renderAvatarPreview(state._pendingAvatar);
+    var remove=q('[data-act="remove-avatar"]');if(remove)remove.hidden=false;
+  });
 }
 
 function changedValue(payload,field,next,current){
@@ -892,25 +898,89 @@ function testRuntime(runtimeId){
     });
 }
 
+function createAvatarPreviewMarkup(){
+  var name=q('[data-field="new-name"]');var value=state._pendingCreateAvatar;
+  return avatarMarkup({name:name&&name.value||'MB',avatarDataUrl:value},true);
+}
+function renderCreateAvatarPreview(){
+  var preview=q('[data-create-avatar-preview]');if(preview)preview.innerHTML=createAvatarPreviewMarkup();
+}
+function createModalMarkup(){
+  return '<div class="modal-box">'+
+    '<div class="modal-title" id="add-metabot-title">Add MetaBot</div>'+
+    '<div class="modal-body">'+
+      '<div class="info-avatar-section">'+
+        '<div class="info-avatar-preview" data-create-avatar-preview>'+createAvatarPreviewMarkup()+'</div>'+
+        '<div class="info-avatar-actions">'+
+          '<button class="btn btn-sm" data-act="upload-create-avatar">Upload</button>'+
+          '<button class="btn btn-sm btn-danger" data-act="remove-create-avatar"'+(state._pendingCreateAvatar?'':' hidden')+'>Remove</button>'+
+          '<input type="file" data-field="new-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
+          '<span class="save-status" data-create-avatar-status></span>'+
+        '</div>'+
+      '</div>'+
+      '<div class="field">'+
+        '<label for="new-metabot-name">Name</label>'+
+        '<input id="new-metabot-name" type="text" data-field="new-name" maxlength="60" autocomplete="off" />'+
+      '</div>'+
+      '<div class="field field-full">'+
+        '<label for="new-metabot-bio">Bio</label>'+
+        '<textarea id="new-metabot-bio" data-field="new-bio"></textarea>'+
+      '</div>'+
+    '</div>'+
+    '<div class="modal-actions">'+
+      '<button class="btn" data-act="cancel-add">Cancel</button>'+
+      '<button class="btn btn-primary" data-act="confirm-add">Create</button>'+
+    '</div>'+
+    '<div class="save-status" data-add-status></div>'+
+  '</div>';
+}
+function handleCreateAvatarUpload(file){
+  var status=q('[data-create-avatar-status]');
+  readAvatarFile(file,status,function(dataUrl){
+    state._pendingCreateAvatar=dataUrl;
+    renderCreateAvatarPreview();
+    var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.hidden=false;
+  });
+}
+function wireCreateModalControls(){
+  var cancel=q('[data-act="cancel-add"]');if(cancel)cancel.addEventListener('click',closeAddModal);
+  var confirm=q('[data-act="confirm-add"]');if(confirm)confirm.addEventListener('click',createMetabot);
+  var name=q('[data-field="new-name"]');if(name){name.addEventListener('keydown',function(event){if(event.key==='Enter')createMetabot();if(event.key==='Escape')closeAddModal()});name.addEventListener('input',renderCreateAvatarPreview)}
+  var file=q('[data-field="new-avatar-file"]');
+  var upload=q('[data-act="upload-create-avatar"]');if(upload&&file)upload.addEventListener('click',function(){file.click()});
+  var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingCreateAvatar=undefined;renderCreateAvatarPreview();this.hidden=true});
+  if(file)file.addEventListener('change',function(){var selected=this.files&&this.files[0];if(selected)handleCreateAvatarUpload(selected)});
+}
 function openAddModal(){
-  var modal=q('[data-modal="add-metabot"]');var input=q('[data-field="new-name"]');var status=q('[data-add-status]');
+  var modal=q('[data-modal="add-metabot"]');
+  state._pendingCreateAvatar=undefined;
+  if(modal)modal.innerHTML=createModalMarkup();
+  var input=q('[data-field="new-name"]');var status=q('[data-add-status]');
   if(status){status.textContent='';status.className='save-status'}
   if(input)input.value='';
+  wireCreateModalControls();
   if(modal)modal.classList.remove('hidden');
   if(input)input.focus();
 }
-function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden')}
+function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden');state._pendingCreateAvatar=undefined}
 function createMetabot(){
-  var input=q('[data-field="new-name"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();
+  var input=q('[data-field="new-name"]');var bioInput=q('[data-field="new-bio"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();var bio=(bioInput&&bioInput.value||'').trim();
   if(!name){if(status){status.textContent='Name is required';status.className='save-status error'}return}
   if(status){status.textContent='Creating...';status.className='save-status saving'}
   if(btn)btn.disabled=true;
-  return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:name,creationSource:'ui'})}).then(function(r){
+  var body={name:name,creationSource:'ui'};
+  if(bio)body.bio=bio;
+  if(state._pendingCreateAvatar)body.avatarDataUrl=state._pendingCreateAvatar;
+  return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     closeAddModal();
     var profile=r.data&&r.data.profile||{};
     state.selectedSlug=profile.slug||state.selectedSlug;
     state.selectedTab='info';
     return loadProfiles().then(function(){
+      if(profile.globalMetaId){
+        window.location.href=botBrowserPath(profile.globalMetaId);
+        return;
+      }
       showChainSuccessModal({
         title:'MetaBot Created On-Chain',
         message:'The on-chain identity has been created. Basic Info is ready for optional edits.',
@@ -936,9 +1006,26 @@ function copyToClipboard(text){
 function fallbackCopy(text){
   var el=document.createElement('textarea');el.value=text;el.setAttribute('readonly','');el.style.position='fixed';el.style.opacity='0';document.body.appendChild(el);el.select();try{document.execCommand('copy');showToast('Copied!')}catch(error){showToast('Copy failed')}document.body.removeChild(el)
 }
+function createModeRequested(){
+  try{
+    var search=typeof window!=='undefined'&&window.location?window.location.search:'';
+    return new URLSearchParams(search||'').get('mode')==='create';
+  }catch(error){return false}
+}
+function modalIsOpen(el){
+  return Boolean(el&&el.classList&&typeof el.classList.contains==='function'&&!el.classList.contains('hidden'));
+}
+function anyModalOpen(){
+  return modalIsOpen(q('[data-modal="add-metabot"]'))||modalIsOpen(modalRoot());
+}
 
 document.addEventListener('DOMContentLoaded',function(){
-  loadAll();
+  var initialLoad=loadAll();
+  if(initialLoad&&typeof initialLoad.then==='function'){
+    initialLoad.then(function(){if(createModeRequested()&&!anyModalOpen())openAddModal()});
+  }else if(createModeRequested()&&!anyModalOpen()){
+    openAddModal();
+  }
   var add=q('[data-act="add-metabot"]');if(add)add.addEventListener('click',openAddModal);
   var cancel=q('[data-act="cancel-add"]');if(cancel)cancel.addEventListener('click',closeAddModal);
   var confirm=q('[data-act="confirm-add"]');if(confirm)confirm.addEventListener('click',createMetabot);
