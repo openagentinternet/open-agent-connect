@@ -66,6 +66,7 @@ Runtime identity, persistence, wallet, and privileged actions are host-provided.
 - Make the standalone hosted Browser a first-class deployment target.
 - Keep OAC and IDBots integration thin and contract-based.
 - Make the top-right "current user" area host-neutral.
+- Model the current resource owner separately from the current actor.
 - Support wallet login and wallet-backed signing/payments in the standalone host.
 - Keep OAC Bot profile behavior available through an OAC adapter.
 - Keep IDBots account or agent behavior available through an IDBots adapter.
@@ -111,6 +112,8 @@ OAC remains a local runtime host. Its adapter maps OAC concepts into Browser con
 - MetaApp cache operations map to OAC's local cache;
 - private chat, service calls, Bot profile actions, and local message views map to trusted OAC
   actions;
+- visiting a local Bot homepage can surface host-provided owner management actions such as
+  editing the profile, configuring chat, viewing messages, and sharing the Bot page;
 - OAC may keep local daemon routes, but route handlers should delegate to the Browser package.
 
 ### IDBots Embedded Browser
@@ -120,6 +123,8 @@ IDBots should consume the same Browser package and provide its own host adapter:
 - the top-right actor control maps to IDBots account, agent, or identity state;
 - settings and cache map to IDBots application storage;
 - IDBots-specific actions map to IDBots routes or local services;
+- visiting a resource owned by the current IDBots account or agent may surface IDBots-owned
+  management actions through the same trusted-action contract;
 - the Browser core does not know whether the backing account is stored in SQLite.
 
 ## Repository Shape
@@ -218,6 +223,7 @@ Owns stable host integration contracts and conformance tests:
 - `BrowserHostAdapter`;
 - `BrowserHostClient`;
 - actor model;
+- resource owner affinity model;
 - runtime snapshot;
 - settings snapshot;
 - cache snapshot;
@@ -324,6 +330,8 @@ type BrowserActorCapability =
   | "payment"
   | "template-settings"
   | "profile-management"
+  | "chat-configuration"
+  | "resource-sharing"
   | "message-view";
 
 interface BrowserActor {
@@ -343,6 +351,52 @@ Actions should be enabled by capabilities, not by host name. For example:
 - OAC Bot actor: `private-chat`, `service-call`, `template-settings`;
 - standalone wallet actor: `wallet-sign`, `payment`, `template-settings`;
 - IDBots account actor: whatever IDBots can actually support.
+
+## Resource Owner Affinity
+
+The Browser has two related but different identities:
+
+- the current actor: the user/account/Bot/wallet currently operating the Browser;
+- the current resource owner: the identity that owns the visited Bot page, MetaApp, document, or
+  other resource.
+
+These must not be collapsed into one concept. A user may visit another Bot's homepage while using
+their own actor. A host may also detect that the visited resource belongs to one of the local or
+logged-in actors. In that case, the Browser can show first-party owner controls without making the
+renderer depend on host internals.
+
+Recommended model:
+
+```ts
+interface BrowserResourceOwner {
+  kind: "bot" | "metaapp-publisher" | "wallet-user" | "unknown";
+  globalMetaId?: string;
+  address?: string;
+  label: string;
+  avatar?: string;
+  verificationState: "verified" | "partial" | "unverified";
+}
+
+interface BrowserOwnerAffinity {
+  ownerActorId: string;
+  ownerGlobalMetaId?: string;
+  capabilities: BrowserActorCapability[];
+  actions: BrowserTrustedActionDescriptor[];
+}
+```
+
+The affinity can be computed by the host adapter or by the Browser from runtime actors and the
+resource owner identity. The important rule is that owner management stays a trusted Browser
+action. The rendered resource should not hardcode OAC profile routes, IDBots account routes, or
+standalone wallet/account routes.
+
+Examples:
+
+- OAC: local Bot owner affinity can expose edit profile, configure chat, view messages, and share
+  Bot page controls.
+- Standalone: a wallet-owned page can expose wallet-backed profile or publication controls only
+  after the wallet is connected.
+- IDBots: an account-owned resource can expose IDBots account or agent management controls.
 
 ## Host Adapter Contract
 
@@ -408,6 +462,7 @@ interface BrowserResourceEnvelope {
   resourceType: "bot" | "metaapp" | "document" | "image" | "pdf" | "unknown";
   title: string;
   owner?: BrowserResourceOwner;
+  ownerAffinity?: BrowserOwnerAffinity | null;
   proof?: BrowserResourceProof;
   renderer: BrowserRendererDescriptor;
   actions: BrowserTrustedActionDescriptor[];
@@ -495,17 +550,67 @@ type BrowserTrustedActionKind =
   | "payment"
   | "edit-profile"
   | "configure-chat"
-  | "view-messages";
+  | "view-messages"
+  | "share-resource";
 ```
 
 The host decides whether a trusted action is supported:
 
 - OAC handles private chat, service calls, profile edits, chat config, and local messages;
-- standalone handles login, wallet signing, and payments through Metalet;
+- standalone handles login, wallet signing, payments, and wallet-owned management actions through
+  Metalet or hosted APIs;
 - IDBots handles its own account and agent actions.
 
 If a host does not support an action, it should fail closed with a structured unsupported-action
 result. The Browser UI should display that as a normal unavailable action, not as a crash.
+
+Trusted actions that navigate to host-owned UI should return structured navigation data instead
+of making Browser core construct host URLs.
+
+```ts
+interface BrowserTrustedActionResult {
+  kind: BrowserTrustedActionKind;
+  handled: boolean;
+  data?: {
+    href?: string;
+    route?: string;
+    copiedText?: string;
+    message?: string;
+  };
+}
+```
+
+Each host client is responsible for validating action results before navigation. For example, OAC
+may allow local Bot management routes, while standalone should allow only hosted same-origin
+account or wallet routes.
+
+## Host Onboarding
+
+No-actor states are host-specific:
+
+- standalone should prompt the user to connect Metalet;
+- OAC should prompt the user to create or activate a local Bot;
+- IDBots should prompt the user to select or create the relevant account or agent.
+
+The Browser runtime snapshot should therefore keep setup copy and setup actions host-provided.
+The core UI can render a primary setup action, but it should not know whether that action means
+`Connect Wallet`, `Create Bot`, `Activate Bot`, or `Select Account`.
+
+```ts
+interface BrowserRuntimeLabels {
+  actorChip: string;
+  noActorTitle: string;
+  noActorBody: string;
+  noActorAction?: {
+    label: string;
+    href?: string;
+    actionKind?: BrowserTrustedActionKind;
+  };
+}
+```
+
+This keeps OAC Bot activation loops, standalone wallet connection, and IDBots account selection
+behind the same host boundary.
 
 ## Standalone Wallet Model
 
@@ -592,6 +697,9 @@ storage and account internals. If an adapter becomes generic enough later, it ca
 - it returns a valid runtime snapshot;
 - actors have stable ids, labels, kinds, and capabilities;
 - no-actor behavior is well defined;
+- no-actor onboarding actions are host-provided and safe to render;
+- resource owner identity is distinct from the current actor;
+- local or logged-in owner affinity exposes only supported owner actions;
 - settings read/write round-trips;
 - resource resolution returns normalized envelopes;
 - cache operations follow the declared feature flags;
@@ -625,6 +733,8 @@ as shared code:
 - built-in Bot homepage templates;
 - settings categories;
 - trusted actions;
+- owner affinity and self-management actions;
+- no-actor onboarding behavior;
 - actor and runtime labels;
 - cache and preview expectations;
 - inspector and browser chrome behavior.
@@ -707,6 +817,8 @@ The architecture succeeds when:
 
 - standalone, OAC, and IDBots use the same Browser UI/rendering/template code;
 - the top-right actor control is host-specific without Browser forks;
+- resource owner management is available through host adapters without hardcoding host routes in
+  Browser core;
 - standalone can use Metalet wallet login without OAC dependencies;
 - OAC can keep local Bot functionality without standalone wallet assumptions;
 - IDBots can use its account system without Browser core knowing SQLite;
