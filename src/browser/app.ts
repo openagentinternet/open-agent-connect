@@ -89,15 +89,17 @@ export function buildBrowserPageDefinition(): BrowserPageDefinition {
           </div>
         </header>
         <div class="browser-owner-toolbar" data-browser-owner-toolbar hidden></div>
-        <aside class="browser-drawer" data-browser-drawer hidden></aside>
-        <main class="browser-viewport" data-browser-viewport></main>
+        <div class="browser-viewport-row" data-browser-viewport-row>
+          <aside class="browser-drawer" data-browser-drawer hidden></aside>
+          <main class="browser-viewport" data-browser-viewport></main>
+          <aside class="browser-inspector" data-browser-inspector hidden></aside>
+        </div>
         <footer class="browser-status-strip" data-browser-status-strip>
           <button type="button" data-browser-status-state>loading</button>
           <button type="button" data-browser-status-proof>unverified</button>
           <span data-browser-status-renderer>renderer: unsupported</span>
           <button type="button" data-browser-status-txid>TXID: -</button>
         </footer>
-        <aside class="browser-inspector" data-browser-inspector hidden></aside>
         <div class="browser-modal" data-browser-modal-root hidden></div>
       </section>
     `,

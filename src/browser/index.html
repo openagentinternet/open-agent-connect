@@ -97,6 +97,7 @@
       .browser-titlebar,
       .browser-topbar,
       .browser-owner-toolbar,
+      .browser-viewport-row,
       .browser-status-strip {
         grid-column: 1 / -1;
       }
@@ -439,8 +440,27 @@
         background: #f8fbff;
         color: var(--browser-accent);
       }
-      .browser-viewport {
+      .browser-viewport-row {
         grid-row: 4;
+        grid-column: 1 / -1;
+        min-width: 0;
+        min-height: 0;
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        overflow: hidden;
+      }
+      .browser-shell.has-drawer .browser-viewport-row {
+        grid-template-columns: 264px minmax(0, 1fr);
+      }
+      .browser-shell.has-inspector .browser-viewport-row {
+        grid-template-columns: minmax(0, 1fr) 324px;
+      }
+      .browser-shell.has-drawer.has-inspector .browser-viewport-row {
+        grid-template-columns: 264px minmax(0, 1fr) 324px;
+      }
+      .browser-viewport {
+        grid-row: 1;
         grid-column: 1;
         min-width: 0;
         min-height: 0;
@@ -458,7 +478,7 @@
       }
       .browser-drawer,
       .browser-inspector {
-        grid-row: 4;
+        grid-row: 1;
         min-width: 0;
         min-height: 0;
         overflow: auto;
@@ -1229,14 +1249,22 @@
         .browser-shell.has-drawer .browser-viewport,
         .browser-shell.has-inspector:not(.has-drawer) .browser-viewport,
         .browser-shell.has-drawer.has-inspector .browser-viewport {
+          grid-row: 1;
+          grid-column: 1;
+        }
+        .browser-viewport-row,
+        .browser-shell.has-drawer .browser-viewport-row,
+        .browser-shell.has-inspector .browser-viewport-row,
+        .browser-shell.has-drawer.has-inspector .browser-viewport-row {
           grid-row: 4;
           grid-column: 1;
+          grid-template-columns: minmax(0, 1fr);
         }
         .browser-drawer,
         .browser-inspector,
         .browser-shell.has-drawer .browser-inspector {
           position: absolute;
-          grid-row: 4;
+          grid-row: 1;
           top: 0;
           bottom: 0;
           width: min(330px, 88vw);

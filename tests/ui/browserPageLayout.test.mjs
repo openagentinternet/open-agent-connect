@@ -4,7 +4,9 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const playwright = await import('playwright');
 const { buildBrowserPageDefinition } = require('../../dist/ui/pages/browser/app.js');
+const { renderBrowserPageHtml } = require('../../dist/browser/page.js');
 const template = readFileSync(new URL('../../src/browser/index.html', import.meta.url), 'utf8');
 
 function cssBlock(selector) {
@@ -58,8 +60,13 @@ test('Browser page locks outer document while renderer viewport owns content scr
   assertDeclaration(browserShellBlock, 'overflow', 'hidden');
   assertDeclaration(browserShellBlock, 'grid-template-rows', '34px 58px auto minmax(0, 1fr) 32px');
 
+  const viewportRowBlock = cssBlock('.browser-viewport-row');
+  assertDeclaration(viewportRowBlock, 'grid-row', '4');
+  assertDeclaration(viewportRowBlock, 'position', 'relative');
+  assertDeclaration(viewportRowBlock, 'overflow', 'hidden');
+
   const viewportBlock = cssBlock('.browser-viewport');
-  assertDeclaration(viewportBlock, 'grid-row', '4');
+  assertDeclaration(viewportBlock, 'grid-row', '1');
   assertDeclaration(viewportBlock, 'min-height', '0');
   assertDeclaration(viewportBlock, 'overflow', 'auto');
 });
@@ -99,9 +106,84 @@ test('Responsive Browser drawer and inspector overlay the viewport row, not owne
   );
 
   assertDeclaration(responsivePanelBlock, 'position', 'absolute');
-  assertDeclaration(responsivePanelBlock, 'grid-row', '4');
+  assertDeclaration(responsivePanelBlock, 'grid-row', '1');
   assertDeclaration(responsivePanelBlock, 'top', '0');
   assertDeclaration(responsivePanelBlock, 'bottom', '0');
   assertNoDeclaration(responsivePanelBlock, 'position', 'fixed');
   assertNoDeclaration(responsivePanelBlock, 'top', '120px');
+});
+
+test('Responsive Browser overlays stay within renderer viewport geometry', async () => {
+  const browser = await playwright.chromium.launch();
+  let page;
+  try {
+    page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    await page.setContent(await renderBrowserPageHtml(buildBrowserPageDefinition()), { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      const shell = document.querySelector('[data-browser-shell]');
+      const ownerToolbar = document.querySelector('[data-browser-owner-toolbar]');
+      const viewport = document.querySelector('[data-browser-viewport]');
+      const drawer = document.querySelector('[data-browser-drawer]');
+      const inspector = document.querySelector('[data-browser-inspector]');
+
+      shell.classList.add('has-drawer', 'has-inspector');
+      ownerToolbar.hidden = false;
+      ownerToolbar.innerHTML = [
+        '<span class="browser-owner-label">Local Bot: Alice</span>',
+        '<button type="button" data-browser-owner-action="edit-profile">Edit Profile</button>',
+        '<button type="button" data-browser-owner-action="configure-chat">Configure Chat</button>',
+        '<button type="button" data-browser-owner-action="view-messages">View Messages</button>',
+        '<button type="button" data-browser-owner-action="share">Share Bot Page</button>',
+      ].join('');
+      viewport.innerHTML = '<section class="browser-empty-state"><h2>Viewport content</h2></section>';
+      drawer.hidden = false;
+      drawer.innerHTML = '<section class="browser-drawer-panel"><h2>Library</h2></section>';
+      inspector.hidden = false;
+      inspector.innerHTML = '<section class="browser-inspector-panel"><h2>Inspector</h2></section>';
+    });
+
+    const geometry = await page.evaluate(() => {
+      function rect(selector) {
+        const box = document.querySelector(selector).getBoundingClientRect();
+        return {
+          top: box.top,
+          right: box.right,
+          bottom: box.bottom,
+          left: box.left,
+          width: box.width,
+          height: box.height,
+        };
+      }
+      return {
+        ownerToolbar: rect('[data-browser-owner-toolbar]'),
+        viewport: rect('[data-browser-viewport]'),
+        drawer: rect('[data-browser-drawer]'),
+        inspector: rect('[data-browser-inspector]'),
+        status: rect('[data-browser-status-strip]'),
+      };
+    });
+
+    assert.ok(
+      geometry.ownerToolbar.bottom <= geometry.viewport.top + 1,
+      `owner toolbar should be above viewport: owner=${JSON.stringify(geometry.ownerToolbar)} viewport=${JSON.stringify(geometry.viewport)}`
+    );
+    for (const panelName of ['drawer', 'inspector']) {
+      const panel = geometry[panelName];
+      assert.ok(
+        panel.top >= geometry.viewport.top - 1,
+        `${panelName} top should be at or below viewport top: panel=${JSON.stringify(panel)} viewport=${JSON.stringify(geometry.viewport)}`
+      );
+      assert.ok(
+        panel.bottom <= geometry.viewport.bottom + 1,
+        `${panelName} bottom should be at or before viewport bottom: panel=${JSON.stringify(panel)} viewport=${JSON.stringify(geometry.viewport)}`
+      );
+      assert.ok(
+        panel.bottom <= geometry.status.top + 1,
+        `${panelName} should not overlap status chrome: panel=${JSON.stringify(panel)} status=${JSON.stringify(geometry.status)}`
+      );
+    }
+  } finally {
+    if (page) await page.close();
+    await browser.close();
+  }
 });

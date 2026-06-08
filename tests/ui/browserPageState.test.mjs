@@ -510,6 +510,43 @@ test('Browser hides Owner Mode for MetaApp resources even when owner is local', 
   assert.equal(ownerToolbar.innerHTML, '');
 });
 
+test('Browser resolve errors clear visible Owner Mode toolbar', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext({
+    resolveResponse: (uri) => {
+      if (uri === 'metaid://missing') {
+        return { ok: false, message: 'Resolve failed.' };
+      }
+      return resolvedBot(uri, 'Alice');
+    },
+  });
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  context.state.runtime = {
+    actors: [
+      { id: 'alice', label: 'Alice', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: true, capabilities: [] },
+    ],
+    labels: { actorChip: 'Using' },
+  };
+  context.state.current = {
+    resourceType: 'bot',
+    normalizedUri: 'metaid://idq1alice',
+    title: 'Alice',
+    owner: { globalMetaId: 'idq1alice', name: 'Alice' },
+    renderer: { type: 'bot-page' },
+    status: { verificationState: 'verified' },
+  };
+  context.renderCurrent();
+
+  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
+  assert.equal(ownerToolbar.hidden, false);
+
+  await context.resolveUri('metaid://missing', { record: false });
+
+  assert.equal(ownerToolbar.hidden, true);
+  assert.equal(ownerToolbar.innerHTML, '');
+});
+
 test('Browser resource chip prefers MetaApp title over publisher identity', async () => {
   const { elements, fetchCalls } = createBrowserContext({
     resolveResponse: (uri) => ({
