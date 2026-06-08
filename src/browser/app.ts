@@ -88,6 +88,7 @@ export function buildBrowserPageDefinition(): BrowserPageDefinition {
             <div class="browser-chrome-menu" data-browser-menu role="menu" hidden></div>
           </div>
         </header>
+        <div class="browser-owner-toolbar" data-browser-owner-toolbar hidden></div>
         <aside class="browser-drawer" data-browser-drawer hidden></aside>
         <main class="browser-viewport" data-browser-viewport></main>
         <footer class="browser-status-strip" data-browser-status-strip>
@@ -292,6 +293,7 @@ function bindElements() {
     usingChip: document.querySelector('[data-browser-using-selector]'),
     menuTrigger: document.querySelector('[data-browser-menu-trigger]'),
     menu: document.querySelector('[data-browser-menu]'),
+    ownerToolbar: document.querySelector('[data-browser-owner-toolbar]'),
     viewport: document.querySelector('[data-browser-viewport]'),
     statusState: document.querySelector('[data-browser-status-state]'),
     statusProof: document.querySelector('[data-browser-status-proof]'),
@@ -685,6 +687,19 @@ function currentResourceUri() {
     textValue(elements.input && elements.input.value);
 }
 
+function currentOwnerGlobalMetaId() {
+  if (!state.current || state.current.resourceType !== 'bot') return '';
+  return textValue(state.current.owner && state.current.owner.globalMetaId);
+}
+
+function findLocalOwnerActor() {
+  var globalMetaId = currentOwnerGlobalMetaId();
+  if (!globalMetaId) return null;
+  return runtimeActors().find(function(actor) {
+    return textValue(actor && actor.globalMetaId) === globalMetaId;
+  }) || null;
+}
+
 function renderUsingIdentity() {
   var actor = selectedActor();
   if (elements.usingChip) {
@@ -700,6 +715,23 @@ function renderUsingIdentity() {
   }
 }
 
+function renderOwnerToolbar() {
+  var owner = findLocalOwnerActor();
+  if (!elements.ownerToolbar) return;
+  if (!owner) {
+    elements.ownerToolbar.hidden = true;
+    elements.ownerToolbar.innerHTML = '';
+    return;
+  }
+  elements.ownerToolbar.hidden = false;
+  elements.ownerToolbar.innerHTML =
+    '<span class="browser-owner-label">Local Bot: ' + escapeHtml(owner.label || 'Bot') + '</span>' +
+    '<button type="button" data-browser-owner-action="edit-profile">Edit Profile</button>' +
+    '<button type="button" data-browser-owner-action="configure-chat">Configure Chat</button>' +
+    '<button type="button" data-browser-owner-action="view-messages">View Messages</button>' +
+    '<button type="button" data-browser-owner-action="share">Share Bot Page</button>';
+}
+
 function renderNoLocalBot() {
   var title = runtimeLabel('noActorTitle', 'No Browser actor');
   var body = runtimeLabel('noActorBody', 'Connect an actor before using Browser actions.');
@@ -708,6 +740,7 @@ function renderNoLocalBot() {
   var actionLabel = action && typeof action === 'object' ? textValue(action.label) : '';
   setStatus('ready', '');
   state.current = null;
+  renderOwnerToolbar();
   if (elements.resourceChip) {
     elements.resourceChip.innerHTML = avatarHtml('', 'Resource', 'browser-chip-avatar') +
       '<span class="browser-chip-copy"><span class="browser-chip-title">No resource</span><span class="browser-chip-subtitle">' + escapeHtml(title) + '</span></span>' +
@@ -750,6 +783,7 @@ function renderCurrent() {
   if (elements.statusProof) elements.statusProof.innerHTML = proofIconHtml(proofState) + '<span>' + escapeHtml(proofState) + '</span>';
   if (elements.statusRenderer) elements.statusRenderer.textContent = 'renderer: ' + rendererType;
   if (elements.statusTxid) elements.statusTxid.textContent = 'TXID: ' + (shortId(txid) || '-');
+  renderOwnerToolbar();
   if (elements.viewport) {
     elements.viewport.innerHTML = renderRenderer(current);
   }
@@ -1404,6 +1438,8 @@ async function resolveUri(uri, options) {
     return result;
   } catch (error) {
     setStatus('error', error && error.message ? error.message : 'Resolve failed.');
+    state.current = null;
+    renderOwnerToolbar();
     if (elements.viewport) {
       elements.viewport.innerHTML = '<section class="browser-empty-state"><h2>Resolve failed</h2><p>' + escapeHtml(state.error) + '</p></section>';
     }

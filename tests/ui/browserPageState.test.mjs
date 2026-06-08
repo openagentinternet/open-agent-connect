@@ -10,7 +10,7 @@ class FakeElement {
   constructor(value = '') {
     this.value = value;
     this.textContent = '';
-    this.innerHTML = '';
+    this._innerHTML = '';
     this.hidden = false;
     this.disabled = false;
     this.listeners = new Map();
@@ -28,6 +28,15 @@ class FakeElement {
         else delete this.attrs[`class:${name}`];
       },
     };
+  }
+
+  get innerHTML() {
+    return this._innerHTML;
+  }
+
+  set innerHTML(value) {
+    this._innerHTML = String(value);
+    this.textContent = this._innerHTML.replace(/<[^>]*>/g, '');
   }
 
   addEventListener(eventName, handler) {
@@ -86,6 +95,7 @@ function createElements() {
     '[data-browser-using-selector]': new FakeElement(),
     '[data-browser-menu-trigger]': new FakeElement(),
     '[data-browser-menu]': new FakeElement(),
+    '[data-browser-owner-toolbar]': new FakeElement(),
     '[data-browser-viewport]': new FakeElement(),
     '[data-browser-status-strip]': new FakeElement(),
     '[data-browser-status-state]': new FakeElement(),
@@ -303,6 +313,144 @@ test('Browser renders current resource identity separately from using identity',
   assert.match(elements['[data-browser-resource-chip]'].innerHTML, /Alice Resource/);
   assert.match(elements['[data-browser-resource-chip]'].innerHTML, /idq1alice/);
   assert.match(elements['[data-browser-using-selector]'].innerHTML, /Using: Worker Bot/);
+});
+
+test('Browser shows Owner Mode for local Bot Page owner', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  context.state.runtime = {
+    actors: [
+      { id: 'alice', label: 'Alice', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: true, capabilities: [] },
+    ],
+    labels: { actorChip: 'Using' },
+  };
+  context.state.current = {
+    resourceType: 'bot',
+    normalizedUri: 'metaid://idq1alice',
+    title: 'Alice',
+    owner: { globalMetaId: 'idq1alice', name: 'Alice' },
+    renderer: { type: 'bot-page' },
+    status: { verificationState: 'verified' },
+  };
+  context.renderCurrent();
+
+  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
+  assert.equal(ownerToolbar.hidden, false);
+  assert.match(ownerToolbar.textContent, /Local Bot: Alice/);
+  assert.match(ownerToolbar.textContent, /Edit Profile/);
+  assert.match(ownerToolbar.textContent, /Configure Chat/);
+  assert.match(ownerToolbar.textContent, /View Messages/);
+  assert.match(ownerToolbar.textContent, /Share Bot Page/);
+});
+
+test('Browser hides Owner Mode for remote Bot Page owner', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  context.state.runtime = {
+    actors: [
+      { id: 'alice', label: 'Alice', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: true, capabilities: [] },
+    ],
+    labels: { actorChip: 'Using' },
+  };
+  context.state.current = {
+    resourceType: 'bot',
+    normalizedUri: 'metaid://idq1remote',
+    title: 'Remote',
+    owner: { globalMetaId: 'idq1remote', name: 'Remote' },
+    renderer: { type: 'bot-page' },
+    status: { verificationState: 'verified' },
+  };
+  context.renderCurrent();
+
+  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
+  assert.equal(ownerToolbar.hidden, true);
+  assert.equal(ownerToolbar.innerHTML, '');
+});
+
+test('Browser shows Owner Mode for local Bot Page owner even when Using actor differs', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  context.state.runtime = {
+    actors: [
+      { id: 'alice', label: 'Alice', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: false, capabilities: [] },
+      { id: 'worker', label: 'Worker Bot', kind: 'oac-bot', globalMetaId: 'idq1worker', isDefault: true, capabilities: [] },
+    ],
+    labels: { actorChip: 'Using' },
+  };
+  context.state.actorId = 'worker';
+  context.state.current = {
+    resourceType: 'bot',
+    normalizedUri: 'metaid://idq1alice',
+    title: 'Alice',
+    owner: { globalMetaId: 'idq1alice', name: 'Alice' },
+    renderer: { type: 'bot-page' },
+    status: { verificationState: 'verified' },
+  };
+  context.renderCurrent();
+
+  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
+  assert.equal(ownerToolbar.hidden, false);
+  assert.match(ownerToolbar.textContent, /Local Bot: Alice/);
+});
+
+test('Browser Owner Mode does not render Switch copy or button', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  context.state.runtime = {
+    actors: [
+      { id: 'alice', label: 'Alice', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: true, capabilities: [] },
+    ],
+    labels: { actorChip: 'Using' },
+  };
+  context.state.current = {
+    resourceType: 'bot',
+    normalizedUri: 'metaid://idq1alice',
+    title: 'Alice',
+    owner: { globalMetaId: 'idq1alice', name: 'Alice' },
+    renderer: { type: 'bot-page' },
+    status: { verificationState: 'verified' },
+  };
+  context.renderCurrent();
+
+  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
+  assert.equal(ownerToolbar.hidden, false);
+  assert.match(ownerToolbar.textContent, /Local Bot: Alice/);
+  assert.doesNotMatch(ownerToolbar.textContent, /Switch to/i);
+  assert.doesNotMatch(ownerToolbar.innerHTML, /switch/i);
+});
+
+test('Browser hides Owner Mode for MetaApp resources even when owner is local', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  context.state.runtime = {
+    actors: [
+      { id: 'alice', label: 'Alice', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: true, capabilities: [] },
+    ],
+    labels: { actorChip: 'Using' },
+  };
+  context.state.current = {
+    resourceType: 'metaapp',
+    normalizedUri: 'metaapp://fixture',
+    title: 'Fixture MetaApp',
+    owner: { globalMetaId: 'idq1alice', name: 'Alice' },
+    renderer: { type: 'unsupported' },
+    status: { verificationState: 'verified' },
+  };
+  context.renderCurrent();
+
+  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
+  assert.equal(ownerToolbar.hidden, true);
+  assert.equal(ownerToolbar.innerHTML, '');
 });
 
 test('Browser resource chip prefers MetaApp title over publisher identity', async () => {

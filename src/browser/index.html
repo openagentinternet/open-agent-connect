@@ -62,7 +62,7 @@
         background: var(--browser-bg);
         color: var(--browser-text);
         display: grid;
-        grid-template-rows: 34px 58px minmax(0, 1fr) 32px;
+        grid-template-rows: 34px 58px auto minmax(0, 1fr) 32px;
         grid-template-columns: minmax(0, 1fr);
         overflow: hidden;
         font: 14px/1.45 var(--sans, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
@@ -95,6 +95,7 @@
       }
       .browser-titlebar,
       .browser-topbar,
+      .browser-owner-toolbar,
       .browser-status-strip {
         grid-column: 1 / -1;
       }
@@ -389,8 +390,50 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .browser-viewport {
+      .browser-owner-toolbar {
         grid-row: 3;
+        grid-column: 1 / -1;
+        min-width: 0;
+        min-height: 38px;
+        border-bottom: 1px solid var(--browser-border);
+        background: #fbfcfe;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        color: var(--browser-muted);
+      }
+      .browser-owner-label {
+        min-width: 0;
+        color: #263548;
+        font-size: 12px;
+        font-weight: 700;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .browser-owner-toolbar button {
+        min-height: 28px;
+        border: 1px solid var(--browser-border);
+        border-radius: 7px;
+        background: var(--browser-surface);
+        color: #344054;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 5px 9px;
+        font-size: 12px;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+      .browser-owner-toolbar button:hover {
+        border-color: #a9b7cf;
+        background: #f8fbff;
+        color: var(--browser-accent);
+      }
+      .browser-viewport {
+        grid-row: 4;
         grid-column: 1;
         min-width: 0;
         min-height: 0;
@@ -408,7 +451,7 @@
       }
       .browser-drawer,
       .browser-inspector {
-        grid-row: 3;
+        grid-row: 4;
         min-width: 0;
         min-height: 0;
         overflow: auto;
@@ -842,7 +885,7 @@
         color: var(--browser-muted);
       }
       .browser-status-strip {
-        grid-row: 4;
+        grid-row: 5;
         min-width: 0;
         min-height: 32px;
         border-top: 1px solid var(--browser-border);
@@ -1144,7 +1187,7 @@
         .browser-shell.has-inspector,
         .browser-shell.has-drawer.has-inspector {
           grid-template-columns: minmax(0, 1fr);
-          grid-template-rows: 34px auto minmax(0, 1fr) auto;
+          grid-template-rows: 34px auto auto minmax(0, 1fr) auto;
         }
         .browser-topbar {
           grid-template-columns: 1fr;
@@ -1179,6 +1222,7 @@
         .browser-shell.has-drawer .browser-viewport,
         .browser-shell.has-inspector:not(.has-drawer) .browser-viewport,
         .browser-shell.has-drawer.has-inspector .browser-viewport {
+          grid-row: 4;
           grid-column: 1;
         }
         .browser-drawer,
