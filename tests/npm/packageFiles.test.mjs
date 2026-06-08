@@ -117,6 +117,7 @@ test('npm package includes runtime install inputs and excludes generated/develop
   assertIncludes(paths, 'README.md');
   assertIncludes(paths, 'LICENSE');
   assertIncludes(paths, 'release/compatibility.json');
+  assertIncludes(paths, 'src/browser/index.html');
   assertIncludes(paths, 'src/ui/pages/hub/index.html');
 
   assertExcludesPrefix(paths, 'tests/');
