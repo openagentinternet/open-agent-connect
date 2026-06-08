@@ -5,6 +5,9 @@ import {
 } from '../config/configTypes';
 import { BOT_HOMEPAGE_TEMPLATES, isBotHomepageTemplateId } from './botHomepageTemplates';
 import { resolveBrowserConfig } from './config';
+import type { BrowserSettingsSnapshot } from './hostTypes';
+
+export type { BrowserSettingsSnapshot } from './hostTypes';
 
 export const BROWSER_BASE_URL_KEYS = [
   'metasoP2PBaseUrl',
@@ -15,13 +18,6 @@ export const BROWSER_BASE_URL_KEYS = [
 ] as const;
 
 export type BrowserBaseUrlKey = typeof BROWSER_BASE_URL_KEYS[number];
-
-export interface BrowserSettingsSnapshot {
-  browser: BrowserConfig;
-  effectiveBrowser: BrowserConfig;
-  defaults: BrowserConfig;
-  configPath?: string;
-}
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -59,9 +55,9 @@ export function createBrowserSettingsSnapshot(input: {
 }): BrowserSettingsSnapshot {
   const defaults = createDefaultConfig().browser;
   return {
-    browser: input.config.browser,
-    effectiveBrowser: resolveBrowserConfig(input.config, input.env ?? process.env),
-    defaults,
+    browser: { ...input.config.browser },
+    effectiveBrowser: { ...resolveBrowserConfig(input.config, input.env ?? process.env) },
+    defaults: { ...defaults },
     ...(input.configPath ? { configPath: input.configPath } : {}),
   };
 }

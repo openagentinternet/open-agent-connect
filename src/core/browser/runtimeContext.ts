@@ -2,7 +2,7 @@ import type { BrowserActor, BrowserRuntimeSnapshot } from './hostTypes';
 import type { BrowserContextResult, BrowserUsingIdentity } from './types';
 
 function actorToUsingIdentity(actor: BrowserActor): BrowserUsingIdentity | null {
-  if (!actor.globalMetaId && actor.kind !== 'oac-bot') {
+  if (actor.kind !== 'oac-bot') {
     return null;
   }
 
@@ -16,7 +16,7 @@ function actorToUsingIdentity(actor: BrowserActor): BrowserUsingIdentity | null 
 }
 
 function actorToDefaultUsingIdentity(actor: BrowserActor): BrowserUsingIdentity | null {
-  if (!actor.globalMetaId) {
+  if (actor.kind !== 'oac-bot' || !actor.globalMetaId) {
     return null;
   }
 

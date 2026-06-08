@@ -7,7 +7,7 @@ import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../help
 
 const require = createRequire(import.meta.url);
 const { createOacBrowserHostAdapter } = require('../../dist/daemon/browser/oacBrowserHostAdapter.js');
-const { createMetabotProfileFromIdentity, getMetabotProfile } = require('../../dist/core/bot/metabotProfileManager.js');
+const { createMetabotProfile, createMetabotProfileFromIdentity, getMetabotProfile } = require('../../dist/core/bot/metabotProfileManager.js');
 const { commandFailed } = require('../../dist/core/contracts/commandResult.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createMetaAppPreviewSessionRegistry } = require('../../dist/core/metaapp/previewSessions.js');
@@ -119,6 +119,39 @@ test('OAC browser host adapter returns an empty runtime when profiles cannot be 
   assert.deepEqual(runtime.data.actors, []);
   assert.equal(runtime.data.defaultActor, null);
   assert.equal(runtime.data.defaultUri, null);
+});
+
+test('OAC browser host adapter keeps local OAC actors without a globalMetaId', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pending-context');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfile(systemHomeDir, {
+    name: 'Pending Browser Bot',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const runtime = await adapter.getRuntime();
+  assert.equal(runtime.ok, true);
+  assert.equal(runtime.data.defaultActor.id, active.slug);
+  assert.equal(runtime.data.defaultActor.globalMetaId, '');
+  assert.equal(runtime.data.defaultUri, null);
+  assert.deepEqual(runtime.data.actors.map((actor) => ({
+    id: actor.id,
+    kind: actor.kind,
+    globalMetaId: actor.globalMetaId,
+    isDefault: actor.isDefault,
+  })), [
+    {
+      id: active.slug,
+      kind: 'oac-bot',
+      globalMetaId: '',
+      isDefault: true,
+    },
+  ]);
 });
 
 test('OAC browser host adapter gives actorId precedence over legacy from', async (t) => {

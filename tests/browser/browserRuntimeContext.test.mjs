@@ -136,7 +136,7 @@ test('browserRuntimeToContextResult includes pending OAC actors in legacy identi
   });
 });
 
-test('browserRuntimeToContextResult returns no default identity when the default actor has no globalMetaId', () => {
+test('browserRuntimeToContextResult excludes non-OAC actors from legacy identities', () => {
   const context = browserRuntimeToContextResult({
     host: {
       kind: 'standalone',
@@ -148,15 +148,25 @@ test('browserRuntimeToContextResult returns no default identity when the default
         id: 'wallet-1',
         label: 'Wallet User',
         kind: 'wallet',
+        globalMetaId: 'idq1walletuser',
         address: '18WalletUser',
         isDefault: true,
         capabilities: ['wallet-sign'],
+      },
+      {
+        id: 'idbots-agent-1',
+        label: 'IDBots Agent',
+        kind: 'idbots-agent',
+        globalMetaId: 'idq1idbotsagent',
+        isDefault: false,
+        capabilities: ['private-chat'],
       },
     ],
     defaultActor: {
       id: 'wallet-1',
       label: 'Wallet User',
       kind: 'wallet',
+      globalMetaId: 'idq1walletuser',
       address: '18WalletUser',
       isDefault: true,
       capabilities: ['wallet-sign'],

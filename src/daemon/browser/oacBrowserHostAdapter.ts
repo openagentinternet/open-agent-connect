@@ -14,6 +14,7 @@ import type {
   BrowserRuntimeInput,
   BrowserRuntimeSnapshot,
   BrowserSettingsInput,
+  BrowserSettingsSnapshot,
   BrowserSettingsUpdateInput,
   BrowserTrustedActionInput,
   BrowserTrustedActionResult,
@@ -22,7 +23,6 @@ import { resolveMetaAppPinToRecord } from '../../core/browser/metaAppPinResolver
 import {
   applyBrowserSettingsUpdate,
   createBrowserSettingsSnapshot,
-  type BrowserSettingsSnapshot,
 } from '../../core/browser/settings';
 import type { BrowserResolveResult } from '../../core/browser/types';
 import { createConfigStore } from '../../core/config/configStore';

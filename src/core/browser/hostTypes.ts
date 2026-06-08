@@ -1,5 +1,4 @@
 import type { MetabotCommandResult } from '../contracts/commandResult';
-import type { BrowserSettingsSnapshot } from './settings';
 import type { BrowserResolveResult } from './types';
 
 export type BrowserHostKind = 'standalone' | 'oac' | 'idbots';
@@ -78,6 +77,13 @@ export interface BrowserCacheClearInput extends BrowserActorInput {
 
 export type BrowserCacheSnapshot = Record<string, unknown>;
 export type BrowserCacheClearResult = Record<string, unknown>;
+
+export interface BrowserSettingsSnapshot {
+  browser: Record<string, unknown>;
+  effectiveBrowser: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+  configPath?: string;
+}
 
 export type BrowserTrustedActionKind =
   | 'private-chat'
