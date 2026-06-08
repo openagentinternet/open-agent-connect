@@ -91,6 +91,15 @@ function readActionPayload(input: BrowserTrustedActionInput): Record<string, unk
     : {};
 }
 
+function ownerActorIdFromPayload(payload: Record<string, unknown>): string {
+  return normalizeText(payload.ownerActorId) || normalizeText(payload.actorId);
+}
+
+function botManagementHref(slug: string, tab: 'info' | 'history', focus: string): string {
+  const query = new URLSearchParams({ profile: slug, tab, focus });
+  return `/ui/bot?${query.toString()}`;
+}
+
 function wrapTrustedActionResult(
   kind: BrowserTrustedActionInput['kind'],
   result: MetabotCommandResult<unknown>,
@@ -319,6 +328,32 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
         request,
       });
       return wrapTrustedActionResult(actionInput.kind, result);
+    }
+
+    if (
+      actionInput.kind === 'edit-profile' ||
+      actionInput.kind === 'configure-chat' ||
+      actionInput.kind === 'view-messages'
+    ) {
+      const ownerActorId = ownerActorIdFromPayload(payload);
+      if (!ownerActorId) {
+        return commandFailed('invalid_browser_action', 'Browser owner action requires ownerActorId.');
+      }
+      const profiles = await listMetabotProfiles(input.systemHomeDir).catch(() => [] as MetabotProfileFull[]);
+      const ownerProfile = profiles.find((profile) => profile.slug === ownerActorId) ?? null;
+      if (!ownerProfile) {
+        return commandFailed('profile_not_found', `MetaBot profile not found: ${ownerActorId}`);
+      }
+      const href = actionInput.kind === 'edit-profile'
+        ? botManagementHref(ownerProfile.slug, 'info', 'profile')
+        : actionInput.kind === 'configure-chat'
+          ? botManagementHref(ownerProfile.slug, 'info', 'chat')
+          : botManagementHref(ownerProfile.slug, 'history', 'messages');
+      return commandSuccess({
+        kind: actionInput.kind,
+        handled: true,
+        data: { href },
+      });
     }
 
     return commandFailed(

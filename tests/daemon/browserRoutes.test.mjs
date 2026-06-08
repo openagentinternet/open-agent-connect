@@ -185,6 +185,39 @@ test('POST /api/browser/actions forwards trusted action payload and actorId', as
   }]);
 });
 
+test('POST /api/browser/actions forwards owner trusted action payload and actorId', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/api/browser/actions?actorId=worker`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      resourceUri: 'metaid://idq1alice',
+      kind: 'edit-profile',
+      payload: {
+        ownerActorId: 'alice',
+        ownerGlobalMetaId: 'idq1alice',
+        currentUri: 'metaid://idq1alice',
+      },
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.data.handled, true);
+  assert.deepEqual(calls.actions, [{
+    actorId: 'worker',
+    resourceUri: 'metaid://idq1alice',
+    kind: 'edit-profile',
+    payload: {
+      ownerActorId: 'alice',
+      ownerGlobalMetaId: 'idq1alice',
+      currentUri: 'metaid://idq1alice',
+    },
+  }]);
+});
+
 test('POST /api/browser/actions maps unsupported actions to a client error', async (t) => {
   const { server, baseUrl } = await startServer();
   t.after(async () => server.close());

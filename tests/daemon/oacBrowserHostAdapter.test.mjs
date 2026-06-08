@@ -383,6 +383,86 @@ test('OAC browser host adapter maps service trusted actions to OAC service input
   }]);
 });
 
+test('OAC browser host adapter maps owner trusted actions to Bot management routes', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-owner-actions');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Active Owner Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1activeowner',
+    mvcAddress: '18ActiveOwner',
+  });
+  await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Alice Owner Bot',
+    homeDir: path.join(systemHomeDir, '.metabot', 'profiles', 'alice'),
+    globalMetaId: 'idq1alice',
+    mvcAddress: '18AliceOwner',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const cases = [
+    ['edit-profile', '/ui/bot?profile=alice&tab=info&focus=profile'],
+    ['configure-chat', '/ui/bot?profile=alice&tab=info&focus=chat'],
+    ['view-messages', '/ui/bot?profile=alice&tab=history&focus=messages'],
+  ];
+
+  for (const [kind, href] of cases) {
+    const result = await adapter.runTrustedAction({
+      actorId: active.slug,
+      resourceUri: 'metaid://idq1alice',
+      kind,
+      payload: {
+        ownerActorId: 'alice',
+        ownerGlobalMetaId: 'idq1alice',
+        currentUri: 'metaid://idq1alice',
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data, {
+      kind,
+      handled: true,
+      data: { href },
+    });
+  }
+});
+
+test('OAC browser host adapter rejects owner trusted actions with unknown owner actors', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-owner-action-missing');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Missing Owner Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1missingowner',
+    mvcAddress: '18MissingOwner',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1missing',
+    kind: 'edit-profile',
+    payload: {
+      ownerActorId: 'missing-owner',
+      ownerGlobalMetaId: 'idq1missing',
+      currentUri: 'metaid://idq1missing',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.code, /^(profile_not_found|invalid_browser_action)$/);
+});
+
 test('OAC browser host adapter rejects incomplete trusted action payloads', async (t) => {
   const profileHome = await createProfileHome('oac-browser-adapter-invalid-action');
   t.after(async () => cleanupProfileHome(profileHome));

@@ -90,7 +90,10 @@ export type BrowserTrustedActionKind =
   | 'service-call'
   | 'copy-uri'
   | 'open-settings'
-  | 'login';
+  | 'login'
+  | 'edit-profile'
+  | 'configure-chat'
+  | 'view-messages';
 
 export interface BrowserTrustedActionInput extends BrowserActorInput {
   resourceUri: string;

@@ -689,6 +689,20 @@ function currentResourceUri() {
     textValue(elements.input && elements.input.value);
 }
 
+function ownerActionPayload(owner) {
+  var uri = currentResourceUri();
+  return {
+    ownerActorId: owner.id,
+    ownerGlobalMetaId: owner.globalMetaId,
+    currentUri: uri
+  };
+}
+
+function openTrustedActionHref(result) {
+  var href = result && result.data && result.data.href;
+  if (href) window.location.href = href;
+}
+
 function currentOwnerGlobalMetaId() {
   if (!state.current || state.current.resourceType !== 'bot') return '';
   return textValue(state.current.owner && state.current.owner.globalMetaId);
@@ -1377,6 +1391,52 @@ async function confirmServiceCall(userTaskText) {
   return result;
 }
 
+function openShareBotPageModal(owner) {
+  var globalMetaId = textValue(owner && owner.globalMetaId);
+  var metaidUri = 'metaid://' + globalMetaId;
+  var localPath = '/browser/metaid/' + encodeURIComponent(globalMetaId);
+  var origin = window.location && window.location.origin ? window.location.origin : '';
+  var localUrl = origin ? origin + localPath : localPath;
+  var publicBaseUrl = textValue(state.runtime && state.runtime.host && state.runtime.host.publicBaseUrl).replace(/[/]+$/, '');
+  var publicButton = publicBaseUrl
+    ? '<button type="button" data-browser-share-copy="' + escapeHtml(publicBaseUrl + localPath) + '">Copy public Browser URL</button>'
+    : '';
+  renderModal(
+    'Share Bot Page',
+    '<div class="browser-share-list">' +
+      '<button type="button" data-browser-share-copy="' + escapeHtml(metaidUri) + '">Copy metaid URI</button>' +
+      '<button type="button" data-browser-share-copy="' + escapeHtml(localUrl) + '">Copy local Browser URL</button>' +
+      publicButton +
+    '</div>',
+    'Close',
+    ''
+  );
+}
+
+async function handleOwnerAction(action) {
+  var owner = findLocalOwnerActor();
+  if (!owner) return null;
+  if (action === 'share') return openShareBotPageModal(owner);
+  var kindMap = {
+    'edit-profile': 'edit-profile',
+    'configure-chat': 'configure-chat',
+    'view-messages': 'view-messages'
+  };
+  var kind = kindMap[action];
+  if (!kind) return null;
+  var result = await commandApi(endpointWithActor(browserEndpoints.actions), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      resourceUri: currentResourceUri(),
+      kind: kind,
+      payload: ownerActionPayload(owner)
+    })
+  });
+  openTrustedActionHref(result);
+  return result;
+}
+
 async function handleTrustedAction(action) {
   var kind = textValue(action && action.kind);
   if (kind === 'copy') return copyUri(action);
@@ -1532,6 +1592,11 @@ async function initialize() {
         });
         return;
       }
+      var shareCopy = closestWithAttribute(event && event.target, 'data-browser-share-copy');
+      if (shareCopy) {
+        copyUri({ uri: shareCopy.getAttribute('data-browser-share-copy') || '' });
+        return;
+      }
       var target = closestWithAttribute(event && event.target, 'data-browser-modal-action') ||
         closestWithAttribute(event && event.target, 'data-browser-actor-id');
       if (!target) return;
@@ -1584,6 +1649,15 @@ async function initialize() {
       if (!target) return;
       handleBrowserMenuAction(target.getAttribute('data-browser-menu-item')).catch(function (error) {
         setStatus('error', error && error.message ? error.message : 'Menu action failed.');
+      });
+    });
+  }
+  if (elements.ownerToolbar) {
+    elements.ownerToolbar.addEventListener('click', function (event) {
+      var target = closestWithAttribute(event && event.target, 'data-browser-owner-action');
+      if (!target) return;
+      handleOwnerAction(target.getAttribute('data-browser-owner-action')).catch(function (error) {
+        setStatus('error', error && error.message ? error.message : 'Owner action failed.');
       });
     });
   }
@@ -1656,6 +1730,7 @@ globalThis.handleTrustedAction = handleTrustedAction;
 globalThis.normalizeBotHomepagePayload = normalizeBotHomepagePayload;
 globalThis.confirmPrivateChat = confirmPrivateChat;
 globalThis.confirmServiceCall = confirmServiceCall;
+globalThis.handleOwnerAction = handleOwnerAction;
 globalThis.closeModal = closeModal;
 globalThis.loadRuntime = loadRuntime;
 globalThis.loadContext = loadContext;
