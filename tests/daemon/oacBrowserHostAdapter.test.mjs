@@ -19,6 +19,8 @@ async function createAdapter(input) {
     metaAppPreviewSessions: createMetaAppPreviewSessionRegistry(),
     env: {},
     fetch: input.fetch,
+    privateChat: input.privateChat,
+    serviceCall: input.serviceCall,
     resolveActorWriteContext: async (rawActor) => {
       const slug = typeof rawActor === 'string' ? rawActor.trim() : '';
       if (!slug) {
@@ -276,6 +278,139 @@ test('OAC browser host adapter resolves metaid URIs with the selected profile Br
   assert.equal(resolved.ok, true);
   assert.equal(resolved.data.renderer.type, 'bot-page');
   assert.equal(resolved.data.renderer.templateId, 'compact-list');
+});
+
+test('OAC browser host adapter maps private chat trusted actions to OAC chat input', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-private-action');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Private Action Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1privateaction',
+    mvcAddress: '18PrivateAction',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    privateChat: async (input) => {
+      calls.push(input);
+      return { ok: true, state: 'success', data: { pinId: 'chat-pin' } };
+    },
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1target',
+    kind: 'private-chat',
+    payload: {
+      to: 'idq1target',
+      content: 'Hello from Browser',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.kind, 'private-chat');
+  assert.equal(result.data.handled, true);
+  assert.deepEqual(result.data.data, { pinId: 'chat-pin' });
+  assert.deepEqual(calls, [{
+    from: active.slug,
+    to: 'idq1target',
+    content: 'Hello from Browser',
+  }]);
+});
+
+test('OAC browser host adapter maps service trusted actions to OAC service input', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-service-action');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Service Action Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1serviceaction',
+    mvcAddress: '18ServiceAction',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    serviceCall: async (input) => {
+      calls.push(input);
+      return {
+        ok: false,
+        state: 'waiting',
+        code: 'order_sent_awaiting_provider',
+        message: 'Order sent to provider. Waiting for response...',
+        pollAfterMs: 3000,
+        data: { traceId: 'trace-1' },
+      };
+    },
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1target',
+    kind: 'service-call',
+    payload: {
+      servicePinId: 'service-pin',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Review this payload',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.equal(result.code, 'order_sent_awaiting_provider');
+  assert.deepEqual(calls, [{
+    from: active.slug,
+    request: {
+      servicePinId: 'service-pin',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Review this payload',
+      taskContext: 'Requested from Agent Internet Browser',
+      rawRequest: 'Review this payload',
+      confirmed: true,
+    },
+  }]);
+});
+
+test('OAC browser host adapter rejects incomplete trusted action payloads', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-invalid-action');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Invalid Action Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1invalidaction',
+    mvcAddress: '18InvalidAction',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const missingPrivateChatContent = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1target',
+    kind: 'private-chat',
+    payload: {
+      to: 'idq1target',
+    },
+  });
+  assert.equal(missingPrivateChatContent.ok, false);
+  assert.equal(missingPrivateChatContent.code, 'invalid_browser_action');
+
+  const unsupported = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1target',
+    kind: 'login',
+  });
+  assert.equal(unsupported.ok, false);
+  assert.equal(unsupported.code, 'browser_action_not_supported');
 });
 
 test('OAC browser host adapter reads and clears the selected profile MetaApp cache', async (t) => {

@@ -8,6 +8,7 @@ function normalizeText(value: unknown): string {
 
 function statusForBrowserResult(result: MetabotCommandResult<unknown>): number {
   if (result.ok) return 200;
+  if (result.state === 'waiting' || result.state === 'manual_action_required') return 200;
   if (result.code === 'missing_uri' || result.code === 'invalid_browser_uri') return 400;
   if (result.code === 'browser_resource_not_found') return 404;
   if (result.code === 'browser_config_missing') return 500;

@@ -31,6 +31,7 @@ import { createMetaAppArtifactCacheStore } from '../../core/metaapp/artifactCach
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
 
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
+type OacBrowserActionHandler = (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 
 export interface OacBrowserActorContext {
   homeDir: string;
@@ -43,6 +44,8 @@ export interface CreateOacBrowserHostAdapterInput {
     rawActor: unknown,
   ) => Promise<OacBrowserActorContext | { failure: MetabotCommandResult<never> }>;
   metaAppPreviewSessions: MetaAppPreviewSessions;
+  privateChat?: OacBrowserActionHandler;
+  serviceCall?: OacBrowserActionHandler;
   fetch?: typeof fetch;
   env?: NodeJS.ProcessEnv;
 }
@@ -80,6 +83,29 @@ function profileToBrowserActor(profile: MetabotProfileFull, selectedHomeDir: str
 
 function toBrowserRecord(value: object): Record<string, unknown> {
   return { ...value };
+}
+
+function readActionPayload(input: BrowserTrustedActionInput): Record<string, unknown> {
+  return input.payload && typeof input.payload === 'object' && !Array.isArray(input.payload)
+    ? input.payload
+    : {};
+}
+
+function wrapTrustedActionResult(
+  kind: BrowserTrustedActionInput['kind'],
+  result: MetabotCommandResult<unknown>,
+): MetabotCommandResult<BrowserTrustedActionResult> {
+  if (!result.ok) {
+    return result as MetabotCommandResult<BrowserTrustedActionResult>;
+  }
+  return {
+    ...result,
+    data: {
+      kind,
+      handled: true,
+      data: result.data,
+    },
+  };
 }
 
 export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterInput): BrowserHostAdapter {
@@ -233,6 +259,68 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
   async function runTrustedAction(
     actionInput: BrowserTrustedActionInput,
   ): Promise<MetabotCommandResult<BrowserTrustedActionResult>> {
+    const actor = await resolveActor(actionInput);
+    if ('failure' in actor) return actor.failure;
+    const from = actorSelector(actionInput);
+    const payload = readActionPayload(actionInput);
+
+    if (actionInput.kind === 'private-chat') {
+      const to = normalizeText(payload.to) || normalizeText(payload.targetGlobalMetaId);
+      const content = normalizeText(payload.content) || normalizeText(payload.message);
+      if (!to || !content) {
+        return commandFailed('invalid_browser_action', 'Browser private-chat action requires to and content.');
+      }
+      if (!input.privateChat) {
+        return commandFailed('browser_action_not_supported', 'Browser private-chat action is not supported by the OAC adapter.');
+      }
+      const result = await input.privateChat({
+        ...(from ? { from } : {}),
+        to,
+        content,
+        ...(normalizeText(payload.replyPin) ? { replyPin: normalizeText(payload.replyPin) } : {}),
+        ...(normalizeText(payload.peerChatPublicKey) ? { peerChatPublicKey: normalizeText(payload.peerChatPublicKey) } : {}),
+        ...(normalizeText(payload.network) ? { network: normalizeText(payload.network) } : {}),
+      });
+      return wrapTrustedActionResult(actionInput.kind, result);
+    }
+
+    if (actionInput.kind === 'service-call') {
+      const servicePinId = normalizeText(payload.servicePinId);
+      const providerGlobalMetaId = normalizeText(payload.providerGlobalMetaId);
+      const userTask = normalizeText(payload.userTask) || normalizeText(payload.rawRequest);
+      if (!servicePinId || !providerGlobalMetaId || !userTask) {
+        return commandFailed(
+          'invalid_browser_action',
+          'Browser service-call action requires servicePinId, providerGlobalMetaId, and userTask.',
+        );
+      }
+      if (!input.serviceCall) {
+        return commandFailed('browser_action_not_supported', 'Browser service-call action is not supported by the OAC adapter.');
+      }
+      const request: Record<string, unknown> = {
+        servicePinId,
+        providerGlobalMetaId,
+        userTask,
+        taskContext: normalizeText(payload.taskContext) || 'Requested from Agent Internet Browser',
+        rawRequest: normalizeText(payload.rawRequest) || userTask,
+        confirmed: payload.confirmed === false ? false : true,
+      };
+      if (normalizeText(payload.providerDaemonBaseUrl)) {
+        request.providerDaemonBaseUrl = normalizeText(payload.providerDaemonBaseUrl);
+      }
+      if (payload.spendCap && typeof payload.spendCap === 'object' && !Array.isArray(payload.spendCap)) {
+        request.spendCap = payload.spendCap;
+      }
+      if (normalizeText(payload.policyMode)) {
+        request.policyMode = normalizeText(payload.policyMode);
+      }
+      const result = await input.serviceCall({
+        ...(from ? { from } : {}),
+        request,
+      });
+      return wrapTrustedActionResult(actionInput.kind, result);
+    }
+
     return commandFailed(
       'browser_action_not_supported',
       `Browser trusted action is not supported by the OAC adapter yet: ${actionInput.kind}`,

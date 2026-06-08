@@ -9873,11 +9873,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry();
+  let daemonHandlers: MetabotDaemonHttpHandlers | null = null;
   const browserHostAdapter = createOacBrowserHostAdapter({
     homeDir: input.homeDir,
     systemHomeDir: normalizedSystemHomeDir,
     resolveActorWriteContext,
     metaAppPreviewSessions,
+    privateChat: async (request) => daemonHandlers?.chat?.private
+      ? daemonHandlers.chat.private(request)
+      : commandFailed('not_implemented', 'Private chat handler is not configured.'),
+    serviceCall: async (request) => daemonHandlers?.services?.call
+      ? daemonHandlers.services.call(request)
+      : commandFailed('not_implemented', 'Service call handler is not configured.'),
     fetch: globalThis.fetch,
     env: process.env,
   });
@@ -10026,7 +10033,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
   }));
 
-  return {
+  daemonHandlers = {
     browser: {
       getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
         actorId: request.actorId,
@@ -14300,4 +14307,5 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
   };
+  return daemonHandlers;
 }
