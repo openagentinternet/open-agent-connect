@@ -410,6 +410,7 @@ function renderInfoTab(options){
   if(!state.chatSkillOptionsStatusBySlug[profile.slug])loadChatSkillOptions(profile.slug);
   var copy=q('[data-act="copy-profile-gmid"]');if(copy)copy.addEventListener('click',function(){copyToClipboard(profile.globalMetaId||'')});
   var save=q('[data-act="save-info"]');if(save)save.addEventListener('click',saveInfo);
+  focusBotManagementTarget();
 }
 
 function renderAvatarPreview(dataUrl){
@@ -769,7 +770,7 @@ function saveInfo(){
 function renderHistoryTab(){
   var tb=q('[data-execution-history-list]');if(!tb)return;
   var rows=state.sessions.filter(function(s){return s.metaBotSlug===state.selectedSlug});
-  if(!rows.length){tb.innerHTML='<tr><td colspan="7" class="table-empty"><strong>No executions yet for this MetaBot</strong></td></tr>';return}
+  if(!rows.length){tb.innerHTML='<tr><td colspan="7" class="table-empty"><strong>No executions yet for this MetaBot</strong></td></tr>';focusBotManagementTarget();return}
   tb.innerHTML=rows.map(function(s,i){
     var detailId='exec-detail-'+esc(state.selectedSlug)+'-'+i;
     var rt=state.runtimes.find(function(r){return r.id===s.runtimeId});
@@ -791,6 +792,7 @@ function renderHistoryTab(){
       '</div></td></tr>'
   }).join('');
   qq('[data-act="toggle-exec"]').forEach(function(el){el.addEventListener('click',function(){toggleExecDetail(this)})});
+  focusBotManagementTarget();
 }
 
 function renderSettingsTab(){
@@ -1033,6 +1035,16 @@ function applyBotManagementRouteRequest(){
   var request=botManagementRouteRequest();
   if(request.profile&&state.profiles.some(function(profile){return profile.slug===request.profile}))state.selectedSlug=request.profile;
   if(request.tab)state.selectedTab=request.tab;
+}
+function focusBotManagementTarget(){
+  var focus=botManagementRouteRequest().focus;
+  var target=null;
+  if(focus==='profile')target=q('[data-field="name"]')||q('[data-field="role"]');
+  else if(focus==='chat')target=q('[data-field="chatSkillSelect"]')||q('[data-act="add-chat-skill"]');
+  else if(focus==='messages')target=q('[data-execution-history-list]');
+  if(!target)return;
+  if(typeof target.scrollIntoView==='function')target.scrollIntoView({block:'start'});
+  if(typeof target.focus==='function')target.focus();
 }
 function modalIsOpen(el){
   return Boolean(el&&el.classList&&typeof el.classList.contains==='function'&&!el.classList.contains('hidden'));

@@ -8,16 +8,24 @@ const { buildBotPageDefinition } = require('../../dist/ui/pages/bot/app.js');
 
 function field(value = '') {
   const attrs = new Map();
-  return {
+  const element = {
     value,
     textContent: '',
     className: '',
     disabled: false,
-    focus: () => {},
+    focused: false,
+    scrolled: false,
+    focus: () => {
+      element.focused = true;
+    },
+    scrollIntoView: () => {
+      element.scrolled = true;
+    },
     addEventListener: () => {},
     getAttribute: (name) => attrs.get(name) ?? null,
     setAttribute: (name, next) => attrs.set(name, String(next)),
   };
+  return element;
 }
 
 function deferred() {
@@ -673,6 +681,7 @@ test('bot page deep link selects requested profile and info tab after profiles l
   const infoPanel = tabElement('info');
   const historyPanel = tabElement('history');
   const infoRoot = { innerHTML: '' };
+  const chatSelect = field();
   const calls = [];
   const context = createBotScriptContext({
     elements: {
@@ -686,6 +695,7 @@ test('bot page deep link selects requested profile and info tab after profiles l
       '[data-tab-bar]': field(),
       '[data-tab-content]': field(),
       '[data-info-content]': infoRoot,
+      '[data-field="chatSkillSelect"]': chatSelect,
       '[data-execution-history-list]': { innerHTML: '' },
     },
     globals: {
@@ -736,6 +746,8 @@ test('bot page deep link selects requested profile and info tab after profiles l
   assert.equal(infoTab.active, true);
   assert.equal(historyTab.active, false);
   assert.match(infoRoot.innerHTML, /data-info-profile-slug="alice"/);
+  assert.equal(chatSelect.focused, true);
+  assert.equal(chatSelect.scrolled, true);
   assert.equal(calls.includes('/api/bot/sessions?slug=alice&limit=50'), false);
 });
 
@@ -744,7 +756,7 @@ test('bot page deep link selects requested profile and history tab before loadin
   const historyTab = tabElement('history');
   const infoPanel = tabElement('info');
   const historyPanel = tabElement('history');
-  const historyRoot = { innerHTML: '' };
+  const historyRoot = field();
   const calls = [];
   const context = createBotScriptContext({
     elements: {
@@ -818,6 +830,80 @@ test('bot page deep link selects requested profile and history tab before loadin
   assert.equal(historyTab.active, true);
   assert.deepEqual(context.state.sessions.map((session) => session.sessionId), ['session-alice']);
   assert.match(historyRoot.innerHTML, /session-alice/);
+  assert.equal(historyRoot.focused, true);
+  assert.equal(historyRoot.scrolled, true);
+});
+
+test('bot page deep link focus profile activates profile identity field', async () => {
+  const infoTab = tabElement('info');
+  const historyTab = tabElement('history');
+  const infoPanel = tabElement('info');
+  const historyPanel = tabElement('history');
+  const infoRoot = { innerHTML: '' };
+  const nameField = field('Alice');
+  const calls = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': field(),
+      '[data-metabot-count]': field(),
+      '[data-detail-header]': field(),
+      '[data-detail-avatar]': field(),
+      '[data-detail-name]': field(),
+      '[data-detail-id]': field(),
+      '[data-detail-empty]': field(),
+      '[data-tab-bar]': field(),
+      '[data-tab-content]': field(),
+      '[data-info-content]': infoRoot,
+      '[data-field="name"]': nameField,
+      '[data-execution-history-list]': field(),
+    },
+    globals: {
+      URLSearchParams,
+      window: {
+        location: {
+          search: '?profile=alice&tab=info&focus=profile',
+        },
+      },
+    },
+    fetch: (url) => {
+      calls.push(String(url));
+      if (url === '/api/bot/profiles') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              profiles: [
+                { slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice', allowChatSkills: [] },
+              ],
+            },
+          }),
+        });
+      }
+      if (url === '/api/services/skills?from=alice') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+  context.document.querySelectorAll = (selector) => {
+    if (selector === '[data-tab]') return [infoTab, historyTab];
+    if (selector === '[data-tab-panel]') return [infoPanel, historyPanel];
+    return [];
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  await context.loadProfiles();
+
+  assert.equal(context.state.selectedSlug, 'alice');
+  assert.equal(context.state.selectedTab, 'info');
+  assert.equal(infoTab.active, true);
+  assert.equal(nameField.focused, true);
+  assert.equal(nameField.scrolled, true);
 });
 
 test('bot page create avatar upload clears a previous pending avatar after an oversized file', () => {
