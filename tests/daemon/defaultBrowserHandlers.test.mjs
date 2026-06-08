@@ -6,7 +6,7 @@ import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../help
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
-const { createMetabotProfileFromIdentity } = require('../../dist/core/bot/metabotProfileManager.js');
+const { createMetabotProfile, createMetabotProfileFromIdentity } = require('../../dist/core/bot/metabotProfileManager.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 
 test('Browser context defaults to the active local Bot and can switch using identity by slug', async (t) => {
@@ -41,6 +41,60 @@ test('Browser context defaults to the active local Bot and can switch using iden
   assert.equal(selectedContext.ok, true);
   assert.equal(selectedContext.data.defaultUsingIdentity.slug, other.slug);
   assert.equal(selectedContext.data.defaultUri, `metaid://${other.globalMetaId}`);
+});
+
+test('Browser handlers return profile_not_found for an unknown using identity', async (t) => {
+  const profileHome = await createProfileHome('browser-unknown-context');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Known Browser Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1knownbrowser',
+    mvcAddress: '18KnownBrowser',
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const context = await handlers.browser.getContext({ from: 'missing-browser-bot' });
+  assert.equal(context.ok, false);
+  assert.equal(context.code, 'profile_not_found');
+
+  const settings = await handlers.browser.getSettings({ from: 'missing-browser-bot' });
+  assert.equal(settings.ok, false);
+  assert.equal(settings.code, 'profile_not_found');
+});
+
+test('Browser context keeps local OAC Bots without a globalMetaId in legacy identities', async (t) => {
+  const profileHome = await createProfileHome('browser-pending-context');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfile(systemHomeDir, {
+    name: 'Pending Browser Bot',
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const context = await handlers.browser.getContext({});
+  assert.equal(context.ok, true);
+  assert.deepEqual(context.data.usingIdentities, [
+    {
+      slug: active.slug,
+      name: 'Pending Browser Bot',
+      globalMetaId: '',
+      isDefault: true,
+    },
+  ]);
+  assert.equal(context.data.defaultUsingIdentity, null);
+  assert.equal(context.data.defaultUri, null);
 });
 
 test('Browser settings expose and persist browser base URL configuration by active Bot', async (t) => {

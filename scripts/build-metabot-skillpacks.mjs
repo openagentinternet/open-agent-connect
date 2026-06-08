@@ -587,7 +587,7 @@ async function copyIfPresent(sourcePath, targetPath) {
   return true;
 }
 
-async function copyRuntimeUiAssets(repoRoot, runtimeRoot) {
+async function copyRuntimeStaticAssets(repoRoot, runtimeRoot) {
   // Copy entire src/ui/ tree into dist/ui/. tsc only emits .js/.d.ts files,
   // so static assets (.html, .css, .js in metaapps, etc.) are never written
   // to dist/ by the compiler. Copying the whole tree here ensures nothing is
@@ -599,6 +599,11 @@ async function copyRuntimeUiAssets(repoRoot, runtimeRoot) {
   await fs.mkdir(runtimeUiRoot, { recursive: true });
   await fs.cp(sourceUiRoot, runtimeUiRoot, { recursive: true });
   await sanitizeGeneratedTree(runtimeUiRoot);
+
+  await copyIfPresent(
+    path.join(repoRoot, 'src', 'browser', 'index.html'),
+    path.join(runtimeRoot, 'dist', 'browser', 'index.html'),
+  );
 }
 
 async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest, dependencyNames) {
@@ -614,7 +619,7 @@ async function ensureBundledRuntime(repoRoot, runtimeRoot, compatibilityManifest
   await fs.rm(path.join(runtimeRoot, 'dist'), { recursive: true, force: true });
   await fs.mkdir(runtimeRoot, { recursive: true });
   await fs.cp(path.join(repoRoot, 'dist'), path.join(runtimeRoot, 'dist'), { recursive: true });
-  await copyRuntimeUiAssets(repoRoot, runtimeRoot);
+  await copyRuntimeStaticAssets(repoRoot, runtimeRoot);
   await writeFile(path.join(runtimeRoot, 'compatibility.json'), compatibilityManifest);
   await fs.cp(path.join(repoRoot, 'package.json'), path.join(runtimeRoot, 'package.json'));
   await copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyNames);

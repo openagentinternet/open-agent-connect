@@ -179,6 +179,7 @@ test('buildAgentConnectSkillpacks renders one shared pack plus self-contained ho
   await assertFileExists(path.join(sharedPackRoot(outputRoot), 'README.md'));
   await assertFileExists(path.join(sharedPackRoot(outputRoot), 'install.sh'));
   await assertFileExists(path.join(sharedPackRoot(outputRoot), EXPECTED_BUNDLED_COMPATIBILITY_COPY));
+  await assertFileExists(path.join(sharedPackRoot(outputRoot), 'runtime', 'dist', 'browser', 'index.html'));
 
   for (const skillName of EXPECTED_METABOT_SKILLS) {
     await assertFileExists(sharedSkillFile(outputRoot, skillName));
@@ -194,6 +195,7 @@ test('buildAgentConnectSkillpacks renders one shared pack plus self-contained ho
     await assertFileExists(path.join(hostRoot, 'install.sh'));
     await assertFileExists(path.join(hostRoot, 'runtime', 'shared-install.sh'));
     await assertFileExists(path.join(hostRoot, EXPECTED_BUNDLED_COMPATIBILITY_COPY));
+    await assertFileExists(path.join(hostRoot, 'runtime', 'dist', 'browser', 'index.html'));
 
     for (const skillName of EXPECTED_METABOT_SKILLS) {
       await assertFileExists(hostWrapperSharedSkillFile(outputRoot, host, skillName));

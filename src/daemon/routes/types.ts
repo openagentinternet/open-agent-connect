@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Buffer } from 'node:buffer';
-import type { BrowserContextResult, BrowserResolveResult } from '../../core/browser/types';
+import type { BrowserHttpHandlers } from '../../browser/http';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
 export type Awaitable<T> = T | Promise<T>;
@@ -30,14 +30,7 @@ export interface ServiceRefundSyncRequest {
 }
 
 export interface MetabotDaemonHttpHandlers {
-  browser?: {
-    getContext?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<BrowserContextResult>>;
-    resolve?: (input: { uri: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserResolveResult>>;
-    getSettings?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    updateSettings?: (input: { from?: string; browser?: Record<string, unknown> } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    getCache?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    clearCache?: (input: { from?: string; scope?: string; pinId?: string; cacheKey?: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-  };
+  browser?: BrowserHttpHandlers;
   config?: {
     get?: () => Awaitable<MetabotCommandResult<unknown>>;
     set?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

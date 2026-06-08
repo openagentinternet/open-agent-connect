@@ -284,15 +284,8 @@ import { btcChainAdapter } from '../core/chain/adapters/btc';
 import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
-import { resolveBrowserConfig } from '../core/browser/config';
-import {
-  applyBrowserSettingsUpdate,
-  createBrowserSettingsSnapshot,
-} from '../core/browser/settings';
-import { resolveBrowserResource } from '../core/browser/browserResolver';
-import { resolveMetaAppPinToRecord } from '../core/browser/metaAppPinResolver';
-import { createMetaAppArtifactCacheStore } from '../core/metaapp/artifactCache';
-import type { BrowserContextResult, BrowserUsingIdentity } from '../core/browser/types';
+import { browserRuntimeToContextResult } from '../core/browser/runtimeContext';
+import { createOacBrowserHostAdapter } from './browser/oacBrowserHostAdapter';
 import {
   DEFAULT_WRITE_NETWORKS,
   type DefaultWriteNetwork,
@@ -4526,65 +4519,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
     await targetConfigStore.set(next);
     return commandSuccess(next);
-  }
-  async function getBrowserSettings(rawFrom?: unknown): Promise<MetabotCommandResult<unknown>> {
-    const actor = await resolveActorWriteContext(rawFrom);
-    if ('failure' in actor) return actor.failure;
-    const targetConfigStore = createConfigStore(actor.homeDir);
-    const config = await targetConfigStore.read();
-    return commandSuccess(createBrowserSettingsSnapshot({
-      config,
-      configPath: targetConfigStore.paths.configPath,
-      env: process.env,
-    }));
-  }
-  async function updateBrowserSettings(rawInput: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
-    const actor = await resolveActorWriteContext(rawInput.from);
-    if ('failure' in actor) return actor.failure;
-    const targetConfigStore = createConfigStore(actor.homeDir);
-    const current = await targetConfigStore.read();
-    try {
-      const next = applyBrowserSettingsUpdate(current, rawInput.browser);
-      await targetConfigStore.set(next);
-      const saved = await targetConfigStore.read();
-      return commandSuccess(createBrowserSettingsSnapshot({
-        config: saved,
-        configPath: targetConfigStore.paths.configPath,
-        env: process.env,
-      }));
-    } catch (error) {
-      return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
-    }
-  }
-  async function getBrowserCache(rawFrom?: unknown): Promise<MetabotCommandResult<unknown>> {
-    const actor = await resolveActorWriteContext(rawFrom);
-    if ('failure' in actor) return actor.failure;
-    return commandSuccess(await createMetaAppArtifactCacheStore(actor.homeDir).getStats());
-  }
-  async function clearBrowserCache(rawInput: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
-    const actor = await resolveActorWriteContext(rawInput.from);
-    if ('failure' in actor) return actor.failure;
-    try {
-      const scope = normalizeText(rawInput.scope) || 'all';
-      if (scope === 'pin') {
-        return commandSuccess(await createMetaAppArtifactCacheStore(actor.homeDir).clear({
-          scope,
-          pinId: normalizeText(rawInput.pinId),
-        }));
-      }
-      if (scope === 'artifact') {
-        return commandSuccess(await createMetaAppArtifactCacheStore(actor.homeDir).clear({
-          scope,
-          cacheKey: normalizeText(rawInput.cacheKey),
-        }));
-      }
-      if (scope === 'all') {
-        return commandSuccess(await createMetaAppArtifactCacheStore(actor.homeDir).clear({ scope }));
-      }
-      return commandFailed('invalid_argument', 'Unsupported Browser cache clear scope.');
-    } catch (error) {
-      return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
-    }
   }
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
   const llmRuntimeStore = createLlmRuntimeStore(input.homeDir);
@@ -9941,6 +9875,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry();
+  let daemonHandlers: MetabotDaemonHttpHandlers | null = null;
+  const browserHostAdapter = createOacBrowserHostAdapter({
+    homeDir: input.homeDir,
+    systemHomeDir: normalizedSystemHomeDir,
+    resolveActorWriteContext,
+    metaAppPreviewSessions,
+    privateChat: async (request) => daemonHandlers?.chat?.private
+      ? daemonHandlers.chat.private(request)
+      : commandFailed('not_implemented', 'Private chat handler is not configured.'),
+    serviceCall: async (request) => daemonHandlers?.services?.call
+      ? daemonHandlers.services.call(request)
+      : commandFailed('not_implemented', 'Service call handler is not configured.'),
+    fetch: globalThis.fetch,
+    env: process.env,
+  });
 
   async function readMetaAppRecordForUpdate(actorHomeDir: string, targetPinId: string): Promise<MetaAppGalleryRecord | null> {
     const indexer = createMetaAppIndexerClient();
@@ -9952,39 +9901,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     const localRecords = await cache.listMerged().catch(() => [] as MetaAppGalleryRecord[]);
     return localRecords.find((record: MetaAppGalleryRecord) => record.pinId === targetPinId) ?? null;
-  }
-
-  async function buildBrowserContextResult(rawFrom?: unknown): Promise<MetabotCommandResult<BrowserContextResult>> {
-    const requestedSlug = normalizeText(rawFrom);
-    const activeHomeDir = path.resolve(input.homeDir);
-    const profiles = await listMetabotProfiles(normalizedSystemHomeDir).catch(() => [] as MetabotProfileFull[]);
-    const selectedProfile = requestedSlug
-      ? profiles.find((profile) => profile.slug === requestedSlug)
-      : profiles.find((profile) => path.resolve(profile.homeDir) === activeHomeDir) ?? profiles[0] ?? null;
-
-    if (requestedSlug && !selectedProfile) {
-      return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
-    }
-
-    const selectedHomeDir = selectedProfile ? path.resolve(selectedProfile.homeDir) : '';
-    const usingIdentities: BrowserUsingIdentity[] = profiles.map((profile) => ({
-      slug: profile.slug,
-      name: profile.name,
-      globalMetaId: profile.globalMetaId,
-      ...(profile.avatarDataUrl ? { avatar: profile.avatarDataUrl } : {}),
-      isDefault: Boolean(selectedHomeDir && path.resolve(profile.homeDir) === selectedHomeDir),
-    }));
-    const defaultUsingIdentity = selectedProfile && selectedProfile.globalMetaId
-      ? usingIdentities.find((identity) => identity.slug === selectedProfile.slug) ?? null
-      : null;
-
-    return commandSuccess({
-      usingIdentities,
-      defaultUsingIdentity,
-      defaultUri: defaultUsingIdentity?.globalMetaId
-        ? `metaid://${defaultUsingIdentity.globalMetaId}`
-        : null,
-    });
   }
 
   async function listMetaAppsForActor(actor: {
@@ -10119,37 +10035,46 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
   }));
 
-  return {
+  daemonHandlers = {
     browser: {
-      getContext: async (request = {}) => buildBrowserContextResult(request.from),
-      getSettings: async (request = {}) => getBrowserSettings(request.from),
-      updateSettings: async (request) => updateBrowserSettings(request),
-      getCache: async (request = {}) => getBrowserCache(request.from),
-      clearCache: async (request) => clearBrowserCache(request),
-      resolve: async (request) => {
-        const actor = await resolveActorWriteContext(request.from);
-        if ('failure' in actor) return actor.failure;
-        const config = await createConfigStore(actor.homeDir).read();
-        const browserConfig = resolveBrowserConfig(config, process.env);
-        return resolveBrowserResource({
-          uri: request.uri,
-          config: browserConfig,
-          fetch: globalThis.fetch,
-          metaAppResolve: (pinId) => resolveMetaAppPinToRecord({
-            pinId,
-            fetch: globalThis.fetch,
-            manApiBaseUrl: browserConfig.manApiBaseUrl,
-            artifactCache: createMetaAppArtifactCacheStore(actor.homeDir),
-            createPreviewSession: ({ artifactDir, indexFile }) => {
-              const session = metaAppPreviewSessions.create({ artifactDir, indexFile });
-              return {
-                previewId: session.previewId,
-                localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
-              };
-            },
-          }),
+      getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
+        actorId: request.actorId,
+        from: request.from,
+      }),
+      getContext: async (request = {}) => {
+        const runtime = await browserHostAdapter.getRuntime({
+          actorId: request.actorId,
+          from: request.from,
         });
+        if (!runtime.ok) return runtime;
+        return commandSuccess(browserRuntimeToContextResult(runtime.data));
       },
+      getSettings: async (request = {}) => browserHostAdapter.getSettings({
+        actorId: request.actorId,
+        from: request.from,
+      }),
+      updateSettings: async (request) => browserHostAdapter.updateSettings({
+        actorId: request.actorId,
+        from: request.from,
+        browser: request.browser,
+      }),
+      getCache: async (request = {}) => browserHostAdapter.getCache({
+        actorId: request.actorId,
+        from: request.from,
+      }),
+      clearCache: async (request) => browserHostAdapter.clearCache({
+        actorId: request.actorId,
+        from: request.from,
+        scope: request.scope,
+        pinId: request.pinId,
+        cacheKey: request.cacheKey,
+      }),
+      resolve: async (request) => browserHostAdapter.resolveResource({
+        actorId: request.actorId,
+        from: request.from,
+        uri: request.uri,
+      }),
+      runTrustedAction: async (request) => browserHostAdapter.runTrustedAction(request),
     },
     config: {
       get: async () => commandSuccess(await configStore.read()),
@@ -14384,4 +14309,5 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
   };
+  return daemonHandlers;
 }
