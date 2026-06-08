@@ -79,10 +79,40 @@ function createContext(options = {}) {
   };
   vm.runInNewContext(buildBrowserPageDefinition().script, context);
   context.bindElements();
-  context.state.context = {
-    defaultUsingIdentity: { slug: 'worker', name: 'Worker Bot', globalMetaId: 'idq1worker', isDefault: true },
+  context.state.runtime = {
+    host: { kind: 'oac', name: 'Open Agent Connect', localMode: true },
+    actors: [{
+      id: 'worker',
+      label: 'Worker Bot',
+      kind: 'oac-bot',
+      globalMetaId: 'idq1worker',
+      isDefault: true,
+      capabilities: ['private-chat', 'service-call', 'template-settings'],
+    }],
+    defaultActor: {
+      id: 'worker',
+      label: 'Worker Bot',
+      kind: 'oac-bot',
+      globalMetaId: 'idq1worker',
+      isDefault: true,
+      capabilities: ['private-chat', 'service-call', 'template-settings'],
+    },
+    defaultUri: 'metaid://idq1worker',
+    features: {
+      privateChat: true,
+      serviceCall: true,
+      cacheManagement: true,
+      templateSettings: true,
+      walletLogin: false,
+    },
+    labels: {
+      actorChip: 'Using',
+      noActorTitle: 'No Bot',
+      noActorBody: 'Create a local Bot before using Browser actions.',
+      noActorAction: { label: 'Create Bot', href: '/ui/bot' },
+    },
   };
-  context.state.usingSlug = 'worker';
+  context.state.actorId = 'worker';
   context.state.current = {
     uri: 'metaid://idq1target',
     normalizedUri: 'metaid://idq1target',
@@ -120,7 +150,7 @@ test('copy-uri writes normalized URI to clipboard and falls back to status text'
   assert.match(withoutClipboard.nodes['[data-browser-status-state]'].textContent, /copied/i);
 });
 
-test('private-chat sends only after modal confirmation with existing daemon contract', async () => {
+test('private-chat sends only after modal confirmation with Browser action contract', async () => {
   const { context, nodes, requests } = createContext();
 
   await context.handleTrustedAction({ id: 'message', kind: 'private-chat' });
@@ -131,17 +161,21 @@ test('private-chat sends only after modal confirmation with existing daemon cont
   await context.confirmPrivateChat('Hello from Browser');
 
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, '/api/chat/private');
+  assert.equal(requests[0].url, '/api/browser/actions?actorId=worker');
   assert.deepEqual(requests[0].body, {
-    from: 'worker',
-    to: 'idq1target',
-    content: 'Hello from Browser',
+    resourceUri: 'metaid://idq1target',
+    kind: 'private-chat',
+    payload: {
+      to: 'idq1target',
+      content: 'Hello from Browser',
+    },
   });
-  assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body, 'peer'), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body, 'message'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body, 'from'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.payload, 'peer'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.payload, 'message'), false);
 });
 
-test('service-call sends only after modal confirmation with existing daemon contract', async () => {
+test('service-call sends only after modal confirmation with Browser action contract', async () => {
   const { context, nodes, requests } = createContext();
 
   await context.handleTrustedAction({ id: 'call', kind: 'service-call', serviceId: 'service-current-pin' });
@@ -152,12 +186,18 @@ test('service-call sends only after modal confirmation with existing daemon cont
   await context.confirmServiceCall('Review this payload');
 
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, '/api/services/call');
-  assert.equal(requests[0].body.from, 'worker');
-  assert.equal(requests[0].body.request.servicePinId, 'service-current-pin');
-  assert.equal(requests[0].body.request.providerGlobalMetaId, 'idq1provider');
-  assert.equal(requests[0].body.request.userTask, 'Review this payload');
-  assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.request, 'input'), false);
+  assert.equal(requests[0].url, '/api/browser/actions?actorId=worker');
+  assert.deepEqual(requests[0].body, {
+    resourceUri: 'metaid://idq1target',
+    kind: 'service-call',
+    payload: {
+      servicePinId: 'service-current-pin',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Review this payload',
+    },
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body, 'from'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.payload, 'input'), false);
 });
 
 test('sandboxed iframe renderer does not expose side-effect helpers to content', () => {

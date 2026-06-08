@@ -92,20 +92,19 @@ var browserSettingsTabs = ${JSON.stringify(BROWSER_SETTINGS_TABS)};
 var browserBaseUrlFields = ${JSON.stringify(BROWSER_BASE_URL_FIELDS)};
 var browserBotHomepageTemplates = ${JSON.stringify(BROWSER_BOT_HOMEPAGE_TEMPLATES)};
 var browserEndpoints = {
-  context: '/api/browser/context',
+  runtime: '/api/browser/runtime',
   resolve: '/api/browser/resolve',
   settings: '/api/browser/settings',
   cache: '/api/browser/cache',
-  privateChat: '/api/chat/private',
-  serviceCall: '/api/services/call',
+  actions: '/api/browser/actions',
 };
 
 var state = {
   history: [],
   historyIndex: -1,
   current: null,
-  context: null,
-  usingSlug: '',
+  runtime: null,
+  actorId: '',
   drawerOpen: false,
   inspectorOpen: false,
   menuOpen: false,
@@ -298,16 +297,31 @@ async function api(url, options) {
   return payload.data;
 }
 
+async function commandApi(url, options) {
+  var response = await fetch(url, options || {});
+  var payload = await response.json();
+  if (payload && payload.ok === true) {
+    return payload.data;
+  }
+  if (payload && (payload.state === 'waiting' || payload.state === 'manual_action_required')) {
+    return payload;
+  }
+  var message = payload && payload.message ? payload.message : 'Request failed.';
+  var error = new Error(message);
+  error.payload = payload;
+  throw error;
+}
+
 function setStatus(nextStatus, message) {
   state.status = nextStatus;
   state.error = message || '';
   if (elements.statusState) elements.statusState.textContent = nextStatus;
 }
 
-function endpointWithFrom(endpoint) {
-  if (!state.usingSlug) return endpoint;
+function endpointWithActor(endpoint) {
+  if (!state.actorId) return endpoint;
   var query = new URLSearchParams();
-  query.set('from', state.usingSlug);
+  query.set('actorId', state.actorId);
   return endpoint + '?' + query.toString();
 }
 
@@ -507,8 +521,8 @@ function renderBrowserSettingsModal() {
 }
 
 async function loadBrowserSettingsData() {
-  var settings = await api(endpointWithFrom(browserEndpoints.settings));
-  var cache = await api(endpointWithFrom(browserEndpoints.cache));
+  var settings = await api(endpointWithActor(browserEndpoints.settings));
+  var cache = await api(endpointWithActor(browserEndpoints.cache));
   state.settingsData = settings;
   state.cacheData = cache;
   return { settings: settings, cache: cache };
@@ -561,7 +575,7 @@ async function saveBrowserSettings() {
     var input = elements.modalRoot.querySelector('[data-browser-setting-field="' + key + '"]');
     browser[key] = input ? input.value : '';
   });
-  var result = await api(endpointWithFrom(browserEndpoints.settings), {
+  var result = await api(endpointWithActor(browserEndpoints.settings), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ browser: browser })
@@ -579,7 +593,7 @@ async function selectBotHomepageTemplate(templateId) {
     return null;
   }
   var selectedId = textValue(selectedTemplate.id);
-  var result = await api(endpointWithFrom(browserEndpoints.settings), {
+  var result = await api(endpointWithActor(browserEndpoints.settings), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ browser: { botHomepageTemplateId: selectedId } })
@@ -607,44 +621,88 @@ async function clearBrowserCache(scope) {
   var body = clearScope === 'pin'
     ? { scope: 'pin', pinId: currentPinId }
     : { scope: 'all' };
-  var result = await api(endpointWithFrom(browserEndpoints.cache), {
+  var result = await api(endpointWithActor(browserEndpoints.cache), {
     method: 'DELETE',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body)
   });
-  state.cacheData = await api(endpointWithFrom(browserEndpoints.cache));
+  state.cacheData = await api(endpointWithActor(browserEndpoints.cache));
   setStatus('cache cleared', '');
   renderBrowserSettingsModal();
   return result;
 }
 
+function runtimeActors() {
+  return state.runtime && Array.isArray(state.runtime.actors) ? state.runtime.actors : [];
+}
+
+function runtimeLabels() {
+  return state.runtime && state.runtime.labels && typeof state.runtime.labels === 'object'
+    ? state.runtime.labels
+    : {};
+}
+
+function runtimeLabel(key, fallback) {
+  return textValue(runtimeLabels()[key]) || fallback;
+}
+
+function selectedActor() {
+  var actors = runtimeActors();
+  var targetId = textValue(state.actorId);
+  for (var index = 0; index < actors.length; index += 1) {
+    if (textValue(actors[index] && actors[index].id) === targetId) {
+      return actors[index];
+    }
+  }
+  return state.runtime && state.runtime.defaultActor ? state.runtime.defaultActor : null;
+}
+
+function actorDefaultUri(actor) {
+  var globalMetaId = textValue(actor && actor.globalMetaId);
+  return globalMetaId ? 'metaid://' + globalMetaId : '';
+}
+
+function currentResourceUri() {
+  return textValue(state.current && (state.current.normalizedUri || state.current.uri)) ||
+    textValue(elements.input && elements.input.value);
+}
+
 function renderUsingIdentity() {
-  var identity = state.context && state.context.defaultUsingIdentity;
+  var actor = selectedActor();
   if (elements.usingChip) {
-    var name = identity && identity.name ? textValue(identity.name) : 'No Bot';
-    elements.usingChip.innerHTML = avatarHtml(identity && identity.avatar, name, 'browser-chip-avatar') +
-      '<span class="browser-chip-copy"><span class="browser-chip-title">Using: ' + escapeHtml(name) + '</span></span>' +
+    var name = textValue(actor && actor.label) || runtimeLabel('noActorTitle', 'No actor');
+    var chipLabel = runtimeLabel('actorChip', 'Using');
+    elements.usingChip.innerHTML = avatarHtml(actor && actor.avatar, name, 'browser-chip-avatar') +
+      '<span class="browser-chip-copy"><span class="browser-chip-title">' + escapeHtml(chipLabel) + ': ' + escapeHtml(name) + '</span></span>' +
       '<span class="browser-chip-caret" aria-hidden="true">' + iconHtml('chevronDown') + '</span>';
     if (typeof elements.usingChip.setAttribute === 'function') {
       elements.usingChip.setAttribute('aria-expanded', 'false');
     }
-    elements.usingChip.disabled = !(state.context && Array.isArray(state.context.usingIdentities) && state.context.usingIdentities.length);
+    elements.usingChip.disabled = !runtimeActors().length;
   }
 }
 
 function renderNoLocalBot() {
+  var title = runtimeLabel('noActorTitle', 'No Browser actor');
+  var body = runtimeLabel('noActorBody', 'Connect an actor before using Browser actions.');
+  var action = runtimeLabels().noActorAction;
+  var actionHref = action && typeof action === 'object' ? safeUrl(action.href) : '';
+  var actionLabel = action && typeof action === 'object' ? textValue(action.label) : '';
   setStatus('ready', '');
   state.current = null;
   if (elements.resourceChip) {
     elements.resourceChip.innerHTML = avatarHtml('', 'Resource', 'browser-chip-avatar') +
-      '<span class="browser-chip-copy"><span class="browser-chip-title">No resource</span><span class="browser-chip-subtitle">Create a local Bot</span></span>' +
+      '<span class="browser-chip-copy"><span class="browser-chip-title">No resource</span><span class="browser-chip-subtitle">' + escapeHtml(title) + '</span></span>' +
       '<span class="browser-chip-proof" aria-hidden="true">' + iconHtml('shield') + '</span>';
   }
   if (elements.statusProof) elements.statusProof.innerHTML = proofIconHtml('unverified') + '<span>unverified</span>';
   if (elements.statusRenderer) elements.statusRenderer.textContent = 'renderer: none';
   if (elements.statusTxid) elements.statusTxid.textContent = 'TXID: -';
   if (elements.viewport) {
-    elements.viewport.innerHTML = '<section class="browser-empty-state" data-browser-empty-state><h2>No local Bot</h2><a class="browser-primary-action" href="/ui/bot">Create Bot</a></section>';
+    elements.viewport.innerHTML = '<section class="browser-empty-state" data-browser-empty-state><h2>' + escapeHtml(title) + '</h2>' +
+      '<p>' + escapeHtml(body) + '</p>' +
+      (actionHref && actionLabel ? '<a class="browser-primary-action" href="' + escapeHtml(actionHref) + '">' + escapeHtml(actionLabel) + '</a>' : '') +
+      '</section>';
   }
 }
 
@@ -719,12 +777,12 @@ function renderVisitList(items) {
 
 function bookmarkItems() {
   var items = [];
-  var defaultUri = textValue(state.context && state.context.defaultUri);
+  var actor = selectedActor();
+  var defaultUri = textValue(state.runtime && state.runtime.defaultUri) || actorDefaultUri(actor);
   if (defaultUri) {
-    var identity = state.context && state.context.defaultUsingIdentity;
     items.push({
       uri: defaultUri,
-      title: textValue(identity && identity.name) || 'My Bot',
+      title: textValue(actor && actor.label) || 'Current actor',
       resourceType: 'bot'
     });
   }
@@ -1087,10 +1145,8 @@ function closeModal() {
 }
 
 function openUsingIdentitySelector() {
-  var identities = state.context && Array.isArray(state.context.usingIdentities)
-    ? state.context.usingIdentities
-    : [];
-  if (!identities.length) {
+  var actors = runtimeActors();
+  if (!actors.length) {
     renderNoLocalBot();
     return;
   }
@@ -1100,13 +1156,13 @@ function openUsingIdentitySelector() {
   }
   elements.modalRoot.hidden = false;
   elements.modalRoot.innerHTML = '<section class="browser-modal-panel" role="dialog" aria-modal="true">' +
-    '<header><h2>Using Bot</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
-    '<div class="browser-modal-body"><div class="browser-using-options">' + identities.map(function (identity) {
-      var slug = textValue(identity && identity.slug);
-      var name = textValue(identity && identity.name) || slug || 'Bot';
-      var globalMetaId = textValue(identity && identity.globalMetaId);
-      var selected = state.usingSlug && slug === state.usingSlug;
-      return '<button type="button" data-browser-using-slug="' + escapeHtml(slug) + '"' + (selected ? ' aria-current="true"' : '') + '>' +
+    '<header><h2>' + escapeHtml(runtimeLabel('actorChip', 'Using')) + ' Actor</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
+    '<div class="browser-modal-body"><div class="browser-using-options">' + actors.map(function (actor) {
+      var actorId = textValue(actor && actor.id);
+      var name = textValue(actor && actor.label) || actorId || 'Actor';
+      var globalMetaId = textValue(actor && actor.globalMetaId);
+      var selected = state.actorId && actorId === state.actorId;
+      return '<button type="button" data-browser-actor-id="' + escapeHtml(actorId) + '"' + (selected ? ' aria-current="true"' : '') + '>' +
         '<strong>' + escapeHtml(name) + '</strong>' +
         (globalMetaId ? '<span>' + escapeHtml(globalMetaId) + '</span>' : '') +
         '</button>';
@@ -1114,35 +1170,50 @@ function openUsingIdentitySelector() {
 }
 
 async function selectUsingIdentity(slug) {
-  var selectedSlug = textValue(slug);
-  var identities = state.context && Array.isArray(state.context.usingIdentities)
-    ? state.context.usingIdentities
-    : [];
+  var selectedId = textValue(slug);
+  var actors = runtimeActors();
   var selected = null;
-  for (var index = 0; index < identities.length; index += 1) {
-    if (textValue(identities[index] && identities[index].slug) === selectedSlug) {
-      selected = identities[index];
+  for (var index = 0; index < actors.length; index += 1) {
+    if (textValue(actors[index] && actors[index].id) === selectedId) {
+      selected = actors[index];
       break;
     }
   }
   if (!selected) {
-    setStatus('error', 'Using Bot not found.');
+    setStatus('error', runtimeLabel('actorChip', 'Actor') + ' not found.');
     return null;
   }
-  if (!state.context) state.context = {};
-  state.context.defaultUsingIdentity = selected;
-  state.usingSlug = selectedSlug;
+  if (!state.runtime) state.runtime = {};
+  state.actorId = selectedId;
+  var updatedActors = actors.map(function (actor) {
+    if (!actor || typeof actor !== 'object') return actor;
+    var actorId = textValue(actor.id);
+    var nextActor = {};
+    Object.keys(actor).forEach(function (key) {
+      nextActor[key] = actor[key];
+    });
+    nextActor.isDefault = actorId === selectedId;
+    return nextActor;
+  });
+  state.runtime.actors = updatedActors;
+  for (var updatedIndex = 0; updatedIndex < updatedActors.length; updatedIndex += 1) {
+    if (textValue(updatedActors[updatedIndex] && updatedActors[updatedIndex].id) === selectedId) {
+      selected = updatedActors[updatedIndex];
+      break;
+    }
+  }
+  state.runtime.defaultActor = selected;
+  state.runtime.defaultUri = actorDefaultUri(selected) || null;
   renderUsingIdentity();
   closeModal();
-  var uri = textValue(state.current && (state.current.normalizedUri || state.current.uri)) ||
-    textValue(elements.input && elements.input.value);
+  var uri = currentResourceUri();
   if (!uri) return null;
   return resolveUri(uri, { record: false });
 }
 
 function usingLabel() {
-  var identity = state.context && state.context.defaultUsingIdentity;
-  return textValue(identity && identity.name) || textValue(state.usingSlug) || 'Current Bot';
+  var actor = selectedActor();
+  return textValue(actor && actor.label) || textValue(state.actorId) || 'Current actor';
 }
 
 async function copyUri(action) {
@@ -1184,13 +1255,16 @@ async function confirmPrivateChat(messageText) {
     setStatus('error', 'Message is required.');
     return null;
   }
-  var result = await api(browserEndpoints.privateChat, {
+  var result = await commandApi(endpointWithActor(browserEndpoints.actions), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      from: state.usingSlug || undefined,
-      to: pending.to,
-      content: content
+      resourceUri: currentResourceUri(),
+      kind: 'private-chat',
+      payload: {
+        to: pending.to,
+        content: content
+      }
     })
   });
   closeModal();
@@ -1231,18 +1305,16 @@ async function confirmServiceCall(userTaskText) {
     setStatus('error', 'Service request is incomplete.');
     return null;
   }
-  var result = await api(browserEndpoints.serviceCall, {
+  var result = await commandApi(endpointWithActor(browserEndpoints.actions), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      from: state.usingSlug || undefined,
-      request: {
+      resourceUri: currentResourceUri(),
+      kind: 'service-call',
+      payload: {
         servicePinId: pending.servicePinId,
         providerGlobalMetaId: pending.providerGlobalMetaId,
-        userTask: userTask,
-        taskContext: 'Requested from Agent Internet Browser',
-        rawRequest: userTask,
-        confirmed: true
+        userTask: userTask
       }
     })
   });
@@ -1294,7 +1366,7 @@ function renderRenderer(current) {
 function resolveUrl(uri) {
   var query = new URLSearchParams();
   query.set('uri', uri);
-  if (state.usingSlug) query.set('from', state.usingSlug);
+  if (state.actorId) query.set('actorId', state.actorId);
   return browserEndpoints.resolve + '?' + query.toString();
 }
 
@@ -1342,13 +1414,17 @@ function goForward() {
   return resolveUri(state.history[state.historyIndex], { record: false });
 }
 
-async function loadContext() {
-  var data = await api(browserEndpoints.context);
-  state.context = data;
-  var identity = data && data.defaultUsingIdentity;
-  state.usingSlug = identity && identity.slug ? identity.slug : '';
+async function loadRuntime() {
+  var data = await api(browserEndpoints.runtime);
+  state.runtime = data || {};
+  var actor = data && data.defaultActor;
+  state.actorId = actor && actor.id ? textValue(actor.id) : '';
   renderUsingIdentity();
   return data;
+}
+
+async function loadContext() {
+  return loadRuntime();
 }
 
 async function initialize() {
@@ -1401,12 +1477,12 @@ async function initialize() {
         return;
       }
       var target = closestWithAttribute(event && event.target, 'data-browser-modal-action') ||
-        closestWithAttribute(event && event.target, 'data-browser-using-slug');
+        closestWithAttribute(event && event.target, 'data-browser-actor-id');
       if (!target) return;
       var action = target.getAttribute('data-browser-modal-action');
-      var usingSlug = target.getAttribute('data-browser-using-slug');
-      if (usingSlug) {
-        selectUsingIdentity(usingSlug);
+      var actorId = target.getAttribute('data-browser-actor-id');
+      if (actorId) {
+        selectUsingIdentity(actorId);
         return;
       }
       if (action === 'private-chat') {
@@ -1478,7 +1554,7 @@ async function initialize() {
 
   var queryUri = new URLSearchParams(window.location.search || '').get('uri') || '';
   var pathUri = queryUri ? '' : browserUriFromPath(window.location && window.location.pathname);
-  var context = await loadContext();
+  var runtime = await loadRuntime();
   var initialUri = queryUri || pathUri;
   if (initialUri) {
     if (elements.input) elements.input.value = initialUri;
@@ -1486,8 +1562,8 @@ async function initialize() {
     return;
   }
 
-  if (context && context.defaultUri) {
-    await navigateTo(context.defaultUri);
+  if (runtime && runtime.defaultUri) {
+    await navigateTo(runtime.defaultUri);
     return;
   }
   renderNoLocalBot();
@@ -1525,6 +1601,7 @@ globalThis.normalizeBotHomepagePayload = normalizeBotHomepagePayload;
 globalThis.confirmPrivateChat = confirmPrivateChat;
 globalThis.confirmServiceCall = confirmServiceCall;
 globalThis.closeModal = closeModal;
+globalThis.loadRuntime = loadRuntime;
 globalThis.loadContext = loadContext;
 globalThis.resolveUri = resolveUri;
 globalThis.navigateTo = navigateTo;

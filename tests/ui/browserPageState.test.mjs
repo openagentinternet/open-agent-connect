@@ -115,17 +115,46 @@ function resolvedBot(uri, name = 'Alice Bot') {
   };
 }
 
+const defaultActor = {
+  id: 'worker',
+  label: 'Worker Bot',
+  kind: 'oac-bot',
+  globalMetaId: 'idq1worker',
+  isDefault: true,
+  capabilities: ['private-chat', 'service-call', 'template-settings'],
+};
+
+function runtimePayload(overrides = {}) {
+  const actor = overrides.defaultActor === undefined ? defaultActor : overrides.defaultActor;
+  return {
+    ok: true,
+    data: {
+      host: { kind: 'oac', name: 'Open Agent Connect', localMode: true },
+      actors: [defaultActor],
+      defaultActor: actor,
+      defaultUri: actor && actor.globalMetaId ? `metaid://${actor.globalMetaId}` : null,
+      features: {
+        privateChat: true,
+        serviceCall: true,
+        cacheManagement: true,
+        templateSettings: true,
+        walletLogin: false,
+      },
+      labels: {
+        actorChip: 'Using',
+        noActorTitle: 'No Bot',
+        noActorBody: 'Create a local Bot before using Browser actions.',
+        noActorAction: { label: 'Create Bot', href: '/ui/bot' },
+      },
+      ...overrides,
+    },
+  };
+}
+
 function createBrowserContext(options = {}) {
   const elements = createElements();
   const fetchCalls = [];
-  const contextResponse = options.contextResponse ?? {
-    ok: true,
-    data: {
-      usingIdentities: [{ slug: 'worker', name: 'Worker Bot', globalMetaId: 'idq1worker', isDefault: true }],
-      defaultUsingIdentity: { slug: 'worker', name: 'Worker Bot', globalMetaId: 'idq1worker', isDefault: true },
-      defaultUri: 'metaid://idq1worker',
-    },
-  };
+  const runtimeResponse = options.runtimeResponse ?? runtimePayload();
   const resolveResponse = options.resolveResponse ?? ((uri) => resolvedBot(uri));
   const settingsData = options.settingsData ?? {
     browser: {
@@ -178,8 +207,8 @@ function createBrowserContext(options = {}) {
     },
     fetch: async (url, fetchOptions = {}) => {
       fetchCalls.push(String(url));
-      if (String(url).startsWith('/api/browser/context')) {
-        return { ok: true, json: async () => contextResponse };
+      if (String(url).startsWith('/api/browser/runtime')) {
+        return { ok: true, json: async () => runtimeResponse };
       }
       if (String(url).startsWith('/api/browser/resolve')) {
         const uri = new URLSearchParams(String(url).split('?')[1] || '').get('uri') || '';
@@ -227,40 +256,40 @@ function createBrowserContext(options = {}) {
 test('Browser query URI is decoded into the address bar and resolved', async () => {
   const { elements, fetchCalls } = createBrowserContext({ search: '?uri=metaid%3A%2F%2Fidq1alice' });
 
-  await waitFor(() => fetchCalls.length === 2, 'context and initial resolve');
+  await waitFor(() => fetchCalls.length === 2, 'runtime and initial resolve');
 
   assert.equal(elements['[data-browser-uri-input]'].value, 'metaid://idq1alice');
-  assert.equal(fetchCalls[0], '/api/browser/context');
-  assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&from=worker');
+  assert.equal(fetchCalls[0], '/api/browser/runtime');
+  assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&actorId=worker');
 });
 
 test('Browser MetaID deep link path is decoded into the address bar and resolved', async () => {
   const { elements, fetchCalls } = createBrowserContext({ pathname: '/browser/metaid/idq1alice' });
 
-  await waitFor(() => fetchCalls.length === 2, 'context and deep link resolve');
+  await waitFor(() => fetchCalls.length === 2, 'runtime and deep link resolve');
 
   assert.equal(elements['[data-browser-uri-input]'].value, 'metaid://idq1alice');
-  assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&from=worker');
+  assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&actorId=worker');
 });
 
 test('Browser MetaApp deep link path is decoded into the address bar and resolved', async () => {
   const pinId = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0';
   const { elements, fetchCalls } = createBrowserContext({ pathname: `/browser/metaapp/${pinId}` });
 
-  await waitFor(() => fetchCalls.length === 2, 'context and deep link resolve');
+  await waitFor(() => fetchCalls.length === 2, 'runtime and deep link resolve');
 
   assert.equal(elements['[data-browser-uri-input]'].value, `metaapp://${pinId}`);
-  assert.equal(fetchCalls[1], `/api/browser/resolve?uri=metaapp%3A%2F%2F${pinId}&from=worker`);
+  assert.equal(fetchCalls[1], `/api/browser/resolve?uri=metaapp%3A%2F%2F${pinId}&actorId=worker`);
 });
 
-test('Browser loads context and resolves default URI when no query URI is present', async () => {
+test('Browser loads runtime and resolves default URI when no query URI is present', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
-  await waitFor(() => fetchCalls.length === 2, 'context and default resolve');
+  await waitFor(() => fetchCalls.length === 2, 'runtime and default resolve');
 
-  assert.equal(fetchCalls[0], '/api/browser/context');
-  assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1worker&from=worker');
-  assert.equal(context.state.usingSlug, 'worker');
+  assert.equal(fetchCalls[0], '/api/browser/runtime');
+  assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1worker&actorId=worker');
+  assert.equal(context.state.actorId, 'worker');
   assert.equal(elements['[data-browser-uri-input]'].value, 'metaid://idq1worker');
 });
 
@@ -300,18 +329,20 @@ test('Browser resource chip prefers MetaApp title over publisher identity', asyn
 });
 
 test('Browser using identity selector switches identity and reloads current URI without history entry', async () => {
+  const reviewerActor = {
+    id: 'reviewer',
+    label: 'Reviewer Bot',
+    kind: 'oac-bot',
+    globalMetaId: 'idq1reviewer',
+    isDefault: false,
+    capabilities: ['private-chat', 'service-call', 'template-settings'],
+  };
   const { context, elements, fetchCalls } = createBrowserContext({
-    contextResponse: {
-      ok: true,
-      data: {
-        usingIdentities: [
-          { slug: 'worker', name: 'Worker Bot', globalMetaId: 'idq1worker', isDefault: true },
-          { slug: 'reviewer', name: 'Reviewer Bot', globalMetaId: 'idq1reviewer', isDefault: false },
-        ],
-        defaultUsingIdentity: { slug: 'worker', name: 'Worker Bot', globalMetaId: 'idq1worker', isDefault: true },
-        defaultUri: 'metaid://idq1worker',
-      },
-    },
+    runtimeResponse: runtimePayload({
+      actors: [defaultActor, reviewerActor],
+      defaultActor,
+      defaultUri: 'metaid://idq1worker',
+    }),
   });
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
@@ -326,12 +357,12 @@ test('Browser using identity selector switches identity and reloads current URI 
   await context.selectUsingIdentity('reviewer');
   await waitFor(() => fetchCalls.length === 3, 'selected identity reload');
 
-  assert.equal(context.state.context.defaultUsingIdentity.slug, 'reviewer');
-  assert.equal(context.state.usingSlug, 'reviewer');
+  assert.equal(context.state.runtime.defaultActor.id, 'reviewer');
+  assert.equal(context.state.actorId, 'reviewer');
   assert.match(elements['[data-browser-using-selector]'].innerHTML, /Using: Reviewer Bot/);
   assert.equal(elements['[data-browser-modal-root]'].hidden, true);
   assert.equal(elements['[data-browser-using-selector]'].getAttribute('aria-expanded'), 'false');
-  assert.equal(fetchCalls[2], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1worker&from=reviewer');
+  assert.equal(fetchCalls[2], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1worker&actorId=reviewer');
   assert.deepEqual(Array.from(context.state.history), ['metaid://idq1worker']);
   assert.equal(context.state.historyIndex, 0);
 });
@@ -361,8 +392,8 @@ test('Browser menu is data-driven and opens cache management settings', async ()
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /Cache/);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /\/tmp\/\.metabot\/cache\/metaapps/);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /2 artifacts/);
-  assert.equal(fetchCalls.at(-2), '/api/browser/settings?from=worker');
-  assert.equal(fetchCalls.at(-1), '/api/browser/cache?from=worker');
+  assert.equal(fetchCalls.at(-2), '/api/browser/settings?actorId=worker');
+  assert.equal(fetchCalls.at(-1), '/api/browser/cache?actorId=worker');
 });
 
 test('Browser template settings select the default Bot homepage template', async () => {
@@ -384,7 +415,7 @@ test('Browser template settings select the default Bot homepage template', async
   assert.equal(context.state.settingsData.browser.botHomepageTemplateId, 'compact-list');
   assert.equal(context.state.current.renderer.templateId, 'compact-list');
   assert.match(elements['[data-browser-viewport]'].innerHTML, /browser-bot-template-compact-list/);
-  assert.equal(fetchCalls.at(-1), '/api/browser/settings?from=worker');
+  assert.equal(fetchCalls.at(-1), '/api/browser/settings?actorId=worker');
 });
 
 test('Browser history controls navigate without replacing Browser chrome', async () => {
@@ -410,16 +441,24 @@ test('Browser history controls navigate without replacing Browser chrome', async
   assert.equal(elements['[data-browser-address-form]'], topbar);
 });
 
-test('Browser renders a no-local-Bot empty state when context has no default identity', async () => {
+test('Browser renders no-actor empty state from runtime labels when runtime has no default actor', async () => {
   const { elements, fetchCalls } = createBrowserContext({
-    contextResponse: {
-      ok: true,
-      data: { usingIdentities: [], defaultUsingIdentity: null, defaultUri: null },
-    },
+    runtimeResponse: runtimePayload({
+      actors: [],
+      defaultActor: null,
+      defaultUri: null,
+      labels: {
+        actorChip: 'Wallet',
+        noActorTitle: 'Sign in with Wallet',
+        noActorBody: 'Use Metalet to activate Browser actions.',
+        noActorAction: { label: 'Open Wallet Login', href: '/ui/wallet' },
+      },
+    }),
   });
 
-  await waitFor(() => elements['[data-browser-viewport]'].innerHTML.includes('No local Bot'), 'no local Bot render');
+  await waitFor(() => elements['[data-browser-viewport]'].innerHTML.includes('Sign in with Wallet'), 'no actor render');
 
-  assert.match(elements['[data-browser-viewport]'].innerHTML, /No local Bot/);
-  assert.match(elements['[data-browser-viewport]'].innerHTML, /href="\/ui\/bot"/);
+  assert.equal(fetchCalls[0], '/api/browser/runtime');
+  assert.match(elements['[data-browser-viewport]'].innerHTML, /Use Metalet to activate Browser actions\./);
+  assert.match(elements['[data-browser-viewport]'].innerHTML, /href="\/ui\/wallet"/);
 });
