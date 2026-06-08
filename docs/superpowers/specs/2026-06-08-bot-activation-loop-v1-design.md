@@ -455,7 +455,7 @@ Avoid first-run copy that leads with:
 - chain explorer language;
 - management dashboard language;
 - marketplace language;
-- Ask Master or skill-service-first positioning.
+- legacy helper or service-first positioning.
 
 ### Owner Mode Tone
 
