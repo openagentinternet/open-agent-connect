@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_pendingCreateAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_pendingCreateAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -1020,16 +1020,18 @@ function createModeRequested(){
   }catch(error){return false}
 }
 function botManagementRouteRequest(){
+  if(state._managementRouteRequest)return state._managementRouteRequest;
   try{
     var search=typeof window!=='undefined'&&window.location?window.location.search:'';
     var query=new URLSearchParams(search||'');
     var tab=query.get('tab')||'';
-    return {
+    state._managementRouteRequest={
       profile:(query.get('profile')||'').trim(),
       tab:tab==='info'||tab==='history'?tab:'',
       focus:(query.get('focus')||'').trim(),
     };
-  }catch(error){return{profile:'',tab:'',focus:''}}
+    return state._managementRouteRequest;
+  }catch(error){state._managementRouteRequest={profile:'',tab:'',focus:''};return state._managementRouteRequest}
 }
 function applyBotManagementRouteRequest(){
   var request=botManagementRouteRequest();
@@ -1043,8 +1045,10 @@ function focusBotManagementTarget(){
   else if(focus==='chat')target=q('[data-field="chatSkillSelect"]')||q('[data-act="add-chat-skill"]');
   else if(focus==='messages')target=q('[data-execution-history-list]');
   if(!target)return;
-  if(typeof target.scrollIntoView==='function')target.scrollIntoView({block:'start'});
-  if(typeof target.focus==='function')target.focus();
+  var handled=false;
+  if(typeof target.scrollIntoView==='function'){target.scrollIntoView({block:'start'});handled=true}
+  if(typeof target.focus==='function'){target.focus();handled=true}
+  if(handled)botManagementRouteRequest().focus='';
 }
 function modalIsOpen(el){
   return Boolean(el&&el.classList&&typeof el.classList.contains==='function'&&!el.classList.contains('hidden'));

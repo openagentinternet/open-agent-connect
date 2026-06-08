@@ -906,6 +906,90 @@ test('bot page deep link focus profile activates profile identity field', async 
   assert.equal(nameField.scrolled, true);
 });
 
+test('bot page deep link focus is consumed after the first successful activation', async () => {
+  const infoTab = tabElement('info');
+  const historyTab = tabElement('history');
+  const infoPanel = tabElement('info');
+  const historyPanel = tabElement('history');
+  const infoRoot = { innerHTML: '' };
+  const nameField = field('Alice');
+  let focusCount = 0;
+  let scrollCount = 0;
+  nameField.focus = () => {
+    nameField.focused = true;
+    focusCount += 1;
+  };
+  nameField.scrollIntoView = () => {
+    nameField.scrolled = true;
+    scrollCount += 1;
+  };
+  const calls = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': field(),
+      '[data-metabot-count]': field(),
+      '[data-detail-header]': field(),
+      '[data-detail-avatar]': field(),
+      '[data-detail-name]': field(),
+      '[data-detail-id]': field(),
+      '[data-detail-empty]': field(),
+      '[data-tab-bar]': field(),
+      '[data-tab-content]': field(),
+      '[data-info-content]': infoRoot,
+      '[data-field="name"]': nameField,
+      '[data-execution-history-list]': field(),
+    },
+    globals: {
+      URLSearchParams,
+      window: {
+        location: {
+          search: '?profile=alice&tab=info&focus=profile',
+        },
+      },
+    },
+    fetch: (url) => {
+      calls.push(String(url));
+      if (url === '/api/bot/profiles') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              profiles: [
+                { slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice', allowChatSkills: [] },
+              ],
+            },
+          }),
+        });
+      }
+      if (url === '/api/bot/runtimes') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { runtimes: [] } }),
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+  context.document.querySelectorAll = (selector) => {
+    if (selector === '[data-tab]') return [infoTab, historyTab];
+    if (selector === '[data-tab-panel]') return [infoPanel, historyPanel];
+    return [];
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.chatSkillOptionsStatusBySlug.alice = 'loaded';
+
+  await context.loadProfiles();
+  await context.loadRuntimes();
+
+  assert.equal(context.state.selectedSlug, 'alice');
+  assert.equal(context.state.selectedTab, 'info');
+  assert.equal(focusCount, 1);
+  assert.equal(scrollCount, 1);
+  assert.equal(calls.includes('/api/services/skills?from=alice'), false);
+});
+
 test('bot page create avatar upload clears a previous pending avatar after an oversized file', () => {
   const preview = { innerHTML: '' };
   const removeButton = field();
