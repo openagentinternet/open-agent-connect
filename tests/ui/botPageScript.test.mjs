@@ -30,6 +30,24 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+function waitFor(condition, label) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const check = () => {
+      if (condition()) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt > 1000) {
+        reject(new Error(`Timed out waiting for ${label}`));
+        return;
+      }
+      setTimeout(check, 5);
+    };
+    check();
+  });
+}
+
 function createBotScriptContext(overrides = {}) {
   const elements = overrides.elements ?? {};
   const root = elements['[data-modal-root]'] ?? {
@@ -58,6 +76,26 @@ function createBotScriptContext(overrides = {}) {
     clearInterval: () => {},
     ...overrides.globals,
   };
+}
+
+function tabElement(value) {
+  const element = {
+    active: false,
+    listeners: new Map(),
+    getAttribute: (name) => {
+      if (name === 'data-tab' || name === 'data-tab-panel') return value;
+      return null;
+    },
+    addEventListener(eventName, handler) {
+      this.listeners.set(eventName, handler);
+    },
+    classList: {
+      toggle: (name, enabled) => {
+        if (name === 'active') element.active = Boolean(enabled);
+      },
+    },
+  };
+  return element;
 }
 
 test('bot page preserves unavailable provider bindings when saving unrelated profile fields', () => {
@@ -627,6 +665,159 @@ test('bot page opens the creation modal after initial load when mode=create is r
   assert.doesNotMatch(modal.innerHTML, /data-field="role"/);
   assert.doesNotMatch(modal.innerHTML, /data-field="soul"/);
   assert.doesNotMatch(modal.innerHTML, /data-field="goal"/);
+});
+
+test('bot page deep link selects requested profile and info tab after profiles load', async () => {
+  const infoTab = tabElement('info');
+  const historyTab = tabElement('history');
+  const infoPanel = tabElement('info');
+  const historyPanel = tabElement('history');
+  const infoRoot = { innerHTML: '' };
+  const calls = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': field(),
+      '[data-metabot-count]': field(),
+      '[data-detail-header]': field(),
+      '[data-detail-avatar]': field(),
+      '[data-detail-name]': field(),
+      '[data-detail-id]': field(),
+      '[data-detail-empty]': field(),
+      '[data-tab-bar]': field(),
+      '[data-tab-content]': field(),
+      '[data-info-content]': infoRoot,
+      '[data-execution-history-list]': { innerHTML: '' },
+    },
+    globals: {
+      URLSearchParams,
+      window: {
+        location: {
+          search: '?profile=alice&tab=info&focus=chat',
+        },
+      },
+    },
+    fetch: (url) => {
+      calls.push(String(url));
+      if (url === '/api/bot/profiles') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              profiles: [
+                { slug: 'bob', name: 'Bob', globalMetaId: 'gm-bob', allowChatSkills: [] },
+                { slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice', allowChatSkills: [] },
+              ],
+            },
+          }),
+        });
+      }
+      if (url === '/api/services/skills?from=alice') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+  context.document.querySelectorAll = (selector) => {
+    if (selector === '[data-tab]') return [infoTab, historyTab];
+    if (selector === '[data-tab-panel]') return [infoPanel, historyPanel];
+    return [];
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  await context.loadProfiles();
+
+  assert.equal(context.state.selectedSlug, 'alice');
+  assert.equal(context.state.selectedTab, 'info');
+  assert.equal(infoTab.active, true);
+  assert.equal(historyTab.active, false);
+  assert.match(infoRoot.innerHTML, /data-info-profile-slug="alice"/);
+  assert.equal(calls.includes('/api/bot/sessions?slug=alice&limit=50'), false);
+});
+
+test('bot page deep link selects requested profile and history tab before loading sessions', async () => {
+  const infoTab = tabElement('info');
+  const historyTab = tabElement('history');
+  const infoPanel = tabElement('info');
+  const historyPanel = tabElement('history');
+  const historyRoot = { innerHTML: '' };
+  const calls = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': field(),
+      '[data-metabot-count]': field(),
+      '[data-detail-header]': field(),
+      '[data-detail-avatar]': field(),
+      '[data-detail-name]': field(),
+      '[data-detail-id]': field(),
+      '[data-detail-empty]': field(),
+      '[data-tab-bar]': field(),
+      '[data-tab-content]': field(),
+      '[data-info-content]': { innerHTML: '' },
+      '[data-execution-history-list]': historyRoot,
+    },
+    globals: {
+      URLSearchParams,
+      window: {
+        location: {
+          search: '?profile=alice&tab=history&focus=messages',
+        },
+      },
+    },
+    fetch: (url) => {
+      calls.push(String(url));
+      if (url === '/api/bot/profiles') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              profiles: [
+                { slug: 'bob', name: 'Bob', globalMetaId: 'gm-bob', allowChatSkills: [] },
+                { slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice', allowChatSkills: [] },
+              ],
+            },
+          }),
+        });
+      }
+      if (url === '/api/bot/sessions?slug=alice&limit=50') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              sessions: [
+                { metaBotSlug: 'alice', sessionId: 'session-alice', status: 'completed', prompt: 'hello' },
+              ],
+            },
+          }),
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+  context.document.querySelectorAll = (selector) => {
+    if (selector === '[data-tab]') return [infoTab, historyTab];
+    if (selector === '[data-tab-panel]') return [infoPanel, historyPanel];
+    return [];
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  await context.loadProfiles();
+  await waitFor(() => calls.includes('/api/bot/sessions?slug=alice&limit=50'), 'Alice history load');
+  await waitFor(() => context.state.sessions.length === 1, 'Alice history state update');
+
+  assert.equal(context.state.selectedSlug, 'alice');
+  assert.equal(context.state.selectedTab, 'history');
+  assert.equal(infoTab.active, false);
+  assert.equal(historyTab.active, true);
+  assert.deepEqual(context.state.sessions.map((session) => session.sessionId), ['session-alice']);
+  assert.match(historyRoot.innerHTML, /session-alice/);
 });
 
 test('bot page create avatar upload clears a previous pending avatar after an oversized file', () => {

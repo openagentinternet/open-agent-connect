@@ -460,7 +460,33 @@ test('OAC browser host adapter rejects owner trusted actions with unknown owner 
   });
 
   assert.equal(result.ok, false);
-  assert.match(result.code, /^(profile_not_found|invalid_browser_action)$/);
+  assert.equal(result.code, 'profile_not_found');
+});
+
+test('OAC browser host adapter reports owner profile list failures separately from missing owner', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-owner-action-list-failure');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const badSystemHomeFile = path.join(systemHomeDir, 'not-a-system-home-file');
+  await writeFile(badSystemHomeFile, 'not a directory\n', 'utf8');
+
+  const adapter = await createAdapter({
+    homeDir: profileHome,
+    systemHomeDir: badSystemHomeFile,
+  });
+
+  const result = await adapter.runTrustedAction({
+    resourceUri: 'metaid://idq1alice',
+    kind: 'edit-profile',
+    payload: {
+      ownerActorId: 'alice',
+      ownerGlobalMetaId: 'idq1alice',
+      currentUri: 'metaid://idq1alice',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'browser_profile_list_failed');
 });
 
 test('OAC browser host adapter rejects owner actions without ownerActorId even when actorId exists in payload', async (t) => {

@@ -828,7 +828,7 @@ function switchTab(tab,silent){
 }
 
 function loadStats(){return api('/api/bot/stats').then(function(r){state.stats=r.data||{};renderStats()}).catch(function(){renderStats()})}
-function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
+function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
 function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){
@@ -1016,6 +1016,23 @@ function createModeRequested(){
     var search=typeof window!=='undefined'&&window.location?window.location.search:'';
     return new URLSearchParams(search||'').get('mode')==='create';
   }catch(error){return false}
+}
+function botManagementRouteRequest(){
+  try{
+    var search=typeof window!=='undefined'&&window.location?window.location.search:'';
+    var query=new URLSearchParams(search||'');
+    var tab=query.get('tab')||'';
+    return {
+      profile:(query.get('profile')||'').trim(),
+      tab:tab==='info'||tab==='history'?tab:'',
+      focus:(query.get('focus')||'').trim(),
+    };
+  }catch(error){return{profile:'',tab:'',focus:''}}
+}
+function applyBotManagementRouteRequest(){
+  var request=botManagementRouteRequest();
+  if(request.profile&&state.profiles.some(function(profile){return profile.slug===request.profile}))state.selectedSlug=request.profile;
+  if(request.tab)state.selectedTab=request.tab;
 }
 function modalIsOpen(el){
   return Boolean(el&&el.classList&&typeof el.classList.contains==='function'&&!el.classList.contains('hidden'));

@@ -339,7 +339,15 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       if (!ownerActorId) {
         return commandFailed('invalid_browser_action', 'Browser owner action requires ownerActorId.');
       }
-      const profiles = await listMetabotProfiles(input.systemHomeDir).catch(() => [] as MetabotProfileFull[]);
+      let profiles: MetabotProfileFull[];
+      try {
+        profiles = await listMetabotProfiles(input.systemHomeDir);
+      } catch (error) {
+        return commandFailed(
+          'browser_profile_list_failed',
+          error instanceof Error ? error.message : 'Browser owner action could not list MetaBot profiles.',
+        );
+      }
       const ownerProfile = profiles.find((profile) => profile.slug === ownerActorId) ?? null;
       if (!ownerProfile) {
         return commandFailed('profile_not_found', `MetaBot profile not found: ${ownerActorId}`);

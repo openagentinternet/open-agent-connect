@@ -700,7 +700,30 @@ function ownerActionPayload(owner) {
 
 function openTrustedActionHref(result) {
   var href = result && result.data && result.data.href;
-  if (href) window.location.href = href;
+  if (!href) return;
+  var safeHref = safeOwnerManagementHref(href);
+  if (!safeHref) {
+    setStatus('error', 'Unsafe owner action route blocked.');
+    return;
+  }
+  window.location.href = safeHref;
+}
+
+function safeOwnerManagementHref(value) {
+  var href = textValue(value);
+  if (!href) return '';
+  if (href.indexOf('/ui/bot?') === 0) return href;
+  try {
+    var origin = window.location && window.location.origin ? window.location.origin : '';
+    if (!origin) return '';
+    var url = new URL(href, origin);
+    if (url.origin === origin && url.pathname === '/ui/bot' && url.search) {
+      return url.pathname + url.search + url.hash;
+    }
+  } catch (error) {
+    return '';
+  }
+  return '';
 }
 
 function currentOwnerGlobalMetaId() {
@@ -1604,6 +1627,10 @@ async function initialize() {
       var actorId = target.getAttribute('data-browser-actor-id');
       if (actorId) {
         selectUsingIdentity(actorId);
+        return;
+      }
+      if (!action) {
+        closeModal();
         return;
       }
       if (action === 'private-chat') {

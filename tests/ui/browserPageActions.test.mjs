@@ -199,6 +199,14 @@ function modalShareCopyTarget(value) {
   };
 }
 
+function modalConfirmTarget(action = '') {
+  return {
+    parentElement: null,
+    getAttribute: (name) => (name === 'data-browser-modal-action' ? action : ''),
+    hasAttribute: (name) => name === 'data-browser-modal-action',
+  };
+}
+
 test('copy-uri writes normalized URI to clipboard and falls back to status text', async () => {
   const withClipboard = createContext();
   await withClipboard.context.handleTrustedAction({ id: 'copy-uri', kind: 'copy', uri: 'metaid://idq1target' });
@@ -309,6 +317,86 @@ test('owner toolbar actions send Browser owner action payloads and follow return
   assert.equal(context.window.location.href, '/ui/bot?profile=alice&tab=info&focus=profile');
 });
 
+test('owner toolbar rejects unsafe javascript action hrefs', async () => {
+  const initialHref = 'http://127.0.0.1:3000/ui/browser';
+  const { context, nodes, requests } = createContext({
+    actionResponse: {
+      ok: true,
+      data: {
+        kind: 'edit-profile',
+        handled: true,
+        data: { href: 'javascript:alert(1)' },
+      },
+    },
+  });
+
+  await context.initialize();
+  context.state.runtime.actors = [
+    { id: 'worker', label: 'Worker Bot', kind: 'oac-bot', globalMetaId: 'idq1worker', isDefault: true, capabilities: [] },
+    { id: 'alice', label: 'Alice Bot', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: false, capabilities: [] },
+  ];
+  context.state.current = {
+    uri: 'metaid://idq1alice',
+    normalizedUri: 'metaid://idq1alice',
+    resourceType: 'bot',
+    title: 'Alice Bot',
+    owner: { kind: 'bot', globalMetaId: 'idq1alice', name: 'Alice Bot', verificationState: 'verified' },
+    renderer: { type: 'bot-page', contentType: 'application/vnd.oac.bot-homepage+json', data: {} },
+    status: { state: 'resolved', verificationState: 'verified', message: '' },
+    source: { resolver: 'test' },
+    actions: [],
+  };
+
+  nodes['[data-browser-owner-toolbar]'].listeners.get('click')({ target: ownerActionTarget('edit-profile') });
+  await waitFor(
+    () => requests.length === 1 && (context.window.location.href !== initialHref || context.state.status === 'error'),
+    'unsafe javascript href handling',
+  );
+
+  assert.equal(context.window.location.href, initialHref);
+  assert.equal(context.state.status, 'error');
+});
+
+test('owner toolbar rejects cross-origin action hrefs', async () => {
+  const initialHref = 'http://127.0.0.1:3000/ui/browser';
+  const { context, nodes, requests } = createContext({
+    actionResponse: {
+      ok: true,
+      data: {
+        kind: 'edit-profile',
+        handled: true,
+        data: { href: 'https://evil.example/ui/bot?profile=alice&tab=info&focus=profile' },
+      },
+    },
+  });
+
+  await context.initialize();
+  context.state.runtime.actors = [
+    { id: 'worker', label: 'Worker Bot', kind: 'oac-bot', globalMetaId: 'idq1worker', isDefault: true, capabilities: [] },
+    { id: 'alice', label: 'Alice Bot', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: false, capabilities: [] },
+  ];
+  context.state.current = {
+    uri: 'metaid://idq1alice',
+    normalizedUri: 'metaid://idq1alice',
+    resourceType: 'bot',
+    title: 'Alice Bot',
+    owner: { kind: 'bot', globalMetaId: 'idq1alice', name: 'Alice Bot', verificationState: 'verified' },
+    renderer: { type: 'bot-page', contentType: 'application/vnd.oac.bot-homepage+json', data: {} },
+    status: { state: 'resolved', verificationState: 'verified', message: '' },
+    source: { resolver: 'test' },
+    actions: [],
+  };
+
+  nodes['[data-browser-owner-toolbar]'].listeners.get('click')({ target: ownerActionTarget('edit-profile') });
+  await waitFor(
+    () => requests.length === 1 && (context.window.location.href !== initialHref || context.state.status === 'error'),
+    'unsafe cross-origin href handling',
+  );
+
+  assert.equal(context.window.location.href, initialHref);
+  assert.equal(context.state.status, 'error');
+});
+
 test('owner toolbar sends configure chat and view messages action kinds', async () => {
   const { context, nodes, requests } = createContext();
 
@@ -385,6 +473,11 @@ test('share bot page opens a local modal without calling Browser actions', async
   await waitFor(() => clipboardWrites.length === 1, 'share copy action');
 
   assert.deepEqual(clipboardWrites, ['metaid://idq1alice']);
+
+  nodes['[data-browser-modal-root]'].listeners.get('click')({
+    target: modalConfirmTarget(),
+  });
+  assert.equal(nodes['[data-browser-modal-root]'].hidden, true);
 });
 
 test('sandboxed iframe renderer does not expose side-effect helpers to content', () => {
