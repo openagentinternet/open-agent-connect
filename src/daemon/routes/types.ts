@@ -1,5 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Buffer } from 'node:buffer';
+import type {
+  BrowserRuntimeSnapshot,
+  BrowserTrustedActionInput,
+  BrowserTrustedActionResult,
+} from '../../core/browser/hostTypes';
 import type { BrowserContextResult, BrowserResolveResult } from '../../core/browser/types';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
@@ -31,12 +36,14 @@ export interface ServiceRefundSyncRequest {
 
 export interface MetabotDaemonHttpHandlers {
   browser?: {
-    getContext?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<BrowserContextResult>>;
-    resolve?: (input: { uri: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserResolveResult>>;
-    getSettings?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    updateSettings?: (input: { from?: string; browser?: Record<string, unknown> } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    getCache?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    clearCache?: (input: { from?: string; scope?: string; pinId?: string; cacheKey?: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    getRuntime?: (input?: { actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserRuntimeSnapshot>>;
+    getContext?: (input?: { actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserContextResult>>;
+    resolve?: (input: { uri: string; actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserResolveResult>>;
+    getSettings?: (input?: { actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    updateSettings?: (input: { actorId?: string; from?: string; browser?: Record<string, unknown> } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    getCache?: (input?: { actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    clearCache?: (input: { actorId?: string; from?: string; scope?: string; pinId?: string; cacheKey?: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    runTrustedAction?: (input: BrowserTrustedActionInput) => Awaitable<MetabotCommandResult<BrowserTrustedActionResult>>;
   };
   config?: {
     get?: () => Awaitable<MetabotCommandResult<unknown>>;

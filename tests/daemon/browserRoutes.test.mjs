@@ -7,9 +7,54 @@ const { createHttpServer } = require('../../dist/daemon/httpServer.js');
 const { commandSuccess, commandFailed } = require('../../dist/core/contracts/commandResult.js');
 
 async function startServer() {
-  const calls = { context: [], resolve: [], getSettings: [], updateSettings: [], getCache: [], clearCache: [] };
+  const calls = {
+    context: [],
+    runtime: [],
+    resolve: [],
+    getSettings: [],
+    updateSettings: [],
+    getCache: [],
+    clearCache: [],
+    actions: [],
+  };
   const server = createHttpServer({
     browser: {
+      getRuntime: async (input) => {
+        calls.runtime.push(input);
+        return commandSuccess({
+          host: { kind: 'oac', name: 'Open Agent Connect', localMode: true },
+          actors: [{
+            id: 'alice',
+            label: 'Alice Bot',
+            kind: 'oac-bot',
+            globalMetaId: 'idq1alice',
+            isDefault: true,
+            capabilities: ['private-chat', 'service-call', 'template-settings'],
+          }],
+          defaultActor: {
+            id: 'alice',
+            label: 'Alice Bot',
+            kind: 'oac-bot',
+            globalMetaId: 'idq1alice',
+            isDefault: true,
+            capabilities: ['private-chat', 'service-call', 'template-settings'],
+          },
+          defaultUri: 'metaid://idq1alice',
+          features: {
+            privateChat: true,
+            serviceCall: true,
+            cacheManagement: true,
+            templateSettings: true,
+            walletLogin: false,
+          },
+          labels: {
+            actorChip: 'Using',
+            noActorTitle: 'No Bot',
+            noActorBody: 'Create a local Bot before using Browser actions.',
+            noActorAction: { label: 'Create Bot', href: '/ui/bot' },
+          },
+        });
+      },
       getContext: async (input) => {
         calls.context.push(input);
         return commandSuccess({
@@ -72,6 +117,11 @@ async function startServer() {
         if (input.scope === 'unknown') return commandFailed('invalid_argument', 'Unsupported cache clear scope.');
         return commandSuccess({ clearedArtifacts: 1, clearedPinRecords: 1 });
       },
+      runTrustedAction: async (input) => {
+        calls.actions.push(input);
+        if (input.kind === 'unsupported') return commandFailed('browser_action_not_supported', 'Unsupported Browser action.');
+        return commandSuccess({ kind: input.kind, handled: true, data: { accepted: true } });
+      },
     },
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -89,6 +139,68 @@ test('GET /api/browser/context forwards optional from slug', async (t) => {
   assert.equal(response.status, 200);
   assert.equal(payload.data.defaultUri, 'metaid://idq1alice');
   assert.deepEqual(calls.context, [{ from: 'alice' }]);
+});
+
+test('GET /api/browser/runtime forwards host-neutral actorId before legacy from', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/api/browser/runtime?actorId=alice&from=legacy-alice`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.data.host.kind, 'oac');
+  assert.equal(payload.data.defaultActor.id, 'alice');
+  assert.deepEqual(calls.runtime, [{ actorId: 'alice', from: 'legacy-alice' }]);
+});
+
+test('POST /api/browser/actions forwards trusted action payload and actorId', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/api/browser/actions?actorId=alice`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      resourceUri: 'metaid://idq1target',
+      kind: 'private-chat',
+      payload: {
+        to: 'idq1target',
+        content: 'Hello from Browser',
+      },
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.data.handled, true);
+  assert.deepEqual(calls.actions, [{
+    actorId: 'alice',
+    resourceUri: 'metaid://idq1target',
+    kind: 'private-chat',
+    payload: {
+      to: 'idq1target',
+      content: 'Hello from Browser',
+    },
+  }]);
+});
+
+test('POST /api/browser/actions maps unsupported actions to a client error', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/api/browser/actions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      resourceUri: 'metaid://idq1target',
+      kind: 'unsupported',
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.code, 'browser_action_not_supported');
 });
 
 test('GET and PUT /api/browser/settings forward from slug and browser settings payload', async (t) => {
@@ -126,6 +238,34 @@ test('GET and PUT /api/browser/settings forward from slug and browser settings p
       botHomepageTemplateId: 'compact-list',
     },
   }]);
+});
+
+test('Browser settings, cache, and resolve routes forward host-neutral actorId', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  await fetch(`${baseUrl}/api/browser/settings?actorId=alice`);
+  await fetch(`${baseUrl}/api/browser/settings?actorId=alice`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ browser: { botHomepageTemplateId: 'compact-list' } }),
+  });
+  await fetch(`${baseUrl}/api/browser/cache?actorId=alice`);
+  await fetch(`${baseUrl}/api/browser/cache?actorId=alice`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scope: 'all' }),
+  });
+  await fetch(`${baseUrl}/api/browser/resolve?uri=${encodeURIComponent('metaid://idq1alice')}&actorId=alice`);
+
+  assert.deepEqual(calls.getSettings.at(-1), { actorId: 'alice' });
+  assert.deepEqual(calls.updateSettings.at(-1), {
+    actorId: 'alice',
+    browser: { botHomepageTemplateId: 'compact-list' },
+  });
+  assert.deepEqual(calls.getCache.at(-1), { actorId: 'alice' });
+  assert.deepEqual(calls.clearCache.at(-1), { actorId: 'alice', scope: 'all' });
+  assert.deepEqual(calls.resolve.at(-1), { uri: 'metaid://idq1alice', actorId: 'alice' });
 });
 
 test('GET and DELETE /api/browser/cache forward cache management requests', async (t) => {

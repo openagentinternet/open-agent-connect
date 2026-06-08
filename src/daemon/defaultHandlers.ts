@@ -10028,30 +10028,44 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
   return {
     browser: {
+      getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
+        actorId: request.actorId,
+        from: request.from,
+      }),
       getContext: async (request = {}) => {
-        const runtime = await browserHostAdapter.getRuntime({ actorId: request.from, from: request.from });
+        const runtime = await browserHostAdapter.getRuntime({
+          actorId: request.actorId,
+          from: request.from,
+        });
         if (!runtime.ok) return runtime;
         return commandSuccess(browserRuntimeToContextResult(runtime.data));
       },
-      getSettings: async (request = {}) => browserHostAdapter.getSettings({ actorId: request.from, from: request.from }),
+      getSettings: async (request = {}) => browserHostAdapter.getSettings({
+        actorId: request.actorId,
+        from: request.from,
+      }),
       updateSettings: async (request) => browserHostAdapter.updateSettings({
-        actorId: request.from,
+        actorId: request.actorId,
         from: request.from,
         browser: request.browser,
       }),
-      getCache: async (request = {}) => browserHostAdapter.getCache({ actorId: request.from, from: request.from }),
+      getCache: async (request = {}) => browserHostAdapter.getCache({
+        actorId: request.actorId,
+        from: request.from,
+      }),
       clearCache: async (request) => browserHostAdapter.clearCache({
-        actorId: request.from,
+        actorId: request.actorId,
         from: request.from,
         scope: request.scope,
         pinId: request.pinId,
         cacheKey: request.cacheKey,
       }),
       resolve: async (request) => browserHostAdapter.resolveResource({
-        actorId: request.from,
+        actorId: request.actorId,
         from: request.from,
         uri: request.uri,
       }),
+      runTrustedAction: async (request) => browserHostAdapter.runTrustedAction(request),
     },
     config: {
       get: async () => commandSuccess(await configStore.read()),
