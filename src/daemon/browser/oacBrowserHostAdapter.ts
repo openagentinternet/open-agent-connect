@@ -95,7 +95,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
   async function getRuntime(runtimeInput: BrowserRuntimeInput = {}): Promise<MetabotCommandResult<BrowserRuntimeSnapshot>> {
     const requestedActor = actorSelector(runtimeInput);
     const activeHomeDir = path.resolve(input.homeDir);
-    const profiles = await listMetabotProfiles(input.systemHomeDir);
+    const profiles = await listMetabotProfiles(input.systemHomeDir).catch(() => [] as MetabotProfileFull[]);
     const selectedProfile = requestedActor
       ? profiles.find((profile) => profile.slug === requestedActor) ?? null
       : profiles.find((profile) => path.resolve(profile.homeDir) === activeHomeDir) ?? profiles[0] ?? null;

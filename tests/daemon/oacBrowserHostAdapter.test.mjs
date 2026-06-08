@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
@@ -100,6 +100,74 @@ test('OAC browser host adapter exposes MetaBot profiles as Browser actors', asyn
       },
     ].sort((left, right) => left.id.localeCompare(right.id)),
   );
+});
+
+test('OAC browser host adapter returns an empty runtime when profiles cannot be listed', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-runtime-empty');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const badSystemHomeFile = path.join(systemHomeDir, 'not-a-system-home-file');
+  await writeFile(badSystemHomeFile, 'not a directory\n', 'utf8');
+
+  const adapter = await createAdapter({
+    homeDir: profileHome,
+    systemHomeDir: badSystemHomeFile,
+  });
+
+  const runtime = await adapter.getRuntime();
+  assert.equal(runtime.ok, true);
+  assert.deepEqual(runtime.data.actors, []);
+  assert.equal(runtime.data.defaultActor, null);
+  assert.equal(runtime.data.defaultUri, null);
+});
+
+test('OAC browser host adapter gives actorId precedence over legacy from', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-actor-precedence');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Active Precedence Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1activeprecedence',
+    mvcAddress: '18ActivePrecedence',
+  });
+  const other = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Other Precedence Bot',
+    homeDir: path.join(systemHomeDir, '.metabot', 'profiles', 'other-precedence-bot'),
+    globalMetaId: 'idq1otherprecedence',
+    mvcAddress: '18OtherPrecedence',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const runtime = await adapter.getRuntime({ actorId: other.slug, from: active.slug });
+  assert.equal(runtime.ok, true);
+  assert.equal(runtime.data.defaultActor.id, other.slug);
+  assert.equal(runtime.data.defaultUri, `metaid://${other.globalMetaId}`);
+});
+
+test('OAC browser host adapter returns profile_not_found for unknown runtime actor', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-missing-actor');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Known Browser Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1knownbrowser',
+    mvcAddress: '18KnownBrowser',
+  });
+  const adapter = await createAdapter({
+    homeDir: profileHome,
+    systemHomeDir,
+  });
+
+  const runtime = await adapter.getRuntime({ actorId: 'missing-browser-bot' });
+  assert.equal(runtime.ok, false);
+  assert.equal(runtime.code, 'profile_not_found');
 });
 
 test('OAC browser host adapter persists Browser settings for the selected profile', async (t) => {
@@ -203,4 +271,12 @@ test('OAC browser host adapter reads and clears the selected profile MetaApp cac
   });
   assert.equal(invalidClear.ok, false);
   assert.equal(invalidClear.code, 'invalid_argument');
+
+  const clearAll = await adapter.clearCache({
+    actorId: active.slug,
+    scope: 'all',
+  });
+  assert.equal(clearAll.ok, true);
+  assert.equal(clearAll.data.clearedArtifacts, 0);
+  assert.equal(clearAll.data.clearedPinRecords, 0);
 });
