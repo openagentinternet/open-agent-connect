@@ -120,8 +120,8 @@ Expected flow:
 Open OAC
 -> strong prompt to create Bot
 -> set name, avatar, public bio
--> choose LLM provider
--> enable private chat / auto-reply basics
+-> apply the current platform's default LLM provider
+-> enable private chat and auto-reply by default
 -> create Bot on chain
 -> open /browser/metaid/<globalMetaId>
 -> render metaid://<globalMetaId>
@@ -185,19 +185,29 @@ The first-run path may be implemented as:
 
 The user-facing result must be the same: creation first, Bot Page next.
 
-### R2: Bot Creation Fields
+### R2: Bot Creation Fields And Defaults
 
-The v1 creation flow should ask for:
+The v1 creation flow should ask the user only for public identity fields:
 
 | Field | Required | Purpose |
 | --- | --- | --- |
 | Name | yes | public Bot display name |
 | Avatar | recommended | public Bot identity signal |
 | Public bio | recommended | one-line or short public introduction |
-| LLM provider | recommended | runtime for auto-reply / chat behavior |
-| Private chat / auto-reply | recommended toggle | makes the Bot feel alive |
 
-Role, soul, goal, chat skills, and detailed LLM configuration may use defaults during creation, but must remain easy to edit in Configure Chat.
+The system should apply these defaults without asking the user during first-run creation:
+
+| Setting | Default behavior |
+| --- | --- |
+| LLM provider | use the current host platform default when detectable, such as the current Codex provider in a Codex-hosted session |
+| Private chat | enabled |
+| Auto-reply | enabled |
+| Role, soul, goal | use OAC defaults |
+| Chat skills | use OAC defaults or an empty allowed list, depending on existing policy |
+
+If the current platform's LLM provider cannot be detected, OAC should use the same fallback behavior it already uses for Bot profile defaults. The first-run flow should surface LLM setup only when no usable default exists.
+
+The detailed LLM provider, role, soul, goal, chat skills, and auto-reply settings must remain easy to edit from Configure Chat after creation.
 
 ### R3: Bot Profile Path Semantics
 
@@ -325,9 +335,9 @@ Purpose:
 - edit role;
 - edit soul;
 - edit goal;
-- choose LLM provider;
+- review or change LLM provider;
 - configure chat skills;
-- configure private-chat / auto-reply basics.
+- review or change private-chat / auto-reply basics.
 
 Suggested OAC destination:
 
@@ -561,34 +571,36 @@ If a local Bot Page does not show Owner Mode:
 
 1. With no local Bot, opening `/browser` presents a clear create-Bot activation path.
 2. A new user can create a Bot without first navigating through a general management dashboard.
-3. Creation asks for name, avatar, public bio, LLM provider, and private-chat / auto-reply basics, or provides clear defaults for optional fields.
-4. On successful creation, OAC opens `/browser/metaid/<globalMetaId>`.
-5. Browser displays `metaid://<globalMetaId>` in the URI input.
-6. The user's new Bot Page renders in the main viewport.
+3. Creation asks only for name, avatar, and public bio.
+4. Creation applies the current platform's default LLM provider when available.
+5. Creation enables private chat and auto-reply by default.
+6. On successful creation, OAC opens `/browser/metaid/<globalMetaId>`.
+7. Browser displays `metaid://<globalMetaId>` in the URI input.
+8. The user's new Bot Page renders in the main viewport.
 
 ### Profile Data Semantics
 
-7. New public bio writes use `/info/bio` as public introduction text.
-8. New role, soul, goal, chat skills, and LLM/provider config writes do not write into `/info/bio`.
-9. Existing legacy `/info/bio` JSON does not appear raw in public Bot Page rendering.
+9. New public bio writes use `/info/bio` as public introduction text.
+10. New role, soul, goal, chat skills, and LLM/provider config writes do not write into `/info/bio`.
+11. Existing legacy `/info/bio` JSON does not appear raw in public Bot Page rendering.
 
 ### Owner Mode
 
-10. A Bot Page owned by any local Bot shows the Owner Mode toolbar.
-11. A Bot Page not owned by a local Bot does not show the Owner Mode toolbar.
-12. Owner Mode works when the current `Using` Bot is different from the Bot Page owner.
-13. Owner Mode is rendered as Browser chrome below the address bar, not inside the Bot Page content.
-14. Owner Mode provides `Edit Profile`, `Configure Chat`, `View Messages`, and `Share Bot Page`.
-15. Owner actions operate on the page owner Bot, not necessarily the current `Using` Bot.
-16. The public Bot Page content remains visually consistent with the visitor view.
+12. A Bot Page owned by any local Bot shows the Owner Mode toolbar.
+13. A Bot Page not owned by a local Bot does not show the Owner Mode toolbar.
+14. Owner Mode works when the current `Using` Bot is different from the Bot Page owner.
+15. Owner Mode is rendered as Browser chrome below the address bar, not inside the Bot Page content.
+16. Owner Mode provides `Edit Profile`, `Configure Chat`, `View Messages`, and `Share Bot Page`.
+17. Owner actions operate on the page owner Bot, not necessarily the current `Using` Bot.
+18. The public Bot Page content remains visually consistent with the visitor view.
 
 ### Browser Compatibility
 
-17. `/browser` continues to render the Agent Internet Browser.
-18. `/ui/browser` continues to render the same Browser surface.
-19. `/browser/metaid/<globalMetaId>` continues to resolve direct Bot Page routes.
-20. MetaApp rendering and non-Bot resource renderers are not changed by Owner Mode.
-21. Inspector, drawer, and proof/source panels remain hidden by default.
+19. `/browser` continues to render the Agent Internet Browser.
+20. `/ui/browser` continues to render the same Browser surface.
+21. `/browser/metaid/<globalMetaId>` continues to resolve direct Bot Page routes.
+22. MetaApp rendering and non-Bot resource renderers are not changed by Owner Mode.
+23. Inspector, drawer, and proof/source panels remain hidden by default.
 
 ## 12. Suggested Tests
 
