@@ -1,9 +1,11 @@
+import { BOT_HOMEPAGE_TEMPLATES } from '../../../core/browser/botHomepageTemplates';
+
 export interface BrowserMenuItemDefinition {
   id: string;
   label: string;
   icon: string;
   action: 'open-settings';
-  settingsTab: 'baseUrls' | 'cache';
+  settingsTab: 'baseUrls' | 'templates' | 'cache';
 }
 
 export interface BrowserMenuSectionDefinition {
@@ -12,7 +14,7 @@ export interface BrowserMenuSectionDefinition {
 }
 
 export interface BrowserSettingsTabDefinition {
-  id: 'baseUrls' | 'cache';
+  id: 'baseUrls' | 'templates' | 'cache';
   label: string;
 }
 
@@ -34,6 +36,13 @@ export const BROWSER_MENU_SECTIONS: BrowserMenuSectionDefinition[] = [
         settingsTab: 'baseUrls',
       },
       {
+        id: 'templates',
+        label: 'Bot Page Templates',
+        icon: 'layout',
+        action: 'open-settings',
+        settingsTab: 'templates',
+      },
+      {
         id: 'cache',
         label: 'Cache Management',
         icon: 'database',
@@ -46,8 +55,11 @@ export const BROWSER_MENU_SECTIONS: BrowserMenuSectionDefinition[] = [
 
 export const BROWSER_SETTINGS_TABS: BrowserSettingsTabDefinition[] = [
   { id: 'baseUrls', label: 'Base URLs' },
+  { id: 'templates', label: 'Templates' },
   { id: 'cache', label: 'Cache' },
 ];
+
+export const BROWSER_BOT_HOMEPAGE_TEMPLATES = BOT_HOMEPAGE_TEMPLATES;
 
 export const BROWSER_BASE_URL_FIELDS: BrowserBaseUrlFieldDefinition[] = [
   {

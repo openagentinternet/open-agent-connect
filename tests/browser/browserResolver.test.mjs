@@ -11,6 +11,7 @@ test('resolveBrowserResource fails closed when metaso-p2p URL is missing for met
     uri: 'metaid://idq1missingconfig',
     config: {
       metasoP2PBaseUrl: '',
+      botHomepageTemplateId: 'document',
       defaultChainName: 'mvc',
       localMode: true,
     },
@@ -27,6 +28,7 @@ test('resolveBrowserResource resolves metaid URI through homepage client', async
     uri: 'metaid://idq1fixturebot',
     config: {
       metasoP2PBaseUrl: 'https://so.example.test',
+      botHomepageTemplateId: 'compact-list',
       defaultChainName: 'mvc',
       localMode: true,
     },
@@ -40,4 +42,5 @@ test('resolveBrowserResource resolves metaid URI through homepage client', async
 
   assert.equal(result.ok, true);
   assert.equal(result.data.renderer.type, 'bot-page');
+  assert.equal(result.data.renderer.templateId, 'compact-list');
 });

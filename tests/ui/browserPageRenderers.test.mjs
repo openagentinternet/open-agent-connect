@@ -130,6 +130,60 @@ test('bot-page renderer shows profile, services, and trusted buttons from homepa
   assert.match(html, /https:\/\/so\.example\.test\/content\/avatar-pin/);
 });
 
+test('bot-page renderer uses compact-list template with normalized future lists', async () => {
+  const homepage = {
+    globalMetaId: 'idq1compactbot',
+    profile: {
+      name: 'Compact Bot',
+      avatar: 'https://so.example.test/content/compact-avatar',
+      bio: 'Runs compact Browser fixtures.',
+    },
+    homepage: {
+      summary: 'Compact summary.',
+    },
+    services: [
+      {
+        id: 'svc-review',
+        currentPinId: 'service-pin-1',
+        displayName: 'Review Service',
+        description: 'Reviews Browser templates.',
+      },
+    ],
+    skills: [
+      {
+        name: 'Template Authoring',
+        description: 'Creates Bot homepage layouts.',
+      },
+    ],
+    buzz: [
+      {
+        title: 'Template update',
+        description: 'Published a compact renderer.',
+      },
+    ],
+  };
+  const { nodes } = runWithResolve(result({
+    type: 'bot-page',
+    contentType: 'application/vnd.oac.bot-homepage+json',
+    templateId: 'compact-list',
+    data: homepage,
+  }, {
+    resourceType: 'bot',
+    title: 'Compact Bot',
+    owner: { kind: 'bot', globalMetaId: 'idq1compactbot', name: 'Compact Bot', verificationState: 'verified' },
+    actions: [],
+  }));
+
+  await waitFor(() => nodes['[data-browser-viewport]'].innerHTML.includes('browser-bot-template-compact-list'), 'compact template render');
+  const html = nodes['[data-browser-viewport]'].innerHTML;
+  assert.match(html, /Compact Bot/);
+  assert.match(html, /Review Service/);
+  assert.match(html, /data-browser-action="service-call"/);
+  assert.match(html, /Template Authoring/);
+  assert.match(html, /Template update/);
+  assert.match(html, /Compact summary/);
+});
+
 test('html-iframe renderer is sandboxed without privileged permissions', async () => {
   const { nodes } = runWithResolve(result({
     type: 'html-iframe',

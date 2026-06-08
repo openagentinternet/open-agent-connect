@@ -610,6 +610,11 @@
         align-content: start;
         padding: 36px 38px;
       }
+      .browser-bot-template-compact-list {
+        width: min(980px, calc(100% - 48px));
+        gap: 18px;
+        padding: 28px 30px;
+      }
       .browser-bot-header {
         display: grid;
         grid-template-columns: 76px minmax(0, 1fr) auto;
@@ -713,6 +718,56 @@
       .browser-bot-services,
       .browser-bot-activity {
         gap: 8px;
+      }
+      .browser-compact-header {
+        display: grid;
+        grid-template-columns: 64px minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 15px;
+        min-width: 0;
+      }
+      .browser-compact-overview {
+        border-top: 1px solid #edf1f6;
+        border-bottom: 1px solid #edf1f6;
+        padding: 12px 0;
+      }
+      .browser-compact-overview p {
+        margin: 0;
+        color: var(--browser-muted);
+        font-size: 13px;
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+      }
+      .browser-compact-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        align-items: start;
+      }
+      .browser-compact-panel {
+        min-width: 0;
+        display: grid;
+        gap: 8px;
+      }
+      .browser-compact-panel h3 {
+        margin: 0;
+        color: #111827;
+        font-size: 15px;
+        font-weight: 720;
+        line-height: 1.25;
+      }
+      .browser-compact-panel .browser-service-row,
+      .browser-compact-panel .browser-activity-row {
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 9px;
+        align-items: start;
+        padding: 9px 0;
+      }
+      .browser-compact-panel .browser-service-row button {
+        grid-column: 2;
+        justify-self: start;
+        min-height: 28px;
+        padding: 5px 9px;
       }
       .browser-service-row,
       .browser-activity-row {
@@ -955,6 +1010,68 @@
       .browser-settings-error {
         color: var(--browser-danger);
       }
+      .browser-template-panel {
+        display: grid;
+        gap: 12px;
+      }
+      .browser-template-options {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .browser-template-option {
+        width: 100%;
+        min-width: 0;
+        min-height: 132px;
+        display: grid;
+        grid-template-columns: 112px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+        text-align: left;
+        border: 1px solid var(--browser-border);
+        border-radius: 8px;
+        background: #fbfcfe;
+        padding: 11px;
+      }
+      .browser-template-option[aria-pressed="true"] {
+        border-color: var(--browser-accent);
+        background: var(--browser-accent-soft);
+      }
+      .browser-template-preview {
+        width: 112px;
+        aspect-ratio: 5 / 3;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid #d9e2ef;
+        border-radius: 7px;
+        background: #f8fafc;
+        overflow: hidden;
+      }
+      .browser-template-preview img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .browser-template-copy {
+        min-width: 0;
+        display: grid;
+        gap: 5px;
+      }
+      .browser-template-copy strong {
+        color: var(--browser-text);
+        font-size: 13px;
+        font-weight: 720;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+      .browser-template-copy span {
+        color: var(--browser-muted);
+        font-size: 12px;
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+      }
       .browser-cache-panel {
         display: grid;
         gap: 14px;
@@ -1090,6 +1207,13 @@
         .browser-bot-header {
           grid-template-columns: 64px minmax(0, 1fr);
         }
+        .browser-compact-header {
+          grid-template-columns: 64px minmax(0, 1fr);
+        }
+        .browser-compact-grid,
+        .browser-template-options {
+          grid-template-columns: minmax(0, 1fr);
+        }
         .browser-bot-avatar {
           width: 64px;
           height: 64px;
@@ -1128,9 +1252,17 @@
           gap: 22px;
         }
         .browser-bot-header,
+        .browser-compact-header,
         .browser-service-row,
         .browser-activity-row {
           grid-template-columns: minmax(0, 1fr);
+        }
+        .browser-template-option {
+          grid-template-columns: minmax(0, 1fr);
+          min-height: 0;
+        }
+        .browser-template-preview {
+          width: 100%;
         }
         .browser-bot-avatar {
           width: 64px;

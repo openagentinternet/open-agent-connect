@@ -3,6 +3,7 @@ import {
   type BrowserConfig,
   type MetabotConfig,
 } from '../config/configTypes';
+import { BOT_HOMEPAGE_TEMPLATES, isBotHomepageTemplateId } from './botHomepageTemplates';
 import { resolveBrowserConfig } from './config';
 
 export const BROWSER_BASE_URL_KEYS = [
@@ -87,6 +88,14 @@ export function applyBrowserSettingsUpdate(current: MetabotConfig, rawBrowserInp
     } else {
       nextBrowser[key] = normalized;
     }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(browserInput, 'botHomepageTemplateId')) {
+    const templateId = normalizeText(browserInput.botHomepageTemplateId);
+    if (!isBotHomepageTemplateId(templateId)) {
+      throw new Error(`browser.botHomepageTemplateId must be one of ${BOT_HOMEPAGE_TEMPLATES.map((template) => template.id).join(', ')}.`);
+    }
+    nextBrowser.botHomepageTemplateId = templateId;
   }
 
   return {

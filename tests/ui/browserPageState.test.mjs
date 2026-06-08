@@ -107,7 +107,7 @@ function resolvedBot(uri, name = 'Alice Bot') {
       resourceType: 'bot',
       title: name,
       owner: { kind: 'bot', globalMetaId: 'idq1alice', name, verificationState: 'verified' },
-      renderer: { type: 'bot-page', contentType: 'application/vnd.oac.bot-homepage+json', data: { profile: { name } } },
+      renderer: { type: 'bot-page', contentType: 'application/vnd.oac.bot-homepage+json', templateId: 'document', data: { profile: { name } } },
       status: { state: 'resolved', verificationState: 'verified', message: '' },
       source: { resolver: 'test' },
       actions: [],
@@ -127,6 +127,35 @@ function createBrowserContext(options = {}) {
     },
   };
   const resolveResponse = options.resolveResponse ?? ((uri) => resolvedBot(uri));
+  const settingsData = options.settingsData ?? {
+    browser: {
+      metasoP2PBaseUrl: 'https://so.metaid.io',
+      metafileContentBaseUrl: 'https://so.metaid.io/content',
+      manApiBaseUrl: 'https://manapi.metaid.io',
+      blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+      botHomepageTemplateId: 'document',
+      defaultChainName: 'mvc',
+      localMode: true,
+    },
+    effectiveBrowser: {
+      metasoP2PBaseUrl: 'https://so.metaid.io',
+      metafileContentBaseUrl: 'https://so.metaid.io/content',
+      manApiBaseUrl: 'https://manapi.metaid.io',
+      blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+      botHomepageTemplateId: 'document',
+      defaultChainName: 'mvc',
+      localMode: true,
+    },
+    defaults: {
+      metasoP2PBaseUrl: 'https://so.metaid.io',
+      metafileContentBaseUrl: 'https://so.metaid.io/content',
+      manApiBaseUrl: 'https://manapi.metaid.io',
+      blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+      botHomepageTemplateId: 'document',
+      defaultChainName: 'mvc',
+      localMode: true,
+    },
+  };
   const context = {
     console,
     URLSearchParams,
@@ -158,36 +187,18 @@ function createBrowserContext(options = {}) {
         return { ok: true, json: async () => payload };
       }
       if (String(url).startsWith('/api/browser/settings')) {
+        if (fetchOptions.method === 'PUT') {
+          const body = JSON.parse(fetchOptions.body || '{}');
+          if (body.browser && typeof body.browser === 'object') {
+            settingsData.browser = { ...settingsData.browser, ...body.browser };
+            settingsData.effectiveBrowser = { ...settingsData.effectiveBrowser, ...body.browser };
+          }
+        }
         return {
           ok: true,
           json: async () => ({
             ok: true,
-            data: {
-              browser: {
-                metasoP2PBaseUrl: 'https://so.metaid.io',
-                metafileContentBaseUrl: 'https://so.metaid.io/content',
-                manApiBaseUrl: 'https://manapi.metaid.io',
-                blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
-                defaultChainName: 'mvc',
-                localMode: true,
-              },
-              effectiveBrowser: {
-                metasoP2PBaseUrl: 'https://so.metaid.io',
-                metafileContentBaseUrl: 'https://so.metaid.io/content',
-                manApiBaseUrl: 'https://manapi.metaid.io',
-                blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
-                defaultChainName: 'mvc',
-                localMode: true,
-              },
-              defaults: {
-                metasoP2PBaseUrl: 'https://so.metaid.io',
-                metafileContentBaseUrl: 'https://so.metaid.io/content',
-                manApiBaseUrl: 'https://manapi.metaid.io',
-                blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
-                defaultChainName: 'mvc',
-                localMode: true,
-              },
-            },
+            data: JSON.parse(JSON.stringify(settingsData)),
           }),
         };
       }
@@ -313,23 +324,48 @@ test('Browser menu is data-driven and opens cache management settings', async ()
 
   assert.ok(Array.isArray(context.browserMenuSections));
   assert.equal(context.browserMenuSections[0].items[0].id, 'settings');
-  assert.equal(context.browserMenuSections[0].items[1].id, 'cache');
+  assert.equal(context.browserMenuSections[0].items[1].id, 'templates');
+  assert.equal(context.browserMenuSections[0].items[2].id, 'cache');
 
   elements['[data-browser-menu-trigger]'].click();
   assert.equal(elements['[data-browser-menu]'].hidden, false);
   assert.equal(elements['[data-browser-menu-trigger]'].getAttribute('aria-expanded'), 'true');
   assert.match(elements['[data-browser-menu]'].innerHTML, /Settings/);
+  assert.match(elements['[data-browser-menu]'].innerHTML, /Bot Page Templates/);
   assert.match(elements['[data-browser-menu]'].innerHTML, /Cache Management/);
 
   await context.handleBrowserMenuAction('cache');
 
   assert.equal(elements['[data-browser-modal-root]'].hidden, false);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /Base URLs/);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Templates/);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /Cache/);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /\/tmp\/\.metabot\/cache\/metaapps/);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /2 artifacts/);
   assert.equal(fetchCalls.at(-2), '/api/browser/settings?from=worker');
   assert.equal(fetchCalls.at(-1), '/api/browser/cache?from=worker');
+});
+
+test('Browser template settings select the default Bot homepage template', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  assert.ok(Array.isArray(context.browserBotHomepageTemplates));
+  assert.equal(context.browserBotHomepageTemplates.map((template) => template.id).join(','), 'document,compact-list');
+
+  await context.handleBrowserMenuAction('templates');
+
+  assert.equal(elements['[data-browser-modal-root]'].hidden, false);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Document/);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Compact List/);
+
+  await context.selectBotHomepageTemplate('compact-list');
+
+  assert.equal(context.state.settingsData.browser.botHomepageTemplateId, 'compact-list');
+  assert.equal(context.state.current.renderer.templateId, 'compact-list');
+  assert.match(elements['[data-browser-viewport]'].innerHTML, /browser-bot-template-compact-list/);
+  assert.equal(fetchCalls.at(-1), '/api/browser/settings?from=worker');
 });
 
 test('Browser history controls navigate without replacing Browser chrome', async () => {

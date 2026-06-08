@@ -63,20 +63,34 @@ test('Browser settings expose and persist browser base URL configuration by acti
   const defaults = await handlers.browser.getSettings({ from: active.slug });
   assert.equal(defaults.ok, true);
   assert.equal(defaults.data.browser.manApiBaseUrl, 'https://manapi.metaid.io');
+  assert.equal(defaults.data.browser.botHomepageTemplateId, 'document');
   assert.equal(defaults.data.effectiveBrowser.manApiBaseUrl, 'https://manapi.metaid.io');
+  assert.equal(defaults.data.effectiveBrowser.botHomepageTemplateId, 'document');
+
+  const invalidTemplate = await handlers.browser.updateSettings({
+    from: active.slug,
+    browser: {
+      botHomepageTemplateId: 'missing-template',
+    },
+  });
+  assert.equal(invalidTemplate.ok, false);
+  assert.equal(invalidTemplate.code, 'invalid_argument');
 
   const updated = await handlers.browser.updateSettings({
     from: active.slug,
     browser: {
       metasoP2PBaseUrl: 'https://so.example.test/',
       manApiBaseUrl: 'https://manapi.example.test/',
+      botHomepageTemplateId: 'compact-list',
     },
   });
   assert.equal(updated.ok, true);
   assert.equal(updated.data.browser.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(updated.data.browser.manApiBaseUrl, 'https://manapi.example.test');
+  assert.equal(updated.data.browser.botHomepageTemplateId, 'compact-list');
 
   const configOnDisk = await createConfigStore(active.homeDir).read();
   assert.equal(configOnDisk.browser.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(configOnDisk.browser.manApiBaseUrl, 'https://manapi.example.test');
+  assert.equal(configOnDisk.browser.botHomepageTemplateId, 'compact-list');
 });

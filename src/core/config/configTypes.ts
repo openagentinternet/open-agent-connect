@@ -1,3 +1,8 @@
+import {
+  DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
+  type BotHomepageTemplateId,
+} from '../browser/botHomepageTemplates';
+
 export interface A2AConfig {
   simplemsgListenerEnabled: boolean;
 }
@@ -16,6 +21,7 @@ export interface BrowserConfig {
   manApiBaseUrl?: string;
   blockExplorerBaseUrl?: string;
   walletApiBaseUrl?: string;
+  botHomepageTemplateId: BotHomepageTemplateId;
   defaultChainName: DefaultWriteNetwork;
   localMode: boolean;
 }
@@ -43,6 +49,7 @@ export function createDefaultConfig(): MetabotConfig {
       metafileContentBaseUrl: 'https://so.metaid.io/content',
       manApiBaseUrl: 'https://manapi.metaid.io',
       blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+      botHomepageTemplateId: DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
       defaultChainName: 'mvc',
       localMode: true,
     },

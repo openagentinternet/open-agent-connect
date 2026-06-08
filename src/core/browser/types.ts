@@ -1,4 +1,5 @@
 import type { DefaultWriteNetwork } from '../config/configTypes';
+import type { BotHomepageTemplateId } from './botHomepageTemplates';
 
 export type BrowserUriScheme = 'metaid' | 'metaapp';
 export type BrowserResourceType = 'bot' | 'metaapp' | 'unsupported';
@@ -12,6 +13,7 @@ export interface BotBrowserConfig {
   manApiBaseUrl?: string;
   blockExplorerBaseUrl?: string;
   walletApiBaseUrl?: string;
+  botHomepageTemplateId: BotHomepageTemplateId;
   defaultChainName: DefaultWriteNetwork;
   localMode: boolean;
 }
@@ -37,6 +39,7 @@ export interface BrowserResourceOwner {
 export interface BrowserRendererDescriptor {
   type: BrowserRendererType;
   contentType: string;
+  templateId?: BotHomepageTemplateId;
   url?: string;
   data?: Record<string, unknown>;
   error?: string;

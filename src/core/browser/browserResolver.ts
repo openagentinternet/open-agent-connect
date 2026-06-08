@@ -44,6 +44,7 @@ export async function resolveBrowserResource(input: ResolveBrowserResourceInput)
       normalizedUri: parsed.normalizedUri,
       homepage: homepage.data,
       resolverUrl: homepage.url,
+      templateId: input.config.botHomepageTemplateId,
     }));
   }
 

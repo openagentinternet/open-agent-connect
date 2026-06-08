@@ -41,6 +41,7 @@ async function startServer() {
             metafileContentBaseUrl: 'https://so.metaid.io/content',
             manApiBaseUrl: 'https://manapi.metaid.io',
             blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+            botHomepageTemplateId: 'document',
             defaultChainName: 'mvc',
             localMode: true,
           },
@@ -52,6 +53,7 @@ async function startServer() {
           browser: {
             metasoP2PBaseUrl: input.browser?.metasoP2PBaseUrl,
             manApiBaseUrl: input.browser?.manApiBaseUrl,
+            botHomepageTemplateId: input.browser?.botHomepageTemplateId,
           },
         });
       },
@@ -107,6 +109,7 @@ test('GET and PUT /api/browser/settings forward from slug and browser settings p
       browser: {
         metasoP2PBaseUrl: 'https://so.example.test',
         manApiBaseUrl: 'https://manapi.example.test',
+        botHomepageTemplateId: 'compact-list',
       },
     }),
   });
@@ -114,11 +117,13 @@ test('GET and PUT /api/browser/settings forward from slug and browser settings p
 
   assert.equal(putResponse.status, 200);
   assert.equal(putPayload.data.browser.manApiBaseUrl, 'https://manapi.example.test');
+  assert.equal(putPayload.data.browser.botHomepageTemplateId, 'compact-list');
   assert.deepEqual(calls.updateSettings, [{
     from: 'alice',
     browser: {
       metasoP2PBaseUrl: 'https://so.example.test',
       manApiBaseUrl: 'https://manapi.example.test',
+      botHomepageTemplateId: 'compact-list',
     },
   }]);
 });

@@ -45,10 +45,25 @@ test('buildBotPageResolveResult maps homepage JSON into BrowserResolveResult', a
   assert.equal(result.owner.online, true);
   assert.equal(result.renderer.type, 'bot-page');
   assert.equal(result.renderer.contentType, 'application/vnd.oac.bot-homepage+json');
+  assert.equal(result.renderer.templateId, 'document');
   assert.equal(result.status.state, 'resolved');
   assert.equal(result.status.verificationState, 'partial');
   assert.equal(result.proof.txid, 'identity-txid');
   assert.equal(result.proof.pinId, 'identity-pin');
   assert.equal(result.actions.some((action) => action.kind === 'private-chat'), true);
   assert.equal(result.actions.some((action) => action.kind === 'service-list'), true);
+});
+
+test('buildBotPageResolveResult accepts a selected Bot homepage template', async () => {
+  const fixture = JSON.parse(await readFile(new URL('../fixtures/browser/botHomepage.v1.json', import.meta.url), 'utf8'));
+  const result = buildBotPageResolveResult({
+    uri: 'metaid://idq1fixturebot',
+    normalizedUri: 'metaid://idq1fixturebot',
+    homepage: fixture,
+    resolverUrl: 'https://so.example.test/api/bot-homepage/globalmetaid/idq1fixturebot',
+    templateId: 'compact-list',
+  });
+
+  assert.equal(result.renderer.type, 'bot-page');
+  assert.equal(result.renderer.templateId, 'compact-list');
 });

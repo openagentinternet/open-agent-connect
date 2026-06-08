@@ -15,7 +15,9 @@ test('config store normalizes Browser config with safe defaults', async () => {
 
     assert.equal(config.browser.localMode, true);
     assert.equal(config.browser.defaultChainName, 'mvc');
+    assert.equal(config.browser.botHomepageTemplateId, 'document');
     assert.equal(resolveBrowserConfig(config, {}).localMode, true);
+    assert.equal(resolveBrowserConfig(config, {}).botHomepageTemplateId, 'document');
   } finally {
     await cleanupProfileHome(homeDir);
   }
@@ -27,6 +29,7 @@ test('Browser config accepts env override over stored base URL', async () => {
     a2a: { simplemsgListenerEnabled: true },
     browser: {
       metasoP2PBaseUrl: '',
+      botHomepageTemplateId: 'compact-list',
       localMode: true,
       defaultChainName: 'mvc',
     },
@@ -38,4 +41,5 @@ test('Browser config accepts env override over stored base URL', async () => {
   assert.equal(resolved.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(resolved.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(resolved.defaultChainName, 'mvc');
+  assert.equal(resolved.botHomepageTemplateId, 'compact-list');
 });

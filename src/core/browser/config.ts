@@ -1,4 +1,8 @@
 import type { BrowserConfig, MetabotConfig } from '../config/configTypes';
+import {
+  DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
+  normalizeBotHomepageTemplateId,
+} from './botHomepageTemplates';
 
 const DEFAULT_METASO_P2P_BASE_URL = 'https://so.metaid.io';
 const DEFAULT_METAFILE_CONTENT_BASE_URL = 'https://so.metaid.io/content';
@@ -18,6 +22,7 @@ export function resolveBrowserConfig(config: MetabotConfig, env: NodeJS.ProcessE
     manApiBaseUrl: normalizeUrl(env.METABOT_BROWSER_MANAPI_BASE_URL) || normalizeUrl(browser.manApiBaseUrl),
     blockExplorerBaseUrl: normalizeUrl(env.METABOT_BROWSER_BLOCK_EXPLORER_BASE_URL) || normalizeUrl(browser.blockExplorerBaseUrl),
     walletApiBaseUrl: normalizeUrl(env.METABOT_BROWSER_WALLET_API_BASE_URL) || normalizeUrl(browser.walletApiBaseUrl),
+    botHomepageTemplateId: normalizeBotHomepageTemplateId(browser.botHomepageTemplateId),
     defaultChainName: browser.defaultChainName || config.chain.defaultWriteNetwork,
     localMode: browser.localMode !== false,
   };
@@ -29,6 +34,7 @@ export function createDefaultBrowserConfig(defaultChainName: BrowserConfig['defa
     metafileContentBaseUrl: DEFAULT_METAFILE_CONTENT_BASE_URL,
     manApiBaseUrl: DEFAULT_MANAPI_BASE_URL,
     blockExplorerBaseUrl: DEFAULT_BLOCK_EXPLORER_BASE_URL,
+    botHomepageTemplateId: DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
     defaultChainName,
     localMode: true,
   };

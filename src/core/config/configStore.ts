@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { resolveMetabotHomeSelection } from '../state/homeSelection';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
+import { normalizeBotHomepageTemplateId } from '../browser/botHomepageTemplates';
 import {
   createDefaultConfig,
   type DefaultWriteNetwork,
@@ -87,6 +88,10 @@ function normalizeConfig(input: unknown): MetabotConfig {
       metafileContentBaseUrl: normalizeString(browserSource.metafileContentBaseUrl) || defaults.browser.metafileContentBaseUrl,
       manApiBaseUrl,
       blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,
+      botHomepageTemplateId: normalizeBotHomepageTemplateId(
+        browserSource.botHomepageTemplateId,
+        defaults.browser.botHomepageTemplateId,
+      ),
       defaultChainName: isDefaultWriteNetwork(browserDefaultChainName)
         ? browserDefaultChainName as DefaultWriteNetwork
         : defaults.chain.defaultWriteNetwork,

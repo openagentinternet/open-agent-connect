@@ -1,6 +1,7 @@
 import type { LocalUiPageDefinition } from '../types';
 import {
   BROWSER_BASE_URL_FIELDS,
+  BROWSER_BOT_HOMEPAGE_TEMPLATES,
   BROWSER_MENU_SECTIONS,
   BROWSER_SETTINGS_TABS,
 } from './menuModel';
@@ -89,6 +90,7 @@ function buildBrowserPageScript(): string {
   return `var browserMenuSections = ${JSON.stringify(BROWSER_MENU_SECTIONS)};
 var browserSettingsTabs = ${JSON.stringify(BROWSER_SETTINGS_TABS)};
 var browserBaseUrlFields = ${JSON.stringify(BROWSER_BASE_URL_FIELDS)};
+var browserBotHomepageTemplates = ${JSON.stringify(BROWSER_BOT_HOMEPAGE_TEMPLATES)};
 var browserEndpoints = {
   context: '/api/browser/context',
   resolve: '/api/browser/resolve',
@@ -207,6 +209,7 @@ function iconHtml(name) {
     copy: '<rect x="8" y="8" width="10" height="10" rx="2"></rect><path d="M6 14H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1"></path>',
     external: '<path d="M14 5h5v5"></path><path d="M10 14L19 5"></path><path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4"></path>',
     history: '<path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5M12 7v5l3 2"></path>',
+    layout: '<rect x="4" y="5" width="16" height="14" rx="2"></rect><path d="M4 10h16M9 10v9"></path>',
     link: '<path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"></path><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1"></path>',
     message: '<path d="M5 6h14v9H8l-3 3V6z"></path>',
     database: '<ellipse cx="12" cy="5" rx="7" ry="3"></ellipse><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5"></path><path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path>',
@@ -408,6 +411,52 @@ function renderBaseUrlSettings() {
   '</form>';
 }
 
+function botHomepageTemplateById(templateId) {
+  var targetId = textValue(templateId) || 'document';
+  for (var index = 0; index < browserBotHomepageTemplates.length; index += 1) {
+    var template = browserBotHomepageTemplates[index];
+    if (textValue(template && template.id) === targetId) return template;
+  }
+  return null;
+}
+
+function normalizeBotHomepageTemplateId(templateId) {
+  var template = botHomepageTemplateById(templateId);
+  return template ? textValue(template.id) : 'document';
+}
+
+function selectedBotHomepageTemplateId() {
+  var data = state.settingsData || {};
+  var effectiveBrowser = data.effectiveBrowser || {};
+  var browser = data.browser || {};
+  var defaults = data.defaults || {};
+  return normalizeBotHomepageTemplateId(
+    effectiveBrowser.botHomepageTemplateId ||
+    browser.botHomepageTemplateId ||
+    defaults.botHomepageTemplateId
+  );
+}
+
+function renderTemplateSettings() {
+  var selectedId = selectedBotHomepageTemplateId();
+  return '<section class="browser-template-panel">' +
+    '<div class="browser-template-options">' + browserBotHomepageTemplates.map(function (template) {
+      var templateId = textValue(template && template.id);
+      var selected = templateId === selectedId;
+      var previewImage = textValue(template && template.previewImage);
+      return '<button type="button" class="browser-template-option" data-browser-template-select="' + escapeHtml(templateId) + '"' +
+        (selected ? ' aria-pressed="true"' : ' aria-pressed="false"') + '>' +
+        '<span class="browser-template-preview">' +
+          (previewImage ? '<img src="' + escapeHtml(previewImage) + '" alt="" />' : iconHtml('layout')) +
+        '</span>' +
+        '<span class="browser-template-copy"><strong>' + escapeHtml(textValue(template && template.name) || templateId) + '</strong>' +
+        '<span>' + escapeHtml(textValue(template && template.description)) + '</span></span>' +
+      '</button>';
+    }).join('') + '</div>' +
+    '<p class="browser-settings-note">The selected template is used for Bot homepage rendering for this local Bot.</p>' +
+  '</section>';
+}
+
 function renderCacheSettings() {
   var cache = state.cacheData || {};
   var artifactCount = typeof cache.artifactCount === 'number' ? cache.artifactCount : 0;
@@ -429,7 +478,9 @@ function renderCacheSettings() {
 
 function renderBrowserSettingsModal() {
   if (!elements.modalRoot) return;
-  var body = state.settingsTab === 'cache' ? renderCacheSettings() : renderBaseUrlSettings();
+  var body = state.settingsTab === 'cache'
+    ? renderCacheSettings()
+    : (state.settingsTab === 'templates' ? renderTemplateSettings() : renderBaseUrlSettings());
   var saveButton = state.settingsTab === 'baseUrls'
     ? '<button type="button" data-browser-settings-save>Save</button>'
     : '';
@@ -501,6 +552,30 @@ async function saveBrowserSettings() {
     body: JSON.stringify({ browser: browser })
   });
   state.settingsData = result;
+  setStatus('saved', '');
+  renderBrowserSettingsModal();
+  return result;
+}
+
+async function selectBotHomepageTemplate(templateId) {
+  var selectedTemplate = botHomepageTemplateById(templateId);
+  if (!selectedTemplate) {
+    setStatus('error', 'Bot homepage template not found.');
+    return null;
+  }
+  var selectedId = textValue(selectedTemplate.id);
+  var result = await api(endpointWithFrom(browserEndpoints.settings), {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ browser: { botHomepageTemplateId: selectedId } })
+  });
+  state.settingsData = result;
+  var browser = (result && (result.effectiveBrowser || result.browser)) || {};
+  var effectiveTemplateId = normalizeBotHomepageTemplateId(browser.botHomepageTemplateId || selectedId);
+  if (state.current && state.current.renderer && textValue(state.current.renderer.type) === 'bot-page') {
+    state.current.renderer.templateId = effectiveTemplateId;
+    renderCurrent();
+  }
   setStatus('saved', '');
   renderBrowserSettingsModal();
   return result;
@@ -781,64 +856,173 @@ function renderActionButtons(actions) {
   }).join('') + '</div>';
 }
 
-function renderActivityRows(data, current) {
-  var activity = Array.isArray(data.activity) ? data.activity : [];
+function objectValue(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function firstArray() {
+  for (var index = 0; index < arguments.length; index += 1) {
+    if (Array.isArray(arguments[index])) return arguments[index];
+  }
+  return [];
+}
+
+function normalizeBotHomepageListItem(item, index, fallbackLabel) {
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    var title = textValue(item.title || item.name || item.displayName || item.serviceName || item.label || item.id) ||
+      fallbackLabel + ' ' + (index + 1);
+    var detail = readableText(item.description || item.summary || item.detail || item.content || item.text || item.bio);
+    return {
+      id: textValue(item.currentPinId || item.servicePinId || item.pinId || item.id || item.uri || title),
+      title: title,
+      detail: detail,
+      raw: item
+    };
+  }
+  return {
+    id: fallbackLabel.toLowerCase() + '-' + index,
+    title: textValue(item) || fallbackLabel + ' ' + (index + 1),
+    detail: '',
+    raw: item
+  };
+}
+
+function normalizeBotHomepageList(items, fallbackLabel) {
+  return firstArray(items).map(function (item, index) {
+    return normalizeBotHomepageListItem(item, index, fallbackLabel);
+  }).filter(function (item) {
+    return !!item.title;
+  });
+}
+
+function normalizeBotHomepageServices(items) {
+  return firstArray(items).map(function (service, index) {
+    var normalized = normalizeBotHomepageListItem(service, index, 'Service');
+    normalized.serviceId = textValue(service && (service.currentPinId || service.servicePinId || service.pinId || service.id)) || normalized.id;
+    return normalized;
+  });
+}
+
+function normalizeBotHomepagePayload(current) {
+  var renderer = current.renderer || {};
+  var data = renderer.data && typeof renderer.data === 'object' ? renderer.data : {};
+  var profile = objectValue(data.profile);
+  var homepage = objectValue(data.homepage);
+  var owner = objectValue(current.owner);
+  var services = normalizeBotHomepageServices(data.services);
+  var activity = normalizeBotHomepageList(data.activity, 'Activity');
   if (!activity.length) {
-    var services = Array.isArray(data.services) ? data.services : [];
     activity = services.slice(0, 2).map(function (service) {
       return {
-        label: 'Service available',
-        detail: textValue(service.displayName) || textValue(service.serviceName) || textValue(service.id) || 'Service'
+        id: service.id,
+        title: 'Service available',
+        detail: service.title,
+        raw: service.raw
       };
     });
     activity.push({
-      label: textValue(current.status && current.status.state) === 'resolved' ? 'Profile resolved' : (textValue(current.status && current.status.state) || 'Profile resolved'),
-      detail: textValue(current.normalizedUri || current.uri)
+      id: 'profile-resolved',
+      title: textValue(current.status && current.status.state) === 'resolved' ? 'Profile resolved' : (textValue(current.status && current.status.state) || 'Profile resolved'),
+      detail: textValue(current.normalizedUri || current.uri),
+      raw: current.status || {}
     });
   }
-  return activity.slice(0, 5).map(function (item) {
-    var label = textValue(item && (item.label || item.title || item.kind)) || 'Activity';
-    var detail = textValue(item && (item.detail || item.description || item.uri || item.createdAt || item.timestamp));
-    return '<article class="browser-activity-row"><span class="browser-row-icon" aria-hidden="true">' + iconHtml('activity') + '</span>' +
-      '<div><strong>' + escapeHtml(label) + '</strong>' +
-      (detail ? '<p>' + escapeHtml(detail) + '</p>' : '') + '</div></article>';
-  }).join('');
+  var name = textValue(profile.name) || textValue(homepage.title) || textValue(current.title);
+  var summary = readableText(homepage.summary) || readableText(profile.bio);
+  return {
+    raw: data,
+    identity: {
+      name: name || 'Bot',
+      globalMetaId: textValue(data.globalMetaId) || textValue(owner.globalMetaId),
+      avatar: safeUrl(profile.avatar || owner.avatar),
+      proofState: textValue(current.status && current.status.verificationState) || 'unverified'
+    },
+    summary: {
+      text: summary,
+      overview: summary || 'This Bot has not published an overview yet.'
+    },
+    services: services,
+    activity: activity,
+    skills: normalizeBotHomepageList(firstArray(data.skills, data.publishedSkills, data.capabilities), 'Skill'),
+    buzz: normalizeBotHomepageList(firstArray(data.buzz, data.posts, data.publications), 'Buzz'),
+    buses: normalizeBotHomepageList(firstArray(data.buses, data.bus), 'Bus')
+  };
+}
+
+function renderServiceRows(services) {
+  return services.length
+    ? services.map(function (service) {
+      return '<article class="browser-service-row"><span class="browser-row-icon" aria-hidden="true">' + iconHtml('service') + '</span>' +
+        '<div><strong>' + escapeHtml(service.title) + '</strong>' +
+        (service.detail ? '<p>' + escapeHtml(service.detail) + '</p>' : '') + '</div>' +
+        '<button type="button" data-browser-action="service-call" data-service-id="' + escapeHtml(service.serviceId || service.id) + '">Request</button></article>';
+    }).join('')
+    : '<p class="browser-muted-row">No public services.</p>';
+}
+
+function renderGenericRows(items, emptyText, iconName) {
+  return items.length
+    ? items.slice(0, 6).map(function (item) {
+      return '<article class="browser-activity-row"><span class="browser-row-icon" aria-hidden="true">' + iconHtml(iconName || 'activity') + '</span>' +
+        '<div><strong>' + escapeHtml(item.title) + '</strong>' +
+        (item.detail ? '<p>' + escapeHtml(item.detail) + '</p>' : '') + '</div></article>';
+    }).join('')
+    : '<p class="browser-muted-row">' + escapeHtml(emptyText) + '</p>';
+}
+
+function renderActivityRows(payload) {
+  return renderGenericRows(payload.activity.slice(0, 5), 'No recent activity.', 'activity');
+}
+
+function renderBotHomepageDocumentTemplate(payload, current) {
+  var identity = payload.identity;
+  return '<article class="browser-bot-page browser-bot-template-document">' +
+    '<header class="browser-bot-header">' +
+    avatarHtml(identity.avatar, identity.name, 'browser-bot-avatar') +
+    '<div class="browser-bot-identity"><div class="browser-bot-title-line"><h2>' + escapeHtml(identity.name) + '</h2>' + proofIconHtml(identity.proofState) + '</div>' +
+    (identity.globalMetaId ? '<p class="browser-globalmetaid">' + escapeHtml(identity.globalMetaId) + '</p>' : '') +
+    (payload.summary.text ? '<p class="browser-bot-summary">' + escapeHtml(payload.summary.text) + '</p>' : '') + '</div>' +
+    renderActionButtons(current.actions) + '</header>' +
+    '<section class="browser-document-section"><h3>Overview</h3><p>' + escapeHtml(payload.summary.overview) + '</p></section>' +
+    '<section class="browser-document-section browser-bot-services"><h3>Services</h3>' + renderServiceRows(payload.services) + '</section>' +
+    '<section class="browser-document-section browser-bot-activity"><h3>Recent Activity</h3>' + renderActivityRows(payload) + '</section>' +
+    '</article>';
+}
+
+function renderCompactPanel(title, html) {
+  return '<section class="browser-compact-panel"><h3>' + escapeHtml(title) + '</h3>' + html + '</section>';
+}
+
+function renderBotHomepageCompactListTemplate(payload, current) {
+  var identity = payload.identity;
+  var extraPanels = [
+    renderCompactPanel('Services', renderServiceRows(payload.services)),
+    renderCompactPanel('Skills', renderGenericRows(payload.skills, 'No public skills.', 'service')),
+    renderCompactPanel('Buzz', renderGenericRows(payload.buzz, 'No public buzz.', 'activity'))
+  ];
+  if (payload.buses.length) {
+    extraPanels.push(renderCompactPanel('Bus', renderGenericRows(payload.buses, 'No public bus entries.', 'activity')));
+  }
+  return '<article class="browser-bot-page browser-bot-template-compact-list">' +
+    '<header class="browser-compact-header">' +
+    avatarHtml(identity.avatar, identity.name, 'browser-bot-avatar') +
+    '<div class="browser-bot-identity"><div class="browser-bot-title-line"><h2>' + escapeHtml(identity.name) + '</h2>' + proofIconHtml(identity.proofState) + '</div>' +
+    (identity.globalMetaId ? '<p class="browser-globalmetaid">' + escapeHtml(identity.globalMetaId) + '</p>' : '') +
+    (payload.summary.text ? '<p class="browser-bot-summary">' + escapeHtml(payload.summary.text) + '</p>' : '') + '</div>' +
+    renderActionButtons(current.actions) + '</header>' +
+    '<section class="browser-compact-overview"><p>' + escapeHtml(payload.summary.overview) + '</p></section>' +
+    '<div class="browser-compact-grid">' + extraPanels.join('') + '</div>' +
+    '</article>';
 }
 
 function renderBotPage(current) {
-  var data = current.renderer && current.renderer.data && typeof current.renderer.data === 'object'
-    ? current.renderer.data
-    : {};
-  var profile = data.profile && typeof data.profile === 'object' ? data.profile : {};
-  var homepage = data.homepage && typeof data.homepage === 'object' ? data.homepage : {};
-  var services = Array.isArray(data.services) ? data.services : [];
-  var avatar = safeUrl(profile.avatar || (current.owner && current.owner.avatar));
-  var name = textValue(profile.name) || textValue(homepage.title) || textValue(current.title);
-  var globalMetaId = textValue(data.globalMetaId) || textValue(current.owner && current.owner.globalMetaId);
-  var summary = readableText(homepage.summary) || readableText(profile.bio);
-  var proofState = textValue(current.status && current.status.verificationState) || 'unverified';
-  var overview = summary || 'This Bot has not published an overview yet.';
-  var servicesHtml = services.length
-    ? services.map(function (service) {
-      var serviceName = textValue(service.displayName) || textValue(service.serviceName) || textValue(service.id) || 'Service';
-      var serviceDescription = textValue(service.description);
-      return '<article class="browser-service-row"><span class="browser-row-icon" aria-hidden="true">' + iconHtml('service') + '</span>' +
-        '<div><strong>' + escapeHtml(serviceName) + '</strong>' +
-        (serviceDescription ? '<p>' + escapeHtml(serviceDescription) + '</p>' : '') + '</div>' +
-        '<button type="button" data-browser-action="service-call" data-service-id="' + escapeHtml(textValue(service.currentPinId || service.servicePinId || service.pinId || service.id)) + '">Request</button></article>';
-    }).join('')
-    : '<p class="browser-muted-row">No public services.</p>';
-  return '<article class="browser-bot-page">' +
-    '<header class="browser-bot-header">' +
-    avatarHtml(avatar, name || 'Bot', 'browser-bot-avatar') +
-    '<div class="browser-bot-identity"><div class="browser-bot-title-line"><h2>' + escapeHtml(name || 'Bot') + '</h2>' + proofIconHtml(proofState) + '</div>' +
-    (globalMetaId ? '<p class="browser-globalmetaid">' + escapeHtml(globalMetaId) + '</p>' : '') +
-    (summary ? '<p class="browser-bot-summary">' + escapeHtml(summary) + '</p>' : '') + '</div>' +
-    renderActionButtons(current.actions) + '</header>' +
-    '<section class="browser-document-section"><h3>Overview</h3><p>' + escapeHtml(overview) + '</p></section>' +
-    '<section class="browser-document-section browser-bot-services"><h3>Services</h3>' + servicesHtml + '</section>' +
-    '<section class="browser-document-section browser-bot-activity"><h3>Recent Activity</h3>' + renderActivityRows(data, current) + '</section>' +
-    '</article>';
+  var renderer = current.renderer || {};
+  var templateId = normalizeBotHomepageTemplateId(renderer.templateId || selectedBotHomepageTemplateId());
+  var payload = normalizeBotHomepagePayload(current);
+  if (templateId === 'compact-list') {
+    return renderBotHomepageCompactListTemplate(payload, current);
+  }
+  return renderBotHomepageDocumentTemplate(payload, current);
 }
 
 function servicesFromCurrent() {
@@ -1187,6 +1371,13 @@ async function initialize() {
         });
         return;
       }
+      var templateSelect = closestWithAttribute(event && event.target, 'data-browser-template-select');
+      if (templateSelect) {
+        selectBotHomepageTemplate(templateSelect.getAttribute('data-browser-template-select')).catch(function (error) {
+          setStatus('error', error && error.message ? error.message : 'Template save failed.');
+        });
+        return;
+      }
       var cacheClear = closestWithAttribute(event && event.target, 'data-browser-cache-clear');
       if (cacheClear) {
         clearBrowserCache(cacheClear.getAttribute('data-browser-cache-clear')).catch(function (error) {
@@ -1289,6 +1480,7 @@ globalThis.browserEndpoints = browserEndpoints;
 globalThis.browserMenuSections = browserMenuSections;
 globalThis.browserSettingsTabs = browserSettingsTabs;
 globalThis.browserBaseUrlFields = browserBaseUrlFields;
+globalThis.browserBotHomepageTemplates = browserBotHomepageTemplates;
 globalThis.state = state;
 globalThis.api = api;
 globalThis.bindElements = bindElements;
@@ -1308,8 +1500,10 @@ globalThis.handleBrowserMenuAction = handleBrowserMenuAction;
 globalThis.openBrowserSettings = openBrowserSettings;
 globalThis.switchBrowserSettingsTab = switchBrowserSettingsTab;
 globalThis.saveBrowserSettings = saveBrowserSettings;
+globalThis.selectBotHomepageTemplate = selectBotHomepageTemplate;
 globalThis.clearBrowserCache = clearBrowserCache;
 globalThis.handleTrustedAction = handleTrustedAction;
+globalThis.normalizeBotHomepagePayload = normalizeBotHomepagePayload;
 globalThis.confirmPrivateChat = confirmPrivateChat;
 globalThis.confirmServiceCall = confirmServiceCall;
 globalThis.closeModal = closeModal;

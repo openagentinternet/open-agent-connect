@@ -4,6 +4,7 @@ import type {
   BrowserTrustedAction,
   BrowserVerificationState,
 } from './types';
+import { normalizeBotHomepageTemplateId } from './botHomepageTemplates';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -155,6 +156,7 @@ export function buildBotPageResolveResult(input: {
   normalizedUri: string;
   homepage: Record<string, unknown>;
   resolverUrl: string;
+  templateId?: unknown;
 }): BrowserResolveResult {
   const canonical = recordField(input.homepage, 'canonical');
   const profile = recordField(input.homepage, 'profile');
@@ -183,6 +185,7 @@ export function buildBotPageResolveResult(input: {
     renderer: {
       type: 'bot-page',
       contentType: 'application/vnd.oac.bot-homepage+json',
+      templateId: normalizeBotHomepageTemplateId(input.templateId),
       data: input.homepage,
     },
     status: {
