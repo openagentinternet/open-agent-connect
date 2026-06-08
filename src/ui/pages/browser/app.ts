@@ -311,6 +311,21 @@ function endpointWithFrom(endpoint) {
   return endpoint + '?' + query.toString();
 }
 
+function browserUriFromPath(pathname) {
+  var match = textValue(pathname).match(/^\\/browser\\/(metaid|metaapp)\\/([^/?#]+)$/);
+  if (!match) return '';
+  var rawId = match[2];
+  var decodedId = rawId;
+  try {
+    decodedId = decodeURIComponent(rawId);
+  } catch (error) {
+    decodedId = rawId;
+  }
+  var id = textValue(decodedId);
+  if (!id) return '';
+  return match[1] + '://' + id;
+}
+
 function findBrowserMenuItem(itemId) {
   var targetId = textValue(itemId);
   for (var sectionIndex = 0; sectionIndex < browserMenuSections.length; sectionIndex += 1) {
@@ -1462,10 +1477,12 @@ async function initialize() {
   if (elements.statusTxid) elements.statusTxid.addEventListener('click', openInspector);
 
   var queryUri = new URLSearchParams(window.location.search || '').get('uri') || '';
+  var pathUri = queryUri ? '' : browserUriFromPath(window.location && window.location.pathname);
   var context = await loadContext();
-  if (queryUri) {
-    if (elements.input) elements.input.value = queryUri;
-    await navigateTo(queryUri);
+  var initialUri = queryUri || pathUri;
+  if (initialUri) {
+    if (elements.input) elements.input.value = initialUri;
+    await navigateTo(initialUri);
     return;
   }
 
@@ -1481,6 +1498,7 @@ globalThis.browserMenuSections = browserMenuSections;
 globalThis.browserSettingsTabs = browserSettingsTabs;
 globalThis.browserBaseUrlFields = browserBaseUrlFields;
 globalThis.browserBotHomepageTemplates = browserBotHomepageTemplates;
+globalThis.browserUriFromPath = browserUriFromPath;
 globalThis.state = state;
 globalThis.api = api;
 globalThis.bindElements = bindElements;

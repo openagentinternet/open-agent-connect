@@ -167,7 +167,7 @@ function createBrowserContext(options = {}) {
     setTimeout,
     clearTimeout,
     window: {
-      location: { search: options.search || '' },
+      location: { pathname: options.pathname || '/ui/browser', search: options.search || '' },
       history: { replaceState() {} },
     },
     document: {
@@ -232,6 +232,25 @@ test('Browser query URI is decoded into the address bar and resolved', async () 
   assert.equal(elements['[data-browser-uri-input]'].value, 'metaid://idq1alice');
   assert.equal(fetchCalls[0], '/api/browser/context');
   assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&from=worker');
+});
+
+test('Browser MetaID deep link path is decoded into the address bar and resolved', async () => {
+  const { elements, fetchCalls } = createBrowserContext({ pathname: '/browser/metaid/idq1alice' });
+
+  await waitFor(() => fetchCalls.length === 2, 'context and deep link resolve');
+
+  assert.equal(elements['[data-browser-uri-input]'].value, 'metaid://idq1alice');
+  assert.equal(fetchCalls[1], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&from=worker');
+});
+
+test('Browser MetaApp deep link path is decoded into the address bar and resolved', async () => {
+  const pinId = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0';
+  const { elements, fetchCalls } = createBrowserContext({ pathname: `/browser/metaapp/${pinId}` });
+
+  await waitFor(() => fetchCalls.length === 2, 'context and deep link resolve');
+
+  assert.equal(elements['[data-browser-uri-input]'].value, `metaapp://${pinId}`);
+  assert.equal(fetchCalls[1], `/api/browser/resolve?uri=metaapp%3A%2F%2F${pinId}&from=worker`);
 });
 
 test('Browser loads context and resolves default URI when no query URI is present', async () => {

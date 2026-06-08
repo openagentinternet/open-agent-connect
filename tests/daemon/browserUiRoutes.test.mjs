@@ -32,6 +32,23 @@ test('GET /browser and /ui/browser serve the same Agent Internet Browser shell',
   assert.equal(productHtml, frameworkHtml);
 });
 
+test('GET Browser deep links serve the Agent Internet Browser shell', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const metaId = await fetch(`${baseUrl}/browser/metaid/idq1alice`);
+  const metaApp = await fetch(`${baseUrl}/browser/metaapp/8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0`);
+  const metaIdHtml = await metaId.text();
+  const metaAppHtml = await metaApp.text();
+
+  assert.equal(metaId.status, 200);
+  assert.equal(metaApp.status, 200);
+  assert.match(metaIdHtml, /Agent Internet Browser/);
+  assert.match(metaIdHtml, /data-browser-uri-input/);
+  assert.match(metaAppHtml, /Agent Internet Browser/);
+  assert.match(metaAppHtml, /data-browser-uri-input/);
+});
+
 test('Browser default shell hides drawer and inspector by default and avoids rejected labels', async (t) => {
   const { server, baseUrl } = await startServer();
   t.after(async () => server.close());

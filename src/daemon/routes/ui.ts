@@ -115,6 +115,10 @@ async function renderBuiltInPage(page: MetabotUiPageName): Promise<string> {
     .replace(/__PAGE_SCRIPT__/g, definition.script);
 }
 
+function isBrowserPagePath(pathname: string): boolean {
+  return pathname === '/browser' || /^\/browser\/(?:metaid|metaapp)\/[^/]+$/.test(pathname);
+}
+
 async function servePlatformAsset(context: Parameters<RouteHandler>[0]): Promise<boolean> {
   const { req, url } = context;
   if (!url.pathname.startsWith(PLATFORM_ASSET_PREFIX)) {
@@ -159,7 +163,7 @@ async function servePlatformAsset(context: Parameters<RouteHandler>[0]): Promise
 export const handleUiRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
 
-  if (url.pathname === '/browser') {
+  if (isBrowserPagePath(url.pathname)) {
     if (req.method !== 'GET') {
       context.sendMethodNotAllowed(['GET']);
       return true;
