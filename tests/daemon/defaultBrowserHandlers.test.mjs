@@ -43,6 +43,32 @@ test('Browser context defaults to the active local Bot and can switch using iden
   assert.equal(selectedContext.data.defaultUri, `metaid://${other.globalMetaId}`);
 });
 
+test('Browser handlers return profile_not_found for an unknown using identity', async (t) => {
+  const profileHome = await createProfileHome('browser-unknown-context');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Known Browser Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1knownbrowser',
+    mvcAddress: '18KnownBrowser',
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const context = await handlers.browser.getContext({ from: 'missing-browser-bot' });
+  assert.equal(context.ok, false);
+  assert.equal(context.code, 'profile_not_found');
+
+  const settings = await handlers.browser.getSettings({ from: 'missing-browser-bot' });
+  assert.equal(settings.ok, false);
+  assert.equal(settings.code, 'profile_not_found');
+});
+
 test('Browser settings expose and persist browser base URL configuration by active Bot', async (t) => {
   const profileHome = await createProfileHome('browser-settings');
   t.after(async () => cleanupProfileHome(profileHome));
