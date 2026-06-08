@@ -120,6 +120,7 @@ test('default bot handlers create, list, and fetch MetaBot profiles', async (t) 
 
   const created = await handlers.bot.createProfile({
     name: 'Alice Bot',
+    bio: 'Builds small tools on the Agent Internet.',
     role: 'Writes careful code.',
   });
   const listed = await handlers.bot.listProfiles();
@@ -127,11 +128,13 @@ test('default bot handlers create, list, and fetch MetaBot profiles', async (t) 
 
   assert.equal(created.ok, true);
   assert.equal(created.data.profile.slug, 'alice-bot');
+  assert.equal(created.data.profile.bio, 'Builds small tools on the Agent Internet.');
   assert.equal(created.data.profile.role, 'Writes careful code.');
   assert.equal(listed.ok, true);
   assert.deepEqual(listed.data.profiles.map((profile) => profile.slug), ['alice-bot']);
   assert.equal(fetched.ok, true);
   assert.equal(fetched.data.profile.name, 'Alice Bot');
+  assert.equal(fetched.data.profile.bio, 'Builds small tools on the Agent Internet.');
 });
 
 test('default bot config handlers persist default write network per MetaBot profile', async (t) => {
@@ -605,7 +608,7 @@ test('default bot createProfile bootstraps a chained identity before indexing th
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.slug, 'chain-bot');
   assert.match(result.data.profile.globalMetaId, /^idq/);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/bio']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/role']);
   assert.deepEqual(writeCalls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
   assert.equal(writeCalls[0].contentType, 'text/plain');
   assert.equal(writeCalls[0].payload, 'Chain Bot');
@@ -639,7 +642,7 @@ test('default bot createProfile writes requested profile fields to chain before 
     }),
     createSignerForHome: () => makeSigner(async (input) => {
       writeCalls.push(input);
-      if (input.path === '/info/bio') {
+      if (input.path === '/info/role') {
         assert.deepEqual(await listIdentityProfiles(systemHomeDir), []);
         await assert.rejects(() => access(targetPaths.roleMdPath), /ENOENT/);
         await assert.rejects(() => access(path.join(targetHomeDir, 'avatar.txt')), /ENOENT/);
@@ -667,12 +670,12 @@ test('default bot createProfile writes requested profile fields to chain before 
   const stored = await getMetabotProfile(systemHomeDir, 'chain-first-draft-bot');
 
   assert.equal(result.ok, true);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/bio']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/role']);
   assert.equal(stored.role, 'Chain first role.');
   assert.equal(stored.avatarDataUrl, 'data:image/png;base64,ZmFrZQ==');
 });
 
-test('default bot createProfile persists requested provider fields after chain bio write', async (t) => {
+test('default bot createProfile persists requested provider fields after chain LLM write', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -686,7 +689,8 @@ test('default bot createProfile persists requested provider fields after chain b
       runtime('claude-code', 'runtime-claude', 'healthy'),
     ],
   });
-  const bioPayloads = [];
+  const llmPayloads = [];
+  let signerCallCount = 0;
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
@@ -698,12 +702,13 @@ test('default bot createProfile persists requested provider fields after chain b
       step2: { txid: 'subsidy-tx-1' },
     }),
     createSignerForHome: () => makeSigner(async (input) => {
-      if (input.path === '/info/bio') {
-        bioPayloads.push(JSON.parse(input.payload));
+      signerCallCount += 1;
+      if (input.path === '/info/LLM') {
+        llmPayloads.push(JSON.parse(input.payload));
       }
       return {
-        txids: [`provider-create-tx-${bioPayloads.length + 1}`],
-        pinId: `provider-create-pin-${bioPayloads.length + 1}`,
+        txids: [`provider-create-tx-${signerCallCount}`],
+        pinId: `provider-create-pin-${signerCallCount}`,
         totalCost: 1,
         network: 'mvc',
         operation: input.operation,
@@ -726,13 +731,9 @@ test('default bot createProfile persists requested provider fields after chain b
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.primaryProvider, 'codex');
   assert.equal(result.data.profile.fallbackProvider, 'claude-code');
-  assert.deepEqual(bioPayloads.at(-1), {
-    role: 'I am a helpful AI assistant.',
-    soul: 'Friendly and professional.',
-    goal: 'Help users accomplish their tasks effectively.',
+  assert.deepEqual(llmPayloads.at(-1), {
     primaryProvider: 'codex',
     fallbackProvider: 'claude-code',
-    allowChatSkills: [],
   });
   assert.deepEqual(
     bindingState.bindings.map((binding) => [binding.role, binding.llmRuntimeId]).sort(),
@@ -790,7 +791,7 @@ test('default bot createProfile accepts empty allowChatSkills as a no-op', async
     await cleanupProfileHome(homeDir);
   });
   const systemHomeDir = deriveSystemHome(homeDir);
-  const bioPayloads = [];
+  const writeCalls = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
@@ -798,12 +799,10 @@ test('default bot createProfile accepts empty allowChatSkills as a no-op', async
     getDaemonRecord: () => null,
     ...makeChainedCreateOverrides(),
     createSignerForHome: () => makeSigner(async (input) => {
-      if (input.path === '/info/bio') {
-        bioPayloads.push(JSON.parse(input.payload));
-      }
+      writeCalls.push(input);
       return {
-        txids: [`create-empty-allow-chat-skill-tx-${bioPayloads.length + 1}`],
-        pinId: `create-empty-allow-chat-skill-pin-${bioPayloads.length + 1}`,
+        txids: [`create-empty-allow-chat-skill-tx-${writeCalls.length}`],
+        pinId: `create-empty-allow-chat-skill-pin-${writeCalls.length}`,
         totalCost: 1,
         network: 'mvc',
         operation: input.operation,
@@ -824,7 +823,7 @@ test('default bot createProfile accepts empty allowChatSkills as a no-op', async
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.data.profile.allowChatSkills, []);
-  assert.deepEqual(bioPayloads.at(-1).allowChatSkills, []);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/role']);
 });
 
 test('default bot createProfile rejects requested degraded providers before chain writes', async (t) => {
@@ -901,19 +900,21 @@ test('default bot createProfile prefers the requested host provider and falls ba
       },
     ],
   });
-  const bioPayloads = [];
+  const llmPayloads = [];
+  let signerCallCount = 0;
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => null,
     ...makeChainedCreateOverrides(),
     createSignerForHome: () => makeSigner(async (input) => {
-      if (input.path === '/info/bio') {
-        bioPayloads.push(JSON.parse(input.payload));
+      signerCallCount += 1;
+      if (input.path === '/info/LLM') {
+        llmPayloads.push(JSON.parse(input.payload));
       }
       return {
-        txids: [`host-default-tx-${bioPayloads.length + 1}`],
-        pinId: `host-default-pin-${bioPayloads.length + 1}`,
+        txids: [`host-default-tx-${signerCallCount}`],
+        pinId: `host-default-pin-${signerCallCount}`,
         totalCost: 1,
         network: 'mvc',
         operation: input.operation,
@@ -934,8 +935,8 @@ test('default bot createProfile prefers the requested host provider and falls ba
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.primaryProvider, 'codex');
   assert.equal(result.data.profile.fallbackProvider, 'claude-code');
-  assert.equal(bioPayloads.at(-1).primaryProvider, 'codex');
-  assert.equal(bioPayloads.at(-1).fallbackProvider, 'claude-code');
+  assert.equal(llmPayloads.at(-1).primaryProvider, 'codex');
+  assert.equal(llmPayloads.at(-1).fallbackProvider, 'claude-code');
 });
 
 test('default bot createProfile from UI defaults providers by recent runtime activity', async (t) => {
@@ -1410,24 +1411,30 @@ test('default bot updateProfile returns chain write txids after saving a chained
   const result = await handlers.bot.updateProfile({
     slug: profile.slug,
     name: 'Chained Save Updated',
+    bio: 'Now writes Bot Pages.',
     role: 'Updated on chain first.',
     avatarDataUrl: 'data:image/png;base64,VXBkYXRlZA==',
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.name, 'Chained Save Updated');
+  assert.equal(result.data.profile.bio, 'Now writes Bot Pages.');
   assert.equal(result.data.profile.role, 'Updated on chain first.');
   assert.equal(result.data.profile.avatarDataUrl, 'data:image/png;base64,VXBkYXRlZA==');
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/bio']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/bio', '/info/role']);
   assert.equal(writeCalls[0].contentType, 'text/plain');
   assert.equal(writeCalls[0].payload, 'Chained Save Updated');
   assert.equal(writeCalls[1].contentType, 'image/png;binary');
   assert.equal(writeCalls[1].payload, 'VXBkYXRlZA==');
   assert.equal(writeCalls[1].encoding, 'base64');
-  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2', 'save-tx-3']);
+  assert.equal(writeCalls[2].contentType, 'text/plain');
+  assert.equal(writeCalls[2].payload, 'Now writes Bot Pages.');
+  assert.equal(writeCalls[3].contentType, 'text/plain');
+  assert.equal(writeCalls[3].payload, 'Updated on chain first.');
+  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2', 'save-tx-3', 'save-tx-4']);
 });
 
-test('default bot updateProfile validates allowChatSkills and writes chain bio before local state', async (t) => {
+test('default bot updateProfile validates allowChatSkills and writes chain chatSkills before local state', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -1473,7 +1480,7 @@ test('default bot updateProfile validates allowChatSkills and writes chain bio b
     getDaemonRecord: () => null,
     signer: makeSigner(async (input) => {
       writeCalls.push(input);
-      if (input.path === '/info/bio') {
+      if (input.path === '/info/chatSkills') {
         const beforeLocalSave = await getMetabotProfile(systemHomeDir, profile.slug);
         assert.deepEqual(beforeLocalSave.allowChatSkills, []);
         assert.deepEqual(JSON.parse(input.payload).allowChatSkills, ['metabot-help']);
@@ -1500,7 +1507,7 @@ test('default bot updateProfile validates allowChatSkills and writes chain bio b
   const updated = await getMetabotProfile(systemHomeDir, profile.slug);
 
   assert.equal(result.ok, true);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/bio']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/chatSkills']);
   assert.deepEqual(result.data.profile.allowChatSkills, ['metabot-help']);
   assert.deepEqual(updated.allowChatSkills, ['metabot-help']);
 });

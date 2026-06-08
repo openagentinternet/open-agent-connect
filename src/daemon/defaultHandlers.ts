@@ -1081,6 +1081,9 @@ function buildMetabotUpdateInput(input: Record<string, unknown>): UpdateMetabotI
       throw new Error('MetaBot name is required.');
     }
   }
+  if (hasOwnField(input, 'bio')) {
+    update.bio = typeof input.bio === 'string' ? input.bio : '';
+  }
   if (hasOwnField(input, 'role')) {
     update.role = typeof input.role === 'string' ? input.role : '';
   }
@@ -1115,6 +1118,9 @@ function buildMetabotCreateInput(input: Record<string, unknown>): CreateMetabotI
     throw new Error('MetaBot name is required.');
   }
   const createInput: CreateMetabotInput = { name };
+  if (hasOwnField(input, 'bio')) {
+    createInput.bio = typeof input.bio === 'string' ? input.bio : '';
+  }
   if (hasOwnField(input, 'role')) {
     createInput.role = typeof input.role === 'string' ? input.role : '';
   }
@@ -1305,6 +1311,7 @@ function calculateMetabotChangedFields(
 ): string[] {
   const changedFields: string[] = [];
   if (update.name !== undefined && update.name !== current.name) changedFields.push('name');
+  if (update.bio !== undefined && update.bio !== current.bio) changedFields.push('bio');
   if (update.role !== undefined && update.role !== current.role) changedFields.push('role');
   if (update.soul !== undefined && update.soul !== current.soul) changedFields.push('soul');
   if (update.goal !== undefined && update.goal !== current.goal) changedFields.push('goal');
@@ -1333,6 +1340,7 @@ function buildMetabotChainProfile(
   return {
     ...current,
     name: update.name ?? current.name,
+    bio: update.bio ?? current.bio,
     role: update.role ?? current.role,
     soul: update.soul ?? current.soul,
     goal: update.goal ?? current.goal,
@@ -1347,15 +1355,12 @@ function buildMetabotChainProfile(
 
 function calculateMetabotCreateChainFields(input: CreateMetabotInput): string[] {
   const changedFields: string[] = [];
-  if (
-    input.role !== undefined
-    || input.soul !== undefined
-    || input.goal !== undefined
-    || input.primaryProvider !== undefined
-    || input.fallbackProvider !== undefined
-  ) {
-    changedFields.push('role');
-  }
+  if (normalizeText(input.bio)) changedFields.push('bio');
+  if (input.role !== undefined) changedFields.push('role');
+  if (input.soul !== undefined) changedFields.push('soul');
+  if (input.goal !== undefined) changedFields.push('goal');
+  if (input.primaryProvider !== undefined) changedFields.push('primaryProvider');
+  if (input.fallbackProvider !== undefined) changedFields.push('fallbackProvider');
   if (normalizeText(input.avatarDataUrl)) {
     changedFields.push('avatar');
   }

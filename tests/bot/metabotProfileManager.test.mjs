@@ -8,6 +8,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const {
   createMetabotProfile,
+  createMetabotProfileFromIdentity,
   deleteMetabotProfile,
   getMetabotProfile,
   getMetabotMnemonicBackup,
@@ -71,6 +72,26 @@ test('createMetabotProfile creates a profile workspace with editable persona def
 
   const profiles = await listMetabotProfiles(systemHomeDir);
   assert.deepEqual(profiles.map((profile) => profile.slug), ['alice-bot']);
+});
+
+test('createMetabotProfileFromIdentity and updateMetabotProfile persist public bio locally', async () => {
+  const systemHomeDir = await createSystemHome();
+  const homeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'alice');
+
+  await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Alice',
+    bio: 'Builds small tools on the Agent Internet.',
+    homeDir,
+    globalMetaId: 'idq1alice',
+    mvcAddress: 'mvc-address',
+  });
+
+  const profile = await getMetabotProfile(systemHomeDir, 'alice');
+  assert.equal(profile.bio, 'Builds small tools on the Agent Internet.');
+
+  await updateMetabotProfile(systemHomeDir, 'alice', { bio: 'Now writes Bot Pages.' });
+  const updated = await getMetabotProfile(systemHomeDir, 'alice');
+  assert.equal(updated.bio, 'Now writes Bot Pages.');
 });
 
 test('createMetabotProfile defaults primary and fallback providers from recently active runtimes', async () => {
@@ -422,7 +443,7 @@ test('validateAvatarDataUrl rejects non-images and oversized payloads', () => {
   assert.equal(validateAvatarDataUrl(`data:image/png;base64,${'A'.repeat(300_000)}`, 200_000).valid, false);
 });
 
-test('syncMetabotInfoToChain writes name, avatar, and bio pins in chain-first order', async () => {
+test('syncMetabotInfoToChain writes changed profile info fields to separate paths', async () => {
   const calls = [];
   const signer = {
     getIdentity: async () => ({}),
@@ -453,6 +474,7 @@ test('syncMetabotInfoToChain writes name, avatar, and bio pins in chain-first or
     mvcAddress: 'addr',
     createdAt: 1,
     updatedAt: 2,
+    bio: 'Builds small tools on the Agent Internet.',
     role: 'Role',
     soul: 'Soul',
     goal: 'Goal',
@@ -460,19 +482,94 @@ test('syncMetabotInfoToChain writes name, avatar, and bio pins in chain-first or
     primaryProvider: 'claude-code',
     fallbackProvider: 'codex',
     allowChatSkills: ['metabot-help', 'metabot-wallet-manage'],
+  }, ['bio', 'role', 'soul', 'goal', 'allowChatSkills', 'primaryProvider', 'fallbackProvider'], { delayMs: 0 });
+
+  assert.deepEqual(calls.map((call) => call.path), [
+    '/info/bio',
+    '/info/role',
+    '/info/soul',
+    '/info/goal',
+    '/info/chatSkills',
+    '/info/LLM',
+  ]);
+  assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify', 'modify', 'modify', 'modify']);
+  assert.deepEqual(calls.map((call) => call.contentType), [
+    'text/plain',
+    'text/plain',
+    'text/plain',
+    'text/plain',
+    'application/json',
+    'application/json',
+  ]);
+  assert.equal(calls[0].payload, 'Builds small tools on the Agent Internet.');
+  assert.equal(calls[1].payload, 'Role');
+  assert.equal(calls[2].payload, 'Soul');
+  assert.equal(calls[3].payload, 'Goal');
+  assert.deepEqual(JSON.parse(calls[4].payload), {
+    allowChatSkills: ['metabot-help', 'metabot-wallet-manage'],
+  });
+  assert.deepEqual(JSON.parse(calls[5].payload), {
+    primaryProvider: 'claude-code',
+    fallbackProvider: 'codex',
+  });
+  assert.equal(results.length, 6);
+});
+
+test('syncMetabotInfoToChain preserves name and avatar writes while splitting profile info', async () => {
+  const calls = [];
+  const signer = {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({}),
+    writePin: async (input) => {
+      calls.push(input);
+      return {
+        txids: [`tx-${calls.length}`],
+        pinId: `pin-${calls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: 'gid',
+        mvcAddress: 'addr',
+      };
+    },
+  };
+
+  const results = await syncMetabotInfoToChain(signer, {
+    name: 'Alice',
+    slug: 'alice',
+    aliases: [],
+    homeDir: '/tmp/alice',
+    globalMetaId: 'gid',
+    mvcAddress: 'addr',
+    createdAt: 1,
+    updatedAt: 2,
+    bio: 'Public bio',
+    role: 'Role',
+    soul: 'Soul',
+    goal: 'Goal',
+    avatarDataUrl: 'data:image/png;base64,ZmFrZQ==',
+    primaryProvider: 'claude-code',
+    fallbackProvider: 'codex',
+    allowChatSkills: ['metabot-help'],
   }, ['name', 'avatar', 'role', 'primaryProvider'], { delayMs: 0 });
 
-  assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/bio']);
-  assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify']);
+  assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/role', '/info/LLM']);
+  assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify', 'modify']);
   assert.equal(calls[0].contentType, 'text/plain');
   assert.equal(calls[0].payload, 'Alice');
   assert.equal(calls[0].encoding, 'utf-8');
   assert.equal(calls[1].contentType, 'image/png;binary');
   assert.equal(calls[1].payload, 'ZmFrZQ==');
   assert.equal(calls[1].encoding, 'base64');
-  assert.equal(JSON.parse(calls[2].payload).primaryProvider, 'claude-code');
-  assert.deepEqual(JSON.parse(calls[2].payload).allowChatSkills, ['metabot-help', 'metabot-wallet-manage']);
-  assert.equal(results.length, 3);
+  assert.equal(calls[2].payload, 'Role');
+  assert.deepEqual(JSON.parse(calls[3].payload), {
+    primaryProvider: 'claude-code',
+    fallbackProvider: 'codex',
+  });
+  assert.equal(results.length, 4);
 });
 
 test('syncMetabotInfoToChain skips local-only profiles without a globalMetaId', async () => {
@@ -491,6 +588,7 @@ test('syncMetabotInfoToChain skips local-only profiles without a globalMetaId', 
     mvcAddress: '',
     createdAt: 1,
     updatedAt: 2,
+    bio: '',
     role: '',
     soul: '',
     goal: '',

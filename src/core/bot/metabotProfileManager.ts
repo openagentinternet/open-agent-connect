@@ -39,11 +39,12 @@ const DEFAULT_ROLE = 'I am a helpful AI assistant.';
 const DEFAULT_SOUL = 'Friendly and professional.';
 const DEFAULT_GOAL = 'Help users accomplish their tasks effectively.';
 const CHAIN_SYNC_DELAY_MS = 3_000;
-const BIO_FIELDS = new Set(['role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
+const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
 
 export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 
 export interface MetabotProfileFull extends IdentityProfileRecord {
+  bio: string;
   role: string;
   soul: string;
   goal: string;
@@ -55,6 +56,7 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
 
 export interface CreateMetabotInput {
   name: string;
+  bio?: string;
   role?: string;
   soul?: string;
   goal?: string;
@@ -71,6 +73,7 @@ export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
 
 export interface UpdateMetabotInfoInput {
   name?: string;
+  bio?: string;
   role?: string;
   soul?: string;
   goal?: string;
@@ -344,7 +347,8 @@ async function readProfileProviderBindings(profile: IdentityProfileRecord): Prom
 
 async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<MetabotProfileFull> {
   const paths = resolveMetabotPaths(profile.homeDir);
-  const [role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills] = await Promise.all([
+  const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills] = await Promise.all([
+    readTextFile(paths.bioMdPath),
     readTextFile(paths.roleMdPath),
     readTextFile(paths.soulMdPath),
     readTextFile(paths.goalMdPath),
@@ -355,6 +359,7 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
 
   return {
     ...profile,
+    bio,
     role,
     soul,
     goal,
@@ -422,6 +427,7 @@ export async function createMetabotProfile(
   });
   const paths = resolveMetabotPaths(resolvedHome.homeDir);
   await Promise.all([
+    writeTextFile(paths.bioMdPath, normalizeText(input.bio)),
     writeTextFile(paths.roleMdPath, normalizeText(input.role) || DEFAULT_ROLE),
     writeTextFile(paths.soulMdPath, normalizeText(input.soul) || DEFAULT_SOUL),
     writeTextFile(paths.goalMdPath, normalizeText(input.goal) || DEFAULT_GOAL),
@@ -475,6 +481,7 @@ export function buildMetabotProfileDraftFromIdentity(input: CreateMetabotFromIde
     mvcAddress,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    bio: normalizeText(input.bio),
     role: normalizeText(input.role) || DEFAULT_ROLE,
     soul: normalizeText(input.soul) || DEFAULT_SOUL,
     goal: normalizeText(input.goal) || DEFAULT_GOAL,
@@ -506,6 +513,7 @@ export async function createMetabotProfileFromIdentity(
   });
   const paths = resolveMetabotPaths(draft.homeDir);
   await Promise.all([
+    writeTextFile(paths.bioMdPath, draft.bio),
     writeTextFile(paths.roleMdPath, draft.role),
     writeTextFile(paths.soulMdPath, draft.soul),
     writeTextFile(paths.goalMdPath, draft.goal),
@@ -758,6 +766,9 @@ export async function updateMetabotProfile(
   if (input.role !== undefined) {
     await writeTextFile(paths.roleMdPath, input.role);
   }
+  if (input.bio !== undefined) {
+    await writeTextFile(paths.bioMdPath, input.bio);
+  }
   if (input.soul !== undefined) {
     await writeTextFile(paths.soulMdPath, input.soul);
   }
@@ -801,17 +812,33 @@ export async function syncMetabotInfoToChain(
   const changed = new Set(changedFields);
   const results: ChainWriteResult[] = [];
 
-  if (changed.has('name')) {
+  async function writeProfileInfo(input: {
+    path: string;
+    contentType: string;
+    payload: string;
+    encoding?: 'utf-8' | 'base64';
+  }): Promise<void> {
+    if (results.length > 0) {
+      await sleep(delayMs);
+    }
     results.push(await signer.writePin({
       operation,
-      path: '/info/name',
+      path: input.path,
       encryption: '0',
       version: '1.0',
-      contentType: 'text/plain',
-      payload: profile.name,
-      encoding: 'utf-8',
+      contentType: input.contentType,
+      payload: input.payload,
+      encoding: input.encoding ?? 'utf-8',
       network: 'mvc',
     }));
+  }
+
+  if (changed.has('name')) {
+    await writeProfileInfo({
+      path: '/info/name',
+      contentType: 'text/plain',
+      payload: profile.name,
+    });
   }
 
   if (changed.has('avatar')) {
@@ -825,27 +852,54 @@ export async function syncMetabotInfoToChain(
     })));
   }
 
-  if (changedFields.some((field) => BIO_FIELDS.has(field))) {
-    if (results.length > 0) {
-      await sleep(delayMs);
+  if (changedFields.some((field) => PROFILE_INFO_FIELDS.has(field))) {
+    if (changed.has('bio')) {
+      await writeProfileInfo({
+        path: '/info/bio',
+        contentType: 'text/plain',
+        payload: profile.bio,
+      });
     }
-    results.push(await signer.writePin({
-      operation,
-      path: '/info/bio',
-      encryption: '0',
-      version: '1.0',
-      contentType: 'application/json',
-      payload: JSON.stringify({
-        role: profile.role,
-        soul: profile.soul,
-        goal: profile.goal,
-        primaryProvider: profile.primaryProvider ?? null,
-        fallbackProvider: profile.fallbackProvider ?? null,
-        allowChatSkills: normalizeAllowChatSkills(profile.allowChatSkills),
-      }),
-      encoding: 'utf-8',
-      network: 'mvc',
-    }));
+    if (changed.has('role')) {
+      await writeProfileInfo({
+        path: '/info/role',
+        contentType: 'text/plain',
+        payload: profile.role,
+      });
+    }
+    if (changed.has('soul')) {
+      await writeProfileInfo({
+        path: '/info/soul',
+        contentType: 'text/plain',
+        payload: profile.soul,
+      });
+    }
+    if (changed.has('goal')) {
+      await writeProfileInfo({
+        path: '/info/goal',
+        contentType: 'text/plain',
+        payload: profile.goal,
+      });
+    }
+    if (changed.has('allowChatSkills')) {
+      await writeProfileInfo({
+        path: '/info/chatSkills',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          allowChatSkills: normalizeAllowChatSkills(profile.allowChatSkills),
+        }),
+      });
+    }
+    if (changed.has('primaryProvider') || changed.has('fallbackProvider')) {
+      await writeProfileInfo({
+        path: '/info/LLM',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          primaryProvider: profile.primaryProvider ?? null,
+          fallbackProvider: profile.fallbackProvider ?? null,
+        }),
+      });
+    }
   }
 
   return results;
