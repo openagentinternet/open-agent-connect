@@ -154,11 +154,11 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       },
       labels: {
         actorChip: 'Using',
-        noActorTitle: 'No Bot',
-        noActorBody: 'Create a local Bot to message, call services, and sign Browser actions.',
+        noActorTitle: 'Create your first Bot',
+        noActorBody: 'Your local Agent needs a Bot identity before it can appear on the Agent Internet.',
         noActorAction: {
           label: 'Create Bot',
-          href: '/ui/bot',
+          href: '/ui/bot?mode=create',
         },
       },
     });

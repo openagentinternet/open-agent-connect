@@ -462,3 +462,31 @@ test('Browser renders no-actor empty state from runtime labels when runtime has 
   assert.match(elements['[data-browser-viewport]'].innerHTML, /Use Metalet to activate Browser actions\./);
   assert.match(elements['[data-browser-viewport]'].innerHTML, /href="\/ui\/wallet"/);
 });
+
+test('Browser no-local-Bot empty state renders Bot creation activation entry', async () => {
+  const { elements, fetchCalls } = createBrowserContext({
+    runtimeResponse: runtimePayload({
+      actors: [],
+      defaultActor: null,
+      defaultUri: null,
+      labels: {
+        actorChip: 'Using',
+        noActorTitle: 'Create your first Bot',
+        noActorBody: 'Your local Agent needs a Bot identity before it can appear on the Agent Internet.',
+        noActorAction: { label: 'Create Bot', href: '/ui/bot?mode=create' },
+      },
+    }),
+  });
+
+  await waitFor(() => elements['[data-browser-viewport]'].innerHTML.includes('Create your first Bot'), 'Bot creation empty state');
+
+  assert.equal(fetchCalls[0], '/api/browser/runtime');
+  assert.match(elements['[data-browser-viewport]'].innerHTML, /Your local Agent needs a Bot identity before it can appear on the Agent Internet\./);
+  assert.match(elements['[data-browser-viewport]'].innerHTML, /href="\/ui\/bot\?mode=create"/);
+  assert.match(elements['[data-browser-viewport]'].innerHTML, />Create Bot<\/a>/);
+
+  const ownerModeToolbar = elements['[data-browser-owner-toolbar]'];
+  if (ownerModeToolbar) {
+    assert.equal(ownerModeToolbar.hidden, true);
+  }
+});

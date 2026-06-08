@@ -120,6 +120,12 @@ test('OAC browser host adapter returns an empty runtime when profiles cannot be 
   assert.equal(runtime.ok, true);
   assert.deepEqual(runtime.data.actors, []);
   assert.equal(runtime.data.defaultActor, null);
+  assert.equal(runtime.data.labels.noActorTitle, 'Create your first Bot');
+  assert.equal(runtime.data.labels.noActorBody, 'Your local Agent needs a Bot identity before it can appear on the Agent Internet.');
+  assert.deepEqual(runtime.data.labels.noActorAction, {
+    label: 'Create Bot',
+    href: '/ui/bot?mode=create',
+  });
   assert.equal(runtime.data.defaultUri, null);
 });
 
