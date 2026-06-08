@@ -1,7 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { buildBrowserPageDefinition } from '../ui/pages/browser/app';
-import type { LocalUiPageDefinition } from '../ui/pages/types';
+import { buildBrowserPageDefinition, type BrowserPageDefinition } from './app';
 
 function escapeHtml(value: string): string {
   return value
@@ -14,8 +13,8 @@ function escapeHtml(value: string): string {
 
 async function loadBrowserPageTemplate(): Promise<string> {
   const candidates = [
-    path.resolve(__dirname, '../ui/pages/browser/index.html'),
-    path.resolve(__dirname, '../../src/ui/pages/browser/index.html'),
+    path.resolve(__dirname, 'index.html'),
+    path.resolve(__dirname, '../../src/browser/index.html'),
   ];
   for (const candidate of candidates) {
     try {
@@ -27,7 +26,7 @@ async function loadBrowserPageTemplate(): Promise<string> {
   throw new Error('Browser page template not found.');
 }
 
-export async function renderBrowserPageHtml(definition: LocalUiPageDefinition = buildBrowserPageDefinition()): Promise<string> {
+export async function renderBrowserPageHtml(definition: BrowserPageDefinition = buildBrowserPageDefinition()): Promise<string> {
   const template = await loadBrowserPageTemplate();
   const content = definition.contentHtml ?? '';
   return template

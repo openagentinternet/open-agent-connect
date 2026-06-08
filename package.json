@@ -35,6 +35,7 @@
     "SKILLs/metabot-upload-largefile/SKILL.md",
     "SKILLs/metabot-wallet-manage/SKILL.md",
     "skillpacks/common/templates/",
+    "src/browser/",
     "src/ui/",
     "scripts/oac-dev-mode.sh",
     "docs/install/open-agent-connect.md",
