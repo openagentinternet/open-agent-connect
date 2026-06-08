@@ -936,6 +936,11 @@ function createModalMarkup(){
 }
 function handleCreateAvatarUpload(file){
   var status=q('[data-create-avatar-status]');
+  if(file.size>200*1024){
+    state._pendingCreateAvatar=undefined;
+    renderCreateAvatarPreview();
+    var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.hidden=true;
+  }
   readAvatarFile(file,status,function(dataUrl){
     state._pendingCreateAvatar=dataUrl;
     renderCreateAvatarPreview();
@@ -976,11 +981,11 @@ function createMetabot(){
     var profile=r.data&&r.data.profile||{};
     state.selectedSlug=profile.slug||state.selectedSlug;
     state.selectedTab='info';
+    if(profile.globalMetaId){
+      window.location.href=botBrowserPath(profile.globalMetaId);
+      return;
+    }
     return loadProfiles().then(function(){
-      if(profile.globalMetaId){
-        window.location.href=botBrowserPath(profile.globalMetaId);
-        return;
-      }
       showChainSuccessModal({
         title:'MetaBot Created On-Chain',
         message:'The on-chain identity has been created. Basic Info is ready for optional edits.',

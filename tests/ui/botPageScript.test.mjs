@@ -619,6 +619,53 @@ test('bot page opens the creation modal after initial load when mode=create is r
 
   assert.equal(classNames.has('hidden'), false);
   assert.equal(focused, true);
+  assert.match(modal.innerHTML, /data-field="new-name"/);
+  assert.match(modal.innerHTML, /data-field="new-avatar-file"/);
+  assert.match(modal.innerHTML, /data-field="new-bio"/);
+  assert.doesNotMatch(modal.innerHTML, /primaryProvider/);
+  assert.doesNotMatch(modal.innerHTML, /fallbackProvider/);
+  assert.doesNotMatch(modal.innerHTML, /data-field="role"/);
+  assert.doesNotMatch(modal.innerHTML, /data-field="soul"/);
+  assert.doesNotMatch(modal.innerHTML, /data-field="goal"/);
+});
+
+test('bot page create avatar upload clears a previous pending avatar after an oversized file', () => {
+  const preview = { innerHTML: '' };
+  const removeButton = field();
+  removeButton.hidden = false;
+  const status = field();
+  const fields = {
+    '[data-field="new-name"]': field('Alice'),
+    '[data-create-avatar-preview]': preview,
+    '[data-act="remove-create-avatar"]': removeButton,
+    '[data-create-avatar-status]': status,
+  };
+  const context = createBotScriptContext({
+    elements: fields,
+    globals: {
+      FileReader: class {
+        readAsDataURL() {
+          this.result = 'data:image/png;base64,valid';
+          this.onload();
+        }
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.handleCreateAvatarUpload({ size: 1024 });
+  assert.equal(context.state._pendingCreateAvatar, 'data:image/png;base64,valid');
+  assert.equal(removeButton.hidden, false);
+  assert.match(preview.innerHTML, /data:image\/png;base64,valid/);
+
+  context.handleCreateAvatarUpload({ size: (200 * 1024) + 1 });
+
+  assert.equal(context.state._pendingCreateAvatar, undefined);
+  assert.equal(removeButton.hidden, true);
+  assert.doesNotMatch(preview.innerHTML, /data:image\/png;base64,valid/);
+  assert.equal(status.textContent, 'Avatar must be 200KB or smaller.');
+  assert.equal(status.className, 'save-status error');
 });
 
 test('bot page runtime modal renders healthy and detected runtimes only', () => {
@@ -893,6 +940,50 @@ test('bot page create flow navigates to the Bot Page when the created profile ha
   assert.equal(context.state.selectedSlug, 'fanny');
   assert.equal(context.window.location.href, '/browser/metaid/gm-fanny');
   assert.equal(success, null);
+});
+
+test('bot page create flow redirects with a GlobalMetaID without waiting for profile reload', async () => {
+  const fields = {
+    '[data-field="new-name"]': field('Fanny'),
+    '[data-add-status]': field(),
+    '[data-act="confirm-add"]': field(),
+  };
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          profile: {
+            slug: 'fanny',
+            name: 'Fanny',
+            globalMetaId: 'gm-fanny',
+          },
+        },
+      }),
+    }),
+    window: {
+      location: {
+        href: '',
+      },
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.closeAddModal = () => {};
+  context.loadProfiles = () => Promise.reject(new Error('temporary reload failure'));
+  context.showChainSuccessModal = () => {
+    throw new Error('success modal should not open before redirect');
+  };
+
+  await context.createMetabot();
+
+  assert.equal(context.window.location.href, '/browser/metaid/gm-fanny');
 });
 
 test('bot page save flow reports chain txids in a modal instead of inline saved text', async () => {
