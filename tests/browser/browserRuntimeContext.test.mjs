@@ -86,6 +86,56 @@ test('browserRuntimeToContextResult preserves the legacy using identity shape', 
   });
 });
 
+test('browserRuntimeToContextResult includes pending OAC actors in legacy identities', () => {
+  const pendingActor = {
+    id: 'pending-bot',
+    label: 'Pending Bot',
+    kind: 'oac-bot',
+    isDefault: true,
+    capabilities: ['template-settings'],
+  };
+
+  const context = browserRuntimeToContextResult({
+    host: {
+      kind: 'oac',
+      name: 'Open Agent Connect',
+      localMode: true,
+    },
+    actors: [pendingActor],
+    defaultActor: pendingActor,
+    defaultUri: null,
+    features: {
+      privateChat: false,
+      serviceCall: false,
+      cacheManagement: false,
+      templateSettings: true,
+      walletLogin: false,
+    },
+    labels: {
+      actorChip: 'Using',
+      noActorTitle: 'No Bot',
+      noActorBody: 'Create a local Bot before using Browser actions.',
+      noActorAction: {
+        label: 'Create Bot',
+        href: '/ui/bot',
+      },
+    },
+  });
+
+  assert.deepEqual(context, {
+    usingIdentities: [
+      {
+        slug: 'pending-bot',
+        name: 'Pending Bot',
+        globalMetaId: '',
+        isDefault: true,
+      },
+    ],
+    defaultUsingIdentity: null,
+    defaultUri: null,
+  });
+});
+
 test('browserRuntimeToContextResult returns no default identity when the default actor has no globalMetaId', () => {
   const context = browserRuntimeToContextResult({
     host: {
