@@ -46,6 +46,8 @@ function elements() {
     '[data-browser-drawer-toggle]': new FakeElement(),
     '[data-browser-resource-chip]': new FakeElement(),
     '[data-browser-using-selector]': new FakeElement(),
+    '[data-browser-menu-trigger]': new FakeElement(),
+    '[data-browser-menu]': new FakeElement(),
     '[data-browser-viewport]': new FakeElement(),
     '[data-browser-status-state]': new FakeElement(),
     '[data-browser-status-proof]': new FakeElement(),
@@ -131,6 +133,9 @@ test('Browser chrome uses icon-only toolbar controls and avoids prototype labels
   assert.match(html, /aria-label="Forward"/);
   assert.match(html, /aria-label="Reload"/);
   assert.match(html, /aria-label="Bookmarks and history"/);
+  assert.match(html, /aria-label="Browser menu"/);
+  assert.match(html, /data-browser-menu-trigger/);
+  assert.match(html, /data-browser-menu[^>]*hidden/);
   assert.doesNotMatch(html, />Back</);
   assert.doesNotMatch(html, />Forward</);
   assert.doesNotMatch(html, />Reload</);

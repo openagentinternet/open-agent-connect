@@ -285,6 +285,10 @@ import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
 import { resolveBrowserConfig } from '../core/browser/config';
+import {
+  applyBrowserSettingsUpdate,
+  createBrowserSettingsSnapshot,
+} from '../core/browser/settings';
 import { resolveBrowserResource } from '../core/browser/browserResolver';
 import { resolveMetaAppPinToRecord } from '../core/browser/metaAppPinResolver';
 import { createMetaAppArtifactCacheStore } from '../core/metaapp/artifactCache';
@@ -4520,6 +4524,65 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
     await targetConfigStore.set(next);
     return commandSuccess(next);
+  }
+  async function getBrowserSettings(rawFrom?: unknown): Promise<MetabotCommandResult<unknown>> {
+    const actor = await resolveActorWriteContext(rawFrom);
+    if ('failure' in actor) return actor.failure;
+    const targetConfigStore = createConfigStore(actor.homeDir);
+    const config = await targetConfigStore.read();
+    return commandSuccess(createBrowserSettingsSnapshot({
+      config,
+      configPath: targetConfigStore.paths.configPath,
+      env: process.env,
+    }));
+  }
+  async function updateBrowserSettings(rawInput: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    const actor = await resolveActorWriteContext(rawInput.from);
+    if ('failure' in actor) return actor.failure;
+    const targetConfigStore = createConfigStore(actor.homeDir);
+    const current = await targetConfigStore.read();
+    try {
+      const next = applyBrowserSettingsUpdate(current, rawInput.browser);
+      await targetConfigStore.set(next);
+      const saved = await targetConfigStore.read();
+      return commandSuccess(createBrowserSettingsSnapshot({
+        config: saved,
+        configPath: targetConfigStore.paths.configPath,
+        env: process.env,
+      }));
+    } catch (error) {
+      return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+    }
+  }
+  async function getBrowserCache(rawFrom?: unknown): Promise<MetabotCommandResult<unknown>> {
+    const actor = await resolveActorWriteContext(rawFrom);
+    if ('failure' in actor) return actor.failure;
+    return commandSuccess(await createMetaAppArtifactCacheStore(actor.homeDir).getStats());
+  }
+  async function clearBrowserCache(rawInput: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    const actor = await resolveActorWriteContext(rawInput.from);
+    if ('failure' in actor) return actor.failure;
+    try {
+      const scope = normalizeText(rawInput.scope) || 'all';
+      if (scope === 'pin') {
+        return commandSuccess(await createMetaAppArtifactCacheStore(actor.homeDir).clear({
+          scope,
+          pinId: normalizeText(rawInput.pinId),
+        }));
+      }
+      if (scope === 'artifact') {
+        return commandSuccess(await createMetaAppArtifactCacheStore(actor.homeDir).clear({
+          scope,
+          cacheKey: normalizeText(rawInput.cacheKey),
+        }));
+      }
+      if (scope === 'all') {
+        return commandSuccess(await createMetaAppArtifactCacheStore(actor.homeDir).clear({ scope }));
+      }
+      return commandFailed('invalid_argument', 'Unsupported Browser cache clear scope.');
+    } catch (error) {
+      return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+    }
   }
   const runtimeStateStore = createRuntimeStateStore(input.homeDir);
   const llmRuntimeStore = createLlmRuntimeStore(input.homeDir);
@@ -10057,6 +10120,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
   return {
     browser: {
       getContext: async (request = {}) => buildBrowserContextResult(request.from),
+      getSettings: async (request = {}) => getBrowserSettings(request.from),
+      updateSettings: async (request) => updateBrowserSettings(request),
+      getCache: async (request = {}) => getBrowserCache(request.from),
+      clearCache: async (request) => clearBrowserCache(request),
       resolve: async (request) => {
         const actor = await resolveActorWriteContext(request.from);
         if ('failure' in actor) return actor.failure;
@@ -10069,6 +10136,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           metaAppResolve: (pinId) => resolveMetaAppPinToRecord({
             pinId,
             fetch: globalThis.fetch,
+            manApiBaseUrl: browserConfig.manApiBaseUrl,
             artifactCache: createMetaAppArtifactCacheStore(actor.homeDir),
             createPreviewSession: ({ artifactDir, indexFile }) => {
               const session = metaAppPreviewSessions.create({ artifactDir, indexFile });

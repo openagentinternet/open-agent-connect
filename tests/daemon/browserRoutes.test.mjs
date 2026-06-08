@@ -7,7 +7,7 @@ const { createHttpServer } = require('../../dist/daemon/httpServer.js');
 const { commandSuccess, commandFailed } = require('../../dist/core/contracts/commandResult.js');
 
 async function startServer() {
-  const calls = { context: [], resolve: [] };
+  const calls = { context: [], resolve: [], getSettings: [], updateSettings: [], getCache: [], clearCache: [] };
   const server = createHttpServer({
     browser: {
       getContext: async (input) => {
@@ -33,6 +33,43 @@ async function startServer() {
           actions: [],
         });
       },
+      getSettings: async (input) => {
+        calls.getSettings.push(input);
+        return commandSuccess({
+          browser: {
+            metasoP2PBaseUrl: 'https://so.metaid.io',
+            metafileContentBaseUrl: 'https://so.metaid.io/content',
+            manApiBaseUrl: 'https://manapi.metaid.io',
+            blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+            defaultChainName: 'mvc',
+            localMode: true,
+          },
+        });
+      },
+      updateSettings: async (input) => {
+        calls.updateSettings.push(input);
+        return commandSuccess({
+          browser: {
+            metasoP2PBaseUrl: input.browser?.metasoP2PBaseUrl,
+            manApiBaseUrl: input.browser?.manApiBaseUrl,
+          },
+        });
+      },
+      getCache: async (input) => {
+        calls.getCache.push(input);
+        return commandSuccess({
+          cacheRoot: '/tmp/.metabot/cache/metaapps',
+          artifactCount: 1,
+          pinRecordCount: 1,
+          totalBytes: 4096,
+          artifacts: [],
+        });
+      },
+      clearCache: async (input) => {
+        calls.clearCache.push(input);
+        if (input.scope === 'unknown') return commandFailed('invalid_argument', 'Unsupported cache clear scope.');
+        return commandSuccess({ clearedArtifacts: 1, clearedPinRecords: 1 });
+      },
     },
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -50,6 +87,72 @@ test('GET /api/browser/context forwards optional from slug', async (t) => {
   assert.equal(response.status, 200);
   assert.equal(payload.data.defaultUri, 'metaid://idq1alice');
   assert.deepEqual(calls.context, [{ from: 'alice' }]);
+});
+
+test('GET and PUT /api/browser/settings forward from slug and browser settings payload', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const getResponse = await fetch(`${baseUrl}/api/browser/settings?from=alice`);
+  const getPayload = await getResponse.json();
+
+  assert.equal(getResponse.status, 200);
+  assert.equal(getPayload.data.browser.manApiBaseUrl, 'https://manapi.metaid.io');
+  assert.deepEqual(calls.getSettings, [{ from: 'alice' }]);
+
+  const putResponse = await fetch(`${baseUrl}/api/browser/settings?from=alice`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      browser: {
+        metasoP2PBaseUrl: 'https://so.example.test',
+        manApiBaseUrl: 'https://manapi.example.test',
+      },
+    }),
+  });
+  const putPayload = await putResponse.json();
+
+  assert.equal(putResponse.status, 200);
+  assert.equal(putPayload.data.browser.manApiBaseUrl, 'https://manapi.example.test');
+  assert.deepEqual(calls.updateSettings, [{
+    from: 'alice',
+    browser: {
+      metasoP2PBaseUrl: 'https://so.example.test',
+      manApiBaseUrl: 'https://manapi.example.test',
+    },
+  }]);
+});
+
+test('GET and DELETE /api/browser/cache forward cache management requests', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const getResponse = await fetch(`${baseUrl}/api/browser/cache?from=alice`);
+  const getPayload = await getResponse.json();
+
+  assert.equal(getResponse.status, 200);
+  assert.equal(getPayload.data.cacheRoot, '/tmp/.metabot/cache/metaapps');
+  assert.deepEqual(calls.getCache, [{ from: 'alice' }]);
+
+  const deleteResponse = await fetch(`${baseUrl}/api/browser/cache?from=alice`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scope: 'pin', pinId: 'pin-fixture' }),
+  });
+  const deletePayload = await deleteResponse.json();
+
+  assert.equal(deleteResponse.status, 200);
+  assert.deepEqual(deletePayload.data, { clearedArtifacts: 1, clearedPinRecords: 1 });
+  assert.deepEqual(calls.clearCache, [{ from: 'alice', scope: 'pin', pinId: 'pin-fixture' }]);
+
+  const invalidResponse = await fetch(`${baseUrl}/api/browser/cache`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scope: 'unknown' }),
+  });
+  const invalidPayload = await invalidResponse.json();
+  assert.equal(invalidResponse.status, 400);
+  assert.equal(invalidPayload.code, 'invalid_argument');
 });
 
 test('GET /api/browser/resolve forwards URI and from slug', async (t) => {

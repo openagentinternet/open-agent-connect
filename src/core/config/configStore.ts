@@ -68,6 +68,7 @@ function normalizeConfig(input: unknown): MetabotConfig {
   const defaultWriteNetwork = normalizeString(chainSource.defaultWriteNetwork).toLowerCase();
   const browserDefaultChainName = normalizeString(browserSource.defaultChainName).toLowerCase();
   const walletApiBaseUrl = normalizeString(browserSource.walletApiBaseUrl) || defaults.browser.walletApiBaseUrl;
+  const manApiBaseUrl = normalizeString(browserSource.manApiBaseUrl) || defaults.browser.manApiBaseUrl;
 
   const normalizedConfig: MetabotConfig = {
     chain: {
@@ -84,6 +85,7 @@ function normalizeConfig(input: unknown): MetabotConfig {
     browser: {
       metasoP2PBaseUrl: normalizeString(browserSource.metasoP2PBaseUrl) || defaults.browser.metasoP2PBaseUrl,
       metafileContentBaseUrl: normalizeString(browserSource.metafileContentBaseUrl) || defaults.browser.metafileContentBaseUrl,
+      manApiBaseUrl,
       blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,
       defaultChainName: isDefaultWriteNetwork(browserDefaultChainName)
         ? browserDefaultChainName as DefaultWriteNetwork

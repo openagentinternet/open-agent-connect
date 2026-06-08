@@ -2,6 +2,7 @@ import type { BrowserConfig, MetabotConfig } from '../config/configTypes';
 
 const DEFAULT_METASO_P2P_BASE_URL = 'https://so.metaid.io';
 const DEFAULT_METAFILE_CONTENT_BASE_URL = 'https://so.metaid.io/content';
+const DEFAULT_MANAPI_BASE_URL = 'https://manapi.metaid.io';
 const DEFAULT_BLOCK_EXPLORER_BASE_URL = 'https://www.mvcscan.com/tx';
 
 function normalizeUrl(value: unknown): string {
@@ -14,6 +15,7 @@ export function resolveBrowserConfig(config: MetabotConfig, env: NodeJS.ProcessE
   return {
     metasoP2PBaseUrl: normalizeUrl(env.METABOT_BROWSER_METASO_P2P_BASE_URL) || normalizeUrl(browser.metasoP2PBaseUrl),
     metafileContentBaseUrl: normalizeUrl(env.METABOT_BROWSER_METAFILE_CONTENT_BASE_URL) || normalizeUrl(browser.metafileContentBaseUrl),
+    manApiBaseUrl: normalizeUrl(env.METABOT_BROWSER_MANAPI_BASE_URL) || normalizeUrl(browser.manApiBaseUrl),
     blockExplorerBaseUrl: normalizeUrl(env.METABOT_BROWSER_BLOCK_EXPLORER_BASE_URL) || normalizeUrl(browser.blockExplorerBaseUrl),
     walletApiBaseUrl: normalizeUrl(env.METABOT_BROWSER_WALLET_API_BASE_URL) || normalizeUrl(browser.walletApiBaseUrl),
     defaultChainName: browser.defaultChainName || config.chain.defaultWriteNetwork,
@@ -25,6 +27,7 @@ export function createDefaultBrowserConfig(defaultChainName: BrowserConfig['defa
   return {
     metasoP2PBaseUrl: DEFAULT_METASO_P2P_BASE_URL,
     metafileContentBaseUrl: DEFAULT_METAFILE_CONTENT_BASE_URL,
+    manApiBaseUrl: DEFAULT_MANAPI_BASE_URL,
     blockExplorerBaseUrl: DEFAULT_BLOCK_EXPLORER_BASE_URL,
     defaultChainName,
     localMode: true,

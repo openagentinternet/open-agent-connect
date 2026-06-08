@@ -46,5 +46,53 @@ export const handleBrowserRoutes: RouteHandler = async (context) => {
     return true;
   }
 
+  if (url.pathname === '/api/browser/settings') {
+    if (req.method === 'GET') {
+      const from = normalizeText(url.searchParams.get('from'));
+      const result = handlers.browser?.getSettings
+        ? await handlers.browser.getSettings(from ? { from } : {})
+        : commandFailed('not_implemented', 'Browser settings handler is not configured.');
+      context.sendJson(statusForBrowserResult(result), result);
+      return true;
+    }
+
+    if (req.method === 'PUT') {
+      const input = await context.readJsonBody();
+      const from = normalizeText(url.searchParams.get('from')) || normalizeText(input.from);
+      const result = handlers.browser?.updateSettings
+        ? await handlers.browser.updateSettings({ ...input, ...(from ? { from } : {}) })
+        : commandFailed('not_implemented', 'Browser settings update handler is not configured.');
+      context.sendJson(statusForBrowserResult(result), result);
+      return true;
+    }
+
+    context.sendMethodNotAllowed(['GET', 'PUT']);
+    return true;
+  }
+
+  if (url.pathname === '/api/browser/cache') {
+    if (req.method === 'GET') {
+      const from = normalizeText(url.searchParams.get('from'));
+      const result = handlers.browser?.getCache
+        ? await handlers.browser.getCache(from ? { from } : {})
+        : commandFailed('not_implemented', 'Browser cache handler is not configured.');
+      context.sendJson(statusForBrowserResult(result), result);
+      return true;
+    }
+
+    if (req.method === 'DELETE') {
+      const input = await context.readJsonBody();
+      const from = normalizeText(url.searchParams.get('from')) || normalizeText(input.from);
+      const result = handlers.browser?.clearCache
+        ? await handlers.browser.clearCache({ ...input, ...(from ? { from } : {}) })
+        : commandFailed('not_implemented', 'Browser cache clear handler is not configured.');
+      context.sendJson(statusForBrowserResult(result), result);
+      return true;
+    }
+
+    context.sendMethodNotAllowed(['GET', 'DELETE']);
+    return true;
+  }
+
   return false;
 };

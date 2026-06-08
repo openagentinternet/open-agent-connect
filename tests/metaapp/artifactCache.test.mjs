@@ -92,3 +92,35 @@ test('artifact cache misses when current effective content reference changes', a
 
   assert.equal(changed, null);
 });
+
+test('artifact cache reports shared stats and clears a pin artifact', async () => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'oac-metaapp-artifact-cache-stats-'));
+  const store = createMetaAppArtifactCacheStore(await makeProfileRoot(systemHome, 'alice'));
+  const descriptor = {
+    metaAppPinId: METAAPP_PIN_ID,
+    contentReference: CONTENT_REFERENCE,
+    contentType: 'application/zip',
+    indexFile: 'index.html',
+    modifyHistory: null,
+  };
+  const written = await store.writeArtifact({
+    ...descriptor,
+    archive: await makeZipBuffer('Stats App'),
+  });
+
+  const stats = await store.getStats();
+  assert.equal(stats.cacheRoot, path.join(systemHome, '.metabot', 'cache', 'metaapps'));
+  assert.equal(stats.artifactCount, 1);
+  assert.equal(stats.pinRecordCount, 1);
+  assert.equal(stats.artifacts[0].cacheKey, written.cacheKey);
+  assert.ok(stats.totalBytes > 0);
+
+  const cleared = await store.clear({ scope: 'pin', pinId: METAAPP_PIN_ID });
+  assert.equal(cleared.clearedArtifacts, 1);
+  assert.equal(cleared.clearedPinRecords, 1);
+
+  const after = await store.getStats();
+  assert.equal(after.artifactCount, 0);
+  assert.equal(after.pinRecordCount, 0);
+  assert.equal(await store.getArtifact(descriptor), null);
+});

@@ -32,8 +32,10 @@ test('Browser config accepts env override over stored base URL', async () => {
     },
   }, {
     METABOT_BROWSER_METASO_P2P_BASE_URL: 'https://so.example.test/',
+    METABOT_BROWSER_MANAPI_BASE_URL: 'https://manapi.example.test/',
   });
 
   assert.equal(resolved.metasoP2PBaseUrl, 'https://so.example.test');
+  assert.equal(resolved.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(resolved.defaultChainName, 'mvc');
 });

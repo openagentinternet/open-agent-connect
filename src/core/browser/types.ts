@@ -9,6 +9,7 @@ export type BrowserVerificationState = 'verified' | 'partial' | 'unverified';
 export interface BotBrowserConfig {
   metasoP2PBaseUrl: string;
   metafileContentBaseUrl?: string;
+  manApiBaseUrl?: string;
   blockExplorerBaseUrl?: string;
   walletApiBaseUrl?: string;
   defaultChainName: DefaultWriteNetwork;

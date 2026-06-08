@@ -1,4 +1,9 @@
 import type { LocalUiPageDefinition } from '../types';
+import {
+  BROWSER_BASE_URL_FIELDS,
+  BROWSER_MENU_SECTIONS,
+  BROWSER_SETTINGS_TABS,
+} from './menuModel';
 
 export function buildBrowserPageDefinition(): LocalUiPageDefinition {
   return {
@@ -57,6 +62,12 @@ export function buildBrowserPageDefinition(): LocalUiPageDefinition {
               <svg viewBox="0 0 24 24" focusable="false"><path d="M6 9l6 6 6-6"></path></svg>
             </span>
           </button>
+          <div class="browser-menu-wrap">
+            <button type="button" class="browser-icon-button browser-menu-trigger" data-browser-menu-trigger aria-label="Browser menu" aria-haspopup="menu" aria-expanded="false">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M12 5.5h.01M12 12h.01M12 18.5h.01"></path></svg>
+            </button>
+            <div class="browser-chrome-menu" data-browser-menu role="menu" hidden></div>
+          </div>
         </header>
         <aside class="browser-drawer" data-browser-drawer hidden></aside>
         <main class="browser-viewport" data-browser-viewport></main>
@@ -75,9 +86,14 @@ export function buildBrowserPageDefinition(): LocalUiPageDefinition {
 }
 
 function buildBrowserPageScript(): string {
-  return `var browserEndpoints = {
+  return `var browserMenuSections = ${JSON.stringify(BROWSER_MENU_SECTIONS)};
+var browserSettingsTabs = ${JSON.stringify(BROWSER_SETTINGS_TABS)};
+var browserBaseUrlFields = ${JSON.stringify(BROWSER_BASE_URL_FIELDS)};
+var browserEndpoints = {
   context: '/api/browser/context',
   resolve: '/api/browser/resolve',
+  settings: '/api/browser/settings',
+  cache: '/api/browser/cache',
   privateChat: '/api/chat/private',
   serviceCall: '/api/services/call',
 };
@@ -90,6 +106,10 @@ var state = {
   usingSlug: '',
   drawerOpen: false,
   inspectorOpen: false,
+  menuOpen: false,
+  settingsTab: 'baseUrls',
+  settingsData: null,
+  cacheData: null,
   pendingPrivateChat: null,
   pendingServiceCall: null,
   visits: [],
@@ -189,8 +209,11 @@ function iconHtml(name) {
     history: '<path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5M12 7v5l3 2"></path>',
     link: '<path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"></path><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1"></path>',
     message: '<path d="M5 6h14v9H8l-3 3V6z"></path>',
+    database: '<ellipse cx="12" cy="5" rx="7" ry="3"></ellipse><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5"></path><path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path>',
     service: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"></path><path d="M4.4 7.8L12 12l7.6-4.2M12 12v8.5"></path>',
-    shield: '<path d="M12 3l7 3v5c0 4.1-2.8 7.9-7 10-4.2-2.1-7-5.9-7-10V6l7-3z"></path><path d="M8.8 12l2.1 2.1 4.5-4.7"></path>'
+    settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1-2.1 2.1-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1.1 1.7V21h-3v-.2a1.8 1.8 0 0 0-1.1-1.7 1.8 1.8 0 0 0-2 .4l-.1.1-2.1-2.1.1-.1a1.8 1.8 0 0 0 .4-2 1.8 1.8 0 0 0-1.7-1.1H5v-3h.2a1.8 1.8 0 0 0 1.7-1.1 1.8 1.8 0 0 0-.4-2l-.1-.1 2.1-2.1.1.1a1.8 1.8 0 0 0 2 .4 1.8 1.8 0 0 0 1.1-1.7V3h3v.2a1.8 1.8 0 0 0 1.1 1.7 1.8 1.8 0 0 0 2-.4l.1-.1 2.1 2.1-.1.1a1.8 1.8 0 0 0-.4 2 1.8 1.8 0 0 0 1.7 1.1h.2v3h-.2a1.8 1.8 0 0 0-1.8 1.3z"></path>',
+    shield: '<path d="M12 3l7 3v5c0 4.1-2.8 7.9-7 10-4.2-2.1-7-5.9-7-10V6l7-3z"></path><path d="M8.8 12l2.1 2.1 4.5-4.7"></path>',
+    trash: '<path d="M4 7h16"></path><path d="M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3"></path>'
   };
   return '<svg class="browser-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">' + (icons[name] || icons.link) + '</svg>';
 }
@@ -247,6 +270,8 @@ function bindElements() {
     drawerToggle: document.querySelector('[data-browser-drawer-toggle]'),
     resourceChip: document.querySelector('[data-browser-resource-chip]'),
     usingChip: document.querySelector('[data-browser-using-selector]'),
+    menuTrigger: document.querySelector('[data-browser-menu-trigger]'),
+    menu: document.querySelector('[data-browser-menu]'),
     viewport: document.querySelector('[data-browser-viewport]'),
     statusState: document.querySelector('[data-browser-status-state]'),
     statusProof: document.querySelector('[data-browser-status-proof]'),
@@ -274,6 +299,233 @@ function setStatus(nextStatus, message) {
   state.status = nextStatus;
   state.error = message || '';
   if (elements.statusState) elements.statusState.textContent = nextStatus;
+}
+
+function endpointWithFrom(endpoint) {
+  if (!state.usingSlug) return endpoint;
+  var query = new URLSearchParams();
+  query.set('from', state.usingSlug);
+  return endpoint + '?' + query.toString();
+}
+
+function findBrowserMenuItem(itemId) {
+  var targetId = textValue(itemId);
+  for (var sectionIndex = 0; sectionIndex < browserMenuSections.length; sectionIndex += 1) {
+    var section = browserMenuSections[sectionIndex];
+    var items = Array.isArray(section.items) ? section.items : [];
+    for (var itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      if (textValue(items[itemIndex] && items[itemIndex].id) === targetId) {
+        return items[itemIndex];
+      }
+    }
+  }
+  return null;
+}
+
+function renderBrowserMenu() {
+  if (!elements.menu) return;
+  elements.menu.innerHTML = browserMenuSections.map(function (section) {
+    var items = Array.isArray(section.items) ? section.items : [];
+    return '<div class="browser-menu-section" data-browser-menu-section="' + escapeHtml(textValue(section.id)) + '">' +
+      items.map(function (item) {
+        return '<button type="button" role="menuitem" data-browser-menu-item="' + escapeHtml(textValue(item.id)) + '">' +
+          iconHtml(textValue(item.icon) || 'settings') +
+          '<span>' + escapeHtml(textValue(item.label) || textValue(item.id)) + '</span>' +
+        '</button>';
+      }).join('') +
+    '</div>';
+  }).join('');
+}
+
+function closeBrowserMenu() {
+  state.menuOpen = false;
+  if (elements.menu) elements.menu.hidden = true;
+  if (elements.menuTrigger && typeof elements.menuTrigger.setAttribute === 'function') {
+    elements.menuTrigger.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function openBrowserMenu() {
+  state.menuOpen = true;
+  renderBrowserMenu();
+  if (elements.menu) elements.menu.hidden = false;
+  if (elements.menuTrigger && typeof elements.menuTrigger.setAttribute === 'function') {
+    elements.menuTrigger.setAttribute('aria-expanded', 'true');
+  }
+}
+
+function toggleBrowserMenu() {
+  if (state.menuOpen) {
+    closeBrowserMenu();
+  } else {
+    openBrowserMenu();
+  }
+}
+
+function settingsTabExists(tabId) {
+  var target = textValue(tabId) || 'baseUrls';
+  return browserSettingsTabs.some(function (tab) { return textValue(tab.id) === target; })
+    ? target
+    : 'baseUrls';
+}
+
+function formatBytes(value) {
+  var bytes = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function currentMetaAppPinId() {
+  if (!state.current || state.current.resourceType !== 'metaapp') return '';
+  return textValue(state.current.proof && state.current.proof.pinId);
+}
+
+function renderSettingsTabs() {
+  return '<div class="browser-settings-tabs" role="tablist">' + browserSettingsTabs.map(function (tab) {
+    var tabId = textValue(tab.id);
+    var selected = tabId === state.settingsTab;
+    return '<button type="button" role="tab" data-browser-settings-tab="' + escapeHtml(tabId) + '"' +
+      (selected ? ' aria-selected="true"' : ' aria-selected="false"') + '>' + escapeHtml(textValue(tab.label)) + '</button>';
+  }).join('') + '</div>';
+}
+
+function renderBaseUrlSettings() {
+  var data = state.settingsData || {};
+  var browser = data.browser || {};
+  var defaults = data.defaults || {};
+  return '<form class="browser-settings-form" data-browser-settings-form>' +
+    browserBaseUrlFields.map(function (field) {
+      var key = textValue(field.key);
+      var value = textValue(browser[key]);
+      var placeholder = textValue(defaults[key]) || textValue(field.placeholder);
+      return '<label class="browser-settings-field">' +
+        '<span>' + escapeHtml(textValue(field.label)) + '</span>' +
+        '<input data-browser-setting-field="' + escapeHtml(key) + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '" />' +
+      '</label>';
+    }).join('') +
+    '<p class="browser-settings-note">Empty values reset to defaults. Changes apply to the selected local Bot.</p>' +
+  '</form>';
+}
+
+function renderCacheSettings() {
+  var cache = state.cacheData || {};
+  var artifactCount = typeof cache.artifactCount === 'number' ? cache.artifactCount : 0;
+  var pinRecordCount = typeof cache.pinRecordCount === 'number' ? cache.pinRecordCount : 0;
+  var currentPinId = currentMetaAppPinId();
+  return '<section class="browser-cache-panel">' +
+    '<dl>' +
+      keyValue('cache root', cache.cacheRoot || '-') +
+      keyValue('artifacts', artifactCount + ' artifacts') +
+      keyValue('pin records', pinRecordCount + ' records') +
+      keyValue('size', formatBytes(cache.totalBytes)) +
+    '</dl>' +
+    '<div class="browser-cache-actions">' +
+      '<button type="button" data-browser-cache-clear="pin"' + (currentPinId ? '' : ' disabled') + '>' + iconHtml('trash') + '<span>Clear Current MetaAPP</span></button>' +
+      '<button type="button" data-browser-cache-clear="all">' + iconHtml('trash') + '<span>Clear All MetaAPP Cache</span></button>' +
+    '</div>' +
+  '</section>';
+}
+
+function renderBrowserSettingsModal() {
+  if (!elements.modalRoot) return;
+  var body = state.settingsTab === 'cache' ? renderCacheSettings() : renderBaseUrlSettings();
+  var saveButton = state.settingsTab === 'baseUrls'
+    ? '<button type="button" data-browser-settings-save>Save</button>'
+    : '';
+  elements.modalRoot.hidden = false;
+  elements.modalRoot.innerHTML = '<section class="browser-modal-panel browser-settings-panel" role="dialog" aria-modal="true">' +
+    '<header><h2>Browser Settings</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
+    '<div class="browser-modal-body">' + renderSettingsTabs() + body + '</div>' +
+    '<footer><button type="button" data-browser-modal-close>Close</button>' + saveButton + '</footer></section>';
+}
+
+async function loadBrowserSettingsData() {
+  var settings = await api(endpointWithFrom(browserEndpoints.settings));
+  var cache = await api(endpointWithFrom(browserEndpoints.cache));
+  state.settingsData = settings;
+  state.cacheData = cache;
+  return { settings: settings, cache: cache };
+}
+
+async function openBrowserSettings(tabId) {
+  state.settingsTab = settingsTabExists(tabId);
+  if (elements.modalRoot) {
+    elements.modalRoot.hidden = false;
+    elements.modalRoot.innerHTML = '<section class="browser-modal-panel browser-settings-panel" role="dialog" aria-modal="true">' +
+      '<header><h2>Browser Settings</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
+      '<div class="browser-modal-body"><p class="browser-settings-note">Loading...</p></div></section>';
+  }
+  try {
+    await loadBrowserSettingsData();
+    renderBrowserSettingsModal();
+  } catch (error) {
+    setStatus('error', error && error.message ? error.message : 'Settings failed.');
+    if (elements.modalRoot) {
+      elements.modalRoot.innerHTML = '<section class="browser-modal-panel browser-settings-panel" role="dialog" aria-modal="true">' +
+        '<header><h2>Browser Settings</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
+        '<div class="browser-modal-body"><p class="browser-settings-error">' + escapeHtml(state.error) + '</p></div></section>';
+    }
+  }
+}
+
+async function handleBrowserMenuAction(itemId) {
+  var item = findBrowserMenuItem(itemId);
+  if (!item) return null;
+  closeBrowserMenu();
+  if (item.action === 'open-settings') {
+    await openBrowserSettings(item.settingsTab);
+  }
+  return item;
+}
+
+async function switchBrowserSettingsTab(tabId) {
+  state.settingsTab = settingsTabExists(tabId);
+  if (!state.settingsData || !state.cacheData) {
+    await loadBrowserSettingsData();
+  }
+  renderBrowserSettingsModal();
+}
+
+async function saveBrowserSettings() {
+  if (!elements.modalRoot || typeof elements.modalRoot.querySelector !== 'function') return null;
+  var browser = {};
+  browserBaseUrlFields.forEach(function (field) {
+    var key = textValue(field.key);
+    var input = elements.modalRoot.querySelector('[data-browser-setting-field="' + key + '"]');
+    browser[key] = input ? input.value : '';
+  });
+  var result = await api(endpointWithFrom(browserEndpoints.settings), {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ browser: browser })
+  });
+  state.settingsData = result;
+  setStatus('saved', '');
+  renderBrowserSettingsModal();
+  return result;
+}
+
+async function clearBrowserCache(scope) {
+  var clearScope = textValue(scope) || 'all';
+  var currentPinId = currentMetaAppPinId();
+  if (clearScope === 'pin' && !currentPinId) return null;
+  var prompt = clearScope === 'pin'
+    ? 'Clear the cached artifact for the current MetaAPP?'
+    : 'Clear all MetaAPP artifact cache?';
+  if (window.confirm && !window.confirm(prompt)) return null;
+  var body = clearScope === 'pin'
+    ? { scope: 'pin', pinId: currentPinId }
+    : { scope: 'all' };
+  var result = await api(endpointWithFrom(browserEndpoints.cache), {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  state.cacheData = await api(endpointWithFrom(browserEndpoints.cache));
+  setStatus('cache cleared', '');
+  renderBrowserSettingsModal();
+  return result;
 }
 
 function renderUsingIdentity() {
@@ -922,6 +1174,26 @@ async function initialize() {
         closeModal();
         return;
       }
+      var settingsTab = closestWithAttribute(event && event.target, 'data-browser-settings-tab');
+      if (settingsTab) {
+        switchBrowserSettingsTab(settingsTab.getAttribute('data-browser-settings-tab')).catch(function (error) {
+          setStatus('error', error && error.message ? error.message : 'Settings failed.');
+        });
+        return;
+      }
+      if (closestWithAttribute(event && event.target, 'data-browser-settings-save')) {
+        saveBrowserSettings().catch(function (error) {
+          setStatus('error', error && error.message ? error.message : 'Settings save failed.');
+        });
+        return;
+      }
+      var cacheClear = closestWithAttribute(event && event.target, 'data-browser-cache-clear');
+      if (cacheClear) {
+        clearBrowserCache(cacheClear.getAttribute('data-browser-cache-clear')).catch(function (error) {
+          setStatus('error', error && error.message ? error.message : 'Cache clear failed.');
+        });
+        return;
+      }
       var target = closestWithAttribute(event && event.target, 'data-browser-modal-action') ||
         closestWithAttribute(event && event.target, 'data-browser-using-slug');
       if (!target) return;
@@ -963,6 +1235,20 @@ async function initialize() {
       }
     });
   }
+  if (elements.menuTrigger) {
+    elements.menuTrigger.addEventListener('click', function () {
+      toggleBrowserMenu();
+    });
+  }
+  if (elements.menu) {
+    elements.menu.addEventListener('click', function (event) {
+      var target = closestWithAttribute(event && event.target, 'data-browser-menu-item');
+      if (!target) return;
+      handleBrowserMenuAction(target.getAttribute('data-browser-menu-item')).catch(function (error) {
+        setStatus('error', error && error.message ? error.message : 'Menu action failed.');
+      });
+    });
+  }
   document.addEventListener('error', function (event) {
     var target = event && event.target;
     if (target && target.classList && target.classList.contains('browser-avatar-image')) {
@@ -1000,6 +1286,9 @@ async function initialize() {
 }
 
 globalThis.browserEndpoints = browserEndpoints;
+globalThis.browserMenuSections = browserMenuSections;
+globalThis.browserSettingsTabs = browserSettingsTabs;
+globalThis.browserBaseUrlFields = browserBaseUrlFields;
 globalThis.state = state;
 globalThis.api = api;
 globalThis.bindElements = bindElements;
@@ -1012,6 +1301,14 @@ globalThis.closeInspector = closeInspector;
 globalThis.renderInspector = renderInspector;
 globalThis.openUsingIdentitySelector = openUsingIdentitySelector;
 globalThis.selectUsingIdentity = selectUsingIdentity;
+globalThis.openBrowserMenu = openBrowserMenu;
+globalThis.closeBrowserMenu = closeBrowserMenu;
+globalThis.toggleBrowserMenu = toggleBrowserMenu;
+globalThis.handleBrowserMenuAction = handleBrowserMenuAction;
+globalThis.openBrowserSettings = openBrowserSettings;
+globalThis.switchBrowserSettingsTab = switchBrowserSettingsTab;
+globalThis.saveBrowserSettings = saveBrowserSettings;
+globalThis.clearBrowserCache = clearBrowserCache;
 globalThis.handleTrustedAction = handleTrustedAction;
 globalThis.confirmPrivateChat = confirmPrivateChat;
 globalThis.confirmServiceCall = confirmServiceCall;

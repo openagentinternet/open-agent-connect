@@ -13,6 +13,7 @@ export interface ChainConfig {
 export interface BrowserConfig {
   metasoP2PBaseUrl: string;
   metafileContentBaseUrl?: string;
+  manApiBaseUrl?: string;
   blockExplorerBaseUrl?: string;
   walletApiBaseUrl?: string;
   defaultChainName: DefaultWriteNetwork;
@@ -40,6 +41,7 @@ export function createDefaultConfig(): MetabotConfig {
     browser: {
       metasoP2PBaseUrl: 'https://so.metaid.io',
       metafileContentBaseUrl: 'https://so.metaid.io/content',
+      manApiBaseUrl: 'https://manapi.metaid.io',
       blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
       defaultChainName: 'mvc',
       localMode: true,

@@ -146,7 +146,7 @@
       .browser-topbar {
         grid-row: 2;
         display: grid;
-        grid-template-columns: auto minmax(260px, 1fr) minmax(170px, auto) minmax(138px, auto);
+        grid-template-columns: auto minmax(260px, 1fr) minmax(170px, auto) minmax(138px, auto) auto;
         align-items: center;
         gap: 10px;
         min-width: 0;
@@ -164,6 +164,7 @@
       .browser-address-form button,
       .browser-resource-chip,
       .browser-using-chip,
+      .browser-chrome-menu button,
       .browser-status-strip button,
       .browser-action-row button,
       .browser-service-row button,
@@ -190,6 +191,7 @@
       .browser-address-form button:hover,
       .browser-resource-chip:hover,
       .browser-using-chip:hover,
+      .browser-chrome-menu button:hover,
       .browser-status-strip button:hover,
       .browser-action-row button:hover,
       .browser-service-row button:hover,
@@ -339,6 +341,53 @@
       .browser-chip-caret svg {
         width: 15px;
         height: 15px;
+      }
+      .browser-menu-wrap {
+        position: relative;
+        display: flex;
+        justify-content: flex-end;
+        min-width: 34px;
+      }
+      .browser-menu-trigger svg path {
+        stroke-width: 3;
+        stroke-linecap: round;
+      }
+      .browser-chrome-menu {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        z-index: 36;
+        width: 220px;
+        border: 1px solid var(--browser-border);
+        border-radius: 8px;
+        background: var(--browser-surface);
+        box-shadow: var(--browser-shadow);
+        padding: 6px;
+      }
+      .browser-menu-section {
+        display: grid;
+        gap: 2px;
+      }
+      .browser-chrome-menu button {
+        width: 100%;
+        min-height: 34px;
+        border: 0;
+        border-radius: 6px;
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        padding: 7px 8px;
+        text-align: left;
+        background: transparent;
+        color: #344054;
+        font-size: 12px;
+        font-weight: 650;
+      }
+      .browser-chrome-menu button span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .browser-viewport {
         grid-row: 3;
@@ -845,6 +894,91 @@
         resize: vertical;
         font: 13px/1.45 var(--sans, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
       }
+      .browser-settings-panel {
+        width: min(760px, 100%);
+      }
+      .browser-settings-tabs {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 14px;
+        padding: 3px;
+        border: 1px solid var(--browser-border);
+        border-radius: 8px;
+        background: #f3f6fb;
+      }
+      .browser-settings-tabs button {
+        min-height: 30px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--browser-muted);
+        padding: 5px 10px;
+      }
+      .browser-settings-tabs button[aria-selected="true"] {
+        background: var(--browser-surface);
+        color: var(--browser-text);
+        box-shadow: 0 1px 2px rgba(31, 41, 55, .08);
+      }
+      .browser-settings-form {
+        display: grid;
+        gap: 10px;
+      }
+      .browser-settings-field {
+        display: grid;
+        grid-template-columns: 210px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+      }
+      .browser-settings-field span {
+        color: var(--browser-muted);
+        font-size: 12px;
+        font-weight: 650;
+      }
+      .browser-settings-field input {
+        width: 100%;
+        min-width: 0;
+        height: 34px;
+        border: 1px solid var(--browser-border);
+        border-radius: 7px;
+        background: #fbfcfe;
+        color: var(--browser-text);
+        padding: 0 9px;
+        font: 12px/1.2 var(--mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+      }
+      .browser-settings-note,
+      .browser-settings-error {
+        margin: 10px 0 0;
+        color: var(--browser-muted);
+        font-size: 12px;
+      }
+      .browser-settings-error {
+        color: var(--browser-danger);
+      }
+      .browser-cache-panel {
+        display: grid;
+        gap: 14px;
+      }
+      .browser-cache-panel dl {
+        margin-bottom: 0;
+      }
+      .browser-cache-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .browser-cache-actions button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .browser-cache-actions button:last-child {
+        color: var(--browser-danger);
+      }
+      .browser-cache-actions button:disabled {
+        opacity: .5;
+        cursor: not-allowed;
+      }
       .browser-using-options {
         display: grid;
         gap: 8px;
@@ -865,15 +999,19 @@
       }
       @media (max-width: 1100px) {
         .browser-topbar {
-          grid-template-columns: auto minmax(220px, 1fr) minmax(150px, auto);
+          grid-template-columns: auto minmax(220px, 1fr) minmax(150px, auto) auto;
           grid-template-areas:
-            "nav address address"
-            "resource resource using";
+            "nav address address menu"
+            "resource resource using menu";
           height: auto;
           align-items: stretch;
         }
         .browser-nav { grid-area: nav; }
         .browser-address-form { grid-area: address; }
+        .browser-menu-wrap {
+          grid-area: menu;
+          align-self: start;
+        }
         .browser-resource-chip {
           grid-area: resource;
           max-width: none;
@@ -897,7 +1035,8 @@
             "address"
             "nav"
             "resource"
-            "using";
+            "using"
+            "menu";
           gap: 8px;
         }
         .browser-nav {
@@ -912,6 +1051,12 @@
         .browser-using-chip {
           width: 100%;
           max-width: none;
+        }
+        .browser-menu-wrap {
+          width: 100%;
+        }
+        .browser-chrome-menu {
+          right: 0;
         }
         .browser-viewport,
         .browser-shell.has-drawer .browser-viewport,
@@ -1000,6 +1145,10 @@
         .browser-inspector-panel dl,
         .browser-modal-body dl {
           grid-template-columns: 1fr;
+        }
+        .browser-settings-field {
+          grid-template-columns: 1fr;
+          gap: 5px;
         }
         .browser-drawer,
         .browser-inspector,

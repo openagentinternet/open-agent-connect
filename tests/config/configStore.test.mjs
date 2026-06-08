@@ -76,6 +76,7 @@ test('createConfigStore defaults to the active runtime config and persists updat
       browser: {
         metasoP2PBaseUrl: 'https://so.metaid.io',
         metafileContentBaseUrl: 'https://so.metaid.io/content',
+        manApiBaseUrl: 'https://manapi.metaid.io',
         blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
         defaultChainName: 'mvc',
         localMode: true,
@@ -92,6 +93,7 @@ test('createConfigStore defaults to the active runtime config and persists updat
       browser: {
         metasoP2PBaseUrl: 'https://so.example.test',
         metafileContentBaseUrl: 'https://so.example.test/content',
+        manApiBaseUrl: 'https://manapi.example.test',
         blockExplorerBaseUrl: 'https://explorer.example.test/tx',
         walletApiBaseUrl: 'https://wallet.example.test',
         defaultChainName: 'opcat',
@@ -122,6 +124,7 @@ test('read merges defaults when active config fields are missing', async () => {
       browser: {
         metasoP2PBaseUrl: 'https://so.metaid.io',
         metafileContentBaseUrl: 'https://so.metaid.io/content',
+        manApiBaseUrl: 'https://manapi.metaid.io',
         blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
         defaultChainName: 'mvc',
         localMode: true,
@@ -163,6 +166,7 @@ test('read ignores retired askMaster and evolution_network config fields', async
       browser: {
         metasoP2PBaseUrl: 'https://so.metaid.io',
         metafileContentBaseUrl: 'https://so.metaid.io/content',
+        manApiBaseUrl: 'https://manapi.metaid.io',
         blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
         defaultChainName: 'mvc',
         localMode: true,
@@ -201,6 +205,7 @@ test('set drops retired askMaster and evolution_network fields from persisted co
       browser: {
         metasoP2PBaseUrl: 'https://so.metaid.io',
         metafileContentBaseUrl: 'https://so.metaid.io/content',
+        manApiBaseUrl: 'https://manapi.metaid.io',
         blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
         defaultChainName: 'mvc',
         localMode: true,

@@ -33,6 +33,10 @@ export interface MetabotDaemonHttpHandlers {
   browser?: {
     getContext?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<BrowserContextResult>>;
     resolve?: (input: { uri: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserResolveResult>>;
+    getSettings?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    updateSettings?: (input: { from?: string; browser?: Record<string, unknown> } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    getCache?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    clearCache?: (input: { from?: string; scope?: string; pinId?: string; cacheKey?: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   config?: {
     get?: () => Awaitable<MetabotCommandResult<unknown>>;

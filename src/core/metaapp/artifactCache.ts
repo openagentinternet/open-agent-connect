@@ -22,12 +22,49 @@ export interface MetaAppArtifactCacheEntry {
   manifestPath: string;
 }
 
+export interface MetaAppArtifactCacheStatsEntry {
+  cacheKey: string;
+  metaAppPinId: string;
+  contentReference: string;
+  contentType: string;
+  indexFile: string;
+  modifyHistory: string[] | null;
+  latestModifyPinId: string | null;
+  artifactDir: string;
+  createdAt: number;
+  updatedAt: number;
+  lastUsedAt: number;
+  sizeBytes: number;
+}
+
+export interface MetaAppArtifactCacheStats {
+  cacheRoot: string;
+  artifactsRoot: string;
+  pinsRoot: string;
+  artifactCount: number;
+  pinRecordCount: number;
+  totalBytes: number;
+  artifacts: MetaAppArtifactCacheStatsEntry[];
+}
+
+export type MetaAppArtifactCacheClearInput =
+  | { scope?: 'all' }
+  | { scope: 'artifact'; cacheKey: string }
+  | { scope: 'pin'; pinId: string };
+
+export interface MetaAppArtifactCacheClearResult {
+  clearedArtifacts: number;
+  clearedPinRecords: number;
+}
+
 export interface MetaAppArtifactCacheStore {
   cacheRoot: string;
   artifactsRoot: string;
   pinsRoot: string;
   getArtifact(input: MetaAppArtifactDescriptor): Promise<MetaAppArtifactCacheEntry | null>;
   writeArtifact(input: MetaAppArtifactDescriptor & { archive: Buffer }): Promise<MetaAppArtifactCacheEntry>;
+  getStats(): Promise<MetaAppArtifactCacheStats>;
+  clear(input?: MetaAppArtifactCacheClearInput): Promise<MetaAppArtifactCacheClearResult>;
 }
 
 interface MetaAppArtifactCacheOptions {
@@ -204,6 +241,73 @@ function pinCacheFilePath(pinsRoot: string, metaAppPinId: string): string {
   return path.join(pinsRoot, `${metaAppPinId}.json`);
 }
 
+function safeCacheKey(value: unknown): string {
+  const text = normalizeText(value);
+  if (!/^[a-f0-9]{64}$/i.test(text)) {
+    throw new Error('Invalid MetaApp artifact cache key.');
+  }
+  return text.toLowerCase();
+}
+
+function safePinId(value: unknown): string {
+  const text = normalizeText(value);
+  if (!/^[A-Za-z0-9_.:-]+$/.test(text)) {
+    throw new Error('Invalid MetaApp pin id.');
+  }
+  return text;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function listFilesRecursive(rootDir: string): Promise<string[]> {
+  const entries = await fs.readdir(rootDir, { withFileTypes: true }).catch(() => []);
+  const files: string[] = [];
+  for (const entry of entries) {
+    const entryPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listFilesRecursive(entryPath));
+    } else if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+async function directorySize(rootDir: string): Promise<number> {
+  const files = await listFilesRecursive(rootDir);
+  let total = 0;
+  for (const file of files) {
+    const stat = await fs.stat(file).catch(() => null);
+    if (stat?.isFile()) {
+      total += stat.size;
+    }
+  }
+  return total;
+}
+
+async function listPinRecordFiles(pinsRoot: string): Promise<string[]> {
+  const entries = await fs.readdir(pinsRoot, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => path.join(pinsRoot, entry.name));
+}
+
+function cacheKeyFromPinRecord(value: unknown): string {
+  const raw = readObject(value);
+  return raw ? normalizeText(raw.cacheKey) : '';
+}
+
 export function createMetaAppArtifactCacheStore(
   pathsOrHomeDir: string | MetabotPaths,
   options: MetaAppArtifactCacheOptions = {},
@@ -312,6 +416,95 @@ export function createMetaAppArtifactCacheStore(
         await fs.rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
         throw error;
       }
+    },
+
+    async getStats() {
+      const artifactEntries = await fs.readdir(artifactsRoot, { withFileTypes: true }).catch(() => []);
+      const artifacts: MetaAppArtifactCacheStatsEntry[] = [];
+      for (const entry of artifactEntries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.staging-')) {
+          continue;
+        }
+        const manifest = normalizeManifest(await readJsonFile(path.join(artifactsRoot, entry.name, 'manifest.json')));
+        if (!manifest) {
+          continue;
+        }
+        const artifactRoot = path.join(artifactsRoot, manifest.cacheKey);
+        artifacts.push({
+          cacheKey: manifest.cacheKey,
+          metaAppPinId: manifest.metaAppPinId,
+          contentReference: manifest.contentReference,
+          contentType: manifest.contentType,
+          indexFile: manifest.indexFile,
+          modifyHistory: manifest.modifyHistory,
+          latestModifyPinId: manifest.latestModifyPinId,
+          artifactDir: path.join(artifactRoot, manifest.artifactPath),
+          createdAt: manifest.createdAt,
+          updatedAt: manifest.updatedAt,
+          lastUsedAt: manifest.lastUsedAt,
+          sizeBytes: await directorySize(artifactRoot),
+        });
+      }
+      const pinRecordFiles = await listPinRecordFiles(pinsRoot);
+      return {
+        cacheRoot,
+        artifactsRoot,
+        pinsRoot,
+        artifactCount: artifacts.length,
+        pinRecordCount: pinRecordFiles.length,
+        totalBytes: await directorySize(cacheRoot),
+        artifacts,
+      };
+    },
+
+    async clear(input = { scope: 'all' }) {
+      const scope = input.scope ?? 'all';
+      if (scope === 'all') {
+        const stats = await this.getStats();
+        await fs.rm(cacheRoot, { recursive: true, force: true });
+        return {
+          clearedArtifacts: stats.artifactCount,
+          clearedPinRecords: stats.pinRecordCount,
+        };
+      }
+
+      let cacheKey = '';
+      let extraPinFile: string | null = null;
+      if (scope === 'pin') {
+        const pinId = safePinId((input as { scope: 'pin'; pinId: string }).pinId);
+        extraPinFile = pinCacheFilePath(pinsRoot, pinId);
+        cacheKey = cacheKeyFromPinRecord(await readJsonFile(extraPinFile));
+        if (!cacheKey) {
+          await fs.rm(extraPinFile, { force: true }).catch(() => undefined);
+          return { clearedArtifacts: 0, clearedPinRecords: 0 };
+        }
+      } else if (scope === 'artifact') {
+        cacheKey = safeCacheKey((input as { scope: 'artifact'; cacheKey: string }).cacheKey);
+      } else {
+        throw new Error('Unsupported MetaApp artifact cache clear scope.');
+      }
+
+      cacheKey = safeCacheKey(cacheKey);
+      const pinRecordFiles = await listPinRecordFiles(pinsRoot);
+      let clearedPinRecords = 0;
+      for (const file of pinRecordFiles) {
+        if (cacheKeyFromPinRecord(await readJsonFile(file)) === cacheKey) {
+          await fs.rm(file, { force: true });
+          clearedPinRecords += 1;
+        }
+      }
+      if (extraPinFile && !pinRecordFiles.includes(extraPinFile) && await pathExists(extraPinFile)) {
+        await fs.rm(extraPinFile, { force: true });
+        clearedPinRecords += 1;
+      }
+
+      const artifactRoot = path.join(artifactsRoot, cacheKey);
+      const hadArtifact = await pathExists(artifactRoot);
+      await fs.rm(artifactRoot, { recursive: true, force: true });
+      return {
+        clearedArtifacts: hadArtifact ? 1 : 0,
+        clearedPinRecords,
+      };
     },
   };
 }

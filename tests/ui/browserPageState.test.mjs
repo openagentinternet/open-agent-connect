@@ -84,6 +84,8 @@ function createElements() {
     '[data-browser-drawer-toggle]': new FakeElement(),
     '[data-browser-resource-chip]': new FakeElement(),
     '[data-browser-using-selector]': new FakeElement(),
+    '[data-browser-menu-trigger]': new FakeElement(),
+    '[data-browser-menu]': new FakeElement(),
     '[data-browser-viewport]': new FakeElement(),
     '[data-browser-status-strip]': new FakeElement(),
     '[data-browser-status-state]': new FakeElement(),
@@ -145,7 +147,7 @@ function createBrowserContext(options = {}) {
       querySelectorAll: () => [],
       addEventListener: () => {},
     },
-    fetch: async (url) => {
+    fetch: async (url, fetchOptions = {}) => {
       fetchCalls.push(String(url));
       if (String(url).startsWith('/api/browser/context')) {
         return { ok: true, json: async () => contextResponse };
@@ -154,6 +156,55 @@ function createBrowserContext(options = {}) {
         const uri = new URLSearchParams(String(url).split('?')[1] || '').get('uri') || '';
         const payload = typeof resolveResponse === 'function' ? resolveResponse(uri) : resolveResponse;
         return { ok: true, json: async () => payload };
+      }
+      if (String(url).startsWith('/api/browser/settings')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: {
+              browser: {
+                metasoP2PBaseUrl: 'https://so.metaid.io',
+                metafileContentBaseUrl: 'https://so.metaid.io/content',
+                manApiBaseUrl: 'https://manapi.metaid.io',
+                blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+                defaultChainName: 'mvc',
+                localMode: true,
+              },
+              effectiveBrowser: {
+                metasoP2PBaseUrl: 'https://so.metaid.io',
+                metafileContentBaseUrl: 'https://so.metaid.io/content',
+                manApiBaseUrl: 'https://manapi.metaid.io',
+                blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+                defaultChainName: 'mvc',
+                localMode: true,
+              },
+              defaults: {
+                metasoP2PBaseUrl: 'https://so.metaid.io',
+                metafileContentBaseUrl: 'https://so.metaid.io/content',
+                manApiBaseUrl: 'https://manapi.metaid.io',
+                blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+                defaultChainName: 'mvc',
+                localMode: true,
+              },
+            },
+          }),
+        };
+      }
+      if (String(url).startsWith('/api/browser/cache')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            data: {
+              cacheRoot: '/tmp/.metabot/cache/metaapps',
+              artifactCount: 2,
+              pinRecordCount: 1,
+              totalBytes: 2048,
+              artifacts: [],
+            },
+          }),
+        };
       }
       throw new Error(`Unexpected fetch ${url}`);
     },
@@ -253,6 +304,32 @@ test('Browser using identity selector switches identity and reloads current URI 
   assert.equal(fetchCalls[2], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1worker&from=reviewer');
   assert.deepEqual(Array.from(context.state.history), ['metaid://idq1worker']);
   assert.equal(context.state.historyIndex, 0);
+});
+
+test('Browser menu is data-driven and opens cache management settings', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  assert.ok(Array.isArray(context.browserMenuSections));
+  assert.equal(context.browserMenuSections[0].items[0].id, 'settings');
+  assert.equal(context.browserMenuSections[0].items[1].id, 'cache');
+
+  elements['[data-browser-menu-trigger]'].click();
+  assert.equal(elements['[data-browser-menu]'].hidden, false);
+  assert.equal(elements['[data-browser-menu-trigger]'].getAttribute('aria-expanded'), 'true');
+  assert.match(elements['[data-browser-menu]'].innerHTML, /Settings/);
+  assert.match(elements['[data-browser-menu]'].innerHTML, /Cache Management/);
+
+  await context.handleBrowserMenuAction('cache');
+
+  assert.equal(elements['[data-browser-modal-root]'].hidden, false);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Base URLs/);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Cache/);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /\/tmp\/\.metabot\/cache\/metaapps/);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /2 artifacts/);
+  assert.equal(fetchCalls.at(-2), '/api/browser/settings?from=worker');
+  assert.equal(fetchCalls.at(-1), '/api/browser/cache?from=worker');
 });
 
 test('Browser history controls navigate without replacing Browser chrome', async () => {
