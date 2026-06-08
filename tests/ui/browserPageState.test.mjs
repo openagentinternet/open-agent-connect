@@ -343,6 +343,10 @@ test('Browser shows Owner Mode for local Bot Page owner', async () => {
   assert.match(ownerToolbar.textContent, /Configure Chat/);
   assert.match(ownerToolbar.textContent, /View Messages/);
   assert.match(ownerToolbar.textContent, /Share Bot Page/);
+  assert.match(ownerToolbar.innerHTML, /data-browser-owner-action="edit-profile"/);
+  assert.match(ownerToolbar.innerHTML, /data-browser-owner-action="configure-chat"/);
+  assert.match(ownerToolbar.innerHTML, /data-browser-owner-action="view-messages"/);
+  assert.match(ownerToolbar.innerHTML, /data-browser-owner-action="share"/);
 });
 
 test('Browser hides Owner Mode for remote Bot Page owner', async () => {
@@ -397,6 +401,59 @@ test('Browser shows Owner Mode for local Bot Page owner even when Using actor di
   const ownerToolbar = elements['[data-browser-owner-toolbar]'];
   assert.equal(ownerToolbar.hidden, false);
   assert.match(ownerToolbar.textContent, /Local Bot: Alice/);
+});
+
+test('Browser Owner Mode escapes local owner labels', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  context.state.runtime = {
+    actors: [
+      { id: 'alice', label: 'Alice <script>alert(1)</script>', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: true, capabilities: [] },
+    ],
+    labels: { actorChip: 'Using' },
+  };
+  context.state.current = {
+    resourceType: 'bot',
+    normalizedUri: 'metaid://idq1alice',
+    title: 'Alice',
+    owner: { globalMetaId: 'idq1alice', name: 'Alice' },
+    renderer: { type: 'bot-page' },
+    status: { verificationState: 'verified' },
+  };
+  context.renderCurrent();
+
+  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
+  assert.equal(ownerToolbar.hidden, false);
+  assert.match(ownerToolbar.innerHTML, /Alice &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(ownerToolbar.innerHTML, /<script>/);
+});
+
+test('Browser Owner Mode uses case-sensitive GlobalMetaId matching', async () => {
+  const { context, elements, fetchCalls } = createBrowserContext();
+
+  await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
+
+  context.state.runtime = {
+    actors: [
+      { id: 'alice', label: 'Alice', kind: 'oac-bot', globalMetaId: 'IDQ1ALICE', isDefault: true, capabilities: [] },
+    ],
+    labels: { actorChip: 'Using' },
+  };
+  context.state.current = {
+    resourceType: 'bot',
+    normalizedUri: 'metaid://idq1alice',
+    title: 'Alice',
+    owner: { globalMetaId: 'idq1alice', name: 'Alice' },
+    renderer: { type: 'bot-page' },
+    status: { verificationState: 'verified' },
+  };
+  context.renderCurrent();
+
+  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
+  assert.equal(ownerToolbar.hidden, true);
+  assert.equal(ownerToolbar.innerHTML, '');
 });
 
 test('Browser Owner Mode does not render Switch copy or button', async () => {

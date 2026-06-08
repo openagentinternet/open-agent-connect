@@ -64,6 +64,7 @@
         display: grid;
         grid-template-rows: 34px 58px auto minmax(0, 1fr) 32px;
         grid-template-columns: minmax(0, 1fr);
+        position: relative;
         overflow: hidden;
         font: 14px/1.45 var(--sans, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
       }
@@ -399,12 +400,17 @@
         background: #fbfcfe;
         display: flex;
         align-items: center;
+        flex-wrap: nowrap;
         gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
         padding: 6px 12px;
         color: var(--browser-muted);
       }
       .browser-owner-label {
+        flex: 0 1 auto;
         min-width: 0;
+        max-width: min(240px, 45vw);
         color: #263548;
         font-size: 12px;
         font-weight: 700;
@@ -413,6 +419,7 @@
         white-space: nowrap;
       }
       .browser-owner-toolbar button {
+        flex: 0 0 auto;
         min-height: 28px;
         border: 1px solid var(--browser-border);
         border-radius: 7px;
@@ -1228,9 +1235,10 @@
         .browser-drawer,
         .browser-inspector,
         .browser-shell.has-drawer .browser-inspector {
-          position: fixed;
-          top: 120px;
-          bottom: 32px;
+          position: absolute;
+          grid-row: 4;
+          top: 0;
+          bottom: 0;
           width: min(330px, 88vw);
           z-index: 30;
           box-shadow: var(--browser-shadow);
@@ -1329,8 +1337,8 @@
         .browser-drawer,
         .browser-inspector,
         .browser-shell.has-drawer .browser-inspector {
-          top: 150px;
-          bottom: 42px;
+          top: 0;
+          bottom: 0;
           width: min(340px, calc(100vw - 20px));
         }
       }
