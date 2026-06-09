@@ -208,3 +208,43 @@ test('Browser API route boundary handles trusted actions without daemon route ty
   assert.equal(sent[0].status, 200);
   assert.equal(sent[0].payload.data.input.payload.servicePinId, 'service-pin');
 });
+
+test('OAC Browser route boundary still uses OAC command-result semantics', async () => {
+  const { handled, sent } = await callBrowserRoute({
+    path: '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&from=alice',
+    handlers: {
+      resolve: async (input) => commandSuccess({
+        uri: input.uri,
+        normalizedUri: input.uri,
+        resourceType: 'bot',
+        title: 'Alice Bot',
+        owner: {
+          kind: 'bot',
+          globalMetaId: 'idq1alice',
+          name: 'Alice Bot',
+          verificationState: 'partial',
+        },
+        renderer: {
+          type: 'bot-page',
+          contentType: 'application/vnd.oac.bot-homepage+json',
+          templateId: 'document',
+          data: {},
+        },
+        status: {
+          state: 'resolved',
+          verificationState: 'partial',
+          message: 'Bot Page resolved.',
+        },
+        source: {
+          resolver: 'test',
+        },
+        actions: [],
+      }),
+    },
+  });
+
+  assert.equal(handled, true);
+  assert.equal(sent[0].status, 200);
+  assert.equal(sent[0].payload.state, 'success');
+  assert.equal(sent[0].payload.data.source.resolver, 'test');
+});
