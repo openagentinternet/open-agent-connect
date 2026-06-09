@@ -66,7 +66,7 @@ Out of scope:
 - Modify: `package-lock.json`
 - Create: `tests/browser/browserPublishedPackages.test.mjs`
 
-- [ ] **Step 1: Write the failing package import smoke test**
+- [x] **Step 1: Write the failing package import smoke test**
 
 Create `tests/browser/browserPublishedPackages.test.mjs`:
 
@@ -101,7 +101,7 @@ test('OAC pins Agent Browser packages to the first published pre-1.0 version', (
 });
 ```
 
-- [ ] **Step 2: Run the smoke test and verify it fails before dependencies are installed**
+- [x] **Step 2: Run the smoke test and verify it fails before dependencies are installed**
 
 Run:
 
@@ -111,7 +111,7 @@ npm run build && node --test tests/browser/browserPublishedPackages.test.mjs
 
 Expected: FAIL with `Cannot find module '@openagentinternet/agent-browser-host-contract'`.
 
-- [ ] **Step 3: Install only the packages OAC consumes in this phase**
+- [x] **Step 3: Install only the packages OAC consumes in this phase**
 
 Run:
 
@@ -122,7 +122,7 @@ npm install --save-dev --save-exact @openagentinternet/agent-browser-test-harnes
 
 Do not install `@openagentinternet/agent-browser-ui` or `@openagentinternet/agent-browser-host-standalone` in this task. OAC's current Browser UI and standalone entrypoint remain local until the shared UI package reaches parity.
 
-- [ ] **Step 4: Run the smoke test again**
+- [x] **Step 4: Run the smoke test again**
 
 Run:
 
@@ -132,7 +132,7 @@ npm run build && node --test tests/browser/browserPublishedPackages.test.mjs
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit package pins**
+- [x] **Step 5: Commit package pins**
 
 Run:
 
@@ -152,7 +152,7 @@ Then use `metabot-post-buzz` with Bob (`--from bob`) to publish a development jo
 - Test: `tests/browser/botHomepageResolver.test.mjs`
 - Test: `tests/daemon/oacBrowserHostAdapter.test.mjs`
 
-- [ ] **Step 1: Replace OAC URI parser with shared core export**
+- [x] **Step 1: Replace OAC URI parser with shared core export**
 
 Change `src/core/browser/uri.ts` to:
 
@@ -164,7 +164,7 @@ export {
 } from '@openagentinternet/agent-browser-core';
 ```
 
-- [ ] **Step 2: Replace OAC Bot homepage template registry with shared core export**
+- [x] **Step 2: Replace OAC Bot homepage template registry with shared core export**
 
 Change `src/core/browser/botHomepageTemplates.ts` to:
 
@@ -179,7 +179,7 @@ export {
 } from '@openagentinternet/agent-browser-core';
 ```
 
-- [ ] **Step 3: Run focused helper and adapter tests**
+- [x] **Step 3: Run focused helper and adapter tests**
 
 Run:
 
@@ -193,7 +193,7 @@ npm run build && node --test \
 
 Expected: PASS. If a failure is only an error-message wording change from the shared parser, update the assertion to preserve the behavior meaning, not the old local string.
 
-- [ ] **Step 4: Commit shared helper consumption**
+- [x] **Step 4: Commit shared helper consumption**
 
 Run:
 
@@ -210,7 +210,7 @@ Then use `metabot-post-buzz` with Bob (`--from bob`) to publish a development jo
 - Create: `src/daemon/browser/oacBrowserCoreBridge.ts`
 - Test: `tests/daemon/oacBrowserCoreBridge.test.mjs`
 
-- [ ] **Step 1: Write the failing OAC conformance test**
+- [x] **Step 1: Write the failing OAC conformance test**
 
 Create `tests/daemon/oacBrowserCoreBridge.test.mjs`:
 
@@ -313,7 +313,7 @@ test('OAC Browser core bridge maps resolved Bot pages to BrowserResourceEnvelope
 });
 ```
 
-- [ ] **Step 2: Run the conformance test and verify it fails**
+- [x] **Step 2: Run the conformance test and verify it fails**
 
 Run:
 
@@ -323,7 +323,7 @@ npm run build && node --test tests/daemon/oacBrowserCoreBridge.test.mjs
 
 Expected: FAIL because `dist/daemon/browser/oacBrowserCoreBridge.js` does not exist.
 
-- [ ] **Step 3: Add the bridge implementation**
+- [x] **Step 3: Add the bridge implementation**
 
 Create `src/daemon/browser/oacBrowserCoreBridge.ts`:
 
@@ -566,7 +566,7 @@ export function createOacBrowserCoreHostAdapter(input: CreateOacBrowserHostAdapt
 }
 ```
 
-- [ ] **Step 4: Run the conformance test**
+- [x] **Step 4: Run the conformance test**
 
 Run:
 
@@ -576,7 +576,7 @@ npm run build && node --test tests/daemon/oacBrowserCoreBridge.test.mjs
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the bridge**
+- [x] **Step 5: Commit the bridge**
 
 Run:
 
@@ -593,7 +593,7 @@ Then use `metabot-post-buzz` with Bob (`--from bob`) to publish a development jo
 - Modify: `tests/browser/browserModuleBoundary.test.mjs`
 - Modify: `tests/daemon/oacBrowserHostAdapter.test.mjs`
 
-- [ ] **Step 1: Add a boundary assertion that OAC still owns runtime routes**
+- [x] **Step 1: Add a boundary assertion that OAC still owns runtime routes**
 
 Append this test to `tests/browser/browserModuleBoundary.test.mjs`:
 
@@ -641,7 +641,7 @@ test('OAC Browser route boundary still uses OAC command-result semantics', async
 
 This test documents the intentional Phase 4 boundary: OAC's existing `/api/browser/*` route continues to return OAC `MetabotCommandResult` payloads while the new bridge proves conformance to the published package contract.
 
-- [ ] **Step 2: Add a regression check for waiting trusted actions**
+- [x] **Step 2: Add a regression check for waiting trusted actions**
 
 Append this test to `tests/daemon/oacBrowserHostAdapter.test.mjs`:
 
@@ -688,7 +688,7 @@ test('OAC browser host adapter preserves waiting command states for runtime trus
 });
 ```
 
-- [ ] **Step 3: Run route and adapter boundary tests**
+- [x] **Step 3: Run route and adapter boundary tests**
 
 Run:
 
@@ -701,7 +701,7 @@ npm run build && node --test \
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit route boundary documentation tests**
+- [x] **Step 4: Commit route boundary documentation tests**
 
 Run:
 
@@ -718,7 +718,7 @@ Then use `metabot-post-buzz` with Bob (`--from bob`) to publish a development jo
 - Modify: `tests/npm/packageFiles.test.mjs`
 - Modify: `docs/superpowers/plans/2026-06-09-oac-browser-core-package-consumption.md`
 
-- [ ] **Step 1: Update OAC npm package test for Browser package dependencies**
+- [x] **Step 1: Update OAC npm package test for Browser package dependencies**
 
 Append this test to `tests/npm/packageFiles.test.mjs`:
 
@@ -734,11 +734,11 @@ test('npm package pins shared Agent Browser package dependencies', async () => {
 });
 ```
 
-- [ ] **Step 2: Mark plan tasks complete as work finishes**
+- [x] **Step 2: Mark plan tasks complete as work finishes**
 
 Update this plan's checkboxes from `[ ]` to `[x]` only for completed steps. Do not mark the whole plan complete until verification and reviews pass.
 
-- [ ] **Step 3: Run focused verification**
+- [x] **Step 3: Run focused verification**
 
 Run:
 
@@ -760,7 +760,7 @@ Expected:
 - all listed tests pass;
 - `git diff --check` prints no errors.
 
-- [ ] **Step 4: Run broad verification only if focused checks pass**
+- [x] **Step 4: Run broad verification only if focused checks pass**
 
 Run:
 
@@ -770,7 +770,7 @@ npm run verify
 
 Expected: PASS. If full verification fails in unrelated tests, capture the exact failure and run the smallest relevant test set again before deciding whether the failure belongs to this phase.
 
-- [ ] **Step 5: Commit closeout docs and package test**
+- [x] **Step 5: Commit closeout docs and package test**
 
 Run:
 
