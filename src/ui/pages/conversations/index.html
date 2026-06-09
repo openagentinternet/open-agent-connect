@@ -46,6 +46,9 @@
         gap: 12px;
         margin-bottom: 10px;
       }
+      .conversation-detail-header > div {
+        min-width: 0;
+      }
       .conversation-section-header h2,
       .conversation-detail-header h2 {
         font-family: var(--mono);
@@ -109,6 +112,28 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .conversation-kind-list,
+      .conversation-actions {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .conversation-kind-list {
+        margin-top: 8px;
+      }
+      .conversation-kind-list span {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 2px 6px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+      .conversation-actions {
+        justify-content: flex-end;
+        flex-shrink: 0;
       }
       .conversation-row-meta {
         display: grid;

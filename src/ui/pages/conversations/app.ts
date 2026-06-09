@@ -8,29 +8,29 @@ export function buildConversationsPageDefinition(): LocalUiPageDefinition {
     title: 'Conversations — Open Agent Connect',
     eyebrow: 'Provider Console',
     heading: 'Conversations',
-    description: 'Review private chat conversations with your Bot.',
+    description: 'Review private chats and service conversations with your Bot.',
     panels: [],
     contentHtml: `
       <section class="conversations-shell" data-conversations-shell>
         <div class="conversations-toolbar">
           <div>
             <h1>Conversations</h1>
-            <p data-conversations-status>Loading private chat conversations...</p>
+            <p data-conversations-status>Loading conversations...</p>
           </div>
           <button class="btn" type="button" data-conversations-refresh>Refresh</button>
         </div>
         <div class="conversations-workspace">
-          <section class="conversation-list-panel" aria-label="Private chat conversations">
+          <section class="conversation-list-panel" aria-label="Bot conversations">
             <div class="conversation-section-header">
-              <h2>Private Chats</h2>
+              <h2>Conversations</h2>
               <span data-conversation-count>0</span>
             </div>
             <div class="conversation-list" data-conversation-list></div>
           </section>
-          <section class="conversation-detail-panel" data-conversation-detail aria-label="Conversation messages">
+          <section class="conversation-detail-panel" data-conversation-detail aria-label="Conversation context">
             <div class="conversation-detail-header" data-conversation-detail-header>
               <h2>Select a conversation</h2>
-              <span>Private chat MVP</span>
+              <span>Conversation context</span>
             </div>
             <div class="conversation-messages" data-conversation-messages></div>
           </section>
@@ -49,14 +49,6 @@ export function buildConversationsPageDefinition(): LocalUiPageDefinition {
     detailHeader: document.querySelector('[data-conversation-detail-header]'),
     messages: document.querySelector('[data-conversation-messages]'),
   };
-  const state = {
-    conversations: [],
-    messages: [],
-    selectedConversationId: '',
-    loading: false,
-    error: '',
-  };
-
   const escapeHtml = (value) => String(value || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -65,9 +57,20 @@ export function buildConversationsPageDefinition(): LocalUiPageDefinition {
     .replace(/'/g, '&#39;');
   const query = new URLSearchParams(window.location.search);
   const from = query.get('from') || '';
+  const initialConversationId = query.get('conversationId') || (query.get('sessionId') ? 'service-' + query.get('sessionId') : '');
+  const state = {
+    conversations: [],
+    traceSessions: [],
+    messages: [],
+    selectedConversationId: initialConversationId,
+    loading: false,
+    error: '',
+  };
+
   const withFrom = (base) => from ? base + (base.indexOf('?') >= 0 ? '&' : '?') + 'from=' + encodeURIComponent(from) : base;
   const privateConversationsUrl = () => withFrom('/api/chat/private/conversations');
   const privateMessagesUrl = (conversationId) => withFrom('/api/chat/private/messages?conversationId=' + encodeURIComponent(conversationId) + '&limit=50');
+  const traceSessionsUrl = () => withFrom('/api/trace/sessions?all=true&limit=50');
 
   const fetchJson = async (url) => {
     const response = await fetch(url, { cache: 'no-store' });
@@ -77,9 +80,17 @@ export function buildConversationsPageDefinition(): LocalUiPageDefinition {
     }
     return payload.data || payload;
   };
+  const fetchOptionalJson = async (url) => {
+    try {
+      return await fetchJson(url);
+    } catch (error) {
+      return null;
+    }
+  };
 
   const buildModel = () => buildConversationsPageViewModel({
     conversations: state.conversations,
+    traceSessions: state.traceSessions,
     messages: state.messages,
     selectedConversationId: state.selectedConversationId,
   });
@@ -103,19 +114,23 @@ export function buildConversationsPageDefinition(): LocalUiPageDefinition {
       button.className = 'conversation-row';
       button.dataset.selected = conversation.isSelected ? 'true' : 'false';
       button.dataset.conversationId = conversation.conversationId;
-      button.innerHTML = '<div class="conversation-row-main"><strong>' + escapeHtml(conversation.peerLabel) + '</strong><p>' + escapeHtml(conversation.latestText) + '</p></div>'
-        + '<div class="conversation-row-meta"><span>' + escapeHtml(conversation.latestAtLabel) + '</span><span>' + escapeHtml(conversation.turnCountLabel) + '</span></div>';
+      button.innerHTML = '<div class="conversation-row-main"><strong>' + escapeHtml(conversation.peerLabel) + '</strong><p>' + escapeHtml(conversation.latestText) + '</p><div class="conversation-kind-list">' + conversation.kinds.map((kind) => '<span>' + escapeHtml(kind) + '</span>').join('') + '</div></div>'
+        + '<div class="conversation-row-meta"><span>' + escapeHtml(conversation.latestAtLabel) + '</span><span>' + escapeHtml(conversation.stateLabel) + '</span><span>' + escapeHtml(conversation.turnCountLabel) + '</span></div>';
       button.addEventListener('click', () => selectConversation(conversation.conversationId));
       elements.list.appendChild(button);
     });
   };
 
+  const renderActions = (actions) => actions && actions.length
+    ? '<div class="conversation-actions">' + actions.map((action) => '<a class="btn btn-sm" href="' + escapeHtml(action.href) + '">' + escapeHtml(action.label) + '</a>').join('') + '</div>'
+    : '';
+
   const renderDetail = (model) => {
     if (elements.detailHeader) {
       const selected = model.selectedConversation;
       elements.detailHeader.innerHTML = selected
-        ? '<h2>' + escapeHtml(selected.peerLabel) + '</h2><span>' + escapeHtml(selected.stateLabel) + ' / ' + escapeHtml(selected.peerGlobalMetaId || '-') + '</span>'
-        : '<h2>Select a conversation</h2><span>Private chat MVP</span>';
+        ? '<div><h2>' + escapeHtml(selected.peerLabel) + '</h2><span>' + escapeHtml(selected.stateLabel) + ' / ' + escapeHtml(selected.peerGlobalMetaId || '-') + (selected.localBotLabel ? ' / ' + escapeHtml(selected.localBotLabel) : '') + '</span></div>' + renderActions(selected.advancedActions)
+        : '<div><h2>Select a conversation</h2><span>Conversation context</span></div>';
     }
     if (!elements.messages) return;
     elements.messages.innerHTML = '';
@@ -139,7 +154,7 @@ export function buildConversationsPageDefinition(): LocalUiPageDefinition {
       return render();
     }
     if (elements.status) {
-      elements.status.textContent = state.error || (state.loading ? 'Loading private chat conversations...' : model.conversations.length + ' private chat conversation' + (model.conversations.length === 1 ? '' : 's'));
+      elements.status.textContent = state.error || (state.loading ? 'Loading conversations...' : model.conversations.length + ' conversation' + (model.conversations.length === 1 ? '' : 's'));
     }
     renderList(model);
     renderDetail(model);
@@ -148,7 +163,14 @@ export function buildConversationsPageDefinition(): LocalUiPageDefinition {
   const selectConversation = async (conversationId) => {
     if (!conversationId) return;
     state.selectedConversationId = conversationId;
+    const selected = buildModel().selectedConversation;
     render();
+    if (!selected || selected.source !== 'private_chat') {
+      state.messages = [];
+      state.error = '';
+      render();
+      return;
+    }
     try {
       const payload = await fetchJson(privateMessagesUrl(conversationId));
       state.messages = Array.isArray(payload.messages) ? payload.messages : [];
@@ -165,14 +187,19 @@ export function buildConversationsPageDefinition(): LocalUiPageDefinition {
     state.error = '';
     render();
     try {
-      const payload = await fetchJson(privateConversationsUrl());
+      const [payload, tracePayload] = await Promise.all([
+        fetchJson(privateConversationsUrl()),
+        fetchOptionalJson(traceSessionsUrl()),
+      ]);
       state.conversations = Array.isArray(payload.conversations) ? payload.conversations : [];
-      const initialModel = buildConversationsPageViewModel({ conversations: state.conversations, selectedConversationId: state.selectedConversationId });
+      state.traceSessions = tracePayload && Array.isArray(tracePayload.sessions) ? tracePayload.sessions : [];
+      const initialModel = buildConversationsPageViewModel({ conversations: state.conversations, traceSessions: state.traceSessions, selectedConversationId: state.selectedConversationId });
       const nextSelected = initialModel.selectedConversation
         ? initialModel.selectedConversation.conversationId
         : (initialModel.conversations[0] && initialModel.conversations[0].conversationId) || '';
       state.selectedConversationId = nextSelected;
-      if (nextSelected) {
+      const selected = initialModel.conversations.find((conversation) => conversation.conversationId === nextSelected);
+      if (nextSelected && selected && selected.source === 'private_chat') {
         const messagesPayload = await fetchJson(privateMessagesUrl(nextSelected));
         state.messages = Array.isArray(messagesPayload.messages) ? messagesPayload.messages : [];
       } else {

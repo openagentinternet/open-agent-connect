@@ -35,6 +35,7 @@ function runtimeLabel(r){var name=r.displayName||r.provider||r.id||'-';var bits=
 function shortId(v){v=String(v||'');if(!v)return'-';return v.length>18?v.slice(0,12)+'...'+v.slice(-4):v}
 function botBrowserPath(globalMetaId){return '/browser/metaid/'+encodeURIComponent(String(globalMetaId||'').trim())}
 function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast('Bot Page is unavailable until Global MetaID is ready');return}window.location.href=botBrowserPath(profile.globalMetaId)}
+function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.slug){showToast('Select a Bot before opening conversations');return}window.location.href='/ui/conversations?from='+encodeURIComponent(profile.slug)}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
@@ -345,6 +346,7 @@ function renderDetailHeader(profile){
   var name=q('[data-detail-name]');if(name)name.textContent=profile.name||profile.slug;
   var id=q('[data-detail-id]');if(id)id.textContent=profile.globalMetaId||profile.slug||'-';
   var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!profile.globalMetaId;
+  var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!profile.slug;
 }
 
 function setDetailVisible(visible){
@@ -1074,6 +1076,7 @@ document.addEventListener('DOMContentLoaded',function(){
   qq('[data-tab]').forEach(function(el){el.addEventListener('click',function(){switchTab(this.getAttribute('data-tab'))})});
   var runtimeModal=q('[data-act="open-runtime-modal"]');if(runtimeModal)runtimeModal.addEventListener('click',openRuntimeModal);
   var viewBotPage=q('[data-act="view-bot-page"]');if(viewBotPage)viewBotPage.addEventListener('click',viewSelectedBotPage);
+  var viewConversations=q('[data-act="view-conversations"]');if(viewConversations)viewConversations.addEventListener('click',viewSelectedConversations);
   var discover=q('[data-act="discover-runtimes"]');if(discover)discover.addEventListener('click',discoverRuntimes);
   var wallet=q('[data-act="open-wallet"]');if(wallet)wallet.addEventListener('click',openWalletPanel);
   var backup=q('[data-act="open-backup"]');if(backup)backup.addEventListener('click',openBackupPanel);

@@ -13,6 +13,8 @@ import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
 import { renderBrowserPageHtml } from '../../browser/page';
+import { createI18nContext, renderClientI18nScript, renderLanguageOptions } from '../../ui/i18n';
+import type { I18nKey, LocalUiI18nContext } from '../../ui/i18n';
 import type { MetabotUiPageName, RouteHandler } from './types';
 import { handleBundledMetaAppRoutes } from './uiMetaApps';
 
@@ -40,11 +42,11 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, () => LocalUiPageDefiniti
   'metaapps': buildMetaAppsPageDefinition,
 };
 
-const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
-  { page: 'bot', label: 'Bot Page' },
-  { page: 'conversations', label: 'Conversations' },
-  { page: 'services', label: 'Services' },
-  { page: 'settings', label: 'Settings' },
+const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
+  { page: 'bot', labelKey: 'nav.botPage' },
+  { page: 'conversations', labelKey: 'nav.conversations' },
+  { page: 'services', labelKey: 'nav.services' },
+  { page: 'settings', labelKey: 'nav.settings' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();
@@ -70,23 +72,31 @@ function renderPanels(definition: LocalUiPageDefinition): string {
   }).join('');
 }
 
-function renderNav(currentPage: MetabotUiPageName): string {
+function renderNav(currentPage: MetabotUiPageName, i18n: LocalUiI18nContext): string {
   return NAV_ITEMS.map((item) => {
     const activeClass = item.page === currentPage ? ' class="active"' : '';
-    return `<a${activeClass} href="/ui/${item.page}">${escapeHtml(item.label)}</a>`;
+    return `<a${activeClass} href="/ui/${item.page}" data-i18n-key="${item.labelKey}">${escapeHtml(i18n.t(item.labelKey))}</a>`;
   }).join('');
 }
 
-function renderTopbarAction(): string {
-  return '<a class="topbar-action" href="/browser">Open Browser</a>';
+function renderTopbarLanguageSelector(i18n: LocalUiI18nContext): string {
+  return [
+    `<select class="topbar-language-select" data-language-select aria-label="${escapeHtml(i18n.t('language.label'))}">`,
+    renderLanguageOptions(i18n),
+    '</select>',
+  ].join('');
 }
 
-function injectTopbarChrome(html: string): string {
+function renderTopbarAction(i18n: LocalUiI18nContext): string {
+  return `<a class="topbar-action" href="/browser" data-i18n-key="action.openBrowser">${escapeHtml(i18n.t('action.openBrowser'))}</a>`;
+}
+
+function injectTopbarChrome(html: string, i18n: LocalUiI18nContext): string {
   const withLogo = html.replace(
     /<a class="topbar-logo" href="\/ui\/hub">MetaBot<\/a>/,
     '<a class="topbar-logo" href="/ui/bot">Open Agent Connect</a>',
   );
-  return withLogo.replace('</nav>', `</nav>${renderTopbarAction()}`);
+  return withLogo.replace('</nav>', `</nav>${renderTopbarLanguageSelector(i18n)}${renderTopbarAction(i18n)}`);
 }
 
 function resolveTemplatePath(page: MetabotUiPageName): string {
@@ -106,27 +116,34 @@ async function loadTemplate(page: MetabotUiPageName): Promise<string> {
   }
 }
 
-async function renderBuiltInPage(page: MetabotUiPageName): Promise<string> {
+function buildPageDefinition(page: MetabotUiPageName, i18n: LocalUiI18nContext): LocalUiPageDefinition {
   const builder = PAGE_BUILDERS[page];
   if (!builder) {
     throw new Error(`Local UI page is not registered: ${page}`);
   }
-  const definition = builder();
+  return page === 'settings' ? buildSettingsPageDefinition(i18n) : builder();
+}
+
+async function renderBuiltInPage(page: MetabotUiPageName, languagePreference?: string | null): Promise<string> {
+  const i18n = createI18nContext(languagePreference);
+  const definition = buildPageDefinition(page, i18n);
   const template = await loadTemplate(page);
   // If the template manages its own layout (uses __PAGE_CONTENT__ directly),
   // inject only the page-specific content HTML. Otherwise fall back to the
   // legacy hero wrapper for templates that don't have __PAGE_CONTENT__.
   const content = definition.contentHtml ?? '';
+  const script = `${renderClientI18nScript(i18n)}\n${definition.script}`;
   const html = template
+    .replace(/<html lang="en">/g, `<html lang="${escapeHtml(i18n.language)}">`)
     .replace(/__PAGE_TITLE__/g, escapeHtml(definition.title))
     .replace(/__PAGE_EYEBROW__/g, escapeHtml(definition.eyebrow))
     .replace(/__PAGE_HEADING__/g, escapeHtml(definition.heading))
     .replace(/__PAGE_DESCRIPTION__/g, escapeHtml(definition.description))
-    .replace(/__PAGE_NAV__/g, renderNav(definition.page))
+    .replace(/__PAGE_NAV__/g, renderNav(definition.page, i18n))
     .replace(/__PAGE_PANELS__/g, renderPanels(definition))
     .replace(/__PAGE_CONTENT__/g, content)
-    .replace(/__PAGE_SCRIPT__/g, definition.script);
-  return injectTopbarChrome(html);
+    .replace(/__PAGE_SCRIPT__/g, script);
+  return injectTopbarChrome(html, i18n);
 }
 
 function isBrowserPagePath(pathname: string): boolean {
@@ -255,7 +272,7 @@ export const handleUiRoutes: RouteHandler = async (context) => {
 
   const html = handlers.ui?.renderPage
     ? await handlers.ui.renderPage(page)
-    : await renderBuiltInPage(page);
+    : await renderBuiltInPage(page, url.searchParams.get('lang'));
   context.sendHtml(200, html);
   return true;
 };

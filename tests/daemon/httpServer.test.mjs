@@ -30,6 +30,7 @@ async function startServer(options = {}) {
     publishSkills: [],
     serviceExecutions: [],
     trace: [],
+    traceSessions: [],
     networkServices: [],
     networkBots: [],
     chatConversation: [],
@@ -276,6 +277,26 @@ async function startServer(options = {}) {
         }),
         '',
       ].join('\n'),
+      listSessions: async (input) => {
+        calls.traceSessions.push(input);
+        return commandSuccess({
+          sessions: [
+            {
+              sessionId: 'session-weather-1',
+              traceId: 'trace-weather-1',
+              role: 'provider',
+              state: 'completed',
+              updatedAt: 1776836284000,
+              localMetabotName: 'Alice Provider',
+              localMetabotGlobalMetaId: 'gm-local-alice',
+              peerGlobalMetaId: 'gm-remote-bob',
+              peerName: 'Bob Bot',
+              servicePinId: 'svc-weather',
+              serviceName: 'Weather Oracle',
+            },
+          ],
+        });
+      },
     },
     chat: {
       privateChatConversations: async (input) => {
@@ -2092,6 +2113,9 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /data-stat-success/);
   assert.match(html, /data-metabot-list/);
   assert.match(html, /data-act="add-metabot"/);
+  assert.match(html, /Open Public Bot Page/);
+  assert.match(html, /data-act="view-conversations"/);
+  assert.match(html, /\/ui\/conversations\?from=/);
   assert.ok(html.indexOf('data-act="open-wallet"') < html.indexOf('data-act="discover-runtimes"'));
   assert.ok(html.indexOf('data-act="open-delete"') < html.indexOf('data-act="discover-runtimes"'));
   assert.ok(html.indexOf('data-act="open-backup"') < html.indexOf('data-act="discover-runtimes"'));
@@ -2130,6 +2154,24 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.doesNotMatch(html, /specialist/i);
   assert.doesNotMatch(html, /preferred runtime/i);
   assert.doesNotMatch(html, /data-binding-list/);
+});
+
+test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/bot?lang=zh-CN`);
+  const html = await response.text();
+  const nav = extractTopbarNav(html);
+
+  assert.equal(response.status, 200);
+  assert.match(nav, /href="\/ui\/bot"[^>]*>机器人页面<\/a>/);
+  assert.match(nav, /href="\/ui\/conversations"[^>]*>对话<\/a>/);
+  assert.match(nav, /href="\/ui\/services"[^>]*>服务<\/a>/);
+  assert.match(nav, /href="\/ui\/settings"[^>]*>设置<\/a>/);
+  assert.match(html, /href="\/browser"[^>]*>打开浏览器<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/browser"/);
+  assert.doesNotMatch(html, /href="\/ui\/browser"[^>]*>打开浏览器<\/a>/);
 });
 
 test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe', async (t) => {
@@ -2694,6 +2736,7 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /Payment/);
   assert.match(html, /Runtime/);
   assert.match(html, /Rating/);
+  assert.match(html, /Trace/);
   assert.match(html, /Session/);
   assert.match(html, /\/api\/services\/owned/);
   assert.match(html, /\/api\/services\/owned\/orders/);
@@ -2716,6 +2759,8 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.match(html, /Services/);
   assert.match(html, /Published Services/);
   assert.match(html, /href="\/ui\/publish"[^>]*>Publish Service<\/a>/);
+  assert.match(html, /Advanced Trace/);
+  assert.match(html, /Trace Session/);
   assert.match(html, /data-my-services-list/);
   assert.match(html, /data-my-service-orders/);
   assert.match(html, /\/api\/services\/owned/);
@@ -2741,6 +2786,8 @@ test('GET /ui/conversations renders the private chat Conversations MVP workspace
   assert.match(html, /data-conversation-detail/);
   assert.match(html, /\/api\/chat\/private\/conversations/);
   assert.match(html, /\/api\/chat\/private\/messages/);
+  assert.match(html, /\/api\/trace\/sessions\?all=true&amp;limit=50|\/api\/trace\/sessions\?all=true&limit=50/);
+  assert.match(html, /Service conversation/);
   assert.match(nav, /href="\/ui\/conversations"[^>]*>Conversations(?: \*)?<\/a>/);
   assert.doesNotMatch(nav, /href="\/ui\/trace"/);
   assert.doesNotMatch(nav, /href="\/ui\/refund"/);
@@ -2765,6 +2812,12 @@ test('GET /ui/settings renders the Provider Console settings home', async (t) =>
   assert.match(html, /\/api\/config/);
   assert.match(html, /\/api\/llm\/runtimes/);
   assert.match(html, /\/api\/network\/sources/);
+  assert.match(html, /Language and Localization/);
+  assert.match(html, /data-language-section/);
+  assert.match(html, /data-language-select/);
+  assert.match(html, /<option value="auto"(?: selected)?>Auto<\/option>/);
+  assert.match(html, /<option value="en"(?: selected)?>English<\/option>/);
+  assert.match(html, /<option value="zh-CN"(?: selected)?>简体中文<\/option>/);
   assert.match(nav, /href="\/ui\/settings"[^>]*>Settings(?: \*)?<\/a>/);
 });
 

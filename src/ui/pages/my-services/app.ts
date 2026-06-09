@@ -10,6 +10,8 @@ export interface MyServicesPageDefinitionOptions {
   toolbarTitle?: string;
   toolbarLabel?: string;
   includePublishAction?: boolean;
+  orderTraceActionLabel?: string;
+  orderSessionActionLabel?: string;
 }
 
 export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionOptions = {}): LocalUiPageDefinition {
@@ -24,6 +26,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   const publishAction = options.includePublishAction
     ? '<a class="btn btn-primary" href="/ui/publish">Publish Service</a>'
     : '';
+  const orderTraceActionLabel = JSON.stringify(options.orderTraceActionLabel ?? 'Trace');
+  const orderSessionActionLabel = JSON.stringify(options.orderSessionActionLabel ?? 'Session');
   return {
     page,
     title,
@@ -173,6 +177,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     `,
     script: `(() => {
   ${buildMyServicesPageViewModelSource}
+  const ORDER_TRACE_ACTION_LABEL = ${orderTraceActionLabel};
+  const ORDER_SESSION_ACTION_LABEL = ${orderSessionActionLabel};
 
   const ICON_MAX_BYTES = 2 * 1024 * 1024;
   const ICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/svg+xml']);
@@ -353,8 +359,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       + '<div><span>Rating</span><p>' + escapeHtml(order.ratingLabel) + '</p>' + (order.ratingComment ? '<p>' + escapeHtml(order.ratingComment) + '</p>' : '') + (order.ratingPinId ? '<p class="mono-text">' + escapeHtml(order.ratingPinId) + '</p>' : '') + '</div>'
       + '<div><span>Runtime</span><p class="mono-text">' + escapeHtml(order.runtimeLabel) + '</p><p class="mono-text">' + escapeHtml(order.sessionLabel) + '</p></div>'
       + '<div class="order-actions">'
-      + '<a class="btn btn-sm" href="' + escapeHtml(order.traceHref) + '">Trace</a>'
-      + (order.sessionHref ? '<a class="btn btn-sm" href="' + escapeHtml(order.sessionHref) + '">Session</a>' : '')
+      + '<a class="btn btn-sm" href="' + escapeHtml(order.traceHref) + '">' + escapeHtml(ORDER_TRACE_ACTION_LABEL) + '</a>'
+      + (order.sessionHref ? '<a class="btn btn-sm" href="' + escapeHtml(order.sessionHref) + '">' + escapeHtml(ORDER_SESSION_ACTION_LABEL) + '</a>' : '')
       + '</div>'
       + '</article>'
     )).join('');
