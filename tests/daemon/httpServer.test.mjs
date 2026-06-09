@@ -2119,6 +2119,9 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /Open Public Bot Page/);
   assert.match(html, /data-act="view-conversations"/);
   assert.match(html, /\/ui\/conversations\?from=/);
+  assert.match(html, /Delete Bot/);
+  assert.match(html, /LLM Providers/);
+  assert.match(html, /Refresh Runtimes/);
   assert.ok(html.indexOf('data-act="open-wallet"') < html.indexOf('data-act="discover-runtimes"'));
   assert.ok(html.indexOf('data-act="open-delete"') < html.indexOf('data-act="discover-runtimes"'));
   assert.ok(html.indexOf('data-act="open-backup"') < html.indexOf('data-act="discover-runtimes"'));

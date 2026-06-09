@@ -809,6 +809,15 @@ test('bot page renders public identity tab with only public identity controls', 
   assert.doesNotMatch(root.innerHTML, /data-field="fallbackProvider"/);
   assert.doesNotMatch(root.innerHTML, /data-field="chatSkillSelect"/);
   assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
+  assert.doesNotMatch(root.innerHTML, /Wallet/);
+  assert.doesNotMatch(root.innerHTML, /Backup/);
+  assert.doesNotMatch(root.innerHTML, /Delete/);
+  assert.doesNotMatch(root.innerHTML, /Delete Bot/);
+  assert.doesNotMatch(root.innerHTML, /LLM Providers/);
+  assert.doesNotMatch(root.innerHTML, /View providers/);
+  assert.doesNotMatch(root.innerHTML, /Refresh Runtimes/);
+  assert.doesNotMatch(root.innerHTML, /Default Write Network/);
+  assert.doesNotMatch(root.innerHTML, /Execution History/);
 });
 
 test('bot page renders behavior tab with only behavior controls', () => {
@@ -1713,6 +1722,61 @@ test('bot page advanced tab loads sessions and selected profile config', async (
   assert.match(historyRoot.innerHTML, /session-alice/);
   assert.match(settingsRoot.innerHTML, /Default Write Network/);
   assert.match(settingsRoot.innerHTML, /<option value="opcat" selected>OPCAT<\/option>/);
+});
+
+test('bot page renderAdvancedTab renders advanced controls and lazily loads local data', async () => {
+  const settingsRoot = field();
+  const historyRoot = field();
+  const calls = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-settings-content]': settingsRoot,
+      '[data-execution-history-list]': historyRoot,
+    },
+    fetch: (url) => {
+      calls.push(String(url));
+      if (url === '/api/bot/sessions?slug=alice&limit=50') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              sessions: [
+                { metaBotSlug: 'alice', sessionId: 'session-alice', status: 'completed', prompt: 'hello' },
+              ],
+            },
+          }),
+        });
+      }
+      if (url === '/api/bot/profiles/alice/config') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: { chain: { defaultWriteNetwork: 'btc' } },
+          }),
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice' }];
+
+  assert.equal(typeof context.renderAdvancedTab, 'function');
+
+  context.renderAdvancedTab();
+
+  assert.match(settingsRoot.innerHTML, /Loading settings/);
+  await waitFor(() => calls.includes('/api/bot/profiles/alice/config'), 'advanced config load');
+  await waitFor(() => calls.includes('/api/bot/sessions?slug=alice&limit=50'), 'advanced sessions load');
+  await waitFor(() => context.state.sessions.length === 1, 'advanced session state update');
+
+  assert.match(settingsRoot.innerHTML, /Default Write Network/);
+  assert.match(settingsRoot.innerHTML, /<option value="btc" selected>BTC<\/option>/);
+  assert.match(historyRoot.innerHTML, /session-alice/);
 });
 
 test('bot page maps legacy settings deep links to advanced and loads selected profile config', async () => {

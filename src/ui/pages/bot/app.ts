@@ -1084,6 +1084,12 @@ function renderSettingsTab(){
   var save=q('[data-act="save-settings"]');if(save)save.addEventListener('click',saveSettings);
 }
 
+function renderAdvancedTab(){
+  renderSettingsTab();
+  loadSelectedProfileConfig();
+  loadSessions();
+}
+
 function toggleExecDetail(btn){
   var id=btn.getAttribute('data-detail');var row=document.getElementById(id);if(!row)return;
   var open=row.hasAttribute('hidden');
@@ -1103,7 +1109,7 @@ function switchTab(tab,silent){
   state.selectedTab=allowed[tab]?tab:'publicIdentity';
   qq('[data-tab]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab')===state.selectedTab)});
   qq('[data-tab-panel]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab-panel')===state.selectedTab)});
-  if(state.selectedTab==='advanced'){renderSettingsTab();loadSelectedProfileConfig();loadSessions()}
+  if(state.selectedTab==='advanced')renderAdvancedTab();
   else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
   else if(state.selectedTab==='behavior')renderBehaviorTab();
   else if(state.selectedTab==='chatSkills')renderChatSkillsTab();
