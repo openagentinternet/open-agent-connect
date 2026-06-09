@@ -112,6 +112,23 @@ body {
   border-color: var(--accent);
   background: var(--accent-hover);
 }
+.topbar-language-select {
+  flex-shrink: 0;
+  min-width: 86px;
+  height: 28px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0 8px;
+}
+.topbar-language-select:focus {
+  color: var(--text);
+  border-color: var(--accent);
+  outline: none;
+}
 
 /* ── Content area ── */
 .content {
@@ -230,6 +247,31 @@ body {
 }
 .btn-danger:hover { background: var(--red-dim); }
 .btn-sm { font-size: 11px; padding: 3px 10px; }
+
+.settings-language-control {
+  display: grid;
+  gap: 6px;
+  min-width: 132px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.settings-language-control select {
+  width: 100%;
+  min-width: 132px;
+  height: 30px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 0 8px;
+}
+.settings-language-control select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
 
 /* ── Card / Panel ── */
 .card {

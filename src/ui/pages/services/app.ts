@@ -11,5 +11,7 @@ export function buildServicesPageDefinition(): LocalUiPageDefinition {
     toolbarTitle: 'Services',
     toolbarLabel: 'Manage published local Bot services.',
     includePublishAction: true,
+    orderTraceActionLabel: 'Advanced Trace',
+    orderSessionActionLabel: 'Trace Session',
   });
 }
