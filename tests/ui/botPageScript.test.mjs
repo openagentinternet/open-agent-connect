@@ -341,9 +341,13 @@ test('bot page uses Simplified Chinese create validation and progress copy', () 
 
 test('bot page loads chat skill options for the selected bot and renders selected chips', async () => {
   const infoRoot = { innerHTML: '' };
+  const activeInfoPanel = {
+    getAttribute: (name) => (name === 'data-info-profile-slug' ? 'alice-bot' : null),
+  };
   const context = createBotScriptContext({
     elements: {
       '[data-info-content]': infoRoot,
+      '[data-info-profile-slug]': activeInfoPanel,
     },
     fetch: (url) => {
       assert.equal(url, '/api/services/skills?from=alice-bot');
@@ -474,6 +478,271 @@ test('bot page preserves info form drafts when chat skill controls rerender the 
   assert.match(root.innerHTML, /data-field="fallbackProvider" value="" data-provider-touched="1"/);
   assert.doesNotMatch(root.innerHTML, /Alice Saved/);
   assert.doesNotMatch(root.innerHTML, /Saved role/);
+});
+
+test('bot page renders public identity tab with only public identity controls', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': root,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice Bot',
+    globalMetaId: 'gm-alice',
+    bio: 'Writes code with the user.',
+    avatarDataUrl: 'data:image/png;base64,avatar',
+  }];
+
+  context.renderPublicIdentityTab();
+
+  assert.match(root.innerHTML, /Bot Name/);
+  assert.match(root.innerHTML, /Upload \/ Replace/);
+  assert.match(root.innerHTML, /data-act="upload-avatar"/);
+  assert.match(root.innerHTML, /data-act="remove-avatar"/);
+  assert.match(root.innerHTML, /Public Bio/);
+  assert.match(root.innerHTML, /Homepage/);
+  assert.match(root.innerHTML, /Default Bot Page renderer/);
+  assert.match(root.innerHTML, /data-act="upload-homepage"/);
+  assert.match(root.innerHTML, /Save Public Identity/);
+  assert.match(root.innerHTML, /Reset/);
+  assert.match(root.innerHTML, /data-field="name"/);
+  assert.match(root.innerHTML, /data-field="bio"/);
+  assert.doesNotMatch(root.innerHTML, /MetaApp/i);
+  assert.doesNotMatch(root.innerHTML, /PINID/i);
+  assert.doesNotMatch(root.innerHTML, /data-field="role"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="soul"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="goal"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="fallbackProvider"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="chatSkillSelect"/);
+  assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
+});
+
+test('bot page public identity tab is not replaced when chat skill options load', async () => {
+  const root = { innerHTML: '' };
+  let renderInfoCalls = 0;
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': root,
+    },
+    fetch: (url) => {
+      assert.equal(url, '/api/services/skills?from=alice');
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            skills: [
+              { skillName: 'weather.lookup', title: 'Weather Lookup' },
+            ],
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.selectedTab = 'publicIdentity';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice Bot',
+    bio: 'Writes code with the user.',
+    allowChatSkills: ['weather.lookup'],
+  }];
+  context.renderPublicIdentityTab();
+  context.renderInfoTab = () => {
+    renderInfoCalls += 1;
+    root.innerHTML = '<div data-field="role">Role</div><div data-field="primaryProvider">Primary Provider</div><div data-field="chatSkillSelect">Chat Allowed Skills</div>';
+  };
+
+  await context.loadChatSkillOptions('alice');
+
+  assert.equal(renderInfoCalls, 0);
+  assert.match(root.innerHTML, /Public Bio/);
+  assert.match(root.innerHTML, /Save Public Identity/);
+  assert.doesNotMatch(root.innerHTML, /data-field="role"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="chatSkillSelect"/);
+  assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
+});
+
+test('bot page savePublicIdentity sends only changed public identity fields', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice Updated'),
+    '[data-field="bio"]': field('Updated public bio.'),
+  };
+  let requestBody = null;
+  let successModal = null;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice',
+              name: 'Alice Updated',
+              bio: 'Updated public bio.',
+              avatarDataUrl: '',
+              role: 'Original role',
+              soul: 'Original soul',
+              goal: 'Original goal',
+              primaryProvider: 'codex',
+              fallbackProvider: 'openclaw',
+              allowChatSkills: ['weather.lookup'],
+            },
+            chainWrites: [],
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+    avatarDataUrl: 'data:image/png;base64,avatar',
+    role: 'Original role',
+    soul: 'Original soul',
+    goal: 'Original goal',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+    allowChatSkills: ['weather.lookup'],
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.state._pendingAvatar = '';
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderPublicIdentityTab = () => {};
+  context.showChainSuccessModal = (input) => { successModal = input; };
+
+  await context.savePublicIdentity();
+
+  assert.deepEqual(requestBody, {
+    name: 'Alice Updated',
+    bio: 'Updated public bio.',
+    avatarDataUrl: '',
+  });
+  for (const key of ['role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'providers', 'allowChatSkills']) {
+    assert.equal(Object.hasOwn(requestBody, key), false, `request body should omit ${key}`);
+  }
+  assert.equal(successModal.title, 'Profile Updated On-Chain');
+});
+
+test('bot page savePublicIdentity ignores stale UI updates after selection changes', async () => {
+  const response = deferred();
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice Updated'),
+    '[data-field="bio"]': field('Updated public bio.'),
+  };
+  let requestUrl = null;
+  let renderListCount = 0;
+  let renderHeroCount = 0;
+  let renderTabCount = 0;
+  let successModalCount = 0;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (url) => {
+      requestUrl = url;
+      return Promise.resolve({
+        ok: true,
+        json: () => response.promise,
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'bob';
+  context.state.profiles = [
+    { slug: 'alice', name: 'Alice', bio: 'Original public bio.' },
+    { slug: 'bob', name: 'Bob', bio: 'Bob public bio.' },
+  ];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderMetabotList = () => { renderListCount += 1; };
+  context.renderDetailHeader = () => { renderHeroCount += 1; };
+  context.renderPublicIdentityTab = () => { renderTabCount += 1; };
+  context.showChainSuccessModal = () => { successModalCount += 1; };
+
+  const save = context.savePublicIdentity();
+  context.state.originalProfile = context.state.profiles[1];
+  response.resolve({
+    ok: true,
+    data: {
+      profile: {
+        slug: 'alice',
+        name: 'Alice Updated',
+        bio: 'Updated public bio.',
+      },
+      chainWrites: [],
+    },
+  });
+
+  await save;
+
+  assert.equal(requestUrl, '/api/bot/profiles/alice');
+  assert.equal(context.state.selectedSlug, 'bob');
+  assert.equal(context.state.originalProfile.slug, 'bob');
+  assert.equal(renderListCount, 0);
+  assert.equal(renderHeroCount, 0);
+  assert.equal(renderTabCount, 0);
+  assert.equal(successModalCount, 0);
+});
+
+test('bot page homepage upload opens a default renderer placeholder modal', () => {
+  const context = createBotScriptContext();
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.openHomepageUploadPlaceholder();
+
+  const modal = context.document.querySelector('[data-modal-root]');
+  assert.match(modal.innerHTML, /Default Bot Page renderer/);
+  assert.match(modal.innerHTML, /homepage package upload will be available later/i);
+  assert.doesNotMatch(modal.innerHTML, /MetaApp/i);
+  assert.doesNotMatch(modal.innerHTML, /PINID/i);
+});
+
+test('bot page public identity reset reverts profile draft and clears pending avatar', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': root,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice Bot',
+    bio: 'Writes code with the user.',
+    avatarDataUrl: 'data:image/png;base64,current',
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.state._pendingAvatar = 'data:image/png;base64,draft';
+
+  context.resetPublicIdentity();
+
+  assert.equal(context.state._pendingAvatar, undefined);
+  assert.match(root.innerHTML, /value="Alice Bot"/);
+  assert.match(root.innerHTML, /Writes code with the user\./);
+  assert.match(root.innerHTML, /data:image\/png;base64,current/);
 });
 
 test('bot page saveInfo sends normalized allowChatSkills only after selected chips change', async () => {
@@ -812,7 +1081,7 @@ test('bot page defaults to the public identity tab after profiles load', async (
   assert.equal(publicIdentityTab.active, true);
   assert.equal(behaviorTab.active, false);
   assert.equal(advancedTab.active, false);
-  assert.match(infoRoot.innerHTML, /data-info-profile-slug="bob"/);
+  assert.match(infoRoot.innerHTML, /data-public-identity-profile-slug="bob"/);
   assert.equal(calls.includes('/api/bot/sessions?slug=alice&limit=50'), false);
 });
 

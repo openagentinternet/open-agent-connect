@@ -208,6 +208,10 @@ function sameChatSkillList(left,right){
   for(var i=0;i<left.length;i++){if(left[i]!==right[i])return false}
   return true;
 }
+function rerenderLegacyInfoForChatSkillLoad(slug){
+  var panel=q('[data-info-profile-slug]');
+  if(slug===state.selectedSlug&&panel&&panel.getAttribute&&panel.getAttribute('data-info-profile-slug')===slug)renderInfoTab();
+}
 function selectedChatSkills(profile){
   var slug=profile&&profile.slug||state.selectedSlug;
   if(slug&&Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,slug)){
@@ -228,7 +232,7 @@ function loadChatSkillOptions(slug){
   if(!slug)return Promise.resolve([]);
   state.chatSkillOptionsStatusBySlug[slug]='loading';
   state.chatSkillOptionsErrorBySlug[slug]='';
-  if(slug===state.selectedSlug&&state.selectedTab==='publicIdentity')renderInfoTab();
+  rerenderLegacyInfoForChatSkillLoad(slug);
   return api('/api/services/skills?from='+encodeURIComponent(slug)).then(function(r){
     var data=r&&r.data?r.data:r;
     var skills=Array.isArray(data&&data.skills)?data.skills:[];
@@ -245,13 +249,13 @@ function loadChatSkillOptions(slug){
     });
     state.chatSkillOptionsBySlug[slug]=rows;
     state.chatSkillOptionsStatusBySlug[slug]='loaded';
-    if(slug===state.selectedSlug&&state.selectedTab==='publicIdentity')renderInfoTab();
+    rerenderLegacyInfoForChatSkillLoad(slug);
     return rows;
   }).catch(function(error){
     state.chatSkillOptionsBySlug[slug]=[];
     state.chatSkillOptionsStatusBySlug[slug]='error';
     state.chatSkillOptionsErrorBySlug[slug]=error&&error.message?error.message:String(error||'Failed to load chat skills');
-    if(slug===state.selectedSlug&&state.selectedTab==='publicIdentity')renderInfoTab();
+    rerenderLegacyInfoForChatSkillLoad(slug);
     return [];
   });
 }
@@ -317,6 +321,15 @@ function currentInfoFormDraft(profile){
     primaryProviderTouched:infoProviderTouched('primaryProvider'),
     fallbackProvider:infoFieldValue('fallbackProvider',profile.fallbackProvider||''),
     fallbackProviderTouched:infoProviderTouched('fallbackProvider'),
+  };
+}
+function currentPublicIdentityDraft(profile){
+  if(!profile||!profile.slug)return null;
+  var panel=q('[data-public-identity-profile-slug]');
+  if(!panel||!panel.getAttribute||panel.getAttribute('data-public-identity-profile-slug')!==profile.slug)return null;
+  return {
+    name:infoFieldValue('name',profile.name||''),
+    bio:infoFieldValue('bio',profile.bio||''),
   };
 }
 
@@ -433,6 +446,40 @@ function renderInfoTab(options){
   focusBotManagementTarget();
 }
 
+function renderPublicIdentityTab(options){
+  options=options||{};
+  var profile=selectedProfile();var root=q('[data-info-content]');if(!root)return;
+  if(!profile){root.innerHTML='';return}
+  state.originalProfile=profile;
+  var draft=options.preserveDraft===false?null:currentPublicIdentityDraft(profile);
+  var nameValue=draft?draft.name:(profile.name||'');
+  var bioValue=draft?draft.bio:(profile.bio||'');
+  var avatar=state._pendingAvatar!==undefined?state._pendingAvatar:profile.avatarDataUrl;
+  root.innerHTML='<div class="info-edit-panel" data-public-identity-profile-slug="'+esc(profile.slug)+'">'+
+    '<div class="info-avatar-section">'+
+    '<div class="info-avatar-preview" data-avatar-preview>'+avatarMarkup({name:nameValue,avatarDataUrl:avatar},true)+'</div>'+
+    '<div class="info-avatar-actions">'+
+      '<button class="btn btn-sm" data-act="upload-avatar">Upload / Replace</button>'+
+      '<button class="btn btn-sm btn-danger" data-act="remove-avatar"'+(avatar?'':' hidden')+'>Remove</button>'+
+      '<input type="file" data-avatar-input accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
+      '<span class="save-status" data-avatar-status></span>'+
+    '</div></div>'+
+    '<div class="info-form-grid">'+
+      '<div class="field"><label for="bot-name">Bot Name</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
+      '<div class="field field-full"><label for="bot-bio">Public Bio</label><textarea id="bot-bio" data-field="bio">'+esc(bioValue)+'</textarea></div>'+
+      '<div class="field field-full"><label>Homepage</label><div class="homepage-row"><span>Default Bot Page renderer</span><button type="button" class="btn btn-sm" data-act="upload-homepage">Upload</button></div></div>'+
+    '</div>'+
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">Save Public Identity</button><button class="btn" data-act="reset-public-identity">Reset</button><span class="save-status" data-save-status></span></div></div>';
+  var input=q('[data-avatar-input]');
+  var upload=q('[data-act="upload-avatar"]');if(upload&&input)upload.addEventListener('click',function(){input.click()});
+  var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
+  if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleAvatarUpload(file)});
+  var homepage=q('[data-act="upload-homepage"]');if(homepage)homepage.addEventListener('click',openHomepageUploadPlaceholder);
+  var save=q('[data-act="save-public-identity"]');if(save)save.addEventListener('click',savePublicIdentity);
+  var reset=q('[data-act="reset-public-identity"]');if(reset)reset.addEventListener('click',resetPublicIdentity);
+  focusBotManagementTarget();
+}
+
 function renderAvatarPreview(dataUrl){
   var preview=q('[data-avatar-preview]');if(!preview)return;
   var profile=selectedProfile()||{};
@@ -517,6 +564,9 @@ function chainSuccessBodyMarkup(input){
 }
 function showChainSuccessModal(input){
   openDynamicModal(input.title,chainSuccessBodyMarkup(input),{boxClass:'modal-box-wide'});
+}
+function openHomepageUploadPlaceholder(){
+  openDynamicModal('Default Bot Page renderer','<div class="modal-body"><p class="modal-note">The current Bot uses the default Bot Page renderer. Homepage package upload will be available later.</p></div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">OK</button></div>');
 }
 function walletChainConfig(chain){return WALLET_CHAINS.find(function(row){return row.chain===chain})||WALLET_CHAINS[0]}
 function walletDisplayUnit(chain){return walletChainConfig(chain).displayUnit}
@@ -787,6 +837,45 @@ function saveInfo(){
   }).finally(function(){btn=q('[data-act="save-info"]');if(btn)btn.disabled=false});
 }
 
+function savePublicIdentity(){
+  var profile=state.originalProfile||selectedProfile();if(!profile||!state.selectedSlug)return;
+  var profileSlug=profile.slug||state.selectedSlug;
+  var status=q('[data-save-status]');var btn=q('[data-act="save-public-identity"]');
+  var payload={};
+  changedValue(payload,'name',(q('[data-field="name"]')||{}).value||'',profile.name||'');
+  changedValue(payload,'bio',(q('[data-field="bio"]')||{}).value||'',profile.bio||'');
+  if(state._pendingAvatar!==undefined)changedValue(payload,'avatarDataUrl',state._pendingAvatar,profile.avatarDataUrl||'');
+  if(!Object.keys(payload).length){if(status){status.textContent='No changes';status.className='save-status'}return}
+  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(btn)btn.disabled=true;
+  return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
+    var updated=r.data.profile;
+    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
+    if(state.selectedSlug!==profileSlug)return;
+    state.originalProfile=updated;
+    state._pendingAvatar=undefined;
+    renderMetabotList();
+    renderDetailHeader(updated);
+    renderPublicIdentityTab({preserveDraft:false});
+    status=q('[data-save-status]');if(status){status.textContent='On-chain update confirmed.';status.className='save-status success'}
+    showChainSuccessModal({
+      title:'Profile Updated On-Chain',
+      message:'Profile changes were written on-chain before local data was saved.',
+      profile:updated,
+      chainWrites:(r.data&&r.data.chainWrites)||[],
+    });
+  }).catch(function(error){
+    if(status){status.textContent=error.message;status.className='save-status error'}
+  }).finally(function(){btn=q('[data-act="save-public-identity"]');if(btn)btn.disabled=false});
+}
+
+function resetPublicIdentity(){
+  state._pendingAvatar=undefined;
+  var profile=selectedProfile();
+  state.originalProfile=profile;
+  renderPublicIdentityTab({preserveDraft:false});
+}
+
 function renderHistoryTab(){
   var tb=q('[data-execution-history-list]');if(!tb)return;
   var rows=state.sessions.filter(function(s){return s.metaBotSlug===state.selectedSlug});
@@ -856,7 +945,7 @@ function switchTab(tab,silent){
   qq('[data-tab]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab')===state.selectedTab)});
   qq('[data-tab-panel]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab-panel')===state.selectedTab)});
   if(state.selectedTab==='advanced'){renderSettingsTab();loadSelectedProfileConfig();loadSessions()}
-  else if(state.selectedTab==='publicIdentity')renderInfoTab();
+  else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
   else renderPlaceholderTab(state.selectedTab);
 }
 
