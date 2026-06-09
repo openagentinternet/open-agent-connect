@@ -612,6 +612,58 @@ test('bot page renders chat skills tab for private conversation replies only', a
   assert.doesNotMatch(root.innerHTML, /marketplace/i);
 });
 
+test('bot page renders services tab as entry links only for the selected profile', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-services-content]': root,
+    },
+    fetch: (url) => {
+      if (String(url).includes('/api/services/owned') || String(url).includes('/api/services/list')) {
+        throw new Error(`Services tab must not fetch service lists: ${url}`);
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice' }];
+
+  context.renderServicesTab();
+
+  assert.match(root.innerHTML, /Publish Service/);
+  assert.match(root.innerHTML, /Manage Services/);
+  assert.match(root.innerHTML, /href="\/ui\/publish\?from=alice"/);
+  assert.match(root.innerHTML, /href="\/ui\/services\?from=alice"/);
+  assert.doesNotMatch(root.innerHTML, /marketplace/i);
+  assert.doesNotMatch(root.innerHTML, /data-service-list/);
+});
+
+test('bot page renders disabled services entries without a selected profile', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-services-content]': root,
+    },
+    fetch: (url) => {
+      throw new Error(`Services tab must not fetch service lists: ${url}`);
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.renderServicesTab();
+
+  assert.match(root.innerHTML, /Publish Service/);
+  assert.match(root.innerHTML, /Manage Services/);
+  assert.match(root.innerHTML, /disabled/);
+  assert.doesNotMatch(root.innerHTML, /href="\/ui\/publish/);
+  assert.doesNotMatch(root.innerHTML, /href="\/ui\/services/);
+  assert.doesNotMatch(root.innerHTML, /marketplace/i);
+  assert.doesNotMatch(root.innerHTML, /data-service-list/);
+});
+
 test('bot page chat skill add and remove controls rerender chat skills tab', () => {
   const addButton = field();
   const removeButton = field();

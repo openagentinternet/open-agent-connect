@@ -556,6 +556,22 @@ function renderChatSkillsTab(){
   focusBotManagementTarget();
 }
 
+function renderServicesTab(){
+  var profile=selectedProfile();var root=q('[data-services-content]');if(!root)return;
+  if(!profile){
+    root.innerHTML='<div class="info-edit-panel">'+
+      '<div class="info-save-row"><button type="button" class="btn btn-primary" disabled>Publish Service</button><button type="button" class="btn" disabled>Manage Services</button></div>'+
+    '</div>';
+    focusBotManagementTarget();
+    return;
+  }
+  var from=encodeURIComponent(profile.slug||'');
+  root.innerHTML='<div class="info-edit-panel" data-services-profile-slug="'+esc(profile.slug)+'">'+
+    '<div class="info-save-row"><a class="btn btn-primary" href="/ui/publish?from='+esc(from)+'">Publish Service</a><a class="btn" href="/ui/services?from='+esc(from)+'">Manage Services</a></div>'+
+  '</div>';
+  focusBotManagementTarget();
+}
+
 function renderAvatarPreview(dataUrl){
   var preview=q('[data-avatar-preview]');if(!preview)return;
   var profile=selectedProfile()||{};
@@ -1091,6 +1107,7 @@ function switchTab(tab,silent){
   else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
   else if(state.selectedTab==='behavior')renderBehaviorTab();
   else if(state.selectedTab==='chatSkills')renderChatSkillsTab();
+  else if(state.selectedTab==='services')renderServicesTab();
   else renderPlaceholderTab(state.selectedTab);
 }
 
