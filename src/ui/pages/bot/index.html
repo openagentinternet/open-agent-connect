@@ -282,6 +282,95 @@
         flex-wrap: wrap;
         justify-content: flex-end;
       }
+      .bot-hero {
+        display: flex;
+        gap: 16px;
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+      .hero-avatar {
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        background: var(--surface2);
+        border: 1px solid var(--border2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--mono);
+        color: var(--dim);
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .hero-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .hero-main {
+        min-width: 0;
+        flex: 1;
+      }
+      .hero-title-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .hero-title-row h1 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.25;
+        letter-spacing: 0;
+        color: var(--text);
+      }
+      .live-indicator {
+        color: var(--green);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      .hero-summary {
+        margin: 8px 0 14px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .hero-meta {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .hero-meta-row {
+        display: grid;
+        grid-template-columns: 112px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        min-width: 0;
+      }
+      .hero-meta-row span {
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      .hero-meta-row code {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 5px 8px;
+        font-size: 11px;
+      }
+      .hero-actions,
+      .advanced-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
       .tab-bar {
         display: flex;
         border-bottom: 1px solid var(--border);
@@ -1013,6 +1102,21 @@
           width: 100%;
           justify-content: flex-start;
         }
+        .bot-shell {
+          height: auto;
+          min-height: 100vh;
+          overflow: visible;
+        }
+        .bot-workspace {
+          overflow: visible;
+        }
+        .bot-hero {
+          flex-direction: column;
+        }
+        .hero-meta-row {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
         .tab-content {
           padding: 16px;
         }
@@ -1049,30 +1153,10 @@
         <nav class="topbar-nav">__PAGE_NAV__</nav>
       </header>
 
-      <div class="bot-stats">
-        <div class="stat-card">
-          <div class="stat-label">Bots</div>
-          <div class="stat-value accent" data-stat-bots>-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Runtimes</div>
-          <div class="stat-value green" data-stat-runtimes>-</div>
-          <button class="stat-link" data-act="open-runtime-modal" type="button">View providers</button>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Executions</div>
-          <div class="stat-value" data-stat-executions>-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Success Rate</div>
-          <div class="stat-value" data-stat-success>-</div>
-        </div>
-      </div>
-
       <main class="bot-workspace">
         <aside class="metabot-panel" aria-label="Bot list">
           <div class="metabot-panel-header">
-            <span class="metabot-panel-title">Bots</span>
+            <span class="metabot-panel-title">Local Bots</span>
             <span class="metabot-panel-count" data-metabot-count>0</span>
           </div>
           <div class="metabot-list-scroll">
@@ -1083,36 +1167,72 @@
             </div>
           </div>
           <div class="metabot-panel-footer">
-            <button class="btn btn-primary" data-act="add-metabot" data-i18n-key="bot.addBot">+ Add Bot</button>
+            <button class="btn btn-primary" data-act="add-metabot" data-i18n-key="bot.addBot">Create Bot</button>
           </div>
         </aside>
 
         <section class="detail-panel" aria-label="Bot detail">
-          <div class="detail-header" data-detail-header hidden>
-            <div class="metabot-avatar" data-detail-avatar>MB</div>
-            <div class="detail-title">
-              <strong data-detail-name>-</strong>
-              <span data-detail-id>-</span>
+          <section class="bot-hero" data-bot-hero hidden>
+            <div class="hero-avatar" data-hero-avatar>MB</div>
+            <div class="hero-main">
+              <div class="hero-title-row">
+                <h1 data-hero-name>-</h1>
+                <span class="live-indicator" data-live-indicator>Live</span>
+              </div>
+              <p class="hero-summary" data-hero-summary>A public Bot Page for identity, messaging, and service entry points.</p>
+              <div class="hero-meta">
+                <div class="hero-meta-row">
+                  <span>GlobalMetaID</span>
+                  <code data-hero-global-meta-id>-</code>
+                  <button class="btn btn-sm" type="button" data-copy-global-meta-id>Copy</button>
+                </div>
+                <div class="hero-meta-row">
+                  <span>Bot URI</span>
+                  <code data-hero-bot-uri>metaid://-</code>
+                  <button class="btn btn-sm" type="button" data-copy-bot-uri disabled>Copy</button>
+                </div>
+              </div>
+              <div class="hero-actions">
+                <button class="btn btn-sm" data-act="view-bot-page">Open Public Bot Page</button>
+                <button class="btn btn-sm" data-act="view-conversations">View Conversations</button>
+              </div>
             </div>
-            <div class="detail-actions">
-              <button class="btn btn-sm" data-act="view-bot-page">Open Public Bot Page</button>
-              <button class="btn btn-sm" data-act="view-conversations">View Conversations</button>
-              <button class="btn btn-sm" data-act="open-wallet">Wallet</button>
-              <button class="btn btn-sm btn-danger" data-act="open-delete">Delete</button>
-              <button class="btn btn-sm" data-act="open-backup">Backup</button>
-              <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes">Refresh Runtimes</button>
-            </div>
-          </div>
+          </section>
           <div class="tab-bar" data-tab-bar hidden>
-            <button class="tab-btn active" data-tab="info">Basic Info</button>
-            <button class="tab-btn" data-tab="history">Execution History</button>
-            <button class="tab-btn" data-tab="settings">Settings</button>
+            <button class="tab-btn active" data-tab="publicIdentity">Public Identity</button>
+            <button class="tab-btn" data-tab="behavior">Behavior</button>
+            <button class="tab-btn" data-tab="chatSkills">Chat Skills</button>
+            <button class="tab-btn" data-tab="services">Services</button>
+            <button class="tab-btn" data-tab="advanced">Advanced</button>
           </div>
           <div class="tab-content" data-tab-content hidden>
-            <div class="tab-panel active" data-tab-panel="info">
+            <div class="tab-panel active" data-tab-panel="publicIdentity">
               <div data-info-content></div>
             </div>
-            <div class="tab-panel" data-tab-panel="history">
+            <div class="tab-panel" data-tab-panel="behavior">
+              <div data-behavior-content>
+                <div class="session-empty"><p>Behavior controls will be available here.</p></div>
+              </div>
+            </div>
+            <div class="tab-panel" data-tab-panel="chatSkills">
+              <div data-chat-skills-content>
+                <div class="session-empty"><p>Chat skill controls will be available here.</p></div>
+              </div>
+            </div>
+            <div class="tab-panel" data-tab-panel="services">
+              <div data-services-content>
+                <div class="session-empty"><p>Service publishing entries will be available here.</p></div>
+              </div>
+            </div>
+            <div class="tab-panel" data-tab-panel="advanced">
+              <div class="advanced-actions">
+                <button class="btn btn-sm" data-act="open-wallet">Wallet</button>
+                <button class="btn btn-sm btn-danger" data-act="open-delete">Delete</button>
+                <button class="btn btn-sm" data-act="open-backup">Backup</button>
+                <button class="btn btn-sm" data-act="open-runtime-modal" type="button">View providers</button>
+                <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes">Refresh Runtimes</button>
+              </div>
+              <div data-settings-content data-default-write-network="mvc"></div>
               <div class="history-scroll">
                 <div class="table-wrap">
                   <table class="data-table exec-table">
@@ -1135,9 +1255,6 @@
                   </table>
                 </div>
               </div>
-            </div>
-            <div class="tab-panel" data-tab-panel="settings">
-              <div data-settings-content data-default-write-network="mvc"></div>
             </div>
           </div>
           <div class="detail-empty" data-detail-empty>

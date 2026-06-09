@@ -734,34 +734,41 @@ test('bot page opens the creation modal after initial load when mode=create is r
   assert.doesNotMatch(modal.innerHTML, /data-field="goal"/);
 });
 
-test('bot page deep link selects requested profile and info tab after profiles load', async () => {
-  const infoTab = tabElement('info');
-  const historyTab = tabElement('history');
-  const infoPanel = tabElement('info');
-  const historyPanel = tabElement('history');
+test('bot page defaults to the public identity tab after profiles load', async () => {
+  const publicIdentityTab = tabElement('publicIdentity');
+  const behaviorTab = tabElement('behavior');
+  const chatSkillsTab = tabElement('chatSkills');
+  const servicesTab = tabElement('services');
+  const advancedTab = tabElement('advanced');
+  const publicIdentityPanel = tabElement('publicIdentity');
+  const behaviorPanel = tabElement('behavior');
+  const chatSkillsPanel = tabElement('chatSkills');
+  const servicesPanel = tabElement('services');
+  const advancedPanel = tabElement('advanced');
   const infoRoot = { innerHTML: '' };
-  const chatSelect = field();
   const calls = [];
   const context = createBotScriptContext({
     elements: {
       '[data-metabot-list]': field(),
       '[data-metabot-count]': field(),
-      '[data-detail-header]': field(),
-      '[data-detail-avatar]': field(),
-      '[data-detail-name]': field(),
-      '[data-detail-id]': field(),
+      '[data-bot-hero]': field(),
+      '[data-hero-avatar]': field(),
+      '[data-hero-name]': field(),
+      '[data-hero-summary]': field(),
+      '[data-hero-global-meta-id]': field(),
+      '[data-hero-bot-uri]': field(),
+      '[data-live-indicator]': field(),
       '[data-detail-empty]': field(),
       '[data-tab-bar]': field(),
       '[data-tab-content]': field(),
       '[data-info-content]': infoRoot,
-      '[data-field="chatSkillSelect"]': chatSelect,
       '[data-execution-history-list]': { innerHTML: '' },
     },
     globals: {
       URLSearchParams,
       window: {
         location: {
-          search: '?profile=alice&tab=info&focus=chat',
+          search: '',
         },
       },
     },
@@ -781,7 +788,7 @@ test('bot page deep link selects requested profile and info tab after profiles l
           }),
         });
       }
-      if (url === '/api/services/skills?from=alice') {
+      if (url === '/api/services/skills?from=bob') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
@@ -791,8 +798,8 @@ test('bot page deep link selects requested profile and info tab after profiles l
     },
   });
   context.document.querySelectorAll = (selector) => {
-    if (selector === '[data-tab]') return [infoTab, historyTab];
-    if (selector === '[data-tab-panel]') return [infoPanel, historyPanel];
+    if (selector === '[data-tab]') return [publicIdentityTab, behaviorTab, chatSkillsTab, servicesTab, advancedTab];
+    if (selector === '[data-tab-panel]') return [publicIdentityPanel, behaviorPanel, chatSkillsPanel, servicesPanel, advancedPanel];
     return [];
   };
 
@@ -800,31 +807,39 @@ test('bot page deep link selects requested profile and info tab after profiles l
 
   await context.loadProfiles();
 
-  assert.equal(context.state.selectedSlug, 'alice');
-  assert.equal(context.state.selectedTab, 'info');
-  assert.equal(infoTab.active, true);
-  assert.equal(historyTab.active, false);
-  assert.match(infoRoot.innerHTML, /data-info-profile-slug="alice"/);
-  assert.equal(chatSelect.focused, true);
-  assert.equal(chatSelect.scrolled, true);
+  assert.equal(context.state.selectedSlug, 'bob');
+  assert.equal(context.state.selectedTab, 'publicIdentity');
+  assert.equal(publicIdentityTab.active, true);
+  assert.equal(behaviorTab.active, false);
+  assert.equal(advancedTab.active, false);
+  assert.match(infoRoot.innerHTML, /data-info-profile-slug="bob"/);
   assert.equal(calls.includes('/api/bot/sessions?slug=alice&limit=50'), false);
 });
 
-test('bot page deep link selects requested profile and history tab before loading sessions', async () => {
-  const infoTab = tabElement('info');
-  const historyTab = tabElement('history');
-  const infoPanel = tabElement('info');
-  const historyPanel = tabElement('history');
+test('bot page deep link maps legacy history messages links to advanced before loading sessions', async () => {
+  const publicIdentityTab = tabElement('publicIdentity');
+  const behaviorTab = tabElement('behavior');
+  const chatSkillsTab = tabElement('chatSkills');
+  const servicesTab = tabElement('services');
+  const advancedTab = tabElement('advanced');
+  const publicIdentityPanel = tabElement('publicIdentity');
+  const behaviorPanel = tabElement('behavior');
+  const chatSkillsPanel = tabElement('chatSkills');
+  const servicesPanel = tabElement('services');
+  const advancedPanel = tabElement('advanced');
   const historyRoot = field();
   const calls = [];
   const context = createBotScriptContext({
     elements: {
       '[data-metabot-list]': field(),
       '[data-metabot-count]': field(),
-      '[data-detail-header]': field(),
-      '[data-detail-avatar]': field(),
-      '[data-detail-name]': field(),
-      '[data-detail-id]': field(),
+      '[data-bot-hero]': field(),
+      '[data-hero-avatar]': field(),
+      '[data-hero-name]': field(),
+      '[data-hero-summary]': field(),
+      '[data-hero-global-meta-id]': field(),
+      '[data-hero-bot-uri]': field(),
+      '[data-live-indicator]': field(),
       '[data-detail-empty]': field(),
       '[data-tab-bar]': field(),
       '[data-tab-content]': field(),
@@ -868,12 +883,27 @@ test('bot page deep link selects requested profile and history tab before loadin
           }),
         });
       }
+      if (url === '/api/services/skills?from=alice') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
+        });
+      }
+      if (url === '/api/bot/profiles/alice/config') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: { chain: { defaultWriteNetwork: 'mvc' } },
+          }),
+        });
+      }
       throw new Error(`Unexpected fetch ${url}`);
     },
   });
   context.document.querySelectorAll = (selector) => {
-    if (selector === '[data-tab]') return [infoTab, historyTab];
-    if (selector === '[data-tab-panel]') return [infoPanel, historyPanel];
+    if (selector === '[data-tab]') return [publicIdentityTab, behaviorTab, chatSkillsTab, servicesTab, advancedTab];
+    if (selector === '[data-tab-panel]') return [publicIdentityPanel, behaviorPanel, chatSkillsPanel, servicesPanel, advancedPanel];
     return [];
   };
 
@@ -884,20 +914,188 @@ test('bot page deep link selects requested profile and history tab before loadin
   await waitFor(() => context.state.sessions.length === 1, 'Alice history state update');
 
   assert.equal(context.state.selectedSlug, 'alice');
-  assert.equal(context.state.selectedTab, 'history');
-  assert.equal(infoTab.active, false);
-  assert.equal(historyTab.active, true);
+  assert.equal(context.state.selectedTab, 'advanced');
+  assert.equal(publicIdentityTab.active, false);
+  assert.equal(advancedTab.active, true);
   assert.deepEqual(context.state.sessions.map((session) => session.sessionId), ['session-alice']);
   assert.match(historyRoot.innerHTML, /session-alice/);
   assert.equal(historyRoot.focused, true);
   assert.equal(historyRoot.scrolled, true);
 });
 
-test('bot page deep link focus profile activates profile identity field', async () => {
-  const infoTab = tabElement('info');
-  const historyTab = tabElement('history');
-  const infoPanel = tabElement('info');
-  const historyPanel = tabElement('history');
+test('bot page advanced tab loads sessions and selected profile config', async () => {
+  const publicIdentityTab = tabElement('publicIdentity');
+  const behaviorTab = tabElement('behavior');
+  const chatSkillsTab = tabElement('chatSkills');
+  const servicesTab = tabElement('services');
+  const advancedTab = tabElement('advanced');
+  const publicIdentityPanel = tabElement('publicIdentity');
+  const behaviorPanel = tabElement('behavior');
+  const chatSkillsPanel = tabElement('chatSkills');
+  const servicesPanel = tabElement('services');
+  const advancedPanel = tabElement('advanced');
+  const settingsRoot = field();
+  const historyRoot = field();
+  const calls = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-settings-content]': settingsRoot,
+      '[data-execution-history-list]': historyRoot,
+    },
+    fetch: (url) => {
+      calls.push(String(url));
+      if (url === '/api/bot/sessions?slug=alice&limit=50') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              sessions: [
+                { metaBotSlug: 'alice', sessionId: 'session-alice', status: 'completed', prompt: 'hello' },
+              ],
+            },
+          }),
+        });
+      }
+      if (url === '/api/bot/profiles/alice/config') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: { chain: { defaultWriteNetwork: 'opcat' } },
+          }),
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+  context.document.querySelectorAll = (selector) => {
+    if (selector === '[data-tab]') return [publicIdentityTab, behaviorTab, chatSkillsTab, servicesTab, advancedTab];
+    if (selector === '[data-tab-panel]') return [publicIdentityPanel, behaviorPanel, chatSkillsPanel, servicesPanel, advancedPanel];
+    return [];
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice' }];
+
+  context.switchTab('advanced');
+
+  await waitFor(() => calls.includes('/api/bot/sessions?slug=alice&limit=50'), 'advanced sessions load');
+  await waitFor(() => calls.includes('/api/bot/profiles/alice/config'), 'advanced config load');
+  await waitFor(() => context.state.sessions.length === 1, 'advanced session state update');
+
+  assert.equal(context.state.selectedTab, 'advanced');
+  assert.equal(advancedTab.active, true);
+  assert.match(historyRoot.innerHTML, /session-alice/);
+  assert.match(settingsRoot.innerHTML, /Default Write Network/);
+  assert.match(settingsRoot.innerHTML, /<option value="opcat" selected>OPCAT<\/option>/);
+});
+
+test('bot page maps legacy settings deep links to advanced and loads selected profile config', async () => {
+  const publicIdentityTab = tabElement('publicIdentity');
+  const behaviorTab = tabElement('behavior');
+  const chatSkillsTab = tabElement('chatSkills');
+  const servicesTab = tabElement('services');
+  const advancedTab = tabElement('advanced');
+  const publicIdentityPanel = tabElement('publicIdentity');
+  const behaviorPanel = tabElement('behavior');
+  const chatSkillsPanel = tabElement('chatSkills');
+  const servicesPanel = tabElement('services');
+  const advancedPanel = tabElement('advanced');
+  const settingsRoot = field();
+  const historyRoot = field();
+  const calls = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': field(),
+      '[data-metabot-count]': field(),
+      '[data-bot-hero]': field(),
+      '[data-hero-avatar]': field(),
+      '[data-hero-name]': field(),
+      '[data-hero-summary]': field(),
+      '[data-hero-global-meta-id]': field(),
+      '[data-hero-bot-uri]': field(),
+      '[data-live-indicator]': field(),
+      '[data-detail-empty]': field(),
+      '[data-tab-bar]': field(),
+      '[data-tab-content]': field(),
+      '[data-info-content]': { innerHTML: '' },
+      '[data-settings-content]': settingsRoot,
+      '[data-execution-history-list]': historyRoot,
+    },
+    globals: {
+      URLSearchParams,
+      window: {
+        location: {
+          search: '?profile=alice&tab=settings',
+        },
+      },
+    },
+    fetch: (url) => {
+      calls.push(String(url));
+      if (url === '/api/bot/profiles') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              profiles: [
+                { slug: 'bob', name: 'Bob', globalMetaId: 'gm-bob', allowChatSkills: [] },
+                { slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice', allowChatSkills: [] },
+              ],
+            },
+          }),
+        });
+      }
+      if (url === '/api/bot/sessions?slug=alice&limit=50') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { sessions: [] } }),
+        });
+      }
+      if (url === '/api/bot/profiles/alice/config') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: { chain: { defaultWriteNetwork: 'doge' } },
+          }),
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+  context.document.querySelectorAll = (selector) => {
+    if (selector === '[data-tab]') return [publicIdentityTab, behaviorTab, chatSkillsTab, servicesTab, advancedTab];
+    if (selector === '[data-tab-panel]') return [publicIdentityPanel, behaviorPanel, chatSkillsPanel, servicesPanel, advancedPanel];
+    return [];
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  await context.loadProfiles();
+  await waitFor(() => calls.includes('/api/bot/profiles/alice/config'), 'legacy settings config load');
+  await waitFor(() => /Default Write Network/.test(settingsRoot.innerHTML), 'legacy settings render');
+
+  assert.equal(context.state.selectedSlug, 'alice');
+  assert.equal(context.state.selectedTab, 'advanced');
+  assert.equal(advancedTab.active, true);
+  assert.match(settingsRoot.innerHTML, /Default Write Network/);
+  assert.match(settingsRoot.innerHTML, /<option value="doge" selected>DOGE<\/option>/);
+});
+
+test('bot page deep link maps legacy info profile links to public identity', async () => {
+  const publicIdentityTab = tabElement('publicIdentity');
+  const behaviorTab = tabElement('behavior');
+  const chatSkillsTab = tabElement('chatSkills');
+  const servicesTab = tabElement('services');
+  const advancedTab = tabElement('advanced');
+  const publicIdentityPanel = tabElement('publicIdentity');
+  const behaviorPanel = tabElement('behavior');
+  const chatSkillsPanel = tabElement('chatSkills');
+  const servicesPanel = tabElement('services');
+  const advancedPanel = tabElement('advanced');
   const infoRoot = { innerHTML: '' };
   const nameField = field('Alice');
   const calls = [];
@@ -905,10 +1103,13 @@ test('bot page deep link focus profile activates profile identity field', async 
     elements: {
       '[data-metabot-list]': field(),
       '[data-metabot-count]': field(),
-      '[data-detail-header]': field(),
-      '[data-detail-avatar]': field(),
-      '[data-detail-name]': field(),
-      '[data-detail-id]': field(),
+      '[data-bot-hero]': field(),
+      '[data-hero-avatar]': field(),
+      '[data-hero-name]': field(),
+      '[data-hero-summary]': field(),
+      '[data-hero-global-meta-id]': field(),
+      '[data-hero-bot-uri]': field(),
+      '[data-live-indicator]': field(),
       '[data-detail-empty]': field(),
       '[data-tab-bar]': field(),
       '[data-tab-content]': field(),
@@ -949,8 +1150,8 @@ test('bot page deep link focus profile activates profile identity field', async 
     },
   });
   context.document.querySelectorAll = (selector) => {
-    if (selector === '[data-tab]') return [infoTab, historyTab];
-    if (selector === '[data-tab-panel]') return [infoPanel, historyPanel];
+    if (selector === '[data-tab]') return [publicIdentityTab, behaviorTab, chatSkillsTab, servicesTab, advancedTab];
+    if (selector === '[data-tab-panel]') return [publicIdentityPanel, behaviorPanel, chatSkillsPanel, servicesPanel, advancedPanel];
     return [];
   };
 
@@ -959,17 +1160,93 @@ test('bot page deep link focus profile activates profile identity field', async 
   await context.loadProfiles();
 
   assert.equal(context.state.selectedSlug, 'alice');
-  assert.equal(context.state.selectedTab, 'info');
-  assert.equal(infoTab.active, true);
+  assert.equal(context.state.selectedTab, 'publicIdentity');
+  assert.equal(publicIdentityTab.active, true);
   assert.equal(nameField.focused, true);
   assert.equal(nameField.scrolled, true);
 });
 
+test('bot page deep link maps legacy info chat links to chat skills', async () => {
+  const publicIdentityTab = tabElement('publicIdentity');
+  const behaviorTab = tabElement('behavior');
+  const chatSkillsTab = tabElement('chatSkills');
+  const servicesTab = tabElement('services');
+  const advancedTab = tabElement('advanced');
+  const publicIdentityPanel = tabElement('publicIdentity');
+  const behaviorPanel = tabElement('behavior');
+  const chatSkillsPanel = tabElement('chatSkills');
+  const servicesPanel = tabElement('services');
+  const advancedPanel = tabElement('advanced');
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': field(),
+      '[data-metabot-count]': field(),
+      '[data-bot-hero]': field(),
+      '[data-hero-avatar]': field(),
+      '[data-hero-name]': field(),
+      '[data-hero-summary]': field(),
+      '[data-hero-global-meta-id]': field(),
+      '[data-hero-bot-uri]': field(),
+      '[data-live-indicator]': field(),
+      '[data-detail-empty]': field(),
+      '[data-tab-bar]': field(),
+      '[data-tab-content]': field(),
+      '[data-info-content]': { innerHTML: '' },
+      '[data-chat-skills-content]': { innerHTML: '' },
+      '[data-execution-history-list]': field(),
+    },
+    globals: {
+      URLSearchParams,
+      window: {
+        location: {
+          search: '?profile=alice&tab=info&focus=chat',
+        },
+      },
+    },
+    fetch: (url) => {
+      if (url === '/api/bot/profiles') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              profiles: [
+                { slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice', allowChatSkills: [] },
+              ],
+            },
+          }),
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+  });
+  context.document.querySelectorAll = (selector) => {
+    if (selector === '[data-tab]') return [publicIdentityTab, behaviorTab, chatSkillsTab, servicesTab, advancedTab];
+    if (selector === '[data-tab-panel]') return [publicIdentityPanel, behaviorPanel, chatSkillsPanel, servicesPanel, advancedPanel];
+    return [];
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  await context.loadProfiles();
+
+  assert.equal(context.state.selectedSlug, 'alice');
+  assert.equal(context.state.selectedTab, 'chatSkills');
+  assert.equal(publicIdentityTab.active, false);
+  assert.equal(chatSkillsTab.active, true);
+});
+
 test('bot page deep link focus is consumed after the first successful activation', async () => {
-  const infoTab = tabElement('info');
-  const historyTab = tabElement('history');
-  const infoPanel = tabElement('info');
-  const historyPanel = tabElement('history');
+  const publicIdentityTab = tabElement('publicIdentity');
+  const behaviorTab = tabElement('behavior');
+  const chatSkillsTab = tabElement('chatSkills');
+  const servicesTab = tabElement('services');
+  const advancedTab = tabElement('advanced');
+  const publicIdentityPanel = tabElement('publicIdentity');
+  const behaviorPanel = tabElement('behavior');
+  const chatSkillsPanel = tabElement('chatSkills');
+  const servicesPanel = tabElement('services');
+  const advancedPanel = tabElement('advanced');
   const infoRoot = { innerHTML: '' };
   const nameField = field('Alice');
   let focusCount = 0;
@@ -987,10 +1264,13 @@ test('bot page deep link focus is consumed after the first successful activation
     elements: {
       '[data-metabot-list]': field(),
       '[data-metabot-count]': field(),
-      '[data-detail-header]': field(),
-      '[data-detail-avatar]': field(),
-      '[data-detail-name]': field(),
-      '[data-detail-id]': field(),
+      '[data-bot-hero]': field(),
+      '[data-hero-avatar]': field(),
+      '[data-hero-name]': field(),
+      '[data-hero-summary]': field(),
+      '[data-hero-global-meta-id]': field(),
+      '[data-hero-bot-uri]': field(),
+      '[data-live-indicator]': field(),
       '[data-detail-empty]': field(),
       '[data-tab-bar]': field(),
       '[data-tab-content]': field(),
@@ -1031,8 +1311,8 @@ test('bot page deep link focus is consumed after the first successful activation
     },
   });
   context.document.querySelectorAll = (selector) => {
-    if (selector === '[data-tab]') return [infoTab, historyTab];
-    if (selector === '[data-tab-panel]') return [infoPanel, historyPanel];
+    if (selector === '[data-tab]') return [publicIdentityTab, behaviorTab, chatSkillsTab, servicesTab, advancedTab];
+    if (selector === '[data-tab-panel]') return [publicIdentityPanel, behaviorPanel, chatSkillsPanel, servicesPanel, advancedPanel];
     return [];
   };
 
@@ -1043,7 +1323,7 @@ test('bot page deep link focus is consumed after the first successful activation
   await context.loadRuntimes();
 
   assert.equal(context.state.selectedSlug, 'alice');
-  assert.equal(context.state.selectedTab, 'info');
+  assert.equal(context.state.selectedTab, 'publicIdentity');
   assert.equal(focusCount, 1);
   assert.equal(scrollCount, 1);
   assert.equal(calls.includes('/api/services/skills?from=alice'), false);
