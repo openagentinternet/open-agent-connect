@@ -383,6 +383,47 @@ test('OAC browser host adapter maps service trusted actions to OAC service input
   }]);
 });
 
+test('OAC browser host adapter preserves waiting command states for runtime trusted actions', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-waiting-state');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Waiting Action Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1waitingaction',
+    mvcAddress: '18WaitingAction',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    serviceCall: async () => ({
+      ok: false,
+      state: 'waiting',
+      code: 'order_sent_awaiting_provider',
+      message: 'Order sent to provider. Waiting for response...',
+      pollAfterMs: 3000,
+      data: { traceId: 'trace-waiting' },
+    }),
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1target',
+    kind: 'service-call',
+    payload: {
+      servicePinId: 'service-pin',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Run this task',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'waiting');
+  assert.equal(result.code, 'order_sent_awaiting_provider');
+  assert.equal(result.data.traceId, 'trace-waiting');
+});
+
 test('OAC browser host adapter maps owner trusted actions to Bot management routes', async (t) => {
   const profileHome = await createProfileHome('oac-browser-adapter-owner-actions');
   t.after(async () => cleanupProfileHome(profileHome));
