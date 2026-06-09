@@ -16,20 +16,6 @@ function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
 var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingCreateAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
-var launchCopy={
-  'zh-CN':{
-    noBotsYet:'还没有 Bot',
-    addBot:'创建 Bot',
-    uploadAvatar:'上传头像',
-    removeAvatar:'移除',
-    name:'Bot 名称',
-    bio:'简介',
-    cancel:'取消',
-    create:'创建',
-    nameRequired:'请输入 Bot 名称',
-    creating:'正在创建...'
-  }
-};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -40,8 +26,7 @@ var WALLET_CHAINS=[
 function api(url,opts){return fetch(url,opts).then(function(r){return r.json().catch(function(){return{ok:false,message:String(r.status)}}).then(function(body){if(!r.ok||body.ok===false){throw new Error(body.message||body.code||String(r.status))}return body})})}
 function fmtTime(t){if(!t)return'-';var d=new Date(t);if(Number.isNaN(d.getTime()))return'-';return d.toLocaleString()}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){if(c==='&')return'&amp;';if(c==='<')return'&lt;';if(c==='>')return'&gt;';if(c==='"')return'&quot;';return'&#39;'})}
-function uiLanguage(){try{if(typeof window!=='undefined'&&window.__oacLocalUiI18n&&typeof window.__oacLocalUiI18n.getLanguage==='function')return window.__oacLocalUiI18n.getLanguage();if(typeof document!=='undefined'&&document.documentElement&&document.documentElement.lang)return document.documentElement.lang}catch(error){}return'en'}
-function uiText(key,fallback){var lang=String(uiLanguage()||'').toLowerCase();var dict=lang==='zh-cn'?launchCopy['zh-CN']:null;return dict&&dict[key]?dict[key]:fallback}
+function uiText(key,fallback,replacements){try{if(typeof window!=='undefined'&&window.__oacLocalUiI18n&&typeof window.__oacLocalUiI18n.t==='function'){var text=window.__oacLocalUiI18n.t(key,replacements||{});if(text&&text!==key)return text}}catch(error){}var out=String(fallback==null?'':fallback);Object.keys(replacements||{}).forEach(function(name){out=out.split('{'+name+'}').join(String(replacements[name]))});return out}
 function statusPill(s){var m={completed:'online',running:'active',starting:'active',failed:'offline',timeout:'offline',cancelled:'offline'};var c=m[s]||'offline';return'<span class="status-pill status-'+c+'"><span class="status-dot"></span>'+esc(s||'unknown')+'</span>'}
 function shortText(v,n){n=n||120;v=String(v==null?'':v).replace(/\s+/g,' ').trim();if(!v)return'-';return v.length>n?v.slice(0,Math.max(0,n-3))+'...':v}
 function clampBlock(v){v=String(v==null?'':v).trim();if(!v)return'-';return v.length>700?v.slice(0,700)+'...':v}
@@ -50,8 +35,8 @@ function resultSummary(s){if(!s||!s.result)return'-';if(s.result.output)return s
 function runtimeLabel(r){var name=r.displayName||r.provider||r.id||'-';var bits=[name];if(r.health)bits.push(r.health);if(r.version)bits.push('v'+r.version);return bits.join(' / ')}
 function shortId(v){v=String(v||'');if(!v)return'-';return v.length>18?v.slice(0,12)+'...'+v.slice(-4):v}
 function botBrowserPath(globalMetaId){return '/browser/metaid/'+encodeURIComponent(String(globalMetaId||'').trim())}
-function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast('Bot Page is unavailable until Global MetaID is ready');return}window.location.href=botBrowserPath(profile.globalMetaId)}
-function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.slug){showToast('Select a Bot before opening conversations');return}window.location.href='/ui/conversations?from='+encodeURIComponent(profile.slug)}
+function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.botPageUnavailable','Bot Page is unavailable until GlobalMetaID is ready'));return}window.location.href=botBrowserPath(profile.globalMetaId)}
+function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.slug){showToast(uiText('bot.selectBotBeforeConversations','Select a Bot before opening conversations'));return}window.location.href='/ui/conversations?from='+encodeURIComponent(profile.slug)}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
@@ -86,24 +71,26 @@ function runtimeDetailCell(label,value,isCode,extraClass){
 }
 function runtimeDetailMarkup(runtime){
   return '<div class="runtime-row-meta">'+
-    runtimeDetailCell('Path',runtime.binaryPath,true,'runtime-path')+
-    runtimeDetailCell('Version',runtime.version,false,'')+
-    runtimeDetailCell('Model',runtime.model,false,'')+
-    runtimeDetailCell('Auth',runtime.authState,false,'')+
-    runtimeDetailCell('Last seen',fmtTime(runtime.lastSeenAt),false,'')+
-    runtimeDetailCell('Checked',fmtTime(runtime.healthCheckedAt),false,'')+
-    runtimeDetailCell('Health',runtime.health,false,'')+
-    (runtime.healthReason?runtimeDetailCell('Reason',runtime.healthReason,false,'runtime-reason'):'')+
+    runtimeDetailCell(uiText('bot.path','Path'),runtime.binaryPath,true,'runtime-path')+
+    runtimeDetailCell(uiText('bot.version','Version'),runtime.version,false,'')+
+    runtimeDetailCell(uiText('bot.model','Model'),runtime.model,false,'')+
+    runtimeDetailCell(uiText('bot.auth','Auth'),runtime.authState,false,'')+
+    runtimeDetailCell(uiText('bot.lastSeen','Last seen'),fmtTime(runtime.lastSeenAt),false,'')+
+    runtimeDetailCell(uiText('bot.checked','Checked'),fmtTime(runtime.healthCheckedAt),false,'')+
+    runtimeDetailCell(uiText('bot.health','Health'),runtime.health,false,'')+
+    (runtime.healthReason?runtimeDetailCell(uiText('bot.reason','Reason'),runtime.healthReason,false,'runtime-reason'):'')+
   '</div>';
 }
 function runtimeModalBodyMarkup(){
   var rows=visibleRuntimeRows();
+  var summaryKey=rows.length===1?'bot.runtimeSummaryOne':'bot.runtimeSummaryMany';
+  var summaryFallback=rows.length===1?'{count} detected provider visible. Unavailable providers are hidden from this list.':'{count} detected providers visible. Unavailable providers are hidden from this list.';
   var body='<div class="runtime-modal-head">'+
-    '<div><div class="runtime-modal-title">LLM Providers</div><div class="runtime-modal-summary" data-runtime-modal-status>'+esc(rows.length)+' detected provider'+(rows.length===1?'':'s')+' visible. Unavailable providers are hidden from this list.</div></div>'+
-    '<div class="runtime-modal-actions"><button class="btn btn-sm" data-act="refresh-runtime-modal">Refresh</button><button class="icon-btn" data-act="close-runtime-modal" aria-label="Close">x</button></div>'+
+    '<div><div class="runtime-modal-title">'+esc(uiText('bot.llmProviders','LLM Providers'))+'</div><div class="runtime-modal-summary" data-runtime-modal-status>'+esc(uiText(summaryKey,summaryFallback,{count:rows.length}))+'</div></div>'+
+    '<div class="runtime-modal-actions"><button class="btn btn-sm" data-act="refresh-runtime-modal">'+esc(uiText('bot.refresh','Refresh'))+'</button><button class="icon-btn" data-act="close-runtime-modal" aria-label="Close">x</button></div>'+
   '</div>';
   if(!rows.length){
-    return body+'<div class="runtime-empty">No healthy or detected LLM providers were found.</div>';
+    return body+'<div class="runtime-empty">'+esc(uiText('bot.noRuntimesFound','No healthy or detected LLM providers were found.'))+'</div>';
   }
   body+='<div class="runtime-list">'+rows.map(function(runtime){
     var testing=state._runtimeTestById[runtime.id]==='testing';
@@ -112,7 +99,7 @@ function runtimeModalBodyMarkup(){
         '<div class="runtime-row-title">'+runtimeHealthMarkup(runtime)+runtimeIconMarkup(runtime)+'<strong>'+esc(runtime.displayName||runtime.provider||runtime.id)+'</strong><code>'+esc(runtime.provider||'-')+'</code></div>'+
         runtimeDetailMarkup(runtime)+
       '</div>'+
-      '<div><button class="btn btn-sm" data-act="test-runtime" data-runtime-id="'+esc(runtime.id)+'"'+(testing?' disabled':'')+'>'+(testing?'Testing...':'Test')+'</button></div>'+
+      '<div><button class="btn btn-sm" data-act="test-runtime" data-runtime-id="'+esc(runtime.id)+'"'+(testing?' disabled':'')+'>'+esc(testing?uiText('bot.testing','Testing...'):uiText('bot.test','Test'))+'</button></div>'+
     '</div>';
   }).join('')+'</div>';
   return body;
@@ -148,7 +135,7 @@ function uniqueProviderRuntimes(){
 function providerPickerMarkup(field,label,selected,allowNone,touched){
   var current=selected||'';var rows=uniqueProviderRuntimes();
   var active=rows.find(function(r){return r.provider===current});
-  var buttonLabel=active?runtimeLabel(active):(current?'Provider unavailable: '+current:'(none)');
+  var buttonLabel=active?runtimeLabel(active):(current?uiText('bot.providerUnavailable','Provider unavailable')+': '+current:uiText('bot.none','None'));
   var buttonIcon=current?providerIconMarkup(current):providerIconMarkup('generic');
   var html='<div class="field provider-field"><label>'+esc(label)+'</label>'+
     '<div class="provider-picker" data-provider-picker="'+esc(field)+'">'+
@@ -156,14 +143,14 @@ function providerPickerMarkup(field,label,selected,allowNone,touched){
     '<button type="button" class="provider-trigger" data-provider-toggle="'+esc(field)+'">'+buttonIcon+'<span>'+esc(buttonLabel)+'</span><span class="provider-caret">v</span></button>'+
     '<div class="provider-menu" data-provider-menu="'+esc(field)+'" hidden>';
   if(allowNone){
-    html+='<button type="button" class="provider-option" data-provider-option="none" data-provider-value=""'+(!current?' selected':'')+'>'+providerIconMarkup('generic')+'<span>(none)</span></button>';
+    html+='<button type="button" class="provider-option" data-provider-option="none" data-provider-value=""'+(!current?' selected':'')+'>'+providerIconMarkup('generic')+'<span>'+esc(uiText('bot.none','None'))+'</span></button>';
   }
   rows.forEach(function(r){
     var selectedAttr=current===r.provider?' selected':'';
     html+='<button type="button" class="provider-option" data-provider-option="'+esc(r.provider)+'" data-provider-value="'+esc(r.provider)+'"'+selectedAttr+'>'+providerIconMarkup(r.provider)+'<span>'+esc(runtimeLabel(r))+'</span></button>';
   });
   if(!rows.length){
-    html+='<div class="provider-empty">No healthy runtimes found</div>';
+    html+='<div class="provider-empty">'+esc(uiText('bot.noHealthyRuntimes','No healthy runtimes found'))+'</div>';
   }
   html+='</div></div></div>';
   return html;
@@ -185,7 +172,7 @@ function wireProviderPickers(){
       var field=picker.getAttribute('data-provider-picker');var input=picker.querySelector('[data-field="'+field+'"]');var trigger=picker.querySelector('[data-provider-toggle="'+field+'"]');
       var value=this.getAttribute('data-provider-value')||'';
       if(input){input.value=value;input.setAttribute('data-provider-touched','1')}
-      if(trigger){trigger.innerHTML=(value?providerIconMarkup(value):providerIconMarkup('generic'))+'<span>'+esc(value?providerDisplayName(value):'(none)')+'</span><span class="provider-caret">v</span>'}
+      if(trigger){trigger.innerHTML=(value?providerIconMarkup(value):providerIconMarkup('generic'))+'<span>'+esc(value?providerDisplayName(value):uiText('bot.none','None'))+'</span><span class="provider-caret">v</span>'}
       picker.querySelectorAll('[data-provider-value]').forEach(function(row){row.removeAttribute('selected')});
       this.setAttribute('selected','');
       var menu=q('[data-provider-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
@@ -267,15 +254,15 @@ function chatAllowedSkillsMarkup(profile){
   var error=state.chatSkillOptionsErrorBySlug[slug]||'';
   var chips=selected.length?selected.map(function(skill){
     return '<span class="skill-chip" data-chat-skill-chip="'+esc(skill)+'"><code>'+esc(skill)+'</code><button type="button" class="icon-btn" data-act="remove-chat-skill" data-skill="'+esc(skill)+'" aria-label="Remove '+esc(skill)+'">x</button></span>';
-  }).join(''):'<div class="provider-empty">No chat skills allowed yet.</div>';
-  var optionHtml='<option value="">Select a skill</option>'+options.map(function(skill){
+  }).join(''):'<div class="provider-empty">'+esc(uiText('bot.noChatSkillsAllowed','No chat skills allowed yet.'))+'</div>';
+  var optionHtml='<option value="">'+esc(uiText('bot.selectSkill','Select a skill'))+'</option>'+options.map(function(skill){
     var label=skill.title&&skill.title!==skill.skillName?skill.title+' ('+skill.skillName+')':skill.skillName;
     return '<option value="'+esc(skill.skillName)+'">'+esc(label)+'</option>';
   }).join('');
-  var note=status==='loading'?'<div class="save-status saving">Loading chat skills...</div>':(status==='error'?'<div class="save-status error">'+esc(error||'Failed to load chat skills')+'</div>':'');
-  return '<div class="field field-full chat-skills-field"><label>Chat Allowed Skills</label>'+
+  var note=status==='loading'?'<div class="save-status saving">'+esc(uiText('bot.loadingChatSkills','Loading chat skills...'))+'</div>':(status==='error'?'<div class="save-status error">'+esc(error||uiText('bot.chatSkillsLoadFailed','Failed to load chat skills.'))+'</div>':'');
+  return '<div class="field field-full chat-skills-field"><label>'+esc(uiText('bot.chatAllowedSkills','Chat Allowed Skills'))+'</label>'+
     '<div class="chat-skill-chips">'+chips+'</div>'+
-    '<div class="chat-skill-picker"><select data-field="chatSkillSelect"'+(status==='loading'?' disabled':'')+'>'+optionHtml+'</select><button type="button" class="btn btn-sm" data-act="add-chat-skill"'+(status==='loading'?' disabled':'')+'>Add</button></div>'+
+    '<div class="chat-skill-picker"><select data-field="chatSkillSelect"'+(status==='loading'?' disabled':'')+'>'+optionHtml+'</select><button type="button" class="btn btn-sm" data-act="add-chat-skill"'+(status==='loading'?' disabled':'')+'>'+esc(uiText('bot.add','Add'))+'</button></div>'+
     note+
   '</div>';
 }
@@ -376,10 +363,10 @@ function renderStats(){
 function renderMetabotList(){
   var list=q('[data-metabot-list]');var count=q('[data-metabot-count]');if(!list)return;
   if(count)count.textContent=String(state.profiles.length);
-  if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>'+esc(uiText('noBotsYet','No Bots yet'))+'</p></div>';return}
+  if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>'+esc(uiText('bot.noBotsYet','No Bots yet'))+'</p></div>';return}
   list.innerHTML=state.profiles.map(function(p){
     var selected=p.slug===state.selectedSlug?' selected':'';
-    var llmBadge=profileLlmUnavailable(p)?'<span class="metabot-llm-unavailable">[LLM unavailable]</span>':'';
+    var llmBadge=profileLlmUnavailable(p)?'<span class="metabot-llm-unavailable">['+esc(uiText('bot.llmUnavailable','LLM unavailable'))+']</span>':'';
     return'<div class="metabot-item'+selected+'" role="button" tabindex="0" data-slug="'+esc(p.slug)+'">'+
       '<div class="metabot-avatar">'+avatarMarkup(p,false)+'</div>'+
       '<div class="metabot-item-info"><div class="metabot-item-name-row"><div class="metabot-item-name">'+esc(p.name||p.slug)+'</div>'+llmBadge+'</div>'+
@@ -403,8 +390,8 @@ function renderBotHero(profile){
   var botUri=globalMetaId?'metaid://'+globalMetaId:'';
   var avatar=q('[data-hero-avatar]');if(avatar)avatar.innerHTML=avatarMarkup(profile,true);
   var name=q('[data-hero-name]');if(name)name.textContent=profile.name||profile.slug||'Bot';
-  var live=q('[data-live-indicator]');if(live)live.textContent='Live on local runtime';
-  var summary=q('[data-hero-summary]');if(summary)summary.textContent=profile.bio||'A public Bot Page for identity, messaging, and service entry points.';
+  var live=q('[data-live-indicator]');if(live)live.textContent=uiText('bot.liveByDefault','Live by default');
+  var summary=q('[data-hero-summary]');if(summary)summary.textContent=profile.bio||uiText('bot.defaultHeroSummary','A public Bot Page for identity, messaging, and service entry points.');
   var id=q('[data-hero-global-meta-id]');if(id)id.textContent=globalMetaId||'Pending GlobalMetaID';
   var uri=q('[data-hero-bot-uri]');if(uri)uri.textContent=botUri||'metaid://pending';
   var copyGlobal=q('[data-copy-global-meta-id]');if(copyGlobal){copyGlobal.disabled=!globalMetaId;copyGlobal.setAttribute('data-value',globalMetaId)}
@@ -492,17 +479,17 @@ function renderPublicIdentityTab(options){
     '<div class="info-avatar-section">'+
     '<div class="info-avatar-preview" data-avatar-preview>'+avatarMarkup({name:nameValue,avatarDataUrl:avatar},true)+'</div>'+
     '<div class="info-avatar-actions">'+
-      '<button class="btn btn-sm" data-act="upload-avatar">Upload / Replace</button>'+
-      '<button class="btn btn-sm btn-danger" data-act="remove-avatar"'+(avatar?'':' hidden')+'>Remove</button>'+
+      '<button class="btn btn-sm" data-act="upload-avatar">'+esc(uiText('bot.uploadReplace','Upload / Replace'))+'</button>'+
+      '<button class="btn btn-sm btn-danger" data-act="remove-avatar"'+(avatar?'':' hidden')+'>'+esc(uiText('bot.removeAvatar','Remove'))+'</button>'+
       '<input type="file" data-avatar-input accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
       '<span class="save-status" data-avatar-status></span>'+
     '</div></div>'+
     '<div class="info-form-grid">'+
-      '<div class="field"><label for="bot-name">Bot Name</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
-      '<div class="field field-full"><label for="bot-bio">Public Bio</label><textarea id="bot-bio" data-field="bio">'+esc(bioValue)+'</textarea></div>'+
-      '<div class="field field-full"><label>Homepage</label><div class="homepage-row"><span>Default Bot Page renderer</span><button type="button" class="btn btn-sm" data-act="upload-homepage">Upload</button></div></div>'+
+      '<div class="field"><label for="bot-name">'+esc(uiText('bot.botName','Bot Name'))+'</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
+      '<div class="field field-full"><label for="bot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label><textarea id="bot-bio" data-field="bio">'+esc(bioValue)+'</textarea></div>'+
+      '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label><div class="homepage-row"><span>'+esc(uiText('bot.defaultRenderer','Default Bot Page renderer'))+'</span><button type="button" class="btn btn-sm" data-act="upload-homepage">'+esc(uiText('bot.upload','Upload'))+'</button></div></div>'+
     '</div>'+
-    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">Save Public Identity</button><button class="btn" data-act="reset-public-identity">Reset</button><span class="save-status" data-save-status></span></div></div>';
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">'+esc(uiText('bot.savePublicIdentity','Save Public Identity'))+'</button><button class="btn" data-act="reset-public-identity">'+esc(uiText('bot.reset','Reset'))+'</button><span class="save-status" data-save-status></span></div></div>';
   var input=q('[data-avatar-input]');
   var upload=q('[data-act="upload-avatar"]');if(upload&&input)upload.addEventListener('click',function(){input.click()});
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
@@ -526,13 +513,13 @@ function renderBehaviorTab(options){
   var fallbackProviderValue=draft?draft.fallbackProvider:(profile.fallbackProvider||'');
   root.innerHTML='<div class="info-edit-panel" data-behavior-profile-slug="'+esc(profile.slug)+'">'+
     '<div class="info-form-grid">'+
-      '<div class="field field-full"><label for="bot-role">Role</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
-      '<div class="field field-full"><label for="bot-soul">Soul</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
-      '<div class="field field-full"><label for="bot-goal">Goal</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
-      providerPickerMarkup('primaryProvider','Primary LLM Provider',primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
-      providerPickerMarkup('fallbackProvider','Fallback LLM Provider',fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
+      '<div class="field field-full"><label for="bot-role">'+esc(uiText('bot.role','Role'))+'</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-soul">'+esc(uiText('bot.soul','Soul'))+'</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-goal">'+esc(uiText('bot.goal','Goal'))+'</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
+      providerPickerMarkup('primaryProvider',uiText('bot.primaryLlmProvider','Primary LLM Provider'),primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
+      providerPickerMarkup('fallbackProvider',uiText('bot.fallbackLlmProvider','Fallback LLM Provider'),fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
     '</div>'+
-    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-behavior">Save Behavior</button><span class="save-status" data-save-status></span></div></div>';
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-behavior">'+esc(uiText('bot.saveBehavior','Save Behavior'))+'</button><span class="save-status" data-save-status></span></div></div>';
   wireProviderPickers();
   var panel=behaviorPanelForProfile(profile);
   var save=queryWithin(panel,'[data-act="save-behavior"]');if(save)save.addEventListener('click',saveBehavior);
@@ -545,10 +532,10 @@ function renderChatSkillsTab(){
   state.originalProfile=profile;
   root.innerHTML='<div class="info-edit-panel" data-chat-skills-profile-slug="'+esc(profile.slug)+'">'+
     '<div class="info-form-grid">'+
-      '<div class="field field-full"><label>Chat Skills</label><div class="settings-note">Choose which skills can be used for private conversation replies.</div></div>'+
+      '<div class="field field-full"><label>'+esc(uiText('bot.chatSkills','Chat Skills'))+'</label><div class="settings-note">'+esc(uiText('bot.chatSkillsNote','Choose which skills can be used for private conversation replies.'))+'</div></div>'+
       chatAllowedSkillsMarkup(profile)+
     '</div>'+
-    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-chat-skills">Save Chat Skills</button><span class="save-status" data-save-status></span></div></div>';
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-chat-skills">'+esc(uiText('bot.saveChatSkills','Save Chat Skills'))+'</button><span class="save-status" data-save-status></span></div></div>';
   wireChatSkillControls();
   if(!state.chatSkillOptionsStatusBySlug[profile.slug])loadChatSkillOptions(profile.slug);
   var panel=chatSkillsPanelForProfile(profile);
@@ -560,14 +547,14 @@ function renderServicesTab(){
   var profile=selectedProfile();var root=q('[data-services-content]');if(!root)return;
   if(!profile){
     root.innerHTML='<div class="info-edit-panel">'+
-      '<div class="info-save-row"><button type="button" class="btn btn-primary" disabled>Publish Service</button><button type="button" class="btn" disabled>Manage Services</button></div>'+
+      '<div class="info-save-row"><button type="button" class="btn btn-primary" disabled>'+esc(uiText('bot.publishService','Publish Service'))+'</button><button type="button" class="btn" disabled>'+esc(uiText('bot.manageServices','Manage Services'))+'</button></div>'+
     '</div>';
     focusBotManagementTarget();
     return;
   }
   var from=encodeURIComponent(profile.slug||'');
   root.innerHTML='<div class="info-edit-panel" data-services-profile-slug="'+esc(profile.slug)+'">'+
-    '<div class="info-save-row"><a class="btn btn-primary" href="/ui/publish?from='+esc(from)+'">Publish Service</a><a class="btn" href="/ui/services?from='+esc(from)+'">Manage Services</a></div>'+
+    '<div class="info-save-row"><a class="btn btn-primary" href="/ui/publish?from='+esc(from)+'">'+esc(uiText('bot.publishService','Publish Service'))+'</a><a class="btn" href="/ui/services?from='+esc(from)+'">'+esc(uiText('bot.manageServices','Manage Services'))+'</a></div>'+
   '</div>';
   focusBotManagementTarget();
 }
@@ -579,13 +566,13 @@ function renderAvatarPreview(dataUrl){
 }
 
 function readAvatarFile(file,status,onReady){
-  if(file.size>200*1024){if(status){status.textContent='Avatar must be 200KB or smaller.';status.className='save-status error'}return}
+  if(file.size>200*1024){if(status){status.textContent=uiText('bot.avatarTooLarge','Avatar must be 200KB or smaller.');status.className='save-status error'}return}
   var reader=new FileReader();
   reader.onload=function(){
     onReady(String(reader.result||''));
-    if(status){status.textContent='Ready to save';status.className='save-status success'}
+    if(status){status.textContent=uiText('bot.readyToSave','Ready to save');status.className='save-status success'}
   };
-  reader.onerror=function(){if(status){status.textContent='Upload failed';status.className='save-status error'}};
+  reader.onerror=function(){if(status){status.textContent=uiText('bot.uploadFailed','Upload failed');status.className='save-status error'}};
   reader.readAsDataURL(file);
 }
 function handleAvatarUpload(file){
@@ -631,9 +618,10 @@ function chainWritesList(chainWrites){
   (chainWrites||[]).forEach(function(write){
     (write.txids||[]).forEach(function(txid){rows.push({path:write.path||'transaction',txid:txid})});
   });
-  if(!rows.length)return '<div class="modal-note">No transaction ID was returned by the chain writer.</div>';
+  if(!rows.length)return '<div class="modal-note">'+esc(uiText('bot.noTransactionIdReturned','No transaction ID was returned by the chain writer.'))+'</div>';
+  var copyTxid=uiText('bot.copyTxid','Copy txid');
   return '<div class="txid-list">'+rows.map(function(row){
-    return '<div class="txid-row"><div><span class="txid-path">'+esc(row.path)+'</span><code>'+esc(row.txid)+'</code></div><button class="icon-btn" data-copy-value="'+esc(row.txid)+'" title="Copy txid" aria-label="Copy txid">⧉</button></div>';
+    return '<div class="txid-row"><div><span class="txid-path">'+esc(row.path)+'</span><code>'+esc(row.txid)+'</code></div><button class="icon-btn" data-copy-value="'+esc(row.txid)+'" title="'+esc(copyTxid)+'" aria-label="'+esc(copyTxid)+'">⧉</button></div>';
   }).join('')+'</div>';
 }
 function createChainWritesFromResponse(data){
@@ -645,27 +633,27 @@ function createChainWritesFromResponse(data){
 function chainSuccessBodyMarkup(input){
   var profile=input.profile||{};
   return '<div class="modal-body">'+
-    '<p class="modal-note">'+esc(input.message||'The on-chain operation has been confirmed.')+'</p>'+
+    '<p class="modal-note">'+esc(input.message||uiText('bot.onChainOperationConfirmed','The on-chain operation has been confirmed.'))+'</p>'+
     '<div class="identity-result">'+
-      '<div><span>GlobalMetaID</span><code>'+esc(profile.globalMetaId||'-')+'</code></div>'+
+      '<div><span>'+esc(uiText('bot.globalMetaId','GlobalMetaID'))+'</span><code>'+esc(profile.globalMetaId||'-')+'</code></div>'+
       '<button class="icon-btn" data-copy-value="'+esc(profile.globalMetaId||'')+'" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID">⧉</button>'+
     '</div>'+
-    '<div class="modal-section-title">Transaction IDs</div>'+
+    '<div class="modal-section-title">'+esc(uiText('bot.transactionIds','Transaction IDs'))+'</div>'+
     chainWritesList(input.chainWrites||[])+
-  '</div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">OK</button></div>';
+  '</div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">'+esc(uiText('bot.ok','OK'))+'</button></div>';
 }
 function showChainSuccessModal(input){
   openDynamicModal(input.title,chainSuccessBodyMarkup(input),{boxClass:'modal-box-wide'});
 }
 function openHomepageUploadPlaceholder(){
-  openDynamicModal('Default Bot Page renderer','<div class="modal-body"><p class="modal-note">The current Bot uses the default Bot Page renderer. Homepage package upload will be available later.</p></div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">OK</button></div>');
+  openDynamicModal(uiText('bot.defaultRenderer','Default Bot Page renderer'),'<div class="modal-body"><p class="modal-note">'+esc(uiText('bot.homepageUploadLater','The current Bot uses the default Bot Page renderer. Homepage package upload will be available later.'))+'</p></div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">'+esc(uiText('bot.ok','OK'))+'</button></div>');
 }
 function walletChainConfig(chain){return WALLET_CHAINS.find(function(row){return row.chain===chain})||WALLET_CHAINS[0]}
 function walletDisplayUnit(chain){return walletChainConfig(chain).displayUnit}
 function walletInputUnit(chain){return walletChainConfig(chain).inputUnit}
 function formatWalletBalance(balance,chain){
-  if(!balance||typeof balance.totalSatoshis!=='number')return'Balance: unavailable';
-  return 'Balance: '+(balance.totalSatoshis/100000000).toFixed(8)+' '+walletDisplayUnit(chain);
+  if(!balance||typeof balance.totalSatoshis!=='number')return uiText('bot.balance','Balance')+': '+uiText('bot.unavailable','Unavailable').toLowerCase();
+  return uiText('bot.balance','Balance')+': '+(balance.totalSatoshis/100000000).toFixed(8)+' '+walletDisplayUnit(chain);
 }
 function normalizeWalletDisplayAmount(value,chain){
   var text=String(value==null?'':value);
@@ -682,20 +670,21 @@ function walletChainRowsMarkup(wallet){
   var balances=wallet&&wallet.balances||{};
   return WALLET_CHAINS.map(function(row){
     var address=addresses[row.chain]||'';
+    var copyAddress=uiText('bot.copyAddress','Copy address');
     return '<div class="wallet-row" data-wallet-chain="'+esc(row.chain)+'"><div>'+
-      '<span>'+esc(row.label)+' Receive Address</span>'+
+      '<span>'+esc(row.label+' '+uiText('bot.receiveAddress','Receive Address'))+'</span>'+
       '<code>'+esc(address||'-')+'</code>'+
       '<div class="wallet-balance">'+esc(formatWalletBalance(balances[row.chain],row.chain))+'</div>'+
       '</div><div class="wallet-row-actions">'+
-      '<button class="icon-btn" data-act="copy-wallet-value" data-copy-value="'+esc(address)+'" title="Copy '+esc(row.label)+' address" aria-label="Copy '+esc(row.label)+' address">⧉</button>'+
-      '<button class="btn btn-sm" data-act="wallet-transfer" data-chain="'+esc(row.chain)+'">Transfer</button>'+
+      '<button class="icon-btn" data-act="copy-wallet-value" data-copy-value="'+esc(address)+'" title="'+esc(copyAddress)+'" aria-label="'+esc(copyAddress)+'">⧉</button>'+
+      '<button class="btn btn-sm" data-act="wallet-transfer" data-chain="'+esc(row.chain)+'">'+esc(uiText('bot.transfer','Transfer'))+'</button>'+
       '</div></div>';
   }).join('');
 }
 function walletBodyMarkup(wallet){
   return '<div class="modal-body">'+
     walletChainRowsMarkup(wallet)+
-  '</div><div class="modal-actions"><button class="btn" data-act="modal-close">Close</button></div>';
+  '</div><div class="modal-actions"><button class="btn" data-act="modal-close">'+esc(uiText('bot.close','Close'))+'</button></div>';
 }
 function walletBalanceSatoshis(wallet,chain){
   var balance=wallet&&wallet.balances&&wallet.balances[chain];
@@ -718,16 +707,19 @@ function walletTransferFormMarkup(wallet,chain,status){
   var unit=walletDisplayUnit(chain);
   var balance=wallet&&wallet.balances&&wallet.balances[chain];
   var address=wallet&&wallet.addresses&&wallet.addresses[chain]||'-';
+  var balanceText=formatWalletBalance(balance,chain);
+  var balancePrefix=uiText('bot.balance','Balance')+': ';
+  var available=balanceText.slice(0,balancePrefix.length)===balancePrefix?balanceText.slice(balancePrefix.length):balanceText;
   return '<div class="modal-body">'+
     '<div class="wallet-transfer-grid">'+
-      '<div><span>Chain</span><strong>'+esc(walletChainConfig(chain).label)+'</strong></div>'+
-      '<div><span>Available</span><strong>'+esc(formatWalletBalance(balance,chain).replace(/^Balance: /,''))+'</strong></div>'+
-      '<div class="field field-full"><label>From Address</label><code>'+esc(address)+'</code></div>'+
-      '<div class="field field-full"><label for="wallet-transfer-to">Recipient</label><input id="wallet-transfer-to" data-field="wallet-transfer-to" autocomplete="off" /></div>'+
-      '<div class="field"><label for="wallet-transfer-amount">Amount ('+esc(unit)+')</label><input id="wallet-transfer-amount" data-field="wallet-transfer-amount" inputmode="decimal" autocomplete="off" /></div>'+
+      '<div><span>'+esc(uiText('bot.chain','Chain'))+'</span><strong>'+esc(walletChainConfig(chain).label)+'</strong></div>'+
+      '<div><span>'+esc(uiText('bot.available','Available'))+'</span><strong>'+esc(available)+'</strong></div>'+
+      '<div class="field field-full"><label>'+esc(uiText('bot.fromAddress','From Address'))+'</label><code>'+esc(address)+'</code></div>'+
+      '<div class="field field-full"><label for="wallet-transfer-to">'+esc(uiText('bot.recipient','Recipient'))+'</label><input id="wallet-transfer-to" data-field="wallet-transfer-to" autocomplete="off" /></div>'+
+      '<div class="field"><label for="wallet-transfer-amount">'+esc(uiText('bot.amount','Amount'))+' ('+esc(unit)+')</label><input id="wallet-transfer-amount" data-field="wallet-transfer-amount" inputmode="decimal" autocomplete="off" /></div>'+
     '</div>'+
     '<div class="save-status '+esc(status&&status.type||'')+'" data-wallet-transfer-status>'+esc(status&&status.text||'')+'</div>'+
-  '</div><div class="modal-actions"><button class="btn" data-act="modal-close">Close</button><button class="btn btn-primary" data-act="wallet-transfer-preview">Next</button></div>';
+  '</div><div class="modal-actions"><button class="btn" data-act="modal-close">'+esc(uiText('bot.close','Close'))+'</button><button class="btn btn-primary" data-act="wallet-transfer-preview">'+esc(uiText('bot.next','Next'))+'</button></div>';
 }
 function walletTransferPreviewMarkup(wallet,chain,preview,status){
   var transfer=state._walletTransfer||{};
@@ -737,31 +729,32 @@ function walletTransferPreviewMarkup(wallet,chain,preview,status){
   var fromAddress=preview&&preview.fromAddress||(wallet&&wallet.addresses&&wallet.addresses[chain])||'-';
   return '<div class="modal-body">'+
     '<div class="wallet-confirm-grid">'+
-      '<div><span>Chain</span><strong>'+esc(walletChainConfig(chain).label)+'</strong></div>'+
-      '<div><span>Amount</span><strong>'+esc(amount)+'</strong></div>'+
-      '<div><span>From Address</span><code>'+esc(fromAddress)+'</code></div>'+
-      '<div><span>Recipient</span><code>'+esc(preview&&preview.toAddress||transfer.toAddress||'-')+'</code></div>'+
-      '<div><span>Estimated Fee</span><strong>'+esc(fee||'Unavailable')+'</strong></div>'+
+      '<div><span>'+esc(uiText('bot.chain','Chain'))+'</span><strong>'+esc(walletChainConfig(chain).label)+'</strong></div>'+
+      '<div><span>'+esc(uiText('bot.amount','Amount'))+'</span><strong>'+esc(amount)+'</strong></div>'+
+      '<div><span>'+esc(uiText('bot.fromAddress','From Address'))+'</span><code>'+esc(fromAddress)+'</code></div>'+
+      '<div><span>'+esc(uiText('bot.recipient','Recipient'))+'</span><code>'+esc(preview&&preview.toAddress||transfer.toAddress||'-')+'</code></div>'+
+      '<div><span>'+esc(uiText('bot.estimatedFee','Estimated Fee'))+'</span><strong>'+esc(fee||uiText('bot.unavailable','Unavailable'))+'</strong></div>'+
     '</div>'+
     '<div class="save-status '+esc(status&&status.type||'')+'" data-wallet-transfer-status>'+esc(status&&status.text||'')+'</div>'+
-  '</div><div class="modal-actions"><button class="btn" data-act="wallet-transfer-back">Back</button><button class="btn btn-primary" data-act="wallet-transfer-confirm">Confirm Transfer</button></div>';
+  '</div><div class="modal-actions"><button class="btn" data-act="wallet-transfer-back">'+esc(uiText('bot.back','Back'))+'</button><button class="btn btn-primary" data-act="wallet-transfer-confirm">'+esc(uiText('bot.confirmTransfer','Confirm Transfer'))+'</button></div>';
 }
 function walletTransferSuccessMarkup(result){
   var transfer=state._walletTransfer||{};
   var unit=walletDisplayUnit(transfer.chain);
   var txid=result&&result.txid||result&&result.transactionId||'';
   var amount=result&&result.amount?normalizeWalletDisplayAmount(result.amount,transfer.chain):((transfer.amount||'-')+' '+unit);
+  var copyTxid=uiText('bot.copyTxid','Copy txid');
   return '<div class="modal-body">'+
-    '<div class="save-status success">Transfer broadcast: '+esc(amount)+'</div>'+
-    '<div class="txid-row"><div><span>Transaction ID</span><code>'+esc(txid||'-')+'</code></div><button class="icon-btn" data-copy-value="'+esc(txid)+'" title="Copy txid" aria-label="Copy txid">⧉</button></div>'+
-  '</div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">OK</button></div>';
+    '<div class="save-status success">'+esc(uiText('bot.transferBroadcastStatus','Transfer broadcast'))+': '+esc(amount)+'</div>'+
+    '<div class="txid-row"><div><span>'+esc(uiText('bot.transactionId','Transaction ID'))+'</span><code>'+esc(txid||'-')+'</code></div><button class="icon-btn" data-copy-value="'+esc(txid)+'" title="'+esc(copyTxid)+'" aria-label="'+esc(copyTxid)+'">⧉</button></div>'+
+  '</div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">'+esc(uiText('bot.ok','OK'))+'</button></div>';
 }
 function openWalletTransferForm(chain,status){
   var slug=state.selectedSlug;
   var token=beginSensitiveModal('wallet-transfer',slug);
   var wallet=state._walletPanel||{};
   state._walletTransfer={wallet:wallet,chain:chain,slug:slug,token:token};
-  openDynamicModal('Transfer '+walletChainConfig(chain).label,walletTransferFormMarkup(wallet,chain,status),{boxClass:'modal-box-wide'});
+  openDynamicModal(uiText('bot.transfer','Transfer')+' '+walletChainConfig(chain).label,walletTransferFormMarkup(wallet,chain,status),{boxClass:'modal-box-wide'});
 }
 function setWalletTransferStatus(type,text){
   var status=q('[data-wallet-transfer-status]');
@@ -777,18 +770,18 @@ function submitWalletTransferPreview(){
   var amount=(q('[data-field="wallet-transfer-amount"]')||{}).value||'';
   toAddress=toAddress.trim();amount=amount.trim();
   var amountSatoshis=walletAmountToSatoshis(amount);
-  if(!toAddress){setWalletTransferStatus('error','Recipient is required.');return Promise.resolve()}
-  if(!Number.isFinite(amountSatoshis)||amountSatoshis<=0){setWalletTransferStatus('error','Enter a positive '+walletDisplayUnit(chain)+' amount.');return Promise.resolve()}
+  if(!toAddress){setWalletTransferStatus('error',uiText('bot.recipientRequired','Recipient is required.'));return Promise.resolve()}
+  if(!Number.isFinite(amountSatoshis)||amountSatoshis<=0){setWalletTransferStatus('error',uiText('bot.enterPositiveAmount','Enter a positive {unit} amount.',{unit:walletDisplayUnit(chain)}));return Promise.resolve()}
   var balanceSatoshis=walletBalanceSatoshis(transfer.wallet||state._walletPanel,chain);
-  if(balanceSatoshis!==null&&amountSatoshis>balanceSatoshis){setWalletTransferStatus('error','Amount exceeds available balance: '+(balanceSatoshis/100000000).toFixed(8)+' '+walletDisplayUnit(chain));return Promise.resolve()}
+  if(balanceSatoshis!==null&&amountSatoshis>balanceSatoshis){setWalletTransferStatus('error',uiText('bot.amountExceedsBalance','Amount exceeds available balance: {balance}',{balance:(balanceSatoshis/100000000).toFixed(8)+' '+walletDisplayUnit(chain)}));return Promise.resolve()}
   var btn=q('[data-act="wallet-transfer-preview"]');if(btn)btn.disabled=true;
-  setWalletTransferStatus('saving','Preparing transfer preview...');
+  setWalletTransferStatus('saving',uiText('bot.preparingTransferPreview','Preparing transfer preview...'));
   var body={chain:chain,toAddress:toAddress,amount:amount};
   return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/wallet/transfer/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     if(!isSensitiveModalCurrent(token,slug))return;
     var preview=walletRoutePayload(r,'preview');
     state._walletTransfer={wallet:transfer.wallet||state._walletPanel,chain:chain,slug:slug,token:token,toAddress:toAddress,amount:amount,preview:preview};
-    openDynamicModal('Confirm '+walletChainConfig(chain).label+' Transfer',walletTransferPreviewMarkup(transfer.wallet||state._walletPanel||{},chain,preview),{boxClass:'modal-box-wide'});
+    openDynamicModal(uiText('bot.confirmTransfer','Confirm Transfer')+' '+walletChainConfig(chain).label,walletTransferPreviewMarkup(transfer.wallet||state._walletPanel||{},chain,preview),{boxClass:'modal-box-wide'});
   }).catch(function(error){
     if(!isSensitiveModalCurrent(token,slug))return;
     setWalletTransferStatus('error',error.message);
@@ -800,7 +793,7 @@ function submitWalletTransferConfirm(){
   var token=transfer.token;
   if(!slug||!isSensitiveModalCurrent(token,slug))return Promise.resolve();
   var btn=q('[data-act="wallet-transfer-confirm"]');if(btn)btn.disabled=true;
-  setWalletTransferStatus('saving','Broadcasting transfer...');
+  setWalletTransferStatus('saving',uiText('bot.broadcastingTransfer','Broadcasting transfer...'));
   var body={chain:transfer.chain,toAddress:transfer.toAddress,amount:transfer.amount};
   return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/wallet/transfer/confirm',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     if(!isSensitiveModalCurrent(token,slug))return;
@@ -808,10 +801,10 @@ function submitWalletTransferConfirm(){
     return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/wallet').then(function(walletResponse){
       if(!isSensitiveModalCurrent(token,slug))return;
       state._walletPanel=walletResponse.data&&walletResponse.data.wallet||state._walletPanel;
-      openDynamicModal('Transfer Broadcast',walletTransferSuccessMarkup(result),{boxClass:'modal-box-wide'});
+      openDynamicModal(uiText('bot.transferBroadcast','Transfer Broadcast'),walletTransferSuccessMarkup(result),{boxClass:'modal-box-wide'});
     }).catch(function(){
       if(!isSensitiveModalCurrent(token,slug))return;
-      openDynamicModal('Transfer Broadcast',walletTransferSuccessMarkup(result),{boxClass:'modal-box-wide'});
+      openDynamicModal(uiText('bot.transferBroadcast','Transfer Broadcast'),walletTransferSuccessMarkup(result),{boxClass:'modal-box-wide'});
     });
   }).catch(function(error){
     if(!isSensitiveModalCurrent(token,slug))return;
@@ -827,39 +820,39 @@ function wireWalletModalActions(){
 function backupBodyMarkup(backup){
   var words=(backup&&backup.words)||[];
   return '<div class="modal-body">'+
-    '<div class="warning-panel"><strong>Write these 12 words down and store them offline.</strong><span>Anyone who gets this phrase can control this MetaBot and access its assets.</span></div>'+
+    '<div class="warning-panel"><strong>'+esc(uiText('bot.backupWarningTitle','Write these 12 words down and store them offline.'))+'</strong><span>'+esc(uiText('bot.backupWarningBody','Anyone who gets this phrase can control this Bot and access its assets.'))+'</span></div>'+
     '<ol class="mnemonic-grid">'+words.map(function(word,index){return '<li class="mnemonic-word"><span>'+String(index+1)+'.</span><code>'+esc(word)+'</code></li>'}).join('')+'</ol>'+
-  '</div><div class="modal-actions"><button class="btn" data-act="modal-close">Close</button></div>';
+  '</div><div class="modal-actions"><button class="btn" data-act="modal-close">'+esc(uiText('bot.close','Close'))+'</button></div>';
 }
 function deleteConfirmMarkup(profile,count,canConfirm,status){
   return '<div class="modal-body">'+
-    '<div class="warning-panel danger"><strong>Deleting this MetaBot will remove all local information.</strong><span>Please make sure you have backed up the mnemonic, otherwise it cannot be recovered after deletion.</span></div>'+
-    '<div class="delete-target"><span>MetaBot</span><strong>'+esc((profile&&profile.name)||((profile&&profile.slug)||'-'))+'</strong></div>'+
+    '<div class="warning-panel danger"><strong>'+esc(uiText('bot.deleteWarningTitle','Deleting this Bot will remove all local information.'))+'</strong><span>'+esc(uiText('bot.deleteWarningBody','Please make sure you have backed up the mnemonic, otherwise it cannot be recovered after deletion.'))+'</span></div>'+
+    '<div class="delete-target"><span>Bot</span><strong>'+esc((profile&&profile.name)||((profile&&profile.slug)||'-'))+'</strong></div>'+
     (status?'<div class="save-status '+esc(status.type||'')+'">'+esc(status.text||'')+'</div>':'')+
-  '</div><div class="modal-actions"><button class="btn" data-act="modal-close"'+(state._deleteWorking?' disabled':'')+'>Cancel</button>'+
-    '<button class="btn btn-danger" data-act="confirm-delete"'+(canConfirm&&!state._deleteWorking?'':' disabled')+'>'+(canConfirm?'Confirm Delete':'Confirm Delete ('+String(count)+'s)')+'</button></div>';
+  '</div><div class="modal-actions"><button class="btn" data-act="modal-close"'+(state._deleteWorking?' disabled':'')+'>'+esc(uiText('bot.cancel','Cancel'))+'</button>'+
+    '<button class="btn btn-danger" data-act="confirm-delete"'+(canConfirm&&!state._deleteWorking?'':' disabled')+'>'+esc(canConfirm?uiText('bot.confirmDelete','Confirm Delete'):uiText('bot.confirmDeleteCountdown','Confirm Delete ({count}s)',{count:count}))+'</button></div>';
 }
 function openWalletPanel(){
   var profile=selectedProfile();if(!profile)return;
   var token=beginSensitiveModal('wallet',profile.slug);
-  openDynamicModal('Wallet','<div class="modal-body"><div class="modal-note">Loading wallet addresses...</div></div>');
+  openDynamicModal(uiText('bot.wallet','Wallet'),'<div class="modal-body"><div class="modal-note">'+esc(uiText('bot.loadingWalletAddresses','Loading wallet addresses...'))+'</div></div>');
   api('/api/bot/profiles/'+encodeURIComponent(profile.slug)+'/wallet').then(function(r){
     if(!isSensitiveModalCurrent(token,profile.slug))return;
     state._walletPanel=r.data&&r.data.wallet||{};
-    openDynamicModal('Wallet',walletBodyMarkup(state._walletPanel),{boxClass:'modal-box-wide'});
-  }).catch(function(error){if(!isSensitiveModalCurrent(token,profile.slug))return;openDynamicModal('Wallet','<div class="modal-body"><div class="save-status error">'+esc(error.message)+'</div></div><div class="modal-actions"><button class="btn" data-act="modal-close">Close</button></div>')});
+    openDynamicModal(uiText('bot.wallet','Wallet'),walletBodyMarkup(state._walletPanel),{boxClass:'modal-box-wide'});
+  }).catch(function(error){if(!isSensitiveModalCurrent(token,profile.slug))return;openDynamicModal(uiText('bot.wallet','Wallet'),'<div class="modal-body"><div class="save-status error">'+esc(error.message)+'</div></div><div class="modal-actions"><button class="btn" data-act="modal-close">'+esc(uiText('bot.close','Close'))+'</button></div>')});
 }
 function openBackupPanel(){
   var profile=selectedProfile();if(!profile)return;
   var token=beginSensitiveModal('backup',profile.slug);
-  openDynamicModal('Backup Mnemonic','<div class="modal-body"><div class="modal-note">Loading backup phrase...</div></div>');
+  openDynamicModal(uiText('bot.backupMnemonic','Backup Mnemonic'),'<div class="modal-body"><div class="modal-note">'+esc(uiText('bot.loadingBackupPhrase','Loading backup phrase...'))+'</div></div>');
   api('/api/bot/profiles/'+encodeURIComponent(profile.slug)+'/backup').then(function(r){
     if(!isSensitiveModalCurrent(token,profile.slug))return;
-    openDynamicModal('Backup Mnemonic',backupBodyMarkup(r.data&&r.data.backup||{}),{boxClass:'modal-box-wide'});
-  }).catch(function(error){if(!isSensitiveModalCurrent(token,profile.slug))return;openDynamicModal('Backup Mnemonic','<div class="modal-body"><div class="save-status error">'+esc(error.message)+'</div></div><div class="modal-actions"><button class="btn" data-act="modal-close">Close</button></div>')});
+    openDynamicModal(uiText('bot.backupMnemonic','Backup Mnemonic'),backupBodyMarkup(r.data&&r.data.backup||{}),{boxClass:'modal-box-wide'});
+  }).catch(function(error){if(!isSensitiveModalCurrent(token,profile.slug))return;openDynamicModal(uiText('bot.backupMnemonic','Backup Mnemonic'),'<div class="modal-body"><div class="save-status error">'+esc(error.message)+'</div></div><div class="modal-actions"><button class="btn" data-act="modal-close">'+esc(uiText('bot.close','Close'))+'</button></div>')});
 }
 function renderDeleteModal(profile,status){
-  openDynamicModal('Delete MetaBot',deleteConfirmMarkup(profile,state._deleteCountdown,state._deleteCountdown<=0,status),{locked:state._deleteWorking});
+  openDynamicModal(uiText('bot.deleteBot','Delete Bot'),deleteConfirmMarkup(profile,state._deleteCountdown,state._deleteCountdown<=0,status),{locked:state._deleteWorking});
   var confirm=q('[data-act="confirm-delete"]');if(confirm)confirm.addEventListener('click',function(){confirmDeleteMetabot(profile)});
 }
 function openDeletePanel(){
@@ -876,7 +869,7 @@ function openDeletePanel(){
 function confirmDeleteMetabot(profile){
   if(!profile||state._deleteCountdown>0||state._deleteWorking)return;
   state._deleteWorking=true;
-  renderDeleteModal(profile,{type:'saving',text:'Deleting local MetaBot data...'});
+  renderDeleteModal(profile,{type:'saving',text:uiText('bot.deletingLocalBotData','Deleting local Bot data...')});
   api('/api/bot/profiles/'+encodeURIComponent(profile.slug),{method:'DELETE'}).then(function(){
     closeDynamicModal();
     state.selectedSlug='';
@@ -903,8 +896,8 @@ function saveInfo(){
   var nextChatSkills=selectedChatSkills(profile);
   if(!sameChatSkillList(nextChatSkills,profile.allowChatSkills||[]))payload.allowChatSkills=nextChatSkills;
   if(state._pendingAvatar!==undefined)changedValue(payload,'avatarDataUrl',state._pendingAvatar,profile.avatarDataUrl||'');
-  if(!Object.keys(payload).length){if(status){status.textContent='No changes';status.className='save-status'}return}
-  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
+  if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
   return api('/api/bot/profiles/'+encodeURIComponent(state.selectedSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
@@ -916,10 +909,10 @@ function saveInfo(){
     renderDetailHeader(updated);
     renderInfoTab({preserveDraft:false});
     renderStats();
-    status=q('[data-save-status]');if(status){status.textContent='On-chain update confirmed.';status.className='save-status success'}
+    status=q('[data-save-status]');if(status){status.textContent=uiText('bot.onChainUpdateConfirmed','On-chain update confirmed.');status.className='save-status success'}
     showChainSuccessModal({
-      title:'Profile Updated On-Chain',
-      message:'Profile changes were written on-chain before local data was saved.',
+      title:uiText('bot.profileUpdatedOnChain','Profile Updated On-Chain'),
+      message:uiText('bot.profileChangesWrittenOnChain','Profile changes were written on-chain before local data was saved.'),
       profile:updated,
       chainWrites:(r.data&&r.data.chainWrites)||[],
     });
@@ -937,8 +930,8 @@ function savePublicIdentity(){
   changedValue(payload,'name',(q('[data-field="name"]')||{}).value||'',profile.name||'');
   changedValue(payload,'bio',(q('[data-field="bio"]')||{}).value||'',profile.bio||'');
   if(state._pendingAvatar!==undefined)changedValue(payload,'avatarDataUrl',state._pendingAvatar,profile.avatarDataUrl||'');
-  if(!Object.keys(payload).length){if(status){status.textContent='No changes';status.className='save-status'}return}
-  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
+  if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
   return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
@@ -949,10 +942,10 @@ function savePublicIdentity(){
     renderMetabotList();
     renderDetailHeader(updated);
     renderPublicIdentityTab({preserveDraft:false});
-    status=q('[data-save-status]');if(status){status.textContent='On-chain update confirmed.';status.className='save-status success'}
+    status=q('[data-save-status]');if(status){status.textContent=uiText('bot.onChainUpdateConfirmed','On-chain update confirmed.');status.className='save-status success'}
     showChainSuccessModal({
-      title:'Profile Updated On-Chain',
-      message:'Profile changes were written on-chain before local data was saved.',
+      title:uiText('bot.profileUpdatedOnChain','Profile Updated On-Chain'),
+      message:uiText('bot.profileChangesWrittenOnChain','Profile changes were written on-chain before local data was saved.'),
       profile:updated,
       chainWrites:(r.data&&r.data.chainWrites)||[],
     });
@@ -973,8 +966,8 @@ function saveBehavior(){
   var primaryEl=queryWithin(panel,'[data-field="primaryProvider"]');var fallbackEl=queryWithin(panel,'[data-field="fallbackProvider"]');
   if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
   if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
-  if(!Object.keys(payload).length){if(status){status.textContent='No changes';status.className='save-status'}return}
-  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
+  if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
   return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
@@ -984,10 +977,10 @@ function saveBehavior(){
     renderMetabotList();
     renderDetailHeader(updated);
     renderBehaviorTab({preserveDraft:false});
-    panel=behaviorPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){status.textContent='On-chain update confirmed.';status.className='save-status success'}
+    panel=behaviorPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){status.textContent=uiText('bot.onChainUpdateConfirmed','On-chain update confirmed.');status.className='save-status success'}
     showChainSuccessModal({
-      title:'Profile Updated On-Chain',
-      message:'Profile changes were written on-chain before local data was saved.',
+      title:uiText('bot.profileUpdatedOnChain','Profile Updated On-Chain'),
+      message:uiText('bot.profileChangesWrittenOnChain','Profile changes were written on-chain before local data was saved.'),
       profile:updated,
       chainWrites:(r.data&&r.data.chainWrites)||[],
     });
@@ -1004,8 +997,8 @@ function saveChatSkills(){
   var nextChatSkills=selectedChatSkills(profile);
   var payload={};
   if(!sameChatSkillList(nextChatSkills,profile.allowChatSkills||[]))payload.allowChatSkills=nextChatSkills;
-  if(!Object.keys(payload).length){if(status){status.textContent='No changes';status.className='save-status'}return}
-  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
+  if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
   return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
@@ -1016,10 +1009,10 @@ function saveChatSkills(){
     renderMetabotList();
     renderDetailHeader(updated);
     renderChatSkillsTab();
-    panel=chatSkillsPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){status.textContent='On-chain update confirmed.';status.className='save-status success'}
+    panel=chatSkillsPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){status.textContent=uiText('bot.onChainUpdateConfirmed','On-chain update confirmed.');status.className='save-status success'}
     showChainSuccessModal({
-      title:'Profile Updated On-Chain',
-      message:'Profile changes were written on-chain before local data was saved.',
+      title:uiText('bot.profileUpdatedOnChain','Profile Updated On-Chain'),
+      message:uiText('bot.profileChangesWrittenOnChain','Profile changes were written on-chain before local data was saved.'),
       profile:updated,
       chainWrites:(r.data&&r.data.chainWrites)||[],
     });
@@ -1038,7 +1031,7 @@ function resetPublicIdentity(){
 function renderHistoryTab(){
   var tb=q('[data-execution-history-list]');if(!tb)return;
   var rows=state.sessions.filter(function(s){return s.metaBotSlug===state.selectedSlug});
-  if(!rows.length){tb.innerHTML='<tr><td colspan="7" class="table-empty"><strong>No executions yet for this MetaBot</strong></td></tr>';focusBotManagementTarget();return}
+  if(!rows.length){tb.innerHTML='<tr><td colspan="7" class="table-empty"><strong>'+esc(uiText('bot.noExecutionsYet','No executions yet for this Bot'))+'</strong></td></tr>';focusBotManagementTarget();return}
   tb.innerHTML=rows.map(function(s,i){
     var detailId='exec-detail-'+esc(state.selectedSlug)+'-'+i;
     var rt=state.runtimes.find(function(r){return r.id===s.runtimeId});
@@ -1051,12 +1044,12 @@ function renderHistoryTab(){
       '<td>'+statusPill(s.status)+'</td>'+
       '<td><span class="exec-duration">'+duration(s)+'</span></td>'+
       '<td><div class="exec-prompt">'+esc(shortText(s.prompt,120))+'</div></td>'+
-      '<td><button class="btn btn-sm" data-act="toggle-exec" data-detail="'+detailId+'" aria-expanded="false">Details</button></td></tr>'+
+      '<td><button class="btn btn-sm" data-act="toggle-exec" data-detail="'+detailId+'" aria-expanded="false">'+esc(uiText('bot.details','Details'))+'</button></td></tr>'+
       '<tr class="exec-detail-row" id="'+detailId+'" hidden><td colspan="7"><div class="exec-detail">'+
-        '<div><div class="exec-detail-label">Session ID</div><pre>'+esc(s.sessionId||'-')+'</pre></div>'+
-        '<div><div class="exec-detail-label">Output/Error</div><pre>'+esc(clampBlock(resultSummary(s)))+'</pre></div>'+
-        '<div><div class="exec-detail-label">Full Prompt</div><pre>'+esc(clampBlock(s.prompt))+'</pre></div>'+
-        '<div><div class="exec-detail-label">Runtime</div><pre>'+esc((s.runtimeId||'-')+'\n'+provider)+'</pre></div>'+
+        '<div><div class="exec-detail-label">'+esc(uiText('bot.sessionId','Session ID'))+'</div><pre>'+esc(s.sessionId||'-')+'</pre></div>'+
+        '<div><div class="exec-detail-label">'+esc(uiText('bot.outputError','Output/Error'))+'</div><pre>'+esc(clampBlock(resultSummary(s)))+'</pre></div>'+
+        '<div><div class="exec-detail-label">'+esc(uiText('bot.fullPrompt','Full Prompt'))+'</div><pre>'+esc(clampBlock(s.prompt))+'</pre></div>'+
+        '<div><div class="exec-detail-label">'+esc(uiText('bot.runtime','Runtime'))+'</div><pre>'+esc((s.runtimeId||'-')+'\n'+provider)+'</pre></div>'+
       '</div></td></tr>'
   }).join('');
   qq('[data-act="toggle-exec"]').forEach(function(el){el.addEventListener('click',function(){toggleExecDetail(this)})});
@@ -1068,7 +1061,7 @@ function renderSettingsTab(){
   var profile=selectedProfile();
   if(!profile){root.innerHTML='';return}
   if(!state.profileConfigs[profile.slug]){
-    root.innerHTML='<div class="settings-form"><div class="settings-note">Loading settings...</div></div>';
+    root.innerHTML='<div class="settings-form"><div class="settings-note">'+esc(uiText('bot.loadingSettings','Loading settings...'))+'</div></div>';
     return;
   }
   var current=defaultWriteNetwork();
@@ -1077,9 +1070,9 @@ function renderSettingsTab(){
     return '<option value="'+network+'"'+(network===current?' selected':'')+'>'+network.toUpperCase()+'</option>';
   }).join('');
   root.innerHTML='<div class="settings-form">'+
-    '<div class="field"><label for="default-write-network">Default Write Network</label><select id="default-write-network" data-field="defaultWriteNetwork">'+options+'</select></div>'+
-    '<div class="settings-note">Used by write commands when no explicit chain is supplied. Wallet balance and transfer keep their own chain selection rules.</div>'+
-    '<div class="settings-save-row"><button class="btn btn-primary" data-act="save-settings">Save Settings</button><span class="save-status" data-settings-status></span></div>'+
+    '<div class="field"><label for="default-write-network">'+esc(uiText('bot.defaultWriteNetwork','Default Write Network'))+'</label><select id="default-write-network" data-field="defaultWriteNetwork">'+options+'</select></div>'+
+    '<div class="settings-note">'+esc(uiText('bot.defaultWriteNetworkNote','Used by write commands when no explicit chain is supplied. Wallet balance and transfer keep their own chain selection rules.'))+'</div>'+
+    '<div class="settings-save-row"><button class="btn btn-primary" data-act="save-settings">'+esc(uiText('bot.saveSettings','Save Settings'))+'</button><span class="save-status" data-settings-status></span></div>'+
   '</div>';
   var save=q('[data-act="save-settings"]');if(save)save.addEventListener('click',saveSettings);
 }
@@ -1100,7 +1093,7 @@ function renderPlaceholderTab(tab){
   var selector=tab==='behavior'?'[data-behavior-content]':tab==='chatSkills'?'[data-chat-skills-content]':tab==='services'?'[data-services-content]':'';
   var root=selector?q(selector):null;
   if(!root)return;
-  var copy=tab==='behavior'?'Behavior controls will be available here.':tab==='chatSkills'?'Chat skill controls will be available here.':'Service publishing entries will be available here.';
+  var copy=tab==='behavior'?uiText('bot.behaviorPlaceholder','Behavior controls will be available here.'):tab==='chatSkills'?uiText('bot.chatSkillsPlaceholder','Chat skill controls will be available here.'):uiText('bot.servicesPlaceholder','Service publishing entries will be available here.');
   root.innerHTML='<div class="session-empty"><p>'+esc(copy)+'</p></div>';
 }
 
@@ -1141,20 +1134,20 @@ function saveSettings(){
   var profile=selectedProfile();if(!profile)return;
   var select=q('[data-field="defaultWriteNetwork"]');var status=q('[data-settings-status]');var btn=q('[data-act="save-settings"]');
   var value=(select&&select.value)||defaultWriteNetwork();
-  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
   return api('/api/bot/profiles/'+encodeURIComponent(profile.slug)+'/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({chain:{defaultWriteNetwork:value}})}).then(function(r){
     state.profileConfigs[profile.slug]=r.data||state.profileConfigs[profile.slug]||{chain:{defaultWriteNetwork:'mvc'}};
     renderSettingsTab();
-    status=q('[data-settings-status]');if(status){status.textContent='Saved';status.className='save-status success'}
+    status=q('[data-settings-status]');if(status){status.textContent=uiText('bot.saved','Saved');status.className='save-status success'}
   }).catch(function(error){
     if(status){status.textContent=error.message;status.className='save-status error'}
   }).finally(function(){btn=q('[data-act="save-settings"]');if(btn)btn.disabled=false});
 }
 
 function discoverRuntimes(){
-  var btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=true;btn.textContent='Refreshing...'}
-  api('/api/bot/runtimes/discover',{method:'POST'}).then(function(){return loadRuntimes()}).catch(function(error){showToast(error.message||'Runtime refresh failed')}).finally(function(){btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=false;btn.textContent='Refresh Runtimes'}})
+  var btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=true;btn.textContent=uiText('bot.refreshing','Refreshing...')}
+  api('/api/bot/runtimes/discover',{method:'POST'}).then(function(){return loadRuntimes()}).catch(function(error){showToast(error.message||uiText('bot.runtimeRefreshFailed','Runtime refresh failed'))}).finally(function(){btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=false;btn.textContent=uiText('bot.refreshRuntimes','Refresh Runtimes')}})
 }
 function testRuntime(runtimeId){
   if(!runtimeId)return Promise.resolve();
@@ -1179,7 +1172,7 @@ function testRuntime(runtimeId){
       renderRuntimeModal();
     })
     .catch(function(error){
-      showToast(error.message||'Runtime test failed');
+      showToast(error.message||uiText('bot.runtimeTestFailed','Runtime test failed'));
       renderRuntimeModal();
     })
     .finally(function(){
@@ -1197,29 +1190,29 @@ function renderCreateAvatarPreview(){
 }
 function createModalMarkup(){
   return '<div class="modal-box">'+
-    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('addBot','Add MetaBot'))+'</div>'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.createBot','Create Bot'))+'</div>'+
     '<div class="modal-body">'+
       '<div class="info-avatar-section">'+
         '<div class="info-avatar-preview" data-create-avatar-preview>'+createAvatarPreviewMarkup()+'</div>'+
         '<div class="info-avatar-actions">'+
-          '<button class="btn btn-sm" data-act="upload-create-avatar">'+esc(uiText('uploadAvatar','Upload'))+'</button>'+
-          '<button class="btn btn-sm btn-danger" data-act="remove-create-avatar"'+(state._pendingCreateAvatar?'':' hidden')+'>'+esc(uiText('removeAvatar','Remove'))+'</button>'+
+          '<button class="btn btn-sm" data-act="upload-create-avatar">'+esc(uiText('bot.upload','Upload'))+'</button>'+
+          '<button class="btn btn-sm btn-danger" data-act="remove-create-avatar"'+(state._pendingCreateAvatar?'':' hidden')+'>'+esc(uiText('bot.removeAvatar','Remove'))+'</button>'+
           '<input type="file" data-field="new-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
           '<span class="save-status" data-create-avatar-status></span>'+
         '</div>'+
       '</div>'+
       '<div class="field">'+
-        '<label for="new-metabot-name">'+esc(uiText('name','Name'))+'</label>'+
+        '<label for="new-metabot-name">'+esc(uiText('bot.botName','Bot Name'))+'</label>'+
         '<input id="new-metabot-name" type="text" data-field="new-name" maxlength="60" autocomplete="off" />'+
       '</div>'+
       '<div class="field field-full">'+
-        '<label for="new-metabot-bio">'+esc(uiText('bio','Bio'))+'</label>'+
+        '<label for="new-metabot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label>'+
         '<textarea id="new-metabot-bio" data-field="new-bio"></textarea>'+
       '</div>'+
     '</div>'+
     '<div class="modal-actions">'+
-      '<button class="btn" data-act="cancel-add">'+esc(uiText('cancel','Cancel'))+'</button>'+
-      '<button class="btn btn-primary" data-act="confirm-add">'+esc(uiText('create','Create'))+'</button>'+
+      '<button class="btn" data-act="cancel-add">'+esc(uiText('bot.cancel','Cancel'))+'</button>'+
+      '<button class="btn btn-primary" data-act="confirm-add">'+esc(uiText('bot.create','Create'))+'</button>'+
     '</div>'+
     '<div class="save-status" data-add-status></div>'+
   '</div>';
@@ -1260,8 +1253,8 @@ function openAddModal(){
 function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden');state._pendingCreateAvatar=undefined}
 function createMetabot(){
   var input=q('[data-field="new-name"]');var bioInput=q('[data-field="new-bio"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();var bio=(bioInput&&bioInput.value||'').trim();
-  if(!name){if(status){status.textContent=uiText('nameRequired','Name is required');status.className='save-status error'}return}
-  if(status){status.textContent=uiText('creating','Creating...');status.className='save-status saving'}
+  if(!name){if(status){status.textContent=uiText('bot.nameRequired','Name is required');status.className='save-status error'}return}
+  if(status){status.textContent=uiText('bot.creating','Creating...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
   var body={name:name,creationSource:'ui'};
   if(bio)body.bio=bio;
@@ -1277,8 +1270,8 @@ function createMetabot(){
     }
     return loadProfiles().then(function(){
       showChainSuccessModal({
-        title:'MetaBot Created On-Chain',
-        message:'The on-chain identity has been created. Basic Info is ready for optional edits.',
+        title:uiText('bot.metaBotCreatedOnChain','Bot Created On-Chain'),
+        message:uiText('bot.identityCreatedBasicInfoReady','The on-chain identity has been created. Basic Info is ready for optional edits.'),
         profile:profile,
         chainWrites:createChainWritesFromResponse(r.data||{}),
       });
@@ -1288,18 +1281,18 @@ function createMetabot(){
 
 function showToast(text){
   var toast=q('[data-copy-toast]');if(!toast)return;
-  toast.textContent=text||'Copied!';
+  toast.textContent=text||uiText('bot.copied','Copied!');
   toast.classList.add('show');
   if(state._toastTimer)clearTimeout(state._toastTimer);
   state._toastTimer=setTimeout(function(){toast.classList.remove('show')},1500);
 }
 
 function copyToClipboard(text){
-  if(!text){showToast('Nothing to copy');return}
-  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){showToast('Copied!')}).catch(function(){fallbackCopy(text)})}else{fallbackCopy(text)}
+  if(!text){showToast(uiText('bot.nothingToCopy','Nothing to copy'));return}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){showToast(uiText('bot.copied','Copied!'))}).catch(function(){fallbackCopy(text)})}else{fallbackCopy(text)}
 }
 function fallbackCopy(text){
-  var el=document.createElement('textarea');el.value=text;el.setAttribute('readonly','');el.style.position='fixed';el.style.opacity='0';document.body.appendChild(el);el.select();try{document.execCommand('copy');showToast('Copied!')}catch(error){showToast('Copy failed')}document.body.removeChild(el)
+  var el=document.createElement('textarea');el.value=text;el.setAttribute('readonly','');el.style.position='fixed';el.style.opacity='0';document.body.appendChild(el);el.select();try{document.execCommand('copy');showToast(uiText('bot.copied','Copied!'))}catch(error){showToast(uiText('bot.copyFailed','Copy failed'))}document.body.removeChild(el)
 }
 function createModeRequested(){
   try{
@@ -1349,6 +1342,21 @@ function modalIsOpen(el){
 }
 function anyModalOpen(){
   return modalIsOpen(q('[data-modal="add-metabot"]'))||modalIsOpen(modalRoot());
+}
+function rerenderLocalizedBotPage(){
+  renderMetabotList();
+  renderDetailHeader(selectedProfile());
+  if(state.selectedTab==='advanced'){
+    renderSettingsTab();
+    renderHistoryTab();
+  }else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
+  else if(state.selectedTab==='behavior')renderBehaviorTab();
+  else if(state.selectedTab==='chatSkills')renderChatSkillsTab();
+  else if(state.selectedTab==='services')renderServicesTab();
+  if(state._runtimeModalOpen)renderRuntimeModal();
+}
+if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
+  window.addEventListener('oac:i18n-changed',rerenderLocalizedBotPage);
 }
 
 document.addEventListener('DOMContentLoaded',function(){

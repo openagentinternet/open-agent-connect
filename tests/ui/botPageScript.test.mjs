@@ -5,6 +5,16 @@ import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
 const { buildBotPageDefinition } = require('../../dist/ui/pages/bot/app.js');
+const { translate } = require('../../dist/ui/i18n.js');
+
+function zhI18nWindow() {
+  return {
+    __oacLocalUiI18n: {
+      getLanguage: () => 'zh-CN',
+      t: (key) => translate('zh-CN', key),
+    },
+  };
+}
 
 function field(value = '') {
   const attrs = new Map();
@@ -509,20 +519,16 @@ test('bot page renders the launch create flow and empty state in Simplified Chin
     elements: {
       '[data-metabot-list]': list,
     },
-    window: {
-      __oacLocalUiI18n: {
-        getLanguage: () => 'zh-CN',
-      },
-    },
+    window: zhI18nWindow(),
   });
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
 
   const createMarkup = context.createModalMarkup();
   assert.match(createMarkup, /创建 Bot/);
-  assert.match(createMarkup, /上传头像/);
+  assert.match(createMarkup, /上传/);
   assert.match(createMarkup, /Bot 名称/);
-  assert.match(createMarkup, /简介/);
+  assert.match(createMarkup, /公开简介/);
   assert.match(createMarkup, /取消/);
 
   context.renderMetabotList();
@@ -540,11 +546,7 @@ test('bot page uses Simplified Chinese create validation and progress copy', () 
   };
   const context = createBotScriptContext({
     elements: fields,
-    window: {
-      __oacLocalUiI18n: {
-        getLanguage: () => 'zh-CN',
-      },
-    },
+    window: zhI18nWindow(),
   });
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
@@ -818,6 +820,54 @@ test('bot page renders public identity tab with only public identity controls', 
   assert.doesNotMatch(root.innerHTML, /Refresh Runtimes/);
   assert.doesNotMatch(root.innerHTML, /Default Write Network/);
   assert.doesNotMatch(root.innerHTML, /Execution History/);
+});
+
+test('bot page localizes owned console copy without translating Bot identity content', () => {
+  const root = { innerHTML: '' };
+  const hero = { hidden: true };
+  const summary = field();
+  const name = field();
+  const live = field();
+  const elements = {
+    '[data-info-content]': root,
+    '[data-bot-hero]': hero,
+    '[data-hero-avatar]': { innerHTML: '' },
+    '[data-hero-name]': name,
+    '[data-live-indicator]': live,
+    '[data-hero-summary]': summary,
+    '[data-hero-global-meta-id]': field(),
+    '[data-hero-bot-uri]': field(),
+    '[data-copy-global-meta-id]': field(),
+    '[data-copy-bot-uri]': field(),
+    '[data-act="view-bot-page"]': field(),
+    '[data-act="view-conversations"]': field(),
+  };
+  const context = createBotScriptContext({
+    elements,
+    window: zhI18nWindow(),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice Public Bot',
+    globalMetaId: 'gm-alice',
+    bio: 'Writes code with the user.',
+  }];
+
+  context.renderBotHero(context.state.profiles[0]);
+  context.renderPublicIdentityTab();
+
+  assert.equal(name.textContent, 'Alice Public Bot');
+  assert.equal(summary.textContent, 'Writes code with the user.');
+  assert.equal(live.textContent, '默认在线');
+  assert.match(root.innerHTML, /Bot 名称/);
+  assert.match(root.innerHTML, /公开简介/);
+  assert.match(root.innerHTML, /默认 Bot Page 渲染器/);
+  assert.match(root.innerHTML, /保存公开身份/);
+  assert.match(root.innerHTML, /Alice Public Bot/);
+  assert.match(root.innerHTML, /Writes code with the user\./);
 });
 
 test('bot page renders behavior tab with only behavior controls', () => {
@@ -3063,7 +3113,7 @@ test('bot page delete confirmation uses the required warning and disables confir
 
   const markup = context.deleteConfirmMarkup({ name: 'Fanny', slug: 'fanny' }, 5, false);
 
-  assert.match(markup, /Deleting this MetaBot will remove all local information/);
+  assert.match(markup, /Deleting this Bot will remove all local information/);
   assert.match(markup, /Please make sure you have backed up the mnemonic/);
   assert.match(markup, /Confirm Delete \(5s\)/);
   assert.match(markup, /data-act="confirm-delete" disabled/);
