@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildBrowserPageDefinition, type BrowserPageDefinition } from './app';
+import { createI18nContext } from '../ui/i18n';
 
 function escapeHtml(value: string): string {
   return value
@@ -26,10 +27,15 @@ async function loadBrowserPageTemplate(): Promise<string> {
   throw new Error('Browser page template not found.');
 }
 
-export async function renderBrowserPageHtml(definition: BrowserPageDefinition = buildBrowserPageDefinition()): Promise<string> {
+export async function renderBrowserPageHtml(
+  definition: BrowserPageDefinition = buildBrowserPageDefinition(),
+  languagePreference?: string | null,
+): Promise<string> {
   const template = await loadBrowserPageTemplate();
   const content = definition.contentHtml ?? '';
+  const i18n = createI18nContext(languagePreference);
   return template
+    .replace(/<html lang="en">/g, `<html lang="${escapeHtml(i18n.language)}">`)
     .replace(/__PAGE_TITLE__/g, escapeHtml(definition.title))
     .replace(/__PAGE_EYEBROW__/g, escapeHtml(definition.eyebrow))
     .replace(/__PAGE_HEADING__/g, escapeHtml(definition.heading))

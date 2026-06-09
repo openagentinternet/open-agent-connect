@@ -16,6 +16,20 @@ function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
 var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'info',originalProfile:null,_pendingAvatar:undefined,_pendingCreateAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var launchCopy={
+  'zh-CN':{
+    noBotsYet:'还没有 Bot',
+    addBot:'创建 Bot',
+    uploadAvatar:'上传头像',
+    removeAvatar:'移除',
+    name:'Bot 名称',
+    bio:'简介',
+    cancel:'取消',
+    create:'创建',
+    nameRequired:'请输入 Bot 名称',
+    creating:'正在创建...'
+  }
+};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -26,6 +40,8 @@ var WALLET_CHAINS=[
 function api(url,opts){return fetch(url,opts).then(function(r){return r.json().catch(function(){return{ok:false,message:String(r.status)}}).then(function(body){if(!r.ok||body.ok===false){throw new Error(body.message||body.code||String(r.status))}return body})})}
 function fmtTime(t){if(!t)return'-';var d=new Date(t);if(Number.isNaN(d.getTime()))return'-';return d.toLocaleString()}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){if(c==='&')return'&amp;';if(c==='<')return'&lt;';if(c==='>')return'&gt;';if(c==='"')return'&quot;';return'&#39;'})}
+function uiLanguage(){try{if(typeof window!=='undefined'&&window.__oacLocalUiI18n&&typeof window.__oacLocalUiI18n.getLanguage==='function')return window.__oacLocalUiI18n.getLanguage();if(typeof document!=='undefined'&&document.documentElement&&document.documentElement.lang)return document.documentElement.lang}catch(error){}return'en'}
+function uiText(key,fallback){var lang=String(uiLanguage()||'').toLowerCase();var dict=lang==='zh-cn'?launchCopy['zh-CN']:null;return dict&&dict[key]?dict[key]:fallback}
 function statusPill(s){var m={completed:'online',running:'active',starting:'active',failed:'offline',timeout:'offline',cancelled:'offline'};var c=m[s]||'offline';return'<span class="status-pill status-'+c+'"><span class="status-dot"></span>'+esc(s||'unknown')+'</span>'}
 function shortText(v,n){n=n||120;v=String(v==null?'':v).replace(/\s+/g,' ').trim();if(!v)return'-';return v.length>n?v.slice(0,Math.max(0,n-3))+'...':v}
 function clampBlock(v){v=String(v==null?'':v).trim();if(!v)return'-';return v.length>700?v.slice(0,700)+'...':v}
@@ -319,7 +335,7 @@ function renderStats(){
 function renderMetabotList(){
   var list=q('[data-metabot-list]');var count=q('[data-metabot-count]');if(!list)return;
   if(count)count.textContent=String(state.profiles.length);
-  if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>No Bots yet</p></div>';return}
+  if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>'+esc(uiText('noBotsYet','No Bots yet'))+'</p></div>';return}
   list.innerHTML=state.profiles.map(function(p){
     var selected=p.slug===state.selectedSlug?' selected':'';
     var llmBadge=profileLlmUnavailable(p)?'<span class="metabot-llm-unavailable">[LLM unavailable]</span>':'';
@@ -913,29 +929,29 @@ function renderCreateAvatarPreview(){
 }
 function createModalMarkup(){
   return '<div class="modal-box">'+
-    '<div class="modal-title" id="add-metabot-title">Add MetaBot</div>'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('addBot','Add MetaBot'))+'</div>'+
     '<div class="modal-body">'+
       '<div class="info-avatar-section">'+
         '<div class="info-avatar-preview" data-create-avatar-preview>'+createAvatarPreviewMarkup()+'</div>'+
         '<div class="info-avatar-actions">'+
-          '<button class="btn btn-sm" data-act="upload-create-avatar">Upload</button>'+
-          '<button class="btn btn-sm btn-danger" data-act="remove-create-avatar"'+(state._pendingCreateAvatar?'':' hidden')+'>Remove</button>'+
+          '<button class="btn btn-sm" data-act="upload-create-avatar">'+esc(uiText('uploadAvatar','Upload'))+'</button>'+
+          '<button class="btn btn-sm btn-danger" data-act="remove-create-avatar"'+(state._pendingCreateAvatar?'':' hidden')+'>'+esc(uiText('removeAvatar','Remove'))+'</button>'+
           '<input type="file" data-field="new-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
           '<span class="save-status" data-create-avatar-status></span>'+
         '</div>'+
       '</div>'+
       '<div class="field">'+
-        '<label for="new-metabot-name">Name</label>'+
+        '<label for="new-metabot-name">'+esc(uiText('name','Name'))+'</label>'+
         '<input id="new-metabot-name" type="text" data-field="new-name" maxlength="60" autocomplete="off" />'+
       '</div>'+
       '<div class="field field-full">'+
-        '<label for="new-metabot-bio">Bio</label>'+
+        '<label for="new-metabot-bio">'+esc(uiText('bio','Bio'))+'</label>'+
         '<textarea id="new-metabot-bio" data-field="new-bio"></textarea>'+
       '</div>'+
     '</div>'+
     '<div class="modal-actions">'+
-      '<button class="btn" data-act="cancel-add">Cancel</button>'+
-      '<button class="btn btn-primary" data-act="confirm-add">Create</button>'+
+      '<button class="btn" data-act="cancel-add">'+esc(uiText('cancel','Cancel'))+'</button>'+
+      '<button class="btn btn-primary" data-act="confirm-add">'+esc(uiText('create','Create'))+'</button>'+
     '</div>'+
     '<div class="save-status" data-add-status></div>'+
   '</div>';
@@ -976,8 +992,8 @@ function openAddModal(){
 function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden');state._pendingCreateAvatar=undefined}
 function createMetabot(){
   var input=q('[data-field="new-name"]');var bioInput=q('[data-field="new-bio"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();var bio=(bioInput&&bioInput.value||'').trim();
-  if(!name){if(status){status.textContent='Name is required';status.className='save-status error'}return}
-  if(status){status.textContent='Creating...';status.className='save-status saving'}
+  if(!name){if(status){status.textContent=uiText('nameRequired','Name is required');status.className='save-status error'}return}
+  if(status){status.textContent=uiText('creating','Creating...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
   var body={name:name,creationSource:'ui'};
   if(bio)body.bio=bio;

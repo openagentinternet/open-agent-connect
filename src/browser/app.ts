@@ -120,6 +120,31 @@ var browserEndpoints = {
   actions: '/api/browser/actions',
 };
 
+var browserLaunchCopy = {
+  'zh-CN': {
+    'runtime.actorChip': '当前 Bot',
+    'runtime.noActorTitle': '创建你的第一个 Bot',
+    'runtime.noActorBody': '本地 Agent 需要先拥有一个 Bot 身份，才能出现在 Bot Internet 上。',
+    'runtime.noActorAction.label': '创建 Bot',
+    'resource.emptyTitle': '没有资源',
+    'status.unverified': '未验证',
+    'status.rendererNone': '渲染器：无',
+    'owner.localBot': '本地 Bot',
+    'owner.editProfile': '编辑主页',
+    'owner.configureChat': '配置聊天',
+    'owner.viewMessages': '查看消息',
+    'owner.share': '分享主页',
+    'modal.close': '关闭',
+    'modal.cancel': '取消',
+    'modal.usingActorTitle': '选择当前 Bot',
+    'share.title': '分享 Bot 主页',
+    'share.metaidUri': '复制 metaid URI',
+    'share.localUrl': '复制本地 Browser URL',
+    'share.publicUrl': '复制公开 Browser URL',
+    'share.close': '关闭'
+  }
+};
+
 var state = {
   history: [],
   historyIndex: -1,
@@ -144,6 +169,23 @@ var elements = {};
 function textValue(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim();
+}
+
+function browserLanguage() {
+  if (typeof document !== 'undefined' && document.documentElement && document.documentElement.lang) {
+    var lang = String(document.documentElement.lang).trim();
+    if (lang) return lang;
+  }
+  return 'en';
+}
+
+function browserIsZhCN() {
+  return browserLanguage().toLowerCase() === 'zh-cn';
+}
+
+function browserText(key, fallback) {
+  var dictionary = browserIsZhCN() ? browserLaunchCopy['zh-CN'] : null;
+  return dictionary && dictionary[key] ? dictionary[key] : fallback;
 }
 
 function escapeHtml(value) {
@@ -665,7 +707,8 @@ function runtimeLabels() {
 }
 
 function runtimeLabel(key, fallback) {
-  return textValue(runtimeLabels()[key]) || fallback;
+  var raw = textValue(runtimeLabels()[key]) || fallback;
+  return browserText('runtime.' + key, raw);
 }
 
 function selectedActor() {
@@ -763,12 +806,13 @@ function renderOwnerToolbar() {
     return;
   }
   elements.ownerToolbar.hidden = false;
+  var ownerSeparator = browserIsZhCN() ? '：' : ': ';
   elements.ownerToolbar.innerHTML =
-    '<span class="browser-owner-label">Local Bot: ' + escapeHtml(owner.label || 'Bot') + '</span>' +
-    '<button type="button" data-browser-owner-action="edit-profile">Edit Profile</button>' +
-    '<button type="button" data-browser-owner-action="configure-chat">Configure Chat</button>' +
-    '<button type="button" data-browser-owner-action="view-messages">View Messages</button>' +
-    '<button type="button" data-browser-owner-action="share">Share Bot Page</button>';
+    '<span class="browser-owner-label">' + escapeHtml(browserText('owner.localBot', 'Local Bot')) + ownerSeparator + escapeHtml(owner.label || 'Bot') + '</span>' +
+    '<button type="button" data-browser-owner-action="edit-profile">' + escapeHtml(browserText('owner.editProfile', 'Edit Profile')) + '</button>' +
+    '<button type="button" data-browser-owner-action="configure-chat">' + escapeHtml(browserText('owner.configureChat', 'Configure Chat')) + '</button>' +
+    '<button type="button" data-browser-owner-action="view-messages">' + escapeHtml(browserText('owner.viewMessages', 'View Messages')) + '</button>' +
+    '<button type="button" data-browser-owner-action="share">' + escapeHtml(browserText('owner.share', 'Share Bot Page')) + '</button>';
 }
 
 function renderNoLocalBot() {
@@ -776,17 +820,17 @@ function renderNoLocalBot() {
   var body = runtimeLabel('noActorBody', 'Connect an actor before using Browser actions.');
   var action = runtimeLabels().noActorAction;
   var actionHref = action && typeof action === 'object' ? safeUrl(action.href) : '';
-  var actionLabel = action && typeof action === 'object' ? textValue(action.label) : '';
+  var actionLabel = browserText('runtime.noActorAction.label', action && typeof action === 'object' ? textValue(action.label) : '');
   setStatus('ready', '');
   state.current = null;
   renderOwnerToolbar();
   if (elements.resourceChip) {
     elements.resourceChip.innerHTML = avatarHtml('', 'Resource', 'browser-chip-avatar') +
-      '<span class="browser-chip-copy"><span class="browser-chip-title">No resource</span><span class="browser-chip-subtitle">' + escapeHtml(title) + '</span></span>' +
+      '<span class="browser-chip-copy"><span class="browser-chip-title">' + escapeHtml(browserText('resource.emptyTitle', 'No resource')) + '</span><span class="browser-chip-subtitle">' + escapeHtml(title) + '</span></span>' +
       '<span class="browser-chip-proof" aria-hidden="true">' + iconHtml('shield') + '</span>';
   }
-  if (elements.statusProof) elements.statusProof.innerHTML = proofIconHtml('unverified') + '<span>unverified</span>';
-  if (elements.statusRenderer) elements.statusRenderer.textContent = 'renderer: none';
+  if (elements.statusProof) elements.statusProof.innerHTML = proofIconHtml('unverified') + '<span>' + escapeHtml(browserText('status.unverified', 'unverified')) + '</span>';
+  if (elements.statusRenderer) elements.statusRenderer.textContent = browserText('status.rendererNone', 'renderer: none');
   if (elements.statusTxid) elements.statusTxid.textContent = 'TXID: -';
   if (elements.viewport) {
     elements.viewport.innerHTML = '<section class="browser-empty-state" data-browser-empty-state><h2>' + escapeHtml(title) + '</h2>' +
@@ -1217,9 +1261,9 @@ function renderModal(title, bodyHtml, confirmLabel, confirmAction) {
   if (!elements.modalRoot) return;
   elements.modalRoot.hidden = false;
   elements.modalRoot.innerHTML = '<section class="browser-modal-panel" role="dialog" aria-modal="true">' +
-    '<header><h2>' + escapeHtml(title) + '</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
+    '<header><h2>' + escapeHtml(title) + '</h2><button type="button" data-browser-modal-close aria-label="' + escapeHtml(browserText('modal.close', 'Close')) + '">' + escapeHtml(browserText('modal.close', 'Close')) + '</button></header>' +
     '<div class="browser-modal-body">' + bodyHtml + '</div>' +
-    '<footer><button type="button" data-browser-modal-close>Cancel</button>' +
+    '<footer><button type="button" data-browser-modal-close>' + escapeHtml(browserText('modal.cancel', 'Cancel')) + '</button>' +
     '<button type="button" data-browser-modal-confirm data-browser-modal-action="' + escapeHtml(confirmAction) + '">' + escapeHtml(confirmLabel) + '</button></footer></section>';
 }
 
@@ -1247,7 +1291,7 @@ function openUsingIdentitySelector() {
   }
   elements.modalRoot.hidden = false;
   elements.modalRoot.innerHTML = '<section class="browser-modal-panel" role="dialog" aria-modal="true">' +
-    '<header><h2>' + escapeHtml(runtimeLabel('actorChip', 'Using')) + ' Actor</h2><button type="button" data-browser-modal-close aria-label="Close">Close</button></header>' +
+    '<header><h2>' + escapeHtml(browserText('modal.usingActorTitle', runtimeLabel('actorChip', 'Using') + ' Actor')) + '</h2><button type="button" data-browser-modal-close aria-label="' + escapeHtml(browserText('modal.close', 'Close')) + '">' + escapeHtml(browserText('modal.close', 'Close')) + '</button></header>' +
     '<div class="browser-modal-body"><div class="browser-using-options">' + actors.map(function (actor) {
       var actorId = textValue(actor && actor.id);
       var name = textValue(actor && actor.label) || actorId || 'Actor';
@@ -1422,16 +1466,16 @@ function openShareBotPageModal(owner) {
   var localUrl = origin ? origin + localPath : localPath;
   var publicBaseUrl = textValue(state.runtime && state.runtime.host && state.runtime.host.publicBaseUrl).replace(/[/]+$/, '');
   var publicButton = publicBaseUrl
-    ? '<button type="button" data-browser-share-copy="' + escapeHtml(publicBaseUrl + localPath) + '">Copy public Browser URL</button>'
+    ? '<button type="button" data-browser-share-copy="' + escapeHtml(publicBaseUrl + localPath) + '">' + escapeHtml(browserText('share.publicUrl', 'Copy public Browser URL')) + '</button>'
     : '';
   renderModal(
-    'Share Bot Page',
+    browserText('share.title', 'Share Bot Page'),
     '<div class="browser-share-list">' +
-      '<button type="button" data-browser-share-copy="' + escapeHtml(metaidUri) + '">Copy metaid URI</button>' +
-      '<button type="button" data-browser-share-copy="' + escapeHtml(localUrl) + '">Copy local Browser URL</button>' +
+      '<button type="button" data-browser-share-copy="' + escapeHtml(metaidUri) + '">' + escapeHtml(browserText('share.metaidUri', 'Copy metaid URI')) + '</button>' +
+      '<button type="button" data-browser-share-copy="' + escapeHtml(localUrl) + '">' + escapeHtml(browserText('share.localUrl', 'Copy local Browser URL')) + '</button>' +
       publicButton +
     '</div>',
-    'Close',
+    browserText('share.close', 'Close'),
     ''
   );
 }

@@ -2170,8 +2170,24 @@ test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async
   assert.match(nav, /href="\/ui\/services"[^>]*>服务<\/a>/);
   assert.match(nav, /href="\/ui\/settings"[^>]*>设置<\/a>/);
   assert.match(html, /href="\/browser"[^>]*>打开浏览器<\/a>/);
+  assert.match(html, /创建 Bot/);
+  assert.match(html, /还没有 Bot/);
   assert.doesNotMatch(nav, /href="\/ui\/browser"/);
   assert.doesNotMatch(html, /href="\/ui\/browser"[^>]*>打开浏览器<\/a>/);
+});
+
+test('GET /browser supports zh-CN launch chrome language selection', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/browser?lang=zh-CN`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /<html lang="zh-CN">/);
+  assert.match(html, /创建你的第一个 Bot/);
+  assert.match(html, /编辑主页/);
+  assert.match(html, /分享主页/);
 });
 
 test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe', async (t) => {

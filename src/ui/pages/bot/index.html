@@ -1078,12 +1078,12 @@
           <div class="metabot-list-scroll">
             <div data-metabot-list>
               <div class="session-empty">
-                <p>No Bots yet</p>
+                <p data-i18n-key="bot.noBotsYet">No Bots yet</p>
               </div>
             </div>
           </div>
           <div class="metabot-panel-footer">
-            <button class="btn btn-primary" data-act="add-metabot">+ Add Bot</button>
+            <button class="btn btn-primary" data-act="add-metabot" data-i18n-key="bot.addBot">+ Add Bot</button>
           </div>
         </aside>
 
@@ -1149,16 +1149,16 @@
 
     <div class="modal-overlay hidden" data-modal="add-metabot" role="dialog" aria-modal="true" aria-labelledby="add-metabot-title">
       <div class="modal-box">
-        <div class="modal-title" id="add-metabot-title">Add MetaBot</div>
+        <div class="modal-title" id="add-metabot-title" data-i18n-key="bot.addBot">Add MetaBot</div>
         <div class="modal-body">
           <div class="field">
-            <label for="new-metabot-name">Name</label>
+            <label for="new-metabot-name" data-i18n-key="bot.name">Name</label>
             <input id="new-metabot-name" type="text" data-field="new-name" maxlength="60" autocomplete="off" />
           </div>
         </div>
         <div class="modal-actions">
-          <button class="btn" data-act="cancel-add">Cancel</button>
-          <button class="btn btn-primary" data-act="confirm-add">Create</button>
+          <button class="btn" data-act="cancel-add" data-i18n-key="bot.cancel">Cancel</button>
+          <button class="btn btn-primary" data-act="confirm-add" data-i18n-key="bot.create">Create</button>
         </div>
         <div class="save-status" data-add-status></div>
       </div>

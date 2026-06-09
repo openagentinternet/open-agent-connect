@@ -78,6 +78,7 @@ function createBotScriptContext(overrides = {}) {
       json: () => Promise.resolve({ ok: true, data: {} }),
     })),
     navigator: {},
+    window: overrides.window ?? {},
     setTimeout: () => 0,
     clearTimeout: () => {},
     setInterval: () => 0,
@@ -278,6 +279,64 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.match(fallbackPicker, /<img src="\/ui\/assets\/platforms\/generic\.svg" alt="" loading="lazy" \/>/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="claude-code"/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
+});
+
+test('bot page renders the launch create flow and empty state in Simplified Chinese', () => {
+  const list = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': list,
+    },
+    window: {
+      __oacLocalUiI18n: {
+        getLanguage: () => 'zh-CN',
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  const createMarkup = context.createModalMarkup();
+  assert.match(createMarkup, /创建 Bot/);
+  assert.match(createMarkup, /上传头像/);
+  assert.match(createMarkup, /Bot 名称/);
+  assert.match(createMarkup, /简介/);
+  assert.match(createMarkup, /取消/);
+
+  context.renderMetabotList();
+  assert.match(list.innerHTML, /还没有 Bot/);
+});
+
+test('bot page uses Simplified Chinese create validation and progress copy', () => {
+  const status = field();
+  const confirm = field();
+  const fields = {
+    '[data-field="new-name"]': field(''),
+    '[data-field="new-bio"]': field(''),
+    '[data-add-status]': status,
+    '[data-act="confirm-add"]': confirm,
+  };
+  const context = createBotScriptContext({
+    elements: fields,
+    window: {
+      __oacLocalUiI18n: {
+        getLanguage: () => 'zh-CN',
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.createMetabot();
+
+  assert.equal(status.textContent, '请输入 Bot 名称');
+  assert.equal(status.className, 'save-status error');
+
+  fields['[data-field="new-name"]'].value = 'Alice Bot';
+  context.api = () => new Promise(() => {});
+  context.createMetabot();
+
+  assert.equal(status.textContent, '正在创建...');
+  assert.equal(status.className, 'save-status saving');
 });
 
 test('bot page loads chat skill options for the selected bot and renders selected chips', async () => {

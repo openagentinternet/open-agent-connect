@@ -201,7 +201,7 @@ export const handleUiRoutes: RouteHandler = async (context) => {
     }
     const html = handlers.ui?.renderPage
       ? await handlers.ui.renderPage('browser')
-      : await renderBrowserPageHtml();
+      : await renderBrowserPageHtml(undefined, url.searchParams.get('lang'));
     context.sendHtml(200, html);
     return true;
   }
@@ -245,7 +245,7 @@ export const handleUiRoutes: RouteHandler = async (context) => {
   if (page === 'browser') {
     const html = handlers.ui?.renderPage
       ? await handlers.ui.renderPage(page)
-      : await renderBrowserPageHtml();
+      : await renderBrowserPageHtml(undefined, url.searchParams.get('lang'));
     context.sendHtml(200, html);
     return true;
   }

@@ -86,6 +86,7 @@ function createContext(options = {}) {
     },
     window: { location: { search: '', origin: 'http://127.0.0.1:3000', href: 'http://127.0.0.1:3000/ui/browser' }, history: { replaceState() {} } },
     document: {
+      documentElement: { lang: options.language || 'en' },
       readyState: 'loading',
       querySelector: (selector) => nodes[selector] ?? null,
       querySelectorAll: () => [],
@@ -240,6 +241,48 @@ test('private-chat sends only after modal confirmation with Browser action contr
   assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body, 'from'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.payload, 'peer'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.payload, 'message'), false);
+});
+
+test('browser renders the no-Bot and owner toolbar launch chrome in Simplified Chinese', () => {
+  const empty = createContext({ language: 'zh-CN' });
+  empty.context.state.runtime = {
+    host: { kind: 'oac', name: 'Open Agent Connect', localMode: true },
+    actors: [],
+    defaultActor: null,
+    defaultUri: null,
+    features: {
+      privateChat: true,
+      serviceCall: true,
+      cacheManagement: true,
+      templateSettings: true,
+      walletLogin: false,
+    },
+    labels: {
+      actorChip: 'Using',
+      noActorTitle: 'Create your first Bot',
+      noActorBody: 'Your local Agent needs a Bot identity before it can appear on the Agent Internet.',
+      noActorAction: { label: 'Create Bot', href: '/ui/bot?mode=create' },
+    },
+  };
+
+  empty.context.renderNoLocalBot();
+
+  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /创建你的第一个 Bot/);
+  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /本地 Agent 需要先拥有一个 Bot 身份/);
+  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /创建 Bot/);
+
+  const owner = createContext({ language: 'zh-CN' });
+  owner.context.state.current.owner.globalMetaId = 'idq1worker';
+  owner.context.state.current.title = 'Worker Bot';
+
+  owner.context.renderOwnerToolbar();
+
+  assert.equal(owner.nodes['[data-browser-owner-toolbar]'].hidden, false);
+  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /本地 Bot：Worker Bot/);
+  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /编辑主页/);
+  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /配置聊天/);
+  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /查看消息/);
+  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /分享主页/);
 });
 
 test('service-call sends only after modal confirmation with Browser action contract', async () => {
