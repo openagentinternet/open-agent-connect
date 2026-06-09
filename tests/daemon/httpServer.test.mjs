@@ -12,6 +12,11 @@ const {
   commandFailed,
 } = require('../../dist/core/contracts/commandResult.js');
 
+function extractTopbarNav(html) {
+  const match = html.match(/<nav class="topbar-nav">([\s\S]*?)<\/nav>/);
+  return match ? match[1] : '';
+}
+
 async function startServer(options = {}) {
   const useBuiltInUiPages = options.useBuiltInUiPages === true;
   const calls = {
@@ -28,6 +33,8 @@ async function startServer(options = {}) {
     networkServices: [],
     networkBots: [],
     chatConversation: [],
+    chatConversations: [],
+    chatMessages: [],
     llmExecute: [],
     llmGetSession: [],
     llmCancelSession: [],
@@ -271,6 +278,42 @@ async function startServer(options = {}) {
       ].join('\n'),
     },
     chat: {
+      privateChatConversations: async (input) => {
+        calls.chatConversations.push(input);
+        return commandSuccess({
+          conversations: [
+            {
+              conversationId: 'pc-gm-local-alice-gm-remote-bob',
+              peerGlobalMetaId: 'gm-remote-bob',
+              peerName: 'Bob Bot',
+              topic: null,
+              strategyId: null,
+              state: 'active',
+              turnCount: 2,
+              lastDirection: 'inbound',
+              createdAt: 1776836100000,
+              updatedAt: 1776836184000,
+            },
+          ],
+        });
+      },
+      privateChatMessages: async (input) => {
+        calls.chatMessages.push(input);
+        return commandSuccess({
+          messages: [
+            {
+              conversationId: input.conversationId,
+              messageId: 'msg-chat-1',
+              direction: 'inbound',
+              senderGlobalMetaId: 'gm-remote-bob',
+              content: 'hello alice',
+              messagePinId: 'pin-chat-1',
+              extensions: null,
+              timestamp: 1776836184000,
+            },
+          ],
+        });
+      },
       privateConversation: async (input) => {
         calls.chatConversation.push(input);
         return commandSuccess({
@@ -2024,8 +2067,23 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
 
   const response = await fetch(`${server.baseUrl}/ui/bot`);
   const html = await response.text();
+  const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
+  assert.match(nav, /href="\/ui\/bot"[^>]*>Bot Page(?: \*)?<\/a>/);
+  assert.match(nav, /href="\/ui\/conversations"[^>]*>Conversations(?: \*)?<\/a>/);
+  assert.match(nav, /href="\/ui\/services"[^>]*>Services(?: \*)?<\/a>/);
+  assert.match(nav, /href="\/ui\/settings"[^>]*>Settings(?: \*)?<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/hub"/);
+  assert.doesNotMatch(nav, /href="\/ui\/browser"/);
+  assert.doesNotMatch(nav, /href="\/ui\/publish"/);
+  assert.doesNotMatch(nav, /href="\/ui\/my-services"/);
+  assert.doesNotMatch(nav, /href="\/ui\/trace"/);
+  assert.doesNotMatch(nav, /href="\/ui\/refund"/);
+  assert.doesNotMatch(nav, /href="\/ui\/loom"/);
+  assert.doesNotMatch(nav, /href="\/ui\/metaapps"/);
+  assert.match(html, /href="\/browser"[^>]*>Open Browser<\/a>/);
+  assert.doesNotMatch(html, /href="\/ui\/browser"[^>]*>Open Browser<\/a>/);
   assert.match(html, /data-stat-bots/);
   assert.match(html, /data-stat-runtimes/);
   assert.match(html, /data-act="open-runtime-modal"/);
@@ -2562,6 +2620,7 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
 
   const response = await fetch(`${server.baseUrl}/ui/publish`);
   const html = await response.text();
+  const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
@@ -2600,7 +2659,7 @@ test('GET /ui/publish serves the primary-runtime-aware publish console', async (
   assert.doesNotMatch(html, /name="runtimeId"/);
   assert.doesNotMatch(html, /name="llmRuntimeId"/);
   assert.doesNotMatch(html, /runtime picker/i);
-  assert.match(html, /href="\/ui\/publish"/);
+  assert.doesNotMatch(nav, /href="\/ui\/publish"/);
 });
 
 test('GET /ui/my-services renders the IDBots-style My Services workspace', async (t) => {
@@ -2644,6 +2703,99 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.doesNotMatch(html, /\/api\/provider\/summary/);
 });
 
+test('GET /ui/services renders the Provider Console services workspace with a publish entry', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/services`);
+  const html = await response.text();
+  const nav = extractTopbarNav(html);
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Services/);
+  assert.match(html, /Published Services/);
+  assert.match(html, /href="\/ui\/publish"[^>]*>Publish Service<\/a>/);
+  assert.match(html, /data-my-services-list/);
+  assert.match(html, /data-my-service-orders/);
+  assert.match(html, /\/api\/services\/owned/);
+  assert.match(html, /\/api\/services\/owned\/orders/);
+  assert.match(nav, /href="\/ui\/services"[^>]*>Services(?: \*)?<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/publish"/);
+  assert.doesNotMatch(nav, /href="\/ui\/my-services"/);
+});
+
+test('GET /ui/conversations renders the private chat Conversations MVP workspace', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/conversations`);
+  const html = await response.text();
+  const nav = extractTopbarNav(html);
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Conversations/);
+  assert.match(html, /data-conversations-shell/);
+  assert.match(html, /data-conversation-list/);
+  assert.match(html, /data-conversation-detail/);
+  assert.match(html, /\/api\/chat\/private\/conversations/);
+  assert.match(html, /\/api\/chat\/private\/messages/);
+  assert.match(nav, /href="\/ui\/conversations"[^>]*>Conversations(?: \*)?<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/trace"/);
+  assert.doesNotMatch(nav, /href="\/ui\/refund"/);
+});
+
+test('GET /ui/settings renders the Provider Console settings home', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/settings`);
+  const html = await response.text();
+  const nav = extractTopbarNav(html);
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+  assert.match(html, /Settings/);
+  assert.match(html, /data-settings-shell/);
+  assert.match(html, /Network and Indexers/);
+  assert.match(html, /Wallet and Payments/);
+  assert.match(html, /LLM Providers/);
+  assert.match(html, /Browser and Gateway/);
+  assert.match(html, /\/api\/config/);
+  assert.match(html, /\/api\/llm\/runtimes/);
+  assert.match(html, /\/api\/network\/sources/);
+  assert.match(nav, /href="\/ui\/settings"[^>]*>Settings(?: \*)?<\/a>/);
+});
+
+test('private chat conversation list and message routes power the Conversations MVP', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const conversationsResponse = await fetch(`${server.baseUrl}/api/chat/private/conversations?from=alice-bot`);
+  const conversationsPayload = await conversationsResponse.json();
+  const messagesResponse = await fetch(`${server.baseUrl}/api/chat/private/messages?from=alice-bot&conversationId=pc-gm-local-alice-gm-remote-bob&limit=25`);
+  const messagesPayload = await messagesResponse.json();
+  const missingResponse = await fetch(`${server.baseUrl}/api/chat/private/messages?from=alice-bot`);
+  const missingPayload = await missingResponse.json();
+
+  assert.equal(conversationsResponse.status, 200);
+  assert.equal(conversationsPayload.ok, true);
+  assert.equal(conversationsPayload.data.conversations[0].peerGlobalMetaId, 'gm-remote-bob');
+  assert.deepEqual(server.calls.chatConversations, [{ from: 'alice-bot' }]);
+  assert.equal(messagesResponse.status, 200);
+  assert.equal(messagesPayload.ok, true);
+  assert.equal(messagesPayload.data.messages[0].content, 'hello alice');
+  assert.deepEqual(server.calls.chatMessages, [{
+    from: 'alice-bot',
+    conversationId: 'pc-gm-local-alice-gm-remote-bob',
+    limit: 25,
+  }]);
+  assert.equal(missingResponse.status, 400);
+  assert.equal(missingPayload.ok, false);
+  assert.equal(missingPayload.code, 'missing_conversation_id');
+});
+
 test('GET /ui/refund renders buyer and seller refund operations', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
@@ -2667,12 +2819,13 @@ test('GET /ui/refund renders buyer and seller refund operations', async (t) => {
   assert.doesNotMatch(html, /\/api\/provider\/refund\/settle/);
 });
 
-test('GET /ui/loom renders the built-in Loom board and includes Loom in navigation', async (t) => {
+test('GET /ui/loom remains directly available without appearing in console navigation', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/loom`);
   const html = await response.text();
+  const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
@@ -2682,7 +2835,7 @@ test('GET /ui/loom renders the built-in Loom board and includes Loom in navigati
   assert.match(html, /data-loom-detail/);
   assert.match(html, /\/api\/loom\/dashboard/);
   assert.match(html, /\/api\/loom\/refresh/);
-  assert.match(html, /href="\/ui\/loom"/);
+  assert.doesNotMatch(nav, /href="\/ui\/loom"/);
   assert.doesNotMatch(html, /\/api\/chain/);
   assert.doesNotMatch(html, /\/api\/wallet/);
   assert.doesNotMatch(html, /\/api\/services\/rate/);
@@ -2694,6 +2847,7 @@ test('GET /ui/metaapps serves the built-in MetaApps gallery shell', async (t) =>
 
   const response = await fetch(`${server.baseUrl}/ui/metaapps?pinId=pin-1i0&from=alice`);
   const html = await response.text();
+  const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
@@ -2734,7 +2888,7 @@ test('GET /ui/metaapps serves the built-in MetaApps gallery shell', async (t) =>
   assert.match(html, /record\.indexer\?\.history/);
   assert.match(html, /data-metaapps-history/);
   assert.match(html, /metaapps-row-state/);
-  assert.match(html, /href="\/ui\/metaapps"/);
+  assert.doesNotMatch(nav, /href="\/ui\/metaapps"/);
   assert.doesNotMatch(html, /\/api\/wallet/);
   assert.doesNotMatch(html, /\/api\/chain/);
   assert.doesNotMatch(html, /\/api\/metaapp\/share/);

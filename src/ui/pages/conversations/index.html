@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .conversations-shell {
+        display: grid;
+        gap: 16px;
+      }
+      .conversations-toolbar {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .conversations-toolbar h1 {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+      .conversations-toolbar p {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .conversations-workspace {
+        display: grid;
+        grid-template-columns: minmax(320px, .85fr) minmax(420px, 1.15fr);
+        gap: 16px;
+        align-items: start;
+      }
+      .conversation-list-panel,
+      .conversation-detail-panel {
+        min-width: 0;
+      }
+      .conversation-section-header,
+      .conversation-detail-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      .conversation-section-header h2,
+      .conversation-detail-header h2 {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text);
+        text-transform: uppercase;
+      }
+      .conversation-section-header span,
+      .conversation-detail-header span {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .conversation-list,
+      .conversation-messages {
+        display: grid;
+        gap: 10px;
+      }
+      .conversation-row,
+      .conversation-message,
+      .conversation-empty {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+      .conversation-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        width: 100%;
+        padding: 12px;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .conversation-row:hover {
+        border-color: var(--border2);
+        background: var(--surface2);
+      }
+      .conversation-row[data-selected="true"] {
+        border-color: rgba(99,102,241,.5);
+        background: rgba(99,102,241,.08);
+      }
+      .conversation-row-main {
+        min-width: 0;
+      }
+      .conversation-row-main strong {
+        display: block;
+        font-size: 13px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .conversation-row-main p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .conversation-row-meta {
+        display: grid;
+        justify-items: end;
+        gap: 4px;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--dim);
+      }
+      .conversation-message {
+        padding: 12px;
+      }
+      .conversation-message > div {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      .conversation-message strong {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--accent);
+      }
+      .conversation-message span {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--dim);
+      }
+      .conversation-message p {
+        color: var(--text);
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .conversation-empty {
+        padding: 16px;
+      }
+      .conversation-empty strong {
+        display: block;
+        font-size: 13px;
+        color: var(--text);
+      }
+      .conversation-empty p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      @media (max-width: 900px) {
+        .conversations-workspace {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">Conversations</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

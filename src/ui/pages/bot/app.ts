@@ -3,10 +3,10 @@ import type { LocalUiPageDefinition } from '../types';
 export function buildBotPageDefinition(): LocalUiPageDefinition {
   return {
     page: 'bot',
-    title: 'Bot Management — Open Agent Connect',
-    eyebrow: 'MetaBot Management',
-    heading: 'Bot Management',
-    description: 'Manage MetaBots, provider settings, and execution history.',
+    title: 'Bot Page — Open Agent Connect',
+    eyebrow: 'Provider Console',
+    heading: 'Bot Page',
+    description: 'Manage your Bot identity, public page, provider settings, and execution history.',
     panels: [],
     script: buildBotPageScript(),
   };
@@ -34,6 +34,7 @@ function resultSummary(s){if(!s||!s.result)return'-';if(s.result.output)return s
 function runtimeLabel(r){var name=r.displayName||r.provider||r.id||'-';var bits=[name];if(r.health)bits.push(r.health);if(r.version)bits.push('v'+r.version);return bits.join(' / ')}
 function shortId(v){v=String(v||'');if(!v)return'-';return v.length>18?v.slice(0,12)+'...'+v.slice(-4):v}
 function botBrowserPath(globalMetaId){return '/browser/metaid/'+encodeURIComponent(String(globalMetaId||'').trim())}
+function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast('Bot Page is unavailable until Global MetaID is ready');return}window.location.href=botBrowserPath(profile.globalMetaId)}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
@@ -317,7 +318,7 @@ function renderStats(){
 function renderMetabotList(){
   var list=q('[data-metabot-list]');var count=q('[data-metabot-count]');if(!list)return;
   if(count)count.textContent=String(state.profiles.length);
-  if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>No MetaBots yet</p></div>';return}
+  if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>No Bots yet</p></div>';return}
   list.innerHTML=state.profiles.map(function(p){
     var selected=p.slug===state.selectedSlug?' selected':'';
     var llmBadge=profileLlmUnavailable(p)?'<span class="metabot-llm-unavailable">[LLM unavailable]</span>':'';
@@ -343,6 +344,7 @@ function renderDetailHeader(profile){
   var avatar=q('[data-detail-avatar]');if(avatar)avatar.innerHTML=avatarMarkup(profile,true);
   var name=q('[data-detail-name]');if(name)name.textContent=profile.name||profile.slug;
   var id=q('[data-detail-id]');if(id)id.textContent=profile.globalMetaId||profile.slug||'-';
+  var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!profile.globalMetaId;
 }
 
 function setDetailVisible(visible){
@@ -1071,6 +1073,7 @@ document.addEventListener('DOMContentLoaded',function(){
   var name=q('[data-field="new-name"]');if(name)name.addEventListener('keydown',function(event){if(event.key==='Enter')createMetabot();if(event.key==='Escape')closeAddModal()});
   qq('[data-tab]').forEach(function(el){el.addEventListener('click',function(){switchTab(this.getAttribute('data-tab'))})});
   var runtimeModal=q('[data-act="open-runtime-modal"]');if(runtimeModal)runtimeModal.addEventListener('click',openRuntimeModal);
+  var viewBotPage=q('[data-act="view-bot-page"]');if(viewBotPage)viewBotPage.addEventListener('click',viewSelectedBotPage);
   var discover=q('[data-act="discover-runtimes"]');if(discover)discover.addEventListener('click',discoverRuntimes);
   var wallet=q('[data-act="open-wallet"]');if(wallet)wallet.addEventListener('click',openWalletPanel);
   var backup=q('[data-act="open-backup"]');if(backup)backup.addEventListener('click',openBackupPanel);

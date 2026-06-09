@@ -327,6 +327,24 @@ test('runCli dispatches `metabot ui open --page` and returns the local UI URL', 
   });
 });
 
+test('runCli dispatches provider console `metabot ui open --page` values', async () => {
+  for (const page of ['conversations', 'services', 'settings']) {
+    const harness = createHarness();
+    const exitCode = await runCli(['ui', 'open', '--page', page, '--from', 'alice'], harness.context);
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(harness.calls.ui, [{ page, from: 'alice' }]);
+    assert.deepEqual(parseLastJson(harness.stdout), {
+      ok: true,
+      state: 'success',
+      data: {
+        page,
+        localUiUrl: `/ui/${page}?from=alice`,
+      },
+    });
+  }
+});
+
 test('runCli rejects unknown and retired `metabot ui open --page` values before opening', async () => {
   for (const page of ['unknown', 'chat-viewer']) {
     const harness = createHarness();

@@ -5,7 +5,19 @@ import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 
 export type Awaitable<T> = T | Promise<T>;
 
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'loom' | 'metaapps' | 'browser';
+export type MetabotUiPageName =
+  | 'hub'
+  | 'publish'
+  | 'my-services'
+  | 'trace'
+  | 'refund'
+  | 'bot'
+  | 'conversations'
+  | 'services'
+  | 'settings'
+  | 'loom'
+  | 'metaapps'
+  | 'browser';
 
 export interface ServiceRefundSyncResponse {
   scanned: {

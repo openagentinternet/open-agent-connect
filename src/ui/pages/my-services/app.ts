@@ -1,23 +1,45 @@
 import type { LocalUiPageDefinition } from '../types';
 import { buildMyServicesPageViewModelRuntimeSource } from './viewModel';
 
-export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
+export interface MyServicesPageDefinitionOptions {
+  page?: LocalUiPageDefinition['page'];
+  title?: string;
+  eyebrow?: string;
+  heading?: string;
+  description?: string;
+  toolbarTitle?: string;
+  toolbarLabel?: string;
+  includePublishAction?: boolean;
+}
+
+export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionOptions = {}): LocalUiPageDefinition {
   const buildMyServicesPageViewModelSource = buildMyServicesPageViewModelRuntimeSource();
+  const page = options.page ?? 'my-services';
+  const title = options.title ?? 'My Services';
+  const eyebrow = options.eyebrow ?? 'Service Ledger';
+  const heading = options.heading ?? 'My Services';
+  const description = options.description ?? 'Manage locally published MetaBot skill services.';
+  const toolbarTitle = options.toolbarTitle ?? 'My Services';
+  const toolbarLabel = options.toolbarLabel ?? 'Loading local services...';
+  const publishAction = options.includePublishAction
+    ? '<a class="btn btn-primary" href="/ui/publish">Publish Service</a>'
+    : '';
   return {
-    page: 'my-services',
-    title: 'My Services',
-    eyebrow: 'Service Ledger',
-    heading: 'My Services',
-    description: 'Manage locally published MetaBot skill services.',
+    page,
+    title,
+    eyebrow,
+    heading,
+    description,
     panels: [],
     contentHtml: `
       <section class="my-services-shell" data-my-services-shell>
         <div class="my-services-toolbar">
           <div>
-            <h1>My Services</h1>
-            <p data-my-services-page-label>Loading local services...</p>
+            <h1>${toolbarTitle}</h1>
+            <p data-my-services-page-label>${toolbarLabel}</p>
           </div>
           <div class="my-services-toolbar-actions">
+            ${publishAction}
             <button class="btn" type="button" data-my-services-refresh>Refresh</button>
           </div>
         </div>
