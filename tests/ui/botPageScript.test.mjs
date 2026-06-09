@@ -28,6 +28,13 @@ function field(value = '') {
   return element;
 }
 
+function panelElement(attributeName, attributeValue, selectors = {}) {
+  return {
+    querySelector: (selector) => selectors[selector] ?? null,
+    getAttribute: (name) => (name === attributeName ? attributeValue : null),
+  };
+}
+
 function deferred() {
   let resolve;
   let reject;
@@ -107,7 +114,7 @@ function tabElement(value) {
   return element;
 }
 
-test('bot page preserves unavailable provider bindings when saving unrelated profile fields', () => {
+test('bot page saveInfo preserves unavailable provider bindings when saving unrelated profile fields', () => {
   const fields = {
     '[data-save-status]': field(),
     '[data-act="save-info"]': field(),
@@ -125,7 +132,13 @@ test('bot page preserves unavailable provider bindings when saving unrelated pro
       querySelectorAll: () => [],
       addEventListener: () => {},
     },
-    fetch: (_url, options) => {
+    fetch: (url, options) => {
+      if (url === '/api/bot/stats') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: {} }),
+        });
+      }
       requestBody = JSON.parse(options.body);
       return Promise.resolve({
         ok: true,
@@ -164,7 +177,7 @@ test('bot page preserves unavailable provider bindings when saving unrelated pro
   assert.deepEqual(requestBody, { name: 'Alice Updated' });
 });
 
-test('bot page sends provider changes only after the provider picker is touched', () => {
+test('bot page saveInfo sends provider changes only after the provider picker is touched', () => {
   const primary = field('codex');
   primary.setAttribute('data-provider-touched', '1');
   const fallback = field('');
@@ -186,7 +199,13 @@ test('bot page sends provider changes only after the provider picker is touched'
       querySelectorAll: () => [],
       addEventListener: () => {},
     },
-    fetch: (_url, options) => {
+    fetch: (url, options) => {
+      if (url === '/api/bot/stats') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: {} }),
+        });
+      }
       requestBody = JSON.parse(options.body);
       return Promise.resolve({
         ok: true,
@@ -226,6 +245,209 @@ test('bot page sends provider changes only after the provider picker is touched'
     primaryProvider: 'codex',
     fallbackProvider: null,
   });
+});
+
+test('bot page saveBehavior preserves unavailable provider bindings when saving unrelated behavior fields', () => {
+  const behaviorFields = {
+    '[data-save-status]': field(),
+    '[data-act="save-behavior"]': field(),
+    '[data-field="role"]': field('New role'),
+    '[data-field="soul"]': field('Original soul'),
+    '[data-field="goal"]': field('Original goal'),
+    '[data-field="primaryProvider"]': field(''),
+    '[data-field="fallbackProvider"]': field(''),
+  };
+  const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
+  let requestBody = null;
+  const context = {
+    document: {
+      querySelector: (selector) => (selector === '[data-behavior-profile-slug]' ? behaviorPanel : null),
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice-bot',
+              name: 'Alice Updated',
+              role: 'Original role',
+              soul: 'Original soul',
+              goal: 'Original goal',
+              primaryProvider: 'codex',
+              fallbackProvider: 'openclaw',
+            },
+          },
+        }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice' }];
+  context.state.originalProfile = {
+    slug: 'alice-bot',
+    name: 'Alice',
+    role: 'Original role',
+    soul: 'Original soul',
+    goal: 'Original goal',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+  };
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderBehaviorTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  context.saveBehavior();
+
+  assert.deepEqual(requestBody, { role: 'New role' });
+});
+
+test('bot page saveBehavior sends provider changes only after the provider picker is touched', () => {
+  const primary = field('codex');
+  primary.setAttribute('data-provider-touched', '1');
+  const fallback = field('');
+  fallback.setAttribute('data-provider-touched', '1');
+  const behaviorFields = {
+    '[data-save-status]': field(),
+    '[data-act="save-behavior"]': field(),
+    '[data-field="role"]': field('Original role'),
+    '[data-field="soul"]': field('Original soul'),
+    '[data-field="goal"]': field('Original goal'),
+    '[data-field="primaryProvider"]': primary,
+    '[data-field="fallbackProvider"]': fallback,
+  };
+  const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
+  let requestBody = null;
+  const context = {
+    document: {
+      querySelector: (selector) => (selector === '[data-behavior-profile-slug]' ? behaviorPanel : null),
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice-bot',
+              name: 'Alice',
+              role: 'Original role',
+              soul: 'Original soul',
+              goal: 'Original goal',
+              primaryProvider: 'codex',
+              fallbackProvider: null,
+            },
+          },
+        }),
+      });
+    },
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice' }];
+  context.state.originalProfile = {
+    slug: 'alice-bot',
+    name: 'Alice',
+    role: 'Original role',
+    soul: 'Original soul',
+    goal: 'Original goal',
+    primaryProvider: 'openclaw',
+    fallbackProvider: 'gemini',
+  };
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderBehaviorTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  context.saveBehavior();
+
+  assert.deepEqual(requestBody, {
+    primaryProvider: 'codex',
+    fallbackProvider: null,
+  });
+});
+
+test('bot page saveBehavior reads fields and save state from the behavior panel only', () => {
+  const publicStatus = field();
+  const publicButton = field();
+  const behaviorStatus = field();
+  const behaviorButton = field();
+  const behaviorFields = {
+    '[data-save-status]': behaviorStatus,
+    '[data-act="save-behavior"]': behaviorButton,
+    '[data-field="role"]': field('Behavior role'),
+    '[data-field="soul"]': field('Original soul'),
+    '[data-field="goal"]': field('Original goal'),
+    '[data-field="primaryProvider"]': field('codex'),
+    '[data-field="fallbackProvider"]': field('openclaw'),
+  };
+  const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
+  const context = createBotScriptContext({
+    elements: {
+      '[data-behavior-profile-slug]': behaviorPanel,
+      '[data-save-status]': publicStatus,
+      '[data-act="save-behavior"]': publicButton,
+      '[data-field="role"]': field('Hidden public role'),
+      '[data-field="soul"]': field('Hidden public soul'),
+      '[data-field="goal"]': field('Hidden public goal'),
+    },
+    fetch: (_url, options) => {
+      context.requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice-bot',
+              name: 'Alice',
+              role: 'Behavior role',
+              soul: 'Original soul',
+              goal: 'Original goal',
+              primaryProvider: 'codex',
+              fallbackProvider: 'openclaw',
+            },
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice' }];
+  context.state.originalProfile = {
+    slug: 'alice-bot',
+    name: 'Alice',
+    role: 'Original role',
+    soul: 'Original soul',
+    goal: 'Original goal',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+  };
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderBehaviorTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  context.saveBehavior();
+
+  assert.deepEqual(context.requestBody, { role: 'Behavior role' });
+  assert.equal(behaviorStatus.textContent, 'Saving...');
+  assert.equal(behaviorButton.disabled, true);
+  assert.equal(publicStatus.textContent, '');
+  assert.equal(publicButton.disabled, false);
 });
 
 test('bot page renders provider pickers with icons and only exposes none for fallback', () => {
@@ -523,6 +745,62 @@ test('bot page renders public identity tab with only public identity controls', 
   assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
 });
 
+test('bot page renders behavior tab with only behavior controls', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-behavior-content]': root,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice Bot',
+    role: 'Build beside the user.',
+    soul: 'Careful and direct.',
+    goal: 'Ship useful work.',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+    wallet: { addresses: { btc: 'btc-address' } },
+    allowChatSkills: ['weather.lookup'],
+  }];
+  context.state.runtimes = [
+    {
+      id: 'runtime-codex',
+      provider: 'codex',
+      displayName: 'Codex',
+      logoPath: '/ui/assets/platforms/codex.svg',
+      health: 'healthy',
+    },
+    {
+      id: 'runtime-openclaw',
+      provider: 'openclaw',
+      displayName: 'OpenClaw',
+      logoPath: '/ui/assets/platforms/openclaw.svg',
+      health: 'healthy',
+    },
+  ];
+
+  context.renderBehaviorTab();
+
+  assert.match(root.innerHTML, /Role/);
+  assert.match(root.innerHTML, /Soul/);
+  assert.match(root.innerHTML, /Goal/);
+  assert.match(root.innerHTML, /Primary LLM Provider/);
+  assert.match(root.innerHTML, /Fallback LLM Provider/);
+  assert.match(root.innerHTML, /Save Behavior/);
+  assert.doesNotMatch(root.innerHTML, /Wallet/);
+  assert.doesNotMatch(root.innerHTML, /Backup/);
+  assert.doesNotMatch(root.innerHTML, /Execution History/);
+  assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
+  assert.doesNotMatch(root.innerHTML, /data-field="chatSkillSelect"/);
+  assert.doesNotMatch(root.innerHTML, /Homepage/);
+  assert.doesNotMatch(root.innerHTML, /data-act="upload-homepage"/);
+  assert.doesNotMatch(root.innerHTML, /Publish Service/);
+});
+
 test('bot page public identity tab is not replaced when chat skill options load', async () => {
   const root = { innerHTML: '' };
   let renderInfoCalls = 0;
@@ -688,6 +966,76 @@ test('bot page savePublicIdentity ignores stale UI updates after selection chang
         slug: 'alice',
         name: 'Alice Updated',
         bio: 'Updated public bio.',
+      },
+      chainWrites: [],
+    },
+  });
+
+  await save;
+
+  assert.equal(requestUrl, '/api/bot/profiles/alice');
+  assert.equal(context.state.selectedSlug, 'bob');
+  assert.equal(context.state.originalProfile.slug, 'bob');
+  assert.equal(renderListCount, 0);
+  assert.equal(renderHeroCount, 0);
+  assert.equal(renderTabCount, 0);
+  assert.equal(successModalCount, 0);
+});
+
+test('bot page saveBehavior ignores stale UI updates after selection changes', async () => {
+  const response = deferred();
+  const behaviorFields = {
+    '[data-save-status]': field(),
+    '[data-act="save-behavior"]': field(),
+    '[data-field="role"]': field('Alice updated role'),
+    '[data-field="soul"]': field('Alice updated soul'),
+    '[data-field="goal"]': field('Alice updated goal'),
+    '[data-field="primaryProvider"]': field('codex'),
+    '[data-field="fallbackProvider"]': field(''),
+  };
+  const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice', behaviorFields);
+  let requestUrl = null;
+  let renderListCount = 0;
+  let renderHeroCount = 0;
+  let renderTabCount = 0;
+  let successModalCount = 0;
+  const context = createBotScriptContext({
+    elements: {
+      '[data-behavior-profile-slug]': behaviorPanel,
+    },
+    fetch: (url) => {
+      requestUrl = url;
+      return Promise.resolve({
+        ok: true,
+        json: () => response.promise,
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [
+    { slug: 'alice', name: 'Alice', role: 'Original role', soul: 'Original soul', goal: 'Original goal' },
+    { slug: 'bob', name: 'Bob', role: 'Bob role', soul: 'Bob soul', goal: 'Bob goal' },
+  ];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderMetabotList = () => { renderListCount += 1; };
+  context.renderDetailHeader = () => { renderHeroCount += 1; };
+  context.renderBehaviorTab = () => { renderTabCount += 1; };
+  context.showChainSuccessModal = () => { successModalCount += 1; };
+
+  const save = context.saveBehavior();
+  context.state.selectedSlug = 'bob';
+  context.state.originalProfile = context.state.profiles[1];
+  response.resolve({
+    ok: true,
+    data: {
+      profile: {
+        slug: 'alice',
+        name: 'Alice',
+        role: 'Alice updated role',
+        soul: 'Alice updated soul',
+        goal: 'Alice updated goal',
       },
       chainWrites: [],
     },

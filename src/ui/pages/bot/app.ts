@@ -308,6 +308,23 @@ function infoProviderTouched(field){
   var el=q('[data-field="'+field+'"]');
   return Boolean(el&&el.getAttribute&&el.getAttribute('data-provider-touched')==='1');
 }
+function queryWithin(root,selector){
+  return root&&typeof root.querySelector==='function'?root.querySelector(selector):null;
+}
+function fieldValueWithin(root,field,fallback){
+  var el=queryWithin(root,'[data-field="'+field+'"]');
+  return el?el.value:fallback;
+}
+function providerTouchedWithin(root,field){
+  var el=queryWithin(root,'[data-field="'+field+'"]');
+  return Boolean(el&&el.getAttribute&&el.getAttribute('data-provider-touched')==='1');
+}
+function behaviorPanelForProfile(profile){
+  var slug=profile&&profile.slug||'';
+  var panel=q('[data-behavior-profile-slug]');
+  if(!slug||!panel||!panel.getAttribute||panel.getAttribute('data-behavior-profile-slug')!==slug)return null;
+  return panel;
+}
 function currentInfoFormDraft(profile){
   if(!profile||!profile.slug)return null;
   var panel=q('[data-info-profile-slug]');
@@ -330,6 +347,19 @@ function currentPublicIdentityDraft(profile){
   return {
     name:infoFieldValue('name',profile.name||''),
     bio:infoFieldValue('bio',profile.bio||''),
+  };
+}
+function currentBehaviorDraft(profile){
+  var panel=behaviorPanelForProfile(profile);
+  if(!panel)return null;
+  return {
+    role:fieldValueWithin(panel,'role',profile.role||''),
+    soul:fieldValueWithin(panel,'soul',profile.soul||''),
+    goal:fieldValueWithin(panel,'goal',profile.goal||''),
+    primaryProvider:fieldValueWithin(panel,'primaryProvider',profile.primaryProvider||''),
+    primaryProviderTouched:providerTouchedWithin(panel,'primaryProvider'),
+    fallbackProvider:fieldValueWithin(panel,'fallbackProvider',profile.fallbackProvider||''),
+    fallbackProviderTouched:providerTouchedWithin(panel,'fallbackProvider'),
   };
 }
 
@@ -477,6 +507,32 @@ function renderPublicIdentityTab(options){
   var homepage=q('[data-act="upload-homepage"]');if(homepage)homepage.addEventListener('click',openHomepageUploadPlaceholder);
   var save=q('[data-act="save-public-identity"]');if(save)save.addEventListener('click',savePublicIdentity);
   var reset=q('[data-act="reset-public-identity"]');if(reset)reset.addEventListener('click',resetPublicIdentity);
+  focusBotManagementTarget();
+}
+
+function renderBehaviorTab(options){
+  options=options||{};
+  var profile=selectedProfile();var root=q('[data-behavior-content]');if(!root)return;
+  if(!profile){root.innerHTML='';return}
+  state.originalProfile=profile;
+  var draft=options.preserveDraft===false?null:currentBehaviorDraft(profile);
+  var roleValue=draft?draft.role:(profile.role||'');
+  var soulValue=draft?draft.soul:(profile.soul||'');
+  var goalValue=draft?draft.goal:(profile.goal||'');
+  var primaryProviderValue=draft?draft.primaryProvider:(profile.primaryProvider||'');
+  var fallbackProviderValue=draft?draft.fallbackProvider:(profile.fallbackProvider||'');
+  root.innerHTML='<div class="info-edit-panel" data-behavior-profile-slug="'+esc(profile.slug)+'">'+
+    '<div class="info-form-grid">'+
+      '<div class="field field-full"><label for="bot-role">Role</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-soul">Soul</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-goal">Goal</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
+      providerPickerMarkup('primaryProvider','Primary LLM Provider',primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
+      providerPickerMarkup('fallbackProvider','Fallback LLM Provider',fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
+    '</div>'+
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-behavior">Save Behavior</button><span class="save-status" data-save-status></span></div></div>';
+  wireProviderPickers();
+  var panel=behaviorPanelForProfile(profile);
+  var save=queryWithin(panel,'[data-act="save-behavior"]');if(save)save.addEventListener('click',saveBehavior);
   focusBotManagementTarget();
 }
 
@@ -869,6 +925,41 @@ function savePublicIdentity(){
   }).finally(function(){btn=q('[data-act="save-public-identity"]');if(btn)btn.disabled=false});
 }
 
+function saveBehavior(){
+  var profile=state.originalProfile||selectedProfile();if(!profile||!state.selectedSlug)return;
+  var profileSlug=profile.slug||state.selectedSlug;
+  var panel=behaviorPanelForProfile(profile);if(!panel)return;
+  var status=queryWithin(panel,'[data-save-status]');var btn=queryWithin(panel,'[data-act="save-behavior"]');
+  var payload={};
+  changedValue(payload,'role',fieldValueWithin(panel,'role',''),profile.role||'');
+  changedValue(payload,'soul',fieldValueWithin(panel,'soul',''),profile.soul||'');
+  changedValue(payload,'goal',fieldValueWithin(panel,'goal',''),profile.goal||'');
+  var primaryEl=queryWithin(panel,'[data-field="primaryProvider"]');var fallbackEl=queryWithin(panel,'[data-field="fallbackProvider"]');
+  if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
+  if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
+  if(!Object.keys(payload).length){if(status){status.textContent='No changes';status.className='save-status'}return}
+  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(btn)btn.disabled=true;
+  return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
+    var updated=r.data.profile;
+    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
+    if(state.selectedSlug!==profileSlug)return;
+    state.originalProfile=updated;
+    renderMetabotList();
+    renderDetailHeader(updated);
+    renderBehaviorTab({preserveDraft:false});
+    panel=behaviorPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){status.textContent='On-chain update confirmed.';status.className='save-status success'}
+    showChainSuccessModal({
+      title:'Profile Updated On-Chain',
+      message:'Profile changes were written on-chain before local data was saved.',
+      profile:updated,
+      chainWrites:(r.data&&r.data.chainWrites)||[],
+    });
+  }).catch(function(error){
+    if(state.selectedSlug===profileSlug&&status){status.textContent=error.message;status.className='save-status error'}
+  }).finally(function(){if(state.selectedSlug===profileSlug){panel=behaviorPanelForProfile(profile);btn=queryWithin(panel,'[data-act="save-behavior"]');if(btn)btn.disabled=false}});
+}
+
 function resetPublicIdentity(){
   state._pendingAvatar=undefined;
   var profile=selectedProfile();
@@ -946,6 +1037,7 @@ function switchTab(tab,silent){
   qq('[data-tab-panel]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab-panel')===state.selectedTab)});
   if(state.selectedTab==='advanced'){renderSettingsTab();loadSelectedProfileConfig();loadSessions()}
   else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
+  else if(state.selectedTab==='behavior')renderBehaviorTab();
   else renderPlaceholderTab(state.selectedTab);
 }
 
