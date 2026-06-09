@@ -34,6 +34,14 @@ test('Browser module exports page rendering and API route boundary', async () =>
   assert.match(html, /\/api\/browser\/actions/);
 });
 
+test('Browser page renders template preview images with browser-safe URLs', async () => {
+  const html = await browserModule.renderBrowserPageHtml();
+
+  assert.doesNotMatch(html, /builtin:\/\/bot-homepage\//);
+  assert.match(html, /browser-template-preview/);
+  assert.match(html, /data:image\/svg\+xml/);
+});
+
 test('Browser API route boundary handles runtime without daemon route types', async () => {
   const { handled, sent } = await callBrowserRoute({
     path: '/api/browser/runtime?actorId=wallet-user',

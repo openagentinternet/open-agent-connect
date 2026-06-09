@@ -1,28 +1,5 @@
-import type { BrowserUriScheme, ParsedBrowserUri } from './types';
-
-const SUPPORTED_SCHEMES = new Set<BrowserUriScheme>(['metaid', 'metaapp']);
-
-export function parseBrowserUri(input: string): ParsedBrowserUri {
-  const originalUri = String(input ?? '').trim();
-  const schemeMatch = originalUri.match(/^([a-z][a-z0-9+.-]*):\/\/(.*)$/i);
-  if (!schemeMatch) {
-    throw new Error('Enter a complete Agent Internet URI such as metaid://idq1example or metaapp://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0.');
-  }
-
-  const scheme = schemeMatch[1].toLowerCase() as BrowserUriScheme;
-  if (!SUPPORTED_SCHEMES.has(scheme)) {
-    throw new Error(`Unsupported URI scheme: ${schemeMatch[1]}.`);
-  }
-
-  const id = schemeMatch[2].trim();
-  if (!id) {
-    throw new Error('Agent Internet URI has an empty resource id.');
-  }
-
-  return {
-    originalUri,
-    normalizedUri: `${scheme}://${id}`,
-    scheme,
-    id,
-  };
-}
+export {
+  parseBrowserUri,
+  type BrowserUriScheme,
+  type ParsedBrowserUri,
+} from '@openagentinternet/agent-browser-core';
