@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .settings-shell {
+        display: grid;
+        gap: 16px;
+      }
+      .settings-toolbar {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .settings-toolbar h1 {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+      .settings-toolbar p {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .settings-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .settings-panel {
+        min-width: 0;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+        padding: 14px;
+      }
+      .settings-panel h2 {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .settings-panel p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .settings-panel code {
+        max-width: 220px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--dim);
+        overflow-wrap: anywhere;
+        text-align: right;
+      }
+      .settings-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .settings-links a {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .settings-links a:hover {
+        color: var(--text);
+      }
+      @media (max-width: 820px) {
+        .settings-grid {
+          grid-template-columns: 1fr;
+        }
+        .settings-panel {
+          display: grid;
+        }
+        .settings-panel code,
+        .settings-links {
+          max-width: none;
+          text-align: left;
+          justify-content: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">Settings</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

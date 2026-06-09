@@ -5,6 +5,9 @@ import type { CliRuntimeContext } from '../types';
 const SUPPORTED_UI_PAGES = new Set([
   'hub',
   'bot',
+  'conversations',
+  'services',
+  'settings',
   'buzz',
   'chat',
   'publish',

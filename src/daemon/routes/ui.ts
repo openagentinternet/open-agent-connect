@@ -6,8 +6,11 @@ import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
+import { buildConversationsPageDefinition } from '../../ui/pages/conversations/app';
 import { buildLoomPageDefinition } from '../../ui/pages/loom/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
+import { buildServicesPageDefinition } from '../../ui/pages/services/app';
+import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
 import { renderBrowserPageHtml } from '../../browser/page';
 import type { MetabotUiPageName, RouteHandler } from './types';
@@ -30,20 +33,18 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, () => LocalUiPageDefiniti
   'trace': buildTracePageDefinition,
   'refund': buildRefundPageDefinition,
   'bot': buildBotPageDefinition,
+  'conversations': buildConversationsPageDefinition,
+  'services': buildServicesPageDefinition,
+  'settings': buildSettingsPageDefinition,
   'loom': buildLoomPageDefinition,
   'metaapps': buildMetaAppsPageDefinition,
 };
 
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; label: string }> = [
-  { page: 'hub', label: 'Hub' },
-  { page: 'bot', label: 'Bot' },
-  { page: 'browser', label: 'Browser' },
-  { page: 'publish', label: 'Publish' },
-  { page: 'my-services', label: 'My Services' },
-  { page: 'trace', label: 'Trace' },
-  { page: 'refund', label: 'Refund' },
-  { page: 'loom', label: 'Loom' },
-  { page: 'metaapps', label: 'MetaApps' },
+  { page: 'bot', label: 'Bot Page' },
+  { page: 'conversations', label: 'Conversations' },
+  { page: 'services', label: 'Services' },
+  { page: 'settings', label: 'Settings' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();
@@ -71,9 +72,21 @@ function renderPanels(definition: LocalUiPageDefinition): string {
 
 function renderNav(currentPage: MetabotUiPageName): string {
   return NAV_ITEMS.map((item) => {
-    const label = item.page === currentPage ? `${item.label} *` : item.label;
-    return `<a href="/ui/${item.page}">${escapeHtml(label)}</a>`;
+    const activeClass = item.page === currentPage ? ' class="active"' : '';
+    return `<a${activeClass} href="/ui/${item.page}">${escapeHtml(item.label)}</a>`;
   }).join('');
+}
+
+function renderTopbarAction(): string {
+  return '<a class="topbar-action" href="/browser">Open Browser</a>';
+}
+
+function injectTopbarChrome(html: string): string {
+  const withLogo = html.replace(
+    /<a class="topbar-logo" href="\/ui\/hub">MetaBot<\/a>/,
+    '<a class="topbar-logo" href="/ui/bot">Open Agent Connect</a>',
+  );
+  return withLogo.replace('</nav>', `</nav>${renderTopbarAction()}`);
 }
 
 function resolveTemplatePath(page: MetabotUiPageName): string {
@@ -83,11 +96,12 @@ function resolveTemplatePath(page: MetabotUiPageName): string {
 }
 
 async function loadTemplate(page: MetabotUiPageName): Promise<string> {
-  const copiedAssetPath = path.resolve(__dirname, `../../ui/pages/${page}/index.html`);
+  const templatePage = page === 'services' ? 'my-services' : page;
+  const copiedAssetPath = path.resolve(__dirname, `../../ui/pages/${templatePage}/index.html`);
   try {
     return await fs.readFile(copiedAssetPath, 'utf8');
   } catch {
-    const sourceAssetPath = path.resolve(__dirname, `../../../src/ui/pages/${page}/index.html`);
+    const sourceAssetPath = path.resolve(__dirname, `../../../src/ui/pages/${templatePage}/index.html`);
     return fs.readFile(sourceAssetPath, 'utf8');
   }
 }
@@ -103,7 +117,7 @@ async function renderBuiltInPage(page: MetabotUiPageName): Promise<string> {
   // inject only the page-specific content HTML. Otherwise fall back to the
   // legacy hero wrapper for templates that don't have __PAGE_CONTENT__.
   const content = definition.contentHtml ?? '';
-  return template
+  const html = template
     .replace(/__PAGE_TITLE__/g, escapeHtml(definition.title))
     .replace(/__PAGE_EYEBROW__/g, escapeHtml(definition.eyebrow))
     .replace(/__PAGE_HEADING__/g, escapeHtml(definition.heading))
@@ -112,6 +126,7 @@ async function renderBuiltInPage(page: MetabotUiPageName): Promise<string> {
     .replace(/__PAGE_PANELS__/g, renderPanels(definition))
     .replace(/__PAGE_CONTENT__/g, content)
     .replace(/__PAGE_SCRIPT__/g, definition.script);
+  return injectTopbarChrome(html);
 }
 
 function isBrowserPagePath(pathname: string): boolean {
