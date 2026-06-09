@@ -208,9 +208,9 @@ function sameChatSkillList(left,right){
   for(var i=0;i<left.length;i++){if(left[i]!==right[i])return false}
   return true;
 }
-function rerenderLegacyInfoForChatSkillLoad(slug){
-  var panel=q('[data-info-profile-slug]');
-  if(slug===state.selectedSlug&&panel&&panel.getAttribute&&panel.getAttribute('data-info-profile-slug')===slug)renderInfoTab();
+function rerenderChatSkillsTabForLoad(slug){
+  var panel=q('[data-chat-skills-profile-slug]');
+  if(state.selectedTab==='chatSkills'&&slug===state.selectedSlug&&panel&&panel.getAttribute&&panel.getAttribute('data-chat-skills-profile-slug')===slug)renderChatSkillsTab();
 }
 function selectedChatSkills(profile){
   var slug=profile&&profile.slug||state.selectedSlug;
@@ -232,7 +232,7 @@ function loadChatSkillOptions(slug){
   if(!slug)return Promise.resolve([]);
   state.chatSkillOptionsStatusBySlug[slug]='loading';
   state.chatSkillOptionsErrorBySlug[slug]='';
-  rerenderLegacyInfoForChatSkillLoad(slug);
+  rerenderChatSkillsTabForLoad(slug);
   return api('/api/services/skills?from='+encodeURIComponent(slug)).then(function(r){
     var data=r&&r.data?r.data:r;
     var skills=Array.isArray(data&&data.skills)?data.skills:[];
@@ -249,13 +249,13 @@ function loadChatSkillOptions(slug){
     });
     state.chatSkillOptionsBySlug[slug]=rows;
     state.chatSkillOptionsStatusBySlug[slug]='loaded';
-    rerenderLegacyInfoForChatSkillLoad(slug);
+    rerenderChatSkillsTabForLoad(slug);
     return rows;
   }).catch(function(error){
     state.chatSkillOptionsBySlug[slug]=[];
     state.chatSkillOptionsStatusBySlug[slug]='error';
     state.chatSkillOptionsErrorBySlug[slug]=error&&error.message?error.message:String(error||'Failed to load chat skills');
-    rerenderLegacyInfoForChatSkillLoad(slug);
+    rerenderChatSkillsTabForLoad(slug);
     return [];
   });
 }
@@ -287,7 +287,7 @@ function wireChatSkillControls(){
       var select=q('[data-field="chatSkillSelect"]');var skill=String(select&&select.value||'').trim();
       if(!skill)return;
       state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(selectedChatSkills(profile).concat([skill]));
-      renderInfoTab();
+      if(state.selectedTab==='chatSkills')renderChatSkillsTab();else renderInfoTab();
     });
   });
   qq('[data-act="remove-chat-skill"]').forEach(function(el){
@@ -296,7 +296,7 @@ function wireChatSkillControls(){
       var profile=selectedProfile();if(!profile)return;
       var skill=this.getAttribute('data-skill')||'';
       state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(selectedChatSkills(profile).filter(function(item){return item!==skill}));
-      renderInfoTab();
+      if(state.selectedTab==='chatSkills')renderChatSkillsTab();else renderInfoTab();
     });
   });
 }
@@ -323,6 +323,12 @@ function behaviorPanelForProfile(profile){
   var slug=profile&&profile.slug||'';
   var panel=q('[data-behavior-profile-slug]');
   if(!slug||!panel||!panel.getAttribute||panel.getAttribute('data-behavior-profile-slug')!==slug)return null;
+  return panel;
+}
+function chatSkillsPanelForProfile(profile){
+  var slug=profile&&profile.slug||'';
+  var panel=q('[data-chat-skills-profile-slug]');
+  if(!slug||!panel||!panel.getAttribute||panel.getAttribute('data-chat-skills-profile-slug')!==slug)return null;
   return panel;
 }
 function currentInfoFormDraft(profile){
@@ -461,7 +467,6 @@ function renderInfoTab(options){
       '<div class="field field-full"><label for="bot-soul">Soul</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
       '<div class="field field-full"><label for="bot-goal">Goal</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
       providerPickerMarkup('fallbackProvider','Fallback Provider',fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
-      chatAllowedSkillsMarkup(profile)+
     '</div>'+
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-info">Save Changes</button><span class="save-status" data-save-status></span></div></div>';
   var input=q('[data-avatar-input]');
@@ -469,8 +474,6 @@ function renderInfoTab(options){
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleAvatarUpload(file)});
   wireProviderPickers();
-  wireChatSkillControls();
-  if(!state.chatSkillOptionsStatusBySlug[profile.slug])loadChatSkillOptions(profile.slug);
   var copy=q('[data-act="copy-profile-gmid"]');if(copy)copy.addEventListener('click',function(){copyToClipboard(profile.globalMetaId||'')});
   var save=q('[data-act="save-info"]');if(save)save.addEventListener('click',saveInfo);
   focusBotManagementTarget();
@@ -533,6 +536,23 @@ function renderBehaviorTab(options){
   wireProviderPickers();
   var panel=behaviorPanelForProfile(profile);
   var save=queryWithin(panel,'[data-act="save-behavior"]');if(save)save.addEventListener('click',saveBehavior);
+  focusBotManagementTarget();
+}
+
+function renderChatSkillsTab(){
+  var profile=selectedProfile();var root=q('[data-chat-skills-content]');if(!root)return;
+  if(!profile){root.innerHTML='';return}
+  state.originalProfile=profile;
+  root.innerHTML='<div class="info-edit-panel" data-chat-skills-profile-slug="'+esc(profile.slug)+'">'+
+    '<div class="info-form-grid">'+
+      '<div class="field field-full"><label>Chat Skills</label><div class="settings-note">Choose which skills can be used for private conversation replies.</div></div>'+
+      chatAllowedSkillsMarkup(profile)+
+    '</div>'+
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-chat-skills">Save Chat Skills</button><span class="save-status" data-save-status></span></div></div>';
+  wireChatSkillControls();
+  if(!state.chatSkillOptionsStatusBySlug[profile.slug])loadChatSkillOptions(profile.slug);
+  var panel=chatSkillsPanelForProfile(profile);
+  var save=queryWithin(panel,'[data-act="save-chat-skills"]');if(save)save.addEventListener('click',saveChatSkills);
   focusBotManagementTarget();
 }
 
@@ -960,6 +980,38 @@ function saveBehavior(){
   }).finally(function(){if(state.selectedSlug===profileSlug){panel=behaviorPanelForProfile(profile);btn=queryWithin(panel,'[data-act="save-behavior"]');if(btn)btn.disabled=false}});
 }
 
+function saveChatSkills(){
+  var profile=state.originalProfile||selectedProfile();if(!profile||!state.selectedSlug)return;
+  var profileSlug=profile.slug||state.selectedSlug;
+  var panel=chatSkillsPanelForProfile(profile);if(!panel)return;
+  var status=queryWithin(panel,'[data-save-status]');var btn=queryWithin(panel,'[data-act="save-chat-skills"]');
+  var nextChatSkills=selectedChatSkills(profile);
+  var payload={};
+  if(!sameChatSkillList(nextChatSkills,profile.allowChatSkills||[]))payload.allowChatSkills=nextChatSkills;
+  if(!Object.keys(payload).length){if(status){status.textContent='No changes';status.className='save-status'}return}
+  if(status){status.textContent='Saving...';status.className='save-status saving'}
+  if(btn)btn.disabled=true;
+  return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
+    var updated=r.data.profile;
+    state.chatAllowedSkillsBySlug[updated.slug]=normalizeChatSkillList(updated.allowChatSkills!==undefined?updated.allowChatSkills:payload.allowChatSkills);
+    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
+    if(state.selectedSlug!==profileSlug)return;
+    state.originalProfile=updated;
+    renderMetabotList();
+    renderDetailHeader(updated);
+    renderChatSkillsTab();
+    panel=chatSkillsPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){status.textContent='On-chain update confirmed.';status.className='save-status success'}
+    showChainSuccessModal({
+      title:'Profile Updated On-Chain',
+      message:'Profile changes were written on-chain before local data was saved.',
+      profile:updated,
+      chainWrites:(r.data&&r.data.chainWrites)||[],
+    });
+  }).catch(function(error){
+    if(state.selectedSlug===profileSlug&&status){status.textContent=error.message;status.className='save-status error'}
+  }).finally(function(){if(state.selectedSlug===profileSlug){panel=chatSkillsPanelForProfile(profile);btn=queryWithin(panel,'[data-act="save-chat-skills"]');if(btn)btn.disabled=false}});
+}
+
 function resetPublicIdentity(){
   state._pendingAvatar=undefined;
   var profile=selectedProfile();
@@ -1038,6 +1090,7 @@ function switchTab(tab,silent){
   if(state.selectedTab==='advanced'){renderSettingsTab();loadSelectedProfileConfig();loadSessions()}
   else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
   else if(state.selectedTab==='behavior')renderBehaviorTab();
+  else if(state.selectedTab==='chatSkills')renderChatSkillsTab();
   else renderPlaceholderTab(state.selectedTab);
 }
 

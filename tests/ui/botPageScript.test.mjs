@@ -561,15 +561,15 @@ test('bot page uses Simplified Chinese create validation and progress copy', () 
   assert.equal(status.className, 'save-status saving');
 });
 
-test('bot page loads chat skill options for the selected bot and renders selected chips', async () => {
-  const infoRoot = { innerHTML: '' };
-  const activeInfoPanel = {
-    getAttribute: (name) => (name === 'data-info-profile-slug' ? 'alice-bot' : null),
+test('bot page renders chat skills tab for private conversation replies only', async () => {
+  const root = { innerHTML: '' };
+  const activeChatSkillsPanel = {
+    getAttribute: (name) => (name === 'data-chat-skills-profile-slug' ? 'alice-bot' : null),
   };
   const context = createBotScriptContext({
     elements: {
-      '[data-info-content]': infoRoot,
-      '[data-info-profile-slug]': activeInfoPanel,
+      '[data-chat-skills-content]': root,
+      '[data-chat-skills-profile-slug]': activeChatSkillsPanel,
     },
     fetch: (url) => {
       assert.equal(url, '/api/services/skills?from=alice-bot');
@@ -595,19 +595,24 @@ test('bot page loads chat skill options for the selected bot and renders selecte
     name: 'Alice',
     allowChatSkills: ['weather.lookup'],
   }];
-  context.renderInfoTab();
+  context.state.selectedTab = 'chatSkills';
+  context.renderChatSkillsTab();
 
   await context.loadChatSkillOptions('alice-bot');
 
-  assert.match(infoRoot.innerHTML, /Chat Allowed Skills/);
-  assert.match(infoRoot.innerHTML, /data-field="chatSkillSelect"/);
-  assert.match(infoRoot.innerHTML, /value="weather\.lookup"/);
-  assert.match(infoRoot.innerHTML, /Weather Lookup/);
-  assert.match(infoRoot.innerHTML, /value="orders\.create"/);
-  assert.match(infoRoot.innerHTML, /data-chat-skill-chip="weather\.lookup"/);
+  assert.match(root.innerHTML, /Chat Skills/);
+  assert.match(root.innerHTML, /private conversation replies/i);
+  assert.match(root.innerHTML, /data-field="chatSkillSelect"/);
+  assert.match(root.innerHTML, /data-act="add-chat-skill"/);
+  assert.match(root.innerHTML, /value="weather\.lookup"/);
+  assert.match(root.innerHTML, /Weather Lookup/);
+  assert.match(root.innerHTML, /value="orders\.create"/);
+  assert.match(root.innerHTML, /data-chat-skill-chip="weather\.lookup"/);
+  assert.doesNotMatch(root.innerHTML, /Publish Service/);
+  assert.doesNotMatch(root.innerHTML, /marketplace/i);
 });
 
-test('bot page chat skill add and remove controls update selected chip state', () => {
+test('bot page chat skill add and remove controls rerender chat skills tab', () => {
   const addButton = field();
   const removeButton = field();
   addButton.addEventListener = (_event, handler) => {
@@ -634,15 +639,24 @@ test('bot page chat skill add and remove controls update selected chip state', (
   context.state.selectedSlug = 'alice-bot';
   context.state.profiles = [{ slug: 'alice-bot', allowChatSkills: ['weather.lookup'] }];
   context.state.chatAllowedSkillsBySlug['alice-bot'] = ['weather.lookup'];
-  context.renderInfoTab = () => {};
+  context.state.selectedTab = 'chatSkills';
+  let renderChatSkillsTabCalls = 0;
+  context.renderChatSkillsTab = () => {
+    renderChatSkillsTabCalls += 1;
+  };
+  context.renderInfoTab = () => {
+    throw new Error('chat skill tab controls should not rerender legacy info');
+  };
 
   context.wireChatSkillControls();
   addButton.click({ preventDefault: () => {} });
   assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['weather.lookup', 'orders.create']);
+  assert.equal(renderChatSkillsTabCalls, 1);
 
   context.wireChatSkillControls();
   removeButton.click({ preventDefault: () => {} });
   assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['orders.create']);
+  assert.equal(renderChatSkillsTabCalls, 2);
 });
 
 test('bot page preserves info form drafts when chat skill controls rerender the tab', () => {
@@ -1161,6 +1175,56 @@ test('bot page saveInfo sends normalized allowChatSkills only after selected chi
   assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['orders.create', 'weather.lookup']);
 });
 
+test('bot page saveChatSkills sends normalized allowChatSkills only after selected chips change', async () => {
+  const chatSkillsFields = {
+    '[data-save-status]': field(),
+    '[data-act="save-chat-skills"]': field(),
+  };
+  const chatSkillsPanel = panelElement('data-chat-skills-profile-slug', 'alice-bot', chatSkillsFields);
+  let requestBody = null;
+  const context = createBotScriptContext({
+    elements: {
+      '[data-chat-skills-profile-slug]': chatSkillsPanel,
+    },
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice-bot',
+              name: 'Alice',
+              allowChatSkills: ['orders.create', 'weather.lookup'],
+            },
+            chainWrites: [],
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    allowChatSkills: ['weather.lookup'],
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.state.chatAllowedSkillsBySlug['alice-bot'] = ['orders.create', 'orders.create', ' ', 'weather.lookup'];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderChatSkillsTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  await context.saveChatSkills();
+
+  assert.deepEqual(requestBody, { allowChatSkills: ['orders.create', 'weather.lookup'] });
+  assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['orders.create', 'weather.lookup']);
+});
+
 test('bot page saveInfo omits allowChatSkills when selected chips are unchanged', async () => {
   const fields = {
     '[data-save-status]': field(),
@@ -1405,12 +1469,6 @@ test('bot page defaults to the public identity tab after profiles load', async (
           }),
         });
       }
-      if (url === '/api/services/skills?from=bob') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
-        });
-      }
       throw new Error(`Unexpected fetch ${url}`);
     },
   });
@@ -1430,6 +1488,8 @@ test('bot page defaults to the public identity tab after profiles load', async (
   assert.equal(behaviorTab.active, false);
   assert.equal(advancedTab.active, false);
   assert.match(infoRoot.innerHTML, /data-public-identity-profile-slug="bob"/);
+  assert.doesNotMatch(infoRoot.innerHTML, /data-field="chatSkillSelect"/);
+  assert.equal(calls.includes('/api/services/skills?from=bob'), false);
   assert.equal(calls.includes('/api/bot/sessions?slug=alice&limit=50'), false);
 });
 
@@ -1498,12 +1558,6 @@ test('bot page deep link maps legacy history messages links to advanced before l
               ],
             },
           }),
-        });
-      }
-      if (url === '/api/services/skills?from=alice') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
         });
       }
       if (url === '/api/bot/profiles/alice/config') {
@@ -1757,12 +1811,6 @@ test('bot page deep link maps legacy info profile links to public identity', asy
           }),
         });
       }
-      if (url === '/api/services/skills?from=alice') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
-        });
-      }
       throw new Error(`Unexpected fetch ${url}`);
     },
   });
@@ -1781,6 +1829,8 @@ test('bot page deep link maps legacy info profile links to public identity', asy
   assert.equal(publicIdentityTab.active, true);
   assert.equal(nameField.focused, true);
   assert.equal(nameField.scrolled, true);
+  assert.doesNotMatch(infoRoot.innerHTML, /data-field="chatSkillSelect"/);
+  assert.equal(calls.includes('/api/services/skills?from=alice'), false);
 });
 
 test('bot page deep link maps legacy info chat links to chat skills', async () => {
@@ -1832,6 +1882,12 @@ test('bot page deep link maps legacy info chat links to chat skills', async () =
               ],
             },
           }),
+        });
+      }
+      if (url === '/api/services/skills?from=alice') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
         });
       }
       throw new Error(`Unexpected fetch ${url}`);
