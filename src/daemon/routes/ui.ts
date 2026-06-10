@@ -99,6 +99,16 @@ function injectTopbarChrome(html: string, i18n: LocalUiI18nContext): string {
   return withLogo.replace('</nav>', `</nav>${renderTopbarLanguageSelector(i18n)}${renderTopbarAction(i18n)}`);
 }
 
+function applyStaticI18n(html: string, i18n: LocalUiI18nContext): string {
+  return html.replace(
+    /(<[^>]*\sdata-i18n-key="([^"]+)"[^>]*>)([^<]*)(<\/[^>]+>)/g,
+    (match: string, open: string, key: string, _text: string, close: string) => {
+      const translated = i18n.t(key as I18nKey);
+      return translated === key ? match : `${open}${escapeHtml(translated)}${close}`;
+    },
+  );
+}
+
 function resolveTemplatePath(page: MetabotUiPageName): string {
   const copiedAssetPath = path.resolve(__dirname, `../../ui/pages/${page}/index.html`);
   const sourceAssetPath = path.resolve(__dirname, `../../../src/ui/pages/${page}/index.html`);
@@ -143,7 +153,7 @@ async function renderBuiltInPage(page: MetabotUiPageName, languagePreference?: s
     .replace(/__PAGE_PANELS__/g, renderPanels(definition))
     .replace(/__PAGE_CONTENT__/g, content)
     .replace(/__PAGE_SCRIPT__/g, script);
-  return injectTopbarChrome(html, i18n);
+  return applyStaticI18n(injectTopbarChrome(html, i18n), i18n);
 }
 
 function isBrowserPagePath(pathname: string): boolean {
