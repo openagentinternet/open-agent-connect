@@ -8,6 +8,11 @@ coverage/
 *.log
 .worktrees/
 .playwright-mcp/
+.codex_tmp/
+.playwright-cli/
+.superpowers/
+generated/*
+output/*
 
 !skillpacks/**/runtime/dist/
 !skillpacks/**/runtime/dist/**
