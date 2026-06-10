@@ -129,4 +129,3 @@ Final acceptance must use the real local daemon data source, not fake fixtures:
    - `Behavior`, `Chat Skills`, `Services`, and `Advanced` tabs switch;
    - old capabilities are reachable in their mapped tabs;
    - hard-no strings and dashboard sections are absent from the default screen.
-
