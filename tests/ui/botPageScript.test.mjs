@@ -791,6 +791,7 @@ test('bot page renders public identity tab with only public identity controls', 
   context.renderPublicIdentityTab();
 
   assert.match(root.innerHTML, /Bot Name/);
+  assert.match(root.innerHTML, /Avatar/);
   assert.match(root.innerHTML, /Upload \/ Replace/);
   assert.match(root.innerHTML, /data-act="upload-avatar"/);
   assert.match(root.innerHTML, /data-act="remove-avatar"/);
@@ -1186,7 +1187,7 @@ test('bot page homepage upload opens a default renderer placeholder modal', () =
 
   const modal = context.document.querySelector('[data-modal-root]');
   assert.match(modal.innerHTML, /Default Bot Page renderer/);
-  assert.match(modal.innerHTML, /homepage package upload will be available later/i);
+  assert.match(modal.innerHTML, /Homepage package upload will be available later\. This Bot is using the default Bot Page renderer\./);
   assert.doesNotMatch(modal.innerHTML, /MetaApp/i);
   assert.doesNotMatch(modal.innerHTML, /PINID/i);
 });
@@ -2372,7 +2373,7 @@ test('bot page runtime Test action keeps readiness failures out of provider pick
   assert.doesNotMatch(context.providerPickerMarkup('primaryProvider', 'Primary Provider', 'codex', false), /data-provider-option="codex"/);
 });
 
-test('bot page marks profiles whose primary LLM is unavailable in the list', () => {
+test('bot page local bots list stays a selector without runtime diagnostics', () => {
   const list = {
     innerHTML: '',
   };
@@ -2421,8 +2422,12 @@ test('bot page marks profiles whose primary LLM is unavailable in the list', () 
 
   context.renderMetabotList();
 
-  assert.match(list.innerHTML, /Broken Bot[\s\S]*\[LLM unavailable\]/);
-  assert.doesNotMatch(list.innerHTML, /Healthy Bot[\s\S]*\[LLM unavailable\]/);
+  assert.match(list.innerHTML, /Broken Bot/);
+  assert.match(list.innerHTML, /Healthy Bot/);
+  assert.doesNotMatch(list.innerHTML, /\[LLM unavailable\]/);
+  assert.doesNotMatch(list.innerHTML, /unavailable/i);
+  assert.doesNotMatch(list.innerHTML, /runtime-codex/);
+  assert.doesNotMatch(list.innerHTML, /Claude Code/);
 });
 
 test('bot page create flow navigates to the Bot Page when the created profile has a GlobalMetaID', async () => {

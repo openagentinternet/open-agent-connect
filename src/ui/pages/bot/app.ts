@@ -40,8 +40,6 @@ function viewSelectedConversations(){var profile=selectedProfile();if(!profile||
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
-function providerHasAvailableRuntime(provider){return availableRuntimes().some(function(r){return r.provider===provider})}
-function profileLlmUnavailable(profile){return !profile||!profile.primaryProvider||!providerHasAvailableRuntime(profile.primaryProvider)}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
 function providerRuntime(provider){return state.runtimes.find(function(r){return r.provider===provider})||null}
 function providerLogoPath(provider){var rt=providerRuntime(provider);return rt&&rt.logoPath?rt.logoPath:'/ui/assets/platforms/generic.svg'}
@@ -366,10 +364,9 @@ function renderMetabotList(){
   if(!state.profiles.length){list.innerHTML='<div class="session-empty"><p>'+esc(uiText('bot.noBotsYet','No Bots yet'))+'</p></div>';return}
   list.innerHTML=state.profiles.map(function(p){
     var selected=p.slug===state.selectedSlug?' selected':'';
-    var llmBadge=profileLlmUnavailable(p)?'<span class="metabot-llm-unavailable">['+esc(uiText('bot.llmUnavailable','LLM unavailable'))+']</span>':'';
     return'<div class="metabot-item'+selected+'" role="button" tabindex="0" data-slug="'+esc(p.slug)+'">'+
       '<div class="metabot-avatar">'+avatarMarkup(p,false)+'</div>'+
-      '<div class="metabot-item-info"><div class="metabot-item-name-row"><div class="metabot-item-name">'+esc(p.name||p.slug)+'</div>'+llmBadge+'</div>'+
+      '<div class="metabot-item-info"><div class="metabot-item-name-row"><div class="metabot-item-name">'+esc(p.name||p.slug)+'</div></div>'+
       '<div class="metabot-item-id-row"><span class="metabot-item-id">'+esc(shortId(p.globalMetaId||p.slug))+'</span>'+
       '<button class="icon-btn" data-act="copy-gmid" data-value="'+esc(p.globalMetaId||'')+'" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID">⧉</button></div></div></div>'
   }).join('');
@@ -479,6 +476,7 @@ function renderPublicIdentityTab(options){
     '<div class="info-avatar-section">'+
     '<div class="info-avatar-preview" data-avatar-preview>'+avatarMarkup({name:nameValue,avatarDataUrl:avatar},true)+'</div>'+
     '<div class="info-avatar-actions">'+
+      '<div class="info-avatar-label">'+esc(uiText('bot.avatar','Avatar'))+'</div>'+
       '<button class="btn btn-sm" data-act="upload-avatar">'+esc(uiText('bot.uploadReplace','Upload / Replace'))+'</button>'+
       '<button class="btn btn-sm btn-danger" data-act="remove-avatar"'+(avatar?'':' hidden')+'>'+esc(uiText('bot.removeAvatar','Remove'))+'</button>'+
       '<input type="file" data-avatar-input accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
@@ -646,7 +644,7 @@ function showChainSuccessModal(input){
   openDynamicModal(input.title,chainSuccessBodyMarkup(input),{boxClass:'modal-box-wide'});
 }
 function openHomepageUploadPlaceholder(){
-  openDynamicModal(uiText('bot.defaultRenderer','Default Bot Page renderer'),'<div class="modal-body"><p class="modal-note">'+esc(uiText('bot.homepageUploadLater','The current Bot uses the default Bot Page renderer. Homepage package upload will be available later.'))+'</p></div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">'+esc(uiText('bot.ok','OK'))+'</button></div>');
+  openDynamicModal(uiText('bot.defaultRenderer','Default Bot Page renderer'),'<div class="modal-body"><p class="modal-note">'+esc(uiText('bot.homepageUploadLater','Homepage package upload will be available later. This Bot is using the default Bot Page renderer.'))+'</p></div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">'+esc(uiText('bot.ok','OK'))+'</button></div>');
 }
 function walletChainConfig(chain){return WALLET_CHAINS.find(function(row){return row.chain===chain})||WALLET_CHAINS[0]}
 function walletDisplayUnit(chain){return walletChainConfig(chain).displayUnit}
@@ -875,7 +873,7 @@ function confirmDeleteMetabot(profile){
     state.selectedSlug='';
     state.originalProfile=null;
     state.sessions=[];
-    return loadProfiles().then(function(){return loadStats()}).then(function(){return loadSessions()});
+    return loadProfiles().then(function(){return loadSessions()});
   }).catch(function(error){
     state._deleteWorking=false;
     renderDeleteModal(profile,{type:'error',text:error.message});
@@ -916,7 +914,7 @@ function saveInfo(){
       profile:updated,
       chainWrites:(r.data&&r.data.chainWrites)||[],
     });
-    return loadStats();
+    return Promise.resolve();
   }).catch(function(error){
     if(status){status.textContent=error.message;status.className='save-status error'}
   }).finally(function(){btn=q('[data-act="save-info"]');if(btn)btn.disabled=false});
@@ -1110,7 +1108,7 @@ function switchTab(tab,silent){
   else renderPlaceholderTab(state.selectedTab);
 }
 
-function loadStats(){return api('/api/bot/stats').then(function(r){state.stats=r.data||{};renderStats()}).catch(function(){renderStats()})}
+function loadStats(){renderStats();return Promise.resolve()}
 function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
 function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
@@ -1271,7 +1269,7 @@ function createMetabot(){
     return loadProfiles().then(function(){
       showChainSuccessModal({
         title:uiText('bot.metaBotCreatedOnChain','Bot Created On-Chain'),
-        message:uiText('bot.identityCreatedBasicInfoReady','The on-chain identity has been created. Basic Info is ready for optional edits.'),
+        message:uiText('bot.identityCreatedBasicInfoReady','The on-chain identity has been created. Public Identity is ready for optional edits.'),
         profile:profile,
         chainWrites:createChainWritesFromResponse(r.data||{}),
       });

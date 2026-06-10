@@ -16,32 +16,6 @@
         display: none !important;
       }
 
-      .bot-stats {
-        display: flex;
-        gap: 12px;
-        padding: 16px 24px 0;
-        flex-shrink: 0;
-        flex-wrap: wrap;
-      }
-      .bot-stats .stat-card {
-        flex: 1;
-        min-width: 126px;
-      }
-      .stat-link {
-        margin-top: 6px;
-        padding: 0;
-        border: 0;
-        background: transparent;
-        color: var(--accent);
-        font-family: var(--mono);
-        font-size: 11px;
-        cursor: pointer;
-      }
-      .stat-link:hover {
-        color: var(--text);
-        text-decoration: underline;
-      }
-
       .bot-workspace {
         flex: 1;
         display: flex;
@@ -167,17 +141,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-      }
-      .metabot-llm-unavailable {
-        flex-shrink: 0;
-        color: var(--red);
-        background: var(--red-dim);
-        border: 1px solid rgba(239,68,68,.28);
-        border-radius: var(--radius-sm);
-        padding: 1px 5px;
-        font-family: var(--mono);
-        font-size: 10px;
-        line-height: 1.4;
       }
       .metabot-item-id-row {
         display: flex;
@@ -371,6 +334,15 @@
         gap: 8px;
         flex-wrap: wrap;
       }
+      .advanced-danger-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
       .tab-bar {
         display: flex;
         border-bottom: 1px solid var(--border);
@@ -438,6 +410,14 @@
         flex-wrap: wrap;
         align-items: center;
         gap: 8px;
+      }
+      .info-avatar-label {
+        flex-basis: 100%;
+        color: var(--muted);
+        font-size: 11px;
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: .08em;
       }
       .info-id-row {
         display: flex;
@@ -673,6 +653,14 @@
 
       .history-scroll {
         overflow: auto;
+      }
+      .advanced-section-title {
+        margin: 18px 0 10px;
+        color: var(--muted);
+        font-size: 11px;
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: .08em;
       }
       .history-scroll .table-wrap {
         overflow-x: auto;
@@ -1078,9 +1066,6 @@
       }
 
       @media (max-width: 768px) {
-        .bot-stats {
-          padding: 12px 16px 0;
-        }
         .bot-workspace {
           margin: 12px 16px 16px;
           flex-direction: column;
@@ -1227,12 +1212,12 @@
             <div class="tab-panel" data-tab-panel="advanced">
               <div class="advanced-actions">
                 <button class="btn btn-sm" data-act="open-wallet" data-i18n-key="bot.wallet">Wallet</button>
-                <button class="btn btn-sm btn-danger" data-act="open-delete" data-i18n-key="bot.deleteBot">Delete Bot</button>
                 <button class="btn btn-sm" data-act="open-backup" data-i18n-key="bot.backup">Backup</button>
                 <button class="btn btn-sm" data-act="open-runtime-modal" type="button" data-i18n-key="bot.llmProviders">LLM Providers</button>
                 <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes" data-i18n-key="bot.refreshRuntimes">Refresh Runtimes</button>
               </div>
               <div data-settings-content data-default-write-network="mvc"></div>
+              <div class="advanced-section-title" data-i18n-key="bot.executionHistory">Execution History</div>
               <div class="history-scroll">
                 <div class="table-wrap">
                   <table class="data-table exec-table">
@@ -1254,6 +1239,9 @@
                     </tbody>
                   </table>
                 </div>
+              </div>
+              <div class="advanced-danger-actions">
+                <button class="btn btn-sm btn-danger" data-act="open-delete" data-i18n-key="bot.deleteBot">Delete Bot</button>
               </div>
             </div>
           </div>

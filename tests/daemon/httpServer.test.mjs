@@ -2112,6 +2112,11 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /data-copy-bot-uri/);
   assert.doesNotMatch(html, /data-stat-bots/);
   assert.doesNotMatch(html, /data-stat-runtimes/);
+  assert.doesNotMatch(html, /bot-stats/);
+  assert.doesNotMatch(html, />Basic Info</);
+  assert.doesNotMatch(html, /Bot Page State/);
+  assert.doesNotMatch(html, /Bind MetaApp/);
+  assert.doesNotMatch(html, /PINID/);
   assert.match(html, /data-act="open-runtime-modal"/);
   assert.match(html, /data-runtime-modal-status/);
   assert.match(html, /data-metabot-list/);
@@ -2122,9 +2127,10 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /Delete Bot/);
   assert.match(html, /LLM Providers/);
   assert.match(html, /Refresh Runtimes/);
-  assert.ok(html.indexOf('data-act="open-wallet"') < html.indexOf('data-act="discover-runtimes"'));
-  assert.ok(html.indexOf('data-act="open-delete"') < html.indexOf('data-act="discover-runtimes"'));
-  assert.ok(html.indexOf('data-act="open-backup"') < html.indexOf('data-act="discover-runtimes"'));
+  assert.ok(html.indexOf('data-act="open-wallet"') < html.indexOf('data-act="open-backup"'));
+  assert.ok(html.indexOf('data-act="open-backup"') < html.indexOf('data-act="open-runtime-modal"'));
+  assert.ok(html.indexOf('data-act="open-runtime-modal"') < html.indexOf('data-execution-history-list'));
+  assert.ok(html.indexOf('data-execution-history-list') < html.indexOf('data-act="open-delete"'));
   assert.match(html, /data-tab="publicIdentity"/);
   assert.match(html, /data-tab="behavior"/);
   assert.match(html, /data-tab="chatSkills"/);
@@ -2144,7 +2150,7 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /<th data-i18n-key="bot\.details">Details<\/th>/);
   assert.match(html, /exec-detail/);
   assert.match(html, /copy-toast/);
-  assert.ok(html.includes("api('/api/bot/stats'"));
+  assert.ok(!html.includes("api('/api/bot/stats'"));
   assert.ok(html.includes("api('/api/bot/profiles'"));
   assert.ok(html.includes("api('/api/bot/runtimes'"));
   assert.ok(html.includes("api('/api/bot/sessions?slug='+encodeURIComponent"));
