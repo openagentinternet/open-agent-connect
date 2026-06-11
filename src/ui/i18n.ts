@@ -447,12 +447,12 @@ export function createI18nContext(
 
 export function renderLanguageOptions(i18n: LocalUiI18nContext): string {
   const options: Array<{ value: LanguagePreference; labelKey: I18nKey }> = [
-    { value: 'auto', labelKey: 'language.auto' },
     { value: 'en', labelKey: 'language.en' },
     { value: 'zh-CN', labelKey: 'language.zhCN' },
   ];
+  const selectedValue = i18n.preference === 'en' || i18n.preference === 'zh-CN' ? i18n.preference : i18n.language;
   return options.map((option) => {
-    const selected = option.value === i18n.preference ? ' selected' : '';
+    const selected = option.value === selectedValue ? ' selected' : '';
     return `<option value="${option.value}"${selected}>${i18n.t(option.labelKey)}</option>`;
   }).join('');
 }
@@ -464,7 +464,7 @@ export function renderClientI18nScript(i18n: LocalUiI18nContext): string {
   const SERVER_PREFERENCE = ${JSON.stringify(i18n.preference)};
   const DICTIONARIES = ${JSON.stringify(DICTIONARIES)};
   const SIMPLIFIED_CHINESE_LOCALES = ['zh-cn', 'zh-hans', 'zh-sg'];
-  const OPTION_KEYS_BY_VALUE = { auto: 'language.auto', en: 'language.en', 'zh-CN': 'language.zhCN' };
+  const OPTION_KEYS_BY_VALUE = { en: 'language.en', 'zh-CN': 'language.zhCN' };
   const normalizePreference = (value) => value === 'en' || value === 'zh-CN' || value === 'auto' ? value : DEFAULT_PREFERENCE;
   const normalizeLocale = (value) => typeof value === 'string' ? value.trim().toLowerCase().replace(/_/g, '-') : '';
   const detectedLocales = () => {
@@ -502,7 +502,7 @@ export function renderClientI18nScript(i18n: LocalUiI18nContext): string {
       element.textContent = t(element.getAttribute('data-i18n-key') || '');
     });
     queryAll('[data-language-select]').forEach((element) => {
-      element.value = currentPreference;
+      element.value = currentPreference === 'auto' ? currentLanguage : currentPreference;
       if (typeof element.querySelectorAll !== 'function') return;
       element.querySelectorAll('option').forEach((option) => {
         const key = OPTION_KEYS_BY_VALUE[option.value];

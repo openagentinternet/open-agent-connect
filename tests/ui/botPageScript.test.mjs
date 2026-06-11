@@ -130,6 +130,8 @@ test('bot page template uses an icon-only online indicator and copy buttons in t
 
   assert.match(template, /<span class="live-indicator" data-live-indicator aria-label="Online" title="Online"><\/span>/);
   assert.match(template, /@keyframes bot-live-breathe/);
+  assert.match(template, /\.detail-panel\s*\{[^}]*max-width:\s*800px;[^}]*margin:\s*0 auto;/s);
+  assert.match(template, /\.tab-bar\s*\{[^}]*overflow-x:\s*auto;/s);
   assert.doesNotMatch(template, /data-live-indicator[^>]*>Live by default<\/span>/);
   assert.doesNotMatch(template, /data-copy-bot-uri[^>]*data-i18n-key="bot\.copy">Copy<\/button>/);
   assert.match(template, /data-copy-bot-uri[^>]*aria-label="Copy Homepage URI"[^>]*>⧉<\/button>/);
@@ -206,6 +208,34 @@ test('bot page Basic tab owns LLM providers and Persona tab owns role fields', (
   assert.match(personaRoot.innerHTML, /data-field="role"/);
   assert.match(personaRoot.innerHTML, /data-field="soul"/);
   assert.match(personaRoot.innerHTML, /data-field="goal"/);
+});
+
+test('bot page Basic tab groups provider controls in one row and separates Homepage copy from Upload', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': root,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    bio: 'Builds wallet automation.',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+  }];
+  context.state.runtimes = [
+    { id: 'runtime-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' },
+    { id: 'runtime-openclaw', provider: 'openclaw', displayName: 'OpenClaw', health: 'healthy' },
+  ];
+
+  context.renderPublicIdentityTab();
+
+  assert.match(root.innerHTML, /<div class="provider-row">[\s\S]*data-field="primaryProvider"[\s\S]*data-field="fallbackProvider"[\s\S]*<\/div>/);
+  assert.match(root.innerHTML, /<div class="homepage-row"><button type="button" class="btn btn-sm" data-act="upload-homepage">Upload<\/button><span class="homepage-renderer-label">Default Bot Page renderer<\/span><\/div>/);
 });
 
 test('bot page saveInfo preserves unavailable provider bindings when saving unrelated profile fields', () => {

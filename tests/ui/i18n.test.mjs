@@ -7,6 +7,7 @@ const {
   DEFAULT_LANGUAGE_PREFERENCE,
   DICTIONARIES,
   normalizeLanguagePreference,
+  renderLanguageOptions,
   resolveConcreteLanguage,
   translate,
 } = require('../../dist/ui/i18n.js');
@@ -110,4 +111,22 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
   assert.equal(translate('en', 'bot.confirmDeleteCountdown', { count: 5 }), 'Confirm Delete (5s)');
   assert.equal(translate('zh-CN', 'bot.confirmDeleteCountdown', { count: 5 }), '确认删除（5s）');
   assert.equal(translate('zh-CN', 'bot.refreshRuntimes'), '刷新运行时');
+});
+
+test('language selector renders only concrete language options and selects the resolved language', () => {
+  const t = (key) => ({
+    'language.auto': 'Auto',
+    'language.en': 'English',
+    'language.zhCN': '简体中文',
+  })[key] ?? key;
+
+  const zhAutoOptions = renderLanguageOptions({ preference: 'auto', language: 'zh-CN', t });
+  assert.doesNotMatch(zhAutoOptions, /value="auto"/);
+  assert.doesNotMatch(zhAutoOptions, />Auto<\/option>/);
+  assert.match(zhAutoOptions, /<option value="zh-CN" selected>简体中文<\/option>/);
+  assert.match(zhAutoOptions, /<option value="en">English<\/option>/);
+
+  const enAutoOptions = renderLanguageOptions({ preference: 'auto', language: 'en', t });
+  assert.match(enAutoOptions, /<option value="en" selected>English<\/option>/);
+  assert.doesNotMatch(enAutoOptions, /value="auto"/);
 });

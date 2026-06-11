@@ -2857,7 +2857,7 @@ test('GET /ui/settings renders the Provider Console settings home', async (t) =>
   assert.match(html, /Language and Localization/);
   assert.match(html, /data-language-section/);
   assert.match(html, /data-language-select/);
-  assert.match(html, /<option value="auto"(?: selected)?>Auto<\/option>/);
+  assert.doesNotMatch(html, /<option value="auto"/);
   assert.match(html, /<option value="en"(?: selected)?>English<\/option>/);
   assert.match(html, /<option value="zh-CN"(?: selected)?>简体中文<\/option>/);
   assert.match(nav, /href="\/ui\/settings"[^>]*>Settings(?: \*)?<\/a>/);
