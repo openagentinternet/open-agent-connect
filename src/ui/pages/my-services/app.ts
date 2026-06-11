@@ -10,6 +10,7 @@ export interface MyServicesPageDefinitionOptions {
   toolbarTitle?: string;
   toolbarLabel?: string;
   includePublishAction?: boolean;
+  includeRefundsAction?: boolean;
   orderTraceActionLabel?: string;
   orderSessionActionLabel?: string;
 }
@@ -25,6 +26,9 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   const toolbarLabel = options.toolbarLabel ?? 'Loading local services...';
   const publishAction = options.includePublishAction
     ? '<a class="btn btn-primary" href="/ui/publish">Publish Service</a>'
+    : '';
+  const refundsAction = options.includeRefundsAction
+    ? '<a class="btn btn-primary" href="/ui/refund">Service Refunds</a>'
     : '';
   const orderTraceActionLabel = JSON.stringify(options.orderTraceActionLabel ?? 'Trace');
   const orderSessionActionLabel = JSON.stringify(options.orderSessionActionLabel ?? 'Session');
@@ -44,6 +48,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
           </div>
           <div class="my-services-toolbar-actions">
             ${publishAction}
+            ${refundsAction}
             <button class="btn" type="button" data-my-services-refresh>Refresh</button>
           </div>
         </div>

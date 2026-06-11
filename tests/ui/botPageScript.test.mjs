@@ -928,7 +928,8 @@ test('bot page renders Basic tab with public identity and provider controls', ()
   assert.match(root.innerHTML, /data-field="primaryProvider"/);
   assert.match(root.innerHTML, /data-field="fallbackProvider"/);
   assert.match(root.innerHTML, /Save Public Identity/);
-  assert.match(root.innerHTML, /Reset/);
+  assert.doesNotMatch(root.innerHTML, /data-act="reset-public-identity"/);
+  assert.doesNotMatch(root.innerHTML, /Reset/);
   assert.match(root.innerHTML, /data-field="name"/);
   assert.match(root.innerHTML, /data-field="bio"/);
   assert.doesNotMatch(root.innerHTML, /MetaApp/i);

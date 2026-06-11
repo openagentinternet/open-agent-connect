@@ -2801,6 +2801,9 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.match(html, /Services/);
   assert.match(html, /Published Services/);
   assert.match(html, /href="\/ui\/publish"[^>]*>Publish Service<\/a>/);
+  assert.match(html, /href="\/ui\/refund"[^>]*>Service Refunds<\/a>/);
+  assert.ok(html.indexOf('href="/ui/publish"') < html.indexOf('href="/ui/refund"'));
+  assert.ok(html.indexOf('href="/ui/refund"') < html.indexOf('data-my-services-refresh'));
   assert.match(html, /Advanced Trace/);
   assert.match(html, /Trace Session/);
   assert.match(html, /data-my-services-list/);

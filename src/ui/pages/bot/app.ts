@@ -493,7 +493,7 @@ function renderPublicIdentityTab(options){
       '<div class="field field-full"><label for="bot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label><textarea id="bot-bio" data-field="bio">'+esc(bioValue)+'</textarea></div>'+
       '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label><div class="homepage-row"><button type="button" class="btn btn-sm" data-act="upload-homepage">'+esc(uiText('bot.upload','Upload'))+'</button><span class="homepage-renderer-label">'+esc(uiText('bot.defaultRenderer','Default Bot Page renderer'))+'</span></div></div>'+
     '</div>'+
-    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">'+esc(uiText('bot.savePublicIdentity','Save Public Identity'))+'</button><button class="btn" data-act="reset-public-identity">'+esc(uiText('bot.reset','Reset'))+'</button><span class="save-status" data-save-status></span></div></div>';
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">'+esc(uiText('bot.savePublicIdentity','Save Public Identity'))+'</button><span class="save-status" data-save-status></span></div></div>';
   var input=q('[data-avatar-input]');
   var upload=q('[data-act="upload-avatar"]');if(upload&&input)upload.addEventListener('click',function(){input.click()});
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
@@ -501,7 +501,6 @@ function renderPublicIdentityTab(options){
   wireProviderPickers();
   var homepage=q('[data-act="upload-homepage"]');if(homepage)homepage.addEventListener('click',openHomepageUploadPlaceholder);
   var save=q('[data-act="save-public-identity"]');if(save)save.addEventListener('click',savePublicIdentity);
-  var reset=q('[data-act="reset-public-identity"]');if(reset)reset.addEventListener('click',resetPublicIdentity);
   focusBotManagementTarget();
 }
 
