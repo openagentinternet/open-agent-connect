@@ -2812,7 +2812,7 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.doesNotMatch(nav, /href="\/ui\/my-services"/);
 });
 
-test('GET /ui/conversations renders the private chat Conversations MVP workspace', async (t) => {
+test('GET /ui/conversations renders the Trace inspector under the Conversations nav label', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -2823,13 +2823,17 @@ test('GET /ui/conversations renders the private chat Conversations MVP workspace
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /Conversations/);
-  assert.match(html, /data-conversations-shell/);
-  assert.match(html, /data-conversation-list/);
-  assert.match(html, /data-conversation-detail/);
-  assert.match(html, /\/api\/chat\/private\/conversations/);
-  assert.match(html, /\/api\/chat\/private\/messages/);
-  assert.match(html, /\/api\/trace\/sessions\?all=true&amp;limit=50|\/api\/trace\/sessions\?all=true&limit=50/);
-  assert.match(html, /Service conversation/);
+  assert.match(html, /trace-shell/);
+  assert.match(html, /Total A2A Sessions/);
+  assert.match(html, /\/api\/trace\/sessions\?all=true/);
+  assert.match(html, /data-session-list/);
+  assert.match(html, /data-session-detail/);
+  assert.match(html, /data-trace-total/);
+  assert.match(html, /session-panel/);
+  assert.match(html, /detail-panel/);
+  assert.doesNotMatch(html, /data-conversations-shell/);
+  assert.doesNotMatch(html, /\/api\/chat\/private\/conversations/);
+  assert.doesNotMatch(html, /\/api\/chat\/private\/messages/);
   assert.match(nav, /href="\/ui\/conversations"[^>]*>Conversations(?: \*)?<\/a>/);
   assert.doesNotMatch(nav, /href="\/ui\/trace"/);
   assert.doesNotMatch(nav, /href="\/ui\/refund"/);
