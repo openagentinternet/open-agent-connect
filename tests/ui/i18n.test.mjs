@@ -91,12 +91,14 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
     assert.notEqual(DICTIONARIES['zh-CN'][key], '', `${key} has empty zh-CN copy`);
   }
 
-  assert.equal(translate('en', 'bot.publicIdentity'), 'Public Identity');
-  assert.equal(translate('zh-CN', 'bot.publicIdentity'), '公开身份');
+  assert.equal(translate('en', 'bot.publicIdentity'), 'Basic');
+  assert.equal(translate('zh-CN', 'bot.publicIdentity'), '基础');
+  assert.equal(translate('en', 'bot.behavior'), 'Persona');
+  assert.equal(translate('zh-CN', 'bot.behavior'), '人格');
+  assert.equal(translate('en', 'bot.botUri'), 'Homepage URI');
+  assert.equal(translate('zh-CN', 'bot.botUri'), 'Homepage URI');
   assert.equal(translate('en', 'bot.localBots'), 'Local Bots');
   assert.equal(translate('zh-CN', 'bot.localBots'), '本地 Bots');
-  assert.equal(translate('en', 'bot.liveByDefault'), 'Live by default');
-  assert.equal(translate('zh-CN', 'bot.liveByDefault'), '默认在线');
   assert.equal(translate('en', 'bot.defaultRenderer'), 'Default Bot Page renderer');
   assert.equal(translate('zh-CN', 'bot.defaultRenderer'), '默认 Bot Page 渲染器');
   assert.equal(translate('en', 'bot.homepageUploadLater'), 'Homepage package upload will be available later. This Bot is using the default Bot Page renderer.');

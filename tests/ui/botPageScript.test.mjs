@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -123,6 +124,89 @@ function tabElement(value) {
   };
   return element;
 }
+
+test('bot page template uses an icon-only online indicator and copy buttons in the hero', () => {
+  const template = readFileSync(new URL('../../src/ui/pages/bot/index.html', import.meta.url), 'utf8');
+
+  assert.match(template, /<span class="live-indicator" data-live-indicator aria-label="Online" title="Online"><\/span>/);
+  assert.match(template, /@keyframes bot-live-breathe/);
+  assert.doesNotMatch(template, /data-live-indicator[^>]*>Live by default<\/span>/);
+  assert.doesNotMatch(template, /data-copy-bot-uri[^>]*data-i18n-key="bot\.copy">Copy<\/button>/);
+  assert.match(template, /data-copy-bot-uri[^>]*aria-label="Copy Homepage URI"[^>]*>⧉<\/button>/);
+});
+
+test('bot page hero renders bio copy and keeps online status icon-only', () => {
+  const live = field('old status');
+  const summary = { textContent: '', hidden: true };
+  const copyUri = field();
+  const elements = {
+    '[data-bot-hero]': { hidden: true },
+    '[data-hero-avatar]': { innerHTML: '' },
+    '[data-hero-name]': field(),
+    '[data-live-indicator]': live,
+    '[data-hero-summary]': summary,
+    '[data-hero-global-meta-id]': field(),
+    '[data-hero-bot-uri]': field(),
+    '[data-copy-global-meta-id]': field(),
+    '[data-copy-bot-uri]': copyUri,
+    '[data-act="view-bot-page"]': field(),
+    '[data-act="view-conversations"]': field(),
+  };
+  const context = createBotScriptContext({ elements });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.renderBotHero({
+    slug: 'alice-bot',
+    name: 'Alice',
+    bio: 'Builds wallet automation.',
+    globalMetaId: 'idq1alice',
+  });
+
+  assert.equal(live.textContent, '');
+  assert.equal(live.getAttribute('aria-label'), 'Online');
+  assert.equal(summary.hidden, false);
+  assert.equal(summary.textContent, 'Builds wallet automation.');
+  assert.equal(copyUri.getAttribute('aria-label'), 'Copy Homepage URI');
+});
+
+test('bot page Basic tab owns LLM providers and Persona tab owns role fields', () => {
+  const basicRoot = { innerHTML: '' };
+  const personaRoot = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': basicRoot,
+      '[data-behavior-content]': personaRoot,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    bio: 'Builds wallet automation.',
+    role: 'Assistant',
+    soul: 'Patient',
+    goal: 'Help users',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+  }];
+  context.state.runtimes = [
+    { id: 'runtime-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' },
+    { id: 'runtime-openclaw', provider: 'openclaw', displayName: 'OpenClaw', health: 'healthy' },
+  ];
+
+  context.renderPublicIdentityTab();
+  context.renderBehaviorTab();
+
+  assert.match(basicRoot.innerHTML, /Primary LLM Provider/);
+  assert.match(basicRoot.innerHTML, /Fallback LLM Provider/);
+  assert.doesNotMatch(personaRoot.innerHTML, /Primary LLM Provider/);
+  assert.doesNotMatch(personaRoot.innerHTML, /Fallback LLM Provider/);
+  assert.match(personaRoot.innerHTML, /data-field="role"/);
+  assert.match(personaRoot.innerHTML, /data-field="soul"/);
+  assert.match(personaRoot.innerHTML, /data-field="goal"/);
+});
 
 test('bot page saveInfo preserves unavailable provider bindings when saving unrelated profile fields', () => {
   const fields = {
@@ -257,15 +341,13 @@ test('bot page saveInfo sends provider changes only after the provider picker is
   });
 });
 
-test('bot page saveBehavior preserves unavailable provider bindings when saving unrelated behavior fields', () => {
+test('bot page saveBehavior sends only persona field changes', () => {
   const behaviorFields = {
     '[data-save-status]': field(),
     '[data-act="save-behavior"]': field(),
     '[data-field="role"]': field('New role'),
     '[data-field="soul"]': field('Original soul'),
     '[data-field="goal"]': field('Original goal'),
-    '[data-field="primaryProvider"]': field(''),
-    '[data-field="fallbackProvider"]': field(''),
   };
   const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
   let requestBody = null;
@@ -319,25 +401,23 @@ test('bot page saveBehavior preserves unavailable provider bindings when saving 
   assert.deepEqual(requestBody, { role: 'New role' });
 });
 
-test('bot page saveBehavior sends provider changes only after the provider picker is touched', () => {
+test('bot page savePublicIdentity sends provider changes only after the provider picker is touched', () => {
   const primary = field('codex');
   primary.setAttribute('data-provider-touched', '1');
   const fallback = field('');
   fallback.setAttribute('data-provider-touched', '1');
-  const behaviorFields = {
+  const fields = {
     '[data-save-status]': field(),
-    '[data-act="save-behavior"]': field(),
-    '[data-field="role"]': field('Original role'),
-    '[data-field="soul"]': field('Original soul'),
-    '[data-field="goal"]': field('Original goal'),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
     '[data-field="primaryProvider"]': primary,
     '[data-field="fallbackProvider"]': fallback,
   };
-  const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
   let requestBody = null;
   const context = {
     document: {
-      querySelector: (selector) => (selector === '[data-behavior-profile-slug]' ? behaviorPanel : null),
+      querySelector: (selector) => fields[selector] ?? null,
       querySelectorAll: () => [],
       addEventListener: () => {},
     },
@@ -369,18 +449,16 @@ test('bot page saveBehavior sends provider changes only after the provider picke
   context.state.originalProfile = {
     slug: 'alice-bot',
     name: 'Alice',
-    role: 'Original role',
-    soul: 'Original soul',
-    goal: 'Original goal',
+    bio: 'Original public bio.',
     primaryProvider: 'openclaw',
     fallbackProvider: 'gemini',
   };
   context.renderMetabotList = () => {};
   context.renderDetailHeader = () => {};
-  context.renderBehaviorTab = () => {};
+  context.renderPublicIdentityTab = () => {};
   context.showChainSuccessModal = () => {};
 
-  context.saveBehavior();
+  context.savePublicIdentity();
 
   assert.deepEqual(requestBody, {
     primaryProvider: 'codex',
@@ -399,8 +477,6 @@ test('bot page saveBehavior reads fields and save state from the behavior panel 
     '[data-field="role"]': field('Behavior role'),
     '[data-field="soul"]': field('Original soul'),
     '[data-field="goal"]': field('Original goal'),
-    '[data-field="primaryProvider"]': field('codex'),
-    '[data-field="fallbackProvider"]': field('openclaw'),
   };
   const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
   const context = createBotScriptContext({
@@ -770,7 +846,7 @@ test('bot page preserves info form drafts when chat skill controls rerender the 
   assert.doesNotMatch(root.innerHTML, /Saved role/);
 });
 
-test('bot page renders public identity tab with only public identity controls', () => {
+test('bot page renders Basic tab with public identity and provider controls', () => {
   const root = { innerHTML: '' };
   const context = createBotScriptContext({
     elements: {
@@ -786,7 +862,25 @@ test('bot page renders public identity tab with only public identity controls', 
     globalMetaId: 'gm-alice',
     bio: 'Writes code with the user.',
     avatarDataUrl: 'data:image/png;base64,avatar',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
   }];
+  context.state.runtimes = [
+    {
+      id: 'runtime-codex',
+      provider: 'codex',
+      displayName: 'Codex',
+      logoPath: '/ui/assets/platforms/codex.svg',
+      health: 'healthy',
+    },
+    {
+      id: 'runtime-openclaw',
+      provider: 'openclaw',
+      displayName: 'OpenClaw',
+      logoPath: '/ui/assets/platforms/openclaw.svg',
+      health: 'healthy',
+    },
+  ];
 
   context.renderPublicIdentityTab();
 
@@ -799,6 +893,10 @@ test('bot page renders public identity tab with only public identity controls', 
   assert.match(root.innerHTML, /Homepage/);
   assert.match(root.innerHTML, /Default Bot Page renderer/);
   assert.match(root.innerHTML, /data-act="upload-homepage"/);
+  assert.match(root.innerHTML, /Primary LLM Provider/);
+  assert.match(root.innerHTML, /Fallback LLM Provider/);
+  assert.match(root.innerHTML, /data-field="primaryProvider"/);
+  assert.match(root.innerHTML, /data-field="fallbackProvider"/);
   assert.match(root.innerHTML, /Save Public Identity/);
   assert.match(root.innerHTML, /Reset/);
   assert.match(root.innerHTML, /data-field="name"/);
@@ -808,8 +906,6 @@ test('bot page renders public identity tab with only public identity controls', 
   assert.doesNotMatch(root.innerHTML, /data-field="role"/);
   assert.doesNotMatch(root.innerHTML, /data-field="soul"/);
   assert.doesNotMatch(root.innerHTML, /data-field="goal"/);
-  assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
-  assert.doesNotMatch(root.innerHTML, /data-field="fallbackProvider"/);
   assert.doesNotMatch(root.innerHTML, /data-field="chatSkillSelect"/);
   assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
   assert.doesNotMatch(root.innerHTML, /Wallet/);
@@ -862,7 +958,8 @@ test('bot page localizes owned console copy without translating Bot identity con
 
   assert.equal(name.textContent, 'Alice Public Bot');
   assert.equal(summary.textContent, 'Writes code with the user.');
-  assert.equal(live.textContent, '默认在线');
+  assert.equal(live.textContent, '');
+  assert.equal(live.getAttribute('aria-label'), '在线');
   assert.match(root.innerHTML, /Bot 名称/);
   assert.match(root.innerHTML, /公开简介/);
   assert.match(root.innerHTML, /默认 Bot Page 渲染器/);
@@ -914,8 +1011,10 @@ test('bot page renders behavior tab with only behavior controls', () => {
   assert.match(root.innerHTML, /Role/);
   assert.match(root.innerHTML, /Soul/);
   assert.match(root.innerHTML, /Goal/);
-  assert.match(root.innerHTML, /Primary LLM Provider/);
-  assert.match(root.innerHTML, /Fallback LLM Provider/);
+  assert.doesNotMatch(root.innerHTML, /Primary LLM Provider/);
+  assert.doesNotMatch(root.innerHTML, /Fallback LLM Provider/);
+  assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="fallbackProvider"/);
   assert.match(root.innerHTML, /Save Behavior/);
   assert.doesNotMatch(root.innerHTML, /Wallet/);
   assert.doesNotMatch(root.innerHTML, /Backup/);
@@ -969,9 +1068,9 @@ test('bot page public identity tab is not replaced when chat skill options load'
 
   assert.equal(renderInfoCalls, 0);
   assert.match(root.innerHTML, /Public Bio/);
+  assert.match(root.innerHTML, /data-field="primaryProvider"/);
   assert.match(root.innerHTML, /Save Public Identity/);
   assert.doesNotMatch(root.innerHTML, /data-field="role"/);
-  assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
   assert.doesNotMatch(root.innerHTML, /data-field="chatSkillSelect"/);
   assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
 });

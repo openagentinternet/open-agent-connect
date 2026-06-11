@@ -338,6 +338,10 @@ function currentPublicIdentityDraft(profile){
   return {
     name:infoFieldValue('name',profile.name||''),
     bio:infoFieldValue('bio',profile.bio||''),
+    primaryProvider:infoFieldValue('primaryProvider',profile.primaryProvider||''),
+    primaryProviderTouched:infoProviderTouched('primaryProvider'),
+    fallbackProvider:infoFieldValue('fallbackProvider',profile.fallbackProvider||''),
+    fallbackProviderTouched:infoProviderTouched('fallbackProvider'),
   };
 }
 function currentBehaviorDraft(profile){
@@ -347,10 +351,6 @@ function currentBehaviorDraft(profile){
     role:fieldValueWithin(panel,'role',profile.role||''),
     soul:fieldValueWithin(panel,'soul',profile.soul||''),
     goal:fieldValueWithin(panel,'goal',profile.goal||''),
-    primaryProvider:fieldValueWithin(panel,'primaryProvider',profile.primaryProvider||''),
-    primaryProviderTouched:providerTouchedWithin(panel,'primaryProvider'),
-    fallbackProvider:fieldValueWithin(panel,'fallbackProvider',profile.fallbackProvider||''),
-    fallbackProviderTouched:providerTouchedWithin(panel,'fallbackProvider'),
   };
 }
 
@@ -387,12 +387,12 @@ function renderBotHero(profile){
   var botUri=globalMetaId?'metaid://'+globalMetaId:'';
   var avatar=q('[data-hero-avatar]');if(avatar)avatar.innerHTML=avatarMarkup(profile,true);
   var name=q('[data-hero-name]');if(name)name.textContent=profile.name||profile.slug||'Bot';
-  var live=q('[data-live-indicator]');if(live)live.textContent=uiText('bot.liveByDefault','Live by default');
-  var summary=q('[data-hero-summary]');if(summary)summary.textContent=profile.bio||uiText('bot.defaultHeroSummary','A public Bot Page for identity, messaging, and service entry points.');
+  var live=q('[data-live-indicator]');if(live){var online=uiText('bot.liveByDefault','Online');live.textContent='';live.setAttribute('aria-label',online);live.setAttribute('title',online)}
+  var summary=q('[data-hero-summary]');if(summary){var bio=String(profile.bio||'').trim();summary.textContent=bio;summary.hidden=!bio}
   var id=q('[data-hero-global-meta-id]');if(id)id.textContent=globalMetaId||'Pending GlobalMetaID';
   var uri=q('[data-hero-bot-uri]');if(uri)uri.textContent=botUri||'metaid://pending';
-  var copyGlobal=q('[data-copy-global-meta-id]');if(copyGlobal){copyGlobal.disabled=!globalMetaId;copyGlobal.setAttribute('data-value',globalMetaId)}
-  var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri)}
+  var copyGlobal=q('[data-copy-global-meta-id]');if(copyGlobal){copyGlobal.disabled=!globalMetaId;copyGlobal.setAttribute('data-value',globalMetaId);copyGlobal.setAttribute('aria-label','Copy GlobalMetaID');copyGlobal.setAttribute('title','Copy GlobalMetaID')}
+  var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri);copyUri.setAttribute('aria-label','Copy Homepage URI');copyUri.setAttribute('title','Copy Homepage URI')}
   var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!globalMetaId;
   var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!profile.slug;
 }
@@ -471,6 +471,8 @@ function renderPublicIdentityTab(options){
   var draft=options.preserveDraft===false?null:currentPublicIdentityDraft(profile);
   var nameValue=draft?draft.name:(profile.name||'');
   var bioValue=draft?draft.bio:(profile.bio||'');
+  var primaryProviderValue=draft?draft.primaryProvider:(profile.primaryProvider||'');
+  var fallbackProviderValue=draft?draft.fallbackProvider:(profile.fallbackProvider||'');
   var avatar=state._pendingAvatar!==undefined?state._pendingAvatar:profile.avatarDataUrl;
   root.innerHTML='<div class="info-edit-panel" data-public-identity-profile-slug="'+esc(profile.slug)+'">'+
     '<div class="info-avatar-section">'+
@@ -484,6 +486,8 @@ function renderPublicIdentityTab(options){
     '</div></div>'+
     '<div class="info-form-grid">'+
       '<div class="field"><label for="bot-name">'+esc(uiText('bot.botName','Bot Name'))+'</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
+      providerPickerMarkup('primaryProvider',uiText('bot.primaryLlmProvider','Primary LLM Provider'),primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
+      providerPickerMarkup('fallbackProvider',uiText('bot.fallbackLlmProvider','Fallback LLM Provider'),fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
       '<div class="field field-full"><label for="bot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label><textarea id="bot-bio" data-field="bio">'+esc(bioValue)+'</textarea></div>'+
       '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label><div class="homepage-row"><span>'+esc(uiText('bot.defaultRenderer','Default Bot Page renderer'))+'</span><button type="button" class="btn btn-sm" data-act="upload-homepage">'+esc(uiText('bot.upload','Upload'))+'</button></div></div>'+
     '</div>'+
@@ -492,6 +496,7 @@ function renderPublicIdentityTab(options){
   var upload=q('[data-act="upload-avatar"]');if(upload&&input)upload.addEventListener('click',function(){input.click()});
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleAvatarUpload(file)});
+  wireProviderPickers();
   var homepage=q('[data-act="upload-homepage"]');if(homepage)homepage.addEventListener('click',openHomepageUploadPlaceholder);
   var save=q('[data-act="save-public-identity"]');if(save)save.addEventListener('click',savePublicIdentity);
   var reset=q('[data-act="reset-public-identity"]');if(reset)reset.addEventListener('click',resetPublicIdentity);
@@ -507,18 +512,13 @@ function renderBehaviorTab(options){
   var roleValue=draft?draft.role:(profile.role||'');
   var soulValue=draft?draft.soul:(profile.soul||'');
   var goalValue=draft?draft.goal:(profile.goal||'');
-  var primaryProviderValue=draft?draft.primaryProvider:(profile.primaryProvider||'');
-  var fallbackProviderValue=draft?draft.fallbackProvider:(profile.fallbackProvider||'');
   root.innerHTML='<div class="info-edit-panel" data-behavior-profile-slug="'+esc(profile.slug)+'">'+
     '<div class="info-form-grid">'+
       '<div class="field field-full"><label for="bot-role">'+esc(uiText('bot.role','Role'))+'</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
       '<div class="field field-full"><label for="bot-soul">'+esc(uiText('bot.soul','Soul'))+'</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
       '<div class="field field-full"><label for="bot-goal">'+esc(uiText('bot.goal','Goal'))+'</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
-      providerPickerMarkup('primaryProvider',uiText('bot.primaryLlmProvider','Primary LLM Provider'),primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
-      providerPickerMarkup('fallbackProvider',uiText('bot.fallbackLlmProvider','Fallback LLM Provider'),fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
     '</div>'+
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-behavior">'+esc(uiText('bot.saveBehavior','Save Behavior'))+'</button><span class="save-status" data-save-status></span></div></div>';
-  wireProviderPickers();
   var panel=behaviorPanelForProfile(profile);
   var save=queryWithin(panel,'[data-act="save-behavior"]');if(save)save.addEventListener('click',saveBehavior);
   focusBotManagementTarget();
@@ -928,6 +928,9 @@ function savePublicIdentity(){
   changedValue(payload,'name',(q('[data-field="name"]')||{}).value||'',profile.name||'');
   changedValue(payload,'bio',(q('[data-field="bio"]')||{}).value||'',profile.bio||'');
   if(state._pendingAvatar!==undefined)changedValue(payload,'avatarDataUrl',state._pendingAvatar,profile.avatarDataUrl||'');
+  var primaryEl=q('[data-field="primaryProvider"]');var fallbackEl=q('[data-field="fallbackProvider"]');
+  if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
+  if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
   if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
   if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
@@ -961,9 +964,6 @@ function saveBehavior(){
   changedValue(payload,'role',fieldValueWithin(panel,'role',''),profile.role||'');
   changedValue(payload,'soul',fieldValueWithin(panel,'soul',''),profile.soul||'');
   changedValue(payload,'goal',fieldValueWithin(panel,'goal',''),profile.goal||'');
-  var primaryEl=queryWithin(panel,'[data-field="primaryProvider"]');var fallbackEl=queryWithin(panel,'[data-field="fallbackProvider"]');
-  if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
-  if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
   if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
   if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;

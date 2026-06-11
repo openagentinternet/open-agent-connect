@@ -290,9 +290,32 @@
         color: var(--text);
       }
       .live-indicator {
-        color: var(--green);
-        font-family: var(--mono);
-        font-size: 11px;
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: var(--green);
+        box-shadow: 0 0 0 0 rgba(34,197,94,.34);
+        flex-shrink: 0;
+        animation: bot-live-breathe 2.8s ease-in-out infinite;
+      }
+      @keyframes bot-live-breathe {
+        0%, 100% {
+          opacity: .72;
+          transform: scale(.92);
+          box-shadow: 0 0 0 0 rgba(34,197,94,.28);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.08);
+          box-shadow: 0 0 0 5px rgba(34,197,94,0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .live-indicator {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
       }
       .hero-summary {
         margin: 8px 0 14px;
@@ -326,6 +349,10 @@
         border-radius: var(--radius-sm);
         padding: 5px 8px;
         font-size: 11px;
+      }
+      .hero-copy-btn {
+        border-color: var(--border);
+        background: var(--surface);
       }
       .hero-actions,
       .advanced-actions {
@@ -1162,19 +1189,19 @@
             <div class="hero-main">
               <div class="hero-title-row">
                 <h1 data-hero-name>-</h1>
-                <span class="live-indicator" data-live-indicator data-i18n-key="bot.liveByDefault">Live by default</span>
+                <span class="live-indicator" data-live-indicator aria-label="Online" title="Online"></span>
               </div>
-              <p class="hero-summary" data-hero-summary>A public Bot Page for identity, messaging, and service entry points.</p>
+              <p class="hero-summary" data-hero-summary hidden></p>
               <div class="hero-meta">
                 <div class="hero-meta-row">
                   <span data-i18n-key="bot.globalMetaId">GlobalMetaID</span>
                   <code data-hero-global-meta-id>-</code>
-                  <button class="btn btn-sm" type="button" data-copy-global-meta-id data-i18n-key="bot.copy">Copy</button>
+                  <button class="icon-btn hero-copy-btn" type="button" data-copy-global-meta-id aria-label="Copy GlobalMetaID" title="Copy GlobalMetaID">⧉</button>
                 </div>
                 <div class="hero-meta-row">
-                  <span data-i18n-key="bot.botUri">Bot URI</span>
+                  <span data-i18n-key="bot.botUri">Homepage URI</span>
                   <code data-hero-bot-uri>metaid://-</code>
-                  <button class="btn btn-sm" type="button" data-copy-bot-uri disabled data-i18n-key="bot.copy">Copy</button>
+                  <button class="icon-btn hero-copy-btn" type="button" data-copy-bot-uri disabled aria-label="Copy Homepage URI" title="Copy Homepage URI">⧉</button>
                 </div>
               </div>
               <div class="hero-actions">
