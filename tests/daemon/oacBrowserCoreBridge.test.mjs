@@ -112,6 +112,7 @@ test('OAC Browser core bridge maps resolved Bot pages to BrowserResourceEnvelope
     kind: 'bot',
     globalMetaId: 'idq1fixturebot',
     address: '18FixtureAddress',
+    name: 'Fixture Bot',
     label: 'Fixture Bot',
     avatar: 'https://so.example.test/content/avatar-pin',
     verificationState: 'partial',
@@ -135,27 +136,27 @@ test('OAC Browser core bridge maps resolved Bot pages to BrowserResourceEnvelope
     label: 'Request Fixture Review',
     kind: 'service-call',
     enabled: true,
+    serviceId: 'service-current-pin',
     payload: {
       providerGlobalMetaId: 'idq1fixturebot',
-      servicePinId: 'service-current-pin',
     },
   });
 
-  const copyUri = resolved.data.actions.find((action) => action.kind === 'copy-uri');
+  const copyUri = resolved.data.actions.find((action) => action.kind === 'copy');
   assert.deepEqual(copyUri, {
     id: 'copy-uri',
     label: 'Copy URI',
-    kind: 'copy-uri',
+    kind: 'copy',
     enabled: true,
-    payload: {
-      uri: 'metaid://idq1fixturebot',
-    },
+    uri: 'metaid://idq1fixturebot',
   });
 
   const copyResult = await adapter.runTrustedAction({
     resourceUri: resolved.data.normalizedUri,
-    kind: copyUri.kind,
-    payload: copyUri.payload,
+    kind: 'copy-uri',
+    payload: {
+      uri: copyUri.uri,
+    },
   });
 
   assert.equal(copyResult.ok, true);

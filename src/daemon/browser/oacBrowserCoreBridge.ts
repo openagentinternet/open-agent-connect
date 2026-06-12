@@ -9,10 +9,10 @@ import {
   type BrowserHostAdapter,
   type BrowserResourceEnvelope,
   type BrowserResourceOwner,
+  type BrowserResolveAction,
   type BrowserResourceSection,
   type BrowserRuntimeSnapshot,
   type BrowserSettingsSnapshot,
-  type BrowserTrustedActionDescriptor,
   type BrowserTrustedActionInput,
   type BrowserTrustedActionResult,
 } from '@openagentinternet/agent-browser-host-contract';
@@ -147,23 +147,22 @@ function ownerFromResult(result: BrowserResolveResult): BrowserResourceOwner {
     kind: result.owner.kind === 'metaapp-publisher' ? 'metaapp-publisher' : result.owner.kind === 'bot' ? 'bot' : 'unknown',
     globalMetaId: result.owner.globalMetaId || undefined,
     address: result.owner.address || undefined,
+    name: result.owner.name || result.title,
     label: result.owner.name || result.title,
     avatar: result.owner.avatar || undefined,
     verificationState: result.owner.verificationState,
   };
 }
 
-function actionFromOac(action: BrowserTrustedAction): BrowserTrustedActionDescriptor | null {
+function actionFromOac(action: BrowserTrustedAction): BrowserResolveAction | null {
   if (action.kind === 'private-chat') {
     return {
       id: action.id,
       label: action.label,
       kind: 'private-chat',
       enabled: action.enabled !== false,
-      payload: {
-        ...(action.payload ?? {}),
-        ...(action.uri ? { currentUri: action.uri } : {}),
-      },
+      ...(action.uri ? { uri: action.uri } : {}),
+      ...(action.payload ? { payload: action.payload } : {}),
     };
   }
 
@@ -173,10 +172,8 @@ function actionFromOac(action: BrowserTrustedAction): BrowserTrustedActionDescri
       label: action.label,
       kind: 'service-call',
       enabled: action.enabled !== false,
-      payload: {
-        ...(action.payload ?? {}),
-        ...(action.serviceId ? { servicePinId: action.serviceId } : {}),
-      },
+      ...(action.serviceId ? { serviceId: action.serviceId } : {}),
+      ...(action.payload ? { payload: action.payload } : {}),
     };
   }
 
@@ -184,12 +181,10 @@ function actionFromOac(action: BrowserTrustedAction): BrowserTrustedActionDescri
     return {
       id: action.id,
       label: action.label,
-      kind: 'copy-uri',
+      kind: 'copy',
       enabled: action.enabled !== false,
-      payload: {
-        ...(action.payload ?? {}),
-        ...(action.uri ? { uri: action.uri } : {}),
-      },
+      ...(action.uri ? { uri: action.uri } : {}),
+      ...(action.payload ? { payload: action.payload } : {}),
     };
   }
 
