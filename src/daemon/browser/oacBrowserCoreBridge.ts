@@ -1,23 +1,23 @@
 import {
   browserFailure,
+  browserManualActionRequired,
   browserSuccess,
+  browserWaiting,
   type BrowserActorInput,
   type BrowserCacheClearResult,
   type BrowserCacheSnapshot,
   type BrowserCommandFailure,
+  type BrowserCommandFailureOptions,
   type BrowserCommandResult,
+  type BrowserCommandWaitingOptions,
+  type BrowserFollowUpAction,
   type BrowserHostAdapter,
-  type BrowserResourceEnvelope,
-  type BrowserResourceOwner,
-  type BrowserResolveAction,
-  type BrowserResourceSection,
+  type BrowserResolveResult,
   type BrowserRuntimeSnapshot,
   type BrowserSettingsSnapshot,
   type BrowserTrustedActionInput,
   type BrowserTrustedActionResult,
 } from '@openagentinternet/agent-browser-host-contract';
-import { normalizeResourceSections } from '@openagentinternet/agent-browser-core';
-import type { BrowserResolveResult, BrowserTrustedAction } from '../../core/browser/types';
 import type { BrowserTrustedActionInput as OacBrowserTrustedActionInput } from '../../core/browser/hostTypes';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 import { createOacBrowserHostAdapter, type CreateOacBrowserHostAdapterInput } from './oacBrowserHostAdapter';
@@ -30,21 +30,66 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function list(value: unknown): Array<Record<string, unknown>> {
-  return Array.isArray(value)
-    ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
-    : [];
+function followUpActionFromOac(result: MetabotCommandResult<unknown>): BrowserFollowUpAction | undefined {
+  const resultData = record(result.data);
+  const href = text((result as { localUiUrl?: unknown }).localUiUrl);
+  const traceId = text(resultData.traceId);
+  const route = href ? '' : traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '';
+  if (!href && !route) return undefined;
+  const action: BrowserFollowUpAction = {
+    label: text((result as { actionLabel?: unknown }).actionLabel) || 'Open details',
+  };
+  if (href) action.href = href;
+  if (route) action.route = route;
+  return action;
+}
+
+function dataRecord(value: unknown): Record<string, unknown> | undefined {
+  const next = record(value);
+  return Object.keys(next).length ? next : undefined;
+}
+
+function failureCode(result: MetabotCommandResult<unknown>): string {
+  return text((result as { code?: unknown }).code) || text((result as { state?: unknown }).state) || 'browser_oac_failure';
+}
+
+function failureMessage(result: MetabotCommandResult<unknown>): string {
+  return text((result as { message?: unknown }).message) || 'OAC Browser command failed.';
 }
 
 function toBrowserFailure(result: MetabotCommandResult<unknown>): BrowserCommandFailure {
-  return browserFailure(
-    text((result as { code?: unknown }).code) || text((result as { state?: unknown }).state) || 'browser_oac_failure',
-    text((result as { message?: unknown }).message) || 'OAC Browser command failed.',
-  );
+  const options: BrowserCommandFailureOptions = {};
+  const action = followUpActionFromOac(result);
+  const data = dataRecord(result.data);
+  if (action) options.action = action;
+  if (data) options.data = data;
+  return browserFailure(failureCode(result), failureMessage(result), options);
 }
 
 function toBrowserResult<T>(result: MetabotCommandResult<T>): BrowserCommandResult<T> {
-  return result.ok ? browserSuccess(result.data) : toBrowserFailure(result);
+  if (result.ok) return browserSuccess(result.data);
+
+  if (result.state === 'waiting') {
+    const options: BrowserCommandWaitingOptions = {};
+    const pollAfterMs = (result as { pollAfterMs?: unknown }).pollAfterMs;
+    const action = followUpActionFromOac(result);
+    const data = dataRecord(result.data);
+    if (typeof pollAfterMs === 'number') options.pollAfterMs = pollAfterMs;
+    if (action) options.action = action;
+    if (data) options.data = data;
+    return browserWaiting(failureCode(result), failureMessage(result), options);
+  }
+
+  if (result.state === 'manual_action_required') {
+    const options: BrowserCommandFailureOptions = {};
+    const action = followUpActionFromOac(result);
+    const data = dataRecord(result.data);
+    if (action) options.action = action;
+    if (data) options.data = data;
+    return browserManualActionRequired(failureCode(result), failureMessage(result), options);
+  }
+
+  return toBrowserFailure(result);
 }
 
 function trustedActionData(value: unknown): BrowserTrustedActionResult['data'] | undefined {
@@ -62,48 +107,23 @@ function trustedActionData(value: unknown): BrowserTrustedActionResult['data'] |
   return Object.keys(normalized).length ? normalized : undefined;
 }
 
-function nonTerminalTrustedActionResultFromOac(
-  actionInput: BrowserTrustedActionInput,
-  result: MetabotCommandResult<unknown>,
-): BrowserCommandResult<BrowserTrustedActionResult> | null {
-  if (result.ok || (result.state !== 'waiting' && result.state !== 'manual_action_required')) {
-    return null;
-  }
-
-  const resultData = record(result.data);
-  const href = text((result as { localUiUrl?: unknown }).localUiUrl);
-  const traceId = text(resultData.traceId);
-  const normalizedData = trustedActionData({
-    message: text(result.message),
-    ...(href ? { href } : traceId ? { route: `/ui/trace?traceId=${encodeURIComponent(traceId)}` } : {}),
-  });
-  return browserSuccess({
-    kind: actionInput.kind,
-    handled: true,
-    ...(normalizedData ? { data: normalizedData } : {}),
-  });
-}
-
 function trustedActionResultFromOac(
   actionInput: BrowserTrustedActionInput,
   result: MetabotCommandResult<unknown>,
 ): BrowserCommandResult<BrowserTrustedActionResult> {
   if (!result.ok) {
-    const nonTerminalResult = nonTerminalTrustedActionResultFromOac(actionInput, result);
-    if (nonTerminalResult) {
-      return nonTerminalResult;
-    }
-    return toBrowserFailure(result);
+    return toBrowserResult(result as MetabotCommandResult<BrowserTrustedActionResult>);
   }
 
   const outer = record(result.data);
   const nested = record(outer.data);
   const normalizedData = trustedActionData(Object.keys(nested).length ? nested : outer);
-  return browserSuccess({
+  const response: BrowserTrustedActionResult = {
     kind: actionInput.kind,
     handled: true,
-    ...(normalizedData ? { data: normalizedData } : {}),
-  });
+  };
+  if (normalizedData) response.data = normalizedData;
+  return browserSuccess(response);
 }
 
 function copyUriTrustedActionResult(actionInput: BrowserTrustedActionInput): BrowserCommandResult<BrowserTrustedActionResult> {
@@ -142,100 +162,6 @@ function toOacTrustedActionInput(input: BrowserTrustedActionInput): OacBrowserTr
   };
 }
 
-function ownerFromResult(result: BrowserResolveResult): BrowserResourceOwner {
-  return {
-    kind: result.owner.kind === 'metaapp-publisher' ? 'metaapp-publisher' : result.owner.kind === 'bot' ? 'bot' : 'unknown',
-    globalMetaId: result.owner.globalMetaId || undefined,
-    address: result.owner.address || undefined,
-    name: result.owner.name || result.title,
-    label: result.owner.name || result.title,
-    avatar: result.owner.avatar || undefined,
-    verificationState: result.owner.verificationState,
-  };
-}
-
-function actionFromOac(action: BrowserTrustedAction): BrowserResolveAction | null {
-  if (action.kind === 'private-chat') {
-    return {
-      id: action.id,
-      label: action.label,
-      kind: 'private-chat',
-      enabled: action.enabled !== false,
-      ...(action.uri ? { uri: action.uri } : {}),
-      ...(action.payload ? { payload: action.payload } : {}),
-    };
-  }
-
-  if (action.kind === 'service-call') {
-    return {
-      id: action.id,
-      label: action.label,
-      kind: 'service-call',
-      enabled: action.enabled !== false,
-      ...(action.serviceId ? { serviceId: action.serviceId } : {}),
-      ...(action.payload ? { payload: action.payload } : {}),
-    };
-  }
-
-  if (action.kind === 'copy') {
-    return {
-      id: action.id,
-      label: action.label,
-      kind: 'copy',
-      enabled: action.enabled !== false,
-      ...(action.uri ? { uri: action.uri } : {}),
-      ...(action.payload ? { payload: action.payload } : {}),
-    };
-  }
-
-  return null;
-}
-
-function sectionsFromOacResult(result: BrowserResolveResult): BrowserResourceSection[] {
-  if (result.resourceType !== 'bot') {
-    return [];
-  }
-
-  const data = record(result.renderer.data);
-  return normalizeResourceSections([
-    { id: 'overview', title: 'Overview', kind: 'generic-list', items: Object.keys(record(data.homepage)).length ? [record(data.homepage)] : [] },
-    { id: 'services', title: 'Services', kind: 'services', items: list(data.services) },
-    { id: 'skills', title: 'Skills', kind: 'skills', items: list(data.skills) },
-    { id: 'buses', title: 'Buses', kind: 'buses', items: list(data.buses) },
-    { id: 'buzzes', title: 'Buzz', kind: 'buzzes', items: list(data.buzzes).length ? list(data.buzzes) : list(data.buzz) },
-    { id: 'apps', title: 'Apps', kind: 'apps', items: list(data.apps) },
-    { id: 'activity', title: 'Recent Activity', kind: 'activity', items: list(data.activity) },
-  ]);
-}
-
-export function oacResolveResultToBrowserEnvelope(result: BrowserResolveResult): BrowserResourceEnvelope {
-  return {
-    uri: result.uri,
-    normalizedUri: result.normalizedUri,
-    resourceType: result.resourceType === 'unsupported' ? 'unknown' : result.resourceType,
-    title: result.title,
-    owner: ownerFromResult(result),
-    ownerAffinity: null,
-    renderer: {
-      type: result.renderer.type,
-      contentType: result.renderer.contentType,
-      templateId: result.renderer.templateId,
-      url: result.renderer.url,
-      data: result.renderer.data,
-      error: result.renderer.error,
-    },
-    actions: result.actions.flatMap((action) => {
-      const mapped = actionFromOac(action);
-      return mapped ? [mapped] : [];
-    }),
-    sections: sectionsFromOacResult(result),
-    status: result.status,
-    proof: result.proof,
-    source: result.source,
-    raw: result,
-  };
-}
-
 export function createOacBrowserCoreHostAdapter(input: CreateOacBrowserHostAdapterInput): BrowserHostAdapter {
   const adapter = createOacBrowserHostAdapter(input);
 
@@ -243,9 +169,8 @@ export function createOacBrowserCoreHostAdapter(input: CreateOacBrowserHostAdapt
     async getRuntime(actorInput?: BrowserActorInput): Promise<BrowserCommandResult<BrowserRuntimeSnapshot>> {
       return toBrowserResult(await adapter.getRuntime(actorInput));
     },
-    async resolveResource(resolveInput): Promise<BrowserCommandResult<BrowserResourceEnvelope>> {
-      const result = await adapter.resolveResource(resolveInput);
-      return result.ok ? browserSuccess(oacResolveResultToBrowserEnvelope(result.data)) : toBrowserFailure(result);
+    async resolveResource(resolveInput): Promise<BrowserCommandResult<BrowserResolveResult>> {
+      return toBrowserResult(await adapter.resolveResource(resolveInput));
     },
     async getSettings(actorInput?: BrowserActorInput): Promise<BrowserCommandResult<BrowserSettingsSnapshot>> {
       return toBrowserResult(await adapter.getSettings(actorInput));
