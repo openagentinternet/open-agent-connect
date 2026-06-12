@@ -608,20 +608,17 @@ test('default bot createProfile bootstraps a chained identity before indexing th
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.slug, 'chain-bot');
   assert.match(result.data.profile.globalMetaId, /^idq/);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/role']);
-  assert.deepEqual(writeCalls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey']);
+  assert.deepEqual(writeCalls.map((call) => call.operation), ['create', 'create']);
   assert.equal(writeCalls[0].contentType, 'text/plain');
   assert.equal(writeCalls[0].payload, 'Chain Bot');
-  assert.equal(writeCalls[2].contentType, 'image/png;binary');
-  assert.equal(writeCalls[2].payload, 'ZmFrZQ==');
-  assert.equal(writeCalls[2].encoding, 'base64');
-  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['tx-1', 'tx-2', 'tx-3', 'tx-4']);
+  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['tx-1', 'tx-2']);
   assert.equal(stored.role, 'Role after chain.');
   assert.equal(stored.avatarDataUrl, 'data:image/png;base64,ZmFrZQ==');
   assert.equal(stored.globalMetaId, result.data.profile.globalMetaId);
 });
 
-test('default bot createProfile writes requested profile fields to chain before local profile files', async (t) => {
+test('default bot createProfile keeps optional profile fields local during minimal chain creation', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -642,7 +639,7 @@ test('default bot createProfile writes requested profile fields to chain before 
     }),
     createSignerForHome: () => makeSigner(async (input) => {
       writeCalls.push(input);
-      if (input.path === '/info/role') {
+      if (input.path === '/info/chatpubkey') {
         assert.deepEqual(await listIdentityProfiles(systemHomeDir), []);
         await assert.rejects(() => access(targetPaths.roleMdPath), /ENOENT/);
         await assert.rejects(() => access(path.join(targetHomeDir, 'avatar.txt')), /ENOENT/);
@@ -670,12 +667,12 @@ test('default bot createProfile writes requested profile fields to chain before 
   const stored = await getMetabotProfile(systemHomeDir, 'chain-first-draft-bot');
 
   assert.equal(result.ok, true);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/role']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey']);
   assert.equal(stored.role, 'Chain first role.');
   assert.equal(stored.avatarDataUrl, 'data:image/png;base64,ZmFrZQ==');
 });
 
-test('default bot createProfile persists requested provider fields after chain LLM write', async (t) => {
+test('default bot createProfile persists requested provider fields without chain LLM write', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -690,6 +687,7 @@ test('default bot createProfile persists requested provider fields after chain L
     ],
   });
   const llmPayloads = [];
+  const writePaths = [];
   let signerCallCount = 0;
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
@@ -703,6 +701,7 @@ test('default bot createProfile persists requested provider fields after chain L
     }),
     createSignerForHome: () => makeSigner(async (input) => {
       signerCallCount += 1;
+      writePaths.push(input.path);
       if (input.path === '/info/LLM') {
         llmPayloads.push(JSON.parse(input.payload));
       }
@@ -731,10 +730,8 @@ test('default bot createProfile persists requested provider fields after chain L
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.primaryProvider, 'codex');
   assert.equal(result.data.profile.fallbackProvider, 'claude-code');
-  assert.deepEqual(llmPayloads.at(-1), {
-    primaryProvider: 'codex',
-    fallbackProvider: 'claude-code',
-  });
+  assert.deepEqual(writePaths, ['/info/name', '/info/chatpubkey']);
+  assert.deepEqual(llmPayloads, []);
   assert.deepEqual(
     bindingState.bindings.map((binding) => [binding.role, binding.llmRuntimeId]).sort(),
     [
@@ -823,7 +820,7 @@ test('default bot createProfile accepts empty allowChatSkills as a no-op', async
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.data.profile.allowChatSkills, []);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/role']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey']);
 });
 
 test('default bot createProfile rejects requested degraded providers before chain writes', async (t) => {
@@ -901,6 +898,7 @@ test('default bot createProfile prefers the requested host provider and falls ba
     ],
   });
   const llmPayloads = [];
+  const writePaths = [];
   let signerCallCount = 0;
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
@@ -909,6 +907,7 @@ test('default bot createProfile prefers the requested host provider and falls ba
     ...makeChainedCreateOverrides(),
     createSignerForHome: () => makeSigner(async (input) => {
       signerCallCount += 1;
+      writePaths.push(input.path);
       if (input.path === '/info/LLM') {
         llmPayloads.push(JSON.parse(input.payload));
       }
@@ -935,8 +934,8 @@ test('default bot createProfile prefers the requested host provider and falls ba
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.primaryProvider, 'codex');
   assert.equal(result.data.profile.fallbackProvider, 'claude-code');
-  assert.equal(llmPayloads.at(-1).primaryProvider, 'codex');
-  assert.equal(llmPayloads.at(-1).fallbackProvider, 'claude-code');
+  assert.deepEqual(writePaths, ['/info/name', '/info/chatpubkey']);
+  assert.deepEqual(llmPayloads, []);
 });
 
 test('default bot createProfile from UI defaults providers by recent runtime activity', async (t) => {

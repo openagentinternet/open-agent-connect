@@ -1343,20 +1343,6 @@ function buildMetabotChainProfile(
   };
 }
 
-function calculateMetabotCreateChainFields(input: CreateMetabotInput): string[] {
-  const changedFields: string[] = [];
-  if (normalizeText(input.bio)) changedFields.push('bio');
-  if (input.role !== undefined) changedFields.push('role');
-  if (input.soul !== undefined) changedFields.push('soul');
-  if (input.goal !== undefined) changedFields.push('goal');
-  if (input.primaryProvider !== undefined) changedFields.push('primaryProvider');
-  if (input.fallbackProvider !== undefined) changedFields.push('fallbackProvider');
-  if (normalizeText(input.avatarDataUrl)) {
-    changedFields.push('avatar');
-  }
-  return changedFields;
-}
-
 async function validateMetabotProviderAvailability(
   profile: MetabotProfileFull,
   update: UpdateMetabotInfoInput,
@@ -13886,7 +13872,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const profileChainWrites = await syncMetabotInfoToChain(
             profileSigner,
             chainProfile,
-            calculateMetabotCreateChainFields(createInput),
+            [],
             {
               delayMs: input.identitySyncStepDelayMs,
               operation: 'create',

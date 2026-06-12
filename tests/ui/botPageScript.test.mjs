@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -123,6 +124,122 @@ function tabElement(value) {
   };
   return element;
 }
+
+test('bot page template uses an icon-only online indicator and copy buttons in the hero', () => {
+  const template = readFileSync(new URL('../../src/ui/pages/bot/index.html', import.meta.url), 'utf8');
+
+  assert.match(template, /<span class="live-indicator" data-live-indicator aria-label="Online" title="Online"><\/span>/);
+  assert.match(template, /@keyframes bot-live-breathe/);
+  assert.match(template, /@keyframes bot-create-chain-flow/);
+  assert.match(template, /@keyframes bot-create-chain-pulse/);
+  assert.match(template, /\.create-chain-modal\s*\{/);
+  assert.match(template, /\.detail-panel\s*\{[^}]*max-width:\s*800px;[^}]*margin:\s*0 auto;/s);
+  assert.match(template, /\.tab-bar\s*\{[^}]*overflow-x:\s*auto;/s);
+  assert.doesNotMatch(template, /data-live-indicator[^>]*>Live by default<\/span>/);
+  assert.doesNotMatch(template, /data-copy-bot-uri[^>]*data-i18n-key="bot\.copy">Copy<\/button>/);
+  assert.match(template, /data-copy-bot-uri[^>]*aria-label="Copy Homepage URI"[^>]*>⧉<\/button>/);
+});
+
+test('bot page hero renders bio copy and keeps online status icon-only', () => {
+  const live = field('old status');
+  const summary = { textContent: '', hidden: true };
+  const copyUri = field();
+  const elements = {
+    '[data-bot-hero]': { hidden: true },
+    '[data-hero-avatar]': { innerHTML: '' },
+    '[data-hero-name]': field(),
+    '[data-live-indicator]': live,
+    '[data-hero-summary]': summary,
+    '[data-hero-global-meta-id]': field(),
+    '[data-hero-bot-uri]': field(),
+    '[data-copy-global-meta-id]': field(),
+    '[data-copy-bot-uri]': copyUri,
+    '[data-act="view-bot-page"]': field(),
+    '[data-act="view-conversations"]': field(),
+  };
+  const context = createBotScriptContext({ elements });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.renderBotHero({
+    slug: 'alice-bot',
+    name: 'Alice',
+    bio: 'Builds wallet automation.',
+    globalMetaId: 'idq1alice',
+  });
+
+  assert.equal(live.textContent, '');
+  assert.equal(live.getAttribute('aria-label'), 'Online');
+  assert.equal(summary.hidden, false);
+  assert.equal(summary.textContent, 'Builds wallet automation.');
+  assert.equal(copyUri.getAttribute('aria-label'), 'Copy Homepage URI');
+});
+
+test('bot page Basic tab owns LLM providers and Persona tab owns role fields', () => {
+  const basicRoot = { innerHTML: '' };
+  const personaRoot = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': basicRoot,
+      '[data-behavior-content]': personaRoot,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    bio: 'Builds wallet automation.',
+    role: 'Assistant',
+    soul: 'Patient',
+    goal: 'Help users',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+  }];
+  context.state.runtimes = [
+    { id: 'runtime-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' },
+    { id: 'runtime-openclaw', provider: 'openclaw', displayName: 'OpenClaw', health: 'healthy' },
+  ];
+
+  context.renderPublicIdentityTab();
+  context.renderBehaviorTab();
+
+  assert.match(basicRoot.innerHTML, /Primary LLM Provider/);
+  assert.match(basicRoot.innerHTML, /Fallback LLM Provider/);
+  assert.doesNotMatch(personaRoot.innerHTML, /Primary LLM Provider/);
+  assert.doesNotMatch(personaRoot.innerHTML, /Fallback LLM Provider/);
+  assert.match(personaRoot.innerHTML, /data-field="role"/);
+  assert.match(personaRoot.innerHTML, /data-field="soul"/);
+  assert.match(personaRoot.innerHTML, /data-field="goal"/);
+});
+
+test('bot page Basic tab groups provider controls in one row and separates Homepage copy from Upload', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': root,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    bio: 'Builds wallet automation.',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+  }];
+  context.state.runtimes = [
+    { id: 'runtime-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' },
+    { id: 'runtime-openclaw', provider: 'openclaw', displayName: 'OpenClaw', health: 'healthy' },
+  ];
+
+  context.renderPublicIdentityTab();
+
+  assert.match(root.innerHTML, /<div class="provider-row">[\s\S]*data-field="primaryProvider"[\s\S]*data-field="fallbackProvider"[\s\S]*<\/div>/);
+  assert.match(root.innerHTML, /<div class="homepage-row"><button type="button" class="btn btn-sm" data-act="upload-homepage">Upload<\/button><span class="homepage-renderer-label">Default Bot Page renderer<\/span><\/div>/);
+});
 
 test('bot page saveInfo preserves unavailable provider bindings when saving unrelated profile fields', () => {
   const fields = {
@@ -257,15 +374,13 @@ test('bot page saveInfo sends provider changes only after the provider picker is
   });
 });
 
-test('bot page saveBehavior preserves unavailable provider bindings when saving unrelated behavior fields', () => {
+test('bot page saveBehavior sends only persona field changes', () => {
   const behaviorFields = {
     '[data-save-status]': field(),
     '[data-act="save-behavior"]': field(),
     '[data-field="role"]': field('New role'),
     '[data-field="soul"]': field('Original soul'),
     '[data-field="goal"]': field('Original goal'),
-    '[data-field="primaryProvider"]': field(''),
-    '[data-field="fallbackProvider"]': field(''),
   };
   const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
   let requestBody = null;
@@ -319,25 +434,23 @@ test('bot page saveBehavior preserves unavailable provider bindings when saving 
   assert.deepEqual(requestBody, { role: 'New role' });
 });
 
-test('bot page saveBehavior sends provider changes only after the provider picker is touched', () => {
+test('bot page savePublicIdentity sends provider changes only after the provider picker is touched', () => {
   const primary = field('codex');
   primary.setAttribute('data-provider-touched', '1');
   const fallback = field('');
   fallback.setAttribute('data-provider-touched', '1');
-  const behaviorFields = {
+  const fields = {
     '[data-save-status]': field(),
-    '[data-act="save-behavior"]': field(),
-    '[data-field="role"]': field('Original role'),
-    '[data-field="soul"]': field('Original soul'),
-    '[data-field="goal"]': field('Original goal'),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
     '[data-field="primaryProvider"]': primary,
     '[data-field="fallbackProvider"]': fallback,
   };
-  const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
   let requestBody = null;
   const context = {
     document: {
-      querySelector: (selector) => (selector === '[data-behavior-profile-slug]' ? behaviorPanel : null),
+      querySelector: (selector) => fields[selector] ?? null,
       querySelectorAll: () => [],
       addEventListener: () => {},
     },
@@ -369,18 +482,16 @@ test('bot page saveBehavior sends provider changes only after the provider picke
   context.state.originalProfile = {
     slug: 'alice-bot',
     name: 'Alice',
-    role: 'Original role',
-    soul: 'Original soul',
-    goal: 'Original goal',
+    bio: 'Original public bio.',
     primaryProvider: 'openclaw',
     fallbackProvider: 'gemini',
   };
   context.renderMetabotList = () => {};
   context.renderDetailHeader = () => {};
-  context.renderBehaviorTab = () => {};
+  context.renderPublicIdentityTab = () => {};
   context.showChainSuccessModal = () => {};
 
-  context.saveBehavior();
+  context.savePublicIdentity();
 
   assert.deepEqual(requestBody, {
     primaryProvider: 'codex',
@@ -399,8 +510,6 @@ test('bot page saveBehavior reads fields and save state from the behavior panel 
     '[data-field="role"]': field('Behavior role'),
     '[data-field="soul"]': field('Original soul'),
     '[data-field="goal"]': field('Original goal'),
-    '[data-field="primaryProvider"]': field('codex'),
-    '[data-field="fallbackProvider"]': field('openclaw'),
   };
   const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
   const context = createBotScriptContext({
@@ -526,9 +635,9 @@ test('bot page renders the launch create flow and empty state in Simplified Chin
 
   const createMarkup = context.createModalMarkup();
   assert.match(createMarkup, /创建 Bot/);
-  assert.match(createMarkup, /上传/);
   assert.match(createMarkup, /Bot 名称/);
-  assert.match(createMarkup, /公开简介/);
+  assert.doesNotMatch(createMarkup, /上传/);
+  assert.doesNotMatch(createMarkup, /公开简介/);
   assert.match(createMarkup, /取消/);
 
   context.renderMetabotList();
@@ -538,11 +647,18 @@ test('bot page renders the launch create flow and empty state in Simplified Chin
 test('bot page uses Simplified Chinese create validation and progress copy', () => {
   const status = field();
   const confirm = field();
+  const modal = {
+    innerHTML: '',
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+  };
   const fields = {
     '[data-field="new-name"]': field(''),
-    '[data-field="new-bio"]': field(''),
     '[data-add-status]': status,
     '[data-act="confirm-add"]': confirm,
+    '[data-modal="add-metabot"]': modal,
   };
   const context = createBotScriptContext({
     elements: fields,
@@ -559,8 +675,9 @@ test('bot page uses Simplified Chinese create validation and progress copy', () 
   context.api = () => new Promise(() => {});
   context.createMetabot();
 
-  assert.equal(status.textContent, '正在创建...');
-  assert.equal(status.className, 'save-status saving');
+  assert.match(modal.innerHTML, /正在上链/);
+  assert.match(modal.innerHTML, /数据正在写入链上，请等候 15-30 秒。/);
+  assert.doesNotMatch(modal.innerHTML, /data-act="confirm-add"/);
 });
 
 test('bot page renders chat skills tab for private conversation replies only', async () => {
@@ -770,7 +887,7 @@ test('bot page preserves info form drafts when chat skill controls rerender the 
   assert.doesNotMatch(root.innerHTML, /Saved role/);
 });
 
-test('bot page renders public identity tab with only public identity controls', () => {
+test('bot page renders Basic tab with public identity and provider controls', () => {
   const root = { innerHTML: '' };
   const context = createBotScriptContext({
     elements: {
@@ -786,7 +903,25 @@ test('bot page renders public identity tab with only public identity controls', 
     globalMetaId: 'gm-alice',
     bio: 'Writes code with the user.',
     avatarDataUrl: 'data:image/png;base64,avatar',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
   }];
+  context.state.runtimes = [
+    {
+      id: 'runtime-codex',
+      provider: 'codex',
+      displayName: 'Codex',
+      logoPath: '/ui/assets/platforms/codex.svg',
+      health: 'healthy',
+    },
+    {
+      id: 'runtime-openclaw',
+      provider: 'openclaw',
+      displayName: 'OpenClaw',
+      logoPath: '/ui/assets/platforms/openclaw.svg',
+      health: 'healthy',
+    },
+  ];
 
   context.renderPublicIdentityTab();
 
@@ -799,8 +934,13 @@ test('bot page renders public identity tab with only public identity controls', 
   assert.match(root.innerHTML, /Homepage/);
   assert.match(root.innerHTML, /Default Bot Page renderer/);
   assert.match(root.innerHTML, /data-act="upload-homepage"/);
+  assert.match(root.innerHTML, /Primary LLM Provider/);
+  assert.match(root.innerHTML, /Fallback LLM Provider/);
+  assert.match(root.innerHTML, /data-field="primaryProvider"/);
+  assert.match(root.innerHTML, /data-field="fallbackProvider"/);
   assert.match(root.innerHTML, /Save Public Identity/);
-  assert.match(root.innerHTML, /Reset/);
+  assert.doesNotMatch(root.innerHTML, /data-act="reset-public-identity"/);
+  assert.doesNotMatch(root.innerHTML, /Reset/);
   assert.match(root.innerHTML, /data-field="name"/);
   assert.match(root.innerHTML, /data-field="bio"/);
   assert.doesNotMatch(root.innerHTML, /MetaApp/i);
@@ -808,8 +948,6 @@ test('bot page renders public identity tab with only public identity controls', 
   assert.doesNotMatch(root.innerHTML, /data-field="role"/);
   assert.doesNotMatch(root.innerHTML, /data-field="soul"/);
   assert.doesNotMatch(root.innerHTML, /data-field="goal"/);
-  assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
-  assert.doesNotMatch(root.innerHTML, /data-field="fallbackProvider"/);
   assert.doesNotMatch(root.innerHTML, /data-field="chatSkillSelect"/);
   assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
   assert.doesNotMatch(root.innerHTML, /Wallet/);
@@ -862,7 +1000,8 @@ test('bot page localizes owned console copy without translating Bot identity con
 
   assert.equal(name.textContent, 'Alice Public Bot');
   assert.equal(summary.textContent, 'Writes code with the user.');
-  assert.equal(live.textContent, '默认在线');
+  assert.equal(live.textContent, '');
+  assert.equal(live.getAttribute('aria-label'), '在线');
   assert.match(root.innerHTML, /Bot 名称/);
   assert.match(root.innerHTML, /公开简介/);
   assert.match(root.innerHTML, /默认 Bot Page 渲染器/);
@@ -914,8 +1053,10 @@ test('bot page renders behavior tab with only behavior controls', () => {
   assert.match(root.innerHTML, /Role/);
   assert.match(root.innerHTML, /Soul/);
   assert.match(root.innerHTML, /Goal/);
-  assert.match(root.innerHTML, /Primary LLM Provider/);
-  assert.match(root.innerHTML, /Fallback LLM Provider/);
+  assert.doesNotMatch(root.innerHTML, /Primary LLM Provider/);
+  assert.doesNotMatch(root.innerHTML, /Fallback LLM Provider/);
+  assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="fallbackProvider"/);
   assert.match(root.innerHTML, /Save Behavior/);
   assert.doesNotMatch(root.innerHTML, /Wallet/);
   assert.doesNotMatch(root.innerHTML, /Backup/);
@@ -969,9 +1110,9 @@ test('bot page public identity tab is not replaced when chat skill options load'
 
   assert.equal(renderInfoCalls, 0);
   assert.match(root.innerHTML, /Public Bio/);
+  assert.match(root.innerHTML, /data-field="primaryProvider"/);
   assert.match(root.innerHTML, /Save Public Identity/);
   assert.doesNotMatch(root.innerHTML, /data-field="role"/);
-  assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
   assert.doesNotMatch(root.innerHTML, /data-field="chatSkillSelect"/);
   assert.doesNotMatch(root.innerHTML, /Chat Allowed Skills/);
 });
@@ -1404,7 +1545,7 @@ test('bot page saveInfo omits allowChatSkills when selected chips are unchanged'
   assert.deepEqual(requestBody, { name: 'Alice Updated' });
 });
 
-test('bot page create flow sends only public identity fields', async () => {
+test('bot page create flow sends only the minimal identity fields', async () => {
   const fields = {
     '[data-field="new-name"]': field('Alice'),
     '[data-field="new-bio"]': field('Builds with Codex.'),
@@ -1446,22 +1587,8 @@ test('bot page create flow sends only public identity fields', async () => {
 
   assert.deepEqual(requestBody, {
     name: 'Alice',
-    bio: 'Builds with Codex.',
-    avatarDataUrl: 'data:image/png;base64,...',
     creationSource: 'ui',
   });
-  for (const key of [
-    'primaryProvider',
-    'fallbackProvider',
-    'privateChat',
-    'autoReply',
-    'role',
-    'soul',
-    'goal',
-    'allowChatSkills',
-  ]) {
-    assert.equal(Object.hasOwn(requestBody, key), false, `request body should omit ${key}`);
-  }
 });
 
 test('bot page opens the creation modal after initial load when mode=create is requested', async () => {
@@ -1518,8 +1645,10 @@ test('bot page opens the creation modal after initial load when mode=create is r
   assert.equal(classNames.has('hidden'), false);
   assert.equal(focused, true);
   assert.match(modal.innerHTML, /data-field="new-name"/);
-  assert.match(modal.innerHTML, /data-field="new-avatar-file"/);
-  assert.match(modal.innerHTML, /data-field="new-bio"/);
+  assert.doesNotMatch(modal.innerHTML, /data-field="new-avatar-file"/);
+  assert.doesNotMatch(modal.innerHTML, /data-field="new-bio"/);
+  assert.doesNotMatch(modal.innerHTML, /data-act="upload-create-avatar"/);
+  assert.doesNotMatch(modal.innerHTML, /data-act="remove-create-avatar"/);
   assert.doesNotMatch(modal.innerHTML, /primaryProvider/);
   assert.doesNotMatch(modal.innerHTML, /fallbackProvider/);
   assert.doesNotMatch(modal.innerHTML, /data-field="role"/);
@@ -2169,45 +2298,6 @@ test('bot page deep link focus is consumed after the first successful activation
   assert.equal(calls.includes('/api/services/skills?from=alice'), false);
 });
 
-test('bot page create avatar upload clears a previous pending avatar after an oversized file', () => {
-  const preview = { innerHTML: '' };
-  const removeButton = field();
-  removeButton.hidden = false;
-  const status = field();
-  const fields = {
-    '[data-field="new-name"]': field('Alice'),
-    '[data-create-avatar-preview]': preview,
-    '[data-act="remove-create-avatar"]': removeButton,
-    '[data-create-avatar-status]': status,
-  };
-  const context = createBotScriptContext({
-    elements: fields,
-    globals: {
-      FileReader: class {
-        readAsDataURL() {
-          this.result = 'data:image/png;base64,valid';
-          this.onload();
-        }
-      },
-    },
-  });
-
-  vm.runInNewContext(buildBotPageDefinition().script, context);
-
-  context.handleCreateAvatarUpload({ size: 1024 });
-  assert.equal(context.state._pendingCreateAvatar, 'data:image/png;base64,valid');
-  assert.equal(removeButton.hidden, false);
-  assert.match(preview.innerHTML, /data:image\/png;base64,valid/);
-
-  context.handleCreateAvatarUpload({ size: (200 * 1024) + 1 });
-
-  assert.equal(context.state._pendingCreateAvatar, undefined);
-  assert.equal(removeButton.hidden, true);
-  assert.doesNotMatch(preview.innerHTML, /data:image\/png;base64,valid/);
-  assert.equal(status.textContent, 'Avatar must be 200KB or smaller.');
-  assert.equal(status.className, 'save-status error');
-});
-
 test('bot page runtime modal renders healthy and detected runtimes only', () => {
   const context = createBotScriptContext();
 
@@ -2430,13 +2520,23 @@ test('bot page local bots list stays a selector without runtime diagnostics', ()
   assert.doesNotMatch(list.innerHTML, /Claude Code/);
 });
 
-test('bot page create flow navigates to the Bot Page when the created profile has a GlobalMetaID', async () => {
+test('bot page create flow shows chain progress and success without replacing the current page', async () => {
   const fields = {
     '[data-field="new-name"]': field('Fanny'),
     '[data-add-status]': field(),
     '[data-act="confirm-add"]': field(),
   };
+  const modal = {
+    innerHTML: '',
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+  };
+  fields['[data-modal="add-metabot"]'] = modal;
   let requestBody = null;
+  let opened = null;
+  const createResponse = deferred();
   let success = null;
   const context = {
     document: {
@@ -2446,7 +2546,7 @@ test('bot page create flow navigates to the Bot Page when the created profile ha
     },
     fetch: (_url, options) => {
       requestBody = JSON.parse(options.body);
-      return Promise.resolve({
+      return createResponse.promise.then(() => ({
         ok: true,
         json: () => Promise.resolve({
           ok: true,
@@ -2462,36 +2562,65 @@ test('bot page create flow navigates to the Bot Page when the created profile ha
             ],
           },
         }),
-      });
+      }));
     },
     window: {
       location: {
-        href: '',
+        href: '/ui/bot',
+      },
+      open: (url, target, features) => {
+        opened = { url, target, features };
       },
     },
   };
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
-  context.closeAddModal = () => {};
   context.loadProfiles = () => Promise.resolve();
   context.showChainSuccessModal = (input) => {
     success = input;
   };
 
-  await context.createMetabot();
+  const createPromise = context.createMetabot();
+
+  assert.match(modal.innerHTML, /create-chain-modal/);
+  assert.match(modal.innerHTML, /Writing to chain/);
+  assert.match(modal.innerHTML, /15-30 seconds/);
+  assert.doesNotMatch(modal.innerHTML, /data-act="confirm-add"/);
+
+  createResponse.resolve();
+  await createPromise;
 
   assert.deepEqual(requestBody, { name: 'Fanny', creationSource: 'ui' });
   assert.equal(context.state.selectedSlug, 'fanny');
-  assert.equal(context.window.location.href, '/browser/metaid/gm-fanny');
+  assert.equal(context.window.location.href, '/ui/bot');
   assert.equal(success, null);
+  assert.match(modal.innerHTML, /Bot created/);
+  assert.match(modal.innerHTML, /data-act="close-created-bot"/);
+  assert.match(modal.innerHTML, /data-act="open-created-bot-homepage"/);
+
+  context.openCreatedBotHomepage();
+
+  assert.deepEqual(opened, {
+    url: '/browser/metaid/gm-fanny',
+    target: '_blank',
+    features: 'noopener',
+  });
 });
 
-test('bot page create flow redirects with a GlobalMetaID without waiting for profile reload', async () => {
+test('bot page create success remains visible when the profile reload fails', async () => {
   const fields = {
     '[data-field="new-name"]': field('Fanny'),
     '[data-add-status]': field(),
     '[data-act="confirm-add"]': field(),
   };
+  const modal = {
+    innerHTML: '',
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+  };
+  fields['[data-modal="add-metabot"]'] = modal;
   const context = {
     document: {
       querySelector: (selector) => fields[selector] ?? null,
@@ -2513,13 +2642,12 @@ test('bot page create flow redirects with a GlobalMetaID without waiting for pro
     }),
     window: {
       location: {
-        href: '',
+        href: '/ui/bot',
       },
     },
   };
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
-  context.closeAddModal = () => {};
   context.loadProfiles = () => Promise.reject(new Error('temporary reload failure'));
   context.showChainSuccessModal = () => {
     throw new Error('success modal should not open before redirect');
@@ -2527,7 +2655,9 @@ test('bot page create flow redirects with a GlobalMetaID without waiting for pro
 
   await context.createMetabot();
 
-  assert.equal(context.window.location.href, '/browser/metaid/gm-fanny');
+  assert.equal(context.window.location.href, '/ui/bot');
+  assert.match(modal.innerHTML, /Bot created/);
+  assert.match(modal.innerHTML, /data-act="open-created-bot-homepage"/);
 });
 
 test('bot page save flow reports chain txids in a modal instead of inline saved text', async () => {

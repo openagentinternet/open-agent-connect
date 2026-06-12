@@ -23,15 +23,15 @@ export const DICTIONARIES = {
     'bot.create': 'Create',
     'bot.localBots': 'Local Bots',
     'bot.createBot': 'Create Bot',
-    'bot.liveByDefault': 'Live by default',
+    'bot.liveByDefault': 'Online',
     'bot.defaultHeroSummary': 'A public Bot Page for identity, messaging, and service entry points.',
     'bot.globalMetaId': 'GlobalMetaID',
-    'bot.botUri': 'Bot URI',
+    'bot.botUri': 'Homepage URI',
     'bot.copy': 'Copy',
     'bot.openPublicBotPage': 'Open Public Bot Page',
     'bot.viewConversations': 'View Conversations',
-    'bot.publicIdentity': 'Public Identity',
-    'bot.behavior': 'Behavior',
+    'bot.publicIdentity': 'Basic',
+    'bot.behavior': 'Persona',
     'bot.chatSkills': 'Chat Skills',
     'bot.services': 'Services',
     'bot.advanced': 'Advanced',
@@ -107,6 +107,12 @@ export const DICTIONARIES = {
     'bot.testing': 'Testing...',
     'bot.nameRequired': 'Name is required',
     'bot.creating': 'Creating...',
+    'bot.chainCreatePendingTitle': 'Writing to chain',
+    'bot.chainCreatePendingMessage': 'Data is being written on-chain. Please wait 15-30 seconds.',
+    'bot.chainCreateSuccessTitle': 'Bot created',
+    'bot.chainCreateSuccessMessage': 'The Bot identity has been written on-chain.',
+    'bot.openBotHomepage': 'Open Bot homepage',
+    'bot.createFailed': 'Bot creation failed',
     'bot.noChanges': 'No changes',
     'bot.saving': 'Saving...',
     'bot.saved': 'Saved',
@@ -209,15 +215,15 @@ export const DICTIONARIES = {
     'bot.create': '创建',
     'bot.localBots': '本地 Bots',
     'bot.createBot': '创建 Bot',
-    'bot.liveByDefault': '默认在线',
+    'bot.liveByDefault': '在线',
     'bot.defaultHeroSummary': '用于身份、消息和服务入口的公开 Bot Page。',
     'bot.globalMetaId': 'GlobalMetaID',
-    'bot.botUri': 'Bot URI',
+    'bot.botUri': 'Homepage URI',
     'bot.copy': '复制',
     'bot.openPublicBotPage': '打开公开 Bot Page',
     'bot.viewConversations': '查看对话',
-    'bot.publicIdentity': '公开身份',
-    'bot.behavior': '行为',
+    'bot.publicIdentity': '基础',
+    'bot.behavior': '人格',
     'bot.chatSkills': '聊天技能',
     'bot.services': '服务',
     'bot.advanced': '高级',
@@ -293,6 +299,12 @@ export const DICTIONARIES = {
     'bot.testing': '测试中...',
     'bot.nameRequired': '请输入 Bot 名称',
     'bot.creating': '正在创建...',
+    'bot.chainCreatePendingTitle': '正在上链',
+    'bot.chainCreatePendingMessage': '数据正在写入链上，请等候 15-30 秒。',
+    'bot.chainCreateSuccessTitle': 'Bot 创建成功',
+    'bot.chainCreateSuccessMessage': 'Bot 身份已写入链上。',
+    'bot.openBotHomepage': '打开 Bot 主页',
+    'bot.createFailed': 'Bot 创建失败',
     'bot.noChanges': '没有变更',
     'bot.saving': '正在保存...',
     'bot.saved': '已保存',
@@ -447,12 +459,12 @@ export function createI18nContext(
 
 export function renderLanguageOptions(i18n: LocalUiI18nContext): string {
   const options: Array<{ value: LanguagePreference; labelKey: I18nKey }> = [
-    { value: 'auto', labelKey: 'language.auto' },
     { value: 'en', labelKey: 'language.en' },
     { value: 'zh-CN', labelKey: 'language.zhCN' },
   ];
+  const selectedValue = i18n.preference === 'en' || i18n.preference === 'zh-CN' ? i18n.preference : i18n.language;
   return options.map((option) => {
-    const selected = option.value === i18n.preference ? ' selected' : '';
+    const selected = option.value === selectedValue ? ' selected' : '';
     return `<option value="${option.value}"${selected}>${i18n.t(option.labelKey)}</option>`;
   }).join('');
 }
@@ -464,7 +476,7 @@ export function renderClientI18nScript(i18n: LocalUiI18nContext): string {
   const SERVER_PREFERENCE = ${JSON.stringify(i18n.preference)};
   const DICTIONARIES = ${JSON.stringify(DICTIONARIES)};
   const SIMPLIFIED_CHINESE_LOCALES = ['zh-cn', 'zh-hans', 'zh-sg'];
-  const OPTION_KEYS_BY_VALUE = { auto: 'language.auto', en: 'language.en', 'zh-CN': 'language.zhCN' };
+  const OPTION_KEYS_BY_VALUE = { en: 'language.en', 'zh-CN': 'language.zhCN' };
   const normalizePreference = (value) => value === 'en' || value === 'zh-CN' || value === 'auto' ? value : DEFAULT_PREFERENCE;
   const normalizeLocale = (value) => typeof value === 'string' ? value.trim().toLowerCase().replace(/_/g, '-') : '';
   const detectedLocales = () => {
@@ -502,7 +514,7 @@ export function renderClientI18nScript(i18n: LocalUiI18nContext): string {
       element.textContent = t(element.getAttribute('data-i18n-key') || '');
     });
     queryAll('[data-language-select]').forEach((element) => {
-      element.value = currentPreference;
+      element.value = currentPreference === 'auto' ? currentLanguage : currentPreference;
       if (typeof element.querySelectorAll !== 'function') return;
       element.querySelectorAll('option').forEach((option) => {
         const key = OPTION_KEYS_BY_VALUE[option.value];

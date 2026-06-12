@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingCreateAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -338,6 +338,10 @@ function currentPublicIdentityDraft(profile){
   return {
     name:infoFieldValue('name',profile.name||''),
     bio:infoFieldValue('bio',profile.bio||''),
+    primaryProvider:infoFieldValue('primaryProvider',profile.primaryProvider||''),
+    primaryProviderTouched:infoProviderTouched('primaryProvider'),
+    fallbackProvider:infoFieldValue('fallbackProvider',profile.fallbackProvider||''),
+    fallbackProviderTouched:infoProviderTouched('fallbackProvider'),
   };
 }
 function currentBehaviorDraft(profile){
@@ -347,10 +351,6 @@ function currentBehaviorDraft(profile){
     role:fieldValueWithin(panel,'role',profile.role||''),
     soul:fieldValueWithin(panel,'soul',profile.soul||''),
     goal:fieldValueWithin(panel,'goal',profile.goal||''),
-    primaryProvider:fieldValueWithin(panel,'primaryProvider',profile.primaryProvider||''),
-    primaryProviderTouched:providerTouchedWithin(panel,'primaryProvider'),
-    fallbackProvider:fieldValueWithin(panel,'fallbackProvider',profile.fallbackProvider||''),
-    fallbackProviderTouched:providerTouchedWithin(panel,'fallbackProvider'),
   };
 }
 
@@ -387,12 +387,12 @@ function renderBotHero(profile){
   var botUri=globalMetaId?'metaid://'+globalMetaId:'';
   var avatar=q('[data-hero-avatar]');if(avatar)avatar.innerHTML=avatarMarkup(profile,true);
   var name=q('[data-hero-name]');if(name)name.textContent=profile.name||profile.slug||'Bot';
-  var live=q('[data-live-indicator]');if(live)live.textContent=uiText('bot.liveByDefault','Live by default');
-  var summary=q('[data-hero-summary]');if(summary)summary.textContent=profile.bio||uiText('bot.defaultHeroSummary','A public Bot Page for identity, messaging, and service entry points.');
+  var live=q('[data-live-indicator]');if(live){var online=uiText('bot.liveByDefault','Online');live.textContent='';live.setAttribute('aria-label',online);live.setAttribute('title',online)}
+  var summary=q('[data-hero-summary]');if(summary){var bio=String(profile.bio||'').trim();summary.textContent=bio;summary.hidden=!bio}
   var id=q('[data-hero-global-meta-id]');if(id)id.textContent=globalMetaId||'Pending GlobalMetaID';
   var uri=q('[data-hero-bot-uri]');if(uri)uri.textContent=botUri||'metaid://pending';
-  var copyGlobal=q('[data-copy-global-meta-id]');if(copyGlobal){copyGlobal.disabled=!globalMetaId;copyGlobal.setAttribute('data-value',globalMetaId)}
-  var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri)}
+  var copyGlobal=q('[data-copy-global-meta-id]');if(copyGlobal){copyGlobal.disabled=!globalMetaId;copyGlobal.setAttribute('data-value',globalMetaId);copyGlobal.setAttribute('aria-label','Copy GlobalMetaID');copyGlobal.setAttribute('title','Copy GlobalMetaID')}
+  var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri);copyUri.setAttribute('aria-label','Copy Homepage URI');copyUri.setAttribute('title','Copy Homepage URI')}
   var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!globalMetaId;
   var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!profile.slug;
 }
@@ -471,6 +471,8 @@ function renderPublicIdentityTab(options){
   var draft=options.preserveDraft===false?null:currentPublicIdentityDraft(profile);
   var nameValue=draft?draft.name:(profile.name||'');
   var bioValue=draft?draft.bio:(profile.bio||'');
+  var primaryProviderValue=draft?draft.primaryProvider:(profile.primaryProvider||'');
+  var fallbackProviderValue=draft?draft.fallbackProvider:(profile.fallbackProvider||'');
   var avatar=state._pendingAvatar!==undefined?state._pendingAvatar:profile.avatarDataUrl;
   root.innerHTML='<div class="info-edit-panel" data-public-identity-profile-slug="'+esc(profile.slug)+'">'+
     '<div class="info-avatar-section">'+
@@ -483,18 +485,22 @@ function renderPublicIdentityTab(options){
       '<span class="save-status" data-avatar-status></span>'+
     '</div></div>'+
     '<div class="info-form-grid">'+
-      '<div class="field"><label for="bot-name">'+esc(uiText('bot.botName','Bot Name'))+'</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
+      '<div class="field field-full"><label for="bot-name">'+esc(uiText('bot.botName','Bot Name'))+'</label><input id="bot-name" data-field="name" value="'+esc(nameValue)+'" /></div>'+
+      '<div class="provider-row">'+
+        providerPickerMarkup('primaryProvider',uiText('bot.primaryLlmProvider','Primary LLM Provider'),primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
+        providerPickerMarkup('fallbackProvider',uiText('bot.fallbackLlmProvider','Fallback LLM Provider'),fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
+      '</div>'+
       '<div class="field field-full"><label for="bot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label><textarea id="bot-bio" data-field="bio">'+esc(bioValue)+'</textarea></div>'+
-      '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label><div class="homepage-row"><span>'+esc(uiText('bot.defaultRenderer','Default Bot Page renderer'))+'</span><button type="button" class="btn btn-sm" data-act="upload-homepage">'+esc(uiText('bot.upload','Upload'))+'</button></div></div>'+
+      '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label><div class="homepage-row"><button type="button" class="btn btn-sm" data-act="upload-homepage">'+esc(uiText('bot.upload','Upload'))+'</button><span class="homepage-renderer-label">'+esc(uiText('bot.defaultRenderer','Default Bot Page renderer'))+'</span></div></div>'+
     '</div>'+
-    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">'+esc(uiText('bot.savePublicIdentity','Save Public Identity'))+'</button><button class="btn" data-act="reset-public-identity">'+esc(uiText('bot.reset','Reset'))+'</button><span class="save-status" data-save-status></span></div></div>';
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">'+esc(uiText('bot.savePublicIdentity','Save Public Identity'))+'</button><span class="save-status" data-save-status></span></div></div>';
   var input=q('[data-avatar-input]');
   var upload=q('[data-act="upload-avatar"]');if(upload&&input)upload.addEventListener('click',function(){input.click()});
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleAvatarUpload(file)});
+  wireProviderPickers();
   var homepage=q('[data-act="upload-homepage"]');if(homepage)homepage.addEventListener('click',openHomepageUploadPlaceholder);
   var save=q('[data-act="save-public-identity"]');if(save)save.addEventListener('click',savePublicIdentity);
-  var reset=q('[data-act="reset-public-identity"]');if(reset)reset.addEventListener('click',resetPublicIdentity);
   focusBotManagementTarget();
 }
 
@@ -507,18 +513,13 @@ function renderBehaviorTab(options){
   var roleValue=draft?draft.role:(profile.role||'');
   var soulValue=draft?draft.soul:(profile.soul||'');
   var goalValue=draft?draft.goal:(profile.goal||'');
-  var primaryProviderValue=draft?draft.primaryProvider:(profile.primaryProvider||'');
-  var fallbackProviderValue=draft?draft.fallbackProvider:(profile.fallbackProvider||'');
   root.innerHTML='<div class="info-edit-panel" data-behavior-profile-slug="'+esc(profile.slug)+'">'+
     '<div class="info-form-grid">'+
       '<div class="field field-full"><label for="bot-role">'+esc(uiText('bot.role','Role'))+'</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
       '<div class="field field-full"><label for="bot-soul">'+esc(uiText('bot.soul','Soul'))+'</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
       '<div class="field field-full"><label for="bot-goal">'+esc(uiText('bot.goal','Goal'))+'</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
-      providerPickerMarkup('primaryProvider',uiText('bot.primaryLlmProvider','Primary LLM Provider'),primaryProviderValue,false,draft&&draft.primaryProviderTouched)+
-      providerPickerMarkup('fallbackProvider',uiText('bot.fallbackLlmProvider','Fallback LLM Provider'),fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
     '</div>'+
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-behavior">'+esc(uiText('bot.saveBehavior','Save Behavior'))+'</button><span class="save-status" data-save-status></span></div></div>';
-  wireProviderPickers();
   var panel=behaviorPanelForProfile(profile);
   var save=queryWithin(panel,'[data-act="save-behavior"]');if(save)save.addEventListener('click',saveBehavior);
   focusBotManagementTarget();
@@ -928,6 +929,9 @@ function savePublicIdentity(){
   changedValue(payload,'name',(q('[data-field="name"]')||{}).value||'',profile.name||'');
   changedValue(payload,'bio',(q('[data-field="bio"]')||{}).value||'',profile.bio||'');
   if(state._pendingAvatar!==undefined)changedValue(payload,'avatarDataUrl',state._pendingAvatar,profile.avatarDataUrl||'');
+  var primaryEl=q('[data-field="primaryProvider"]');var fallbackEl=q('[data-field="fallbackProvider"]');
+  if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
+  if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
   if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
   if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
@@ -961,9 +965,6 @@ function saveBehavior(){
   changedValue(payload,'role',fieldValueWithin(panel,'role',''),profile.role||'');
   changedValue(payload,'soul',fieldValueWithin(panel,'soul',''),profile.soul||'');
   changedValue(payload,'goal',fieldValueWithin(panel,'goal',''),profile.goal||'');
-  var primaryEl=queryWithin(panel,'[data-field="primaryProvider"]');var fallbackEl=queryWithin(panel,'[data-field="fallbackProvider"]');
-  if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
-  if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
   if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
   if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
@@ -1179,33 +1180,13 @@ function testRuntime(runtimeId){
     });
 }
 
-function createAvatarPreviewMarkup(){
-  var name=q('[data-field="new-name"]');var value=state._pendingCreateAvatar;
-  return avatarMarkup({name:name&&name.value||'MB',avatarDataUrl:value},true);
-}
-function renderCreateAvatarPreview(){
-  var preview=q('[data-create-avatar-preview]');if(preview)preview.innerHTML=createAvatarPreviewMarkup();
-}
 function createModalMarkup(){
   return '<div class="modal-box">'+
     '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.createBot','Create Bot'))+'</div>'+
     '<div class="modal-body">'+
-      '<div class="info-avatar-section">'+
-        '<div class="info-avatar-preview" data-create-avatar-preview>'+createAvatarPreviewMarkup()+'</div>'+
-        '<div class="info-avatar-actions">'+
-          '<button class="btn btn-sm" data-act="upload-create-avatar">'+esc(uiText('bot.upload','Upload'))+'</button>'+
-          '<button class="btn btn-sm btn-danger" data-act="remove-create-avatar"'+(state._pendingCreateAvatar?'':' hidden')+'>'+esc(uiText('bot.removeAvatar','Remove'))+'</button>'+
-          '<input type="file" data-field="new-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
-          '<span class="save-status" data-create-avatar-status></span>'+
-        '</div>'+
-      '</div>'+
       '<div class="field">'+
         '<label for="new-metabot-name">'+esc(uiText('bot.botName','Bot Name'))+'</label>'+
         '<input id="new-metabot-name" type="text" data-field="new-name" maxlength="60" autocomplete="off" />'+
-      '</div>'+
-      '<div class="field field-full">'+
-        '<label for="new-metabot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label>'+
-        '<textarea id="new-metabot-bio" data-field="new-bio"></textarea>'+
       '</div>'+
     '</div>'+
     '<div class="modal-actions">'+
@@ -1215,31 +1196,94 @@ function createModalMarkup(){
     '<div class="save-status" data-add-status></div>'+
   '</div>';
 }
-function handleCreateAvatarUpload(file){
-  var status=q('[data-create-avatar-status]');
-  if(file.size>200*1024){
-    state._pendingCreateAvatar=undefined;
-    renderCreateAvatarPreview();
-    var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.hidden=true;
+function createChainVisualMarkup(done){
+  return '<div class="create-chain-visual'+(done?' create-chain-visual-done':'')+'" aria-hidden="true">'+
+    '<span class="create-chain-link"></span>'+
+    '<span class="create-chain-node create-chain-node-left"></span>'+
+    '<span class="create-chain-core"></span>'+
+    '<span class="create-chain-node create-chain-node-right"></span>'+
+  '</div>';
+}
+function createChainPendingMarkup(name){
+  return '<div class="modal-box create-chain-modal">'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.chainCreatePendingTitle','Writing to chain'))+'</div>'+
+    '<div class="modal-body create-chain-body">'+
+      createChainVisualMarkup(false)+
+      '<div class="create-chain-copy">'+
+        '<strong>'+esc(name)+'</strong>'+
+        '<p>'+esc(uiText('bot.chainCreatePendingMessage','Data is being written on-chain. Please wait 15-30 seconds.'))+'</p>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function createChainSuccessMarkup(profile,url){
+  var openDisabled=url?'':' disabled';
+  return '<div class="modal-box create-chain-modal">'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.chainCreateSuccessTitle','Bot created'))+'</div>'+
+    '<div class="modal-body create-chain-body">'+
+      createChainVisualMarkup(true)+
+      '<div class="create-chain-copy">'+
+        '<strong>'+esc(profile&&profile.name||uiText('bot.createBot','Create Bot'))+'</strong>'+
+        '<p>'+esc(uiText('bot.chainCreateSuccessMessage','The Bot identity has been written on-chain.'))+'</p>'+
+      '</div>'+
+    '</div>'+
+    '<div class="modal-actions create-chain-actions">'+
+      '<button class="btn" data-act="close-created-bot">'+esc(uiText('bot.close','Close'))+'</button>'+
+      '<button class="btn btn-primary" data-act="open-created-bot-homepage" data-url="'+esc(url||'')+'"'+openDisabled+'>'+esc(uiText('bot.openBotHomepage','Open Bot homepage'))+'</button>'+
+    '</div>'+
+  '</div>';
+}
+function createChainErrorMarkup(message){
+  return '<div class="modal-box create-chain-modal">'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.createFailed','Bot creation failed'))+'</div>'+
+    '<div class="modal-body create-chain-body">'+
+      '<p class="save-status error">'+esc(message||uiText('bot.createFailed','Bot creation failed'))+'</p>'+
+    '</div>'+
+    '<div class="modal-actions create-chain-actions">'+
+      '<button class="btn btn-primary" data-act="close-created-bot">'+esc(uiText('bot.close','Close'))+'</button>'+
+    '</div>'+
+  '</div>';
+}
+function renderCreateModal(markup){
+  var modal=q('[data-modal="add-metabot"]');
+  if(!modal)return;
+  modal.innerHTML=markup;
+  modal.classList.remove('hidden');
+}
+function renderCreateChainPending(name){
+  renderCreateModal(createChainPendingMarkup(name));
+}
+function renderCreateChainSuccess(profile){
+  var url=profile&&profile.globalMetaId?botBrowserPath(profile.globalMetaId):'';
+  state._createdBotPageUrl=url;
+  renderCreateModal(createChainSuccessMarkup(profile||{},url));
+  wireCreateSuccessControls();
+}
+function renderCreateChainError(message){
+  renderCreateModal(createChainErrorMarkup(message));
+  wireCreateSuccessControls();
+}
+function openCreatedBotHomepage(){
+  var button=q('[data-act="open-created-bot-homepage"]');
+  var url=button&&button.getAttribute?button.getAttribute('data-url'):state._createdBotPageUrl;
+  url=url||state._createdBotPageUrl;
+  if(!url){showToast(uiText('bot.botPageUnavailable','Bot Page is unavailable until GlobalMetaID is ready'));return}
+  if(typeof window!=='undefined'&&window&&typeof window.open==='function'){
+    window.open(url,'_blank','noopener');
   }
-  readAvatarFile(file,status,function(dataUrl){
-    state._pendingCreateAvatar=dataUrl;
-    renderCreateAvatarPreview();
-    var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.hidden=false;
-  });
+}
+function wireCreateSuccessControls(){
+  var close=q('[data-act="close-created-bot"]');if(close)close.addEventListener('click',closeAddModal);
+  var open=q('[data-act="open-created-bot-homepage"]');if(open)open.addEventListener('click',openCreatedBotHomepage);
 }
 function wireCreateModalControls(){
   var cancel=q('[data-act="cancel-add"]');if(cancel)cancel.addEventListener('click',closeAddModal);
   var confirm=q('[data-act="confirm-add"]');if(confirm)confirm.addEventListener('click',createMetabot);
-  var name=q('[data-field="new-name"]');if(name){name.addEventListener('keydown',function(event){if(event.key==='Enter')createMetabot();if(event.key==='Escape')closeAddModal()});name.addEventListener('input',renderCreateAvatarPreview)}
-  var file=q('[data-field="new-avatar-file"]');
-  var upload=q('[data-act="upload-create-avatar"]');if(upload&&file)upload.addEventListener('click',function(){file.click()});
-  var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingCreateAvatar=undefined;renderCreateAvatarPreview();this.hidden=true});
-  if(file)file.addEventListener('change',function(){var selected=this.files&&this.files[0];if(selected)handleCreateAvatarUpload(selected)});
+  var name=q('[data-field="new-name"]');if(name)name.addEventListener('keydown',function(event){if(event.key==='Enter')createMetabot();if(event.key==='Escape')closeAddModal()});
 }
 function openAddModal(){
   var modal=q('[data-modal="add-metabot"]');
-  state._pendingCreateAvatar=undefined;
+  state._createdBotPageUrl='';
   if(modal)modal.innerHTML=createModalMarkup();
   var input=q('[data-field="new-name"]');var status=q('[data-add-status]');
   if(status){status.textContent='';status.className='save-status'}
@@ -1248,33 +1292,20 @@ function openAddModal(){
   if(modal)modal.classList.remove('hidden');
   if(input)input.focus();
 }
-function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden');state._pendingCreateAvatar=undefined}
+function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden');state._createdBotPageUrl=''}
 function createMetabot(){
-  var input=q('[data-field="new-name"]');var bioInput=q('[data-field="new-bio"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();var bio=(bioInput&&bioInput.value||'').trim();
+  var input=q('[data-field="new-name"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();
   if(!name){if(status){status.textContent=uiText('bot.nameRequired','Name is required');status.className='save-status error'}return}
-  if(status){status.textContent=uiText('bot.creating','Creating...');status.className='save-status saving'}
+  renderCreateChainPending(name);
   if(btn)btn.disabled=true;
   var body={name:name,creationSource:'ui'};
-  if(bio)body.bio=bio;
-  if(state._pendingCreateAvatar)body.avatarDataUrl=state._pendingCreateAvatar;
   return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
-    closeAddModal();
     var profile=r.data&&r.data.profile||{};
     state.selectedSlug=profile.slug||state.selectedSlug;
     state.selectedTab='publicIdentity';
-    if(profile.globalMetaId){
-      window.location.href=botBrowserPath(profile.globalMetaId);
-      return;
-    }
-    return loadProfiles().then(function(){
-      showChainSuccessModal({
-        title:uiText('bot.metaBotCreatedOnChain','Bot Created On-Chain'),
-        message:uiText('bot.identityCreatedBasicInfoReady','The on-chain identity has been created. Public Identity is ready for optional edits.'),
-        profile:profile,
-        chainWrites:createChainWritesFromResponse(r.data||{}),
-      });
-    });
-  }).catch(function(error){if(status){status.textContent=error.message;status.className='save-status error'}}).finally(function(){if(btn)btn.disabled=false});
+    renderCreateChainSuccess(profile);
+    return loadProfiles().catch(function(error){showToast(error.message)});
+  }).catch(function(error){renderCreateChainError(error.message)}).finally(function(){if(btn)btn.disabled=false});
 }
 
 function showToast(text){
