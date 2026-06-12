@@ -2190,9 +2190,9 @@ test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async
   assert.match(html, /href="\/browser"[^>]*>打开浏览器<\/a>/);
   assert.match(html, /data-i18n-key="bot\.localBots">本地 Bots<\/span>/);
   assert.match(html, /data-i18n-key="bot\.createBot">创建 Bot<\/button>/);
-  assert.match(html, /data-i18n-key="bot\.liveByDefault">默认在线<\/span>/);
-  assert.match(html, /data-i18n-key="bot\.publicIdentity">公开身份<\/button>/);
-  assert.match(html, /data-i18n-key="bot\.behavior">行为<\/button>/);
+  assert.match(html, /data-live-indicator aria-label="Online" title="Online"><\/span>/);
+  assert.match(html, /data-i18n-key="bot\.publicIdentity">基础<\/button>/);
+  assert.match(html, /data-i18n-key="bot\.behavior">人格<\/button>/);
   assert.match(html, /data-i18n-key="bot\.chatSkills">聊天技能<\/button>/);
   assert.match(html, /data-i18n-key="bot\.advanced">高级<\/button>/);
   assert.match(html, /data-i18n-key="bot\.openPublicBotPage">打开公开 Bot Page<\/button>/);
