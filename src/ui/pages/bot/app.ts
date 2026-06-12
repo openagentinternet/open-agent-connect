@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -1196,6 +1196,86 @@ function createModalMarkup(){
     '<div class="save-status" data-add-status></div>'+
   '</div>';
 }
+function createChainVisualMarkup(done){
+  return '<div class="create-chain-visual'+(done?' create-chain-visual-done':'')+'" aria-hidden="true">'+
+    '<span class="create-chain-link"></span>'+
+    '<span class="create-chain-node create-chain-node-left"></span>'+
+    '<span class="create-chain-core"></span>'+
+    '<span class="create-chain-node create-chain-node-right"></span>'+
+  '</div>';
+}
+function createChainPendingMarkup(name){
+  return '<div class="modal-box create-chain-modal">'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.chainCreatePendingTitle','Writing to chain'))+'</div>'+
+    '<div class="modal-body create-chain-body">'+
+      createChainVisualMarkup(false)+
+      '<div class="create-chain-copy">'+
+        '<strong>'+esc(name)+'</strong>'+
+        '<p>'+esc(uiText('bot.chainCreatePendingMessage','Data is being written on-chain. Please wait 15-30 seconds.'))+'</p>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function createChainSuccessMarkup(profile,url){
+  var openDisabled=url?'':' disabled';
+  return '<div class="modal-box create-chain-modal">'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.chainCreateSuccessTitle','Bot created'))+'</div>'+
+    '<div class="modal-body create-chain-body">'+
+      createChainVisualMarkup(true)+
+      '<div class="create-chain-copy">'+
+        '<strong>'+esc(profile&&profile.name||uiText('bot.createBot','Create Bot'))+'</strong>'+
+        '<p>'+esc(uiText('bot.chainCreateSuccessMessage','The Bot identity has been written on-chain.'))+'</p>'+
+      '</div>'+
+    '</div>'+
+    '<div class="modal-actions create-chain-actions">'+
+      '<button class="btn" data-act="close-created-bot">'+esc(uiText('bot.close','Close'))+'</button>'+
+      '<button class="btn btn-primary" data-act="open-created-bot-homepage" data-url="'+esc(url||'')+'"'+openDisabled+'>'+esc(uiText('bot.openBotHomepage','Open Bot homepage'))+'</button>'+
+    '</div>'+
+  '</div>';
+}
+function createChainErrorMarkup(message){
+  return '<div class="modal-box create-chain-modal">'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.createFailed','Bot creation failed'))+'</div>'+
+    '<div class="modal-body create-chain-body">'+
+      '<p class="save-status error">'+esc(message||uiText('bot.createFailed','Bot creation failed'))+'</p>'+
+    '</div>'+
+    '<div class="modal-actions create-chain-actions">'+
+      '<button class="btn btn-primary" data-act="close-created-bot">'+esc(uiText('bot.close','Close'))+'</button>'+
+    '</div>'+
+  '</div>';
+}
+function renderCreateModal(markup){
+  var modal=q('[data-modal="add-metabot"]');
+  if(!modal)return;
+  modal.innerHTML=markup;
+  modal.classList.remove('hidden');
+}
+function renderCreateChainPending(name){
+  renderCreateModal(createChainPendingMarkup(name));
+}
+function renderCreateChainSuccess(profile){
+  var url=profile&&profile.globalMetaId?botBrowserPath(profile.globalMetaId):'';
+  state._createdBotPageUrl=url;
+  renderCreateModal(createChainSuccessMarkup(profile||{},url));
+  wireCreateSuccessControls();
+}
+function renderCreateChainError(message){
+  renderCreateModal(createChainErrorMarkup(message));
+  wireCreateSuccessControls();
+}
+function openCreatedBotHomepage(){
+  var button=q('[data-act="open-created-bot-homepage"]');
+  var url=button&&button.getAttribute?button.getAttribute('data-url'):state._createdBotPageUrl;
+  url=url||state._createdBotPageUrl;
+  if(!url){showToast(uiText('bot.botPageUnavailable','Bot Page is unavailable until GlobalMetaID is ready'));return}
+  if(typeof window!=='undefined'&&window&&typeof window.open==='function'){
+    window.open(url,'_blank','noopener');
+  }
+}
+function wireCreateSuccessControls(){
+  var close=q('[data-act="close-created-bot"]');if(close)close.addEventListener('click',closeAddModal);
+  var open=q('[data-act="open-created-bot-homepage"]');if(open)open.addEventListener('click',openCreatedBotHomepage);
+}
 function wireCreateModalControls(){
   var cancel=q('[data-act="cancel-add"]');if(cancel)cancel.addEventListener('click',closeAddModal);
   var confirm=q('[data-act="confirm-add"]');if(confirm)confirm.addEventListener('click',createMetabot);
@@ -1203,6 +1283,7 @@ function wireCreateModalControls(){
 }
 function openAddModal(){
   var modal=q('[data-modal="add-metabot"]');
+  state._createdBotPageUrl='';
   if(modal)modal.innerHTML=createModalMarkup();
   var input=q('[data-field="new-name"]');var status=q('[data-add-status]');
   if(status){status.textContent='';status.className='save-status'}
@@ -1211,31 +1292,20 @@ function openAddModal(){
   if(modal)modal.classList.remove('hidden');
   if(input)input.focus();
 }
-function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden')}
+function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden');state._createdBotPageUrl=''}
 function createMetabot(){
   var input=q('[data-field="new-name"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();
   if(!name){if(status){status.textContent=uiText('bot.nameRequired','Name is required');status.className='save-status error'}return}
-  if(status){status.textContent=uiText('bot.creating','Creating...');status.className='save-status saving'}
+  renderCreateChainPending(name);
   if(btn)btn.disabled=true;
   var body={name:name,creationSource:'ui'};
   return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
-    closeAddModal();
     var profile=r.data&&r.data.profile||{};
     state.selectedSlug=profile.slug||state.selectedSlug;
     state.selectedTab='publicIdentity';
-    if(profile.globalMetaId){
-      window.location.href=botBrowserPath(profile.globalMetaId);
-      return;
-    }
-    return loadProfiles().then(function(){
-      showChainSuccessModal({
-        title:uiText('bot.metaBotCreatedOnChain','Bot Created On-Chain'),
-        message:uiText('bot.identityCreatedBasicInfoReady','The on-chain identity has been created. Public Identity is ready for optional edits.'),
-        profile:profile,
-        chainWrites:createChainWritesFromResponse(r.data||{}),
-      });
-    });
-  }).catch(function(error){if(status){status.textContent=error.message;status.className='save-status error'}}).finally(function(){if(btn)btn.disabled=false});
+    renderCreateChainSuccess(profile);
+    return loadProfiles().catch(function(error){showToast(error.message)});
+  }).catch(function(error){renderCreateChainError(error.message)}).finally(function(){if(btn)btn.disabled=false});
 }
 
 function showToast(text){

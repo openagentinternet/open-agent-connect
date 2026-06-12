@@ -130,6 +130,9 @@ test('bot page template uses an icon-only online indicator and copy buttons in t
 
   assert.match(template, /<span class="live-indicator" data-live-indicator aria-label="Online" title="Online"><\/span>/);
   assert.match(template, /@keyframes bot-live-breathe/);
+  assert.match(template, /@keyframes bot-create-chain-flow/);
+  assert.match(template, /@keyframes bot-create-chain-pulse/);
+  assert.match(template, /\.create-chain-modal\s*\{/);
   assert.match(template, /\.detail-panel\s*\{[^}]*max-width:\s*800px;[^}]*margin:\s*0 auto;/s);
   assert.match(template, /\.tab-bar\s*\{[^}]*overflow-x:\s*auto;/s);
   assert.doesNotMatch(template, /data-live-indicator[^>]*>Live by default<\/span>/);
@@ -644,10 +647,18 @@ test('bot page renders the launch create flow and empty state in Simplified Chin
 test('bot page uses Simplified Chinese create validation and progress copy', () => {
   const status = field();
   const confirm = field();
+  const modal = {
+    innerHTML: '',
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+  };
   const fields = {
     '[data-field="new-name"]': field(''),
     '[data-add-status]': status,
     '[data-act="confirm-add"]': confirm,
+    '[data-modal="add-metabot"]': modal,
   };
   const context = createBotScriptContext({
     elements: fields,
@@ -664,8 +675,9 @@ test('bot page uses Simplified Chinese create validation and progress copy', () 
   context.api = () => new Promise(() => {});
   context.createMetabot();
 
-  assert.equal(status.textContent, '正在创建...');
-  assert.equal(status.className, 'save-status saving');
+  assert.match(modal.innerHTML, /正在上链/);
+  assert.match(modal.innerHTML, /数据正在写入链上，请等候 15-30 秒。/);
+  assert.doesNotMatch(modal.innerHTML, /data-act="confirm-add"/);
 });
 
 test('bot page renders chat skills tab for private conversation replies only', async () => {
@@ -2508,13 +2520,23 @@ test('bot page local bots list stays a selector without runtime diagnostics', ()
   assert.doesNotMatch(list.innerHTML, /Claude Code/);
 });
 
-test('bot page create flow navigates to the Bot Page when the created profile has a GlobalMetaID', async () => {
+test('bot page create flow shows chain progress and success without replacing the current page', async () => {
   const fields = {
     '[data-field="new-name"]': field('Fanny'),
     '[data-add-status]': field(),
     '[data-act="confirm-add"]': field(),
   };
+  const modal = {
+    innerHTML: '',
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+  };
+  fields['[data-modal="add-metabot"]'] = modal;
   let requestBody = null;
+  let opened = null;
+  const createResponse = deferred();
   let success = null;
   const context = {
     document: {
@@ -2524,7 +2546,7 @@ test('bot page create flow navigates to the Bot Page when the created profile ha
     },
     fetch: (_url, options) => {
       requestBody = JSON.parse(options.body);
-      return Promise.resolve({
+      return createResponse.promise.then(() => ({
         ok: true,
         json: () => Promise.resolve({
           ok: true,
@@ -2540,36 +2562,65 @@ test('bot page create flow navigates to the Bot Page when the created profile ha
             ],
           },
         }),
-      });
+      }));
     },
     window: {
       location: {
-        href: '',
+        href: '/ui/bot',
+      },
+      open: (url, target, features) => {
+        opened = { url, target, features };
       },
     },
   };
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
-  context.closeAddModal = () => {};
   context.loadProfiles = () => Promise.resolve();
   context.showChainSuccessModal = (input) => {
     success = input;
   };
 
-  await context.createMetabot();
+  const createPromise = context.createMetabot();
+
+  assert.match(modal.innerHTML, /create-chain-modal/);
+  assert.match(modal.innerHTML, /Writing to chain/);
+  assert.match(modal.innerHTML, /15-30 seconds/);
+  assert.doesNotMatch(modal.innerHTML, /data-act="confirm-add"/);
+
+  createResponse.resolve();
+  await createPromise;
 
   assert.deepEqual(requestBody, { name: 'Fanny', creationSource: 'ui' });
   assert.equal(context.state.selectedSlug, 'fanny');
-  assert.equal(context.window.location.href, '/browser/metaid/gm-fanny');
+  assert.equal(context.window.location.href, '/ui/bot');
   assert.equal(success, null);
+  assert.match(modal.innerHTML, /Bot created/);
+  assert.match(modal.innerHTML, /data-act="close-created-bot"/);
+  assert.match(modal.innerHTML, /data-act="open-created-bot-homepage"/);
+
+  context.openCreatedBotHomepage();
+
+  assert.deepEqual(opened, {
+    url: '/browser/metaid/gm-fanny',
+    target: '_blank',
+    features: 'noopener',
+  });
 });
 
-test('bot page create flow redirects with a GlobalMetaID without waiting for profile reload', async () => {
+test('bot page create success remains visible when the profile reload fails', async () => {
   const fields = {
     '[data-field="new-name"]': field('Fanny'),
     '[data-add-status]': field(),
     '[data-act="confirm-add"]': field(),
   };
+  const modal = {
+    innerHTML: '',
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+  };
+  fields['[data-modal="add-metabot"]'] = modal;
   const context = {
     document: {
       querySelector: (selector) => fields[selector] ?? null,
@@ -2591,13 +2642,12 @@ test('bot page create flow redirects with a GlobalMetaID without waiting for pro
     }),
     window: {
       location: {
-        href: '',
+        href: '/ui/bot',
       },
     },
   };
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
-  context.closeAddModal = () => {};
   context.loadProfiles = () => Promise.reject(new Error('temporary reload failure'));
   context.showChainSuccessModal = () => {
     throw new Error('success modal should not open before redirect');
@@ -2605,7 +2655,9 @@ test('bot page create flow redirects with a GlobalMetaID without waiting for pro
 
   await context.createMetabot();
 
-  assert.equal(context.window.location.href, '/browser/metaid/gm-fanny');
+  assert.equal(context.window.location.href, '/ui/bot');
+  assert.match(modal.innerHTML, /Bot created/);
+  assert.match(modal.innerHTML, /data-act="open-created-bot-homepage"/);
 });
 
 test('bot page save flow reports chain txids in a modal instead of inline saved text', async () => {

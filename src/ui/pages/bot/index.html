@@ -971,6 +971,137 @@
         justify-content: flex-end;
         margin-top: 20px;
       }
+      .create-chain-modal {
+        width: 460px;
+        text-align: center;
+      }
+      .create-chain-body {
+        justify-items: center;
+        gap: 16px;
+        padding: 4px 0 2px;
+      }
+      .create-chain-visual {
+        position: relative;
+        width: 116px;
+        height: 70px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 2px auto 0;
+      }
+      .create-chain-link {
+        position: absolute;
+        left: 20px;
+        right: 20px;
+        top: 34px;
+        height: 2px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--border2);
+      }
+      .create-chain-link::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(34,197,94,.88), transparent);
+        transform: translateX(-100%);
+        animation: bot-create-chain-flow 1.7s ease-in-out infinite;
+      }
+      .create-chain-node,
+      .create-chain-core {
+        position: absolute;
+        z-index: 1;
+        border: 1px solid rgba(34,197,94,.44);
+        background: var(--surface);
+        box-shadow: 0 0 0 4px var(--green-dim);
+      }
+      .create-chain-node {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: var(--green);
+      }
+      .create-chain-node-left {
+        left: 4px;
+      }
+      .create-chain-node-right {
+        right: 4px;
+      }
+      .create-chain-core {
+        width: 42px;
+        height: 42px;
+        border-radius: 13px;
+        animation: bot-create-chain-pulse 1.7s ease-in-out infinite;
+      }
+      .create-chain-core::before,
+      .create-chain-core::after {
+        content: "";
+        position: absolute;
+        left: 11px;
+        right: 11px;
+        height: 2px;
+        border-radius: 999px;
+        background: var(--green);
+      }
+      .create-chain-core::before {
+        top: 15px;
+      }
+      .create-chain-core::after {
+        bottom: 15px;
+      }
+      .create-chain-visual-done .create-chain-link::after,
+      .create-chain-visual-done .create-chain-core {
+        animation: none;
+      }
+      .create-chain-copy {
+        display: grid;
+        gap: 6px;
+        max-width: 320px;
+      }
+      .create-chain-copy strong {
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      .create-chain-copy p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .create-chain-actions {
+        justify-content: center;
+      }
+      @keyframes bot-create-chain-flow {
+        0% {
+          transform: translateX(-100%);
+          opacity: 0;
+        }
+        20%, 80% {
+          opacity: 1;
+        }
+        100% {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+      }
+      @keyframes bot-create-chain-pulse {
+        0%, 100% {
+          transform: scale(.98);
+          box-shadow: 0 0 0 4px var(--green-dim);
+        }
+        50% {
+          transform: scale(1.04);
+          box-shadow: 0 0 0 7px rgba(34,197,94,0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .create-chain-link::after,
+        .create-chain-core {
+          animation: none;
+        }
+      }
       .identity-result,
       .wallet-row,
       .txid-row,
