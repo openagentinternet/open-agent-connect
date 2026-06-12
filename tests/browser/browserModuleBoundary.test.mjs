@@ -64,6 +64,20 @@ test('Browser API route boundary uses the published host contract result shape',
   assert.doesNotMatch(contents, /\.\.\/core\/contracts\/commandResult/);
 });
 
+test('OAC default Browser handlers use the ABC host contract bridge', () => {
+  const contents = readFileSync(new URL('../../dist/daemon/defaultHandlers.js', import.meta.url), 'utf8');
+
+  assert.match(contents, /oacBrowserCoreBridge/);
+  assert.match(contents, /createOacBrowserCoreHostAdapter/);
+});
+
+test('OAC default Browser context keeps the legacy host adapter available', () => {
+  const contents = readFileSync(new URL('../../dist/daemon/defaultHandlers.js', import.meta.url), 'utf8');
+
+  assert.match(contents, /oacBrowserHostAdapter/);
+  assert.match(contents, /createOacBrowserHostAdapter/);
+});
+
 test('Browser page declarations keep ABC UI package subpath private', () => {
   const outputFiles = [
     '../../dist/browser/app.d.ts',

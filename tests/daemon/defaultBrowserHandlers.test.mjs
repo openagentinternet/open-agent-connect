@@ -97,6 +97,38 @@ test('Browser context keeps local OAC Bots without a globalMetaId in legacy iden
   assert.equal(context.data.defaultUri, null);
 });
 
+test('Browser runtime uses host contract data while context keeps legacy identities', async (t) => {
+  const profileHome = await createProfileHome('browser-runtime-context-split');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Runtime Split Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1runtimesplit',
+    mvcAddress: '18RuntimeSplit',
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const runtime = await handlers.browser.getRuntime({ from: active.slug });
+  assert.equal(runtime.ok, true);
+  assert.equal(runtime.state, 'success');
+  assert.equal(runtime.data.defaultActor.id, active.slug);
+  assert.equal(runtime.data.defaultActor.globalMetaId, 'idq1runtimesplit');
+  assert.equal(runtime.data.usingIdentities, undefined);
+
+  const context = await handlers.browser.getContext({ from: active.slug });
+  assert.equal(context.ok, true);
+  assert.equal(context.state, 'success');
+  assert.equal(context.data.defaultUsingIdentity.slug, active.slug);
+  assert.equal(context.data.usingIdentities[0].globalMetaId, 'idq1runtimesplit');
+  assert.equal(context.data.defaultActor, undefined);
+});
+
 test('Browser settings expose and persist browser base URL configuration by active Bot', async (t) => {
   const profileHome = await createProfileHome('browser-settings');
   t.after(async () => cleanupProfileHome(profileHome));

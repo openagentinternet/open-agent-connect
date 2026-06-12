@@ -125,8 +125,17 @@ async function startServer() {
       runTrustedAction: async (input) => {
         calls.actions.push(input);
         if (input.kind === 'unsupported') return browserFailure('browser_action_not_supported', 'Unsupported Browser action.');
-        if (input.kind === 'service-call') return browserWaiting('order_sent_awaiting_provider', 'Waiting for provider.', { pollAfterMs: 1000 });
-        if (input.kind === 'open-settings') return browserManualActionRequired('browser_settings_required', 'Open Browser settings.');
+        if (input.kind === 'service-call') {
+          return browserWaiting('order_sent_awaiting_provider', 'Waiting for provider.', {
+            pollAfterMs: 1000,
+            action: { label: 'Open trace', route: '/ui/trace?traceId=trace-service-call' },
+          });
+        }
+        if (input.kind === 'open-settings') {
+          return browserManualActionRequired('browser_settings_required', 'Open Browser settings.', {
+            action: { label: 'Open settings', href: '/ui/settings' },
+          });
+        }
         return browserSuccess({ kind: input.kind, handled: true, data: { accepted: true } });
       },
     },
@@ -256,10 +265,13 @@ test('POST /api/browser/actions serializes waiting and manual action results wit
     }),
   });
   const waitingPayload = await waitingResponse.json();
+  const expectedWaitingFollowUpTarget = '/ui/trace?traceId=trace-service-call';
 
   assert.equal(waitingResponse.status, 200);
+  assert.equal(waitingPayload.ok, false);
   assert.equal(waitingPayload.state, 'waiting');
   assert.equal(waitingPayload.code, 'order_sent_awaiting_provider');
+  assert.equal(waitingPayload.action.href || waitingPayload.action.route, expectedWaitingFollowUpTarget);
 
   const manualResponse = await fetch(`${baseUrl}/api/browser/actions`, {
     method: 'POST',
@@ -270,10 +282,13 @@ test('POST /api/browser/actions serializes waiting and manual action results wit
     }),
   });
   const manualPayload = await manualResponse.json();
+  const expectedManualFollowUpTarget = '/ui/settings';
 
   assert.equal(manualResponse.status, 200);
+  assert.equal(manualPayload.ok, false);
   assert.equal(manualPayload.state, 'manual_action_required');
   assert.equal(manualPayload.code, 'browser_settings_required');
+  assert.equal(manualPayload.action.href || manualPayload.action.route, expectedManualFollowUpTarget);
 });
 
 test('GET and PUT /api/browser/settings forward from slug and browser settings payload', async (t) => {
