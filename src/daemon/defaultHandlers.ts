@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { browserSuccess } from '@openagentinternet/agent-browser-host-contract';
 import {
   commandAwaitingConfirmation,
   commandFailed,
@@ -285,7 +286,7 @@ import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
 import { browserRuntimeToContextResult } from '../core/browser/runtimeContext';
-import { createOacBrowserHostAdapter } from './browser/oacBrowserHostAdapter';
+import { createOacBrowserCoreHostAdapter } from './browser/oacBrowserCoreBridge';
 import {
   DEFAULT_WRITE_NETWORKS,
   type DefaultWriteNetwork,
@@ -9862,7 +9863,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
   const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry();
   let daemonHandlers: MetabotDaemonHttpHandlers | null = null;
-  const browserHostAdapter = createOacBrowserHostAdapter({
+  const browserHostAdapter = createOacBrowserCoreHostAdapter({
     homeDir: input.homeDir,
     systemHomeDir: normalizedSystemHomeDir,
     resolveActorWriteContext,
@@ -9876,6 +9877,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
     fetch: globalThis.fetch,
     env: process.env,
   });
+
+  function browserActorInput(request: { actorId?: string; from?: string } = {}): { actorId?: string; from?: string } {
+    return {
+      actorId: request.actorId,
+      from: request.from,
+    };
+  }
 
   async function readMetaAppRecordForUpdate(actorHomeDir: string, targetPinId: string): Promise<MetaAppGalleryRecord | null> {
     const indexer = createMetaAppIndexerClient();
@@ -10024,42 +10032,37 @@ export function createDefaultMetabotDaemonHandlers(input: {
   daemonHandlers = {
     browser: {
       getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
-        actorId: request.actorId,
-        from: request.from,
-      }),
+        ...browserActorInput(request),
+      } as Parameters<typeof browserHostAdapter.getRuntime>[0] & { from?: string }),
       getContext: async (request = {}) => {
         const runtime = await browserHostAdapter.getRuntime({
-          actorId: request.actorId,
-          from: request.from,
-        });
+          ...browserActorInput(request),
+        } as Parameters<typeof browserHostAdapter.getRuntime>[0] & { from?: string });
         if (!runtime.ok) return runtime;
-        return commandSuccess(browserRuntimeToContextResult(runtime.data));
+        return browserSuccess(browserRuntimeToContextResult(
+          runtime.data as Parameters<typeof browserRuntimeToContextResult>[0],
+        ));
       },
       getSettings: async (request = {}) => browserHostAdapter.getSettings({
-        actorId: request.actorId,
-        from: request.from,
-      }),
+        ...browserActorInput(request),
+      } as Parameters<typeof browserHostAdapter.getSettings>[0] & { from?: string }),
       updateSettings: async (request) => browserHostAdapter.updateSettings({
-        actorId: request.actorId,
-        from: request.from,
+        ...browserActorInput(request),
         browser: request.browser,
-      }),
+      } as Parameters<typeof browserHostAdapter.updateSettings>[0] & { from?: string }),
       getCache: async (request = {}) => browserHostAdapter.getCache({
-        actorId: request.actorId,
-        from: request.from,
-      }),
+        ...browserActorInput(request),
+      } as Parameters<typeof browserHostAdapter.getCache>[0] & { from?: string }),
       clearCache: async (request) => browserHostAdapter.clearCache({
-        actorId: request.actorId,
-        from: request.from,
+        ...browserActorInput(request),
         scope: request.scope,
         pinId: request.pinId,
         cacheKey: request.cacheKey,
-      }),
+      } as Parameters<typeof browserHostAdapter.clearCache>[0] & { from?: string }),
       resolve: async (request) => browserHostAdapter.resolveResource({
-        actorId: request.actorId,
-        from: request.from,
+        ...browserActorInput(request),
         uri: request.uri,
-      }),
+      } as Parameters<typeof browserHostAdapter.resolveResource>[0] & { from?: string }),
       runTrustedAction: async (request) => browserHostAdapter.runTrustedAction(request),
     },
     config: {
