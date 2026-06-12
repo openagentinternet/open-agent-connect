@@ -42,6 +42,34 @@ test('Browser page renders template preview images with browser-safe URLs', asyn
   assert.match(html, /data:image\/svg\+xml/);
 });
 
+test('Browser page modules consume the published ABC UI package', () => {
+  const outputFiles = [
+    '../../dist/browser/app.js',
+    '../../dist/browser/page.js',
+    '../../dist/browser/menuModel.js',
+  ];
+
+  for (const relativePath of outputFiles) {
+    const contents = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+    assert.match(contents, /@openagentinternet\/agent-browser-ui\/browser/);
+    assert.doesNotMatch(contents, /Browser page template not found/);
+    assert.doesNotMatch(contents, /loadBrowserPageTemplate/);
+  }
+});
+
+test('Browser page declarations keep ABC UI package subpath private', () => {
+  const outputFiles = [
+    '../../dist/browser/app.d.ts',
+    '../../dist/browser/page.d.ts',
+    '../../dist/browser/menuModel.d.ts',
+  ];
+
+  for (const relativePath of outputFiles) {
+    const contents = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+    assert.doesNotMatch(contents, /@openagentinternet\/agent-browser-ui\/browser/);
+  }
+});
+
 test('Browser API route boundary handles runtime without daemon route types', async () => {
   const { handled, sent } = await callBrowserRoute({
     path: '/api/browser/runtime?actorId=wallet-user',
