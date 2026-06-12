@@ -632,9 +632,9 @@ test('bot page renders the launch create flow and empty state in Simplified Chin
 
   const createMarkup = context.createModalMarkup();
   assert.match(createMarkup, /创建 Bot/);
-  assert.match(createMarkup, /上传/);
   assert.match(createMarkup, /Bot 名称/);
-  assert.match(createMarkup, /公开简介/);
+  assert.doesNotMatch(createMarkup, /上传/);
+  assert.doesNotMatch(createMarkup, /公开简介/);
   assert.match(createMarkup, /取消/);
 
   context.renderMetabotList();
@@ -646,7 +646,6 @@ test('bot page uses Simplified Chinese create validation and progress copy', () 
   const confirm = field();
   const fields = {
     '[data-field="new-name"]': field(''),
-    '[data-field="new-bio"]': field(''),
     '[data-add-status]': status,
     '[data-act="confirm-add"]': confirm,
   };
@@ -1534,7 +1533,7 @@ test('bot page saveInfo omits allowChatSkills when selected chips are unchanged'
   assert.deepEqual(requestBody, { name: 'Alice Updated' });
 });
 
-test('bot page create flow sends only public identity fields', async () => {
+test('bot page create flow sends only the minimal identity fields', async () => {
   const fields = {
     '[data-field="new-name"]': field('Alice'),
     '[data-field="new-bio"]': field('Builds with Codex.'),
@@ -1576,22 +1575,8 @@ test('bot page create flow sends only public identity fields', async () => {
 
   assert.deepEqual(requestBody, {
     name: 'Alice',
-    bio: 'Builds with Codex.',
-    avatarDataUrl: 'data:image/png;base64,...',
     creationSource: 'ui',
   });
-  for (const key of [
-    'primaryProvider',
-    'fallbackProvider',
-    'privateChat',
-    'autoReply',
-    'role',
-    'soul',
-    'goal',
-    'allowChatSkills',
-  ]) {
-    assert.equal(Object.hasOwn(requestBody, key), false, `request body should omit ${key}`);
-  }
 });
 
 test('bot page opens the creation modal after initial load when mode=create is requested', async () => {
@@ -1648,8 +1633,10 @@ test('bot page opens the creation modal after initial load when mode=create is r
   assert.equal(classNames.has('hidden'), false);
   assert.equal(focused, true);
   assert.match(modal.innerHTML, /data-field="new-name"/);
-  assert.match(modal.innerHTML, /data-field="new-avatar-file"/);
-  assert.match(modal.innerHTML, /data-field="new-bio"/);
+  assert.doesNotMatch(modal.innerHTML, /data-field="new-avatar-file"/);
+  assert.doesNotMatch(modal.innerHTML, /data-field="new-bio"/);
+  assert.doesNotMatch(modal.innerHTML, /data-act="upload-create-avatar"/);
+  assert.doesNotMatch(modal.innerHTML, /data-act="remove-create-avatar"/);
   assert.doesNotMatch(modal.innerHTML, /primaryProvider/);
   assert.doesNotMatch(modal.innerHTML, /fallbackProvider/);
   assert.doesNotMatch(modal.innerHTML, /data-field="role"/);
@@ -2297,45 +2284,6 @@ test('bot page deep link focus is consumed after the first successful activation
   assert.equal(focusCount, 1);
   assert.equal(scrollCount, 1);
   assert.equal(calls.includes('/api/services/skills?from=alice'), false);
-});
-
-test('bot page create avatar upload clears a previous pending avatar after an oversized file', () => {
-  const preview = { innerHTML: '' };
-  const removeButton = field();
-  removeButton.hidden = false;
-  const status = field();
-  const fields = {
-    '[data-field="new-name"]': field('Alice'),
-    '[data-create-avatar-preview]': preview,
-    '[data-act="remove-create-avatar"]': removeButton,
-    '[data-create-avatar-status]': status,
-  };
-  const context = createBotScriptContext({
-    elements: fields,
-    globals: {
-      FileReader: class {
-        readAsDataURL() {
-          this.result = 'data:image/png;base64,valid';
-          this.onload();
-        }
-      },
-    },
-  });
-
-  vm.runInNewContext(buildBotPageDefinition().script, context);
-
-  context.handleCreateAvatarUpload({ size: 1024 });
-  assert.equal(context.state._pendingCreateAvatar, 'data:image/png;base64,valid');
-  assert.equal(removeButton.hidden, false);
-  assert.match(preview.innerHTML, /data:image\/png;base64,valid/);
-
-  context.handleCreateAvatarUpload({ size: (200 * 1024) + 1 });
-
-  assert.equal(context.state._pendingCreateAvatar, undefined);
-  assert.equal(removeButton.hidden, true);
-  assert.doesNotMatch(preview.innerHTML, /data:image\/png;base64,valid/);
-  assert.equal(status.textContent, 'Avatar must be 200KB or smaller.');
-  assert.equal(status.className, 'save-status error');
 });
 
 test('bot page runtime modal renders healthy and detected runtimes only', () => {

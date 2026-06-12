@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingCreateAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -1180,33 +1180,13 @@ function testRuntime(runtimeId){
     });
 }
 
-function createAvatarPreviewMarkup(){
-  var name=q('[data-field="new-name"]');var value=state._pendingCreateAvatar;
-  return avatarMarkup({name:name&&name.value||'MB',avatarDataUrl:value},true);
-}
-function renderCreateAvatarPreview(){
-  var preview=q('[data-create-avatar-preview]');if(preview)preview.innerHTML=createAvatarPreviewMarkup();
-}
 function createModalMarkup(){
   return '<div class="modal-box">'+
     '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.createBot','Create Bot'))+'</div>'+
     '<div class="modal-body">'+
-      '<div class="info-avatar-section">'+
-        '<div class="info-avatar-preview" data-create-avatar-preview>'+createAvatarPreviewMarkup()+'</div>'+
-        '<div class="info-avatar-actions">'+
-          '<button class="btn btn-sm" data-act="upload-create-avatar">'+esc(uiText('bot.upload','Upload'))+'</button>'+
-          '<button class="btn btn-sm btn-danger" data-act="remove-create-avatar"'+(state._pendingCreateAvatar?'':' hidden')+'>'+esc(uiText('bot.removeAvatar','Remove'))+'</button>'+
-          '<input type="file" data-field="new-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />'+
-          '<span class="save-status" data-create-avatar-status></span>'+
-        '</div>'+
-      '</div>'+
       '<div class="field">'+
         '<label for="new-metabot-name">'+esc(uiText('bot.botName','Bot Name'))+'</label>'+
         '<input id="new-metabot-name" type="text" data-field="new-name" maxlength="60" autocomplete="off" />'+
-      '</div>'+
-      '<div class="field field-full">'+
-        '<label for="new-metabot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label>'+
-        '<textarea id="new-metabot-bio" data-field="new-bio"></textarea>'+
       '</div>'+
     '</div>'+
     '<div class="modal-actions">'+
@@ -1216,31 +1196,13 @@ function createModalMarkup(){
     '<div class="save-status" data-add-status></div>'+
   '</div>';
 }
-function handleCreateAvatarUpload(file){
-  var status=q('[data-create-avatar-status]');
-  if(file.size>200*1024){
-    state._pendingCreateAvatar=undefined;
-    renderCreateAvatarPreview();
-    var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.hidden=true;
-  }
-  readAvatarFile(file,status,function(dataUrl){
-    state._pendingCreateAvatar=dataUrl;
-    renderCreateAvatarPreview();
-    var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.hidden=false;
-  });
-}
 function wireCreateModalControls(){
   var cancel=q('[data-act="cancel-add"]');if(cancel)cancel.addEventListener('click',closeAddModal);
   var confirm=q('[data-act="confirm-add"]');if(confirm)confirm.addEventListener('click',createMetabot);
-  var name=q('[data-field="new-name"]');if(name){name.addEventListener('keydown',function(event){if(event.key==='Enter')createMetabot();if(event.key==='Escape')closeAddModal()});name.addEventListener('input',renderCreateAvatarPreview)}
-  var file=q('[data-field="new-avatar-file"]');
-  var upload=q('[data-act="upload-create-avatar"]');if(upload&&file)upload.addEventListener('click',function(){file.click()});
-  var remove=q('[data-act="remove-create-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingCreateAvatar=undefined;renderCreateAvatarPreview();this.hidden=true});
-  if(file)file.addEventListener('change',function(){var selected=this.files&&this.files[0];if(selected)handleCreateAvatarUpload(selected)});
+  var name=q('[data-field="new-name"]');if(name)name.addEventListener('keydown',function(event){if(event.key==='Enter')createMetabot();if(event.key==='Escape')closeAddModal()});
 }
 function openAddModal(){
   var modal=q('[data-modal="add-metabot"]');
-  state._pendingCreateAvatar=undefined;
   if(modal)modal.innerHTML=createModalMarkup();
   var input=q('[data-field="new-name"]');var status=q('[data-add-status]');
   if(status){status.textContent='';status.className='save-status'}
@@ -1249,15 +1211,13 @@ function openAddModal(){
   if(modal)modal.classList.remove('hidden');
   if(input)input.focus();
 }
-function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden');state._pendingCreateAvatar=undefined}
+function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden')}
 function createMetabot(){
-  var input=q('[data-field="new-name"]');var bioInput=q('[data-field="new-bio"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();var bio=(bioInput&&bioInput.value||'').trim();
+  var input=q('[data-field="new-name"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();
   if(!name){if(status){status.textContent=uiText('bot.nameRequired','Name is required');status.className='save-status error'}return}
   if(status){status.textContent=uiText('bot.creating','Creating...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
   var body={name:name,creationSource:'ui'};
-  if(bio)body.bio=bio;
-  if(state._pendingCreateAvatar)body.avatarDataUrl=state._pendingCreateAvatar;
   return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     closeAddModal();
     var profile=r.data&&r.data.profile||{};
