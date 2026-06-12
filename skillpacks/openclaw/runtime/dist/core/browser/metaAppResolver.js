@@ -1,0 +1,127 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildMetaAppResolveResult = buildMetaAppResolveResult;
+function safeRendererUrl(value) {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    const text = value.trim();
+    if (!text) {
+        return undefined;
+    }
+    if (text.startsWith('/') && !text.startsWith('//')) {
+        return text;
+    }
+    try {
+        const url = new URL(text);
+        return url.protocol === 'http:' || url.protocol === 'https:' ? text : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+function selectUrl(record) {
+    return safeRendererUrl(record.runUrl)
+        ?? safeRendererUrl(record.metawebUrl)
+        ?? safeRendererUrl(record.downloadUrl)
+        ?? safeRendererUrl(record.localUiUrl);
+}
+function hasExtension(url, extensions) {
+    if (!url) {
+        return false;
+    }
+    const pathname = url.split(/[?#]/, 1)[0].toLowerCase();
+    return extensions.some((extension) => pathname.endsWith(extension));
+}
+function selectRendererType(record, url) {
+    const contentType = record.contentType.toLowerCase();
+    const codeType = record.codeType.toLowerCase();
+    if (contentType === 'application/pdf' || hasExtension(url, ['.pdf'])) {
+        return 'pdf';
+    }
+    if (contentType.startsWith('image/') || hasExtension(url, ['.apng', '.avif', '.gif', '.jpg', '.jpeg', '.png', '.svg', '.webp'])) {
+        return 'image';
+    }
+    if (contentType.startsWith('video/') || hasExtension(url, ['.mp4', '.m4v', '.mov', '.ogg', '.ogv', '.webm'])) {
+        return 'video';
+    }
+    if (contentType === 'text/html' || contentType === 'application/xhtml+xml') {
+        return 'html-iframe';
+    }
+    if (!contentType && (codeType === 'html' || !!record.runUrl || !!record.metawebUrl)) {
+        return 'html-iframe';
+    }
+    return 'unsupported';
+}
+function buildMetaAppResolveResult(input) {
+    const url = selectUrl(input.record);
+    const rendererType = selectRendererType(input.record, url);
+    const unsupported = rendererType === 'unsupported';
+    return {
+        uri: input.uri,
+        normalizedUri: input.normalizedUri,
+        resourceType: 'metaapp',
+        title: input.record.title || input.record.appName || input.record.pinId,
+        owner: {
+            kind: 'metaapp-publisher',
+            globalMetaId: input.record.ownerGlobalMetaId,
+            address: input.record.ownerAddress || undefined,
+            name: input.record.ownerGlobalMetaId || 'Unknown publisher',
+            verificationState: 'partial',
+        },
+        renderer: {
+            type: rendererType,
+            contentType: input.record.contentType || 'application/octet-stream',
+            url: unsupported ? undefined : url,
+            data: {
+                record: input.record,
+            },
+            error: unsupported ? 'Unsupported MetaApp content type.' : undefined,
+        },
+        status: {
+            state: unsupported ? 'error' : 'resolved',
+            verificationState: 'partial',
+            message: unsupported ? 'Unsupported MetaApp content type.' : 'MetaApp resolved.',
+        },
+        proof: {
+            pinId: input.record.pinId,
+            publisherGlobalMetaId: input.record.ownerGlobalMetaId,
+            protocolPath: '/protocols/metaapp',
+            verificationState: 'partial',
+            details: {
+                firstPinId: input.record.firstPinId,
+                operation: input.record.operation,
+                network: input.record.network,
+            },
+        },
+        source: {
+            resolver: 'metaapp-cache',
+            url,
+            fetchedAt: input.fetchedAt,
+            indexedAt: input.record.updatedAt,
+            schemaVersion: input.record.version,
+            raw: input.record.raw ?? { record: input.record },
+        },
+        actions: [
+            {
+                id: 'copy-uri',
+                label: 'Copy URI',
+                kind: 'copy',
+                enabled: true,
+                uri: input.normalizedUri,
+            },
+            {
+                id: 'proof',
+                label: 'Proof',
+                kind: 'proof',
+                enabled: true,
+            },
+            {
+                id: 'creator',
+                label: 'Creator',
+                kind: 'creator',
+                enabled: !!input.record.ownerGlobalMetaId,
+            },
+        ],
+    };
+}

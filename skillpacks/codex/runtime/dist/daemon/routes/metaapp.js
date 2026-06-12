@@ -44,6 +44,7 @@ async function writePreviewAssetResponse(context, result) {
         'content-type': result.contentType,
         'content-length': node_buffer_1.Buffer.byteLength(body),
         'cache-control': 'no-store',
+        'access-control-allow-origin': '*',
     });
     context.res.end(body);
 }

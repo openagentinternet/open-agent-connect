@@ -16,32 +16,6 @@
         display: none !important;
       }
 
-      .bot-stats {
-        display: flex;
-        gap: 12px;
-        padding: 16px 24px 0;
-        flex-shrink: 0;
-        flex-wrap: wrap;
-      }
-      .bot-stats .stat-card {
-        flex: 1;
-        min-width: 126px;
-      }
-      .stat-link {
-        margin-top: 6px;
-        padding: 0;
-        border: 0;
-        background: transparent;
-        color: var(--accent);
-        font-family: var(--mono);
-        font-size: 11px;
-        cursor: pointer;
-      }
-      .stat-link:hover {
-        color: var(--text);
-        text-decoration: underline;
-      }
-
       .bot-workspace {
         flex: 1;
         display: flex;
@@ -168,17 +142,6 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .metabot-llm-unavailable {
-        flex-shrink: 0;
-        color: var(--red);
-        background: var(--red-dim);
-        border: 1px solid rgba(239,68,68,.28);
-        border-radius: var(--radius-sm);
-        padding: 1px 5px;
-        font-family: var(--mono);
-        font-size: 10px;
-        line-height: 1.4;
-      }
       .metabot-item-id-row {
         display: flex;
         align-items: center;
@@ -224,7 +187,10 @@
       }
 
       .detail-panel {
-        flex: 1;
+        flex: 0 1 800px;
+        width: min(100%, 800px);
+        max-width: 800px;
+        margin: 0 auto;
         display: flex;
         flex-direction: column;
         min-height: 0;
@@ -282,12 +248,142 @@
         flex-wrap: wrap;
         justify-content: flex-end;
       }
+      .bot-hero {
+        display: flex;
+        gap: 16px;
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+      .hero-avatar {
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        background: var(--surface2);
+        border: 1px solid var(--border2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--mono);
+        color: var(--dim);
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .hero-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .hero-main {
+        min-width: 0;
+        flex: 1;
+      }
+      .hero-title-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .hero-title-row h1 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.25;
+        letter-spacing: 0;
+        color: var(--text);
+      }
+      .live-indicator {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: var(--green);
+        box-shadow: 0 0 0 0 rgba(34,197,94,.34);
+        flex-shrink: 0;
+        animation: bot-live-breathe 2.8s ease-in-out infinite;
+      }
+      @keyframes bot-live-breathe {
+        0%, 100% {
+          opacity: .72;
+          transform: scale(.92);
+          box-shadow: 0 0 0 0 rgba(34,197,94,.28);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.08);
+          box-shadow: 0 0 0 5px rgba(34,197,94,0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .live-indicator {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+      }
+      .hero-summary {
+        margin: 8px 0 14px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .hero-meta {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .hero-meta-row {
+        display: grid;
+        grid-template-columns: 112px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        min-width: 0;
+      }
+      .hero-meta-row span {
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      .hero-meta-row code {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 5px 8px;
+        font-size: 11px;
+      }
+      .hero-copy-btn {
+        border-color: var(--border);
+        background: var(--surface);
+      }
+      .hero-actions,
+      .advanced-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .advanced-danger-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
       .tab-bar {
         display: flex;
         border-bottom: 1px solid var(--border);
         background: var(--surface);
         flex-shrink: 0;
         padding: 0 12px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .tab-bar::-webkit-scrollbar {
+        display: none;
       }
       .tab-btn {
         padding: 12px 16px;
@@ -350,6 +446,14 @@
         align-items: center;
         gap: 8px;
       }
+      .info-avatar-label {
+        flex-basis: 100%;
+        color: var(--muted);
+        font-size: 11px;
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: .08em;
+      }
       .info-id-row {
         display: flex;
         align-items: center;
@@ -376,6 +480,15 @@
       }
       .info-form-grid .field-full {
         grid-column: 1 / -1;
+      }
+      .provider-row {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+      }
+      .provider-row .provider-field {
+        min-width: 0;
       }
       .info-form-grid textarea {
         min-height: 88px;
@@ -407,6 +520,17 @@
       }
       .provider-field {
         position: relative;
+      }
+      .homepage-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .homepage-renderer-label {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
       }
       .provider-picker {
         position: relative;
@@ -584,6 +708,14 @@
 
       .history-scroll {
         overflow: auto;
+      }
+      .advanced-section-title {
+        margin: 18px 0 10px;
+        color: var(--muted);
+        font-size: 11px;
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: .08em;
       }
       .history-scroll .table-wrap {
         overflow-x: auto;
@@ -839,6 +971,137 @@
         justify-content: flex-end;
         margin-top: 20px;
       }
+      .create-chain-modal {
+        width: 460px;
+        text-align: center;
+      }
+      .create-chain-body {
+        justify-items: center;
+        gap: 16px;
+        padding: 4px 0 2px;
+      }
+      .create-chain-visual {
+        position: relative;
+        width: 116px;
+        height: 70px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 2px auto 0;
+      }
+      .create-chain-link {
+        position: absolute;
+        left: 20px;
+        right: 20px;
+        top: 34px;
+        height: 2px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--border2);
+      }
+      .create-chain-link::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(34,197,94,.88), transparent);
+        transform: translateX(-100%);
+        animation: bot-create-chain-flow 1.7s ease-in-out infinite;
+      }
+      .create-chain-node,
+      .create-chain-core {
+        position: absolute;
+        z-index: 1;
+        border: 1px solid rgba(34,197,94,.44);
+        background: var(--surface);
+        box-shadow: 0 0 0 4px var(--green-dim);
+      }
+      .create-chain-node {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: var(--green);
+      }
+      .create-chain-node-left {
+        left: 4px;
+      }
+      .create-chain-node-right {
+        right: 4px;
+      }
+      .create-chain-core {
+        width: 42px;
+        height: 42px;
+        border-radius: 13px;
+        animation: bot-create-chain-pulse 1.7s ease-in-out infinite;
+      }
+      .create-chain-core::before,
+      .create-chain-core::after {
+        content: "";
+        position: absolute;
+        left: 11px;
+        right: 11px;
+        height: 2px;
+        border-radius: 999px;
+        background: var(--green);
+      }
+      .create-chain-core::before {
+        top: 15px;
+      }
+      .create-chain-core::after {
+        bottom: 15px;
+      }
+      .create-chain-visual-done .create-chain-link::after,
+      .create-chain-visual-done .create-chain-core {
+        animation: none;
+      }
+      .create-chain-copy {
+        display: grid;
+        gap: 6px;
+        max-width: 320px;
+      }
+      .create-chain-copy strong {
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      .create-chain-copy p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .create-chain-actions {
+        justify-content: center;
+      }
+      @keyframes bot-create-chain-flow {
+        0% {
+          transform: translateX(-100%);
+          opacity: 0;
+        }
+        20%, 80% {
+          opacity: 1;
+        }
+        100% {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+      }
+      @keyframes bot-create-chain-pulse {
+        0%, 100% {
+          transform: scale(.98);
+          box-shadow: 0 0 0 4px var(--green-dim);
+        }
+        50% {
+          transform: scale(1.04);
+          box-shadow: 0 0 0 7px rgba(34,197,94,0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .create-chain-link::after,
+        .create-chain-core {
+          animation: none;
+        }
+      }
       .identity-result,
       .wallet-row,
       .txid-row,
@@ -989,8 +1252,12 @@
       }
 
       @media (max-width: 768px) {
-        .bot-stats {
-          padding: 12px 16px 0;
+        .topbar {
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .topbar::-webkit-scrollbar {
+          display: none;
         }
         .bot-workspace {
           margin: 12px 16px 16px;
@@ -1003,6 +1270,10 @@
           max-height: 220px;
         }
         .detail-panel {
+          flex: 1 1 auto;
+          width: 100%;
+          max-width: none;
+          margin: 0;
           min-height: 320px;
         }
         .detail-header {
@@ -1013,10 +1284,26 @@
           width: 100%;
           justify-content: flex-start;
         }
+        .bot-shell {
+          height: auto;
+          min-height: 100vh;
+          overflow: visible;
+        }
+        .bot-workspace {
+          overflow: visible;
+        }
+        .bot-hero {
+          flex-direction: column;
+        }
+        .hero-meta-row {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
         .tab-content {
           padding: 16px;
         }
         .info-form-grid,
+        .provider-row,
         .exec-detail,
         .runtime-row,
         .mnemonic-grid {
@@ -1044,102 +1331,120 @@
       <header class="topbar">
         <a class="topbar-logo" href="/ui/hub">MetaBot</a>
         <div class="topbar-sep"></div>
-        <span class="topbar-title">Bot Management</span>
+        <span class="topbar-title" data-i18n-key="nav.botPage">Bot Page</span>
         <div class="topbar-spacer"></div>
         <nav class="topbar-nav">__PAGE_NAV__</nav>
       </header>
 
-      <div class="bot-stats">
-        <div class="stat-card">
-          <div class="stat-label">Bots</div>
-          <div class="stat-value accent" data-stat-bots>-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Runtimes</div>
-          <div class="stat-value green" data-stat-runtimes>-</div>
-          <button class="stat-link" data-act="open-runtime-modal" type="button">View providers</button>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Executions</div>
-          <div class="stat-value" data-stat-executions>-</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Success Rate</div>
-          <div class="stat-value" data-stat-success>-</div>
-        </div>
-      </div>
-
       <main class="bot-workspace">
-        <aside class="metabot-panel" aria-label="MetaBot list">
+        <aside class="metabot-panel" aria-label="Bot list">
           <div class="metabot-panel-header">
-            <span class="metabot-panel-title">MetaBots</span>
+            <span class="metabot-panel-title" data-i18n-key="bot.localBots">Local Bots</span>
             <span class="metabot-panel-count" data-metabot-count>0</span>
           </div>
           <div class="metabot-list-scroll">
             <div data-metabot-list>
               <div class="session-empty">
-                <p>No MetaBots yet</p>
+                <p data-i18n-key="bot.noBotsYet">No Bots yet</p>
               </div>
             </div>
           </div>
           <div class="metabot-panel-footer">
-            <button class="btn btn-primary" data-act="add-metabot">+ Add MetaBot</button>
+            <button class="btn btn-primary" data-act="add-metabot" data-i18n-key="bot.createBot">Create Bot</button>
           </div>
         </aside>
 
-        <section class="detail-panel" aria-label="MetaBot detail">
-          <div class="detail-header" data-detail-header hidden>
-            <div class="metabot-avatar" data-detail-avatar>MB</div>
-            <div class="detail-title">
-              <strong data-detail-name>-</strong>
-              <span data-detail-id>-</span>
+        <section class="detail-panel" aria-label="Bot detail">
+          <section class="bot-hero" data-bot-hero hidden>
+            <div class="hero-avatar" data-hero-avatar>MB</div>
+            <div class="hero-main">
+              <div class="hero-title-row">
+                <h1 data-hero-name>-</h1>
+                <span class="live-indicator" data-live-indicator aria-label="Online" title="Online"></span>
+              </div>
+              <p class="hero-summary" data-hero-summary hidden></p>
+              <div class="hero-meta">
+                <div class="hero-meta-row">
+                  <span data-i18n-key="bot.globalMetaId">GlobalMetaID</span>
+                  <code data-hero-global-meta-id>-</code>
+                  <button class="icon-btn hero-copy-btn" type="button" data-copy-global-meta-id aria-label="Copy GlobalMetaID" title="Copy GlobalMetaID">⧉</button>
+                </div>
+                <div class="hero-meta-row">
+                  <span data-i18n-key="bot.botUri">Homepage URI</span>
+                  <code data-hero-bot-uri>metaid://-</code>
+                  <button class="icon-btn hero-copy-btn" type="button" data-copy-bot-uri disabled aria-label="Copy Homepage URI" title="Copy Homepage URI">⧉</button>
+                </div>
+              </div>
+              <div class="hero-actions">
+                <button class="btn btn-sm" data-act="view-bot-page" data-i18n-key="bot.openPublicBotPage">Open Public Bot Page</button>
+                <button class="btn btn-sm" data-act="view-conversations" data-i18n-key="bot.viewConversations">View Conversations</button>
+              </div>
             </div>
-            <div class="detail-actions">
-              <button class="btn btn-sm" data-act="open-wallet">Wallet</button>
-              <button class="btn btn-sm btn-danger" data-act="open-delete">Delete</button>
-              <button class="btn btn-sm" data-act="open-backup">Backup</button>
-              <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes">Refresh Runtimes</button>
-            </div>
-          </div>
+          </section>
           <div class="tab-bar" data-tab-bar hidden>
-            <button class="tab-btn active" data-tab="info">Basic Info</button>
-            <button class="tab-btn" data-tab="history">Execution History</button>
-            <button class="tab-btn" data-tab="settings">Settings</button>
+            <button class="tab-btn active" data-tab="publicIdentity" data-i18n-key="bot.publicIdentity">Public Identity</button>
+            <button class="tab-btn" data-tab="behavior" data-i18n-key="bot.behavior">Behavior</button>
+            <button class="tab-btn" data-tab="chatSkills" data-i18n-key="bot.chatSkills">Chat Skills</button>
+            <button class="tab-btn" data-tab="services" data-i18n-key="bot.services">Services</button>
+            <button class="tab-btn" data-tab="advanced" data-i18n-key="bot.advanced">Advanced</button>
           </div>
           <div class="tab-content" data-tab-content hidden>
-            <div class="tab-panel active" data-tab-panel="info">
+            <div class="tab-panel active" data-tab-panel="publicIdentity">
               <div data-info-content></div>
             </div>
-            <div class="tab-panel" data-tab-panel="history">
+            <div class="tab-panel" data-tab-panel="behavior">
+              <div data-behavior-content>
+                <div class="session-empty"><p data-i18n-key="bot.behaviorPlaceholder">Behavior controls will be available here.</p></div>
+              </div>
+            </div>
+            <div class="tab-panel" data-tab-panel="chatSkills">
+              <div data-chat-skills-content>
+                <div class="session-empty"><p data-i18n-key="bot.chatSkillsPlaceholder">Chat skill controls will be available here.</p></div>
+              </div>
+            </div>
+            <div class="tab-panel" data-tab-panel="services">
+              <div data-services-content>
+                <div class="session-empty"><p data-i18n-key="bot.servicesPlaceholder">Service publishing entries will be available here.</p></div>
+              </div>
+            </div>
+            <div class="tab-panel" data-tab-panel="advanced">
+              <div class="advanced-actions">
+                <button class="btn btn-sm" data-act="open-wallet" data-i18n-key="bot.wallet">Wallet</button>
+                <button class="btn btn-sm" data-act="open-backup" data-i18n-key="bot.backup">Backup</button>
+                <button class="btn btn-sm" data-act="open-runtime-modal" type="button" data-i18n-key="bot.llmProviders">LLM Providers</button>
+                <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes" data-i18n-key="bot.refreshRuntimes">Refresh Runtimes</button>
+              </div>
+              <div data-settings-content data-default-write-network="mvc"></div>
+              <div class="advanced-section-title" data-i18n-key="bot.executionHistory">Execution History</div>
               <div class="history-scroll">
                 <div class="table-wrap">
                   <table class="data-table exec-table">
                     <thead>
                       <tr>
-                        <th>Time</th>
-                        <th>Provider</th>
-                        <th>Runtime</th>
-                        <th>Status</th>
-                        <th>Duration</th>
-                        <th>Prompt</th>
-                        <th>Details</th>
+                        <th data-i18n-key="bot.time">Time</th>
+                        <th data-i18n-key="bot.provider">Provider</th>
+                        <th data-i18n-key="bot.runtime">Runtime</th>
+                        <th data-i18n-key="bot.status">Status</th>
+                        <th data-i18n-key="bot.duration">Duration</th>
+                        <th data-i18n-key="bot.prompt">Prompt</th>
+                        <th data-i18n-key="bot.details">Details</th>
                       </tr>
                     </thead>
                     <tbody data-execution-history-list>
                       <tr>
-                        <td colspan="7" class="table-empty"><strong>No executions yet for this MetaBot</strong></td>
+                        <td colspan="7" class="table-empty"><strong data-i18n-key="bot.noExecutionsYet">No executions yet for this Bot</strong></td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
               </div>
-            </div>
-            <div class="tab-panel" data-tab-panel="settings">
-              <div data-settings-content data-default-write-network="mvc"></div>
+              <div class="advanced-danger-actions">
+                <button class="btn btn-sm btn-danger" data-act="open-delete" data-i18n-key="bot.deleteBot">Delete Bot</button>
+              </div>
             </div>
           </div>
           <div class="detail-empty" data-detail-empty>
-            <span class="mono">Select a MetaBot</span>
+            <span class="mono" data-i18n-key="bot.selectBot">Select a Bot</span>
           </div>
         </section>
       </main>
@@ -1147,16 +1452,16 @@
 
     <div class="modal-overlay hidden" data-modal="add-metabot" role="dialog" aria-modal="true" aria-labelledby="add-metabot-title">
       <div class="modal-box">
-        <div class="modal-title" id="add-metabot-title">Add MetaBot</div>
+        <div class="modal-title" id="add-metabot-title" data-i18n-key="bot.createBot">Create Bot</div>
         <div class="modal-body">
           <div class="field">
-            <label for="new-metabot-name">Name</label>
+            <label for="new-metabot-name" data-i18n-key="bot.botName">Bot Name</label>
             <input id="new-metabot-name" type="text" data-field="new-name" maxlength="60" autocomplete="off" />
           </div>
         </div>
         <div class="modal-actions">
-          <button class="btn" data-act="cancel-add">Cancel</button>
-          <button class="btn btn-primary" data-act="confirm-add">Create</button>
+          <button class="btn" data-act="cancel-add" data-i18n-key="bot.cancel">Cancel</button>
+          <button class="btn btn-primary" data-act="confirm-add" data-i18n-key="bot.create">Create</button>
         </div>
         <div class="save-status" data-add-status></div>
       </div>

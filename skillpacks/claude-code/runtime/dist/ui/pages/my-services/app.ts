@@ -1,23 +1,54 @@
 import type { LocalUiPageDefinition } from '../types';
 import { buildMyServicesPageViewModelRuntimeSource } from './viewModel';
 
-export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
+export interface MyServicesPageDefinitionOptions {
+  page?: LocalUiPageDefinition['page'];
+  title?: string;
+  eyebrow?: string;
+  heading?: string;
+  description?: string;
+  toolbarTitle?: string;
+  toolbarLabel?: string;
+  includePublishAction?: boolean;
+  includeRefundsAction?: boolean;
+  orderTraceActionLabel?: string;
+  orderSessionActionLabel?: string;
+}
+
+export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionOptions = {}): LocalUiPageDefinition {
   const buildMyServicesPageViewModelSource = buildMyServicesPageViewModelRuntimeSource();
+  const page = options.page ?? 'my-services';
+  const title = options.title ?? 'My Services';
+  const eyebrow = options.eyebrow ?? 'Service Ledger';
+  const heading = options.heading ?? 'My Services';
+  const description = options.description ?? 'Manage locally published MetaBot skill services.';
+  const toolbarTitle = options.toolbarTitle ?? 'My Services';
+  const toolbarLabel = options.toolbarLabel ?? 'Loading local services...';
+  const publishAction = options.includePublishAction
+    ? '<a class="btn btn-primary" href="/ui/publish">Publish Service</a>'
+    : '';
+  const refundsAction = options.includeRefundsAction
+    ? '<a class="btn btn-primary" href="/ui/refund">Service Refunds</a>'
+    : '';
+  const orderTraceActionLabel = JSON.stringify(options.orderTraceActionLabel ?? 'Trace');
+  const orderSessionActionLabel = JSON.stringify(options.orderSessionActionLabel ?? 'Session');
   return {
-    page: 'my-services',
-    title: 'My Services',
-    eyebrow: 'Service Ledger',
-    heading: 'My Services',
-    description: 'Manage locally published MetaBot skill services.',
+    page,
+    title,
+    eyebrow,
+    heading,
+    description,
     panels: [],
     contentHtml: `
       <section class="my-services-shell" data-my-services-shell>
         <div class="my-services-toolbar">
           <div>
-            <h1>My Services</h1>
-            <p data-my-services-page-label>Loading local services...</p>
+            <h1>${toolbarTitle}</h1>
+            <p data-my-services-page-label>${toolbarLabel}</p>
           </div>
           <div class="my-services-toolbar-actions">
+            ${publishAction}
+            ${refundsAction}
             <button class="btn" type="button" data-my-services-refresh>Refresh</button>
           </div>
         </div>
@@ -151,6 +182,8 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
     `,
     script: `(() => {
   ${buildMyServicesPageViewModelSource}
+  const ORDER_TRACE_ACTION_LABEL = ${orderTraceActionLabel};
+  const ORDER_SESSION_ACTION_LABEL = ${orderSessionActionLabel};
 
   const ICON_MAX_BYTES = 2 * 1024 * 1024;
   const ICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/svg+xml']);
@@ -331,8 +364,8 @@ export function buildMyServicesPageDefinition(): LocalUiPageDefinition {
       + '<div><span>Rating</span><p>' + escapeHtml(order.ratingLabel) + '</p>' + (order.ratingComment ? '<p>' + escapeHtml(order.ratingComment) + '</p>' : '') + (order.ratingPinId ? '<p class="mono-text">' + escapeHtml(order.ratingPinId) + '</p>' : '') + '</div>'
       + '<div><span>Runtime</span><p class="mono-text">' + escapeHtml(order.runtimeLabel) + '</p><p class="mono-text">' + escapeHtml(order.sessionLabel) + '</p></div>'
       + '<div class="order-actions">'
-      + '<a class="btn btn-sm" href="' + escapeHtml(order.traceHref) + '">Trace</a>'
-      + (order.sessionHref ? '<a class="btn btn-sm" href="' + escapeHtml(order.sessionHref) + '">Session</a>' : '')
+      + '<a class="btn btn-sm" href="' + escapeHtml(order.traceHref) + '">' + escapeHtml(ORDER_TRACE_ACTION_LABEL) + '</a>'
+      + (order.sessionHref ? '<a class="btn btn-sm" href="' + escapeHtml(order.sessionHref) + '">' + escapeHtml(ORDER_SESSION_ACTION_LABEL) + '</a>' : '')
       + '</div>'
       + '</article>'
     )).join('');
