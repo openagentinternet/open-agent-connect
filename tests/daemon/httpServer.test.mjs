@@ -2893,11 +2893,11 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /My Services/);
   assert.match(html, /data-my-services-list/);
-  assert.match(html, /data-my-service-orders/);
   assert.match(html, /data-services-page-prev/);
   assert.match(html, /data-services-page-next/);
-  assert.match(html, /data-orders-page-prev/);
-  assert.match(html, /data-orders-page-next/);
+  assert.match(html, /data-my-service-detail-modal/);
+  assert.match(html, /data-my-service-detail-modal-body/);
+  assert.match(html, /data-my-service-order-page-label/);
   assert.match(html, /data-my-service-edit-modal/);
   assert.match(html, /data-edit-provider-skill-picker/);
   assert.match(html, /data-edit-provider-skill-select/);
@@ -2920,6 +2920,8 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /\/api\/services\/owned\/orders/);
   assert.match(html, /\/api\/services\/owned\/modify/);
   assert.match(html, /\/api\/services\/owned\/revoke/);
+  assert.doesNotMatch(html, /my-services-detail-panel/);
+  assert.doesNotMatch(html, /data-my-service-orders/);
   assert.doesNotMatch(html, /\/api\/services\/my/);
   assert.doesNotMatch(html, /\/api\/provider\/summary/);
 });
@@ -2943,9 +2945,13 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.match(html, /Advanced Trace/);
   assert.match(html, /Trace Session/);
   assert.match(html, /data-my-services-list/);
-  assert.match(html, /data-my-service-orders/);
+  assert.match(html, /data-my-service-detail-modal/);
+  assert.match(html, /data-my-service-detail-modal-body/);
+  assert.match(html, /data-my-service-order-page-label/);
   assert.match(html, /\/api\/services\/owned/);
   assert.match(html, /\/api\/services\/owned\/orders/);
+  assert.doesNotMatch(html, /my-services-detail-panel/);
+  assert.doesNotMatch(html, /data-my-service-orders/);
   assert.match(nav, /href="\/ui\/services"[^>]*>Services(?: \*)?<\/a>/);
   assert.doesNotMatch(nav, /href="\/ui\/publish"/);
   assert.doesNotMatch(nav, /href="\/ui\/my-services"/);

@@ -212,12 +212,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     listCount: document.querySelector('[data-my-services-list-count]'),
     servicesPagePrev: document.querySelector('[data-services-page-prev]'),
     servicesPageNext: document.querySelector('[data-services-page-next]'),
-    detail: document.querySelector('[data-my-service-detail]'),
-    detailSummary: document.querySelector('[data-my-service-detail-summary]'),
-    orders: document.querySelector('[data-my-service-orders]'),
     orderPageLabel: document.querySelector('[data-my-service-order-page-label]'),
-    ordersPagePrev: document.querySelector('[data-orders-page-prev]'),
-    ordersPageNext: document.querySelector('[data-orders-page-next]'),
     detailModal: document.querySelector('[data-my-service-detail-modal]'),
     detailModalBody: document.querySelector('[data-my-service-detail-modal-body]'),
     editModal: document.querySelector('[data-my-service-edit-modal]'),
@@ -351,16 +346,13 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
 
   const renderDetail = (model) => {
     if (elements.orderPageLabel) elements.orderPageLabel.textContent = model.orderPageLabel;
-    if (elements.ordersPagePrev) elements.ordersPagePrev.disabled = !model.orderPagination.canPrevious || !model.selectedService;
-    if (elements.ordersPageNext) elements.ordersPageNext.disabled = !model.orderPagination.canNext || !model.selectedService;
-    if (!elements.detailSummary || !elements.orders) return;
+    if (!elements.detailModalBody) return;
     const selected = model.selectedService;
     if (!selected) {
-      elements.detailSummary.innerHTML = '<div class="ledger-empty"><strong>No service selected</strong><p>Select a service to inspect orders and lifecycle actions.</p></div>';
-      elements.orders.innerHTML = '';
+      elements.detailModalBody.innerHTML = '<div class="ledger-empty"><strong>No service selected</strong><p>Select a service to inspect orders and lifecycle actions.</p></div>';
       return;
     }
-    elements.detailSummary.innerHTML = '<div class="detail-heading"><div><h3>' + escapeHtml(selected.title) + '</h3><p>' + escapeHtml(selected.description || selected.serviceName) + '</p></div>'
+    const summaryHtml = '<div class="my-service-detail-summary"><div class="detail-heading"><div><h3>' + escapeHtml(selected.title) + '</h3><p>' + escapeHtml(selected.description || selected.serviceName) + '</p></div>'
       + '<div class="detail-actions">'
       + '<button class="btn btn-sm" type="button" data-service-action="edit" data-service-id="' + escapeHtml(selected.currentPinId) + '"' + (selected.canModify ? '' : ' disabled') + '>Edit</button>'
       + '<button class="btn btn-sm btn-danger" type="button" data-service-action="revoke" data-service-id="' + escapeHtml(selected.currentPinId) + '"' + (selected.canRevoke ? '' : ' disabled') + '>Revoke</button>'
@@ -370,13 +362,13 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       + '<div><dt>Source Pin</dt><dd>' + escapeHtml(selected.sourceServicePinId) + '</dd></div>'
       + '<div><dt>Skill</dt><dd>' + escapeHtml(selected.skillLabel) + '</dd></div>'
       + '<div><dt>Price</dt><dd>' + escapeHtml(selected.priceLabel) + '</dd></div>'
-      + '</dl>';
+      + '</dl></div>';
 
     if (!model.orders.length) {
-      elements.orders.innerHTML = '<div class="ledger-empty"><strong>' + escapeHtml(model.orderEmptyState.title) + '</strong><p>' + escapeHtml(model.orderEmptyState.message) + '</p></div>';
+      elements.detailModalBody.innerHTML = summaryHtml + '<div class="ledger-empty"><strong>' + escapeHtml(model.orderEmptyState.title) + '</strong><p>' + escapeHtml(model.orderEmptyState.message) + '</p></div>';
       return;
     }
-    elements.orders.innerHTML = model.orders.map((order) => (
+    const ordersHtml = model.orders.map((order) => (
       '<article class="order-row">'
       + '<div><strong>' + escapeHtml(order.statusLabel) + '</strong><p>' + escapeHtml(order.buyerLabel) + '</p><p class="mono-text">' + escapeHtml(order.timeLabel) + '</p></div>'
       + '<div><span>Payment</span><p class="mono-text">' + escapeHtml(order.paymentLabel) + '</p><p class="mono-text">' + escapeHtml(order.orderTxid) + '</p></div>'
@@ -388,6 +380,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       + '</div>'
       + '</article>'
     )).join('');
+    elements.detailModalBody.innerHTML = summaryHtml + '<div class="my-service-orders">' + ordersHtml + '</div>';
   };
 
   const render = () => {
@@ -690,7 +683,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   document.addEventListener('click', async (event) => {
-    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
+    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
     if (!target) return;
     if (target.matches('[data-edit-provider-skill-add]')) {
       const candidate = normalizeTextClient(state.editCandidateProviderSkillValue);
@@ -730,17 +723,6 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       state.mutationResult = null;
       try {
         await loadServices(false);
-      } catch (error) {
-        setError(error);
-      }
-      return;
-    }
-    if (target.matches('[data-orders-page-prev]') || target.matches('[data-orders-page-next]')) {
-      const delta = target.matches('[data-orders-page-prev]') ? -1 : 1;
-      state.ordersPageNumber = Math.max(1, state.ordersPageNumber + delta);
-      state.mutationResult = null;
-      try {
-        await loadOrders(state.selectedServiceId, false);
       } catch (error) {
         setError(error);
       }
