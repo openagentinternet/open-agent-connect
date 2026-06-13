@@ -206,6 +206,9 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
   assert.match(myServicesHtml, /data-services-bot-menu/);
   assert.match(myServicesHtml, /data-my-service-detail-modal/);
   assert.match(myServicesHtml, /data-my-service-detail-modal-body/);
+  assert.match(myServicesScript, /\[data-my-service-detail-close\]/);
+  assert.match(myServicesScript, /elements\.detailModal\.hidden = false/);
+  assert.match(myServicesScript, /elements\.detailModal\.hidden = true/);
   assert.doesNotMatch(myServicesHtml, /my-services-detail-panel/);
   assert.doesNotMatch(myServicesHtml, /data-my-service-detail aria-label="Selected service details"/);
   assert.match(myServicesHtml, /data-edit-provider-skill-picker/);

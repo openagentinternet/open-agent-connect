@@ -630,6 +630,10 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     state.revokeServiceId = '';
   };
 
+  const closeDetail = () => {
+    if (elements.detailModal) elements.detailModal.hidden = true;
+  };
+
   const submitEdit = async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -691,7 +695,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   document.addEventListener('click', async (event) => {
-    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
+    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-detail-close], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
     if (!target) return;
     if (target.matches('[data-edit-provider-skill-add]')) {
       const candidate = normalizeTextClient(state.editCandidateProviderSkillValue);
@@ -723,6 +727,10 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     }
     if (target.matches('[data-my-service-revoke-close]')) {
       closeRevoke();
+      return;
+    }
+    if (target.matches('[data-my-service-detail-close]')) {
+      closeDetail();
       return;
     }
     if (target.matches('[data-services-page-prev]') || target.matches('[data-services-page-next]')) {
@@ -759,6 +767,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       state.selectedServiceId = serviceId;
       state.ordersPageNumber = 1;
       state.mutationResult = null;
+      if (elements.detailModal) elements.detailModal.hidden = false;
       try {
         await loadOrders(serviceId, false);
       } catch (error) {
