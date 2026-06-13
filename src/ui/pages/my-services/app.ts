@@ -496,22 +496,36 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
 
   const loadOrders = async (serviceId, refresh) => {
     const loadToken = ++state.ordersLoadToken;
+    const selectedBotSlug = state.selectedBotSlug;
     if (!serviceId) {
       state.ordersPage = null;
       render();
       return;
     }
-    const fetchOrdersPage = () => fetchJson('/api/services/owned/orders?serviceId=' + encodeURIComponent(serviceId) + '&from=' + encodeURIComponent(state.selectedBotSlug) + '&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    const isStaleLoad = () => loadToken !== state.ordersLoadToken || state.selectedServiceId !== serviceId || state.selectedBotSlug !== selectedBotSlug;
+    const fetchOrdersPage = () => fetchJson('/api/services/owned/orders?serviceId=' + encodeURIComponent(serviceId) + '&from=' + encodeURIComponent(selectedBotSlug) + '&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
     state.ordersPage = null;
     render();
-    const ordersPage = await fetchOrdersPage();
-    if (loadToken !== state.ordersLoadToken || state.selectedServiceId !== serviceId) return;
+    let ordersPage;
+    try {
+      ordersPage = await fetchOrdersPage();
+    } catch (error) {
+      if (isStaleLoad()) return;
+      throw error;
+    }
+    if (isStaleLoad()) return;
     state.ordersPage = ordersPage;
     const totalPages = Number(ordersPage && ordersPage.totalPages) || 0;
     if (state.ordersPageNumber > 1 && totalPages > 0 && state.ordersPageNumber > totalPages) {
       state.ordersPageNumber = totalPages;
-      const adjustedOrdersPage = await fetchOrdersPage();
-      if (loadToken !== state.ordersLoadToken || state.selectedServiceId !== serviceId) return;
+      let adjustedOrdersPage;
+      try {
+        adjustedOrdersPage = await fetchOrdersPage();
+      } catch (error) {
+        if (isStaleLoad()) return;
+        throw error;
+      }
+      if (isStaleLoad()) return;
       state.ordersPage = adjustedOrdersPage;
     }
     render();

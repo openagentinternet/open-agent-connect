@@ -284,6 +284,44 @@ test('my-services detail modal ignores stale order responses after switching ser
   assert.doesNotMatch(detailHtml, /payment-A-race/);
 });
 
+test('my-services detail modal ignores stale order errors after switching services', async () => {
+  const { context, elements, documentListeners, orderRequestsByService } = createContext();
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => orderRequestsByService.has('service-a'), 'initial service A order request');
+  orderRequestsByService.get('service-a')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 1,
+    totalPages: 1,
+    items: [order('initial-a', 'payment-A-initial')],
+  });
+  await waitFor(() => elements['[data-my-service-detail-modal-body]'].innerHTML.includes('payment-A-initial'), 'initial order render');
+
+  await clickDetails(documentListeners, 'service-a');
+  await waitFor(() => orderRequestsByService.get('service-a')?.length === 2, 'service A stale detail request');
+  const staleServiceARequest = orderRequestsByService.get('service-a')[1];
+
+  await clickDetails(documentListeners, 'service-b');
+  await waitFor(() => orderRequestsByService.has('service-b'), 'service B current detail request');
+  orderRequestsByService.get('service-b')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 1,
+    totalPages: 1,
+    items: [order('order-b', 'payment-B-current')],
+  });
+  await waitFor(() => elements['[data-my-service-detail-modal-body]'].innerHTML.includes('payment-B-current'), 'current service B order render');
+
+  staleServiceARequest.reject(new Error('Service A stale orders failed'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements['[data-my-services-notice]'].hidden, true);
+  assert.match(elements['[data-my-service-detail-modal-body]'].innerHTML, /Service B/);
+  assert.match(elements['[data-my-service-detail-modal-body]'].innerHTML, /payment-B-current/);
+  assert.doesNotMatch(elements['[data-my-service-detail-modal-body]'].innerHTML, /Service A stale orders failed/);
+});
+
 test('my-services defaults to the active bot and scopes startup links and reads', async () => {
   const { context, elements, fetchUrls, locationUrl } = createContext({
     profiles: [
@@ -582,4 +620,61 @@ test('my-services ignores stale services errors after switching bots', async () 
   assert.match(elements['[data-my-services-list]'].innerHTML, /Bob Service/);
   assert.doesNotMatch(elements['[data-my-services-list]'].innerHTML, /Alice services failed/);
   assert.equal(elements['[data-my-services-notice]'].hidden, true);
+});
+
+test('my-services ignores stale order errors after switching bots', async () => {
+  const servicesRequests = [];
+  const { context, elements, documentListeners, orderRequestsByService } = createContext({
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: true },
+      { slug: 'bob-bot', name: 'Bob', avatar: { label: 'BO' }, isActive: false },
+    ],
+    fetchServicesPage: (url) => {
+      const from = new URL(url, 'http://localhost').searchParams.get('from');
+      const pending = deferred();
+      servicesRequests.push({ from, pending });
+      return pending.promise;
+    },
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => servicesRequests.some((request) => request.from === 'alice-bot'), 'initial Alice services request');
+  servicesRequests.find((request) => request.from === 'alice-bot').pending.resolve({
+    page: 1,
+    pageSize: 20,
+    total: 1,
+    totalPages: 1,
+    items: [service('alice-service', 'Alice Service')],
+  });
+  await waitFor(() => orderRequestsByService.has('alice-service'), 'Alice stale order request');
+  const staleAliceOrderRequest = orderRequestsByService.get('alice-service')[0];
+
+  await clickBotOption(documentListeners, 'bob-bot');
+  await waitFor(() => servicesRequests.some((request) => request.from === 'bob-bot'), 'Bob services request');
+  servicesRequests.find((request) => request.from === 'bob-bot').pending.resolve({
+    page: 1,
+    pageSize: 20,
+    total: 1,
+    totalPages: 1,
+    items: [service('bob-service', 'Bob Service')],
+  });
+  await waitFor(() => orderRequestsByService.has('bob-service'), 'Bob current order request');
+  orderRequestsByService.get('bob-service')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 1,
+    totalPages: 1,
+    items: [order('bob-current', 'payment-Bob-current')],
+  });
+  await waitFor(() => elements['[data-my-service-detail-modal-body]'].innerHTML.includes('payment-Bob-current'), 'current Bob order render');
+
+  staleAliceOrderRequest.reject(new Error('Alice stale orders failed'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(elements['[data-my-services-notice]'].hidden, true);
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /Bob/);
+  assert.match(elements['[data-my-services-list]'].innerHTML, /Bob Service/);
+  assert.doesNotMatch(elements['[data-my-services-list]'].innerHTML, /Alice Service/);
+  assert.match(elements['[data-my-service-detail-modal-body]'].innerHTML, /payment-Bob-current/);
+  assert.doesNotMatch(elements['[data-my-service-detail-modal-body]'].innerHTML, /Alice stale orders failed/);
 });
