@@ -1591,6 +1591,54 @@ test('bot page create flow sends only the minimal identity fields', async () => 
   });
 });
 
+test('bot page create flow forwards the host hint from the URL', async () => {
+  const fields = {
+    '[data-field="new-name"]': field('Codex Bot'),
+    '[data-add-status]': field(),
+    '[data-act="confirm-add"]': field(),
+  };
+  let requestBody = null;
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'codex-bot',
+              name: 'Codex Bot',
+            },
+          },
+        }),
+      });
+    },
+    window: {
+      location: {
+        search: '?mode=create&host=codex',
+      },
+    },
+    URLSearchParams,
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.loadProfiles = () => Promise.resolve();
+
+  await context.createMetabot();
+
+  assert.deepEqual(requestBody, {
+    name: 'Codex Bot',
+    creationSource: 'ui',
+    host: 'codex',
+  });
+});
+
 test('bot page opens the creation modal after initial load when mode=create is requested', async () => {
   const loaded = deferred();
   let domReady = null;

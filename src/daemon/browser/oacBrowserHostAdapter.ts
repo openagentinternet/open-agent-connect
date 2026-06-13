@@ -27,6 +27,7 @@ import {
 import type { BrowserResolveResult } from '../../core/browser/types';
 import { createConfigStore } from '../../core/config/configStore';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
+import { isLlmProvider } from '../../core/llm/llmTypes';
 import { createMetaAppArtifactCacheStore } from '../../core/metaapp/artifactCache';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
 
@@ -52,6 +53,11 @@ export interface CreateOacBrowserHostAdapterInput {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizePreferredCreateHost(value: unknown): string | null {
+  const provider = normalizeText(value);
+  return provider && provider !== 'custom' && isLlmProvider(provider) ? provider : null;
 }
 
 function actorSelector(input?: BrowserActorInput): string {
@@ -97,6 +103,13 @@ function ownerActorIdFromPayload(payload: Record<string, unknown>): string {
 
 function botManagementHref(slug: string, tab: 'info' | 'history', focus: string): string {
   const query = new URLSearchParams({ profile: slug, tab, focus });
+  return `/ui/bot?${query.toString()}`;
+}
+
+function createBotHref(env: NodeJS.ProcessEnv): string {
+  const query = new URLSearchParams({ mode: 'create' });
+  const host = normalizePreferredCreateHost(env.METABOT_HOST) ?? normalizePreferredCreateHost(env.OAC_HOST);
+  if (host) query.set('host', host);
   return `/ui/bot?${query.toString()}`;
 }
 
@@ -167,7 +180,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
         noActorBody: 'Your local Agent needs a Bot identity before it can appear on the Agent Internet.',
         noActorAction: {
           label: 'Create Bot',
-          href: '/ui/bot?mode=create',
+          href: createBotHref(env),
         },
       },
     });

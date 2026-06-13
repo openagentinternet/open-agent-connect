@@ -17,7 +17,7 @@ async function createAdapter(input) {
     homeDir: input.homeDir,
     systemHomeDir: input.systemHomeDir,
     metaAppPreviewSessions: createMetaAppPreviewSessionRegistry(),
-    env: {},
+    env: input.env ?? {},
     fetch: input.fetch,
     privateChat: input.privateChat,
     serviceCall: input.serviceCall,
@@ -127,6 +127,30 @@ test('OAC browser host adapter returns an empty runtime when profiles cannot be 
     href: '/ui/bot?mode=create',
   });
   assert.equal(runtime.data.defaultUri, null);
+});
+
+test('OAC browser host adapter includes the host hint in first Bot creation links', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-runtime-host-hint');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const badSystemHomeFile = path.join(systemHomeDir, 'not-a-system-home-file');
+  await writeFile(badSystemHomeFile, 'not a directory\n', 'utf8');
+
+  const adapter = await createAdapter({
+    homeDir: profileHome,
+    systemHomeDir: badSystemHomeFile,
+    env: {
+      OAC_HOST: 'codex',
+    },
+  });
+
+  const runtime = await adapter.getRuntime();
+
+  assert.equal(runtime.ok, true);
+  assert.deepEqual(runtime.data.labels.noActorAction, {
+    label: 'Create Bot',
+    href: '/ui/bot?mode=create&host=codex',
+  });
 });
 
 test('OAC browser host adapter keeps local OAC actors without a globalMetaId', async (t) => {

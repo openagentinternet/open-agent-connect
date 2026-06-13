@@ -1299,6 +1299,8 @@ function createMetabot(){
   renderCreateChainPending(name);
   if(btn)btn.disabled=true;
   var body={name:name,creationSource:'ui'};
+  var host=createHostHint();
+  if(host)body.host=host;
   return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     var profile=r.data&&r.data.profile||{};
     state.selectedSlug=profile.slug||state.selectedSlug;
@@ -1328,6 +1330,13 @@ function createModeRequested(){
     var search=typeof window!=='undefined'&&window.location?window.location.search:'';
     return new URLSearchParams(search||'').get('mode')==='create';
   }catch(error){return false}
+}
+function createHostHint(){
+  try{
+    var search=typeof window!=='undefined'&&window.location?window.location.search:'';
+    var host=(new URLSearchParams(search||'').get('host')||'').trim();
+    return /^[a-z0-9][a-z0-9-]{0,63}$/i.test(host)?host:'';
+  }catch(error){return ''}
 }
 function botManagementRouteRequest(){
   if(state._managementRouteRequest)return state._managementRouteRequest;
