@@ -6,6 +6,7 @@ import { handleBuzzRoutes } from './routes/buzz';
 import { handleChainRoutes } from './routes/chain';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
+import { handleConversationRoutes } from './routes/conversations';
 import { handleFileRoutes } from './routes/file';
 import { handleIdentityRoutes } from './routes/identity';
 import { handleLoomRoutes } from './routes/loom';
@@ -28,6 +29,7 @@ const ROUTES: RouteHandler[] = [
   handleChainRoutes,
   handleDaemonRoutes,
   handleChatRoutes,
+  handleConversationRoutes,
   handleFileRoutes,
   handleIdentityRoutes,
   handleLoomRoutes,

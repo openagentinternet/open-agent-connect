@@ -36,7 +36,7 @@ function runtimeLabel(r){var name=r.displayName||r.provider||r.id||'-';var bits=
 function shortId(v){v=String(v||'');if(!v)return'-';return v.length>18?v.slice(0,12)+'...'+v.slice(-4):v}
 function botBrowserPath(globalMetaId){return '/browser/metaid/'+encodeURIComponent(String(globalMetaId||'').trim())}
 function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.botPageUnavailable','Bot Page is unavailable until GlobalMetaID is ready'));return}window.location.href=botBrowserPath(profile.globalMetaId)}
-function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.slug){showToast(uiText('bot.selectBotBeforeConversations','Select a Bot before opening conversations'));return}window.location.href='/ui/conversations?from='+encodeURIComponent(profile.slug)}
+function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.selectBotBeforeConversations','Select a Bot before opening conversations'));return}window.location.href='/ui/conversations?local='+encodeURIComponent(profile.globalMetaId)}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
@@ -394,7 +394,7 @@ function renderBotHero(profile){
   var copyGlobal=q('[data-copy-global-meta-id]');if(copyGlobal){copyGlobal.disabled=!globalMetaId;copyGlobal.setAttribute('data-value',globalMetaId);copyGlobal.setAttribute('aria-label','Copy GlobalMetaID');copyGlobal.setAttribute('title','Copy GlobalMetaID')}
   var copyUri=q('[data-copy-bot-uri]');if(copyUri){copyUri.disabled=!botUri;copyUri.setAttribute('data-value',botUri);copyUri.setAttribute('aria-label','Copy Homepage URI');copyUri.setAttribute('title','Copy Homepage URI')}
   var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!globalMetaId;
-  var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!profile.slug;
+  var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!globalMetaId;
 }
 function renderDetailHeader(profile){renderBotHero(profile)}
 

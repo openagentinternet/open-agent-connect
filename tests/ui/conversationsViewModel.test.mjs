@@ -9,101 +9,192 @@ const {
   buildConversationsPageViewModelRuntimeSource,
 } = require('../../dist/ui/pages/conversations/viewModel.js');
 
-test('buildConversationsPageViewModel maps private chats into Bot conversation summaries', () => {
+test('buildConversationsPageViewModel maps peer conversations into local-Bot scoped summaries', () => {
   const model = buildConversationsPageViewModel({
-    conversations: [
+    localBots: [
       {
-        conversationId: 'pc-gm-local-gm-bob',
-        peerGlobalMetaId: 'gm-bob',
-        peerName: 'Bob Bot',
-        topic: null,
-        strategyId: null,
-        state: 'active',
-        turnCount: 4,
-        lastDirection: 'inbound',
-        createdAt: 1776836100000,
-        updatedAt: 1776836184000,
+        name: 'Alice Bot',
+        slug: 'alice-bot',
+        globalMetaId: 'gm-local',
+        avatarDataUrl: 'data:image/png;base64,alice',
+      },
+      {
+        name: 'Eric Bot',
+        slug: 'eric-bot',
+        globalMetaId: 'gm-eric',
+        avatar: 'https://example.test/eric.png',
       },
     ],
-    selectedConversationId: 'pc-gm-local-gm-bob',
+    selectedLocalGlobalMetaId: 'gm-local',
+    conversations: [
+      {
+        conversationId: 'peer-gm-local-gm-bob',
+        localGlobalMetaId: 'gm-local',
+        localBotName: 'Alice Bot',
+        localAvatar: 'data:image/png;base64,alice',
+        peerGlobalMetaId: 'gm-bob',
+        peerName: 'Bob Bot',
+        peerAvatar: 'https://example.test/bob.png',
+        latestText: 'Order accepted',
+        latestAt: 1776836184000,
+        messageCount: 4,
+        kinds: ['private_chat', 'order_protocol'],
+      },
+    ],
+    selectedPeerGlobalMetaId: 'gm-bob',
     messages: [
       {
-        conversationId: 'pc-gm-local-gm-bob',
         messageId: 'msg-1',
-        direction: 'inbound',
-        senderGlobalMetaId: 'gm-bob',
-        content: 'Can you check the weather?',
-        messagePinId: 'pin-msg-1',
-        extensions: null,
+        direction: 'incoming',
+        kind: 'private_chat',
+        sender: { globalMetaId: 'gm-bob', name: 'Bob Bot', avatar: 'https://example.test/bob.png' },
+        recipient: { globalMetaId: 'gm-local', name: 'Alice Bot', avatar: 'data:image/png;base64,alice' },
+        content: '**Can** you check the weather?',
+        contentType: 'text/markdown',
+        txid: 'a'.repeat(64),
+        txids: ['a'.repeat(64)],
         timestamp: 1776836184000,
       },
       {
-        conversationId: 'pc-gm-local-gm-bob',
         messageId: 'msg-2',
-        direction: 'outbound',
-        senderGlobalMetaId: 'gm-local',
-        content: 'I can do that.',
-        messagePinId: 'pin-msg-2',
-        extensions: null,
+        direction: 'outgoing',
+        kind: 'order_protocol',
+        protocolTag: 'ORDER_STATUS',
+        sender: { globalMetaId: 'gm-local', name: 'Alice Bot', avatar: 'data:image/png;base64,alice' },
+        recipient: { globalMetaId: 'gm-bob', name: 'Bob Bot', avatar: 'https://example.test/bob.png' },
+        content: 'Order accepted',
+        contentType: 'text/plain',
+        pinId: `${'b'.repeat(64)}i0`,
         timestamp: 1776836190000,
       },
     ],
   });
 
+  assert.deepEqual(model.localBots, [
+    {
+      label: 'Alice Bot',
+      slug: 'alice-bot',
+      globalMetaId: 'gm-local',
+      avatar: 'data:image/png;base64,alice',
+      isSelected: true,
+    },
+    {
+      label: 'Eric Bot',
+      slug: 'eric-bot',
+      globalMetaId: 'gm-eric',
+      avatar: 'https://example.test/eric.png',
+      isSelected: false,
+    },
+  ]);
+  assert.equal(model.selectedLocalGlobalMetaId, 'gm-local');
   assert.deepEqual(model.conversations, [
     {
-      conversationId: 'pc-gm-local-gm-bob',
+      conversationId: 'peer-gm-local-gm-bob',
+      conversationIdPreview: 'peer-gm-local-gm-bob',
+      localGlobalMetaId: 'gm-local',
+      localAvatar: 'data:image/png;base64,alice',
       peerLabel: 'Bob Bot',
       peerGlobalMetaId: 'gm-bob',
-      source: 'private_chat',
-      latestText: 'Inbound private chat with Bob Bot',
+      peerAvatar: 'https://example.test/bob.png',
+      latestText: 'Order accepted',
       latestAt: 1776836184000,
       latestAtLabel: '2026-04-22 05:36',
-      kinds: ['Chat'],
+      kinds: ['Chat', 'Service'],
       stateLabel: 'Active',
-      turnCountLabel: '4 turns',
-      localBotLabel: '',
-      serviceName: '',
-      traceHref: '',
-      sessionHref: '',
-      refundHref: '',
-      advancedActions: [],
+      messageCountLabel: '4 messages',
+      localBotLabel: 'Alice Bot',
       isSelected: true,
     },
   ]);
   assert.equal(model.emptyState.title, 'No conversations yet');
   assert.deepEqual(model.messages.map((message) => ({
-    messageId: message.messageId,
-    directionLabel: message.directionLabel,
-    content: message.content,
-    timestampLabel: message.timestampLabel,
-  })), [
+      messageId: message.messageId,
+      directionLabel: message.directionLabel,
+      kindLabel: message.kindLabel,
+      content: message.content,
+      contentType: message.contentType,
+      senderLabel: message.senderLabel,
+      senderAvatar: message.senderAvatar,
+      txid: message.txid,
+      txidPreview: message.txidPreview,
+      isMarkdown: message.isMarkdown,
+      timestampLabel: message.timestampLabel,
+    })), [
     {
       messageId: 'msg-1',
       directionLabel: 'Peer',
-      content: 'Can you check the weather?',
+      kindLabel: 'Chat',
+      content: '**Can** you check the weather?',
+      contentType: 'text/markdown',
+      senderLabel: 'Bob Bot',
+      senderAvatar: 'https://example.test/bob.png',
+      txid: 'a'.repeat(64),
+      txidPreview: `${'a'.repeat(8)}...${'a'.repeat(6)}`,
+      isMarkdown: true,
       timestampLabel: '2026-04-22 05:36',
     },
     {
       messageId: 'msg-2',
       directionLabel: 'Bot',
-      content: 'I can do that.',
+      kindLabel: 'Service',
+      content: 'Order accepted',
+      contentType: 'text/plain',
+      senderLabel: 'Alice Bot',
+      senderAvatar: 'data:image/png;base64,alice',
+      txid: 'b'.repeat(64),
+      txidPreview: `${'b'.repeat(8)}...${'b'.repeat(6)}`,
+      isMarkdown: false,
       timestampLabel: '2026-04-22 05:36',
     },
   ]);
 });
 
-test('buildConversationsPageViewModel adds service trace sessions as service conversation rows', () => {
+test('buildConversationsPageViewModel selects only the requested peer when switching conversations', () => {
   const model = buildConversationsPageViewModel({
     conversations: [
       {
-        conversationId: 'pc-gm-local-gm-bob',
+        conversationId: 'peer-gm-local-gm-first',
+        localGlobalMetaId: 'gm-local',
+        peerGlobalMetaId: 'gm-first',
+        peerName: 'First Bot',
+        latestText: 'first message',
+        latestAt: 1776836200000,
+      },
+      {
+        conversationId: 'peer-gm-local-gm-second',
+        localGlobalMetaId: 'gm-local',
+        peerGlobalMetaId: 'gm-second',
+        peerName: 'Second Bot',
+        latestText: 'second message',
+        latestAt: 1776836100000,
+      },
+    ],
+    selectedPeerGlobalMetaId: 'gm-second',
+  });
+
+  assert.deepEqual(model.conversations.map((conversation) => ({
+    peerGlobalMetaId: conversation.peerGlobalMetaId,
+    isSelected: conversation.isSelected,
+  })), [
+    { peerGlobalMetaId: 'gm-first', isSelected: false },
+    { peerGlobalMetaId: 'gm-second', isSelected: true },
+  ]);
+  assert.equal(model.selectedConversation.peerGlobalMetaId, 'gm-second');
+  assert.equal(model.selectedConversation.conversationIdPreview, 'peer-gm-local-gm-second');
+});
+
+test('buildConversationsPageViewModel does not split service trace sessions into separate conversation rows', () => {
+  const model = buildConversationsPageViewModel({
+    conversations: [
+      {
+        conversationId: 'peer-gm-local-gm-bob',
+        localGlobalMetaId: 'gm-local',
         peerGlobalMetaId: 'gm-bob',
         peerName: 'Bob Bot',
-        state: 'active',
-        turnCount: 4,
-        lastDirection: 'inbound',
-        updatedAt: 1776836184000,
+        latestText: 'Latest peer message',
+        latestAt: 1776836184000,
+        messageCount: 4,
+        kinds: ['private_chat'],
       },
     ],
     traceSessionsResponse: {
@@ -130,35 +221,13 @@ test('buildConversationsPageViewModel adds service trace sessions as service con
         ],
       },
     },
-    selectedConversationId: 'service-session-weather-1',
+    selectedPeerGlobalMetaId: 'gm-bob',
   });
 
-  assert.equal(model.conversations.length, 2);
-  assert.deepEqual(model.conversations[0], {
-    conversationId: 'service-session-weather-1',
-    peerLabel: 'Buyer Bot',
-    peerGlobalMetaId: 'gm-buyer',
-    source: 'service_trace',
-    latestText: 'Weather Oracle service session with Buyer Bot',
-    latestAt: 1776836284000,
-    latestAtLabel: '2026-04-22 05:38',
-    kinds: ['Service'],
-    stateLabel: 'Completed',
-    turnCountLabel: 'session-weather-1',
-    localBotLabel: 'Alice Provider',
-    serviceName: 'Weather Oracle',
-    traceHref: '/ui/trace?traceId=trace-weather-1',
-    sessionHref: '/ui/trace?sessionId=session-weather-1',
-    refundHref: '/ui/refund?orderId=order-weather-1',
-    advancedActions: [
-      { label: 'Trace', href: '/ui/trace?traceId=trace-weather-1' },
-      { label: 'Session', href: '/ui/trace?sessionId=session-weather-1' },
-      { label: 'Refund', href: '/ui/refund?orderId=order-weather-1' },
-    ],
-    isSelected: true,
-  });
-  assert.equal(model.selectedConversation.source, 'service_trace');
-  assert.equal(model.detailEmptyState.title, 'Service conversation');
+  assert.equal(model.conversations.length, 1);
+  assert.deepEqual(model.conversations.map((conversation) => conversation.peerGlobalMetaId), ['gm-bob']);
+  assert.equal(model.selectedConversation.peerGlobalMetaId, 'gm-bob');
+  assert.equal(model.detailEmptyState.title, 'No messages yet');
   assert.deepEqual(model.messages, []);
 });
 
@@ -166,13 +235,14 @@ test('buildConversationsPageViewModel skips peer trace sessions without service 
   const model = buildConversationsPageViewModel({
     conversations: [
       {
-        conversationId: 'pc-gm-local-gm-bob',
+        conversationId: 'peer-gm-local-gm-bob',
+        localGlobalMetaId: 'gm-local',
         peerGlobalMetaId: 'gm-bob',
         peerName: 'Bob Bot',
-        state: 'active',
-        turnCount: 1,
-        lastDirection: 'inbound',
-        updatedAt: 1776836184000,
+        latestText: 'Hello',
+        latestAt: 1776836184000,
+        messageCount: 1,
+        kinds: ['private_chat'],
       },
     ],
     traceSessions: [
@@ -190,7 +260,7 @@ test('buildConversationsPageViewModel skips peer trace sessions without service 
 
   assert.deepEqual(
     model.conversations.map((conversation) => conversation.conversationId),
-    ['pc-gm-local-gm-bob'],
+    ['peer-gm-local-gm-bob'],
   );
 });
 
@@ -200,16 +270,16 @@ test('buildConversationsPageViewModelRuntimeSource executes in browser-like cont
       conversations: [
         {
           conversationId: 'pc-runtime',
+          localGlobalMetaId: 'gm-local',
           peerGlobalMetaId: 'gm-runtime-peer',
           peerName: null,
-          state: 'paused',
-          turnCount: 1,
-          lastDirection: 'outbound',
-          createdAt: 1776836100000,
-          updatedAt: 1776836200000,
+          latestText: 'Runtime hello',
+          latestAt: 1776836200000,
+          messageCount: 1,
+          kinds: ['private_chat'],
         },
       ],
-      selectedConversationId: 'pc-runtime',
+      selectedPeerGlobalMetaId: 'gm-runtime-peer',
       messages: [],
     },
     result: null,
@@ -222,7 +292,7 @@ test('buildConversationsPageViewModelRuntimeSource executes in browser-like cont
 
   assert.equal(context.result.conversations.length, 1);
   assert.equal(context.result.conversations[0].peerLabel, 'gm-runtime-peer');
-  assert.equal(context.result.conversations[0].stateLabel, 'Paused');
-  assert.equal(context.result.conversations[0].latestText, 'Outbound private chat with gm-runtime-peer');
-  assert.equal(context.result.conversations[0].source, 'private_chat');
+  assert.equal(context.result.conversations[0].stateLabel, 'Active');
+  assert.equal(context.result.conversations[0].latestText, 'Runtime hello');
+  assert.deepEqual(context.result.conversations[0].kinds, ['Chat']);
 });

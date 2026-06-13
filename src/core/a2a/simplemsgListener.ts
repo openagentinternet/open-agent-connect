@@ -258,6 +258,7 @@ function createProfileSimplemsgListener(input: {
     const inboundMessage: PrivateChatInboundMessage = {
       fromGlobalMetaId,
       content: plaintext,
+      contentType: normalizeText(message.contentType) || normalizeText(message.content_type) || null,
       messagePinId,
       fromChatPublicKey: peerChatPublicKey,
       timestamp: toFiniteTimestamp(message.timestamp),
@@ -282,6 +283,7 @@ function createProfileSimplemsgListener(input: {
         messageId: messagePinId,
         direction: 'incoming',
         content: plaintext,
+        contentType: inboundMessage.contentType,
         pinId: messagePinId,
         txid: normalizeText(message.txId) || null,
         replyPinId: normalizeText(message.replyPin) || null,

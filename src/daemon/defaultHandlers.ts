@@ -215,13 +215,20 @@ import type { A2ASessionRecord, A2ATaskRunRecord } from '../core/a2a/sessionType
 import { buildTraceWatchEvents, serializeTraceWatchEvents } from '../core/a2a/watch/traceWatch';
 import { isTerminalTraceWatchStatus } from '../core/a2a/watch/watchEvents';
 import { createA2AConversationStore } from '../core/a2a/conversationStore';
-import type { A2AConversationSession } from '../core/a2a/conversationTypes';
+import type { A2AConversationActor, A2AConversationMessage, A2AConversationSession } from '../core/a2a/conversationTypes';
 import {
   buildA2APeerSessionId,
   persistA2AConversationMessage,
   persistA2AConversationMessageBestEffort,
   type A2AConversationMessagePersister,
 } from '../core/a2a/conversationPersistence';
+import {
+  listPeerConversationSummaries,
+  readPeerConversationMessages,
+  type ListPeerConversationSummariesResult,
+  type PeerConversationSummary,
+  type ReadPeerConversationMessagesResult,
+} from '../core/a2a/conversationProjection';
 import {
   findUnifiedA2ATraceSessionForProfileByOrder,
   getUnifiedA2ATraceSessionForProfile,
@@ -4559,7 +4566,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     input.ratingFollowupRetryDelaysMs,
     DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
   );
-  const a2aConversationPersister = input.a2aConversationPersister ?? persistA2AConversationMessage;
+  const baseA2AConversationPersister = input.a2aConversationPersister ?? persistA2AConversationMessage;
   const buyerRatingReplyRunner = input.buyerRatingReplyRunner ?? createDefaultChatReplyRunner();
   const buyerRatingTextGenerator = input.buyerRatingTextGenerator ?? null;
   const callerOrderTextGenerator = input.callerOrderTextGenerator ?? null;
@@ -4568,6 +4575,141 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
   const CHAIN_AVATAR_FETCH_TIMEOUT_MS = 4500;
+
+  type ConversationProfileProjection = {
+    globalMetaId: string;
+    name: string;
+    avatar: string;
+  };
+
+  type ConversationEvent = {
+    type: 'conversation-message' | 'conversation-update';
+    localGlobalMetaId: string;
+    peerGlobalMetaId?: string;
+    messageId?: string;
+    timestamp: number;
+    kind?: string;
+    protocolTag?: string | null;
+  };
+
+  const conversationEventSubscribers = new Set<(event: ConversationEvent) => void>();
+
+  function publishConversationEvent(event: ConversationEvent): void {
+    for (const subscriber of conversationEventSubscribers) {
+      try {
+        subscriber(event);
+      } catch {
+        // One disconnected event consumer must not block message persistence.
+      }
+    }
+  }
+
+  function subscribeConversationEvents(
+    localGlobalMetaId: string,
+    subscriber: (event: ConversationEvent) => void,
+  ): () => void {
+    const normalizedLocal = normalizeText(localGlobalMetaId);
+    const filteredSubscriber = (event: ConversationEvent) => {
+      if (event.localGlobalMetaId === normalizedLocal) {
+        subscriber(event);
+      }
+    };
+    conversationEventSubscribers.add(filteredSubscriber);
+    return () => {
+      conversationEventSubscribers.delete(filteredSubscriber);
+    };
+  }
+
+  async function* streamConversationEventsForLocalBot(
+    localGlobalMetaId: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<ConversationEvent, void, unknown> {
+    const normalizedLocal = normalizeText(localGlobalMetaId);
+    const queue: ConversationEvent[] = [{
+      type: 'conversation-update',
+      localGlobalMetaId: normalizedLocal,
+      timestamp: Date.now(),
+    }];
+    let notify: (() => void) | null = null;
+    let clearAbortListener: (() => void) | null = null;
+    const removeAbortListener = () => {
+      const listener = clearAbortListener;
+      clearAbortListener = null;
+      if (listener) {
+        listener();
+      }
+    };
+    const wake = () => {
+      if (notify) {
+        const currentNotify = notify;
+        notify = null;
+        currentNotify();
+      }
+    };
+    const unsubscribe = subscribeConversationEvents(normalizedLocal, (event) => {
+      queue.push(event);
+      wake();
+    });
+    try {
+      while (!signal?.aborted) {
+        while (queue.length) {
+          const event = queue.shift();
+          if (event) {
+            yield event;
+          }
+        }
+        if (signal?.aborted) {
+          break;
+        }
+        await new Promise<void>((resolve) => {
+          const onAbort = () => {
+            signal?.removeEventListener('abort', onAbort);
+            clearAbortListener = null;
+            notify = null;
+            resolve();
+          };
+          clearAbortListener = () => {
+            signal?.removeEventListener('abort', onAbort);
+          };
+          signal?.addEventListener('abort', onAbort, { once: true });
+          notify = resolve;
+        });
+        removeAbortListener();
+      }
+    } finally {
+      removeAbortListener();
+      unsubscribe();
+    }
+  }
+
+  function buildConversationMessageEvent(
+    persistInput: Parameters<A2AConversationMessagePersister>[0],
+    message: A2AConversationMessage,
+  ): ConversationEvent | null {
+    const localGlobalMetaId = normalizeText(persistInput.local.globalMetaId);
+    const peerGlobalMetaId = normalizeText(persistInput.peer.globalMetaId);
+    if (!localGlobalMetaId || !peerGlobalMetaId) {
+      return null;
+    }
+    return {
+      type: 'conversation-message',
+      localGlobalMetaId,
+      peerGlobalMetaId,
+      messageId: message.messageId,
+      timestamp: message.timestamp,
+      kind: message.kind,
+      protocolTag: message.protocolTag ?? null,
+    };
+  }
+
+  const a2aConversationPersister: A2AConversationMessagePersister = async (persistInput) => {
+    const message = await baseA2AConversationPersister(persistInput);
+    const event = buildConversationMessageEvent(persistInput, message);
+    if (event) {
+      publishConversationEvent(event);
+    }
+    return message;
+  };
 
   function extractChainAvatarPinId(reference: string): string {
     const normalized = normalizeText(reference);
@@ -4600,49 +4742,79 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return '';
   }
 
-  async function resolveChainAvatarDataUrl(globalMetaId: string): Promise<string> {
+  async function resolveChainAvatarReferenceDataUrl(rawAvatar: string): Promise<string> {
+    const avatar = normalizeText(rawAvatar);
+    if (!avatar) return '';
+    if (/^data:image\//iu.test(avatar)) return avatar;
+    const pinId = extractChainAvatarPinId(avatar);
+    if (!pinId) return '';
+    const encodedPinId = encodeURIComponent(pinId);
+    const contentUrls = [
+      `http://localhost:7281/content/${encodedPinId}`,
+      `https://file.metaid.io/metafile-indexer/content/${encodedPinId}`,
+      `https://file.metaid.io/metafile-indexer/api/v1/users/avatar/accelerate/${encodedPinId}?process=thumbnail`,
+      `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/${encodedPinId}?process=thumbnail`,
+      `https://file.metaid.io/metafile-indexer/api/v1/files/content/${encodedPinId}`,
+    ];
+    for (const contentUrl of contentUrls) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), CHAIN_AVATAR_FETCH_TIMEOUT_MS);
+      try {
+        const contentResp = await fetch(contentUrl, { signal: controller.signal });
+        if (!contentResp.ok) continue;
+        const contentType = normalizeText(contentResp.headers.get('content-type') || '').split(';')[0]?.trim() || 'application/octet-stream';
+        if (/^text\//iu.test(contentType) || /(?:application\/json|[+/]json)(?:\s*;|$)/iu.test(contentType)) continue;
+        const buffer = Buffer.from(await contentResp.arrayBuffer());
+        if (!buffer.length) continue;
+        return `data:${contentType};base64,${buffer.toString('base64')}`;
+      } catch { /* try next URL */ }
+      finally { clearTimeout(timeout); }
+    }
+    return '';
+  }
+
+  function readChainProfileData(value: unknown): Record<string, unknown> {
+    const record = readObject(value) ?? {};
+    return readObject(record.data) ?? record;
+  }
+
+  function readChainProfileName(data: Record<string, unknown>): string {
+    return normalizeText(data.name)
+      || normalizeText(data.displayName)
+      || normalizeText(data.nickName)
+      || normalizeText(data.nickname)
+      || normalizeText(data.userName)
+      || normalizeText(data.username)
+      || normalizeText(data.metabotName)
+      || normalizeText(data.metaidName);
+  }
+
+  function readChainProfileAvatarReference(data: Record<string, unknown>): string {
+    return normalizeText(data.avatar)
+      || normalizeText(data.avatarUrl)
+      || normalizeText(data.avatarId)
+      || normalizeText(data.avatarImage)
+      || normalizeText(data.avatarUri)
+      || normalizeText(data.avatar_uri);
+  }
+
+  async function resolveChainProfile(globalMetaId: string): Promise<ConversationProfileProjection | null> {
     const gmid = normalizeText(globalMetaId);
-    if (!gmid) return '';
+    if (!gmid) return null;
     try {
       const resp = await fetch(`https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(gmid)}`);
-      if (!resp.ok) return '';
-      const json = await resp.json();
-      const data: Record<string, unknown> = json?.data || json || {};
-      const rawAvatar = normalizeText(data.avatar)
-        || normalizeText(data.avatarUrl)
-        || normalizeText(data.avatarId)
-        || normalizeText(data.avatarImage)
-        || normalizeText(data.avatarUri)
-        || normalizeText(data.avatar_uri);
-      if (!rawAvatar) return '';
-      const pinId = extractChainAvatarPinId(rawAvatar);
-      if (!pinId) return '';
-      const encodedPinId = encodeURIComponent(pinId);
-      const contentUrls = [
-        `http://localhost:7281/content/${encodedPinId}`,
-        `https://file.metaid.io/metafile-indexer/content/${encodedPinId}`,
-        `https://file.metaid.io/metafile-indexer/api/v1/users/avatar/accelerate/${encodedPinId}?process=thumbnail`,
-        `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/${encodedPinId}?process=thumbnail`,
-        `https://file.metaid.io/metafile-indexer/api/v1/files/content/${encodedPinId}`,
-      ];
-      for (const contentUrl of contentUrls) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), CHAIN_AVATAR_FETCH_TIMEOUT_MS);
-        try {
-          const contentResp = await fetch(contentUrl, { signal: controller.signal });
-          if (!contentResp.ok) continue;
-          const contentType = normalizeText(contentResp.headers.get('content-type') || '').split(';')[0]?.trim() || 'application/octet-stream';
-          if (/^text\//iu.test(contentType) || /(?:application\/json|[+/]json)(?:\s*;|$)/iu.test(contentType)) continue;
-          const buffer = Buffer.from(await contentResp.arrayBuffer());
-          if (!buffer.length) continue;
-          return `data:${contentType};base64,${buffer.toString('base64')}`;
-        } catch { /* try next URL */ }
-        finally { clearTimeout(timeout); }
-      }
-      return '';
+      if (!resp.ok) return null;
+      const data = readChainProfileData(await resp.json());
+      const avatar = await resolveChainAvatarReferenceDataUrl(readChainProfileAvatarReference(data));
+      const name = readChainProfileName(data);
+      return name || avatar ? { globalMetaId: gmid, name, avatar } : null;
     } catch {
-      return '';
+      return null;
     }
+  }
+
+  async function resolveChainAvatarDataUrl(globalMetaId: string): Promise<string> {
+    return (await resolveChainProfile(globalMetaId))?.avatar ?? '';
   }
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
@@ -5114,6 +5286,202 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return `${normalizedAmount}${unit}`;
   }
 
+  async function resolveMetabotProfileBySelector(selector: unknown): Promise<MetabotProfileFull | null> {
+    const requestedSelector = normalizeText(selector);
+    if (!requestedSelector) {
+      return null;
+    }
+    const bySlug = await getMetabotProfile(normalizedSystemHomeDir, requestedSelector);
+    if (bySlug) {
+      return bySlug;
+    }
+    const profiles = await listMetabotProfiles(normalizedSystemHomeDir).catch(() => [] as MetabotProfileFull[]);
+    return profiles.find((profile) => profile.globalMetaId === requestedSelector) ?? null;
+  }
+
+  function metabotProfileProjection(profile: MetabotProfileFull): ConversationProfileProjection | null {
+    const globalMetaId = normalizeText(profile.globalMetaId);
+    if (!globalMetaId) return null;
+    return {
+      globalMetaId,
+      name: normalizeText(profile.name),
+      avatar: normalizeText(profile.avatarDataUrl),
+    };
+  }
+
+  async function loadConversationProfileIndex(
+    selectedProfile: MetabotProfileFull,
+  ): Promise<Map<string, ConversationProfileProjection>> {
+    const profiles = await listMetabotProfiles(normalizedSystemHomeDir).catch(() => [] as MetabotProfileFull[]);
+    const index = new Map<string, ConversationProfileProjection>();
+    for (const profile of [selectedProfile, ...profiles]) {
+      const projection = metabotProfileProjection(profile);
+      if (projection) {
+        const existing = index.get(projection.globalMetaId);
+        index.set(projection.globalMetaId, existing ? { ...existing, ...projection } : projection);
+      }
+    }
+    return index;
+  }
+
+  function meaningfulConversationName(name: unknown, globalMetaId: string): string {
+    const normalized = normalizeText(name);
+    return normalized && normalized !== normalizeText(globalMetaId) ? normalized : '';
+  }
+
+  async function resolveConversationProfileProjection(inputProfile: {
+    globalMetaId: string;
+    currentName?: unknown;
+    currentAvatar?: unknown;
+    profileIndex: Map<string, ConversationProfileProjection>;
+    chainProfileCache: Map<string, Promise<ConversationProfileProjection | null>>;
+  }): Promise<ConversationProfileProjection | null> {
+    const globalMetaId = normalizeText(inputProfile.globalMetaId);
+    if (!globalMetaId) return null;
+    const indexed = inputProfile.profileIndex.get(globalMetaId) ?? null;
+    const hasName = Boolean(meaningfulConversationName(inputProfile.currentName, globalMetaId) || indexed?.name);
+    const hasAvatar = Boolean(normalizeText(inputProfile.currentAvatar) || indexed?.avatar);
+    if (hasName && hasAvatar) {
+      return indexed;
+    }
+    if (!inputProfile.chainProfileCache.has(globalMetaId)) {
+      inputProfile.chainProfileCache.set(globalMetaId, resolveChainProfile(globalMetaId));
+    }
+    const chainProfile = await inputProfile.chainProfileCache.get(globalMetaId) ?? null;
+    if (!indexed && !chainProfile) return null;
+    return {
+      globalMetaId,
+      name: indexed?.name || chainProfile?.name || '',
+      avatar: indexed?.avatar || chainProfile?.avatar || '',
+    };
+  }
+
+  function mergeConversationName(currentName: unknown, globalMetaId: string, profile: ConversationProfileProjection | null): string | null {
+    return meaningfulConversationName(currentName, globalMetaId)
+      || profile?.name
+      || normalizeText(currentName)
+      || null;
+  }
+
+  function mergeConversationAvatar(currentAvatar: unknown, profile: ConversationProfileProjection | null): string | null {
+    return normalizeText(currentAvatar) || profile?.avatar || null;
+  }
+
+  function enrichConversationActor(
+    actor: A2AConversationActor,
+    profile: ConversationProfileProjection | null,
+  ): A2AConversationActor {
+    return {
+      ...actor,
+      name: mergeConversationName(actor.name, actor.globalMetaId, profile),
+      avatar: mergeConversationAvatar(actor.avatar, profile),
+    };
+  }
+
+  async function enrichConversationListResult(
+    result: ListPeerConversationSummariesResult,
+    selectedProfile: MetabotProfileFull,
+  ): Promise<ListPeerConversationSummariesResult> {
+    const profileIndex = await loadConversationProfileIndex(selectedProfile);
+    const chainProfileCache = new Map<string, Promise<ConversationProfileProjection | null>>();
+    const localGlobalMetaId = normalizeText(result.localBot.globalMetaId) || normalizeText(selectedProfile.globalMetaId);
+    const localProfile = await resolveConversationProfileProjection({
+      globalMetaId: localGlobalMetaId,
+      currentName: result.localBot.name || selectedProfile.name,
+      currentAvatar: result.localBot.avatar || selectedProfile.avatarDataUrl,
+      profileIndex,
+      chainProfileCache,
+    });
+    const localBot = {
+      ...result.localBot,
+      globalMetaId: localGlobalMetaId,
+      name: mergeConversationName(result.localBot.name || selectedProfile.name, localGlobalMetaId, localProfile),
+      avatar: mergeConversationAvatar(result.localBot.avatar || selectedProfile.avatarDataUrl, localProfile),
+    };
+    const conversations: PeerConversationSummary[] = await Promise.all(result.conversations.map(async (summary) => {
+      const summaryLocalProfile = await resolveConversationProfileProjection({
+        globalMetaId: summary.localGlobalMetaId,
+        currentName: summary.localName,
+        currentAvatar: summary.localAvatar,
+        profileIndex,
+        chainProfileCache,
+      });
+      const peerProfile = await resolveConversationProfileProjection({
+        globalMetaId: summary.peerGlobalMetaId,
+        currentName: summary.peerName,
+        currentAvatar: summary.peerAvatar,
+        profileIndex,
+        chainProfileCache,
+      });
+      return {
+        ...summary,
+        localName: mergeConversationName(summary.localName, summary.localGlobalMetaId, summaryLocalProfile) ?? localBot.name,
+        localAvatar: mergeConversationAvatar(summary.localAvatar, summaryLocalProfile) ?? localBot.avatar,
+        peerName: mergeConversationName(summary.peerName, summary.peerGlobalMetaId, peerProfile),
+        peerAvatar: mergeConversationAvatar(summary.peerAvatar, peerProfile),
+      };
+    }));
+    return {
+      ...result,
+      localBot,
+      conversations,
+    };
+  }
+
+  async function enrichConversationMessagesResult(
+    result: ReadPeerConversationMessagesResult,
+    selectedProfile: MetabotProfileFull,
+  ): Promise<ReadPeerConversationMessagesResult> {
+    const profileIndex = await loadConversationProfileIndex(selectedProfile);
+    const chainProfileCache = new Map<string, Promise<ConversationProfileProjection | null>>();
+    const localGlobalMetaId = normalizeText(result.localBot.globalMetaId) || normalizeText(selectedProfile.globalMetaId);
+    const peerGlobalMetaId = normalizeText(result.peerBot.globalMetaId);
+    const localProfile = await resolveConversationProfileProjection({
+      globalMetaId: localGlobalMetaId,
+      currentName: result.localBot.name || selectedProfile.name,
+      currentAvatar: result.localBot.avatar || selectedProfile.avatarDataUrl,
+      profileIndex,
+      chainProfileCache,
+    });
+    const peerProfile = await resolveConversationProfileProjection({
+      globalMetaId: peerGlobalMetaId,
+      currentName: result.peerBot.name,
+      currentAvatar: result.peerBot.avatar,
+      profileIndex,
+      chainProfileCache,
+    });
+    const localBot = {
+      ...result.localBot,
+      globalMetaId: localGlobalMetaId,
+      name: mergeConversationName(result.localBot.name || selectedProfile.name, localGlobalMetaId, localProfile),
+      avatar: mergeConversationAvatar(result.localBot.avatar || selectedProfile.avatarDataUrl, localProfile),
+    };
+    const peerBot = {
+      ...result.peerBot,
+      name: mergeConversationName(result.peerBot.name, peerGlobalMetaId, peerProfile),
+      avatar: mergeConversationAvatar(result.peerBot.avatar, peerProfile),
+    };
+    const messages = result.messages.map((message) => ({
+      ...message,
+      sender: message.sender.globalMetaId === localGlobalMetaId
+        ? enrichConversationActor(message.sender, localProfile)
+        : message.sender.globalMetaId === peerGlobalMetaId
+          ? enrichConversationActor(message.sender, peerProfile)
+          : message.sender,
+      recipient: message.recipient.globalMetaId === localGlobalMetaId
+        ? enrichConversationActor(message.recipient, localProfile)
+        : message.recipient.globalMetaId === peerGlobalMetaId
+          ? enrichConversationActor(message.recipient, peerProfile)
+          : message.recipient,
+    }));
+    return {
+      ...result,
+      localBot,
+      peerBot,
+      messages,
+    };
+  }
+
   async function resolveActorWriteContext(rawActor: unknown): Promise<
     | {
       homeDir: string;
@@ -5125,7 +5493,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const requestedSlug = normalizeText(rawActor);
     let profileHomeDir = input.homeDir;
     if (requestedSlug) {
-      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedSlug);
+      const selectedProfile = await resolveMetabotProfileBySelector(requestedSlug);
       if (!selectedProfile) {
         return {
           failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
@@ -12886,6 +13254,58 @@ export function createDefaultMetabotDaemonHandlers(input: {
           traceMarkdownPath: artifacts.traceMarkdownPath,
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
         });
+      },
+    },
+    conversations: {
+      list: async (rawInput) => {
+        const profile = await resolveMetabotProfileBySelector(rawInput.local);
+        if (!profile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(rawInput.local) || '<missing>'}`);
+        }
+        try {
+          const result = await listPeerConversationSummaries({
+            homeDir: profile.homeDir,
+            localGlobalMetaId: profile.globalMetaId,
+            limit: rawInput.limit,
+          });
+          return commandSuccess(await enrichConversationListResult(result, profile));
+        } catch (error) {
+          return commandFailed(
+            'conversation_list_failed',
+            error instanceof Error ? error.message : 'Failed to load conversations.',
+          );
+        }
+      },
+      messages: async (rawInput) => {
+        const profile = await resolveMetabotProfileBySelector(rawInput.local);
+        if (!profile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(rawInput.local) || '<missing>'}`);
+        }
+        const peer = normalizeText(rawInput.peer);
+        if (!peer) {
+          return commandFailed('missing_peer', 'peer query parameter is required.');
+        }
+        try {
+          const result = await readPeerConversationMessages({
+            homeDir: profile.homeDir,
+            localGlobalMetaId: profile.globalMetaId,
+            peerGlobalMetaId: peer,
+            before: rawInput.before,
+            after: rawInput.after,
+            limit: rawInput.limit,
+          });
+          return commandSuccess(await enrichConversationMessagesResult(result, profile));
+        } catch (error) {
+          return commandFailed(
+            'conversation_messages_failed',
+            error instanceof Error ? error.message : 'Failed to load conversation messages.',
+          );
+        }
+      },
+      streamEvents: async (rawInput) => {
+        const profile = await resolveMetabotProfileBySelector(rawInput.local);
+        const localGlobalMetaId = profile?.globalMetaId ?? normalizeText(rawInput.local);
+        return streamConversationEventsForLocalBot(localGlobalMetaId, rawInput.signal);
       },
     },
     chat: {

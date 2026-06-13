@@ -31,6 +31,9 @@ async function startServer(options = {}) {
     serviceExecutions: [],
     trace: [],
     traceSessions: [],
+    conversationList: [],
+    conversationMessages: [],
+    conversationEvents: [],
     networkServices: [],
     networkBots: [],
     chatConversation: [],
@@ -296,6 +299,73 @@ async function startServer(options = {}) {
             },
           ],
         });
+      },
+    },
+    conversations: {
+      list: async (input) => {
+        calls.conversationList.push(input);
+        return commandSuccess({
+          localBot: {
+            globalMetaId: input.local,
+            name: 'Alice Bot',
+            slug: 'alice-bot',
+          },
+          conversations: [
+            {
+              conversationId: 'peer-gm-local-alice-gm-remote-bob',
+              localGlobalMetaId: input.local,
+              localBotName: 'Alice Bot',
+              peerGlobalMetaId: 'gm-remote-bob',
+              peerName: 'Bob Bot',
+              latestText: 'Weather order accepted',
+              latestAt: 1776836284000,
+              messageCount: 3,
+              kinds: ['private_chat', 'order_protocol'],
+            },
+          ],
+        });
+      },
+      messages: async (input) => {
+        calls.conversationMessages.push(input);
+        return commandSuccess({
+          localGlobalMetaId: input.local,
+          peerGlobalMetaId: input.peer,
+          messages: [
+            {
+              messageId: 'msg-private-1',
+              direction: 'incoming',
+              kind: 'private_chat',
+              content: 'hello alice',
+              timestamp: 1776836184000,
+              sender: { globalMetaId: input.peer, name: 'Bob Bot' },
+              recipient: { globalMetaId: input.local, name: 'Alice Bot' },
+            },
+            {
+              messageId: 'msg-order-1',
+              direction: 'outgoing',
+              kind: 'order_protocol',
+              protocolTag: 'ORDER_STATUS',
+              content: 'Weather order accepted',
+              timestamp: 1776836284000,
+              sender: { globalMetaId: input.local, name: 'Alice Bot' },
+              recipient: { globalMetaId: input.peer, name: 'Bob Bot' },
+            },
+          ],
+          pagination: {
+            hasMoreBefore: false,
+            before: input.before,
+            limit: input.limit,
+          },
+        });
+      },
+      streamEvents: async function* (input) {
+        calls.conversationEvents.push(input);
+        yield {
+          type: 'conversation-message',
+          localGlobalMetaId: input.local,
+          peerGlobalMetaId: 'gm-remote-bob',
+          messageId: 'msg-live-1',
+        };
       },
     },
     chat: {
@@ -2123,7 +2193,7 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /data-act="add-metabot"/);
   assert.match(html, /Open Public Bot Page/);
   assert.match(html, /data-act="view-conversations"/);
-  assert.match(html, /\/ui\/conversations\?from=/);
+  assert.match(html, /\/ui\/conversations\?local=/);
   assert.match(html, /Delete Bot/);
   assert.match(html, /LLM Providers/);
   assert.match(html, /Refresh Runtimes/);
@@ -2592,6 +2662,72 @@ test('GET /api/chat/private/conversation rejects requests without a peer', async
   });
 });
 
+test('GET /api/conversations lists peer conversations for a local Bot GlobalMetaID', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/conversations?local=gm-local-alice&limit=25`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.conversationList, [
+    {
+      local: 'gm-local-alice',
+      limit: 25,
+    },
+  ]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.localBot.globalMetaId, 'gm-local-alice');
+  assert.equal(payload.data.conversations.length, 1);
+  assert.equal(payload.data.conversations[0].peerGlobalMetaId, 'gm-remote-bob');
+  assert.deepEqual(payload.data.conversations[0].kinds, ['private_chat', 'order_protocol']);
+});
+
+test('GET /api/conversations/messages reads one peer timeline by local and remote GlobalMetaID', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/conversations/messages?local=gm-local-alice&peer=gm-remote-bob&before=1776836290000&limit=20`);
+  const payload = await response.json();
+  const missingPeerResponse = await fetch(`${server.baseUrl}/api/conversations/messages?local=gm-local-alice`);
+  const missingPeerPayload = await missingPeerResponse.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.conversationMessages, [
+    {
+      local: 'gm-local-alice',
+      peer: 'gm-remote-bob',
+      before: 1776836290000,
+      limit: 20,
+    },
+  ]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.messages.length, 2);
+  assert.deepEqual(payload.data.messages.map((message) => message.kind), ['private_chat', 'order_protocol']);
+  assert.equal(missingPeerResponse.status, 400);
+  assert.equal(missingPeerPayload.ok, false);
+  assert.equal(missingPeerPayload.code, 'missing_peer');
+});
+
+test('GET /api/conversations/events streams conversation updates scoped to a local Bot GlobalMetaID', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/conversations/events?local=gm-local-alice`, {
+    headers: { accept: 'text/event-stream' },
+  });
+  const body = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'text/event-stream; charset=utf-8');
+  assert.equal(server.calls.conversationEvents.length, 1);
+  assert.equal(server.calls.conversationEvents[0].local, 'gm-local-alice');
+  assert.equal(server.calls.conversationEvents[0].signal instanceof AbortSignal, true);
+  assert.match(body, /event: conversation-message/);
+  assert.match(body, /"localGlobalMetaId":"gm-local-alice"/);
+  assert.match(body, /"peerGlobalMetaId":"gm-remote-bob"/);
+});
+
 test('GET /api/trace/:traceId/events returns server-sent trace status events for the local inspector', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -2815,26 +2951,44 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.doesNotMatch(nav, /href="\/ui\/my-services"/);
 });
 
-test('GET /ui/conversations renders the Trace inspector under the Conversations nav label', async (t) => {
+test('GET /ui/conversations renders the local-Bot scoped IM conversations workspace', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/conversations`);
+  const response = await fetch(`${server.baseUrl}/ui/conversations?local=gm-local-alice&peer=gm-remote-bob`);
   const html = await response.text();
   const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /Conversations/);
-  assert.match(html, /trace-shell/);
-  assert.match(html, /Total A2A Sessions/);
-  assert.match(html, /\/api\/trace\/sessions\?all=true/);
-  assert.match(html, /data-session-list/);
-  assert.match(html, /data-session-detail/);
-  assert.match(html, /data-trace-total/);
-  assert.match(html, /session-panel/);
-  assert.match(html, /detail-panel/);
-  assert.doesNotMatch(html, /data-conversations-shell/);
+  assert.match(html, /data-conversations-shell/);
+  assert.match(html, /data-local-bot-picker/);
+  assert.match(html, /data-local-bot-menu/);
+  assert.match(html, /data-conversation-list/);
+  assert.match(html, /data-conversation-messages/);
+  assert.match(html, /data-conversation-readonly-status/);
+  assert.match(html, /Agent-to-agent conversation/);
+  assert.match(html, /Human replies are disabled/);
+  assert.match(html, /data-copy-toast/);
+  assert.match(html, /data-copy-text/);
+  assert.match(html, /data-conversation-id-copy/);
+  assert.match(html, /conversation-id-chip/);
+  assert.match(html, /conversation-row-avatar/);
+  assert.match(html, /msg-avatar/);
+  assert.match(html, /txidPreview/);
+  assert.doesNotMatch(html, /data-conversation-input/);
+  assert.doesNotMatch(html, /data-conversation-send/);
+  assert.doesNotMatch(html, /conversation-composer/);
+  assert.doesNotMatch(html, /\/api\/chat\/private/);
+  assert.match(html, /\/api\/bot\/profiles/);
+  assert.match(html, /\/api\/conversations\?local=/);
+  assert.match(html, /\/api\/conversations\/messages\?local=/);
+  assert.match(html, /\/api\/conversations\/events\?local=/);
+  assert.match(html, /query\.get\('local'\)/);
+  assert.match(html, /query\.get\('peer'\)/);
+  assert.doesNotMatch(html, /trace-shell/);
+  assert.doesNotMatch(html, /\/api\/trace\/sessions\?all=true/);
   assert.doesNotMatch(html, /\/api\/chat\/private\/conversations/);
   assert.doesNotMatch(html, /\/api\/chat\/private\/messages/);
   assert.match(nav, /href="\/ui\/conversations"[^>]*>Conversations(?: \*)?<\/a>/);
