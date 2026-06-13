@@ -195,8 +195,11 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
   assert.doesNotMatch(publishHtml, /skill-checkbox-list/);
   assert.doesNotMatch(publishScript, /input\[name="providerSkills"\]:checked/);
 
-  const myServicesHtml = buildMyServicesPageDefinition().contentHtml;
-  const myServicesScript = buildMyServicesPageDefinition().script;
+  const myServicesPage = buildMyServicesPageDefinition({ includePublishAction: true, includeRefundsAction: true });
+  const myServicesHtml = myServicesPage.contentHtml;
+  const myServicesScript = myServicesPage.script;
+  assert.match(myServicesHtml, /data-my-services-publish/);
+  assert.match(myServicesHtml, /data-my-services-refunds/);
   assert.match(myServicesHtml, /data-services-bot-picker/);
   assert.match(myServicesHtml, /data-services-bot-trigger/);
   assert.match(myServicesHtml, /data-services-bot-current/);
