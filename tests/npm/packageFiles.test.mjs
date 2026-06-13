@@ -25,6 +25,13 @@ const EXPECTED_NPM_SKILLS = [
 ];
 const OFFICIAL_SKILL_PREFIX = 'metabot-';
 const PACKAGE_SKILL_FILE_PATTERN = /^SKILLs\/([^/]+)\/SKILL\.md$/;
+const AGENT_BROWSER_RUNTIME_PACKAGES = [
+  '@openagentinternet/agent-browser-host-contract',
+  '@openagentinternet/agent-browser-core',
+  '@openagentinternet/agent-browser-ui',
+];
+const AGENT_BROWSER_DEV_PACKAGES = ['@openagentinternet/agent-browser-test-harness'];
+const EXACT_SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 async function readPackDryRun() {
   const { stdout } = await execFile('npm', ['pack', '--dry-run', '--json'], {
@@ -67,6 +74,23 @@ function assertOfficialSkillName(skillName, source) {
     true,
     `expected ${source} skill ${skillName} to use the ${OFFICIAL_SKILL_PREFIX} prefix`,
   );
+}
+
+function assertExactSharedBrowserPins(packageJson) {
+  const versions = [];
+  for (const packageName of AGENT_BROWSER_RUNTIME_PACKAGES) {
+    const version = packageJson.dependencies[packageName];
+    assert.match(version, EXACT_SEMVER_RE, `${packageName} must be an exact package version`);
+    versions.push(version);
+  }
+  for (const packageName of AGENT_BROWSER_DEV_PACKAGES) {
+    const version = packageJson.devDependencies[packageName];
+    assert.match(version, EXACT_SEMVER_RE, `${packageName} must be an exact package version`);
+    versions.push(version);
+  }
+
+  assert.deepEqual([...new Set(versions)], [versions[0]], 'Agent Browser packages must share one version');
+  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-host-standalone'], undefined);
 }
 
 test('npm package includes runtime install inputs and excludes generated/development-only artifacts', async () => {
@@ -135,10 +159,5 @@ test('npm package includes runtime install inputs and excludes generated/develop
 
 test('npm package pins shared Agent Browser package dependencies', async () => {
   const packageJson = JSON.parse(await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'));
-
-  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-host-contract'], '0.3.0');
-  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-core'], '0.3.0');
-  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-ui'], '0.3.0');
-  assert.equal(packageJson.devDependencies['@openagentinternet/agent-browser-test-harness'], '0.3.0');
-  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-host-standalone'], undefined);
+  assertExactSharedBrowserPins(packageJson);
 });

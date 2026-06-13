@@ -3,8 +3,32 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const AGENT_BROWSER_RUNTIME_PACKAGES = [
+  '@openagentinternet/agent-browser-host-contract',
+  '@openagentinternet/agent-browser-core',
+  '@openagentinternet/agent-browser-ui',
+];
+const AGENT_BROWSER_DEV_PACKAGES = ['@openagentinternet/agent-browser-test-harness'];
+const EXACT_SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
-test('OAC can import published Agent Browser packages pinned to 0.3.0', () => {
+function assertExactSharedBrowserPins(rootPackage) {
+  const versions = [];
+  for (const packageName of AGENT_BROWSER_RUNTIME_PACKAGES) {
+    const version = rootPackage.dependencies[packageName];
+    assert.match(version, EXACT_SEMVER_RE, `${packageName} must be an exact package version`);
+    versions.push(version);
+  }
+  for (const packageName of AGENT_BROWSER_DEV_PACKAGES) {
+    const version = rootPackage.devDependencies[packageName];
+    assert.match(version, EXACT_SEMVER_RE, `${packageName} must be an exact package version`);
+    versions.push(version);
+  }
+
+  assert.deepEqual([...new Set(versions)], [versions[0]], 'Agent Browser packages must share one version');
+  assert.equal(rootPackage.dependencies['@openagentinternet/agent-browser-host-standalone'], undefined);
+}
+
+test('OAC can import published Agent Browser packages', () => {
   const contract = require('@openagentinternet/agent-browser-host-contract');
   const core = require('@openagentinternet/agent-browser-core');
   const ui = require('@openagentinternet/agent-browser-ui/browser');
@@ -21,12 +45,7 @@ test('OAC can import published Agent Browser packages pinned to 0.3.0', () => {
   assert.equal(typeof harness.assertBrowserCommandResultShape, 'function');
 });
 
-test('OAC pins consumed Agent Browser packages to 0.3.0', () => {
+test('OAC pins consumed Agent Browser packages to one exact shared version', () => {
   const rootPackage = require('../../package.json');
-
-  assert.equal(rootPackage.dependencies['@openagentinternet/agent-browser-host-contract'], '0.3.0');
-  assert.equal(rootPackage.dependencies['@openagentinternet/agent-browser-core'], '0.3.0');
-  assert.equal(rootPackage.dependencies['@openagentinternet/agent-browser-ui'], '0.3.0');
-  assert.equal(rootPackage.devDependencies['@openagentinternet/agent-browser-test-harness'], '0.3.0');
-  assert.equal(rootPackage.dependencies['@openagentinternet/agent-browser-host-standalone'], undefined);
+  assertExactSharedBrowserPins(rootPackage);
 });
