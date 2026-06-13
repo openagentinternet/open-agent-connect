@@ -72,7 +72,10 @@ class FakeElement {
   }
 
   closest(selector) {
-    return this.matches(selector) ? this : null;
+    for (let element = this; element; element = element.parentElement ?? null) {
+      if (element.matches(selector)) return element;
+    }
+    return null;
   }
 
   setAttribute(name, value) {
@@ -210,6 +213,9 @@ function createContext(options = {}) {
     setTimeout,
     clearTimeout,
   };
+  elements['[data-services-bot-trigger]'].parentElement = elements['[data-services-bot-picker]'];
+  elements['[data-services-bot-current]'].parentElement = elements['[data-services-bot-trigger]'];
+  elements['[data-services-bot-menu]'].parentElement = elements['[data-services-bot-picker]'];
   context.window = context;
   return { context, elements, documentListeners, orderRequestsByService, fetchUrls, locationUrl };
 }
@@ -387,6 +393,11 @@ test('my-services bot picker trigger, outside click, and Escape close the menu',
   await dispatchDocumentEvent(documentListeners, 'click', { target: trigger });
   assert.equal(menu.hidden, false);
   await dispatchDocumentEvent(documentListeners, 'click', { target: new FakeElement() });
+  assert.equal(menu.hidden, true);
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: trigger });
+  assert.equal(menu.hidden, false);
+  await dispatchDocumentEvent(documentListeners, 'click', { target: elements['[data-my-services-refresh]'] });
   assert.equal(menu.hidden, true);
 
   await dispatchDocumentEvent(documentListeners, 'click', { target: trigger });

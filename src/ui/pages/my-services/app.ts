@@ -814,11 +814,11 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
 
   document.addEventListener('click', async (event) => {
     const eventTarget = event.target instanceof Element ? event.target : null;
+    if (state.botMenuOpen && eventTarget && !eventTarget.closest('[data-services-bot-picker]')) {
+      closeBotMenu();
+    }
     const target = eventTarget ? eventTarget.closest('[data-services-bot-trigger], [data-services-bot-option], [data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-detail-close], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
     if (!target) {
-      if (state.botMenuOpen && eventTarget && !eventTarget.closest('[data-services-bot-picker]')) {
-        closeBotMenu();
-      }
       return;
     }
     if (target.matches('[data-services-bot-trigger]')) {
