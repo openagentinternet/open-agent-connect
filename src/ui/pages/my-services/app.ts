@@ -220,6 +220,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     ordersPageNext: document.querySelector('[data-orders-page-next]'),
     orderPageLabel: document.querySelector('[data-my-service-order-page-label]'),
     detailModal: document.querySelector('[data-my-service-detail-modal]'),
+    detailClose: document.querySelector('[data-my-service-detail-close]'),
     detailModalBody: document.querySelector('[data-my-service-detail-modal-body]'),
     editModal: document.querySelector('[data-my-service-edit-modal]'),
     editForm: document.querySelector('[data-my-service-edit-form]'),
@@ -263,6 +264,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     editSelectedProviderSkillValues: [],
     editCandidateProviderSkillValue: '',
     botMenuOpen: false,
+    detailModalOpener: null,
   };
 
   const escapeHtml = (value) => String(value || '')
@@ -430,7 +432,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       return '<article class="service-row"' + selected + ' data-service-row="' + escapeHtml(service.currentPinId) + '">'
         + '<div class="service-cover">' + icon + '</div>'
         + '<div class="service-main">'
-        + '<div class="service-title-line"><h3>' + escapeHtml(service.title) + '</h3><span>' + escapeHtml(service.priceLabel) + '</span></div>'
+        + '<div class="service-title-line"><h3><button class="service-title-button" type="button" data-service-title-action="details" data-service-id="' + escapeHtml(service.currentPinId) + '">' + escapeHtml(service.title) + '</button></h3><span>' + escapeHtml(service.priceLabel) + '</span></div>'
         + '<p>' + escapeHtml(service.description || service.serviceName) + '</p>'
         + '<div class="service-meta"><span>' + escapeHtml(service.skillLabel) + '</span><span>' + escapeHtml(service.outputTypeLabel) + '</span><span>' + escapeHtml(service.creatorLabel) + '</span><span>' + escapeHtml(service.updatedAtLabel) + '</span></div>'
         + '<div class="service-metrics">' + metrics + '</div>'
@@ -783,8 +785,40 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     state.revokeServiceId = '';
   };
 
+  const focusElement = (element) => {
+    if (element && typeof element.focus === 'function') {
+      element.focus();
+    }
+  };
+
+  const setDetailModalLock = (locked) => {
+    if (typeof document === 'undefined' || !document.body || !document.body.classList) return;
+    document.body.classList[locked ? 'add' : 'remove']('my-services-modal-open');
+  };
+
+  const openDetail = async (serviceId, opener) => {
+    state.selectedServiceId = serviceId;
+    state.ordersPageNumber = 1;
+    state.mutationResult = null;
+    state.detailModalOpener = opener || null;
+    closeBotMenu();
+    if (elements.detailModal) elements.detailModal.hidden = false;
+    setDetailModalLock(true);
+    focusElement(elements.detailClose);
+    try {
+      await loadOrders(serviceId, false);
+    } catch (error) {
+      setError(error);
+    }
+  };
+
   const closeDetail = () => {
-    if (elements.detailModal) elements.detailModal.hidden = true;
+    if (!elements.detailModal || elements.detailModal.hidden) return;
+    elements.detailModal.hidden = true;
+    setDetailModalLock(false);
+    const opener = state.detailModalOpener;
+    state.detailModalOpener = null;
+    focusElement(opener);
   };
 
   const submitEdit = async (event) => {
@@ -852,7 +886,11 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     if (state.botMenuOpen && eventTarget && !eventTarget.closest('[data-services-bot-picker]')) {
       closeBotMenu();
     }
-    const target = eventTarget ? eventTarget.closest('[data-services-bot-trigger], [data-services-bot-option], [data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-detail-close], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
+    if (eventTarget && elements.detailModal && eventTarget === elements.detailModal && !elements.detailModal.hidden) {
+      closeDetail();
+      return;
+    }
+    const target = eventTarget ? eventTarget.closest('[data-services-bot-trigger], [data-services-bot-option], [data-service-action], [data-service-title-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-detail-close], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
     if (!target) {
       return;
     }
@@ -932,18 +970,10 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       target.textContent = 'Copied';
       return;
     }
-    const action = target.getAttribute('data-service-action');
+    const action = target.getAttribute('data-service-action') || target.getAttribute('data-service-title-action');
     const serviceId = target.getAttribute('data-service-id') || '';
     if (action === 'details') {
-      state.selectedServiceId = serviceId;
-      state.ordersPageNumber = 1;
-      state.mutationResult = null;
-      if (elements.detailModal) elements.detailModal.hidden = false;
-      try {
-        await loadOrders(serviceId, false);
-      } catch (error) {
-        setError(error);
-      }
+      await openDetail(serviceId, target);
     }
     if (action === 'edit') {
       await openEdit(serviceId);
@@ -956,6 +986,9 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && state.botMenuOpen) {
       closeBotMenu();
+    }
+    if (event.key === 'Escape' && elements.detailModal && !elements.detailModal.hidden) {
+      closeDetail();
     }
   });
 

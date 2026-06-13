@@ -44,6 +44,18 @@ class FakeElement {
     this.hidden = false;
     this.dataset = {};
     this.href = this.attributes.get('href') ?? '';
+    this.ownerDocument = null;
+    this.parentElement = null;
+    this.classList = {
+      values: new Set(),
+      add: (...tokens) => {
+        for (const token of tokens) this.classList.values.add(token);
+      },
+      remove: (...tokens) => {
+        for (const token of tokens) this.classList.values.delete(token);
+      },
+      contains: (token) => this.classList.values.has(token),
+    };
   }
 
   addEventListener(eventName, handler) {
@@ -81,6 +93,12 @@ class FakeElement {
   setAttribute(name, value) {
     this.attributes.set(name, String(value));
     if (name === 'href') this.href = String(value);
+  }
+
+  focus() {
+    if (this.ownerDocument) {
+      this.ownerDocument.activeElement = this;
+    }
   }
 }
 
@@ -131,6 +149,7 @@ function order(id, paymentTxid) {
 function createContext(options = {}) {
   const documentListeners = new Map();
   const locationUrl = new URL(options.url ?? 'http://localhost/ui/services');
+  const body = new FakeElement();
   const elements = {
     '[data-my-services-page-label]': new FakeElement(),
     '[data-my-services-publish]': new FakeElement({ href: '/ui/publish' }),
@@ -149,12 +168,26 @@ function createContext(options = {}) {
     '[data-orders-page-next]': new FakeElement({ 'data-orders-page-next': '' }),
     '[data-my-service-order-page-label]': new FakeElement(),
     '[data-my-service-detail-modal]': new FakeElement(),
+    '[data-my-service-detail-close]': new FakeElement({ 'data-my-service-detail-close': '' }),
     '[data-my-service-detail-modal-body]': new FakeElement(),
     '[data-my-service-edit-modal]': new FakeElement(),
     '[data-my-service-revoke-modal]': new FakeElement(),
     '[data-my-service-revoke-copy]': new FakeElement(),
     '[data-my-service-revoke-confirm]': new FakeElement(),
   };
+  const document = {
+    body,
+    activeElement: body,
+    querySelector: (selector) => elements[selector] ?? null,
+    addEventListener: (eventName, handler) => {
+      const listeners = documentListeners.get(eventName) ?? [];
+      listeners.push(handler);
+      documentListeners.set(eventName, listeners);
+    },
+  };
+  for (const element of [body, ...Object.values(elements)]) {
+    element.ownerDocument = document;
+  }
   const orderRequestsByService = new Map();
   const fetchUrls = [];
   const profiles = options.profiles ?? [
@@ -176,14 +209,7 @@ function createContext(options = {}) {
     Element: FakeElement,
     URL,
     URLSearchParams,
-    document: {
-      querySelector: (selector) => elements[selector] ?? null,
-      addEventListener: (eventName, handler) => {
-        const listeners = documentListeners.get(eventName) ?? [];
-        listeners.push(handler);
-        documentListeners.set(eventName, listeners);
-      },
-    },
+    document,
     fetch: (url) => {
       fetchUrls.push(String(url));
       if (String(url) === '/api/bot/profiles') {
@@ -219,6 +245,7 @@ function createContext(options = {}) {
   elements['[data-services-bot-trigger]'].parentElement = elements['[data-services-bot-picker]'];
   elements['[data-services-bot-current]'].parentElement = elements['[data-services-bot-trigger]'];
   elements['[data-services-bot-menu]'].parentElement = elements['[data-services-bot-picker]'];
+  elements['[data-my-service-detail-close]'].parentElement = elements['[data-my-service-detail-modal]'];
   context.window = context;
   return { context, elements, documentListeners, orderRequestsByService, fetchUrls, locationUrl };
 }
@@ -235,6 +262,16 @@ async function clickDetails(documentListeners, serviceId) {
     'data-service-id': serviceId,
   });
   dispatchDocumentEvent(documentListeners, 'click', { target });
+}
+
+async function clickTitle(documentListeners, serviceId, ownerDocument = null) {
+  const target = new FakeElement({
+    'data-service-title-action': 'details',
+    'data-service-id': serviceId,
+  });
+  target.ownerDocument = ownerDocument;
+  dispatchDocumentEvent(documentListeners, 'click', { target });
+  return target;
 }
 
 async function clickBotOption(documentListeners, slug) {
@@ -282,6 +319,102 @@ test('my-services detail modal ignores stale order responses after switching ser
   const detailHtml = elements['[data-my-service-detail-modal-body]'].innerHTML;
   assert.match(detailHtml, /Service B/);
   assert.doesNotMatch(detailHtml, /payment-A-race/);
+});
+
+test('my-services service title opens and closes the centered detail modal with focus restored', async () => {
+  const { context, elements, documentListeners, orderRequestsByService } = createContext();
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => orderRequestsByService.has('service-a'), 'initial service A order request');
+  orderRequestsByService.get('service-a')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 0,
+    totalPages: 0,
+    items: [],
+  });
+  await waitFor(() => elements['[data-my-services-list]'].innerHTML.includes('data-service-title-action="details"'), 'service title action render');
+
+  const opener = await clickTitle(documentListeners, 'service-b', context.document);
+  await waitFor(() => orderRequestsByService.has('service-b'), 'service B title detail request');
+
+  assert.equal(elements['[data-my-service-detail-modal]'].hidden, false);
+  assert.equal(context.document.activeElement, elements['[data-my-service-detail-close]']);
+  assert.equal(context.document.body.classList.contains('my-services-modal-open'), true);
+
+  dispatchDocumentEvent(documentListeners, 'click', { target: elements['[data-my-service-detail-close]'] });
+
+  assert.equal(elements['[data-my-service-detail-modal]'].hidden, true);
+  assert.equal(context.document.body.classList.contains('my-services-modal-open'), false);
+  assert.equal(context.document.activeElement, opener);
+});
+
+test('my-services detail modal closes with Escape and backdrop clicks', async () => {
+  const { context, elements, documentListeners, orderRequestsByService } = createContext();
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => orderRequestsByService.has('service-a'), 'initial service A order request');
+  orderRequestsByService.get('service-a')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 0,
+    totalPages: 0,
+    items: [],
+  });
+
+  const escapeOpener = await clickTitle(documentListeners, 'service-b', context.document);
+  await waitFor(() => orderRequestsByService.has('service-b'), 'service B detail request');
+  assert.equal(elements['[data-my-service-detail-modal]'].hidden, false);
+
+  dispatchDocumentEvent(documentListeners, 'keydown', { key: 'Escape' });
+  assert.equal(elements['[data-my-service-detail-modal]'].hidden, true);
+  assert.equal(context.document.activeElement, escapeOpener);
+
+  const backdropOpener = await clickTitle(documentListeners, 'service-a', context.document);
+  await waitFor(() => orderRequestsByService.get('service-a')?.length === 2, 'service A detail request');
+  assert.equal(elements['[data-my-service-detail-modal]'].hidden, false);
+
+  dispatchDocumentEvent(documentListeners, 'click', { target: elements['[data-my-service-detail-modal]'] });
+  assert.equal(elements['[data-my-service-detail-modal]'].hidden, true);
+  assert.equal(context.document.body.classList.contains('my-services-modal-open'), false);
+  assert.equal(context.document.activeElement, backdropOpener);
+});
+
+test('my-services detail modal keeps order pagination and trace actions in modal content', async () => {
+  const { context, elements, documentListeners, orderRequestsByService } = createContext();
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => orderRequestsByService.has('service-a'), 'initial service A order request');
+  orderRequestsByService.get('service-a')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 0,
+    totalPages: 0,
+    items: [],
+  });
+
+  await clickDetails(documentListeners, 'service-b');
+  await waitFor(() => orderRequestsByService.has('service-b'), 'service B detail request');
+  orderRequestsByService.get('service-b')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 20,
+    totalPages: 2,
+    items: [order('order-b', 'payment-B-current')],
+  });
+  await waitFor(() => elements['[data-my-service-detail-modal-body]'].innerHTML.includes('payment-B-current'), 'service B order render');
+
+  const detailHtml = elements['[data-my-service-detail-modal-body]'].innerHTML;
+  assert.match(detailHtml, /Service B/);
+  assert.match(detailHtml, /\/ui\/trace\?/);
+  assert.match(detailHtml, /Trace/);
+  assert.match(detailHtml, /Session/);
+  assert.equal(elements['[data-orders-page-next]'].disabled, false);
+  assert.equal(elements['[data-orders-page-prev]'].disabled, true);
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: elements['[data-orders-page-next]'] });
+  await waitFor(() => orderRequestsByService.get('service-b')?.length === 2, 'service B second order page request');
+  assert.equal(elements['[data-my-service-detail-modal]'].hidden, false);
 });
 
 test('my-services detail modal ignores stale order errors after switching services', async () => {
