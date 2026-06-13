@@ -197,6 +197,14 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
 
   const myServicesHtml = buildMyServicesPageDefinition().contentHtml;
   const myServicesScript = buildMyServicesPageDefinition().script;
+  assert.match(myServicesHtml, /data-services-bot-picker/);
+  assert.match(myServicesHtml, /data-services-bot-trigger/);
+  assert.match(myServicesHtml, /data-services-bot-current/);
+  assert.match(myServicesHtml, /data-services-bot-menu/);
+  assert.match(myServicesHtml, /data-my-service-detail-modal/);
+  assert.match(myServicesHtml, /data-my-service-detail-modal-body/);
+  assert.doesNotMatch(myServicesHtml, /my-services-detail-panel/);
+  assert.doesNotMatch(myServicesHtml, /data-my-service-detail aria-label="Selected service details"/);
   assert.match(myServicesHtml, /data-edit-provider-skill-picker/);
   assert.match(myServicesHtml, /data-edit-provider-skill-select/);
   assert.match(myServicesHtml, /data-edit-provider-skill-add/);

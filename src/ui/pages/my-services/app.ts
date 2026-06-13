@@ -25,10 +25,10 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   const toolbarTitle = options.toolbarTitle ?? 'My Services';
   const toolbarLabel = options.toolbarLabel ?? 'Loading local services...';
   const publishAction = options.includePublishAction
-    ? '<a class="btn btn-primary" href="/ui/publish">Publish Service</a>'
+    ? '<a class="btn btn-primary" href="/ui/publish" data-my-services-publish>Publish Service</a>'
     : '';
   const refundsAction = options.includeRefundsAction
-    ? '<a class="btn btn-primary" href="/ui/refund">Service Refunds</a>'
+    ? '<a class="btn btn-primary" href="/ui/refund" data-my-services-refunds>Service Refunds</a>'
     : '';
   const orderTraceActionLabel = JSON.stringify(options.orderTraceActionLabel ?? 'Trace');
   const orderSessionActionLabel = JSON.stringify(options.orderSessionActionLabel ?? 'Session');
@@ -55,6 +55,17 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
 
         <div class="my-services-notice" data-my-services-notice hidden></div>
 
+        <div class="services-bot-filter">
+          <label id="services-bot-picker-label">Local Bot</label>
+          <div class="services-bot-picker" data-services-bot-picker>
+            <button class="services-bot-trigger" type="button" data-services-bot-trigger aria-labelledby="services-bot-picker-label" aria-haspopup="listbox" aria-expanded="false">
+              <span class="services-bot-current" data-services-bot-current></span>
+              <span class="services-bot-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="services-bot-menu" data-services-bot-menu role="listbox" hidden></div>
+          </div>
+        </div>
+
         <div class="my-services-workspace">
           <section class="my-services-list-panel" aria-label="Published services">
             <div class="ledger-section-header">
@@ -67,19 +78,19 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
               <button class="btn btn-sm" type="button" data-services-page-next>Next</button>
             </div>
           </section>
+        </div>
 
-          <section class="my-services-detail-panel" data-my-service-detail aria-label="Selected service details">
-            <div class="ledger-section-header">
-              <h2>Service Detail</h2>
-              <span data-my-service-order-page-label>0 orders</span>
+        <div class="my-services-modal" data-my-service-detail-modal hidden>
+          <div class="my-services-modal-dialog my-service-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="my-service-detail-title">
+            <div class="modal-heading">
+              <div>
+                <h2 id="my-service-detail-title">Service Detail</h2>
+                <p data-my-service-order-page-label>0 orders</p>
+              </div>
+              <button class="modal-close" type="button" data-my-service-detail-close aria-label="Close service detail modal">x</button>
             </div>
-            <div class="my-service-detail-summary" data-my-service-detail-summary></div>
-            <div class="my-service-orders" data-my-service-orders></div>
-            <div class="ledger-pagination">
-              <button class="btn btn-sm" type="button" data-orders-page-prev>Previous</button>
-              <button class="btn btn-sm" type="button" data-orders-page-next>Next</button>
-            </div>
-          </section>
+            <div data-my-service-detail-modal-body></div>
+          </div>
         </div>
 
         <div class="my-services-modal" data-my-service-edit-modal hidden>
@@ -189,8 +200,14 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   const ICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/svg+xml']);
   const elements = {
     pageLabel: document.querySelector('[data-my-services-page-label]'),
+    publish: document.querySelector('[data-my-services-publish]'),
+    refunds: document.querySelector('[data-my-services-refunds]'),
     refresh: document.querySelector('[data-my-services-refresh]'),
     notice: document.querySelector('[data-my-services-notice]'),
+    botPicker: document.querySelector('[data-services-bot-picker]'),
+    botTrigger: document.querySelector('[data-services-bot-trigger]'),
+    botCurrent: document.querySelector('[data-services-bot-current]'),
+    botMenu: document.querySelector('[data-services-bot-menu]'),
     list: document.querySelector('[data-my-services-list]'),
     listCount: document.querySelector('[data-my-services-list-count]'),
     servicesPagePrev: document.querySelector('[data-services-page-prev]'),
@@ -201,6 +218,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     orderPageLabel: document.querySelector('[data-my-service-order-page-label]'),
     ordersPagePrev: document.querySelector('[data-orders-page-prev]'),
     ordersPageNext: document.querySelector('[data-orders-page-next]'),
+    detailModal: document.querySelector('[data-my-service-detail-modal]'),
+    detailModalBody: document.querySelector('[data-my-service-detail-modal-body]'),
     editModal: document.querySelector('[data-my-service-edit-modal]'),
     editForm: document.querySelector('[data-my-service-edit-form]'),
     editProviderSkillSelect: document.querySelector('[data-edit-provider-skill-select]'),
