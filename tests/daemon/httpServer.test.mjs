@@ -2893,6 +2893,11 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /My Services/);
   assert.match(html, /data-my-services-list/);
+  assert.match(html, /\.my-services-shell\s*\{[\s\S]*max-width:\s*980px/);
+  assert.match(html, /\.my-services-shell\s*\{[\s\S]*margin:\s*0 auto/);
+  assert.match(html, /\.my-services-workspace\s*\{[\s\S]*justify-items:\s*center/);
+  assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*width:\s*100%/);
+  assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*max-width:\s*900px/);
   assert.match(html, /data-services-page-prev/);
   assert.match(html, /data-services-page-next/);
   assert.match(html, /data-my-service-detail-modal/);
@@ -2910,6 +2915,10 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /name="paymentTiming"[^>]+value="prepaid"/);
   assert.match(html, /name="executionReminder"/);
   assert.match(html, /data-my-service-revoke-modal/);
+  assert.match(html, /data-service-title-action="details"/);
+  assert.match(html, /data-service-action="details"/);
+  assert.match(html, /data-service-action="edit"/);
+  assert.match(html, /data-service-action="revoke"/);
   assert.match(html, /Details/);
   assert.match(html, /Edit/);
   assert.match(html, /Revoke/);
@@ -2947,6 +2956,11 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.match(html, /Advanced Trace/);
   assert.match(html, /Trace Session/);
   assert.match(html, /data-my-services-list/);
+  assert.match(html, /\.my-services-shell\s*\{[\s\S]*max-width:\s*980px/);
+  assert.match(html, /\.my-services-shell\s*\{[\s\S]*margin:\s*0 auto/);
+  assert.match(html, /\.my-services-workspace\s*\{[\s\S]*justify-items:\s*center/);
+  assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*width:\s*100%/);
+  assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*max-width:\s*900px/);
   assert.match(html, /data-my-service-detail-modal/);
   assert.match(html, /data-my-service-detail-modal-body/);
   assert.match(html, /data-orders-page-prev/);
