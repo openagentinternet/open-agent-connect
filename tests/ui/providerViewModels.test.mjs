@@ -228,6 +228,14 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
   assert.doesNotMatch(myServicesScript, /input\[name="providerSkills"\]:checked/);
 });
 
+test('my-services details action clears stale orders before opening the detail modal', () => {
+  const { script } = buildMyServicesPageDefinition();
+  const detailsBranch = script.match(/if \(action === 'details'\) \{[\s\S]*?\n    \}/u);
+
+  assert.ok(detailsBranch, 'details action branch should exist');
+  assert.match(detailsBranch[0], /state\.selectedServiceId = serviceId;\s+state\.ordersPageNumber = 1;\s+state\.ordersPage = null;\s+state\.mutationResult = null;\s+if \(elements\.detailModal\) elements\.detailModal\.hidden = false;/u);
+});
+
 test('buildPublishPageViewModel disables publishing when primary runtime or skill roots are unavailable', () => {
   const missingRuntime = buildPublishPageViewModel({
     providerSummary: {

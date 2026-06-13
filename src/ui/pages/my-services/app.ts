@@ -766,6 +766,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     if (action === 'details') {
       state.selectedServiceId = serviceId;
       state.ordersPageNumber = 1;
+      state.ordersPage = null;
       state.mutationResult = null;
       if (elements.detailModal) elements.detailModal.hidden = false;
       try {
