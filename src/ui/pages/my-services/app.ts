@@ -261,6 +261,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     editSkillOptions: [],
     editSelectedProviderSkillValues: [],
     editCandidateProviderSkillValue: '',
+    botMenuOpen: false,
   };
 
   const escapeHtml = (value) => String(value || '')
@@ -341,12 +342,51 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     elements.botTrigger.disabled = state.profiles.length === 0;
     elements.botMenu.innerHTML = state.profiles.map((profile) => {
       const slug = profileSlug(profile);
-      return '<button type="button" class="services-bot-option" role="option" data-services-bot-option="' + escapeHtml(slug) + '" data-selected="' + (slug === state.selectedBotSlug ? 'true' : 'false') + '" aria-selected="' + (slug === state.selectedBotSlug ? 'true' : 'false') + '">'
+      return '<button type="button" class="services-bot-option" role="option" data-services-bot-option data-bot-slug="' + escapeHtml(slug) + '" data-selected="' + (slug === state.selectedBotSlug ? 'true' : 'false') + '" aria-selected="' + (slug === state.selectedBotSlug ? 'true' : 'false') + '">'
         + profileAvatarMarkup(profile)
         + '<span>' + escapeHtml(normalizeTextClient(profile && profile.name) || slug) + '</span>'
         + '</button>';
     }).join('');
-    elements.botMenu.hidden = true;
+    elements.botMenu.hidden = !state.botMenuOpen;
+    elements.botTrigger.setAttribute('aria-expanded', state.botMenuOpen ? 'true' : 'false');
+  };
+
+  const closeBotMenu = () => {
+    state.botMenuOpen = false;
+    renderBotPicker();
+  };
+
+  const toggleBotMenu = () => {
+    if (!state.profiles.length) return;
+    state.botMenuOpen = !state.botMenuOpen;
+    renderBotPicker();
+  };
+
+  const resetSelectedServiceState = () => {
+    state.servicesPage = null;
+    state.ordersPage = null;
+    state.selectedServiceId = '';
+    state.ordersPageNumber = 1;
+    state.ordersLoadToken += 1;
+    state.editServiceId = '';
+    state.revokeServiceId = '';
+    state.mutationResult = null;
+  };
+
+  const selectBot = async (slug) => {
+    const nextSlug = normalizeTextClient(slug);
+    if (!nextSlug || nextSlug === state.selectedBotSlug) {
+      closeBotMenu();
+      return;
+    }
+    state.selectedBotSlug = nextSlug;
+    state.servicesPageNumber = 1;
+    resetSelectedServiceState();
+    closeBotMenu();
+    setUrlState();
+    syncActionLinks();
+    render();
+    await loadServices(false);
   };
 
   const renderNotice = (model) => {
@@ -773,8 +813,26 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   document.addEventListener('click', async (event) => {
-    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-detail-close], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
-    if (!target) return;
+    const eventTarget = event.target instanceof Element ? event.target : null;
+    const target = eventTarget ? eventTarget.closest('[data-services-bot-trigger], [data-services-bot-option], [data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-detail-close], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
+    if (!target) {
+      if (state.botMenuOpen && eventTarget && !eventTarget.closest('[data-services-bot-picker]')) {
+        closeBotMenu();
+      }
+      return;
+    }
+    if (target.matches('[data-services-bot-trigger]')) {
+      toggleBotMenu();
+      return;
+    }
+    if (target.matches('[data-services-bot-option]')) {
+      try {
+        await selectBot(target.getAttribute('data-bot-slug') || target.getAttribute('data-services-bot-option') || '');
+      } catch (error) {
+        setError(error);
+      }
+      return;
+    }
     if (target.matches('[data-edit-provider-skill-add]')) {
       const candidate = normalizeTextClient(state.editCandidateProviderSkillValue);
       const exists = state.editSkillOptions.some((option) => option.value === candidate);
@@ -857,6 +915,12 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     }
     if (action === 'revoke') {
       openRevoke(serviceId);
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && state.botMenuOpen) {
+      closeBotMenu();
     }
   });
 

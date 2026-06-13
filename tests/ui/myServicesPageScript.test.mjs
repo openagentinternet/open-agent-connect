@@ -37,6 +37,7 @@ function waitFor(condition, label) {
 class FakeElement {
   constructor(attributes = {}) {
     this.attributes = new Map(Object.entries(attributes));
+    this.listeners = new Map();
     this.innerHTML = '';
     this.textContent = '';
     this.disabled = false;
@@ -45,7 +46,17 @@ class FakeElement {
     this.href = this.attributes.get('href') ?? '';
   }
 
-  addEventListener() {}
+  addEventListener(eventName, handler) {
+    const listeners = this.listeners.get(eventName) ?? [];
+    listeners.push(handler);
+    this.listeners.set(eventName, listeners);
+  }
+
+  dispatchEvent(eventName, event = {}) {
+    for (const handler of this.listeners.get(eventName) ?? []) {
+      handler({ target: this, currentTarget: this, preventDefault() {}, ...event });
+    }
+  }
 
   getAttribute(name) {
     return this.attributes.get(name) ?? null;
@@ -115,7 +126,7 @@ function order(id, paymentTxid) {
 }
 
 function createContext(options = {}) {
-  const clickListeners = [];
+  const documentListeners = new Map();
   const locationUrl = new URL(options.url ?? 'http://localhost/ui/services');
   const elements = {
     '[data-my-services-page-label]': new FakeElement(),
@@ -123,10 +134,10 @@ function createContext(options = {}) {
     '[data-my-services-refunds]': new FakeElement({ href: '/ui/refund' }),
     '[data-my-services-refresh]': new FakeElement({ 'data-my-services-refresh': '' }),
     '[data-my-services-notice]': new FakeElement(),
-    '[data-services-bot-picker]': new FakeElement(),
-    '[data-services-bot-trigger]': new FakeElement(),
+    '[data-services-bot-picker]': new FakeElement({ 'data-services-bot-picker': '' }),
+    '[data-services-bot-trigger]': new FakeElement({ 'data-services-bot-trigger': '' }),
     '[data-services-bot-current]': new FakeElement(),
-    '[data-services-bot-menu]': new FakeElement(),
+    '[data-services-bot-menu]': new FakeElement({ 'data-services-bot-menu': '' }),
     '[data-my-services-list]': new FakeElement(),
     '[data-my-services-list-count]': new FakeElement(),
     '[data-services-page-prev]': new FakeElement({ 'data-services-page-prev': '' }),
@@ -165,7 +176,9 @@ function createContext(options = {}) {
     document: {
       querySelector: (selector) => elements[selector] ?? null,
       addEventListener: (eventName, handler) => {
-        if (eventName === 'click') clickListeners.push(handler);
+        const listeners = documentListeners.get(eventName) ?? [];
+        listeners.push(handler);
+        documentListeners.set(eventName, listeners);
       },
     },
     fetch: (url) => {
@@ -198,21 +211,33 @@ function createContext(options = {}) {
     clearTimeout,
   };
   context.window = context;
-  return { context, elements, clickListeners, orderRequestsByService, fetchUrls, locationUrl };
+  return { context, elements, documentListeners, orderRequestsByService, fetchUrls, locationUrl };
 }
 
-function clickDetails(clickListeners, serviceId) {
+function dispatchDocumentEvent(documentListeners, eventName, event) {
+  for (const listener of documentListeners.get(eventName) ?? []) {
+    listener(event);
+  }
+}
+
+async function clickDetails(documentListeners, serviceId) {
   const target = new FakeElement({
     'data-service-action': 'details',
     'data-service-id': serviceId,
   });
-  for (const listener of clickListeners) {
-    listener({ target });
-  }
+  dispatchDocumentEvent(documentListeners, 'click', { target });
+}
+
+async function clickBotOption(documentListeners, slug) {
+  const target = new FakeElement({
+    'data-services-bot-option': '',
+    'data-bot-slug': slug,
+  });
+  dispatchDocumentEvent(documentListeners, 'click', { target });
 }
 
 test('my-services detail modal ignores stale order responses after switching services', async () => {
-  const { context, elements, clickListeners, orderRequestsByService } = createContext();
+  const { context, elements, documentListeners, orderRequestsByService } = createContext();
   vm.runInNewContext(buildMyServicesPageDefinition().script, context);
 
   await waitFor(() => orderRequestsByService.has('service-a'), 'initial service A order request');
@@ -225,11 +250,11 @@ test('my-services detail modal ignores stale order responses after switching ser
   });
   await waitFor(() => elements['[data-my-service-detail-modal-body]'].innerHTML.includes('payment-A-initial'), 'initial order render');
 
-  clickDetails(clickListeners, 'service-a');
+  await clickDetails(documentListeners, 'service-a');
   await waitFor(() => orderRequestsByService.get('service-a')?.length === 2, 'service A detail request');
   const serviceARequest = orderRequestsByService.get('service-a')[1];
 
-  clickDetails(clickListeners, 'service-b');
+  await clickDetails(documentListeners, 'service-b');
   await waitFor(() => orderRequestsByService.has('service-b'), 'service B detail request');
 
   const loadingDetailHtml = elements['[data-my-service-detail-modal-body]'].innerHTML;
@@ -297,7 +322,7 @@ test('my-services honors a valid from query over the active bot', async () => {
 });
 
 test('my-services service and order reads do not request all bots', async () => {
-  const { context, clickListeners, fetchUrls, orderRequestsByService } = createContext({
+  const { context, documentListeners, fetchUrls, orderRequestsByService } = createContext({
     profiles: [
       { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: true },
     ],
@@ -305,7 +330,7 @@ test('my-services service and order reads do not request all bots', async () => 
   vm.runInNewContext(buildMyServicesPageDefinition().script, context);
 
   await waitFor(() => orderRequestsByService.has('service-a'), 'initial scoped order request');
-  clickDetails(clickListeners, 'service-b');
+  await clickDetails(documentListeners, 'service-b');
   await waitFor(() => orderRequestsByService.has('service-b'), 'detail scoped order request');
 
   const scopedUrls = fetchUrls.filter((url) => url.startsWith('/api/services/owned'));
@@ -315,4 +340,119 @@ test('my-services service and order reads do not request all bots', async () => 
     assert.equal(parsed.searchParams.get('from'), 'alice-bot');
     assert.equal(parsed.searchParams.get('all'), null);
   }
+});
+
+test('my-services bot picker renders loaded profiles without an all-bots option', async () => {
+  const { context, elements, fetchUrls } = createContext({
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: true },
+      { slug: 'bob-bot', name: 'Bob', avatar: { label: 'BO' }, isActive: false },
+    ],
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => fetchUrls.some((url) => url.startsWith('/api/services/owned?')), 'startup services request');
+
+  const menuHtml = elements['[data-services-bot-menu]'].innerHTML;
+  assert.equal((menuHtml.match(/data-services-bot-option/gu) ?? []).length, 2);
+  assert.match(menuHtml, /data-bot-slug="alice-bot"/);
+  assert.match(menuHtml, /data-bot-slug="bob-bot"/);
+  assert.match(menuHtml, /Alice/);
+  assert.match(menuHtml, /BO/);
+  assert.doesNotMatch(menuHtml, /All Bots/i);
+});
+
+test('my-services bot picker trigger, outside click, and Escape close the menu', async () => {
+  const { context, elements, documentListeners, fetchUrls } = createContext({
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: true },
+      { slug: 'bob-bot', name: 'Bob', avatar: { label: 'BO' }, isActive: false },
+    ],
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+  await waitFor(() => fetchUrls.some((url) => url.startsWith('/api/services/owned?')), 'startup services request');
+
+  const trigger = elements['[data-services-bot-trigger]'];
+  const menu = elements['[data-services-bot-menu]'];
+  assert.equal(menu.hidden, true);
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: trigger });
+  assert.equal(menu.hidden, false);
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: trigger });
+  assert.equal(menu.hidden, true);
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: trigger });
+  assert.equal(menu.hidden, false);
+  await dispatchDocumentEvent(documentListeners, 'click', { target: new FakeElement() });
+  assert.equal(menu.hidden, true);
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: trigger });
+  assert.equal(menu.hidden, false);
+  await dispatchDocumentEvent(documentListeners, 'keydown', { key: 'Escape' });
+  assert.equal(menu.hidden, true);
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+});
+
+test('my-services bot option selection scopes URL, links, services, and clears stale detail state', async () => {
+  const { context, elements, documentListeners, fetchUrls, locationUrl, orderRequestsByService } = createContext({
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: true },
+      { slug: 'bob-bot', name: 'Bob', avatar: { label: 'BO' }, isActive: false },
+    ],
+  });
+  vm.runInNewContext(
+    buildMyServicesPageDefinition({ includePublishAction: true, includeRefundsAction: true }).script,
+    context,
+  );
+
+  await waitFor(() => orderRequestsByService.has('service-a'), 'initial order request');
+  orderRequestsByService.get('service-a')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 1,
+    totalPages: 1,
+    items: [order('initial-a', 'payment-A-initial')],
+  });
+  await waitFor(() => elements['[data-my-service-detail-modal-body]'].innerHTML.includes('payment-A-initial'), 'initial order render');
+
+  await clickDetails(documentListeners, 'service-b');
+  await waitFor(() => orderRequestsByService.has('service-b'), 'service B detail request');
+  const staleServiceBRequest = orderRequestsByService.get('service-b')[0];
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: elements['[data-services-bot-trigger]'] });
+  await clickBotOption(documentListeners, 'bob-bot');
+  await waitFor(
+    () => fetchUrls.filter((url) => url.startsWith('/api/services/owned?') && new URL(url, 'http://localhost').searchParams.get('from') === 'bob-bot').length === 1,
+    'bob scoped services reload',
+  );
+
+  assert.equal(elements['[data-services-bot-menu]'].hidden, true);
+  assert.equal(locationUrl.search, '?from=bob-bot');
+  assert.equal(elements['[data-my-services-publish]'].href, '/ui/publish?from=bob-bot');
+  assert.equal(elements['[data-my-services-refunds]'].href, '/ui/refund?from=bob-bot');
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /Bob/);
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /BO/);
+
+  const bobServicesUrl = fetchUrls.findLast((url) => url.startsWith('/api/services/owned?'));
+  const params = new URL(bobServicesUrl, 'http://localhost').searchParams;
+  assert.equal(params.get('from'), 'bob-bot');
+  assert.equal(params.get('page'), '1');
+  assert.equal(params.get('all'), null);
+
+  const loadingDetailHtml = elements['[data-my-service-detail-modal-body]'].innerHTML;
+  assert.doesNotMatch(loadingDetailHtml, /Service B/);
+  assert.doesNotMatch(loadingDetailHtml, /payment-A-initial/);
+
+  staleServiceBRequest.resolve({
+    page: 1,
+    pageSize: 10,
+    total: 1,
+    totalPages: 1,
+    items: [order('stale-b', 'payment-B-stale')],
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.doesNotMatch(elements['[data-my-service-detail-modal-body]'].innerHTML, /payment-B-stale/);
 });
