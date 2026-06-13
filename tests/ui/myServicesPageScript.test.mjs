@@ -190,6 +190,9 @@ function createContext(options = {}) {
         return Promise.resolve(response({ profiles }));
       }
       if (String(url).startsWith('/api/services/owned?')) {
+        if (typeof options.fetchServicesPage === 'function') {
+          return Promise.resolve(options.fetchServicesPage(String(url))).then((data) => response(data));
+        }
         return Promise.resolve(response(servicesPage));
       }
       if (String(url).startsWith('/api/services/owned/orders?')) {
@@ -466,4 +469,65 @@ test('my-services bot option selection scopes URL, links, services, and clears s
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.doesNotMatch(elements['[data-my-service-detail-modal-body]'].innerHTML, /payment-B-stale/);
+});
+
+test('my-services ignores stale services responses after switching bots', async () => {
+  const servicesRequests = [];
+  const { context, elements, documentListeners, fetchUrls, orderRequestsByService } = createContext({
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: false },
+      { slug: 'bob-bot', name: 'Bob', avatar: { label: 'BO' }, isActive: true },
+    ],
+    fetchServicesPage: (url) => {
+      const from = new URL(url, 'http://localhost').searchParams.get('from');
+      const pending = deferred();
+      servicesRequests.push({ from, pending });
+      return pending.promise;
+    },
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => servicesRequests.some((request) => request.from === 'bob-bot'), 'initial Bob services request');
+
+  await clickBotOption(documentListeners, 'alice-bot');
+  await waitFor(() => servicesRequests.some((request) => request.from === 'alice-bot'), 'Alice services request');
+
+  servicesRequests.find((request) => request.from === 'alice-bot').pending.resolve({
+    page: 1,
+    pageSize: 20,
+    total: 1,
+    totalPages: 1,
+    items: [service('alice-service', 'Alice Service')],
+  });
+  await waitFor(() => orderRequestsByService.has('alice-service'), 'Alice order request');
+
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /Alice/);
+  assert.match(elements['[data-my-services-list]'].innerHTML, /Alice Service/);
+  assert.doesNotMatch(elements['[data-my-services-list]'].innerHTML, /Bob Service/);
+
+  const aliceOrderUrl = fetchUrls.find((url) => url.startsWith('/api/services/owned/orders?') && new URL(url, 'http://localhost').searchParams.get('serviceId') === 'alice-service');
+  assert.ok(aliceOrderUrl, 'expected Alice order request');
+  assert.equal(new URL(aliceOrderUrl, 'http://localhost').searchParams.get('from'), 'alice-bot');
+
+  servicesRequests.find((request) => request.from === 'bob-bot').pending.resolve({
+    page: 1,
+    pageSize: 20,
+    total: 1,
+    totalPages: 1,
+    items: [service('bob-service', 'Bob Service')],
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /Alice/);
+  assert.match(elements['[data-my-services-list]'].innerHTML, /Alice Service/);
+  assert.doesNotMatch(elements['[data-my-services-list]'].innerHTML, /Bob Service/);
+  assert.equal(orderRequestsByService.has('bob-service'), false);
+  assert.equal(
+    fetchUrls.some((url) => {
+      if (!url.startsWith('/api/services/owned/orders?')) return false;
+      const params = new URL(url, 'http://localhost').searchParams;
+      return params.get('serviceId') === 'bob-service' && params.get('from') === 'alice-bot';
+    }),
+    false,
+  );
 });

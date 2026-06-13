@@ -251,6 +251,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     servicesPageSize: 20,
     ordersPageNumber: 1,
     ordersPageSize: 10,
+    servicesLoadToken: 0,
     ordersLoadToken: 0,
     editServiceId: '',
     revokeServiceId: '',
@@ -367,6 +368,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     state.ordersPage = null;
     state.selectedServiceId = '';
     state.ordersPageNumber = 1;
+    state.servicesLoadToken += 1;
     state.ordersLoadToken += 1;
     state.editServiceId = '';
     state.revokeServiceId = '';
@@ -516,16 +518,23 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   const loadServices = async (refresh) => {
+    const loadToken = ++state.servicesLoadToken;
+    const selectedBotSlug = state.selectedBotSlug;
     state.error = null;
-    if (!state.selectedBotSlug) {
+    if (!selectedBotSlug) {
       throw new Error('No local Bot profile is available for Services.');
     }
-    const fetchServicesPage = () => fetchJson('/api/services/owned?from=' + encodeURIComponent(state.selectedBotSlug) + '&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
-    state.servicesPage = await fetchServicesPage();
+    const isStaleLoad = () => loadToken !== state.servicesLoadToken || state.selectedBotSlug !== selectedBotSlug;
+    const fetchServicesPage = () => fetchJson('/api/services/owned?from=' + encodeURIComponent(selectedBotSlug) + '&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    const servicesPage = await fetchServicesPage();
+    if (isStaleLoad()) return;
+    state.servicesPage = servicesPage;
     const totalPages = Number(state.servicesPage && state.servicesPage.totalPages) || 0;
     if (state.servicesPageNumber > 1 && totalPages > 0 && state.servicesPageNumber > totalPages) {
       state.servicesPageNumber = totalPages;
-      state.servicesPage = await fetchServicesPage();
+      const adjustedServicesPage = await fetchServicesPage();
+      if (isStaleLoad()) return;
+      state.servicesPage = adjustedServicesPage;
     }
     const items = getServiceItems();
     const hasSelected = items.some((service) => normalizeTextClient(service && (service.currentPinId || service.id)) === state.selectedServiceId);
