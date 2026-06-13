@@ -12,10 +12,11 @@ const app_3 = require("../../ui/pages/publish/app");
 const app_4 = require("../../ui/pages/refund/app");
 const app_5 = require("../../ui/pages/trace/app");
 const app_6 = require("../../ui/pages/bot/app");
-const app_7 = require("../../ui/pages/loom/app");
-const app_8 = require("../../ui/pages/metaapps/app");
-const app_9 = require("../../ui/pages/services/app");
-const app_10 = require("../../ui/pages/settings/app");
+const app_7 = require("../../ui/pages/conversations/app");
+const app_8 = require("../../ui/pages/loom/app");
+const app_9 = require("../../ui/pages/metaapps/app");
+const app_10 = require("../../ui/pages/services/app");
+const app_11 = require("../../ui/pages/settings/app");
 const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
 const uiMetaApps_1 = require("./uiMetaApps");
@@ -35,11 +36,11 @@ const PAGE_BUILDERS = {
     'trace': app_5.buildTracePageDefinition,
     'refund': app_4.buildRefundPageDefinition,
     'bot': app_6.buildBotPageDefinition,
-    'conversations': buildConversationsTracePageDefinition,
-    'services': app_9.buildServicesPageDefinition,
-    'settings': app_10.buildSettingsPageDefinition,
-    'loom': app_7.buildLoomPageDefinition,
-    'metaapps': app_8.buildMetaAppsPageDefinition,
+    'conversations': app_7.buildConversationsPageDefinition,
+    'services': app_10.buildServicesPageDefinition,
+    'settings': app_11.buildSettingsPageDefinition,
+    'loom': app_8.buildLoomPageDefinition,
+    'metaapps': app_9.buildMetaAppsPageDefinition,
 };
 const NAV_ITEMS = [
     { page: 'bot', labelKey: 'nav.botPage' },
@@ -83,15 +84,6 @@ function renderTopbarLanguageSelector(i18n) {
 function renderTopbarAction(i18n) {
     return `<a class="topbar-action" href="/browser" data-i18n-key="action.openBrowser">${escapeHtml(i18n.t('action.openBrowser'))}</a>`;
 }
-function buildConversationsTracePageDefinition() {
-    const definition = (0, app_5.buildTracePageDefinition)();
-    return {
-        ...definition,
-        page: 'conversations',
-        title: 'Conversations — Open Agent Connect',
-        eyebrow: 'Conversations',
-    };
-}
 function injectTopbarChrome(html, i18n) {
     const withLogo = html.replace(/<a class="topbar-logo" href="\/ui\/hub">MetaBot<\/a>/, '<a class="topbar-logo" href="/ui/bot">Open Agent Connect</a>');
     return withLogo.replace('</nav>', `</nav>${renderTopbarLanguageSelector(i18n)}${renderTopbarAction(i18n)}`);
@@ -110,9 +102,7 @@ function resolveTemplatePath(page) {
 async function loadTemplate(page) {
     const templatePage = page === 'services'
         ? 'my-services'
-        : page === 'conversations'
-            ? 'trace'
-            : page;
+        : page;
     const copiedAssetPath = node_path_1.default.resolve(__dirname, `../../ui/pages/${templatePage}/index.html`);
     try {
         return await node_fs_1.promises.readFile(copiedAssetPath, 'utf8');
@@ -127,7 +117,7 @@ function buildPageDefinition(page, i18n) {
     if (!builder) {
         throw new Error(`Local UI page is not registered: ${page}`);
     }
-    return page === 'settings' ? (0, app_10.buildSettingsPageDefinition)(i18n) : builder();
+    return page === 'settings' ? (0, app_11.buildSettingsPageDefinition)(i18n) : builder();
 }
 async function renderBuiltInPage(page, languagePreference) {
     const i18n = (0, i18n_1.createI18nContext)(languagePreference);

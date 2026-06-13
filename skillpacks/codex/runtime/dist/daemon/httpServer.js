@@ -12,6 +12,7 @@ const buzz_1 = require("./routes/buzz");
 const chain_1 = require("./routes/chain");
 const daemon_1 = require("./routes/daemon");
 const chat_1 = require("./routes/chat");
+const conversations_1 = require("./routes/conversations");
 const file_1 = require("./routes/file");
 const identity_1 = require("./routes/identity");
 const loom_1 = require("./routes/loom");
@@ -31,6 +32,7 @@ const ROUTES = [
     chain_1.handleChainRoutes,
     daemon_1.handleDaemonRoutes,
     chat_1.handleChatRoutes,
+    conversations_1.handleConversationRoutes,
     file_1.handleFileRoutes,
     identity_1.handleIdentityRoutes,
     loom_1.handleLoomRoutes,

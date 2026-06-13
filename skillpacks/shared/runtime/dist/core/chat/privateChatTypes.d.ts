@@ -42,6 +42,7 @@ export interface ChatPersona {
 export interface PrivateChatInboundMessage {
     fromGlobalMetaId: string;
     content: string;
+    contentType?: string | null;
     messagePinId: string | null;
     fromChatPublicKey: string | null;
     timestamp: number;

@@ -19,6 +19,8 @@ export interface MetaWebPrivateMessage {
     txId?: string | null;
     pinId?: string | null;
     content?: string | null;
+    contentType?: string | null;
+    content_type?: string | null;
     timestamp?: number | null;
     replyPin?: string | null;
     fromGlobalMetaId?: string | null;

@@ -12,9 +12,14 @@ const metaAppPinResolver_1 = require("../../core/browser/metaAppPinResolver");
 const settings_1 = require("../../core/browser/settings");
 const configStore_1 = require("../../core/config/configStore");
 const commandResult_1 = require("../../core/contracts/commandResult");
+const llmTypes_1 = require("../../core/llm/llmTypes");
 const artifactCache_1 = require("../../core/metaapp/artifactCache");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+function normalizePreferredCreateHost(value) {
+    const provider = normalizeText(value);
+    return provider && provider !== 'custom' && (0, llmTypes_1.isLlmProvider)(provider) ? provider : null;
 }
 function actorSelector(input) {
     return normalizeText(input?.actorId) || normalizeText(input?.from);
@@ -53,6 +58,13 @@ function ownerActorIdFromPayload(payload) {
 }
 function botManagementHref(slug, tab, focus) {
     const query = new URLSearchParams({ profile: slug, tab, focus });
+    return `/ui/bot?${query.toString()}`;
+}
+function createBotHref(env) {
+    const query = new URLSearchParams({ mode: 'create' });
+    const host = normalizePreferredCreateHost(env.METABOT_HOST) ?? normalizePreferredCreateHost(env.OAC_HOST);
+    if (host)
+        query.set('host', host);
     return `/ui/bot?${query.toString()}`;
 }
 function wrapTrustedActionResult(kind, result) {
@@ -111,7 +123,7 @@ function createOacBrowserHostAdapter(input) {
                 noActorBody: 'Your local Agent needs a Bot identity before it can appear on the Agent Internet.',
                 noActorAction: {
                     label: 'Create Bot',
-                    href: '/ui/bot?mode=create',
+                    href: createBotHref(env),
                 },
             },
         });
