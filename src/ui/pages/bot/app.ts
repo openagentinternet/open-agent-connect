@@ -260,7 +260,7 @@ function chatAllowedSkillsMarkup(profile){
   var note=status==='loading'?'<div class="save-status saving">'+esc(uiText('bot.loadingChatSkills','Loading chat skills...'))+'</div>':(status==='error'?'<div class="save-status error">'+esc(error||uiText('bot.chatSkillsLoadFailed','Failed to load chat skills.'))+'</div>':'');
   return '<div class="field field-full chat-skills-field"><label>'+esc(uiText('bot.chatAllowedSkills','Chat Allowed Skills'))+'</label>'+
     '<div class="chat-skill-chips">'+chips+'</div>'+
-    '<div class="chat-skill-picker"><select data-field="chatSkillSelect"'+(status==='loading'?' disabled':'')+'>'+optionHtml+'</select><button type="button" class="btn btn-sm" data-act="add-chat-skill"'+(status==='loading'?' disabled':'')+'>'+esc(uiText('bot.add','Add'))+'</button></div>'+
+    '<div class="chat-skill-picker"><select data-field="chatSkillSelect"'+(status==='loading'?' disabled':'')+'>'+optionHtml+'</select><button type="button" class="btn btn-primary btn-sm" data-act="add-chat-skill"'+(status==='loading'?' disabled':'')+'>'+esc(uiText('bot.add','Add'))+'</button></div>'+
     note+
   '</div>';
 }
@@ -531,7 +531,6 @@ function renderChatSkillsTab(){
   state.originalProfile=profile;
   root.innerHTML='<div class="info-edit-panel" data-chat-skills-profile-slug="'+esc(profile.slug)+'">'+
     '<div class="info-form-grid">'+
-      '<div class="field field-full"><label>'+esc(uiText('bot.chatSkills','Chat Skills'))+'</label><div class="settings-note">'+esc(uiText('bot.chatSkillsNote','Choose which skills can be used for private conversation replies.'))+'</div></div>'+
       chatAllowedSkillsMarkup(profile)+
     '</div>'+
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-chat-skills">'+esc(uiText('bot.saveChatSkills','Save Chat Skills'))+'</button><span class="save-status" data-save-status></span></div></div>';
