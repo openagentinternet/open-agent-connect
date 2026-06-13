@@ -2897,6 +2897,8 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(html, /data-services-page-next/);
   assert.match(html, /data-my-service-detail-modal/);
   assert.match(html, /data-my-service-detail-modal-body/);
+  assert.match(html, /data-orders-page-prev/);
+  assert.match(html, /data-orders-page-next/);
   assert.match(html, /data-my-service-order-page-label/);
   assert.match(html, /data-my-service-edit-modal/);
   assert.match(html, /data-edit-provider-skill-picker/);
@@ -2947,6 +2949,8 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.match(html, /data-my-services-list/);
   assert.match(html, /data-my-service-detail-modal/);
   assert.match(html, /data-my-service-detail-modal-body/);
+  assert.match(html, /data-orders-page-prev/);
+  assert.match(html, /data-orders-page-next/);
   assert.match(html, /data-my-service-order-page-label/);
   assert.match(html, /\/api\/services\/owned/);
   assert.match(html, /\/api\/services\/owned\/orders/);

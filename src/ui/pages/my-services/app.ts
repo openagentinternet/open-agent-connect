@@ -90,6 +90,10 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
               <button class="modal-close" type="button" data-my-service-detail-close aria-label="Close service detail modal">x</button>
             </div>
             <div data-my-service-detail-modal-body></div>
+            <div class="ledger-pagination" data-my-service-order-pagination>
+              <button class="btn btn-sm" type="button" data-orders-page-prev>Previous</button>
+              <button class="btn btn-sm" type="button" data-orders-page-next>Next</button>
+            </div>
           </div>
         </div>
 
@@ -212,6 +216,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     listCount: document.querySelector('[data-my-services-list-count]'),
     servicesPagePrev: document.querySelector('[data-services-page-prev]'),
     servicesPageNext: document.querySelector('[data-services-page-next]'),
+    ordersPagePrev: document.querySelector('[data-orders-page-prev]'),
+    ordersPageNext: document.querySelector('[data-orders-page-next]'),
     orderPageLabel: document.querySelector('[data-my-service-order-page-label]'),
     detailModal: document.querySelector('[data-my-service-detail-modal]'),
     detailModalBody: document.querySelector('[data-my-service-detail-modal-body]'),
@@ -346,6 +352,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
 
   const renderDetail = (model) => {
     if (elements.orderPageLabel) elements.orderPageLabel.textContent = model.orderPageLabel;
+    if (elements.ordersPagePrev) elements.ordersPagePrev.disabled = !model.orderPagination.canPrevious || !model.selectedService;
+    if (elements.ordersPageNext) elements.ordersPageNext.disabled = !model.orderPagination.canNext || !model.selectedService;
     if (!elements.detailModalBody) return;
     const selected = model.selectedService;
     if (!selected) {
@@ -683,7 +691,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   document.addEventListener('click', async (event) => {
-    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
+    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
     if (!target) return;
     if (target.matches('[data-edit-provider-skill-add]')) {
       const candidate = normalizeTextClient(state.editCandidateProviderSkillValue);
@@ -723,6 +731,17 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       state.mutationResult = null;
       try {
         await loadServices(false);
+      } catch (error) {
+        setError(error);
+      }
+      return;
+    }
+    if (target.matches('[data-orders-page-prev]') || target.matches('[data-orders-page-next]')) {
+      const delta = target.matches('[data-orders-page-prev]') ? -1 : 1;
+      state.ordersPageNumber = Math.max(1, state.ordersPageNumber + delta);
+      state.mutationResult = null;
+      try {
+        await loadOrders(state.selectedServiceId, false);
       } catch (error) {
         setError(error);
       }
