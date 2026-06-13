@@ -1,0 +1,25 @@
+import type { BotHomepageTemplateDefinition } from '@openagentinternet/agent-browser-core';
+export interface BrowserMenuItemDefinition {
+    id: string;
+    label: string;
+    icon: string;
+    action: 'open-settings';
+    settingsTab: 'baseUrls' | 'templates' | 'cache';
+}
+export interface BrowserMenuSectionDefinition {
+    id: string;
+    items: BrowserMenuItemDefinition[];
+}
+export interface BrowserSettingsTabDefinition {
+    id: 'baseUrls' | 'templates' | 'cache';
+    label: string;
+}
+export interface BrowserBaseUrlFieldDefinition {
+    key: string;
+    label: string;
+    placeholder: string;
+}
+export declare const BROWSER_BASE_URL_FIELDS: BrowserBaseUrlFieldDefinition[];
+export declare const BROWSER_BOT_HOMEPAGE_TEMPLATES: readonly BotHomepageTemplateDefinition[];
+export declare const BROWSER_MENU_SECTIONS: BrowserMenuSectionDefinition[];
+export declare const BROWSER_SETTINGS_TABS: BrowserSettingsTabDefinition[];

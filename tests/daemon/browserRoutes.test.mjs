@@ -4,7 +4,12 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { createHttpServer } = require('../../dist/daemon/httpServer.js');
-const { commandSuccess, commandFailed } = require('../../dist/core/contracts/commandResult.js');
+const {
+  browserFailure,
+  browserManualActionRequired,
+  browserSuccess,
+  browserWaiting,
+} = require('@openagentinternet/agent-browser-host-contract');
 
 async function startServer() {
   const calls = {
@@ -21,7 +26,7 @@ async function startServer() {
     browser: {
       getRuntime: async (input) => {
         calls.runtime.push(input);
-        return commandSuccess({
+        return browserSuccess({
           host: { kind: 'oac', name: 'Open Agent Connect', localMode: true },
           actors: [{
             id: 'alice',
@@ -57,7 +62,7 @@ async function startServer() {
       },
       getContext: async (input) => {
         calls.context.push(input);
-        return commandSuccess({
+        return browserSuccess({
           usingIdentities: [{ slug: 'alice', name: 'Alice Bot', globalMetaId: 'idq1alice', isDefault: true }],
           defaultUsingIdentity: { slug: 'alice', name: 'Alice Bot', globalMetaId: 'idq1alice', isDefault: true },
           defaultUri: 'metaid://idq1alice',
@@ -65,8 +70,8 @@ async function startServer() {
       },
       resolve: async (input) => {
         calls.resolve.push(input);
-        if (input.uri === 'metaid://missing') return commandFailed('browser_resource_not_found', 'Resource not found.');
-        return commandSuccess({
+        if (input.uri === 'metaid://missing') return browserFailure('browser_resource_not_found', 'Resource not found.');
+        return browserSuccess({
           uri: input.uri,
           normalizedUri: input.uri.toLowerCase(),
           resourceType: 'bot',
@@ -80,7 +85,7 @@ async function startServer() {
       },
       getSettings: async (input) => {
         calls.getSettings.push(input);
-        return commandSuccess({
+        return browserSuccess({
           browser: {
             metasoP2PBaseUrl: 'https://so.metaid.io',
             metafileContentBaseUrl: 'https://so.metaid.io/content',
@@ -94,7 +99,7 @@ async function startServer() {
       },
       updateSettings: async (input) => {
         calls.updateSettings.push(input);
-        return commandSuccess({
+        return browserSuccess({
           browser: {
             metasoP2PBaseUrl: input.browser?.metasoP2PBaseUrl,
             manApiBaseUrl: input.browser?.manApiBaseUrl,
@@ -104,7 +109,7 @@ async function startServer() {
       },
       getCache: async (input) => {
         calls.getCache.push(input);
-        return commandSuccess({
+        return browserSuccess({
           cacheRoot: '/tmp/.metabot/cache/metaapps',
           artifactCount: 1,
           pinRecordCount: 1,
@@ -114,13 +119,24 @@ async function startServer() {
       },
       clearCache: async (input) => {
         calls.clearCache.push(input);
-        if (input.scope === 'unknown') return commandFailed('invalid_argument', 'Unsupported cache clear scope.');
-        return commandSuccess({ clearedArtifacts: 1, clearedPinRecords: 1 });
+        if (input.scope === 'unknown') return browserFailure('invalid_argument', 'Unsupported cache clear scope.');
+        return browserSuccess({ clearedArtifacts: 1, clearedPinRecords: 1 });
       },
       runTrustedAction: async (input) => {
         calls.actions.push(input);
-        if (input.kind === 'unsupported') return commandFailed('browser_action_not_supported', 'Unsupported Browser action.');
-        return commandSuccess({ kind: input.kind, handled: true, data: { accepted: true } });
+        if (input.kind === 'unsupported') return browserFailure('browser_action_not_supported', 'Unsupported Browser action.');
+        if (input.kind === 'service-call') {
+          return browserWaiting('order_sent_awaiting_provider', 'Waiting for provider.', {
+            pollAfterMs: 1000,
+            action: { label: 'Open trace', route: '/ui/trace?traceId=trace-service-call' },
+          });
+        }
+        if (input.kind === 'open-settings') {
+          return browserManualActionRequired('browser_settings_required', 'Open Browser settings.', {
+            action: { label: 'Open settings', href: '/ui/settings' },
+          });
+        }
+        return browserSuccess({ kind: input.kind, handled: true, data: { accepted: true } });
       },
     },
   });
@@ -234,6 +250,45 @@ test('POST /api/browser/actions maps unsupported actions to a client error', asy
 
   assert.equal(response.status, 400);
   assert.equal(payload.code, 'browser_action_not_supported');
+});
+
+test('POST /api/browser/actions serializes waiting and manual action results with HTTP 200', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const waitingResponse = await fetch(`${baseUrl}/api/browser/actions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      resourceUri: 'metaid://idq1target',
+      kind: 'service-call',
+    }),
+  });
+  const waitingPayload = await waitingResponse.json();
+  const expectedWaitingFollowUpTarget = '/ui/trace?traceId=trace-service-call';
+
+  assert.equal(waitingResponse.status, 200);
+  assert.equal(waitingPayload.ok, false);
+  assert.equal(waitingPayload.state, 'waiting');
+  assert.equal(waitingPayload.code, 'order_sent_awaiting_provider');
+  assert.equal(waitingPayload.action.href || waitingPayload.action.route, expectedWaitingFollowUpTarget);
+
+  const manualResponse = await fetch(`${baseUrl}/api/browser/actions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      resourceUri: 'metaid://idq1target',
+      kind: 'open-settings',
+    }),
+  });
+  const manualPayload = await manualResponse.json();
+  const expectedManualFollowUpTarget = '/ui/settings';
+
+  assert.equal(manualResponse.status, 200);
+  assert.equal(manualPayload.ok, false);
+  assert.equal(manualPayload.state, 'manual_action_required');
+  assert.equal(manualPayload.code, 'browser_settings_required');
+  assert.equal(manualPayload.action.href || manualPayload.action.route, expectedManualFollowUpTarget);
 });
 
 test('GET and PUT /api/browser/settings forward from slug and browser settings payload', async (t) => {

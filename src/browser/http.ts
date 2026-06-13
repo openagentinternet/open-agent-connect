@@ -1,23 +1,28 @@
-import { commandFailed, type MetabotCommandResult } from '../core/contracts/commandResult';
-import type {
+import {
+  browserFailure,
+  type BrowserCacheClearResult,
+  type BrowserCacheSnapshot,
+  type BrowserCommandResult,
+  type BrowserResolveResult,
   BrowserRuntimeSnapshot,
+  type BrowserSettingsSnapshot,
   BrowserTrustedActionInput,
   BrowserTrustedActionKind,
   BrowserTrustedActionResult,
-} from '../core/browser/hostTypes';
-import type { BrowserContextResult, BrowserResolveResult } from '../core/browser/types';
+} from '@openagentinternet/agent-browser-host-contract';
+import type { BrowserContextResult } from '../core/browser/types';
 
 export type Awaitable<T> = T | Promise<T>;
 
 export interface BrowserHttpHandlers {
-  getRuntime?: (input?: { actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserRuntimeSnapshot>>;
-  getContext?: (input?: { actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserContextResult>>;
-  resolve?: (input: { uri: string; actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<BrowserResolveResult>>;
-  getSettings?: (input?: { actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-  updateSettings?: (input: { actorId?: string; from?: string; browser?: Record<string, unknown> } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-  getCache?: (input?: { actorId?: string; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-  clearCache?: (input: { actorId?: string; from?: string; scope?: string; pinId?: string; cacheKey?: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-  runTrustedAction?: (input: BrowserTrustedActionInput) => Awaitable<MetabotCommandResult<BrowserTrustedActionResult>>;
+  getRuntime?: (input?: { actorId?: string; from?: string }) => Awaitable<BrowserCommandResult<BrowserRuntimeSnapshot>>;
+  getContext?: (input?: { actorId?: string; from?: string }) => Awaitable<BrowserCommandResult<BrowserContextResult>>;
+  resolve?: (input: { uri: string; actorId?: string; from?: string }) => Awaitable<BrowserCommandResult<BrowserResolveResult>>;
+  getSettings?: (input?: { actorId?: string; from?: string }) => Awaitable<BrowserCommandResult<BrowserSettingsSnapshot>>;
+  updateSettings?: (input: { actorId?: string; from?: string; browser?: Record<string, unknown> } & Record<string, unknown>) => Awaitable<BrowserCommandResult<BrowserSettingsSnapshot>>;
+  getCache?: (input?: { actorId?: string; from?: string }) => Awaitable<BrowserCommandResult<BrowserCacheSnapshot>>;
+  clearCache?: (input: { actorId?: string; from?: string; scope?: string; pinId?: string; cacheKey?: string } & Record<string, unknown>) => Awaitable<BrowserCommandResult<BrowserCacheClearResult>>;
+  runTrustedAction?: (input: BrowserTrustedActionInput & { from?: string }) => Awaitable<BrowserCommandResult<BrowserTrustedActionResult>>;
 }
 
 export interface BrowserHttpRouteContext {
@@ -33,7 +38,7 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function statusForBrowserResult(result: MetabotCommandResult<unknown>): number {
+export function statusForBrowserResult(result: BrowserCommandResult<unknown>): number {
   if (result.ok) return 200;
   if (result.state === 'waiting' || result.state === 'manual_action_required') return 200;
   if (result.code === 'missing_uri' || result.code === 'invalid_browser_uri') return 400;
@@ -61,7 +66,7 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
     }
     const result = handlers?.getRuntime
       ? await handlers.getRuntime(actorRouteInput(url))
-      : commandFailed('not_implemented', 'Browser runtime handler is not configured.');
+      : browserFailure('not_implemented', 'Browser runtime handler is not configured.');
     context.sendJson(statusForBrowserResult(result), result);
     return true;
   }
@@ -73,7 +78,7 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
     }
     const result = handlers?.getContext
       ? await handlers.getContext(actorRouteInput(url))
-      : commandFailed('not_implemented', 'Browser context handler is not configured.');
+      : browserFailure('not_implemented', 'Browser context handler is not configured.');
     context.sendJson(statusForBrowserResult(result), result);
     return true;
   }
@@ -85,12 +90,12 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
     }
     const uri = normalizeText(url.searchParams.get('uri'));
     if (!uri) {
-      context.sendJson(400, commandFailed('missing_uri', 'uri query parameter is required.'));
+      context.sendJson(400, browserFailure('missing_uri', 'uri query parameter is required.'));
       return true;
     }
     const result = handlers?.resolve
       ? await handlers.resolve({ uri, ...actorRouteInput(url) })
-      : commandFailed('not_implemented', 'Browser resolve handler is not configured.');
+      : browserFailure('not_implemented', 'Browser resolve handler is not configured.');
     context.sendJson(statusForBrowserResult(result), result);
     return true;
   }
@@ -99,7 +104,7 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
     if (method === 'GET') {
       const result = handlers?.getSettings
         ? await handlers.getSettings(actorRouteInput(url))
-        : commandFailed('not_implemented', 'Browser settings handler is not configured.');
+        : browserFailure('not_implemented', 'Browser settings handler is not configured.');
       context.sendJson(statusForBrowserResult(result), result);
       return true;
     }
@@ -108,7 +113,7 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
       const input = await context.readJsonBody();
       const result = handlers?.updateSettings
         ? await handlers.updateSettings({ ...input, ...actorRouteInput(url, input) })
-        : commandFailed('not_implemented', 'Browser settings update handler is not configured.');
+        : browserFailure('not_implemented', 'Browser settings update handler is not configured.');
       context.sendJson(statusForBrowserResult(result), result);
       return true;
     }
@@ -121,7 +126,7 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
     if (method === 'GET') {
       const result = handlers?.getCache
         ? await handlers.getCache(actorRouteInput(url))
-        : commandFailed('not_implemented', 'Browser cache handler is not configured.');
+        : browserFailure('not_implemented', 'Browser cache handler is not configured.');
       context.sendJson(statusForBrowserResult(result), result);
       return true;
     }
@@ -130,7 +135,7 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
       const input = await context.readJsonBody();
       const result = handlers?.clearCache
         ? await handlers.clearCache({ ...input, ...actorRouteInput(url, input) })
-        : commandFailed('not_implemented', 'Browser cache clear handler is not configured.');
+        : browserFailure('not_implemented', 'Browser cache clear handler is not configured.');
       context.sendJson(statusForBrowserResult(result), result);
       return true;
     }
@@ -157,7 +162,7 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
         kind: kind as BrowserTrustedActionKind,
         ...(payload ? { payload } : {}),
       })
-      : commandFailed('not_implemented', 'Browser action handler is not configured.');
+      : browserFailure('not_implemented', 'Browser action handler is not configured.');
     context.sendJson(statusForBrowserResult(result), result);
     return true;
   }

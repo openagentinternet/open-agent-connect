@@ -8,3 +8,12 @@ export declare function writeMetaAppZipArchive(input: {
     sha256: string;
     entries: string[];
 }>;
+export declare function extractMetaAppZipArchive(input: {
+    archive: Buffer;
+    outDir: string;
+    maxEntries?: number;
+    maxUncompressedBytes?: number;
+}): Promise<{
+    outDir: string;
+    entries: string[];
+}>;

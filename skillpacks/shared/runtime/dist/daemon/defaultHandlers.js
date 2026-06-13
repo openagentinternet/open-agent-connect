@@ -11,6 +11,7 @@ exports.rebuildTraceArtifactsFromSessionState = rebuildTraceArtifactsFromSession
 exports.createDefaultMetabotDaemonHandlers = createDefaultMetabotDaemonHandlers;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const agent_browser_host_contract_1 = require("@openagentinternet/agent-browser-host-contract");
 const commandResult_1 = require("../core/contracts/commandResult");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const identityProfiles_1 = require("../core/identity/identityProfiles");
@@ -89,6 +90,9 @@ const btc_1 = require("../core/chain/adapters/btc");
 const doge_1 = require("../core/chain/adapters/doge");
 const opcat_1 = require("../core/chain/adapters/opcat");
 const configStore_1 = require("../core/config/configStore");
+const runtimeContext_1 = require("../core/browser/runtimeContext");
+const oacBrowserCoreBridge_1 = require("./browser/oacBrowserCoreBridge");
+const oacBrowserHostAdapter_1 = require("./browser/oacBrowserHostAdapter");
 const configTypes_1 = require("../core/config/configTypes");
 const metawebReplyWaiter_1 = require("../core/a2a/metawebReplyWaiter");
 const deliveryArtifacts_1 = require("../core/a2a/deliveryArtifacts");
@@ -717,6 +721,9 @@ function buildMetabotUpdateInput(input) {
             throw new Error('MetaBot name is required.');
         }
     }
+    if (hasOwnField(input, 'bio')) {
+        update.bio = typeof input.bio === 'string' ? input.bio : '';
+    }
     if (hasOwnField(input, 'role')) {
         update.role = typeof input.role === 'string' ? input.role : '';
     }
@@ -750,6 +757,9 @@ function buildMetabotCreateInput(input) {
         throw new Error('MetaBot name is required.');
     }
     const createInput = { name };
+    if (hasOwnField(input, 'bio')) {
+        createInput.bio = typeof input.bio === 'string' ? input.bio : '';
+    }
     if (hasOwnField(input, 'role')) {
         createInput.role = typeof input.role === 'string' ? input.role : '';
     }
@@ -788,9 +798,6 @@ function normalizePreferredCreateProvider(value) {
     return provider;
 }
 function resolveMetabotCreatePreferredProvider(input) {
-    if (normalizeText(input.creationSource).toLowerCase() === 'ui') {
-        return null;
-    }
     return normalizePreferredCreateProvider(input.host)
         ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
         ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
@@ -904,6 +911,8 @@ function calculateMetabotChangedFields(current, update) {
     const changedFields = [];
     if (update.name !== undefined && update.name !== current.name)
         changedFields.push('name');
+    if (update.bio !== undefined && update.bio !== current.bio)
+        changedFields.push('bio');
     if (update.role !== undefined && update.role !== current.role)
         changedFields.push('role');
     if (update.soul !== undefined && update.soul !== current.soul)
@@ -929,6 +938,7 @@ function buildMetabotChainProfile(current, update) {
     return {
         ...current,
         name: update.name ?? current.name,
+        bio: update.bio ?? current.bio,
         role: update.role ?? current.role,
         soul: update.soul ?? current.soul,
         goal: update.goal ?? current.goal,
@@ -939,20 +949,6 @@ function buildMetabotChainProfile(current, update) {
         fallbackProvider: update.fallbackProvider !== undefined ? update.fallbackProvider : (current.fallbackProvider ?? null),
         allowChatSkills: update.allowChatSkills !== undefined ? update.allowChatSkills : current.allowChatSkills,
     };
-}
-function calculateMetabotCreateChainFields(input) {
-    const changedFields = [];
-    if (input.role !== undefined
-        || input.soul !== undefined
-        || input.goal !== undefined
-        || input.primaryProvider !== undefined
-        || input.fallbackProvider !== undefined) {
-        changedFields.push('role');
-    }
-    if (normalizeText(input.avatarDataUrl)) {
-        changedFields.push('avatar');
-    }
-    return changedFields;
 }
 async function validateMetabotProviderAvailability(profile, update) {
     const requestedProviders = [];
@@ -8143,6 +8139,26 @@ function createDefaultMetabotDaemonHandlers(input) {
         });
     }
     const metaAppPreviewSessions = (0, previewSessions_1.createMetaAppPreviewSessionRegistry)();
+    let daemonHandlers = null;
+    const browserHostAdapterInput = {
+        homeDir: input.homeDir,
+        systemHomeDir: normalizedSystemHomeDir,
+        resolveActorWriteContext,
+        metaAppPreviewSessions,
+        privateChat: async (request) => daemonHandlers?.chat?.private
+            ? daemonHandlers.chat.private(request)
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Private chat handler is not configured.'),
+        serviceCall: async (request) => daemonHandlers?.services?.call
+            ? daemonHandlers.services.call(request)
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Service call handler is not configured.'),
+        fetch: globalThis.fetch,
+        env: process.env,
+    };
+    const browserHostAdapter = (0, oacBrowserHostAdapter_1.createOacBrowserHostAdapter)(browserHostAdapterInput);
+    const browserCoreHostAdapter = (0, oacBrowserCoreBridge_1.createOacBrowserCoreHostAdapter)(browserHostAdapterInput);
+    function browserActorId(request) {
+        return request.actorId || request.from || undefined;
+    }
     async function readMetaAppRecordForUpdate(actorHomeDir, targetPinId) {
         const indexer = (0, indexerClient_1.createMetaAppIndexerClient)();
         const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actorHomeDir);
@@ -8280,7 +8296,52 @@ function createDefaultMetabotDaemonHandlers(input) {
             return resolved.service.getDashboard({ from: request.from, refresh: true });
         },
     }));
-    return {
+    const handlers = {
+        browser: {
+            getRuntime: async (request = {}) => browserCoreHostAdapter.getRuntime({
+                actorId: browserActorId(request),
+            }),
+            getContext: async (request = {}) => {
+                const runtime = await browserHostAdapter.getRuntime({
+                    actorId: browserActorId(request),
+                });
+                if (!runtime.ok) {
+                    return (0, agent_browser_host_contract_1.browserFailure)(runtime.code || 'browser_runtime_failed', runtime.message || 'Browser runtime is unavailable.');
+                }
+                return (0, agent_browser_host_contract_1.browserSuccess)((0, runtimeContext_1.browserRuntimeToContextResult)(runtime.data));
+            },
+            getSettings: async (request = {}) => browserCoreHostAdapter.getSettings({
+                actorId: browserActorId(request),
+            }),
+            updateSettings: async (request) => browserCoreHostAdapter.updateSettings({
+                actorId: browserActorId(request),
+                browser: request.browser,
+            }),
+            getCache: async (request = {}) => browserCoreHostAdapter.getCache({
+                actorId: browserActorId(request),
+            }),
+            clearCache: async (request) => browserCoreHostAdapter.clearCache({
+                actorId: browserActorId(request),
+                scope: request.scope,
+                pinId: request.pinId,
+                cacheKey: request.cacheKey,
+            }),
+            resolve: async (request) => browserCoreHostAdapter.resolveResource({
+                actorId: browserActorId(request),
+                uri: request.uri,
+            }),
+            runTrustedAction: async (request) => {
+                const actionRequest = {
+                    actorId: browserActorId(request),
+                    resourceUri: request.resourceUri,
+                    kind: request.kind,
+                };
+                if (request.payload) {
+                    Object.assign(actionRequest, { payload: request.payload });
+                }
+                return browserCoreHostAdapter.runTrustedAction(actionRequest);
+            },
+        },
         config: {
             get: async () => (0, commandResult_1.commandSuccess)(await configStore.read()),
             set: async (rawInput) => updateConfigDefaultWriteNetwork(configStore, rawInput),
@@ -11798,7 +11859,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         globalMetaId: identity.globalMetaId,
                         mvcAddress: identity.mvcAddress,
                     });
-                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, calculateMetabotCreateChainFields(createInput), {
+                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, [], {
                         delayMs: input.identitySyncStepDelayMs,
                         operation: 'create',
                     });
@@ -12225,4 +12286,6 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         },
     };
+    daemonHandlers = handlers;
+    return handlers;
 }

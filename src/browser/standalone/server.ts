@@ -2,6 +2,14 @@ import http from 'node:http';
 import { Buffer } from 'node:buffer';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+  browserFailure,
+  browserManualActionRequired,
+  browserSuccess,
+  browserWaiting,
+  type BrowserCommandResult,
+  type BrowserTrustedActionResult as ContractBrowserTrustedActionResult,
+} from '@openagentinternet/agent-browser-host-contract';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { BrowserRuntimeSnapshot } from '../../core/browser/hostTypes';
 import type { BrowserContextResult } from '../../core/browser/types';
@@ -150,16 +158,41 @@ function browserContextFromRuntime(
   });
 }
 
+function toBrowserCommandResult<TInput, TOutput = TInput>(result: MetabotCommandResult<TInput>): BrowserCommandResult<TOutput> {
+  if (result.ok) {
+    return browserSuccess(result.data as unknown as TOutput);
+  }
+
+  const code = result.code ?? result.state;
+  const message = result.message ?? 'Standalone Browser command failed.';
+  const options = result.data ? { data: result.data } : undefined;
+  if (result.state === 'waiting') {
+    return browserWaiting(code, message, {
+      ...options,
+      pollAfterMs: result.pollAfterMs,
+    });
+  }
+  if (result.state === 'manual_action_required') {
+    return browserManualActionRequired(code, message, options);
+  }
+  return browserFailure(code, message, options);
+}
+
 function createBrowserHandlers(adapter: StandaloneBrowserHostAdapter): BrowserHttpHandlers {
   return {
-    getRuntime: (request = {}) => adapter.getRuntime(request),
-    getContext: async (request = {}) => browserContextFromRuntime(await adapter.getRuntime(request)),
-    resolve: (request) => adapter.resolveResource(request),
-    getSettings: (request = {}) => adapter.getSettings(request),
-    updateSettings: (request) => adapter.updateSettings(request),
-    getCache: (request = {}) => adapter.getCache(request),
-    clearCache: (request) => adapter.clearCache(request),
-    runTrustedAction: (request) => adapter.runTrustedAction(request),
+    getRuntime: async (request = {}) => toBrowserCommandResult(await adapter.getRuntime(request)),
+    getContext: async (request = {}) => toBrowserCommandResult(browserContextFromRuntime(await adapter.getRuntime(request))),
+    resolve: async (request) => toBrowserCommandResult(await adapter.resolveResource(request)),
+    getSettings: async (request = {}) => toBrowserCommandResult(await adapter.getSettings(request)),
+    updateSettings: async (request) => toBrowserCommandResult(await adapter.updateSettings(request)),
+    getCache: async (request = {}) => toBrowserCommandResult(await adapter.getCache(request)),
+    clearCache: async (request) => toBrowserCommandResult(await adapter.clearCache(request)),
+    runTrustedAction: async (request) => toBrowserCommandResult<
+      Awaited<ReturnType<StandaloneBrowserHostAdapter['runTrustedAction']>> extends MetabotCommandResult<infer T> ? T : never,
+      ContractBrowserTrustedActionResult
+    >(await adapter.runTrustedAction(
+      request as Parameters<StandaloneBrowserHostAdapter['runTrustedAction']>[0],
+    )),
   };
 }
 
@@ -204,7 +237,8 @@ export function createStandaloneBrowserServer(input: CreateStandaloneBrowserServ
         }
         const result = await adapter.resolvePreviewAsset(previewAsset);
         if (!result.ok) {
-          sendJson(res, statusForBrowserResult(result), result);
+          const failure = toBrowserCommandResult(result);
+          sendJson(res, statusForBrowserResult(failure), failure);
           return;
         }
         sendText(res, 200, result.data.body, result.data.contentType);

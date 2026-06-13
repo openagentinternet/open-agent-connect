@@ -136,9 +136,9 @@ test('npm package includes runtime install inputs and excludes generated/develop
 test('npm package pins shared Agent Browser package dependencies', async () => {
   const packageJson = JSON.parse(await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'));
 
-  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-host-contract'], '0.1.0');
-  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-core'], '0.1.0');
-  assert.equal(packageJson.devDependencies['@openagentinternet/agent-browser-test-harness'], '0.1.0');
-  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-ui'], undefined);
+  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-host-contract'], '0.3.0');
+  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-core'], '0.3.0');
+  assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-ui'], '0.3.0');
+  assert.equal(packageJson.devDependencies['@openagentinternet/agent-browser-test-harness'], '0.3.0');
   assert.equal(packageJson.dependencies['@openagentinternet/agent-browser-host-standalone'], undefined);
 });

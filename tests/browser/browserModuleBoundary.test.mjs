@@ -5,7 +5,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const browserModule = require('../../dist/browser/index.js');
-const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
+const { browserSuccess } = require('@openagentinternet/agent-browser-host-contract');
 
 async function callBrowserRoute({ method = 'GET', path, body = {}, handlers }) {
   const sent = [];
@@ -42,11 +42,60 @@ test('Browser page renders template preview images with browser-safe URLs', asyn
   assert.match(html, /data:image\/svg\+xml/);
 });
 
+test('Browser page modules consume the published ABC UI package', () => {
+  const outputFiles = [
+    '../../dist/browser/app.js',
+    '../../dist/browser/page.js',
+    '../../dist/browser/menuModel.js',
+  ];
+
+  for (const relativePath of outputFiles) {
+    const contents = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+    assert.match(contents, /@openagentinternet\/agent-browser-ui\/browser/);
+    assert.doesNotMatch(contents, /Browser page template not found/);
+    assert.doesNotMatch(contents, /loadBrowserPageTemplate/);
+  }
+});
+
+test('Browser API route boundary uses the published host contract result shape', () => {
+  const contents = readFileSync(new URL('../../dist/browser/http.js', import.meta.url), 'utf8');
+
+  assert.match(contents, /@openagentinternet\/agent-browser-host-contract/);
+  assert.doesNotMatch(contents, /\.\.\/core\/contracts\/commandResult/);
+});
+
+test('OAC default Browser handlers use the ABC host contract bridge', () => {
+  const contents = readFileSync(new URL('../../dist/daemon/defaultHandlers.js', import.meta.url), 'utf8');
+
+  assert.match(contents, /oacBrowserCoreBridge/);
+  assert.match(contents, /createOacBrowserCoreHostAdapter/);
+});
+
+test('OAC default Browser context keeps the legacy host adapter available', () => {
+  const contents = readFileSync(new URL('../../dist/daemon/defaultHandlers.js', import.meta.url), 'utf8');
+
+  assert.match(contents, /oacBrowserHostAdapter/);
+  assert.match(contents, /createOacBrowserHostAdapter/);
+});
+
+test('Browser page declarations keep ABC UI package subpath private', () => {
+  const outputFiles = [
+    '../../dist/browser/app.d.ts',
+    '../../dist/browser/page.d.ts',
+    '../../dist/browser/menuModel.d.ts',
+  ];
+
+  for (const relativePath of outputFiles) {
+    const contents = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+    assert.doesNotMatch(contents, /@openagentinternet\/agent-browser-ui\/browser/);
+  }
+});
+
 test('Browser API route boundary handles runtime without daemon route types', async () => {
   const { handled, sent } = await callBrowserRoute({
     path: '/api/browser/runtime?actorId=wallet-user',
     handlers: {
-      getRuntime: async (input) => commandSuccess({
+      getRuntime: async (input) => browserSuccess({
         host: { kind: 'standalone', name: 'Standalone Browser', localMode: false },
         actors: [{
           id: input.actorId,
@@ -109,7 +158,7 @@ test('Browser API route boundary handles resolve without daemon route types', as
     handlers: {
       resolve: async (input) => {
         received = input;
-        return commandSuccess({
+        return browserSuccess({
           uri: input.uri,
           resource: {
             kind: 'bot-homepage',
@@ -146,7 +195,7 @@ test('Browser API route boundary handles settings update without daemon route ty
     handlers: {
       updateSettings: async (input) => {
         received = input;
-        return commandSuccess({ browser: input.browser });
+        return browserSuccess({ browser: input.browser });
       },
     },
   });
@@ -169,7 +218,7 @@ test('Browser API route boundary handles cache clear without daemon route types'
     handlers: {
       clearCache: async (input) => {
         received = input;
-        return commandSuccess({ clearedArtifacts: 0, clearedPinRecords: 0, input });
+        return browserSuccess({ clearedArtifacts: 0, clearedPinRecords: 0, input });
       },
     },
   });
@@ -198,7 +247,7 @@ test('Browser API route boundary handles trusted actions without daemon route ty
     handlers: {
       runTrustedAction: async (input) => {
         received = input;
-        return commandSuccess({ action: 'noop', input });
+        return browserSuccess({ action: 'noop', input });
       },
     },
   });
@@ -209,11 +258,11 @@ test('Browser API route boundary handles trusted actions without daemon route ty
   assert.equal(sent[0].payload.data.input.payload.servicePinId, 'service-pin');
 });
 
-test('OAC Browser route boundary still uses OAC command-result semantics', async () => {
+test('Browser API route boundary uses Browser command-result semantics', async () => {
   const { handled, sent } = await callBrowserRoute({
     path: '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1alice&from=alice',
     handlers: {
-      resolve: async (input) => commandSuccess({
+      resolve: async (input) => browserSuccess({
         uri: input.uri,
         normalizedUri: input.uri,
         resourceType: 'bot',

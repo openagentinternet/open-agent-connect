@@ -1,0 +1,1 @@
+export { BOT_HOMEPAGE_TEMPLATES, DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID, isBotHomepageTemplateId, normalizeBotHomepageTemplateId, type BotHomepageTemplateDefinition, type BotHomepageTemplateId, } from '@openagentinternet/agent-browser-core';

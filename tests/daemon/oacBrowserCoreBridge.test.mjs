@@ -63,7 +63,7 @@ test('OAC Browser core bridge satisfies the published host conformance harness',
   });
 });
 
-test('OAC Browser core bridge maps resolved Bot pages to BrowserResourceEnvelope sections and actions', async (t) => {
+test('OAC Browser core bridge maps resolved Bot pages to BrowserResolveResult actions', async (t) => {
   const profileHome = await createProfileHome('oac-browser-core-bridge-envelope');
   t.after(async () => cleanupProfileHome(profileHome));
   const systemHomeDir = deriveSystemHome(profileHome);
@@ -111,19 +111,20 @@ test('OAC Browser core bridge maps resolved Bot pages to BrowserResourceEnvelope
   assert.deepEqual(resolved.data.owner, {
     kind: 'bot',
     globalMetaId: 'idq1fixturebot',
+    metaid: 'metaid-fixture',
     address: '18FixtureAddress',
-    label: 'Fixture Bot',
+    name: 'Fixture Bot',
     avatar: 'https://so.example.test/content/avatar-pin',
+    online: true,
     verificationState: 'partial',
   });
-  assert.equal(resolved.data.sections.some((section) => section.id === 'services'), true);
-
   const privateChat = resolved.data.actions.find((action) => action.kind === 'private-chat');
   assert.deepEqual(privateChat, {
     id: 'message',
     label: 'Message',
     kind: 'private-chat',
     enabled: true,
+    requiresUsingIdentity: true,
     payload: {
       targetGlobalMetaId: 'idq1fixturebot',
     },
@@ -135,27 +136,27 @@ test('OAC Browser core bridge maps resolved Bot pages to BrowserResourceEnvelope
     label: 'Request Fixture Review',
     kind: 'service-call',
     enabled: true,
+    serviceId: 'service-current-pin',
     payload: {
       providerGlobalMetaId: 'idq1fixturebot',
-      servicePinId: 'service-current-pin',
     },
   });
 
-  const copyUri = resolved.data.actions.find((action) => action.kind === 'copy-uri');
+  const copyUri = resolved.data.actions.find((action) => action.kind === 'copy');
   assert.deepEqual(copyUri, {
     id: 'copy-uri',
     label: 'Copy URI',
-    kind: 'copy-uri',
+    kind: 'copy',
     enabled: true,
-    payload: {
-      uri: 'metaid://idq1fixturebot',
-    },
+    uri: 'metaid://idq1fixturebot',
   });
 
   const copyResult = await adapter.runTrustedAction({
     resourceUri: resolved.data.normalizedUri,
-    kind: copyUri.kind,
-    payload: copyUri.payload,
+    kind: 'copy-uri',
+    payload: {
+      uri: copyUri.uri,
+    },
   });
 
   assert.equal(copyResult.ok, true);
@@ -168,7 +169,7 @@ test('OAC Browser core bridge maps resolved Bot pages to BrowserResourceEnvelope
   });
 });
 
-test('OAC Browser core bridge maps non-terminal service-call states to contract successes', async (t) => {
+test('OAC Browser core bridge preserves non-terminal service-call command states', async (t) => {
   const profileHome = await createProfileHome('oac-browser-core-bridge-waiting-action');
   t.after(async () => cleanupProfileHome(profileHome));
   const systemHomeDir = deriveSystemHome(profileHome);
@@ -227,14 +228,15 @@ test('OAC Browser core bridge maps non-terminal service-call states to contract 
     },
   });
 
-  assert.equal(withHref.ok, true);
-  assert.equal(withHref.state, 'success');
-  assert.equal(withHref.data.kind, 'service-call');
-  assert.equal(withHref.data.handled, true);
-  assert.deepEqual(withHref.data.data, {
-    message: 'Order sent. Waiting for response...',
+  assert.equal(withHref.ok, false);
+  assert.equal(withHref.state, 'waiting');
+  assert.equal(withHref.code, 'order_sent_awaiting_provider');
+  assert.match(withHref.message, /^Order sent\. Waiting for response/);
+  assert.deepEqual(withHref.action, {
+    label: 'Open details',
     href: '/ui/trace?traceId=trace-waiting',
   });
+  assert.deepEqual(withHref.data, { traceId: 'trace-waiting' });
 
   const withRoute = await adapter.runTrustedAction({
     actorId: active.slug,
@@ -247,11 +249,15 @@ test('OAC Browser core bridge maps non-terminal service-call states to contract 
     },
   });
 
-  assert.equal(withRoute.ok, true);
-  assert.deepEqual(withRoute.data.data, {
-    message: 'Order sent. Waiting for response...',
+  assert.equal(withRoute.ok, false);
+  assert.equal(withRoute.state, 'waiting');
+  assert.equal(withRoute.code, 'order_sent_awaiting_provider');
+  assert.match(withRoute.message, /^Order sent\. Waiting for response/);
+  assert.deepEqual(withRoute.action, {
+    label: 'Open details',
     route: '/ui/trace?traceId=trace%20waiting%2Froute',
   });
+  assert.deepEqual(withRoute.data, { traceId: 'trace waiting/route' });
 
   const manualAction = await adapter.runTrustedAction({
     actorId: active.slug,
@@ -264,9 +270,13 @@ test('OAC Browser core bridge maps non-terminal service-call states to contract 
     },
   });
 
-  assert.equal(manualAction.ok, true);
-  assert.deepEqual(manualAction.data.data, {
-    message: 'Confirm the service request in the trace view.',
+  assert.equal(manualAction.ok, false);
+  assert.equal(manualAction.state, 'manual_action_required');
+  assert.equal(manualAction.code, 'service_call_needs_confirmation');
+  assert.match(manualAction.message, /^Confirm the service request/);
+  assert.deepEqual(manualAction.action, {
+    label: 'Open details',
     href: '/ui/trace?traceId=trace-manual',
   });
+  assert.deepEqual(manualAction.data, { traceId: 'trace-manual' });
 });

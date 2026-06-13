@@ -8,6 +8,7 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const homeSelection_1 = require("../state/homeSelection");
 const paths_1 = require("../state/paths");
+const botHomepageTemplates_1 = require("../browser/botHomepageTemplates");
 const configTypes_1 = require("./configTypes");
 async function ensureLayout(paths) {
     await node_fs_1.promises.mkdir(node_path_1.default.dirname(paths.configPath), { recursive: true });
@@ -48,15 +49,22 @@ function normalizeConfig(input) {
     }
     const root = input;
     const maybeA2A = root['a2a'];
+    const maybeBrowser = root['browser'];
     const maybeChain = root['chain'];
     const a2aSource = maybeA2A && typeof maybeA2A === 'object'
         ? maybeA2A
+        : {};
+    const browserSource = maybeBrowser && typeof maybeBrowser === 'object'
+        ? maybeBrowser
         : {};
     const chainSource = maybeChain && typeof maybeChain === 'object'
         ? maybeChain
         : {};
     const defaultWriteNetwork = normalizeString(chainSource.defaultWriteNetwork).toLowerCase();
-    return {
+    const browserDefaultChainName = normalizeString(browserSource.defaultChainName).toLowerCase();
+    const walletApiBaseUrl = normalizeString(browserSource.walletApiBaseUrl) || defaults.browser.walletApiBaseUrl;
+    const manApiBaseUrl = normalizeString(browserSource.manApiBaseUrl) || defaults.browser.manApiBaseUrl;
+    const normalizedConfig = {
         chain: {
             defaultWriteNetwork: (0, configTypes_1.isDefaultWriteNetwork)(defaultWriteNetwork)
                 ? defaultWriteNetwork
@@ -65,7 +73,22 @@ function normalizeConfig(input) {
         a2a: {
             simplemsgListenerEnabled: normalizeBoolean(a2aSource.simplemsgListenerEnabled, defaults.a2a.simplemsgListenerEnabled),
         },
+        browser: {
+            metasoP2PBaseUrl: normalizeString(browserSource.metasoP2PBaseUrl) || defaults.browser.metasoP2PBaseUrl,
+            metafileContentBaseUrl: normalizeString(browserSource.metafileContentBaseUrl) || defaults.browser.metafileContentBaseUrl,
+            manApiBaseUrl,
+            blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,
+            botHomepageTemplateId: (0, botHomepageTemplates_1.normalizeBotHomepageTemplateId)(browserSource.botHomepageTemplateId, defaults.browser.botHomepageTemplateId),
+            defaultChainName: (0, configTypes_1.isDefaultWriteNetwork)(browserDefaultChainName)
+                ? browserDefaultChainName
+                : defaults.chain.defaultWriteNetwork,
+            localMode: normalizeBoolean(browserSource.localMode, defaults.browser.localMode),
+        },
     };
+    if (walletApiBaseUrl) {
+        normalizedConfig.browser.walletApiBaseUrl = walletApiBaseUrl;
+    }
+    return normalizedConfig;
 }
 function resolvePaths(homeDirOrPaths) {
     if (typeof homeDirOrPaths === 'string') {

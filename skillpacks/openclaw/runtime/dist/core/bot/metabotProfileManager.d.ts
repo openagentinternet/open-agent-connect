@@ -4,6 +4,7 @@ import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
 export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 export interface MetabotProfileFull extends IdentityProfileRecord {
+    bio: string;
     role: string;
     soul: string;
     goal: string;
@@ -14,6 +15,7 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
 }
 export interface CreateMetabotInput {
     name: string;
+    bio?: string;
     role?: string;
     soul?: string;
     goal?: string;
@@ -28,6 +30,7 @@ export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
 }
 export interface UpdateMetabotInfoInput {
     name?: string;
+    bio?: string;
     role?: string;
     soul?: string;
     goal?: string;

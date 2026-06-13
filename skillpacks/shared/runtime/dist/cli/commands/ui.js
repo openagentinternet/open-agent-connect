@@ -6,6 +6,9 @@ const helpers_1 = require("./helpers");
 const SUPPORTED_UI_PAGES = new Set([
     'hub',
     'bot',
+    'conversations',
+    'services',
+    'settings',
     'buzz',
     'chat',
     'publish',

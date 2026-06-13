@@ -1,7 +1,10 @@
+import type { BotHomepageTemplateDefinition } from '@openagentinternet/agent-browser-core';
 import {
-  BOT_HOMEPAGE_TEMPLATES,
-  type BotHomepageTemplateDefinition,
-} from '../core/browser/botHomepageTemplates';
+  BROWSER_BASE_URL_FIELDS as ABC_BROWSER_BASE_URL_FIELDS,
+  BROWSER_BOT_HOMEPAGE_TEMPLATES as ABC_BROWSER_BOT_HOMEPAGE_TEMPLATES,
+  BROWSER_MENU_SECTIONS as ABC_BROWSER_MENU_SECTIONS,
+  BROWSER_SETTINGS_TABS as ABC_BROWSER_SETTINGS_TABS,
+} from '@openagentinternet/agent-browser-ui/browser';
 
 export interface BrowserMenuItemDefinition {
   id: string;
@@ -27,83 +30,11 @@ export interface BrowserBaseUrlFieldDefinition {
   placeholder: string;
 }
 
-export const BROWSER_MENU_SECTIONS: BrowserMenuSectionDefinition[] = [
-  {
-    id: 'main',
-    items: [
-      {
-        id: 'settings',
-        label: 'Settings',
-        icon: 'settings',
-        action: 'open-settings',
-        settingsTab: 'baseUrls',
-      },
-      {
-        id: 'templates',
-        label: 'Bot Page Templates',
-        icon: 'layout',
-        action: 'open-settings',
-        settingsTab: 'templates',
-      },
-      {
-        id: 'cache',
-        label: 'Cache Management',
-        icon: 'database',
-        action: 'open-settings',
-        settingsTab: 'cache',
-      },
-    ],
-  },
-];
-
-export const BROWSER_SETTINGS_TABS: BrowserSettingsTabDefinition[] = [
-  { id: 'baseUrls', label: 'Base URLs' },
-  { id: 'templates', label: 'Templates' },
-  { id: 'cache', label: 'Cache' },
-];
-
-const DOCUMENT_PREVIEW_IMAGE = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='160'%20height='96'%20viewBox='0%200%20160%2096'%3E%3Crect%20width='160'%20height='96'%20rx='8'%20fill='%23f8fafc'/%3E%3Crect%20x='18'%20y='16'%20width='44'%20height='44'%20rx='8'%20fill='%23dbeafe'/%3E%3Crect%20x='74'%20y='20'%20width='70'%20height='8'%20rx='4'%20fill='%231f2937'/%3E%3Crect%20x='74'%20y='34'%20width='54'%20height='6'%20rx='3'%20fill='%2394a3b8'/%3E%3Crect%20x='18'%20y='70'%20width='126'%20height='6'%20rx='3'%20fill='%23cbd5e1'/%3E%3Crect%20x='18'%20y='82'%20width='92'%20height='5'%20rx='2.5'%20fill='%23e2e8f0'/%3E%3C/svg%3E";
-const COMPACT_LIST_PREVIEW_IMAGE = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='160'%20height='96'%20viewBox='0%200%20160%2096'%3E%3Crect%20width='160'%20height='96'%20rx='8'%20fill='%23f8fafc'/%3E%3Crect%20x='14'%20y='14'%20width='30'%20height='30'%20rx='7'%20fill='%23ccfbf1'/%3E%3Crect%20x='54'%20y='16'%20width='90'%20height='7'%20rx='3.5'%20fill='%231f2937'/%3E%3Crect%20x='54'%20y='29'%20width='66'%20height='5'%20rx='2.5'%20fill='%2394a3b8'/%3E%3Crect%20x='14'%20y='55'%20width='132'%20height='1'%20fill='%23e2e8f0'/%3E%3Crect%20x='18'%20y='65'%20width='72'%20height='6'%20rx='3'%20fill='%23475569'/%3E%3Crect%20x='18'%20y='79'%20width='110'%20height='5'%20rx='2.5'%20fill='%23cbd5e1'/%3E%3C/svg%3E";
-
-const BROWSER_SAFE_TEMPLATE_PREVIEW_IMAGES: Record<string, string> = {
-  'builtin://bot-homepage/document/preview.svg': DOCUMENT_PREVIEW_IMAGE,
-  'builtin://bot-homepage/compact-list/preview.svg': COMPACT_LIST_PREVIEW_IMAGE,
-};
-
-function browserSafeTemplatePreviewImage(previewImage: string): string {
-  return BROWSER_SAFE_TEMPLATE_PREVIEW_IMAGES[previewImage] ?? previewImage;
-}
-
+export const BROWSER_BASE_URL_FIELDS: BrowserBaseUrlFieldDefinition[] =
+  ABC_BROWSER_BASE_URL_FIELDS;
 export const BROWSER_BOT_HOMEPAGE_TEMPLATES: readonly BotHomepageTemplateDefinition[] =
-  BOT_HOMEPAGE_TEMPLATES.map((template) => ({
-    ...template,
-    previewImage: browserSafeTemplatePreviewImage(template.previewImage),
-  }));
-
-export const BROWSER_BASE_URL_FIELDS: BrowserBaseUrlFieldDefinition[] = [
-  {
-    key: 'metasoP2PBaseUrl',
-    label: 'Metaso P2P Base URL',
-    placeholder: 'https://so.metaid.io',
-  },
-  {
-    key: 'metafileContentBaseUrl',
-    label: 'Metafile Content Base URL',
-    placeholder: 'https://so.metaid.io/content',
-  },
-  {
-    key: 'manApiBaseUrl',
-    label: 'ManAPI Base URL',
-    placeholder: 'https://manapi.metaid.io',
-  },
-  {
-    key: 'blockExplorerBaseUrl',
-    label: 'Block Explorer Base URL',
-    placeholder: 'https://www.mvcscan.com/tx',
-  },
-  {
-    key: 'walletApiBaseUrl',
-    label: 'Wallet API Base URL',
-    placeholder: 'https://...',
-  },
-];
+  ABC_BROWSER_BOT_HOMEPAGE_TEMPLATES;
+export const BROWSER_MENU_SECTIONS: BrowserMenuSectionDefinition[] =
+  ABC_BROWSER_MENU_SECTIONS;
+export const BROWSER_SETTINGS_TABS: BrowserSettingsTabDefinition[] =
+  ABC_BROWSER_SETTINGS_TABS;

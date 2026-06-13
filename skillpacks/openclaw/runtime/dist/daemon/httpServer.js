@@ -23,6 +23,7 @@ const trace_1 = require("./routes/trace");
 const ui_1 = require("./routes/ui");
 const llm_1 = require("./routes/llm");
 const bot_1 = require("./routes/bot");
+const browser_1 = require("./routes/browser");
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 const ROUTES = [
     config_1.handleConfigRoutes,
@@ -38,6 +39,7 @@ const ROUTES = [
     metaapp_1.handleMetaAppRoutes,
     services_1.handleServicesRoutes,
     trace_1.handleTraceRoutes,
+    browser_1.handleBrowserRoutes,
     ui_1.handleUiRoutes,
     llm_1.handleLlmRoutes,
     bot_1.handleBotRoutes,
