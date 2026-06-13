@@ -42,6 +42,7 @@ class FakeElement {
     this.disabled = false;
     this.hidden = false;
     this.dataset = {};
+    this.href = this.attributes.get('href') ?? '';
   }
 
   addEventListener() {}
@@ -61,6 +62,11 @@ class FakeElement {
 
   closest(selector) {
     return this.matches(selector) ? this : null;
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+    if (name === 'href') this.href = String(value);
   }
 }
 
@@ -108,10 +114,13 @@ function order(id, paymentTxid) {
   };
 }
 
-function createContext() {
+function createContext(options = {}) {
   const clickListeners = [];
+  const locationUrl = new URL(options.url ?? 'http://localhost/ui/services');
   const elements = {
     '[data-my-services-page-label]': new FakeElement(),
+    '[data-my-services-publish]': new FakeElement({ href: '/ui/publish' }),
+    '[data-my-services-refunds]': new FakeElement({ href: '/ui/refund' }),
     '[data-my-services-refresh]': new FakeElement({ 'data-my-services-refresh': '' }),
     '[data-my-services-notice]': new FakeElement(),
     '[data-services-bot-picker]': new FakeElement(),
@@ -133,6 +142,15 @@ function createContext() {
     '[data-my-service-revoke-confirm]': new FakeElement(),
   };
   const orderRequestsByService = new Map();
+  const fetchUrls = [];
+  const profiles = options.profiles ?? [
+    {
+      slug: 'provider-bot',
+      name: 'Provider Bot',
+      isActive: true,
+      avatar: { label: 'PB' },
+    },
+  ];
   const servicesPage = {
     page: 1,
     pageSize: 20,
@@ -142,6 +160,8 @@ function createContext() {
   };
   const context = {
     Element: FakeElement,
+    URL,
+    URLSearchParams,
     document: {
       querySelector: (selector) => elements[selector] ?? null,
       addEventListener: (eventName, handler) => {
@@ -149,6 +169,10 @@ function createContext() {
       },
     },
     fetch: (url) => {
+      fetchUrls.push(String(url));
+      if (String(url) === '/api/bot/profiles') {
+        return Promise.resolve(response({ profiles }));
+      }
       if (String(url).startsWith('/api/services/owned?')) {
         return Promise.resolve(response(servicesPage));
       }
@@ -162,11 +186,19 @@ function createContext() {
       }
       throw new Error(`Unexpected fetch ${url}`);
     },
+    history: {
+      replaceState: (state, title, url) => {
+        locationUrl.href = new URL(String(url), locationUrl).href;
+      },
+    },
+    location: locationUrl,
+    window: null,
     navigator: {},
     setTimeout,
     clearTimeout,
   };
-  return { context, elements, clickListeners, orderRequestsByService };
+  context.window = context;
+  return { context, elements, clickListeners, orderRequestsByService, fetchUrls, locationUrl };
 }
 
 function clickDetails(clickListeners, serviceId) {
@@ -216,4 +248,71 @@ test('my-services detail modal ignores stale order responses after switching ser
   const detailHtml = elements['[data-my-service-detail-modal-body]'].innerHTML;
   assert.match(detailHtml, /Service B/);
   assert.doesNotMatch(detailHtml, /payment-A-race/);
+});
+
+test('my-services defaults to the active bot and scopes startup links and reads', async () => {
+  const { context, elements, fetchUrls, locationUrl } = createContext({
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: false },
+      { slug: 'bob-bot', name: 'Bob', avatar: { label: 'BO' }, isActive: true },
+    ],
+  });
+  vm.runInNewContext(
+    buildMyServicesPageDefinition({ includePublishAction: true, includeRefundsAction: true }).script,
+    context,
+  );
+
+  await waitFor(() => fetchUrls.some((url) => url.startsWith('/api/services/owned?')), 'scoped services request');
+
+  assert.equal(fetchUrls[0], '/api/bot/profiles');
+  const servicesUrl = fetchUrls.find((url) => url.startsWith('/api/services/owned?'));
+  assert.ok(servicesUrl, 'expected services request');
+  const params = new URL(servicesUrl, 'http://localhost').searchParams;
+  assert.equal(params.get('from'), 'bob-bot');
+  assert.equal(params.get('all'), null);
+  assert.equal(locationUrl.search, '?from=bob-bot');
+  assert.equal(elements['[data-my-services-publish]'].href, '/ui/publish?from=bob-bot');
+  assert.equal(elements['[data-my-services-refunds]'].href, '/ui/refund?from=bob-bot');
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /Bob/);
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /BO/);
+});
+
+test('my-services honors a valid from query over the active bot', async () => {
+  const { context, fetchUrls } = createContext({
+    url: 'http://localhost/ui/services?from=alice-bot',
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: false },
+      { slug: 'bob-bot', name: 'Bob', avatar: { label: 'BO' }, isActive: true },
+    ],
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => fetchUrls.some((url) => url.startsWith('/api/services/owned?')), 'scoped services request');
+
+  const servicesUrl = fetchUrls.find((url) => url.startsWith('/api/services/owned?'));
+  assert.ok(servicesUrl, 'expected services request');
+  const params = new URL(servicesUrl, 'http://localhost').searchParams;
+  assert.equal(params.get('from'), 'alice-bot');
+  assert.equal(params.get('all'), null);
+});
+
+test('my-services service and order reads do not request all bots', async () => {
+  const { context, clickListeners, fetchUrls, orderRequestsByService } = createContext({
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: true },
+    ],
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => orderRequestsByService.has('service-a'), 'initial scoped order request');
+  clickDetails(clickListeners, 'service-b');
+  await waitFor(() => orderRequestsByService.has('service-b'), 'detail scoped order request');
+
+  const scopedUrls = fetchUrls.filter((url) => url.startsWith('/api/services/owned'));
+  assert.ok(scopedUrls.length >= 2, 'expected service and order requests');
+  for (const url of scopedUrls) {
+    const parsed = new URL(url, 'http://localhost');
+    assert.equal(parsed.searchParams.get('from'), 'alice-bot');
+    assert.equal(parsed.searchParams.get('all'), null);
+  }
 });

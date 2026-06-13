@@ -239,6 +239,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   const state = {
+    profiles: [],
+    selectedBotSlug: '',
     servicesPage: null,
     ordersPage: null,
     selectedServiceId: '',
@@ -269,6 +271,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     .replace(/'/g, '&#39;');
 
   const normalizeTextClient = (value) => String(value || '').trim();
+  const profileSlug = (profile) => normalizeTextClient(profile && profile.slug);
+  const selectedBotProfile = () => state.profiles.find((profile) => profileSlug(profile) === state.selectedBotSlug) || null;
   const getServiceItems = () => Array.isArray(state.servicesPage && state.servicesPage.items) ? state.servicesPage.items : [];
   const getSelectedRawService = () => {
     const serviceId = state.editServiceId || state.revokeServiceId || state.selectedServiceId;
@@ -295,6 +299,54 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       throw new Error((payload && payload.message) || 'Request failed.');
     }
     return payload.data;
+  };
+
+  const fromQuery = () => new URLSearchParams((typeof window !== 'undefined' && window.location && window.location.search) || '').get('from') || '';
+  const setUrlState = () => {
+    if (typeof window === 'undefined' || !window.history || !window.location || !state.selectedBotSlug) return;
+    const next = new URLSearchParams(window.location.search || '');
+    next.set('from', state.selectedBotSlug);
+    const suffix = next.toString();
+    window.history.replaceState(null, '', window.location.pathname + (suffix ? '?' + suffix : ''));
+  };
+  const syncActionLinks = () => {
+    const suffix = state.selectedBotSlug ? '?from=' + encodeURIComponent(state.selectedBotSlug) : '';
+    if (elements.publish) elements.publish.setAttribute('href', '/ui/publish' + suffix);
+    if (elements.refunds) elements.refunds.setAttribute('href', '/ui/refund' + suffix);
+  };
+  const chooseSelectedBot = () => {
+    const querySlug = normalizeTextClient(fromQuery());
+    const queryProfile = state.profiles.find((profile) => profileSlug(profile) === querySlug);
+    const activeProfile = state.profiles.find((profile) => profile && profile.isActive === true);
+    const selected = queryProfile || activeProfile || state.profiles[0] || null;
+    state.selectedBotSlug = profileSlug(selected);
+    setUrlState();
+    syncActionLinks();
+  };
+  const profileAvatarMarkup = (profile) => {
+    const avatar = profile && profile.avatar;
+    const avatarValue = normalizeTextClient(profile && (profile.avatarDataUrl || profile.avatarUri || profile.avatarUrl || profile.avatarImage || (typeof avatar === 'string' ? avatar : '')));
+    const label = normalizeTextClient(profile && profile.name) || profileSlug(profile) || 'Bot';
+    const fallback = normalizeTextClient(avatar && typeof avatar === 'object' && avatar.label) || label.slice(0, 2).toUpperCase() || 'BT';
+    return avatarValue
+      ? '<img class="avatar" src="' + escapeHtml(avatarValue) + '" alt="" loading="lazy" />'
+      : '<span class="avatar">' + escapeHtml(fallback) + '</span>';
+  };
+  const renderBotPicker = () => {
+    if (!elements.botCurrent || !elements.botMenu || !elements.botTrigger) return;
+    const selected = selectedBotProfile();
+    elements.botCurrent.innerHTML = selected
+      ? profileAvatarMarkup(selected) + '<span>' + escapeHtml(normalizeTextClient(selected.name) || state.selectedBotSlug) + '</span>'
+      : '<span>No local Bot</span>';
+    elements.botTrigger.disabled = state.profiles.length === 0;
+    elements.botMenu.innerHTML = state.profiles.map((profile) => {
+      const slug = profileSlug(profile);
+      return '<button type="button" class="services-bot-option" role="option" data-services-bot-option="' + escapeHtml(slug) + '" data-selected="' + (slug === state.selectedBotSlug ? 'true' : 'false') + '" aria-selected="' + (slug === state.selectedBotSlug ? 'true' : 'false') + '">'
+        + profileAvatarMarkup(profile)
+        + '<span>' + escapeHtml(normalizeTextClient(profile && profile.name) || slug) + '</span>'
+        + '</button>';
+    }).join('');
+    elements.botMenu.hidden = true;
   };
 
   const renderNotice = (model) => {
@@ -394,6 +446,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
 
   const render = () => {
     const model = buildModel();
+    renderBotPicker();
     renderNotice(model);
     renderServices(model);
     renderDetail(model);
@@ -406,7 +459,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       render();
       return;
     }
-    const fetchOrdersPage = () => fetchJson('/api/services/owned/orders?serviceId=' + encodeURIComponent(serviceId) + '&all=true&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    const fetchOrdersPage = () => fetchJson('/api/services/owned/orders?serviceId=' + encodeURIComponent(serviceId) + '&from=' + encodeURIComponent(state.selectedBotSlug) + '&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
     state.ordersPage = null;
     render();
     const ordersPage = await fetchOrdersPage();
@@ -424,7 +477,10 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
 
   const loadServices = async (refresh) => {
     state.error = null;
-    const fetchServicesPage = () => fetchJson('/api/services/owned?all=true&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    if (!state.selectedBotSlug) {
+      throw new Error('No local Bot profile is available for Services.');
+    }
+    const fetchServicesPage = () => fetchJson('/api/services/owned?from=' + encodeURIComponent(state.selectedBotSlug) + '&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
     state.servicesPage = await fetchServicesPage();
     const totalPages = Number(state.servicesPage && state.servicesPage.totalPages) || 0;
     if (state.servicesPageNumber > 1 && totalPages > 0 && state.servicesPageNumber > totalPages) {
@@ -438,6 +494,20 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       state.ordersPageNumber = 1;
     }
     await loadOrders(state.selectedServiceId, refresh);
+  };
+
+  const loadProfiles = async () => {
+    const data = await fetchJson('/api/bot/profiles');
+    state.profiles = Array.isArray(data && data.profiles)
+      ? data.profiles.filter((profile) => profileSlug(profile))
+      : [];
+    chooseSelectedBot();
+    renderBotPicker();
+  };
+
+  const initialize = async () => {
+    await loadProfiles();
+    await loadServices(false);
   };
 
   const setError = (error) => {
@@ -834,7 +904,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     elements.revokeConfirm.addEventListener('click', confirmRevoke);
   }
 
-  loadServices(false).catch(setError);
+  initialize().catch(setError);
 })();`,
   };
 }
