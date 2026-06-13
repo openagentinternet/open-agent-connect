@@ -6,6 +6,7 @@ import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
+import { buildConversationsPageDefinition } from '../../ui/pages/conversations/app';
 import { buildLoomPageDefinition } from '../../ui/pages/loom/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
@@ -34,7 +35,7 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, () => LocalUiPageDefiniti
   'trace': buildTracePageDefinition,
   'refund': buildRefundPageDefinition,
   'bot': buildBotPageDefinition,
-  'conversations': buildConversationsTracePageDefinition,
+  'conversations': buildConversationsPageDefinition,
   'services': buildServicesPageDefinition,
   'settings': buildSettingsPageDefinition,
   'loom': buildLoomPageDefinition,
@@ -90,16 +91,6 @@ function renderTopbarAction(i18n: LocalUiI18nContext): string {
   return `<a class="topbar-action" href="/browser" data-i18n-key="action.openBrowser">${escapeHtml(i18n.t('action.openBrowser'))}</a>`;
 }
 
-function buildConversationsTracePageDefinition(): LocalUiPageDefinition {
-  const definition = buildTracePageDefinition();
-  return {
-    ...definition,
-    page: 'conversations',
-    title: 'Conversations — Open Agent Connect',
-    eyebrow: 'Conversations',
-  };
-}
-
 function injectTopbarChrome(html: string, i18n: LocalUiI18nContext): string {
   const withLogo = html.replace(
     /<a class="topbar-logo" href="\/ui\/hub">MetaBot<\/a>/,
@@ -127,9 +118,7 @@ function resolveTemplatePath(page: MetabotUiPageName): string {
 async function loadTemplate(page: MetabotUiPageName): Promise<string> {
   const templatePage = page === 'services'
     ? 'my-services'
-    : page === 'conversations'
-      ? 'trace'
-      : page;
+    : page;
   const copiedAssetPath = path.resolve(__dirname, `../../ui/pages/${templatePage}/index.html`);
   try {
     return await fs.readFile(copiedAssetPath, 'utf8');

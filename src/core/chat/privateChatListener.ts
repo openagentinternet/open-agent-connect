@@ -33,6 +33,8 @@ export interface MetaWebPrivateMessage {
   txId?: string | null;
   pinId?: string | null;
   content?: string | null;
+  contentType?: string | null;
+  content_type?: string | null;
   timestamp?: number | null;
   replyPin?: string | null;
   fromGlobalMetaId?: string | null;
@@ -206,6 +208,7 @@ export function createPrivateChatListener(input: {
     const inboundMessage: PrivateChatInboundMessage = {
       fromGlobalMetaId,
       content: plaintext,
+      contentType: normalizeText(message.contentType) || normalizeText(message.content_type) || null,
       messagePinId,
       fromChatPublicKey: peerChatPublicKey,
       timestamp: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)

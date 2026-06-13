@@ -12,6 +12,7 @@ import type {
 } from './conversationTypes';
 import { normalizeDeliveryArtifacts } from './deliveryArtifacts';
 import { classifySimplemsgContent } from './simplemsgClassifier';
+import { normalizeSimplemsgDisplayContent, readSimplemsgPayloadContentType } from './simplemsgPayload';
 
 const SENSITIVE_RAW_METADATA_KEYS = new Set([
   'content',
@@ -215,10 +216,15 @@ export async function persistA2AConversationMessage(
   const timestamp = Number.isFinite(input.message.timestamp)
     ? Math.trunc(Number(input.message.timestamp))
     : Date.now();
-  const classification = classifySimplemsgContent(input.message.content);
+  const display = normalizeSimplemsgDisplayContent({
+    content: input.message.content,
+    contentType: input.message.contentType,
+    payloadContentType: readSimplemsgPayloadContentType(input.message.raw),
+  });
+  const classification = classifySimplemsgContent(display.content);
   const artifacts = normalizeDeliveryArtifacts({
     artifacts: input.message.artifacts,
-    resultText: input.message.content,
+    resultText: display.content,
   });
   const classifiedOrderTxid = classification.kind === 'order_protocol'
     ? classification.orderTxid
@@ -250,8 +256,8 @@ export async function persistA2AConversationMessage(
     serviceOrderPinId,
     orderPinId: serviceOrderPinId,
     paymentTxid: normalizeText(input.message.paymentTxid) || null,
-    content: String(input.message.content ?? ''),
-    contentType: normalizeText(input.message.contentType) || 'text/plain',
+    content: display.content,
+    contentType: display.contentType,
     ...(artifacts.length ? { artifacts } : {}),
     chain: normalizeText(input.message.chain) || null,
     pinId: normalizeText(input.message.pinId) || null,
