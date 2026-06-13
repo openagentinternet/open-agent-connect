@@ -123,15 +123,24 @@ test('default bot handlers create, list, and fetch MetaBot profiles', async (t) 
     bio: 'Builds small tools on the Agent Internet.',
     role: 'Writes careful code.',
   });
-  const listed = await handlers.bot.listProfiles();
-  const fetched = await handlers.bot.getProfile({ slug: created.data.profile.slug });
 
   assert.equal(created.ok, true);
+  const activeHandlers = createDefaultMetabotDaemonHandlers({
+    homeDir: created.data.profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+  const listed = await activeHandlers.bot.listProfiles();
+  const fetched = await activeHandlers.bot.getProfile({ slug: created.data.profile.slug });
+
   assert.equal(created.data.profile.slug, 'alice-bot');
   assert.equal(created.data.profile.bio, 'Builds small tools on the Agent Internet.');
   assert.equal(created.data.profile.role, 'Writes careful code.');
   assert.equal(listed.ok, true);
   assert.deepEqual(listed.data.profiles.map((profile) => profile.slug), ['alice-bot']);
+  assert.equal(listed.data.profiles[0].isActive, true);
+  assert.equal(typeof listed.data.profiles[0].homeDir, 'string');
   assert.equal(fetched.ok, true);
   assert.equal(fetched.data.profile.name, 'Alice Bot');
   assert.equal(fetched.data.profile.bio, 'Builds small tools on the Agent Internet.');

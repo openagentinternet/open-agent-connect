@@ -14187,6 +14187,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       listProfiles: async () => {
         const profiles = await listMetabotProfiles(normalizedSystemHomeDir);
+        const activeHomeDir = path.resolve(input.homeDir);
         await Promise.all(profiles.map(async (profile) => {
           if (!profile.avatarDataUrl && profile.globalMetaId) {
             const chainAvatar = await resolveChainAvatarDataUrl(profile.globalMetaId);
@@ -14195,7 +14196,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
             }
           }
         }));
-        return commandSuccess({ profiles });
+        return commandSuccess({
+          profiles: profiles.map((profile) => ({
+            ...profile,
+            isActive: path.resolve(profile.homeDir) === activeHomeDir,
+          })),
+        });
       },
       getProfile: async ({ slug }) => {
         const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
