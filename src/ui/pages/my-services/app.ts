@@ -249,6 +249,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     servicesPageSize: 20,
     ordersPageNumber: 1,
     ordersPageSize: 10,
+    ordersLoadToken: 0,
     editServiceId: '',
     revokeServiceId: '',
     editCoverDataUrl: '',
@@ -399,17 +400,24 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   const loadOrders = async (serviceId, refresh) => {
+    const loadToken = ++state.ordersLoadToken;
     if (!serviceId) {
       state.ordersPage = null;
       render();
       return;
     }
     const fetchOrdersPage = () => fetchJson('/api/services/owned/orders?serviceId=' + encodeURIComponent(serviceId) + '&all=true&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
-    state.ordersPage = await fetchOrdersPage();
-    const totalPages = Number(state.ordersPage && state.ordersPage.totalPages) || 0;
+    state.ordersPage = null;
+    render();
+    const ordersPage = await fetchOrdersPage();
+    if (loadToken !== state.ordersLoadToken || state.selectedServiceId !== serviceId) return;
+    state.ordersPage = ordersPage;
+    const totalPages = Number(ordersPage && ordersPage.totalPages) || 0;
     if (state.ordersPageNumber > 1 && totalPages > 0 && state.ordersPageNumber > totalPages) {
       state.ordersPageNumber = totalPages;
-      state.ordersPage = await fetchOrdersPage();
+      const adjustedOrdersPage = await fetchOrdersPage();
+      if (loadToken !== state.ordersLoadToken || state.selectedServiceId !== serviceId) return;
+      state.ordersPage = adjustedOrdersPage;
     }
     render();
   };
@@ -766,7 +774,6 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     if (action === 'details') {
       state.selectedServiceId = serviceId;
       state.ordersPageNumber = 1;
-      state.ordersPage = null;
       state.mutationResult = null;
       if (elements.detailModal) elements.detailModal.hidden = false;
       try {
