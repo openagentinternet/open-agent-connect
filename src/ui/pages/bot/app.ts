@@ -541,22 +541,6 @@ function renderChatSkillsTab(){
   focusBotManagementTarget();
 }
 
-function renderServicesTab(){
-  var profile=selectedProfile();var root=q('[data-services-content]');if(!root)return;
-  if(!profile){
-    root.innerHTML='<div class="info-edit-panel">'+
-      '<div class="info-save-row"><button type="button" class="btn btn-primary" disabled>'+esc(uiText('bot.publishService','Publish Service'))+'</button><button type="button" class="btn" disabled>'+esc(uiText('bot.manageServices','Manage Services'))+'</button></div>'+
-    '</div>';
-    focusBotManagementTarget();
-    return;
-  }
-  var from=encodeURIComponent(profile.slug||'');
-  root.innerHTML='<div class="info-edit-panel" data-services-profile-slug="'+esc(profile.slug)+'">'+
-    '<div class="info-save-row"><a class="btn btn-primary" href="/ui/publish?from='+esc(from)+'">'+esc(uiText('bot.publishService','Publish Service'))+'</a><a class="btn" href="/ui/services?from='+esc(from)+'">'+esc(uiText('bot.manageServices','Manage Services'))+'</a></div>'+
-  '</div>';
-  focusBotManagementTarget();
-}
-
 function renderAvatarPreview(dataUrl){
   var preview=q('[data-avatar-preview]');if(!preview)return;
   var profile=selectedProfile()||{};
@@ -1088,15 +1072,15 @@ function toggleExecDetail(btn){
 }
 
 function renderPlaceholderTab(tab){
-  var selector=tab==='behavior'?'[data-behavior-content]':tab==='chatSkills'?'[data-chat-skills-content]':tab==='services'?'[data-services-content]':'';
+  var selector=tab==='behavior'?'[data-behavior-content]':tab==='chatSkills'?'[data-chat-skills-content]':'';
   var root=selector?q(selector):null;
   if(!root)return;
-  var copy=tab==='behavior'?uiText('bot.behaviorPlaceholder','Behavior controls will be available here.'):tab==='chatSkills'?uiText('bot.chatSkillsPlaceholder','Chat skill controls will be available here.'):uiText('bot.servicesPlaceholder','Service publishing entries will be available here.');
+  var copy=tab==='behavior'?uiText('bot.behaviorPlaceholder','Behavior controls will be available here.'):uiText('bot.chatSkillsPlaceholder','Chat skill controls will be available here.');
   root.innerHTML='<div class="session-empty"><p>'+esc(copy)+'</p></div>';
 }
 
 function switchTab(tab,silent){
-  var allowed={publicIdentity:1,behavior:1,chatSkills:1,services:1,advanced:1};
+  var allowed={publicIdentity:1,behavior:1,chatSkills:1,advanced:1};
   state.selectedTab=allowed[tab]?tab:'publicIdentity';
   qq('[data-tab]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab')===state.selectedTab)});
   qq('[data-tab-panel]').forEach(function(el){el.classList.toggle('active',el.getAttribute('data-tab-panel')===state.selectedTab)});
@@ -1104,7 +1088,6 @@ function switchTab(tab,silent){
   else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
   else if(state.selectedTab==='behavior')renderBehaviorTab();
   else if(state.selectedTab==='chatSkills')renderChatSkillsTab();
-  else if(state.selectedTab==='services')renderServicesTab();
   else renderPlaceholderTab(state.selectedTab);
 }
 
@@ -1348,7 +1331,7 @@ function botManagementRouteRequest(){
     if(tab==='info')mappedTab=focus==='chat'?'chatSkills':'publicIdentity';
     else if(tab==='history'||focus==='messages')mappedTab='advanced';
     else if(tab==='settings')mappedTab='advanced';
-    else if(tab==='publicIdentity'||tab==='behavior'||tab==='chatSkills'||tab==='services'||tab==='advanced')mappedTab=tab;
+    else if(tab==='publicIdentity'||tab==='behavior'||tab==='chatSkills'||tab==='advanced')mappedTab=tab;
     state._managementRouteRequest={
       profile:(query.get('profile')||'').trim(),
       tab:mappedTab,
@@ -1389,7 +1372,6 @@ function rerenderLocalizedBotPage(){
   }else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
   else if(state.selectedTab==='behavior')renderBehaviorTab();
   else if(state.selectedTab==='chatSkills')renderChatSkillsTab();
-  else if(state.selectedTab==='services')renderServicesTab();
   if(state._runtimeModalOpen)renderRuntimeModal();
 }
 if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
