@@ -853,6 +853,7 @@ export async function syncMetabotInfoToChain(
   }
 
   if (changedFields.some((field) => PROFILE_INFO_FIELDS.has(field))) {
+    const personaChanged = changed.has('role') || changed.has('soul') || changed.has('goal');
     if (changed.has('bio')) {
       await writeProfileInfo({
         path: '/info/bio',
@@ -860,25 +861,15 @@ export async function syncMetabotInfoToChain(
         payload: profile.bio,
       });
     }
-    if (changed.has('role')) {
+    if (personaChanged) {
       await writeProfileInfo({
-        path: '/info/role',
-        contentType: 'text/plain',
-        payload: profile.role,
-      });
-    }
-    if (changed.has('soul')) {
-      await writeProfileInfo({
-        path: '/info/soul',
-        contentType: 'text/plain',
-        payload: profile.soul,
-      });
-    }
-    if (changed.has('goal')) {
-      await writeProfileInfo({
-        path: '/info/goal',
-        contentType: 'text/plain',
-        payload: profile.goal,
+        path: '/info/persona',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          role: profile.role,
+          soul: profile.soul,
+          goal: profile.goal,
+        }),
       });
     }
     if (changed.has('allowChatSkills')) {

@@ -1468,7 +1468,7 @@ test('default bot updateProfile returns chain write txids after saving a chained
   assert.equal(result.data.profile.bio, 'Now writes Bot Pages.');
   assert.equal(result.data.profile.role, 'Updated on chain first.');
   assert.equal(result.data.profile.avatarDataUrl, 'data:image/png;base64,VXBkYXRlZA==');
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/bio', '/info/role']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/bio', '/info/persona']);
   assert.equal(writeCalls[0].contentType, 'text/plain');
   assert.equal(writeCalls[0].payload, 'Chained Save Updated');
   assert.equal(writeCalls[1].contentType, 'image/png;binary');
@@ -1476,8 +1476,12 @@ test('default bot updateProfile returns chain write txids after saving a chained
   assert.equal(writeCalls[1].encoding, 'base64');
   assert.equal(writeCalls[2].contentType, 'text/plain');
   assert.equal(writeCalls[2].payload, 'Now writes Bot Pages.');
-  assert.equal(writeCalls[3].contentType, 'text/plain');
-  assert.equal(writeCalls[3].payload, 'Updated on chain first.');
+  assert.equal(writeCalls[3].contentType, 'application/json');
+  assert.deepEqual(JSON.parse(writeCalls[3].payload), {
+    role: 'Updated on chain first.',
+    soul: 'Friendly and professional.',
+    goal: 'Help users accomplish their tasks effectively.',
+  });
   assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2', 'save-tx-3', 'save-tx-4']);
 });
 
