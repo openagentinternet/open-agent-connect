@@ -526,13 +526,25 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     }
     const isStaleLoad = () => loadToken !== state.servicesLoadToken || state.selectedBotSlug !== selectedBotSlug;
     const fetchServicesPage = () => fetchJson('/api/services/owned?from=' + encodeURIComponent(selectedBotSlug) + '&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
-    const servicesPage = await fetchServicesPage();
+    let servicesPage;
+    try {
+      servicesPage = await fetchServicesPage();
+    } catch (error) {
+      if (isStaleLoad()) return;
+      throw error;
+    }
     if (isStaleLoad()) return;
     state.servicesPage = servicesPage;
     const totalPages = Number(state.servicesPage && state.servicesPage.totalPages) || 0;
     if (state.servicesPageNumber > 1 && totalPages > 0 && state.servicesPageNumber > totalPages) {
       state.servicesPageNumber = totalPages;
-      const adjustedServicesPage = await fetchServicesPage();
+      let adjustedServicesPage;
+      try {
+        adjustedServicesPage = await fetchServicesPage();
+      } catch (error) {
+        if (isStaleLoad()) return;
+        throw error;
+      }
       if (isStaleLoad()) return;
       state.servicesPage = adjustedServicesPage;
     }

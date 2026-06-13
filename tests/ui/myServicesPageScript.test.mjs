@@ -531,3 +531,55 @@ test('my-services ignores stale services responses after switching bots', async 
     false,
   );
 });
+
+test('my-services ignores stale services errors after switching bots', async () => {
+  const servicesRequests = [];
+  const { context, elements, documentListeners, orderRequestsByService } = createContext({
+    profiles: [
+      { slug: 'alice-bot', name: 'Alice', avatar: { label: 'AL' }, isActive: true },
+      { slug: 'bob-bot', name: 'Bob', avatar: { label: 'BO' }, isActive: false },
+    ],
+    fetchServicesPage: (url) => {
+      const from = new URL(url, 'http://localhost').searchParams.get('from');
+      const pending = deferred();
+      servicesRequests.push({ from, pending });
+      return pending.promise;
+    },
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => servicesRequests.some((request) => request.from === 'alice-bot'), 'initial Alice services request');
+
+  await clickBotOption(documentListeners, 'bob-bot');
+  await waitFor(() => servicesRequests.some((request) => request.from === 'bob-bot'), 'Bob services request');
+
+  servicesRequests.find((request) => request.from === 'bob-bot').pending.resolve({
+    page: 1,
+    pageSize: 20,
+    total: 1,
+    totalPages: 1,
+    items: [service('bob-service', 'Bob Service')],
+  });
+  await waitFor(() => orderRequestsByService.has('bob-service'), 'Bob order request');
+  orderRequestsByService.get('bob-service')[0].resolve({
+    page: 1,
+    pageSize: 10,
+    total: 0,
+    totalPages: 0,
+    items: [],
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /Bob/);
+  assert.match(elements['[data-my-services-list]'].innerHTML, /Bob Service/);
+  assert.doesNotMatch(elements['[data-my-services-list]'].innerHTML, /Alice Service/);
+  assert.equal(elements['[data-my-services-notice]'].hidden, true);
+
+  servicesRequests.find((request) => request.from === 'alice-bot').pending.reject(new Error('Alice services failed'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(elements['[data-services-bot-current]'].innerHTML, /Bob/);
+  assert.match(elements['[data-my-services-list]'].innerHTML, /Bob Service/);
+  assert.doesNotMatch(elements['[data-my-services-list]'].innerHTML, /Alice services failed/);
+  assert.equal(elements['[data-my-services-notice]'].hidden, true);
+});
