@@ -57,9 +57,9 @@ test('createMetabotProfile creates a profile workspace with editable persona def
 
   assert.equal(created.name, 'Alice Bot');
   assert.equal(created.slug, 'alice-bot');
-  assert.equal(created.role, 'I am a helpful AI assistant.');
-  assert.equal(created.soul, 'Friendly and professional.');
-  assert.equal(created.goal, 'Help users accomplish their tasks effectively.');
+  assert.equal(created.role, 'You are a helpful AI assistant.');
+  assert.equal(created.soul, 'You are friendly and professional.');
+  assert.equal(created.goal, 'Your goal is to help users accomplish their tasks effectively.');
   assert.equal(created.primaryProvider, null);
   assert.equal(created.fallbackProvider, null);
   assert.deepEqual(created.allowChatSkills, []);
@@ -311,7 +311,7 @@ test('updateMetabotProfile validates allowChatSkills before writing local profil
   );
 
   const afterFailure = await getMetabotProfile(systemHomeDir, created.slug);
-  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'I am a helpful AI assistant.\n');
+  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'You are a helpful AI assistant.\n');
   assert.deepEqual(afterFailure.allowChatSkills, []);
   await assert.rejects(
     () => readFile(paths.chatSkillPolicyPath, 'utf8'),
@@ -335,7 +335,7 @@ test('updateMetabotProfile validates provider changes before writing local profi
 
   const afterFailure = await getMetabotProfile(systemHomeDir, created.slug);
   assert.equal(afterFailure.name, 'Atomic Bot');
-  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'I am a helpful AI assistant.\n');
+  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'You are a helpful AI assistant.\n');
   assert.equal(afterFailure.primaryProvider, null);
 });
 

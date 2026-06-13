@@ -1258,7 +1258,7 @@ test('default bot updateProfile rejects local-only profiles before saving local 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'chain_identity_missing');
   assert.equal(afterFailure.name, 'Local Bot');
-  assert.equal(afterFailure.role, 'I am a helpful AI assistant.');
+  assert.equal(afterFailure.role, 'You are a helpful AI assistant.');
   assert.deepEqual(signerCalls, []);
 });
 
@@ -1479,8 +1479,8 @@ test('default bot updateProfile returns chain write txids after saving a chained
   assert.equal(writeCalls[3].contentType, 'application/json');
   assert.deepEqual(JSON.parse(writeCalls[3].payload), {
     role: 'Updated on chain first.',
-    soul: 'Friendly and professional.',
-    goal: 'Help users accomplish their tasks effectively.',
+    soul: 'You are friendly and professional.',
+    goal: 'Your goal is to help users accomplish their tasks effectively.',
   });
   assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2', 'save-tx-3', 'save-tx-4']);
 });

@@ -35,9 +35,9 @@ import type {
 import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
 
-const DEFAULT_ROLE = 'I am a helpful AI assistant.';
-const DEFAULT_SOUL = 'Friendly and professional.';
-const DEFAULT_GOAL = 'Help users accomplish their tasks effectively.';
+const DEFAULT_ROLE = 'You are a helpful AI assistant.';
+const DEFAULT_SOUL = 'You are friendly and professional.';
+const DEFAULT_GOAL = 'Your goal is to help users accomplish their tasks effectively.';
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
 
