@@ -152,6 +152,7 @@ function createPrivateChatListener(input) {
         const inboundMessage = {
             fromGlobalMetaId,
             content: plaintext,
+            contentType: normalizeText(message.contentType) || normalizeText(message.content_type) || null,
             messagePinId,
             fromChatPublicKey: peerChatPublicKey,
             timestamp: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)

@@ -13,6 +13,7 @@ const paths_1 = require("../state/paths");
 const conversationStore_1 = require("./conversationStore");
 const deliveryArtifacts_1 = require("./deliveryArtifacts");
 const simplemsgClassifier_1 = require("./simplemsgClassifier");
+const simplemsgPayload_1 = require("./simplemsgPayload");
 const SENSITIVE_RAW_METADATA_KEYS = new Set([
     'content',
     'payload',
@@ -143,10 +144,15 @@ async function persistA2AConversationMessage(input) {
     const timestamp = Number.isFinite(input.message.timestamp)
         ? Math.trunc(Number(input.message.timestamp))
         : Date.now();
-    const classification = (0, simplemsgClassifier_1.classifySimplemsgContent)(input.message.content);
+    const display = (0, simplemsgPayload_1.normalizeSimplemsgDisplayContent)({
+        content: input.message.content,
+        contentType: input.message.contentType,
+        payloadContentType: (0, simplemsgPayload_1.readSimplemsgPayloadContentType)(input.message.raw),
+    });
+    const classification = (0, simplemsgClassifier_1.classifySimplemsgContent)(display.content);
     const artifacts = (0, deliveryArtifacts_1.normalizeDeliveryArtifacts)({
         artifacts: input.message.artifacts,
-        resultText: input.message.content,
+        resultText: display.content,
     });
     const classifiedOrderTxid = classification.kind === 'order_protocol'
         ? classification.orderTxid
@@ -178,8 +184,8 @@ async function persistA2AConversationMessage(input) {
         serviceOrderPinId,
         orderPinId: serviceOrderPinId,
         paymentTxid: normalizeText(input.message.paymentTxid) || null,
-        content: String(input.message.content ?? ''),
-        contentType: normalizeText(input.message.contentType) || 'text/plain',
+        content: display.content,
+        contentType: display.contentType,
         ...(artifacts.length ? { artifacts } : {}),
         chain: normalizeText(input.message.chain) || null,
         pinId: normalizeText(input.message.pinId) || null,

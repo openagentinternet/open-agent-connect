@@ -53,6 +53,51 @@ function titleCase(value) {
         .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1).toLowerCase())
         .join(' ') || 'Unknown';
 }
+function readAvatar(record) {
+    return normalizeText(record.avatarDataUrl)
+        || normalizeText(record.avatar)
+        || normalizeText(record.avatarUrl)
+        || normalizeText(record.avatarImage)
+        || normalizeText(record.avatarUri)
+        || normalizeText(record.avatar_uri);
+}
+function normalizeTxid(value) {
+    const normalized = normalizeText(value).toLowerCase();
+    return /^[0-9a-f]{64}$/iu.test(normalized) ? normalized : '';
+}
+function normalizePinIdTxid(value) {
+    const normalized = normalizeText(value).toLowerCase();
+    const match = normalized.match(/^([0-9a-f]{64})i\d+$/iu);
+    return match ? match[1] : '';
+}
+function resolveMessageTxid(record) {
+    const txids = readArray(record.txids).map(normalizeTxid).find(Boolean);
+    return txids
+        || normalizeTxid(record.txid)
+        || normalizeTxid(record.txId)
+        || normalizePinIdTxid(record.pinId)
+        || normalizePinIdTxid(record.messagePinId);
+}
+function formatTxidPreview(txid) {
+    return txid ? `${txid.slice(0, 8)}...${txid.slice(-6)}` : '';
+}
+function formatConversationIdPreview(conversationId) {
+    return conversationId.length > 28
+        ? `${conversationId.slice(0, 8)}...${conversationId.slice(-6)}`
+        : conversationId;
+}
+function isMarkdownContentType(contentType) {
+    return /^text\/markdown(?:\s*;|$)/iu.test(contentType);
+}
+function extractLocalBots(input) {
+    if (Array.isArray(input.localBots))
+        return input.localBots;
+    const response = readObject(input.botProfilesResponse);
+    const data = readObject(response.data);
+    return readArray(data.profiles).length > 0
+        ? readArray(data.profiles)
+        : readArray(response.profiles);
+}
 function extractConversations(input) {
     if (Array.isArray(input.conversations))
         return input.conversations;
@@ -71,200 +116,160 @@ function extractMessages(input) {
         ? readArray(data.messages)
         : readArray(response.messages);
 }
-function extractTraceSessions(input) {
-    if (Array.isArray(input.traceSessions))
-        return input.traceSessions;
-    const response = readObject(input.traceSessionsResponse);
-    const data = readObject(response.data);
-    return readArray(data.sessions).length > 0
-        ? readArray(data.sessions)
-        : readArray(response.sessions);
+function normalizeKindLabel(value) {
+    const normalized = normalizeText(value).toLowerCase();
+    if (normalized === 'order_protocol' || normalized === 'service' || normalized === 'service_order') {
+        return 'Service';
+    }
+    return 'Chat';
 }
-function serviceConversationId(sessionId) {
-    return `service-${sessionId}`;
+function normalizeKindLabels(value) {
+    const raw = readArray(value);
+    const labels = raw.length > 0 ? raw.map(normalizeKindLabel) : ['Chat'];
+    return labels.filter((label, index) => labels.indexOf(label) === index);
 }
-function buildTraceHref(traceId) {
-    return traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '';
-}
-function buildSessionHref(sessionId) {
-    return sessionId ? `/ui/trace?sessionId=${encodeURIComponent(sessionId)}` : '';
-}
-function buildRefundHref(record) {
-    const order = readObject(record.order);
-    const source = Object.keys(order).length > 0 ? order : record;
-    const orderId = normalizeText(source.id)
-        || normalizeText(source.serviceOrderPinId)
-        || normalizeText(source.orderReference)
-        || normalizeText(record.refundOrderId)
-        || normalizeText(record.orderId)
-        || normalizeText(record.serviceOrderPinId);
-    if (!orderId)
-        return '';
-    const status = normalizeText(source.status) || normalizeText(record.refundStatus) || normalizeText(record.status);
-    const refundRequestPinId = normalizeText(source.refundRequestPinId) || normalizeText(record.refundRequestPinId);
-    const requiresRefundAction = status === 'refund_pending'
-        || Boolean(refundRequestPinId)
-        || record.refundActionRequired === true
-        || record.manualActionRequired === true;
-    return requiresRefundAction ? `/ui/refund?orderId=${encodeURIComponent(orderId)}` : '';
-}
-function hasServiceConversationContext(record, order) {
-    return Boolean(normalizeText(record.servicePinId)
-        || normalizeText(record.serviceName)
-        || normalizeText(record.displayName)
-        || normalizeText(record.orderId)
-        || normalizeText(record.serviceOrderPinId)
-        || normalizeText(order.id)
-        || normalizeText(order.servicePinId)
-        || normalizeText(order.serviceName)
-        || normalizeText(order.serviceOrderPinId)
-        || normalizeText(order.orderReference));
-}
-function buildConversationSummary(row, selectedConversationId) {
+function buildLocalBotOption(row, selectedLocalGlobalMetaId) {
     const record = readObject(row);
-    const conversationId = normalizeText(record.conversationId) || normalizeText(record.id);
-    const peerGlobalMetaId = normalizeText(record.peerGlobalMetaId) || normalizeText(record.peer);
-    const peerLabel = normalizeText(record.peerName) || normalizeText(record.peerDisplayName) || peerGlobalMetaId || 'Unknown peer';
-    const direction = normalizeText(record.lastDirection);
-    const latestAt = normalizeTimestampMs(record.updatedAt || record.lastMessageAt || record.createdAt);
-    const stateLabel = titleCase(normalizeText(record.state) || 'active');
-    const turnCount = typeof record.turnCount === 'number' && Number.isFinite(record.turnCount)
-        ? record.turnCount
-        : Number(record.turnCount || 0);
-    const normalizedTurnCount = Number.isFinite(turnCount) && turnCount >= 0 ? turnCount : 0;
+    const globalMetaId = normalizeText(record.globalMetaId);
+    if (!globalMetaId)
+        return null;
+    const label = normalizeText(record.name) || normalizeText(record.slug) || globalMetaId;
     return {
-        conversationId,
-        peerLabel,
-        peerGlobalMetaId,
-        source: 'private_chat',
-        latestText: `${titleCase(direction || 'private')} private chat with ${peerLabel}`,
-        latestAt,
-        latestAtLabel: formatTimestamp(latestAt),
-        kinds: ['Chat'],
-        stateLabel,
-        turnCountLabel: `${normalizedTurnCount} ${normalizedTurnCount === 1 ? 'turn' : 'turns'}`,
-        localBotLabel: normalizeText(record.localMetabotName) || normalizeText(record.localBotName),
-        serviceName: '',
-        traceHref: '',
-        sessionHref: '',
-        refundHref: '',
-        advancedActions: [],
-        isSelected: Boolean(selectedConversationId && conversationId === selectedConversationId),
+        label,
+        slug: normalizeText(record.slug),
+        globalMetaId,
+        avatar: readAvatar(record),
+        isSelected: selectedLocalGlobalMetaId === globalMetaId,
     };
 }
-function buildServiceSummary(row, selectedConversationId) {
+function buildConversationId(record, localGlobalMetaId, peerGlobalMetaId) {
+    return normalizeText(record.conversationId)
+        || normalizeText(record.id)
+        || `peer-${localGlobalMetaId || 'local'}-${peerGlobalMetaId || 'peer'}`;
+}
+function buildConversationSummary(row, selected) {
     const record = readObject(row);
-    const sessionId = normalizeText(record.sessionId) || normalizeText(record.id);
-    const conversationId = serviceConversationId(sessionId);
-    const traceId = normalizeText(record.traceId);
+    const localGlobalMetaId = normalizeText(record.localGlobalMetaId)
+        || normalizeText(record.localBotGlobalMetaId);
     const peerGlobalMetaId = normalizeText(record.peerGlobalMetaId)
-        || normalizeText(record.providerGlobalMetaId)
-        || normalizeText(record.callerGlobalMetaId);
+        || normalizeText(record.peer);
+    const conversationId = buildConversationId(record, localGlobalMetaId, peerGlobalMetaId);
     const peerLabel = normalizeText(record.peerName)
-        || normalizeText(record.providerName)
-        || normalizeText(record.callerName)
+        || normalizeText(record.peerDisplayName)
         || peerGlobalMetaId
-        || 'Remote Bot';
-    const order = readObject(record.order);
-    if (!sessionId || !hasServiceConversationContext(record, order)) {
-        return null;
-    }
-    const serviceName = normalizeText(record.serviceName)
-        || normalizeText(order.serviceName)
-        || normalizeText(record.displayName)
-        || normalizeText(record.servicePinId)
-        || 'Service';
-    const serviceText = serviceName === 'Service' ? 'Service session' : `${serviceName} service session`;
-    const latestAt = normalizeTimestampMs(record.updatedAt || record.completedAt || record.createdAt);
-    const traceHref = buildTraceHref(traceId);
-    const sessionHref = buildSessionHref(sessionId);
-    const refundHref = buildRefundHref(record);
-    const advancedActions = [
-        ...(traceHref ? [{ label: 'Trace', href: traceHref }] : []),
-        ...(sessionHref ? [{ label: 'Session', href: sessionHref }] : []),
-        ...(refundHref ? [{ label: 'Refund', href: refundHref }] : []),
-    ];
+        || 'Unknown peer';
+    const latestAt = normalizeTimestampMs(record.latestAt || record.updatedAt || record.lastMessageAt || record.createdAt);
+    const count = Number(record.messageCount ?? record.turnCount ?? 0);
+    const messageCount = Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0;
     return {
         conversationId,
+        conversationIdPreview: formatConversationIdPreview(conversationId),
+        localGlobalMetaId,
+        localAvatar: normalizeText(record.localAvatar)
+            || normalizeText(record.localBotAvatar)
+            || normalizeText(record.localMetabotAvatar),
         peerLabel,
         peerGlobalMetaId,
-        source: 'service_trace',
-        latestText: `${serviceText} with ${peerLabel}`,
+        peerAvatar: normalizeText(record.peerAvatar)
+            || normalizeText(record.avatar)
+            || normalizeText(record.peerAvatarUrl)
+            || normalizeText(record.peerAvatarImage),
+        latestText: normalizeText(record.latestText)
+            || normalizeText(record.lastMessage)
+            || normalizeText(record.preview)
+            || `Conversation with ${peerLabel}`,
         latestAt,
         latestAtLabel: formatTimestamp(latestAt),
-        kinds: ['Service'],
-        stateLabel: titleCase(normalizeText(record.state) || 'service'),
-        turnCountLabel: sessionId,
-        localBotLabel: normalizeText(record.localMetabotName) || normalizeText(record.localBotName),
-        serviceName,
-        traceHref,
-        sessionHref,
-        refundHref,
-        advancedActions,
-        isSelected: Boolean(selectedConversationId && conversationId === selectedConversationId),
+        kinds: normalizeKindLabels(record.kinds),
+        stateLabel: titleCase(normalizeText(record.state) || 'active'),
+        messageCountLabel: `${messageCount} ${messageCount === 1 ? 'message' : 'messages'}`,
+        localBotLabel: normalizeText(record.localBotName)
+            || normalizeText(record.localMetabotName)
+            || normalizeText(record.localName),
+        isSelected: Boolean((selected.peerGlobalMetaId && peerGlobalMetaId === selected.peerGlobalMetaId)
+            || (selected.conversationId && conversationId === selected.conversationId)),
     };
 }
 function buildMessage(row) {
     const record = readObject(row);
     const direction = normalizeText(record.direction).toLowerCase();
     const timestamp = normalizeTimestampMs(record.timestamp || record.createdAt);
+    const sender = readObject(record.sender);
+    const contentType = normalizeText(record.contentType) || 'text/plain';
+    const txid = resolveMessageTxid(record);
     return {
-        messageId: normalizeText(record.messageId) || normalizeText(record.id) || normalizeText(record.messagePinId),
-        directionLabel: direction === 'outbound' ? 'Bot' : 'Peer',
+        messageId: normalizeText(record.messageId)
+            || normalizeText(record.id)
+            || normalizeText(record.pinId)
+            || normalizeText(record.messagePinId),
+        direction,
+        directionLabel: direction === 'outgoing' || direction === 'outbound' ? 'Bot' : 'Peer',
+        kindLabel: normalizeKindLabel(record.kind || record.protocolTag),
         content: normalizeText(record.content) || normalizeText(record.text) || normalizeText(record.body),
-        timestampLabel: formatTimestamp(timestamp),
+        contentType,
+        isMarkdown: isMarkdownContentType(contentType),
+        senderLabel: normalizeText(sender.name)
+            || normalizeText(sender.displayName)
+            || normalizeText(sender.globalMetaId)
+            || (direction === 'outgoing' || direction === 'outbound' ? 'Local Bot' : 'Remote Bot'),
+        senderAvatar: readAvatar(sender),
+        txid,
+        txidPreview: formatTxidPreview(txid),
+        timestampLabel: formatTimestamp(timestamp || normalizeTimestampMs(sender.timestamp)),
     };
 }
 function buildConversationsPageViewModel(input = {}) {
-    const selectedInput = normalizeText(input.selectedConversationId);
-    const privateSummaries = extractConversations(input)
-        .map((row) => buildConversationSummary(row, normalizeText(input.selectedConversationId)))
-        .filter((summary) => summary.conversationId);
-    const serviceSummaries = extractTraceSessions(input)
-        .map((row) => buildServiceSummary(row, selectedInput))
-        .filter((summary) => Boolean(summary));
-    const summaries = [...privateSummaries, ...serviceSummaries]
+    const selectedLocalInput = normalizeText(input.selectedLocalGlobalMetaId);
+    const localBotRows = extractLocalBots(input);
+    const selectedLocalGlobalMetaId = selectedLocalInput
+        || normalizeText(readObject(localBotRows[0]).globalMetaId);
+    const localBots = localBotRows
+        .map((row) => buildLocalBotOption(row, selectedLocalGlobalMetaId))
+        .filter((bot) => Boolean(bot));
+    const selected = {
+        peerGlobalMetaId: normalizeText(input.selectedPeerGlobalMetaId),
+        conversationId: normalizeText(input.selectedConversationId),
+    };
+    const summaries = extractConversations(input)
+        .map((row) => buildConversationSummary(row, selected))
+        .filter((summary) => summary.peerGlobalMetaId)
         .sort((left, right) => right.latestAt - left.latestAt);
-    const selectedConversationId = selectedInput || (summaries[0] ? summaries[0].conversationId : '');
+    const activeSummary = selected.conversationId
+        ? summaries.find((summary) => summary.conversationId === selected.conversationId) ?? null
+        : selected.peerGlobalMetaId
+            ? summaries.find((summary) => summary.peerGlobalMetaId === selected.peerGlobalMetaId) ?? null
+            : summaries[0] ?? null;
+    const selectedPeer = activeSummary?.peerGlobalMetaId ?? '';
+    const selectedConversationId = activeSummary?.conversationId ?? '';
     const conversations = summaries.map((summary) => ({
         ...summary,
-        isSelected: summary.conversationId === selectedConversationId,
+        isSelected: Boolean((selectedPeer && summary.peerGlobalMetaId === selectedPeer)
+            || (selectedConversationId && summary.conversationId === selectedConversationId)),
     }));
     const selectedConversation = conversations.find((summary) => summary.isSelected) || null;
-    const messages = selectedConversation?.source === 'private_chat'
-        ? extractMessages(input)
-            .filter((row) => {
-            if (!selectedConversationId)
-                return true;
-            const record = readObject(row);
-            const conversationId = normalizeText(record.conversationId);
-            return !conversationId || conversationId === selectedConversationId;
-        })
-            .sort((left, right) => {
-            const leftRecord = readObject(left);
-            const rightRecord = readObject(right);
-            return normalizeTimestampMs(leftRecord.timestamp || leftRecord.createdAt)
-                - normalizeTimestampMs(rightRecord.timestamp || rightRecord.createdAt);
-        })
-            .map(buildMessage)
-        : [];
+    const messages = extractMessages(input)
+        .sort((left, right) => {
+        const leftRecord = readObject(left);
+        const rightRecord = readObject(right);
+        return normalizeTimestampMs(leftRecord.timestamp || leftRecord.createdAt)
+            - normalizeTimestampMs(rightRecord.timestamp || rightRecord.createdAt);
+    })
+        .map(buildMessage);
     return {
+        localBots,
+        selectedLocalGlobalMetaId,
         conversations,
         selectedConversation,
         messages,
         emptyState: {
             title: 'No conversations yet',
-            message: 'Private chat conversations will appear here after your Bot receives or sends messages.',
+            message: 'Peer conversations for the selected local Bot will appear here.',
         },
         detailEmptyState: {
-            title: selectedConversation?.source === 'service_trace'
-                ? 'Service conversation'
-                : selectedConversation ? 'No messages yet' : 'Select a conversation',
+            title: selectedConversation ? 'No messages yet' : 'Select a conversation',
             message: selectedConversation
-                ? selectedConversation.source === 'service_trace'
-                    ? 'Open Trace, Session, or Refund for the full service context.'
-                    : 'Messages for this conversation will appear here.'
-                : 'Choose a private chat thread from the conversation list.',
+                ? 'Messages for this Bot pair will appear here.'
+                : 'Choose a remote Bot from the conversation list.',
         },
     };
 }
@@ -276,16 +281,21 @@ function buildConversationsPageViewModelRuntimeSource() {
         normalizeTimestampMs,
         formatTimestamp,
         titleCase,
+        readAvatar,
+        normalizeTxid,
+        normalizePinIdTxid,
+        resolveMessageTxid,
+        formatTxidPreview,
+        formatConversationIdPreview,
+        isMarkdownContentType,
+        extractLocalBots,
         extractConversations,
         extractMessages,
-        extractTraceSessions,
-        serviceConversationId,
-        buildTraceHref,
-        buildSessionHref,
-        buildRefundHref,
-        hasServiceConversationContext,
+        normalizeKindLabel,
+        normalizeKindLabels,
+        buildLocalBotOption,
+        buildConversationId,
         buildConversationSummary,
-        buildServiceSummary,
         buildMessage,
         buildConversationsPageViewModel,
     ].map((fn) => fn.toString()).join('\n');

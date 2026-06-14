@@ -1,31 +1,39 @@
-export type ConversationSource = 'private_chat' | 'service_trace';
-export interface ConversationActionViewModel {
+export interface LocalBotOptionViewModel {
     label: string;
-    href: string;
+    slug: string;
+    globalMetaId: string;
+    avatar: string;
+    isSelected: boolean;
 }
 export interface ConversationSummaryViewModel {
     conversationId: string;
+    conversationIdPreview: string;
+    localGlobalMetaId: string;
+    localAvatar: string;
     peerLabel: string;
     peerGlobalMetaId: string;
-    source: ConversationSource;
+    peerAvatar: string;
     latestText: string;
     latestAt: number;
     latestAtLabel: string;
     kinds: string[];
     stateLabel: string;
-    turnCountLabel: string;
+    messageCountLabel: string;
     localBotLabel: string;
-    serviceName: string;
-    traceHref: string;
-    sessionHref: string;
-    refundHref: string;
-    advancedActions: ConversationActionViewModel[];
     isSelected: boolean;
 }
 export interface ConversationMessageViewModel {
     messageId: string;
+    direction: string;
     directionLabel: string;
+    kindLabel: string;
     content: string;
+    contentType: string;
+    isMarkdown: boolean;
+    senderLabel: string;
+    senderAvatar: string;
+    txid: string;
+    txidPreview: string;
     timestampLabel: string;
 }
 export interface ConversationsEmptyStateViewModel {
@@ -33,6 +41,8 @@ export interface ConversationsEmptyStateViewModel {
     message: string;
 }
 export interface ConversationsPageViewModel {
+    localBots: LocalBotOptionViewModel[];
+    selectedLocalGlobalMetaId: string;
     conversations: ConversationSummaryViewModel[];
     selectedConversation: ConversationSummaryViewModel | null;
     messages: ConversationMessageViewModel[];
@@ -40,12 +50,16 @@ export interface ConversationsPageViewModel {
     detailEmptyState: ConversationsEmptyStateViewModel;
 }
 export interface ConversationsPageViewModelInput {
+    localBots?: unknown[];
+    botProfilesResponse?: unknown;
     conversations?: unknown[];
     conversationsResponse?: unknown;
     traceSessions?: unknown[];
     traceSessionsResponse?: unknown;
     messages?: unknown[];
     messagesResponse?: unknown;
+    selectedLocalGlobalMetaId?: string;
+    selectedPeerGlobalMetaId?: string;
     selectedConversationId?: string;
 }
 export declare function buildConversationsPageViewModel(input?: ConversationsPageViewModelInput): ConversationsPageViewModel;

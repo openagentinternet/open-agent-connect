@@ -207,6 +207,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     messageId: inboundMessageRecord.messageId,
                     direction: 'incoming',
                     content: inboundMessageRecord.content,
+                    contentType: message.contentType,
                     pinId: inboundMessageRecord.messagePinId,
                     timestamp: inboundMessageRecord.timestamp,
                     raw: message.rawMessage,

@@ -25,6 +25,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-create-wiki',
   'metabot-loom-wish2task',
   'metabot-metaapp-publish',
+  'metabot-homepage-guide',
   'metabot-upload-file',
   'metabot-upload-largefile',
   'metabot-wallet-manage',

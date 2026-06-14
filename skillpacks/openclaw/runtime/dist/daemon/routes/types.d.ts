@@ -196,6 +196,23 @@ export interface MetabotDaemonHttpHandlers {
             peer: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    conversations?: {
+        list?: (input: {
+            local: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        messages?: (input: {
+            local: string;
+            peer: string;
+            before?: number;
+            after?: number;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        streamEvents?: (input: {
+            local: string;
+            signal?: AbortSignal;
+        }) => Awaitable<AsyncIterable<unknown>>;
+    };
     file?: {
         upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         uploadLarge?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
