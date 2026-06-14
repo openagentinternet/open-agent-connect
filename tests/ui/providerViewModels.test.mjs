@@ -12,6 +12,202 @@ const {
   buildMyServicesPageViewModelRuntimeSource,
 } = require('../../dist/ui/pages/my-services/viewModel.js');
 
+class FakePublishElement {
+  constructor(attrs = {}) {
+    this.attrs = { ...attrs };
+    this.children = [];
+    this.dataset = {};
+    this.disabled = false;
+    this.hidden = false;
+    this.listeners = new Map();
+    this.textContent = '';
+    this.value = '';
+  }
+
+  set innerHTML(value) {
+    this._innerHTML = String(value || '');
+    this.children = [];
+  }
+
+  get innerHTML() {
+    return this._innerHTML || '';
+  }
+
+  appendChild(child) {
+    this.children.push(child);
+    if (!this.value && child && child.value) {
+      this.value = child.value;
+    }
+    return child;
+  }
+
+  addEventListener(eventName, handler) {
+    this.listeners.set(eventName, handler);
+  }
+
+  querySelectorAll() {
+    return [];
+  }
+
+  hasAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attrs, name);
+  }
+
+  setAttribute(name, value) {
+    this.attrs[name] = String(value);
+  }
+
+  getAttribute(name) {
+    return this.attrs[name] || '';
+  }
+
+  removeAttribute(name) {
+    delete this.attrs[name];
+  }
+}
+
+function createPublishElements() {
+  const selectors = [
+    '[data-publish-form]',
+    '[data-publish-submit]',
+    '[data-publish-status]',
+    '[data-publish-availability]',
+    '[data-metabot-select]',
+    '[data-provider-skill-select]',
+    '[data-provider-skill-add]',
+    '[data-provider-skill-chips]',
+    '[data-publish-skill-summary]',
+    '[data-publish-provider-card]',
+    '[data-publish-runtime-card]',
+    '[data-display-name-input]',
+    '[data-service-name-input]',
+    '[data-price-currency-row]',
+    '[data-price-input]',
+    '[data-currency-select]',
+    '[data-service-icon-input]',
+    '[data-service-icon-trigger]',
+    '[data-service-icon-remove]',
+    '[data-service-icon-preview]',
+    '[data-service-icon-preview-img]',
+    '[data-service-icon-placeholder]',
+    '[data-service-icon-note]',
+    '[data-publish-status-panel]',
+    '[data-publish-status-panel-mark]',
+    '[data-publish-status-panel-title]',
+    '[data-publish-status-panel-message]',
+    '[data-publish-status-tx]',
+    '[data-publish-status-txid]',
+    '[data-publish-status-copy]',
+    '[data-publish-status-panel-close]',
+  ];
+  return Object.fromEntries(selectors.map((selector) => [selector, new FakePublishElement()]));
+}
+
+function createPublishFetch() {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    const entry = { url: String(url) };
+    calls.push(entry);
+    if (entry.url === '/api/bot/profiles') {
+      return {
+        json: async () => ({
+          ok: true,
+          data: {
+            profiles: [
+              { slug: 'bob-bot', name: 'Bob Bot', primaryProvider: 'codex', globalMetaId: 'idq1bob' },
+              { slug: 'alice-bot', name: 'Alice Bot', primaryProvider: 'codex', globalMetaId: 'idq1alice' },
+            ],
+          },
+        }),
+      };
+    }
+    if (entry.url === '/api/bot/runtimes') {
+      return {
+        json: async () => ({
+          ok: true,
+          data: {
+            runtimes: [{ id: 'runtime-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' }],
+          },
+        }),
+      };
+    }
+    if (entry.url.startsWith('/api/services/skills?from=')) {
+      const metaBotSlug = new URL(entry.url, 'http://localhost').searchParams.get('from');
+      return {
+        json: async () => ({
+          ok: true,
+          data: {
+            metaBotSlug,
+            identity: { name: metaBotSlug, globalMetaId: `idq1${metaBotSlug}`, mvcAddress: '1ProviderAddress' },
+            runtime: { id: 'runtime-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' },
+            skills: [{ skillName: 'metabot-weather-oracle', title: 'Weather Oracle', description: 'Forecast.' }],
+            rootDiagnostics: [{ rootId: 'codex-home', status: 'readable', absolutePath: '/tmp/.codex/skills' }],
+          },
+        }),
+      };
+    }
+    return { json: async () => ({ ok: false, message: 'unexpected url' }) };
+  };
+  fetchImpl.calls = calls;
+  return fetchImpl;
+}
+
+function runPublishPage(search = '') {
+  const elements = createPublishElements();
+  const fetchImpl = createPublishFetch();
+  vm.runInNewContext(buildPublishPageDefinition().script, {
+    document: {
+      querySelector: (selector) => elements[selector] || null,
+      createElement: () => new FakePublishElement(),
+      body: new FakePublishElement(),
+      execCommand: () => true,
+    },
+    window: {
+      location: { search },
+      history: { replaceState() {} },
+    },
+    fetch: fetchImpl,
+    navigator: { clipboard: null },
+    FormData: class {
+      get(name) {
+        return name === 'paymentTiming' ? 'free' : '';
+      }
+    },
+    FileReader: class {},
+    URL,
+    URLSearchParams,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    Set,
+    Map,
+    Array,
+    String,
+    Number,
+    Error,
+    encodeURIComponent,
+  });
+  return { elements, fetchImpl };
+}
+
+function waitFor(condition, label) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const check = () => {
+      if (condition()) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt > 1000) {
+        reject(new Error(`Timed out waiting for ${label}`));
+        return;
+      }
+      setTimeout(check, 5);
+    };
+    check();
+  });
+}
+
 test('buildPublishPageViewModel shows the local provider identity that will publish the service', () => {
   const model = buildPublishPageViewModel({
     providerSummary: {
@@ -163,6 +359,21 @@ test('buildPublishPageViewModel exposes primary runtime catalog availability for
   });
 });
 
+test('publish page uses query from slug for initial skills load when it matches a MetaBot profile', async () => {
+  const { elements, fetchImpl } = runPublishPage('?from=alice-bot');
+
+  await waitFor(
+    () => fetchImpl.calls.some((entry) => entry.url === '/api/services/skills?from=alice-bot'),
+    'Alice publish skills request',
+  );
+
+  assert.equal(elements['[data-metabot-select]'].value, 'alice-bot');
+  assert.equal(
+    fetchImpl.calls.find((entry) => entry.url.startsWith('/api/services/skills?from='))?.url,
+    '/api/services/skills?from=alice-bot',
+  );
+});
+
 test('publish and my-services pages expose skill-service v1.1 service controls', () => {
   const publishHtml = buildPublishPageDefinition().contentHtml;
   const publishScript = buildPublishPageDefinition().script;
@@ -195,8 +406,22 @@ test('publish and my-services pages expose skill-service v1.1 service controls',
   assert.doesNotMatch(publishHtml, /skill-checkbox-list/);
   assert.doesNotMatch(publishScript, /input\[name="providerSkills"\]:checked/);
 
-  const myServicesHtml = buildMyServicesPageDefinition().contentHtml;
-  const myServicesScript = buildMyServicesPageDefinition().script;
+  const myServicesPage = buildMyServicesPageDefinition({ includePublishAction: true, includeRefundsAction: true });
+  const myServicesHtml = myServicesPage.contentHtml;
+  const myServicesScript = myServicesPage.script;
+  assert.match(myServicesHtml, /data-my-services-publish/);
+  assert.match(myServicesHtml, /data-my-services-refunds/);
+  assert.match(myServicesHtml, /data-services-bot-picker/);
+  assert.match(myServicesHtml, /data-services-bot-trigger/);
+  assert.match(myServicesHtml, /data-services-bot-current/);
+  assert.match(myServicesHtml, /data-services-bot-menu/);
+  assert.match(myServicesHtml, /data-my-service-detail-modal/);
+  assert.match(myServicesHtml, /data-my-service-detail-modal-body/);
+  assert.match(myServicesScript, /\[data-my-service-detail-close\]/);
+  assert.match(myServicesScript, /elements\.detailModal\.hidden = false/);
+  assert.match(myServicesScript, /elements\.detailModal\.hidden = true/);
+  assert.doesNotMatch(myServicesHtml, /my-services-detail-panel/);
+  assert.doesNotMatch(myServicesHtml, /data-my-service-detail aria-label="Selected service details"/);
   assert.match(myServicesHtml, /data-edit-provider-skill-picker/);
   assert.match(myServicesHtml, /data-edit-provider-skill-select/);
   assert.match(myServicesHtml, /data-edit-provider-skill-add/);

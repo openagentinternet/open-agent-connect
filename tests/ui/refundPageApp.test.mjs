@@ -129,7 +129,7 @@ function createFetch({ sync = [{ ok: true }], lists = [], settle = [{ ok: true, 
         json: async () => payload,
       };
     }
-    if (entry.url.startsWith('/api/services/refunds?all=true')) {
+    if (entry.url.startsWith('/api/services/refunds?all=true') || entry.url.startsWith('/api/services/refunds?from=')) {
       const payload = listResponses.length
         ? listResponses.shift()
         : { ok: true, data: { initiatedByMe: [], receivedByMe: [], totalCount: 0, pendingCount: 0 } };
@@ -154,12 +154,13 @@ function createFetch({ sync = [{ ok: true }], lists = [], settle = [{ ok: true, 
   return fetchImpl;
 }
 
-function runRefundPage(fetchImpl, elements = createElements()) {
+function runRefundPage(fetchImpl, elements = createElements(), search = '') {
   vm.runInNewContext(buildRefundPageDefinition().script, {
     document: {
       querySelector: (selector) => elements[selector] || null,
       querySelectorAll: (selector) => elements.__querySelectorAll?.[selector] || [],
     },
+    window: { location: { search } },
     fetch: fetchImpl,
     AbortController,
     setTimeout,
@@ -172,6 +173,7 @@ function runRefundPage(fetchImpl, elements = createElements()) {
     encodeURIComponent,
     Error,
     Array,
+    URLSearchParams,
   });
   return elements;
 }
@@ -194,7 +196,7 @@ function waitFor(condition, label) {
   });
 }
 
-test('initial load calls sync before list', async () => {
+test('standalone initial load keeps all-profile sync and refund list', async () => {
   const fetchImpl = createFetch();
 
   runRefundPage(fetchImpl);
@@ -205,6 +207,19 @@ test('initial load calls sync before list', async () => {
     '/api/services/refunds?all=true',
   ]);
   assert.equal(JSON.parse(fetchImpl.calls[0].options.body).all, true);
+});
+
+test('initial load with from query scopes sync and refund list to selected bot', async () => {
+  const fetchImpl = createFetch();
+
+  runRefundPage(fetchImpl, createElements(), '?from=alice-bot');
+
+  await waitFor(() => fetchImpl.calls.some((entry) => entry.url.startsWith('/api/services/refunds?from=alice-bot')), 'scoped refund list call');
+  assert.deepEqual(fetchImpl.calls.slice(0, 2).map((entry) => entry.url), [
+    '/api/services/refunds/sync',
+    '/api/services/refunds?from=alice-bot',
+  ]);
+  assert.deepEqual(JSON.parse(fetchImpl.calls[0].options.body), { from: 'alice-bot' });
 });
 
 test('refund page defines provider action and initiated refund tabs', () => {
@@ -270,6 +285,26 @@ test('initiated tab switch shows buyer initiated refund workspace', async () => 
   assert.equal(elements.__tabs.initiated.getAttribute('aria-selected'), 'true');
   assert.equal(elements.__panels.action.hidden, true);
   assert.equal(elements.__panels.initiated.hidden, false);
+});
+
+test('from query preserves orderId focus behavior', async () => {
+  const fetchImpl = createFetch({
+    lists: [{
+      ok: true,
+      data: {
+        initiatedByMe: [],
+        receivedByMe: [createRefundItem({ orderId: 'order-1' })],
+        totalCount: 1,
+        pendingCount: 1,
+      },
+    }],
+  });
+  const elements = runRefundPage(fetchImpl, createElements(), '?from=alice-bot&orderId=order-1');
+
+  await waitFor(() => elements['[data-refund-seller-list]'].innerHTML.includes('refund-item-focus'), 'focused seller row');
+  assert.equal(fetchImpl.calls[1].url, '/api/services/refunds?from=alice-bot');
+  assert.match(elements['[data-refund-seller-list]'].innerHTML, /data-refund-order-id="order-1"/);
+  assert.equal(elements.__tabs.action.getAttribute('aria-selected'), 'true');
 });
 
 test('sync failure still loads rows and shows status error', async () => {
