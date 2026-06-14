@@ -20,7 +20,7 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-post-skillservice',
   'metabot-create-wiki',
   'metabot-metaapp-publish',
-  'metabot-bot-homepage-guide',
+  'metabot-homepage-guide',
   'metabot-upload-file',
   'metabot-upload-largefile',
   'metabot-wallet-manage',

@@ -1,8 +1,8 @@
-# MetaBot Bot Homepage Guide Implementation Plan
+# MetaBot Homepage Guide Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the `metabot-bot-homepage-guide` skill as a guide-only shared MetaBot skill that constrains static Bot homepage generation and hands publishing off to the existing OAC MetaApp CLI.
+**Goal:** Add the `metabot-homepage-guide` skill as a guide-only shared MetaBot skill that constrains static Bot homepage generation and hands publishing off to the existing OAC MetaApp CLI.
 
 **Architecture:** Add one source skill under `SKILLs/`, register it in the npm allowlist and skillpack build lists, then regenerate tracked skillpacks so all supported hosts receive the same guide. The skill must remain documentation-only: it does not add a CLI, does not generate frontend files, and does not modify OAC Browser or MetaApp runtime behavior.
 
@@ -12,29 +12,29 @@
 
 ## File Structure
 
-- Create `SKILLs/metabot-bot-homepage-guide/SKILL.md`
+- Create `SKILLs/metabot-homepage-guide/SKILL.md`
   - Source guide skill consumed by shared and host-specific skillpacks.
   - Includes actor selection, data contract, action manifest rules, static export rules, MetaApp publish handoff, and validation checklist.
 - Modify `scripts/build-metabot-skillpacks.mjs`
-  - Add `metabot-bot-homepage-guide` to `METABOT_SKILLS` so the generated shared pack and host wrapper packs include it.
+  - Add `metabot-homepage-guide` to `METABOT_SKILLS` so the generated shared pack and host wrapper packs include it.
 - Modify `package.json`
-  - Add `SKILLs/metabot-bot-homepage-guide/SKILL.md` to the explicit npm package file allowlist.
+  - Add `SKILLs/metabot-homepage-guide/SKILL.md` to the explicit npm package file allowlist.
 - Modify `tests/skillpacks/buildSkillpacks.test.mjs`
   - Add the skill to `EXPECTED_METABOT_SKILLS`.
 - Modify `tests/npm/packageFiles.test.mjs`
   - Add the skill to `EXPECTED_NPM_SKILLS`.
 - Regenerate tracked skillpacks with `npm run build:skillpacks`
   - Expected generated files include:
-    - `skillpacks/shared/skills/metabot-bot-homepage-guide/SKILL.md`
-    - `skillpacks/codex/runtime/shared-skills/metabot-bot-homepage-guide/SKILL.md`
-    - `skillpacks/claude-code/runtime/shared-skills/metabot-bot-homepage-guide/SKILL.md`
-    - `skillpacks/openclaw/runtime/shared-skills/metabot-bot-homepage-guide/SKILL.md`
+    - `skillpacks/shared/skills/metabot-homepage-guide/SKILL.md`
+    - `skillpacks/codex/runtime/shared-skills/metabot-homepage-guide/SKILL.md`
+    - `skillpacks/claude-code/runtime/shared-skills/metabot-homepage-guide/SKILL.md`
+    - `skillpacks/openclaw/runtime/shared-skills/metabot-homepage-guide/SKILL.md`
   - README or install script changes may also be generated because the skill list is rendered from `METABOT_SKILLS`.
 
 ## Task 1: Add Source Guide Skill And Packaging Lists
 
 **Files:**
-- Create: `SKILLs/metabot-bot-homepage-guide/SKILL.md`
+- Create: `SKILLs/metabot-homepage-guide/SKILL.md`
 - Modify: `scripts/build-metabot-skillpacks.mjs`
 - Modify: `package.json`
 - Modify: `tests/skillpacks/buildSkillpacks.test.mjs`
@@ -42,19 +42,19 @@
 
 - [ ] **Step 1: Write failing allowlist expectations**
 
-Add `metabot-bot-homepage-guide` to `EXPECTED_METABOT_SKILLS` in `tests/skillpacks/buildSkillpacks.test.mjs`, after `metabot-metaapp-publish`:
+Add `metabot-homepage-guide` to `EXPECTED_METABOT_SKILLS` in `tests/skillpacks/buildSkillpacks.test.mjs`, after `metabot-metaapp-publish`:
 
 ```js
   'metabot-metaapp-publish',
-  'metabot-bot-homepage-guide',
+  'metabot-homepage-guide',
   'metabot-upload-file',
 ```
 
-Add `metabot-bot-homepage-guide` to `EXPECTED_NPM_SKILLS` in `tests/npm/packageFiles.test.mjs`, after `metabot-metaapp-publish` if that test has the MetaApp publish skill in its current list, otherwise after `metabot-create-wiki`:
+Add `metabot-homepage-guide` to `EXPECTED_NPM_SKILLS` in `tests/npm/packageFiles.test.mjs`, after `metabot-metaapp-publish` if that test has the MetaApp publish skill in its current list, otherwise after `metabot-create-wiki`:
 
 ```js
   'metabot-metaapp-publish',
-  'metabot-bot-homepage-guide',
+  'metabot-homepage-guide',
   'metabot-upload-file',
 ```
 
@@ -63,7 +63,7 @@ If `tests/npm/packageFiles.test.mjs` still does not list `metabot-metaapp-publis
 ```js
   'metabot-create-wiki',
   'metabot-metaapp-publish',
-  'metabot-bot-homepage-guide',
+  'metabot-homepage-guide',
   'metabot-upload-file',
 ```
 
@@ -75,7 +75,7 @@ Run:
 npm run build && node --test tests/npm/packageFiles.test.mjs
 ```
 
-Expected: FAIL because `package.json` does not yet include `SKILLs/metabot-bot-homepage-guide/SKILL.md`.
+Expected: FAIL because `package.json` does not yet include `SKILLs/metabot-homepage-guide/SKILL.md`.
 
 Run:
 
@@ -83,19 +83,19 @@ Run:
 node --test tests/skillpacks/buildSkillpacks.test.mjs
 ```
 
-Expected: FAIL because the source skill and generated skillpacks do not yet include `metabot-bot-homepage-guide`.
+Expected: FAIL because the source skill and generated skillpacks do not yet include `metabot-homepage-guide`.
 
 - [ ] **Step 3: Create the source skill**
 
-Create `SKILLs/metabot-bot-homepage-guide/SKILL.md` with this content:
+Create `SKILLs/metabot-homepage-guide/SKILL.md` with this content:
 
 ````markdown
 ---
-name: metabot-bot-homepage-guide
+name: metabot-homepage-guide
 description: Guide another agent or frontend skill to create a static Bot homepage from MetaID homepage data, use API-provided actions, and publish the finished site as a MetaApp through OAC.
 ---
 
-# MetaBot Bot Homepage Guide
+# MetaBot Homepage Guide
 
 Guide another agent, frontend skill, or local LLM workflow to create a static personal homepage for a MetaBot. This skill is a constraint and handoff guide. It does not generate frontend code, does not run a site builder, and does not introduce a new publishing CLI.
 
@@ -330,7 +330,7 @@ In `scripts/build-metabot-skillpacks.mjs`, add:
 
 ```js
   'metabot-metaapp-publish',
-  'metabot-bot-homepage-guide',
+  'metabot-homepage-guide',
   'metabot-upload-file',
 ```
 
@@ -338,7 +338,7 @@ In `package.json`, add:
 
 ```json
     "SKILLs/metabot-metaapp-publish/SKILL.md",
-    "SKILLs/metabot-bot-homepage-guide/SKILL.md",
+    "SKILLs/metabot-homepage-guide/SKILL.md",
     "SKILLs/metabot-upload-file/SKILL.md",
 ```
 
@@ -366,7 +366,7 @@ Expected: PASS.
 
 ```bash
 git add \
-  SKILLs/metabot-bot-homepage-guide/SKILL.md \
+  SKILLs/metabot-homepage-guide/SKILL.md \
   scripts/build-metabot-skillpacks.mjs \
   package.json \
   tests/skillpacks/buildSkillpacks.test.mjs \
@@ -410,17 +410,17 @@ Run:
 npm run build:skillpacks
 ```
 
-Expected: generated shared and host skillpacks include `metabot-bot-homepage-guide`.
+Expected: generated shared and host skillpacks include `metabot-homepage-guide`.
 
 - [ ] **Step 3: Verify generated files exist**
 
 Run:
 
 ```bash
-test -f skillpacks/shared/skills/metabot-bot-homepage-guide/SKILL.md
-test -f skillpacks/codex/runtime/shared-skills/metabot-bot-homepage-guide/SKILL.md
-test -f skillpacks/claude-code/runtime/shared-skills/metabot-bot-homepage-guide/SKILL.md
-test -f skillpacks/openclaw/runtime/shared-skills/metabot-bot-homepage-guide/SKILL.md
+test -f skillpacks/shared/skills/metabot-homepage-guide/SKILL.md
+test -f skillpacks/codex/runtime/shared-skills/metabot-homepage-guide/SKILL.md
+test -f skillpacks/claude-code/runtime/shared-skills/metabot-homepage-guide/SKILL.md
+test -f skillpacks/openclaw/runtime/shared-skills/metabot-homepage-guide/SKILL.md
 ```
 
 Expected: all commands exit with code 0.

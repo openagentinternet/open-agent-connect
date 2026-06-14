@@ -1,22 +1,17 @@
 ---
-name: metabot-bot-homepage-guide
+name: metabot-homepage-guide
 description: Guide another agent or frontend skill to create a static Bot homepage from MetaID homepage data, use API-provided actions, and publish the finished site as a MetaApp through OAC.
 ---
 
-# MetaBot Bot Homepage Guide
+# MetaBot Homepage Guide
 
 Guide another agent, frontend skill, or local LLM workflow to create a static personal homepage for a MetaBot. This skill is a constraint and handoff guide. It does not generate frontend code, does not run a site builder, and does not introduce a new publishing CLI.
 
-
+{{HOST_ADAPTER_SECTION}}
 
 ## Routing
 
-Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason over the returned JSON envelope.
-
-- Prefer JSON and local daemon routes for agent workflows.
-- Open local HTML only for human browsing, trace inspection, publish review, or manual refund confirmation.
-- Treat MetaWeb as the network layer and the local host as a thin adapter.
-
+{{SYSTEM_ROUTING}}
 
 ## Actor Selection
 
@@ -24,7 +19,7 @@ Use a target Bot `globalMetaId` for homepage data. Use `--from <bot-slug>` only 
 
 Resolve actor inputs in this order:
 
-1. Human names a specific local Bot slug for publishing -> use that slug in `$HOME/.metabot/bin/metabot metaapp publish --from <bot-slug>`.
+1. Human names a specific local Bot slug for publishing -> use that slug in `{{METABOT_CLI}} metaapp publish --from <bot-slug>`.
 2. Human gives only a `globalMetaId` -> guide static homepage creation, but ask for the publishing Bot slug before any MetaApp write.
 3. Human gives an existing MetaApp pin id -> use it only for update guidance with `metaapp update --target-pin-id <pinid>`.
 
@@ -185,19 +180,19 @@ Avoid absolute local filesystem paths. Avoid requiring a local development serve
 Use the existing OAC MetaApp CLI. Preview first:
 
 ```bash
-$HOME/.metabot/bin/metabot metaapp preview --project-dir <homepage-dir>
+{{METABOT_CLI}} metaapp preview --project-dir <homepage-dir>
 ```
 
 Publish after preview is confirmed:
 
 ```bash
-$HOME/.metabot/bin/metabot metaapp publish --from <bot-slug> --project-dir <homepage-dir> --confirm
+{{METABOT_CLI}} metaapp publish --from <bot-slug> --project-dir <homepage-dir> --confirm
 ```
 
 Update an existing published homepage:
 
 ```bash
-$HOME/.metabot/bin/metabot metaapp update --target-pin-id <pinid> --from <bot-slug> --project-dir <homepage-dir> --confirm
+{{METABOT_CLI}} metaapp update --target-pin-id <pinid> --from <bot-slug> --project-dir <homepage-dir> --confirm
 ```
 
 The MetaApp publish flow packages the browser-runnable homepage artifact as a ZIP and writes a `/protocols/metaapp` record pointing to the uploaded ZIP metafile. Do not invent a separate hosting URL when the human wants an on-chain MetaApp publication.
@@ -222,7 +217,7 @@ Before handing the homepage back to the human, verify:
 - No renderer URL is hard-coded unless it came from the action manifest or local static assets.
 - The page does not hard-code show.now, service-market URLs, Buzz detail URLs, or localhost daemon URLs.
 - The page does not attempt Follow, guestbook writes, wallet signing, or in-page Buzz comments.
-- `$HOME/.metabot/bin/metabot metaapp preview --project-dir <homepage-dir>` has been run before publish.
+- `{{METABOT_CLI}} metaapp preview --project-dir <homepage-dir>` has been run before publish.
 - If published, the result includes a reported MetaApp `pinId` and URL fields when returned.
 
 ## Handoff To
@@ -233,5 +228,5 @@ Before handing the homepage back to the human, verify:
 
 ## Compatibility
 
-- CLI path: `$HOME/.metabot/bin/metabot`
-- Compatibility manifest: `release/compatibility.json`
+- CLI path: `{{METABOT_CLI}}`
+- Compatibility manifest: `{{COMPATIBILITY_MANIFEST}}`

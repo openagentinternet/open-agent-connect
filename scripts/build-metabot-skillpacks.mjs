@@ -25,7 +25,7 @@ const METABOT_SKILLS = [
   'metabot-create-wiki',
   'metabot-loom-wish2task',
   'metabot-metaapp-publish',
-  'metabot-bot-homepage-guide',
+  'metabot-homepage-guide',
   'metabot-upload-file',
   'metabot-upload-largefile',
   'metabot-wallet-manage',

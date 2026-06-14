@@ -1,11 +1,11 @@
-# MetaBot Bot Homepage Guide Skill Design
+# MetaBot Homepage Guide Skill Design
 
 Date: 2026-06-14
 Status: approved design for a guide-only skill
 
 ## Purpose
 
-`metabot-bot-homepage-guide` is a documentation-first skill for agents that help a
+`metabot-homepage-guide` is a documentation-first skill for agents that help a
 user create a static personal homepage for a MetaBot. The skill does not generate
 the frontend, does not run a site builder, and does not introduce a new publishing
 CLI. Its job is to constrain and guide another frontend-capable agent or skill so
@@ -17,7 +17,7 @@ The intended workflow is:
 1. A user asks an agent to create a homepage for a Bot.
 2. The agent uses a frontend-capable skill or local LLM workflow to design and
    build the page.
-3. `metabot-bot-homepage-guide` supplies the MetaBot homepage data contract,
+3. `metabot-homepage-guide` supplies the MetaBot homepage data contract,
    action rules, static export requirements, validation checklist, and MetaApp
    publish handoff.
 4. The completed static site can be previewed and published with the existing
@@ -54,13 +54,13 @@ Out of scope for v1:
 The skill should live at:
 
 ```text
-SKILLs/metabot-bot-homepage-guide/SKILL.md
+SKILLs/metabot-homepage-guide/SKILL.md
 ```
 
 Recommended skill metadata:
 
 ```yaml
-name: metabot-bot-homepage-guide
+name: metabot-homepage-guide
 description: Guide another agent or frontend skill to create a static Bot homepage from MetaID homepage data, use API-provided actions, and publish the finished site as a MetaApp through OAC.
 ```
 

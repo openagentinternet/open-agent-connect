@@ -1,9 +1,9 @@
 ---
-name: metabot-bot-homepage-guide
+name: metabot-homepage-guide
 description: Guide another agent or frontend skill to create a static Bot homepage from MetaID homepage data, use API-provided actions, and publish the finished site as a MetaApp through OAC.
 ---
 
-# MetaBot Bot Homepage Guide
+# MetaBot Homepage Guide
 
 Guide another agent, frontend skill, or local LLM workflow to create a static personal homepage for a MetaBot. This skill is a constraint and handoff guide. It does not generate frontend code, does not run a site builder, and does not introduce a new publishing CLI.
 
