@@ -143,6 +143,13 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       return '';
     }
   };
+  const getScopedRefundFrom = () => {
+    try {
+      return String(new URLSearchParams(window.location.search).get('from') || '').trim();
+    } catch {
+      return '';
+    }
+  };
 
   const activateRefundTab = (requestedTab) => {
     const nextTab = requestedTab === 'initiated' ? 'initiated' : 'action';
@@ -417,7 +424,13 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
   };
 
   const loadRefunds = async () => {
-    const response = await fetch('/api/services/refunds?all=true', { cache: 'no-store' });
+    const scopedFrom = getScopedRefundFrom();
+    const response = await fetch(
+      scopedFrom
+        ? '/api/services/refunds?from=' + encodeURIComponent(scopedFrom)
+        : '/api/services/refunds?all=true',
+      { cache: 'no-store' }
+    );
     const payload = await response.json();
     if (!payload || payload.ok !== true) {
       throw new Error((payload && payload.message) || 'Refunds load failed.');
@@ -473,7 +486,7 @@ export function buildRefundPageDefinition(): LocalUiPageDefinition {
       const response = await fetch('/api/services/refunds/sync', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ all: true }),
+        body: JSON.stringify(getScopedRefundFrom() ? { from: getScopedRefundFrom() } : { all: true }),
         cache: 'no-store',
         signal: controller.signal,
       });

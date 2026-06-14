@@ -44,13 +44,25 @@ Preview a project before publishing:
 $HOME/.metabot/bin/metabot metaapp preview --project-dir <path>
 ```
 
-Publish a new MetaApp after confirming the preview:
+Prepare a publish confirmation package before any chain write:
+
+```bash
+$HOME/.metabot/bin/metabot metaapp publish --from <bot-slug> --project-dir <path> --json
+```
+
+Publish a new MetaApp only after confirming both the rendered preview and `payloadPreview` JSON:
 
 ```bash
 $HOME/.metabot/bin/metabot metaapp publish --from <bot-slug> --project-dir <path> --confirm
 ```
 
-Update an existing MetaApp after confirming the preview:
+Prepare an update confirmation package before any chain write:
+
+```bash
+$HOME/.metabot/bin/metabot metaapp update --target-pin-id <pinid> --from <bot-slug> --project-dir <path> --json
+```
+
+Update an existing MetaApp only after confirming both the rendered preview and `payloadPreview` JSON:
 
 ```bash
 $HOME/.metabot/bin/metabot metaapp update --target-pin-id <pinid> --from <bot-slug> --project-dir <path> --confirm
@@ -87,6 +99,12 @@ $HOME/.metabot/bin/metabot metaapp comment --pin-id <pinid> --comment <text> --f
 - Surface returned `pinId`, `metawebUrl`, and `localUiUrl` when present.
 - Do not invent deployment URLs or custom hosted links.
 - `metaapp preview` should be the first step for browser apps, games, and sites before any write.
+- Before publish/update confirmation, gather missing user-facing fields such as `title`, `appName`, `coverImg`, `icon`, `intro`, `introImgs`, and `tags`. Ask the human when these values are not obvious or not present in the manifest.
+- Put user-facing MetaApp metadata in a manifest file such as `.metaapp.json` or a `--manifest-file` JSON override. Do not encode these fields in local notes that the CLI cannot publish.
+- A MetaApp protocol payload must treat `content` as the browser runtime artifact and it must be non-empty. `code` is optional source-code material and may be empty or different from `content`.
+- Do not publish local filesystem paths, project directories, artifact directories, build commands, package-manager names, secrets, or workstation details in on-chain `metadata`.
+- Run `metaapp publish` or `metaapp update` without `--confirm` before the final write and show the human the returned `payloadPreview` JSON. Confirm only after the human has seen the rendered preview and the JSON payload preview.
+- Check `payloadPreview` for non-empty `content`, expected title/cover/intro fields, and absence of local paths before adding `--confirm`.
 - `metaapp share` without `--announce` is read-only sharing; ignore write-chain planning in that mode.
 - `metaapp share --announce` should quote or reference the MetaApp pin in the buzz announcement.
 - `metaapp comment` writes against the target MetaApp pin using the existing comment protocol.

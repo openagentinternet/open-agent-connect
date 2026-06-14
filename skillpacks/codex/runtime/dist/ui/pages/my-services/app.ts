@@ -25,10 +25,10 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   const toolbarTitle = options.toolbarTitle ?? 'My Services';
   const toolbarLabel = options.toolbarLabel ?? 'Loading local services...';
   const publishAction = options.includePublishAction
-    ? '<a class="btn btn-primary" href="/ui/publish">Publish Service</a>'
+    ? '<a class="btn btn-primary" href="/ui/publish" data-my-services-publish>Publish Service</a>'
     : '';
   const refundsAction = options.includeRefundsAction
-    ? '<a class="btn btn-primary" href="/ui/refund">Service Refunds</a>'
+    ? '<a class="btn btn-primary" href="/ui/refund" data-my-services-refunds>Service Refunds</a>'
     : '';
   const orderTraceActionLabel = JSON.stringify(options.orderTraceActionLabel ?? 'Trace');
   const orderSessionActionLabel = JSON.stringify(options.orderSessionActionLabel ?? 'Session');
@@ -55,6 +55,17 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
 
         <div class="my-services-notice" data-my-services-notice hidden></div>
 
+        <div class="services-bot-filter">
+          <label id="services-bot-picker-label">Local Bot</label>
+          <div class="services-bot-picker" data-services-bot-picker>
+            <button class="services-bot-trigger" type="button" data-services-bot-trigger aria-labelledby="services-bot-picker-label" aria-haspopup="listbox" aria-expanded="false">
+              <span class="services-bot-current" data-services-bot-current></span>
+              <span class="services-bot-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="services-bot-menu" data-services-bot-menu role="listbox" hidden></div>
+          </div>
+        </div>
+
         <div class="my-services-workspace">
           <section class="my-services-list-panel" aria-label="Published services">
             <div class="ledger-section-header">
@@ -67,19 +78,23 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
               <button class="btn btn-sm" type="button" data-services-page-next>Next</button>
             </div>
           </section>
+        </div>
 
-          <section class="my-services-detail-panel" data-my-service-detail aria-label="Selected service details">
-            <div class="ledger-section-header">
-              <h2>Service Detail</h2>
-              <span data-my-service-order-page-label>0 orders</span>
+        <div class="my-services-modal" data-my-service-detail-modal hidden>
+          <div class="my-services-modal-dialog my-service-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="my-service-detail-title">
+            <div class="modal-heading">
+              <div>
+                <h2 id="my-service-detail-title">Service Detail</h2>
+                <p data-my-service-order-page-label>0 orders</p>
+              </div>
+              <button class="modal-close" type="button" data-my-service-detail-close aria-label="Close service detail modal">x</button>
             </div>
-            <div class="my-service-detail-summary" data-my-service-detail-summary></div>
-            <div class="my-service-orders" data-my-service-orders></div>
-            <div class="ledger-pagination">
+            <div data-my-service-detail-modal-body></div>
+            <div class="ledger-pagination" data-my-service-order-pagination>
               <button class="btn btn-sm" type="button" data-orders-page-prev>Previous</button>
               <button class="btn btn-sm" type="button" data-orders-page-next>Next</button>
             </div>
-          </section>
+          </div>
         </div>
 
         <div class="my-services-modal" data-my-service-edit-modal hidden>
@@ -189,18 +204,24 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   const ICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/svg+xml']);
   const elements = {
     pageLabel: document.querySelector('[data-my-services-page-label]'),
+    publish: document.querySelector('[data-my-services-publish]'),
+    refunds: document.querySelector('[data-my-services-refunds]'),
     refresh: document.querySelector('[data-my-services-refresh]'),
     notice: document.querySelector('[data-my-services-notice]'),
+    botPicker: document.querySelector('[data-services-bot-picker]'),
+    botTrigger: document.querySelector('[data-services-bot-trigger]'),
+    botCurrent: document.querySelector('[data-services-bot-current]'),
+    botMenu: document.querySelector('[data-services-bot-menu]'),
     list: document.querySelector('[data-my-services-list]'),
     listCount: document.querySelector('[data-my-services-list-count]'),
     servicesPagePrev: document.querySelector('[data-services-page-prev]'),
     servicesPageNext: document.querySelector('[data-services-page-next]'),
-    detail: document.querySelector('[data-my-service-detail]'),
-    detailSummary: document.querySelector('[data-my-service-detail-summary]'),
-    orders: document.querySelector('[data-my-service-orders]'),
-    orderPageLabel: document.querySelector('[data-my-service-order-page-label]'),
     ordersPagePrev: document.querySelector('[data-orders-page-prev]'),
     ordersPageNext: document.querySelector('[data-orders-page-next]'),
+    orderPageLabel: document.querySelector('[data-my-service-order-page-label]'),
+    detailModal: document.querySelector('[data-my-service-detail-modal]'),
+    detailClose: document.querySelector('[data-my-service-detail-close]'),
+    detailModalBody: document.querySelector('[data-my-service-detail-modal-body]'),
     editModal: document.querySelector('[data-my-service-edit-modal]'),
     editForm: document.querySelector('[data-my-service-edit-form]'),
     editProviderSkillSelect: document.querySelector('[data-edit-provider-skill-select]'),
@@ -219,6 +240,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   const state = {
+    profiles: [],
+    selectedBotSlug: '',
     servicesPage: null,
     ordersPage: null,
     selectedServiceId: '',
@@ -229,6 +252,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     servicesPageSize: 20,
     ordersPageNumber: 1,
     ordersPageSize: 10,
+    servicesLoadToken: 0,
+    ordersLoadToken: 0,
     editServiceId: '',
     revokeServiceId: '',
     editCoverDataUrl: '',
@@ -238,6 +263,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     editSkillOptions: [],
     editSelectedProviderSkillValues: [],
     editCandidateProviderSkillValue: '',
+    botMenuOpen: false,
+    detailModalOpener: null,
   };
 
   const escapeHtml = (value) => String(value || '')
@@ -248,6 +275,8 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     .replace(/'/g, '&#39;');
 
   const normalizeTextClient = (value) => String(value || '').trim();
+  const profileSlug = (profile) => normalizeTextClient(profile && profile.slug);
+  const selectedBotProfile = () => state.profiles.find((profile) => profileSlug(profile) === state.selectedBotSlug) || null;
   const getServiceItems = () => Array.isArray(state.servicesPage && state.servicesPage.items) ? state.servicesPage.items : [];
   const getSelectedRawService = () => {
     const serviceId = state.editServiceId || state.revokeServiceId || state.selectedServiceId;
@@ -274,6 +303,94 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       throw new Error((payload && payload.message) || 'Request failed.');
     }
     return payload.data;
+  };
+
+  const fromQuery = () => new URLSearchParams((typeof window !== 'undefined' && window.location && window.location.search) || '').get('from') || '';
+  const setUrlState = () => {
+    if (typeof window === 'undefined' || !window.history || !window.location || !state.selectedBotSlug) return;
+    const next = new URLSearchParams(window.location.search || '');
+    next.set('from', state.selectedBotSlug);
+    const suffix = next.toString();
+    window.history.replaceState(null, '', window.location.pathname + (suffix ? '?' + suffix : ''));
+  };
+  const syncActionLinks = () => {
+    const suffix = state.selectedBotSlug ? '?from=' + encodeURIComponent(state.selectedBotSlug) : '';
+    if (elements.publish) elements.publish.setAttribute('href', '/ui/publish' + suffix);
+    if (elements.refunds) elements.refunds.setAttribute('href', '/ui/refund' + suffix);
+  };
+  const chooseSelectedBot = () => {
+    const querySlug = normalizeTextClient(fromQuery());
+    const queryProfile = state.profiles.find((profile) => profileSlug(profile) === querySlug);
+    const activeProfile = state.profiles.find((profile) => profile && profile.isActive === true);
+    const selected = queryProfile || activeProfile || state.profiles[0] || null;
+    state.selectedBotSlug = profileSlug(selected);
+    setUrlState();
+    syncActionLinks();
+  };
+  const profileAvatarMarkup = (profile) => {
+    const avatar = profile && profile.avatar;
+    const avatarValue = normalizeTextClient(profile && (profile.avatarDataUrl || profile.avatarUri || profile.avatarUrl || profile.avatarImage || (typeof avatar === 'string' ? avatar : '')));
+    const label = normalizeTextClient(profile && profile.name) || profileSlug(profile) || 'Bot';
+    const fallback = normalizeTextClient(avatar && typeof avatar === 'object' && avatar.label) || label.slice(0, 2).toUpperCase() || 'BT';
+    return avatarValue
+      ? '<img class="avatar" src="' + escapeHtml(avatarValue) + '" alt="" loading="lazy" />'
+      : '<span class="avatar">' + escapeHtml(fallback) + '</span>';
+  };
+  const renderBotPicker = () => {
+    if (!elements.botCurrent || !elements.botMenu || !elements.botTrigger) return;
+    const selected = selectedBotProfile();
+    elements.botCurrent.innerHTML = selected
+      ? profileAvatarMarkup(selected) + '<span>' + escapeHtml(normalizeTextClient(selected.name) || state.selectedBotSlug) + '</span>'
+      : '<span>No local Bot</span>';
+    elements.botTrigger.disabled = state.profiles.length === 0;
+    elements.botMenu.innerHTML = state.profiles.map((profile) => {
+      const slug = profileSlug(profile);
+      return '<button type="button" class="services-bot-option" role="option" data-services-bot-option data-bot-slug="' + escapeHtml(slug) + '" data-selected="' + (slug === state.selectedBotSlug ? 'true' : 'false') + '" aria-selected="' + (slug === state.selectedBotSlug ? 'true' : 'false') + '">'
+        + profileAvatarMarkup(profile)
+        + '<span>' + escapeHtml(normalizeTextClient(profile && profile.name) || slug) + '</span>'
+        + '</button>';
+    }).join('');
+    elements.botMenu.hidden = !state.botMenuOpen;
+    elements.botTrigger.setAttribute('aria-expanded', state.botMenuOpen ? 'true' : 'false');
+  };
+
+  const closeBotMenu = () => {
+    state.botMenuOpen = false;
+    renderBotPicker();
+  };
+
+  const toggleBotMenu = () => {
+    if (!state.profiles.length) return;
+    state.botMenuOpen = !state.botMenuOpen;
+    renderBotPicker();
+  };
+
+  const resetSelectedServiceState = () => {
+    state.servicesPage = null;
+    state.ordersPage = null;
+    state.selectedServiceId = '';
+    state.ordersPageNumber = 1;
+    state.servicesLoadToken += 1;
+    state.ordersLoadToken += 1;
+    state.editServiceId = '';
+    state.revokeServiceId = '';
+    state.mutationResult = null;
+  };
+
+  const selectBot = async (slug) => {
+    const nextSlug = normalizeTextClient(slug);
+    if (!nextSlug || nextSlug === state.selectedBotSlug) {
+      closeBotMenu();
+      return;
+    }
+    state.selectedBotSlug = nextSlug;
+    state.servicesPageNumber = 1;
+    resetSelectedServiceState();
+    closeBotMenu();
+    setUrlState();
+    syncActionLinks();
+    render();
+    await loadServices(false);
   };
 
   const renderNotice = (model) => {
@@ -315,7 +432,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       return '<article class="service-row"' + selected + ' data-service-row="' + escapeHtml(service.currentPinId) + '">'
         + '<div class="service-cover">' + icon + '</div>'
         + '<div class="service-main">'
-        + '<div class="service-title-line"><h3>' + escapeHtml(service.title) + '</h3><span>' + escapeHtml(service.priceLabel) + '</span></div>'
+        + '<div class="service-title-line"><h3><button class="service-title-button" type="button" data-service-title-action="details" data-service-id="' + escapeHtml(service.currentPinId) + '">' + escapeHtml(service.title) + '</button></h3><span>' + escapeHtml(service.priceLabel) + '</span></div>'
         + '<p>' + escapeHtml(service.description || service.serviceName) + '</p>'
         + '<div class="service-meta"><span>' + escapeHtml(service.skillLabel) + '</span><span>' + escapeHtml(service.outputTypeLabel) + '</span><span>' + escapeHtml(service.creatorLabel) + '</span><span>' + escapeHtml(service.updatedAtLabel) + '</span></div>'
         + '<div class="service-metrics">' + metrics + '</div>'
@@ -334,14 +451,13 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     if (elements.orderPageLabel) elements.orderPageLabel.textContent = model.orderPageLabel;
     if (elements.ordersPagePrev) elements.ordersPagePrev.disabled = !model.orderPagination.canPrevious || !model.selectedService;
     if (elements.ordersPageNext) elements.ordersPageNext.disabled = !model.orderPagination.canNext || !model.selectedService;
-    if (!elements.detailSummary || !elements.orders) return;
+    if (!elements.detailModalBody) return;
     const selected = model.selectedService;
     if (!selected) {
-      elements.detailSummary.innerHTML = '<div class="ledger-empty"><strong>No service selected</strong><p>Select a service to inspect orders and lifecycle actions.</p></div>';
-      elements.orders.innerHTML = '';
+      elements.detailModalBody.innerHTML = '<div class="ledger-empty"><strong>No service selected</strong><p>Select a service to inspect orders and lifecycle actions.</p></div>';
       return;
     }
-    elements.detailSummary.innerHTML = '<div class="detail-heading"><div><h3>' + escapeHtml(selected.title) + '</h3><p>' + escapeHtml(selected.description || selected.serviceName) + '</p></div>'
+    const summaryHtml = '<div class="my-service-detail-summary"><div class="detail-heading"><div><h3>' + escapeHtml(selected.title) + '</h3><p>' + escapeHtml(selected.description || selected.serviceName) + '</p></div>'
       + '<div class="detail-actions">'
       + '<button class="btn btn-sm" type="button" data-service-action="edit" data-service-id="' + escapeHtml(selected.currentPinId) + '"' + (selected.canModify ? '' : ' disabled') + '>Edit</button>'
       + '<button class="btn btn-sm btn-danger" type="button" data-service-action="revoke" data-service-id="' + escapeHtml(selected.currentPinId) + '"' + (selected.canRevoke ? '' : ' disabled') + '>Revoke</button>'
@@ -351,13 +467,13 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       + '<div><dt>Source Pin</dt><dd>' + escapeHtml(selected.sourceServicePinId) + '</dd></div>'
       + '<div><dt>Skill</dt><dd>' + escapeHtml(selected.skillLabel) + '</dd></div>'
       + '<div><dt>Price</dt><dd>' + escapeHtml(selected.priceLabel) + '</dd></div>'
-      + '</dl>';
+      + '</dl></div>';
 
     if (!model.orders.length) {
-      elements.orders.innerHTML = '<div class="ledger-empty"><strong>' + escapeHtml(model.orderEmptyState.title) + '</strong><p>' + escapeHtml(model.orderEmptyState.message) + '</p></div>';
+      elements.detailModalBody.innerHTML = summaryHtml + '<div class="ledger-empty"><strong>' + escapeHtml(model.orderEmptyState.title) + '</strong><p>' + escapeHtml(model.orderEmptyState.message) + '</p></div>';
       return;
     }
-    elements.orders.innerHTML = model.orders.map((order) => (
+    const ordersHtml = model.orders.map((order) => (
       '<article class="order-row">'
       + '<div><strong>' + escapeHtml(order.statusLabel) + '</strong><p>' + escapeHtml(order.buyerLabel) + '</p><p class="mono-text">' + escapeHtml(order.timeLabel) + '</p></div>'
       + '<div><span>Payment</span><p class="mono-text">' + escapeHtml(order.paymentLabel) + '</p><p class="mono-text">' + escapeHtml(order.orderTxid) + '</p></div>'
@@ -369,39 +485,84 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       + '</div>'
       + '</article>'
     )).join('');
+    elements.detailModalBody.innerHTML = summaryHtml + '<div class="my-service-orders">' + ordersHtml + '</div>';
   };
 
   const render = () => {
     const model = buildModel();
+    renderBotPicker();
     renderNotice(model);
     renderServices(model);
     renderDetail(model);
   };
 
   const loadOrders = async (serviceId, refresh) => {
+    const loadToken = ++state.ordersLoadToken;
+    const selectedBotSlug = state.selectedBotSlug;
     if (!serviceId) {
       state.ordersPage = null;
       render();
       return;
     }
-    const fetchOrdersPage = () => fetchJson('/api/services/owned/orders?serviceId=' + encodeURIComponent(serviceId) + '&all=true&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
-    state.ordersPage = await fetchOrdersPage();
-    const totalPages = Number(state.ordersPage && state.ordersPage.totalPages) || 0;
+    const isStaleLoad = () => loadToken !== state.ordersLoadToken || state.selectedServiceId !== serviceId || state.selectedBotSlug !== selectedBotSlug;
+    const fetchOrdersPage = () => fetchJson('/api/services/owned/orders?serviceId=' + encodeURIComponent(serviceId) + '&from=' + encodeURIComponent(selectedBotSlug) + '&page=' + encodeURIComponent(String(state.ordersPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.ordersPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    state.ordersPage = null;
+    render();
+    let ordersPage;
+    try {
+      ordersPage = await fetchOrdersPage();
+    } catch (error) {
+      if (isStaleLoad()) return;
+      throw error;
+    }
+    if (isStaleLoad()) return;
+    state.ordersPage = ordersPage;
+    const totalPages = Number(ordersPage && ordersPage.totalPages) || 0;
     if (state.ordersPageNumber > 1 && totalPages > 0 && state.ordersPageNumber > totalPages) {
       state.ordersPageNumber = totalPages;
-      state.ordersPage = await fetchOrdersPage();
+      let adjustedOrdersPage;
+      try {
+        adjustedOrdersPage = await fetchOrdersPage();
+      } catch (error) {
+        if (isStaleLoad()) return;
+        throw error;
+      }
+      if (isStaleLoad()) return;
+      state.ordersPage = adjustedOrdersPage;
     }
     render();
   };
 
   const loadServices = async (refresh) => {
+    const loadToken = ++state.servicesLoadToken;
+    const selectedBotSlug = state.selectedBotSlug;
     state.error = null;
-    const fetchServicesPage = () => fetchJson('/api/services/owned?all=true&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
-    state.servicesPage = await fetchServicesPage();
+    if (!selectedBotSlug) {
+      throw new Error('No local Bot profile is available for Services.');
+    }
+    const isStaleLoad = () => loadToken !== state.servicesLoadToken || state.selectedBotSlug !== selectedBotSlug;
+    const fetchServicesPage = () => fetchJson('/api/services/owned?from=' + encodeURIComponent(selectedBotSlug) + '&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
+    let servicesPage;
+    try {
+      servicesPage = await fetchServicesPage();
+    } catch (error) {
+      if (isStaleLoad()) return;
+      throw error;
+    }
+    if (isStaleLoad()) return;
+    state.servicesPage = servicesPage;
     const totalPages = Number(state.servicesPage && state.servicesPage.totalPages) || 0;
     if (state.servicesPageNumber > 1 && totalPages > 0 && state.servicesPageNumber > totalPages) {
       state.servicesPageNumber = totalPages;
-      state.servicesPage = await fetchServicesPage();
+      let adjustedServicesPage;
+      try {
+        adjustedServicesPage = await fetchServicesPage();
+      } catch (error) {
+        if (isStaleLoad()) return;
+        throw error;
+      }
+      if (isStaleLoad()) return;
+      state.servicesPage = adjustedServicesPage;
     }
     const items = getServiceItems();
     const hasSelected = items.some((service) => normalizeTextClient(service && (service.currentPinId || service.id)) === state.selectedServiceId);
@@ -410,6 +571,20 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       state.ordersPageNumber = 1;
     }
     await loadOrders(state.selectedServiceId, refresh);
+  };
+
+  const loadProfiles = async () => {
+    const data = await fetchJson('/api/bot/profiles');
+    state.profiles = Array.isArray(data && data.profiles)
+      ? data.profiles.filter((profile) => profileSlug(profile))
+      : [];
+    chooseSelectedBot();
+    renderBotPicker();
+  };
+
+  const initialize = async () => {
+    await loadProfiles();
+    await loadServices(false);
   };
 
   const setError = (error) => {
@@ -610,6 +785,42 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     state.revokeServiceId = '';
   };
 
+  const focusElement = (element) => {
+    if (element && typeof element.focus === 'function') {
+      element.focus();
+    }
+  };
+
+  const setDetailModalLock = (locked) => {
+    if (typeof document === 'undefined' || !document.body || !document.body.classList) return;
+    document.body.classList[locked ? 'add' : 'remove']('my-services-modal-open');
+  };
+
+  const openDetail = async (serviceId, opener) => {
+    state.selectedServiceId = serviceId;
+    state.ordersPageNumber = 1;
+    state.mutationResult = null;
+    state.detailModalOpener = opener || null;
+    closeBotMenu();
+    if (elements.detailModal) elements.detailModal.hidden = false;
+    setDetailModalLock(true);
+    focusElement(elements.detailClose);
+    try {
+      await loadOrders(serviceId, false);
+    } catch (error) {
+      setError(error);
+    }
+  };
+
+  const closeDetail = () => {
+    if (!elements.detailModal || elements.detailModal.hidden) return;
+    elements.detailModal.hidden = true;
+    setDetailModalLock(false);
+    const opener = state.detailModalOpener;
+    state.detailModalOpener = null;
+    focusElement(opener);
+  };
+
   const submitEdit = async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -671,8 +882,30 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   };
 
   document.addEventListener('click', async (event) => {
-    const target = event.target instanceof Element ? event.target.closest('[data-service-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
-    if (!target) return;
+    const eventTarget = event.target instanceof Element ? event.target : null;
+    if (state.botMenuOpen && eventTarget && !eventTarget.closest('[data-services-bot-picker]')) {
+      closeBotMenu();
+    }
+    if (eventTarget && elements.detailModal && eventTarget === elements.detailModal && !elements.detailModal.hidden) {
+      closeDetail();
+      return;
+    }
+    const target = eventTarget ? eventTarget.closest('[data-services-bot-trigger], [data-services-bot-option], [data-service-action], [data-service-title-action], [data-copy-value], [data-my-services-refresh], [data-services-page-prev], [data-services-page-next], [data-orders-page-prev], [data-orders-page-next], [data-my-service-detail-close], [data-my-service-edit-close], [data-my-service-revoke-close], [data-edit-provider-skill-add], [data-edit-provider-skill-remove]') : null;
+    if (!target) {
+      return;
+    }
+    if (target.matches('[data-services-bot-trigger]')) {
+      toggleBotMenu();
+      return;
+    }
+    if (target.matches('[data-services-bot-option]')) {
+      try {
+        await selectBot(target.getAttribute('data-bot-slug') || target.getAttribute('data-services-bot-option') || '');
+      } catch (error) {
+        setError(error);
+      }
+      return;
+    }
     if (target.matches('[data-edit-provider-skill-add]')) {
       const candidate = normalizeTextClient(state.editCandidateProviderSkillValue);
       const exists = state.editSkillOptions.some((option) => option.value === candidate);
@@ -705,6 +938,10 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       closeRevoke();
       return;
     }
+    if (target.matches('[data-my-service-detail-close]')) {
+      closeDetail();
+      return;
+    }
     if (target.matches('[data-services-page-prev]') || target.matches('[data-services-page-next]')) {
       const delta = target.matches('[data-services-page-prev]') ? -1 : 1;
       state.servicesPageNumber = Math.max(1, state.servicesPageNumber + delta);
@@ -733,23 +970,25 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
       target.textContent = 'Copied';
       return;
     }
-    const action = target.getAttribute('data-service-action');
+    const action = target.getAttribute('data-service-action') || target.getAttribute('data-service-title-action');
     const serviceId = target.getAttribute('data-service-id') || '';
     if (action === 'details') {
-      state.selectedServiceId = serviceId;
-      state.ordersPageNumber = 1;
-      state.mutationResult = null;
-      try {
-        await loadOrders(serviceId, false);
-      } catch (error) {
-        setError(error);
-      }
+      await openDetail(serviceId, target);
     }
     if (action === 'edit') {
       await openEdit(serviceId);
     }
     if (action === 'revoke') {
       openRevoke(serviceId);
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && state.botMenuOpen) {
+      closeBotMenu();
+    }
+    if (event.key === 'Escape' && elements.detailModal && !elements.detailModal.hidden) {
+      closeDetail();
     }
   });
 
@@ -797,7 +1036,7 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     elements.revokeConfirm.addEventListener('click', confirmRevoke);
   }
 
-  loadServices(false).catch(setError);
+  initialize().catch(setError);
 })();`,
   };
 }

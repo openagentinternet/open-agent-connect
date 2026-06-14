@@ -315,6 +315,23 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
   };
 
   const selectedMetaBotSlug = () => elements.metaBotSelect ? normalizeText(elements.metaBotSelect.value) : state.selectedMetaBotSlug;
+  const readQueryFromSlug = () => {
+    try {
+      return normalizeText(new URLSearchParams(window.location.search).get('from'));
+    } catch {
+      return '';
+    }
+  };
+  const replaceQueryFromSlug = (slug) => {
+    try {
+      if (!window.history || typeof window.history.replaceState !== 'function') return;
+      const params = new URLSearchParams(window.location.search);
+      if (slug) params.set('from', slug);
+      else params.delete('from');
+      const query = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : ''));
+    } catch { /* ignore URL updates */ }
+  };
   const normalizeSkillValues = (values) => {
     const seen = new Set();
     const normalized = [];
@@ -665,6 +682,17 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
     state.runtimes = runtimesEnvelope && runtimesEnvelope.ok === true && runtimesEnvelope.data && Array.isArray(runtimesEnvelope.data.runtimes)
       ? runtimesEnvelope.data.runtimes
       : [];
+    const queryFromSlug = readQueryFromSlug();
+    if (queryFromSlug) {
+      const queryModel = buildPublishPageViewModel({
+        profiles: state.profiles,
+        runtimes: state.runtimes,
+        selectedMetaBotSlug: queryFromSlug,
+      });
+      if (queryModel.metabots.some((bot) => bot.value === queryFromSlug)) {
+        state.selectedMetaBotSlug = queryFromSlug;
+      }
+    }
     render();
     const slug = state.selectedMetaBotSlug || selectedMetaBotSlug();
     if (slug) {
@@ -749,6 +777,7 @@ export function buildPublishPageDefinition(): LocalUiPageDefinition {
       state.candidateProviderSkillValue = '';
       if (elements.displayNameInput) elements.displayNameInput.value = '';
       if (elements.serviceNameInput) elements.serviceNameInput.value = '';
+      replaceQueryFromSlug(state.selectedMetaBotSlug);
       void loadPublishSkills(state.selectedMetaBotSlug);
     });
   }

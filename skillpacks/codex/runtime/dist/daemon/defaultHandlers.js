@@ -12096,6 +12096,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
             listProfiles: async () => {
                 const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(normalizedSystemHomeDir);
+                const activeHomeDir = node_path_1.default.resolve(input.homeDir);
                 await Promise.all(profiles.map(async (profile) => {
                     if (!profile.avatarDataUrl && profile.globalMetaId) {
                         const chainAvatar = await resolveChainAvatarDataUrl(profile.globalMetaId);
@@ -12104,7 +12105,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                         }
                     }
                 }));
-                return (0, commandResult_1.commandSuccess)({ profiles });
+                return (0, commandResult_1.commandSuccess)({
+                    profiles: profiles.map((profile) => ({
+                        ...profile,
+                        isActive: node_path_1.default.resolve(profile.homeDir) === activeHomeDir,
+                    })),
+                });
             },
             getProfile: async ({ slug }) => {
                 const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);

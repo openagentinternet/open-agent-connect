@@ -9,6 +9,9 @@
       .my-services-shell {
         display: grid;
         gap: 16px;
+        width: 100%;
+        max-width: 980px;
+        margin: 0 auto;
       }
       .my-services-toolbar {
         display: flex;
@@ -79,12 +82,14 @@
       }
       .my-services-workspace {
         display: grid;
-        grid-template-columns: minmax(360px, 1.05fr) minmax(360px, .95fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 16px;
         align-items: start;
+        justify-items: center;
       }
-      .my-services-list-panel,
-      .my-services-detail-panel {
+      .my-services-list-panel {
+        width: 100%;
+        max-width: 900px;
         min-width: 0;
       }
       .ledger-section-header {
@@ -104,7 +109,7 @@
       .my-services-list,
       .my-service-orders {
         display: grid;
-        gap: 10px;
+        gap: 12px;
       }
       .ledger-pagination {
         display: flex;
@@ -122,21 +127,23 @@
       }
       .service-row {
         display: grid;
-        grid-template-columns: 58px minmax(0, 1fr) auto;
-        gap: 12px;
-        padding: 12px;
+        grid-template-columns: 68px minmax(0, 1fr) 104px;
+        gap: 16px;
+        padding: 16px;
+        align-items: start;
+        box-shadow: 0 1px 0 rgba(255,255,255,.02), 0 14px 36px rgba(0,0,0,.12);
       }
       .service-row[data-selected="true"] {
-        border-color: rgba(99,102,241,.5);
-        background: rgba(99,102,241,.08);
+        border-color: rgba(34,197,94,.38);
+        background: linear-gradient(180deg, rgba(34,197,94,.08), rgba(34,197,94,.03));
       }
       .service-cover,
       .edit-cover-preview {
-        width: 58px;
-        height: 58px;
+        width: 68px;
+        height: 68px;
         border-radius: 8px;
         border: 1px solid var(--border2);
-        background: var(--surface2);
+        background: var(--surface3);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -152,31 +159,50 @@
       .service-cover span,
       .edit-cover-preview span {
         font-family: var(--mono);
-        font-size: 13px;
+        font-size: 14px;
         color: var(--muted);
       }
       .service-main {
         min-width: 0;
         display: grid;
-        gap: 7px;
+        gap: 10px;
       }
       .service-title-line {
         display: flex;
-        align-items: baseline;
+        align-items: flex-start;
         justify-content: space-between;
-        gap: 10px;
+        gap: 14px;
       }
       .service-title-line h3,
       .detail-heading h3 {
-        font-size: 14px;
+        font-size: 16px;
         font-weight: 600;
         min-width: 0;
+        line-height: 1.25;
+      }
+      .service-title-button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .service-title-button:hover,
+      .service-title-button:focus-visible {
+        text-decoration: underline;
       }
       .service-title-line span {
         font-family: var(--mono);
         color: var(--green);
-        font-size: 11px;
+        font-size: 12px;
         white-space: nowrap;
+        border: 1px solid rgba(34,197,94,.26);
+        border-radius: 6px;
+        background: var(--green-dim);
+        padding: 4px 7px;
       }
       .service-main p,
       .detail-heading p,
@@ -184,6 +210,7 @@
       .modal-heading p {
         color: var(--muted);
         font-size: 12px;
+        line-height: 1.45;
         overflow-wrap: anywhere;
       }
       .service-meta {
@@ -195,7 +222,7 @@
       .service-metric {
         border: 1px solid var(--border2);
         border-radius: 6px;
-        padding: 3px 7px;
+        padding: 4px 7px;
         background: var(--surface2);
         font-family: var(--mono);
         font-size: 10px;
@@ -203,12 +230,13 @@
       }
       .service-metrics {
         display: grid;
-        grid-template-columns: repeat(5, minmax(72px, 1fr));
-        gap: 6px;
+        grid-template-columns: repeat(5, minmax(82px, 1fr));
+        gap: 8px;
       }
       .service-metric {
         display: grid;
-        gap: 2px;
+        gap: 3px;
+        min-width: 0;
       }
       .service-metric strong {
         color: var(--text);
@@ -218,11 +246,11 @@
       .service-actions {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 7px;
         align-items: stretch;
       }
       .service-actions small {
-        max-width: 120px;
+        max-width: 104px;
         color: var(--amber);
         font-family: var(--mono);
         font-size: 10px;
@@ -301,6 +329,9 @@
       .ledger-empty strong {
         display: block;
         margin-bottom: 4px;
+      }
+      body.my-services-modal-open {
+        overflow: hidden;
       }
       .my-services-modal {
         position: fixed;
@@ -412,6 +443,22 @@
         }
         .service-row {
           grid-template-columns: 48px minmax(0, 1fr);
+          gap: 12px;
+          padding: 12px;
+        }
+        .service-cover,
+        .edit-cover-preview {
+          width: 48px;
+          height: 48px;
+        }
+        .service-title-line {
+          align-items: stretch;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .service-title-line span {
+          justify-self: start;
+          width: fit-content;
         }
         .service-actions {
           grid-column: 1 / -1;

@@ -25,6 +25,8 @@ import type {
 } from './types';
 import { writeMetaAppZipArchive } from './zipArchive';
 
+const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>.zip';
+
 export interface UploadLikeResult {
   pinId?: string;
   txids?: string[];
@@ -198,6 +200,12 @@ function finalizeManifestForWrite(input: {
   const fallbackAppName = slugFromProjectDir(input.plan.projectDir);
   const title = normalizeText(input.manifest.title) || normalizeText(input.manifest.appName) || fallbackAppName;
   const appName = normalizeText(input.manifest.appName) || slugFromProjectDir(title);
+  const explicitCode = normalizeText(input.manifest.code);
+  const code = explicitCode || (
+    input.plan.projectType === 'static' || input.compatibilityMirrorContent
+      ? input.artifactUri
+      : ''
+  );
 
   return {
     ...input.manifest,
@@ -208,8 +216,8 @@ function finalizeManifestForWrite(input: {
     indexFile: normalizeText(input.manifest.indexFile) || input.plan.indexFile,
     contentType: normalizeText(input.manifest.contentType) || 'application/zip',
     codeType: normalizeText(input.manifest.codeType) || 'application/zip',
-    code: input.artifactUri,
-    content: input.compatibilityMirrorContent ? input.artifactUri : '',
+    code,
+    content: input.artifactUri,
     contentHash: input.contentHash,
   };
 }
@@ -325,6 +333,33 @@ async function makeArchive(input: {
     sourceDir: input.artifactDir,
     outFile: path.join(tempDir, 'metaapp.zip'),
   });
+}
+
+async function createConfirmationData(
+  input: MetaAppPublishInput,
+  deps: MetaAppPublishDependencies,
+  plan: MetaAppPreviewPlan,
+  manifest: MetaAppManifestInput,
+): Promise<Record<string, unknown>> {
+  const data = createPreviewData(input, deps, plan, manifest);
+  if (!plan.artifactDir) {
+    return data;
+  }
+
+  const archive = await makeArchive({ deps, artifactDir: plan.artifactDir });
+  data.archivePreview = {
+    bytes: archive.bytes,
+    sha256: archive.sha256,
+    entries: archive.entries,
+  };
+  data.payloadPreview = cleanManifestForPayload(finalizeManifestForWrite({
+    plan,
+    manifest,
+    artifactUri: METAAPP_RUNTIME_URI_PREVIEW,
+    contentHash: archive.sha256,
+    compatibilityMirrorContent: input.compatibilityMirrorContent,
+  }));
+  return data;
 }
 
 function uploadArtifactUri(upload: UploadLikeResult): string {
@@ -475,7 +510,7 @@ export async function publishMetaApp(
   }
 
   if (!input.confirm) {
-    return commandAwaitingConfirmation(createPreviewData(input, deps, plan, manifest));
+    return commandAwaitingConfirmation(await createConfirmationData(input, deps, plan, manifest));
   }
 
   return writePublishedMetaApp({
@@ -518,7 +553,7 @@ export async function updateMetaApp(
   }
 
   if (!input.confirm) {
-    const preview = createPreviewData(input, deps, plan, manifest);
+    const preview = await createConfirmationData(input, deps, plan, manifest);
     preview.targetPinId = targetPinId;
     preview.warnings = warnings;
     return commandAwaitingConfirmation(preview);

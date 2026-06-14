@@ -20,12 +20,23 @@ const UPDATE_TARGET_PIN = `${'b'.repeat(64)}i0`;
 const UPDATE_PIN = `${'c'.repeat(64)}i0`;
 const BUZZ_PIN = `${'d'.repeat(64)}i0`;
 const COMMENT_PIN = `${'e'.repeat(64)}i0`;
+const PREVIEW_ARTIFACT_URI = 'metafile://<uploaded-metaapp-zip-pin>.zip';
 
 async function makeProject(prefix, manifest = {}) {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), `metabot-metaapp-publish-${prefix}-`));
   await writeProjectFile(projectDir, 'dist/index.html', '<h1>MetaApp</h1>');
   await writeProjectFile(projectDir, 'dist/assets/app.js', 'console.log("metaapp");');
   await writeProjectFile(projectDir, 'package.json', JSON.stringify({ scripts: { build: 'vite build' } }));
+  if (Object.keys(manifest).length > 0) {
+    await writeProjectFile(projectDir, '.metaapp.json', JSON.stringify(manifest));
+  }
+  return projectDir;
+}
+
+async function makeStaticProject(prefix, manifest = {}) {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), `metabot-metaapp-static-${prefix}-`));
+  await writeProjectFile(projectDir, 'index.html', '<h1>Static MetaApp</h1>');
+  await writeProjectFile(projectDir, 'assets/app.js', 'console.log("static metaapp");');
   if (Object.keys(manifest).length > 0) {
     await writeProjectFile(projectDir, '.metaapp.json', JSON.stringify(manifest));
   }
@@ -153,6 +164,13 @@ test('publishMetaApp without confirm awaits confirmation and performs no writes'
 
   assert.equal(result.state, 'awaiting_confirmation');
   assert.equal(result.data.plan.artifactDir, path.join(projectDir, 'dist'));
+  assert.equal(result.data.payloadPreview.content, PREVIEW_ARTIFACT_URI);
+  assert.equal(result.data.payloadPreview.code, '');
+  assert.equal(result.data.payloadPreview.contentType, 'application/zip');
+  assert.equal(result.data.payloadPreview.codeType, 'application/zip');
+  assert.match(result.data.payloadPreview.contentHash, /^[a-f0-9]{64}$/);
+  assert.equal(result.data.payloadPreview.metadata, undefined);
+  assert.equal(JSON.stringify(result.data.payloadPreview).includes(projectDir), false);
   assert.deepEqual(deps.calls.map((call) => call.type), ['previewSession']);
 });
 
@@ -182,17 +200,43 @@ test('publishMetaApp uploads the ZIP before writing create payload and upserting
   const payload = writePayload(deps.calls);
   assert.equal(payload.title, 'Publish App');
   assert.equal(payload.appName, 'publish-app');
-  assert.equal(payload.code, 'metafile://upload-pin.zip');
-  assert.equal(payload.content, '');
+  assert.equal(payload.code, '');
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
   assert.equal(payload.contentType, 'application/zip');
   assert.equal(payload.codeType, 'application/zip');
   assert.match(payload.contentHash, /^[a-f0-9]{64}$/);
+  assert.equal(payload.metadata, undefined);
+  assert.equal(JSON.stringify(payload).includes(projectDir), false);
   assert.equal(deps.upserts[0].pinId, CREATE_PIN);
-  assert.equal(deps.upserts[0].code, 'metafile://upload-pin.zip');
-  assert.equal(deps.upserts[0].content, '');
+  assert.equal(deps.upserts[0].code, '');
+  assert.equal(deps.upserts[0].content, 'metafile://upload-pin.zip');
 });
 
-test('publishMetaApp mirrors content only when compatibility mirror is requested', async () => {
+test('publishMetaApp defaults static project code to the runtime artifact', async () => {
+  const projectDir = await makeStaticProject('static-code-runtime');
+  const deps = createDeps();
+
+  await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  const payload = writePayload(deps.calls);
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
+  assert.equal(payload.code, 'metafile://upload-pin.zip');
+});
+
+test('publishMetaApp preserves explicit source code while content points at runtime', async () => {
+  const projectDir = await makeProject('source-code', {
+    code: 'metafile://source-code.zip',
+  });
+  const deps = createDeps();
+
+  await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  const payload = writePayload(deps.calls);
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
+  assert.equal(payload.code, 'metafile://source-code.zip');
+});
+
+test('publishMetaApp can mirror runtime into code when compatibility mirror is requested', async () => {
   const projectDir = await makeProject('compat-mirror');
   const deps = createDeps();
 
@@ -261,6 +305,8 @@ test('updateMetaApp writes modify path and inherits previous fields before local
   assert.deepEqual(payload.tags, ['local']);
   assert.equal(payload.runtime, 'browser');
   assert.equal(payload.indexFile, 'previous.html');
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
+  assert.equal(payload.code, '');
 });
 
 test('updateMetaApp continues with a warning when previous lookup fails', async () => {
