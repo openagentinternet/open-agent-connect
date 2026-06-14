@@ -35,9 +35,9 @@ import type {
 import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
 
-const DEFAULT_ROLE = 'I am a helpful AI assistant.';
-const DEFAULT_SOUL = 'Friendly and professional.';
-const DEFAULT_GOAL = 'Help users accomplish their tasks effectively.';
+const DEFAULT_ROLE = 'You are a helpful AI assistant.';
+const DEFAULT_SOUL = 'You are friendly and professional.';
+const DEFAULT_GOAL = 'Your goal is to help users accomplish their tasks effectively.';
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
 
@@ -853,6 +853,7 @@ export async function syncMetabotInfoToChain(
   }
 
   if (changedFields.some((field) => PROFILE_INFO_FIELDS.has(field))) {
+    const personaChanged = changed.has('role') || changed.has('soul') || changed.has('goal');
     if (changed.has('bio')) {
       await writeProfileInfo({
         path: '/info/bio',
@@ -860,25 +861,15 @@ export async function syncMetabotInfoToChain(
         payload: profile.bio,
       });
     }
-    if (changed.has('role')) {
+    if (personaChanged) {
       await writeProfileInfo({
-        path: '/info/role',
-        contentType: 'text/plain',
-        payload: profile.role,
-      });
-    }
-    if (changed.has('soul')) {
-      await writeProfileInfo({
-        path: '/info/soul',
-        contentType: 'text/plain',
-        payload: profile.soul,
-      });
-    }
-    if (changed.has('goal')) {
-      await writeProfileInfo({
-        path: '/info/goal',
-        contentType: 'text/plain',
-        payload: profile.goal,
+        path: '/info/persona',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          role: profile.role,
+          soul: profile.soul,
+          goal: profile.goal,
+        }),
       });
     }
     if (changed.has('allowChatSkills')) {

@@ -57,9 +57,9 @@ test('createMetabotProfile creates a profile workspace with editable persona def
 
   assert.equal(created.name, 'Alice Bot');
   assert.equal(created.slug, 'alice-bot');
-  assert.equal(created.role, 'I am a helpful AI assistant.');
-  assert.equal(created.soul, 'Friendly and professional.');
-  assert.equal(created.goal, 'Help users accomplish their tasks effectively.');
+  assert.equal(created.role, 'You are a helpful AI assistant.');
+  assert.equal(created.soul, 'You are friendly and professional.');
+  assert.equal(created.goal, 'Your goal is to help users accomplish their tasks effectively.');
   assert.equal(created.primaryProvider, null);
   assert.equal(created.fallbackProvider, null);
   assert.deepEqual(created.allowChatSkills, []);
@@ -311,7 +311,7 @@ test('updateMetabotProfile validates allowChatSkills before writing local profil
   );
 
   const afterFailure = await getMetabotProfile(systemHomeDir, created.slug);
-  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'I am a helpful AI assistant.\n');
+  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'You are a helpful AI assistant.\n');
   assert.deepEqual(afterFailure.allowChatSkills, []);
   await assert.rejects(
     () => readFile(paths.chatSkillPolicyPath, 'utf8'),
@@ -335,7 +335,7 @@ test('updateMetabotProfile validates provider changes before writing local profi
 
   const afterFailure = await getMetabotProfile(systemHomeDir, created.slug);
   assert.equal(afterFailure.name, 'Atomic Bot');
-  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'I am a helpful AI assistant.\n');
+  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'You are a helpful AI assistant.\n');
   assert.equal(afterFailure.primaryProvider, null);
 });
 
@@ -443,7 +443,7 @@ test('validateAvatarDataUrl rejects non-images and oversized payloads', () => {
   assert.equal(validateAvatarDataUrl(`data:image/png;base64,${'A'.repeat(300_000)}`, 200_000).valid, false);
 });
 
-test('syncMetabotInfoToChain writes changed profile info fields to separate paths', async () => {
+test('syncMetabotInfoToChain writes persona fields to one JSON path', async () => {
   const calls = [];
   const signer = {
     getIdentity: async () => ({}),
@@ -486,33 +486,31 @@ test('syncMetabotInfoToChain writes changed profile info fields to separate path
 
   assert.deepEqual(calls.map((call) => call.path), [
     '/info/bio',
-    '/info/role',
-    '/info/soul',
-    '/info/goal',
+    '/info/persona',
     '/info/chatSkills',
     '/info/LLM',
   ]);
-  assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify', 'modify', 'modify', 'modify']);
+  assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify', 'modify']);
   assert.deepEqual(calls.map((call) => call.contentType), [
     'text/plain',
-    'text/plain',
-    'text/plain',
-    'text/plain',
+    'application/json',
     'application/json',
     'application/json',
   ]);
   assert.equal(calls[0].payload, 'Builds small tools on the Agent Internet.');
-  assert.equal(calls[1].payload, 'Role');
-  assert.equal(calls[2].payload, 'Soul');
-  assert.equal(calls[3].payload, 'Goal');
-  assert.deepEqual(JSON.parse(calls[4].payload), {
+  assert.deepEqual(JSON.parse(calls[1].payload), {
+    role: 'Role',
+    soul: 'Soul',
+    goal: 'Goal',
+  });
+  assert.deepEqual(JSON.parse(calls[2].payload), {
     allowChatSkills: ['metabot-help', 'metabot-wallet-manage'],
   });
-  assert.deepEqual(JSON.parse(calls[5].payload), {
+  assert.deepEqual(JSON.parse(calls[3].payload), {
     primaryProvider: 'claude-code',
     fallbackProvider: 'codex',
   });
-  assert.equal(results.length, 6);
+  assert.equal(results.length, 4);
 });
 
 test('syncMetabotInfoToChain preserves name and avatar writes while splitting profile info', async () => {
@@ -556,7 +554,7 @@ test('syncMetabotInfoToChain preserves name and avatar writes while splitting pr
     allowChatSkills: ['metabot-help'],
   }, ['name', 'avatar', 'role', 'primaryProvider'], { delayMs: 0 });
 
-  assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/role', '/info/LLM']);
+  assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/persona', '/info/LLM']);
   assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify', 'modify']);
   assert.equal(calls[0].contentType, 'text/plain');
   assert.equal(calls[0].payload, 'Alice');
@@ -564,7 +562,12 @@ test('syncMetabotInfoToChain preserves name and avatar writes while splitting pr
   assert.equal(calls[1].contentType, 'image/png;binary');
   assert.equal(calls[1].payload, 'ZmFrZQ==');
   assert.equal(calls[1].encoding, 'base64');
-  assert.equal(calls[2].payload, 'Role');
+  assert.equal(calls[2].contentType, 'application/json');
+  assert.deepEqual(JSON.parse(calls[2].payload), {
+    role: 'Role',
+    soul: 'Soul',
+    goal: 'Goal',
+  });
   assert.deepEqual(JSON.parse(calls[3].payload), {
     primaryProvider: 'claude-code',
     fallbackProvider: 'codex',

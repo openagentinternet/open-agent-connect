@@ -110,6 +110,34 @@ function selectPrimaryBinding(bindings: LlmBinding[], metaBotSlug: string): LlmB
   return candidates[0] ?? null;
 }
 
+function selectRoleBinding(bindings: LlmBinding[], metaBotSlug: string, role: 'primary' | 'fallback'): LlmBinding | null {
+  const candidates = bindings
+    .filter((binding) => (
+      binding.metaBotSlug === metaBotSlug
+      && binding.role === role
+      && binding.enabled
+    ))
+    .sort((left, right) => {
+      if (left.priority !== right.priority) {
+        return left.priority - right.priority;
+      }
+      if (left.updatedAt !== right.updatedAt) {
+        return right.updatedAt.localeCompare(left.updatedAt);
+      }
+      return left.id.localeCompare(right.id);
+    });
+  return candidates[0] ?? null;
+}
+
+function isUsableRuntime(runtime: LlmRuntime | undefined): runtime is LlmRuntime {
+  return Boolean(
+    runtime
+    && runtime.health === 'healthy'
+    && isPlatformId(runtime.provider)
+    && normalizeText(runtime.binaryPath),
+  );
+}
+
 function resolveCatalogRoot(input: {
   root: PlatformSkillRoot;
   systemHomeDir: string;
@@ -237,8 +265,8 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
         options.runtimeStore.read(),
         options.bindingStore.read(),
       ]);
-      const binding = selectPrimaryBinding(bindingState.bindings, metaBotSlug);
-      if (!binding) {
+      const primaryBinding = selectPrimaryBinding(bindingState.bindings, metaBotSlug);
+      if (!primaryBinding) {
         return {
           ok: false,
           code: 'primary_runtime_missing',
@@ -248,14 +276,24 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
         };
       }
 
-      const runtime = runtimeState.runtimes.find((entry) => entry.id === binding.llmRuntimeId);
+      const primaryRuntime = runtimeState.runtimes.find((entry) => entry.id === primaryBinding.llmRuntimeId);
+      const fallbackBinding = selectRoleBinding(bindingState.bindings, metaBotSlug, 'fallback');
+      const fallbackRuntime = fallbackBinding
+        ? runtimeState.runtimes.find((entry) => entry.id === fallbackBinding.llmRuntimeId)
+        : undefined;
+      let binding: LlmBinding = primaryBinding;
+      let runtime = primaryRuntime;
+      if (!isUsableRuntime(primaryRuntime) && fallbackBinding && isUsableRuntime(fallbackRuntime)) {
+        binding = fallbackBinding;
+        runtime = fallbackRuntime;
+      }
       if (!runtime) {
         return {
           ok: false,
           code: 'primary_runtime_missing',
           message: 'The selected MetaBot primary runtime binding points to a missing runtime.',
           metaBotSlug,
-          binding,
+          binding: primaryBinding,
           rootDiagnostics: [],
         };
       }
@@ -267,7 +305,7 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
           message: 'The selected MetaBot primary runtime is unavailable.',
           metaBotSlug,
           runtime,
-          binding,
+          binding: primaryBinding,
           rootDiagnostics: [],
         };
       }
@@ -279,7 +317,7 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
           message: 'The selected MetaBot primary runtime provider is not supported by the platform skill registry.',
           metaBotSlug,
           runtime,
-          binding,
+          binding: primaryBinding,
           rootDiagnostics: [],
         };
       }
@@ -291,7 +329,7 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
           message: 'The selected MetaBot primary runtime is not healthy.',
           metaBotSlug,
           runtime,
-          binding,
+          binding: primaryBinding,
           rootDiagnostics: [],
         };
       }
@@ -303,7 +341,7 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
           message: 'The selected MetaBot primary runtime has no binary path.',
           metaBotSlug,
           runtime,
-          binding,
+          binding: primaryBinding,
           rootDiagnostics: [],
         };
       }
