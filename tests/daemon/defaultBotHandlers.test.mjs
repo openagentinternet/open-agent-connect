@@ -1635,6 +1635,62 @@ test('default bot updateProfile writes homepage chain data before local state', 
   assert.deepEqual(updated.homepage, homepage);
 });
 
+test('default bot uploadHomepageFile writes selected browser file bytes through profile signer', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-homepage-upload-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage Upload Bot',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-homepage-upload-bot',
+    mvcAddress: 'addr-homepage-upload-bot',
+  });
+
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      return {
+        txids: ['homepage-upload-tx-1'],
+        pinId: 'homepage-upload-pin-1',
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: 'gm-homepage-upload-bot',
+        mvcAddress: 'addr-homepage-upload-bot',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.uploadHomepageFile({
+    slug: profile.slug,
+    fileName: 'cover.png',
+    contentType: 'image/png',
+    base64: Buffer.from('pngdata').toString('base64'),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.pinId, 'homepage-upload-pin-1');
+  assert.equal(result.data.metafileUri, 'metafile://homepage-upload-pin-1.png');
+  assert.equal(result.data.bytes, 7);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/file']);
+  assert.equal(writeCalls[0].payload, Buffer.from('pngdata').toString('base64'));
+  assert.equal(writeCalls[0].contentType, 'image/png');
+  assert.equal(writeCalls[0].encoding, 'base64');
+});
+
 test('default bot updateProfile rejects invalid homepage input without calling signer', async (t) => {
   const homeDir = await createProfileHome('metabot-default-homepage-invalid-');
   t.after(async () => {

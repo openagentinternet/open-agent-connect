@@ -56,6 +56,7 @@ async function startServer(options = {}) {
     botProfile: [],
     botCreateProfile: [],
     botUpdateProfile: [],
+    botHomepageUpload: [],
     botWallet: [],
     botWalletTransferPreview: [],
     botWalletTransferConfirm: [],
@@ -682,6 +683,17 @@ async function startServer(options = {}) {
               path: '/info/name',
             },
           ],
+        });
+      },
+      uploadHomepageFile: async (input) => {
+        calls.botHomepageUpload.push(input);
+        return commandSuccess({
+          pinId: 'homepage-file-pin-1',
+          metafileUri: 'metafile://homepage-file-pin-1.png',
+          contentType: input.contentType,
+          network: 'mvc',
+          txids: ['tx-homepage-file-1'],
+          bytes: 7,
         });
       },
       getWallet: async (input) => {
@@ -1881,6 +1893,28 @@ test('PUT /api/bot/profiles/:slug does not let the JSON body override the path s
   assert.equal(response.status, 200);
   assert.deepEqual(server.calls.botUpdateProfile, [{ slug: 'alice-bot', name: 'Alice Updated' }]);
   assert.equal(payload.data.profile.slug, 'alice-bot');
+});
+
+test('POST /api/bot/profiles/:slug/homepage/upload forwards selected file bytes', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    fileName: 'cover.png',
+    contentType: 'image/png',
+    base64: Buffer.from('pngdata').toString('base64'),
+  };
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/homepage/upload`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.botHomepageUpload, [{ slug: 'alice-bot', ...request }]);
+  assert.equal(payload.data.pinId, 'homepage-file-pin-1');
+  assert.equal(payload.data.metafileUri, 'metafile://homepage-file-pin-1.png');
 });
 
 test('GET /api/bot/profiles/:slug/wallet forwards to the MetaBot wallet handler', async (t) => {

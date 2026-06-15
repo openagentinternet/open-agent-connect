@@ -176,7 +176,7 @@ import {
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
 import { uploadLargeFileToChain, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
-import { uploadLocalFileToChain } from '../core/files/uploadFile';
+import { uploadFileBufferToChain, uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
 import { createMetaAppIndexerClient } from '../core/metaapp/indexerClient';
@@ -346,6 +346,18 @@ const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function decodeRequiredBase64(value: unknown): Buffer {
+  const base64 = normalizeText(value);
+  if (!base64) {
+    throw new Error('Homepage upload requires base64 file data.');
+  }
+  const buffer = Buffer.from(base64, 'base64');
+  if (!buffer.length || buffer.toString('base64').replace(/=+$/u, '') !== base64.replace(/=+$/u, '')) {
+    throw new Error('Homepage upload base64 file data is invalid.');
+  }
+  return buffer;
 }
 
 function readErrorCode(error: unknown, fallback: string): string {
@@ -14445,6 +14457,38 @@ export function createDefaultMetabotDaemonHandlers(input: {
             return commandFailed('profile_not_found', message);
           }
           return commandFailed('metabot_profile_update_failed', message);
+        }
+      },
+      uploadHomepageFile: async (body) => {
+        const slug = normalizeText(body.slug);
+        const current = await getMetabotProfile(normalizedSystemHomeDir, slug);
+        if (!current) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+        }
+        if (!current.globalMetaId) {
+          return commandFailed(
+            'chain_identity_missing',
+            'This MetaBot has no chained identity yet, so homepage files cannot be uploaded safely.'
+          );
+        }
+
+        try {
+          const network = await resolveFileUploadNetworkForHome(body.network, current.homeDir);
+          const data = decodeRequiredBase64(body.base64);
+          const profileSigner = createSignerForProfileHome(current.homeDir);
+          const result = await uploadFileBufferToChain({
+            fileName: normalizeText(body.fileName) || 'homepage-upload.bin',
+            contentType: typeof body.contentType === 'string' ? body.contentType : undefined,
+            network,
+            data,
+            signer: profileSigner,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          return commandFailed(
+            'homepage_upload_failed',
+            error instanceof Error ? error.message : String(error)
+          );
         }
       },
       getWallet: async ({ slug }) => {
