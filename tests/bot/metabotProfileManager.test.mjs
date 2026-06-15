@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -266,6 +267,32 @@ test('updateMetabotProfile persists allowChatSkills under runtime state after up
   assert.equal(typeof persisted.updatedAt, 'string');
 });
 
+test('updateMetabotProfile persists homepage JSON under runtime state', async (t) => {
+  const homeDir = await createProfileHome('metabot-homepage-profile-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const created = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage Bot',
+    bio: 'Original bio.',
+  });
+
+  const homepage = {
+    uri: 'metaapp://metaapp-pin-123',
+    renderer: 'metaapp',
+    contentType: 'application/vnd.metaapp',
+  };
+  const updated = await updateMetabotProfile(systemHomeDir, created.slug, { homepage });
+  const loaded = await getMetabotProfile(systemHomeDir, created.slug);
+  const paths = resolveMetabotPaths(created.homeDir);
+  const persisted = JSON.parse(await readFile(paths.homepageStatePath, 'utf8'));
+
+  assert.deepEqual(updated.homepage, homepage);
+  assert.deepEqual(loaded.homepage, homepage);
+  assert.deepEqual(persisted, homepage);
+});
+
 test('updateMetabotProfile preserves allowChatSkills when omitted and clears when explicitly empty', async () => {
   const systemHomeDir = await createSystemHome();
   const created = await createMetabotProfile(systemHomeDir, { name: 'Policy Preserve Bot' });
@@ -511,6 +538,60 @@ test('syncMetabotInfoToChain writes persona fields to one JSON path', async () =
     fallbackProvider: 'codex',
   });
   assert.equal(results.length, 4);
+});
+
+test('syncMetabotInfoToChain writes homepage JSON to /info/homepage on MVC', async () => {
+  const calls = [];
+  const signer = {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({}),
+    writePin: async (input) => {
+      calls.push(input);
+      return {
+        txids: [`tx-${calls.length}`],
+        pinId: `pin-${calls.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: 'gid',
+        mvcAddress: 'addr',
+      };
+    },
+  };
+  const homepage = {
+    uri: 'metafile://file-pin-123',
+    renderer: 'auto',
+    contentType: 'image/png',
+  };
+
+  const results = await syncMetabotInfoToChain(signer, {
+    name: 'Alice',
+    slug: 'alice',
+    aliases: [],
+    homeDir: '/tmp/alice',
+    globalMetaId: 'gid',
+    mvcAddress: 'addr',
+    createdAt: 1,
+    updatedAt: 2,
+    bio: 'Public bio',
+    role: 'Role',
+    soul: 'Soul',
+    goal: 'Goal',
+    primaryProvider: 'codex',
+    fallbackProvider: null,
+    allowChatSkills: [],
+    homepage,
+  }, ['homepage'], { delayMs: 0 });
+
+  assert.equal(results.length, 1);
+  assert.deepEqual(calls.map((call) => call.path), ['/info/homepage']);
+  assert.equal(calls[0].network, 'mvc');
+  assert.equal(calls[0].contentType, 'application/json');
+  assert.equal(calls[0].encoding, 'utf-8');
+  assert.deepEqual(JSON.parse(calls[0].payload), homepage);
 });
 
 test('syncMetabotInfoToChain preserves name and avatar writes while splitting profile info', async () => {
