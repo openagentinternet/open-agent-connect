@@ -383,6 +383,14 @@
         padding: 14px;
         margin-bottom: 10px;
       }
+      .detail-heading > div,
+      [data-my-service-detail-modal-body],
+      .my-service-detail-summary,
+      .detail-fields,
+      .my-service-orders,
+      .order-row > div {
+        min-width: 0;
+      }
       .detail-heading {
         display: flex;
         justify-content: space-between;
@@ -425,13 +433,14 @@
       }
       .order-row {
         display: grid;
-        grid-template-columns: minmax(120px, .8fr) minmax(160px, 1fr) minmax(120px, .8fr) minmax(160px, 1fr) auto;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
         gap: 12px;
         padding: 12px;
         align-items: start;
       }
       .order-row strong {
         font-size: 13px;
+        overflow-wrap: anywhere;
       }
       .order-row p {
         margin-top: 3px;
@@ -468,12 +477,16 @@
       .my-services-modal-dialog {
         width: min(720px, 100%);
         max-height: min(760px, calc(100vh - 40px));
-        overflow: auto;
+        overflow-y: auto;
+        overflow-x: hidden;
         border: 1px solid var(--border2);
         border-radius: 8px;
         background: var(--surface);
         padding: 18px;
         box-shadow: 0 22px 60px rgba(0,0,0,.38);
+      }
+      .my-service-detail-dialog {
+        width: min(760px, calc(100vw - 32px));
       }
       .revoke-dialog {
         width: min(460px, 100%);

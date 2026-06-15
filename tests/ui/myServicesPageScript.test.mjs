@@ -553,6 +553,15 @@ test('my-services template styles the custom local Bot picker', () => {
   assert.match(template, /\.services-bot-option:hover,[\s\S]*\.services-bot-option\[data-selected="true"\]/);
 });
 
+test('my-services template prevents horizontal overflow in the detail modal', () => {
+  const template = readFileSync(new URL('../../src/ui/pages/my-services/index.html', import.meta.url), 'utf8');
+
+  assert.match(template, /\.my-services-modal-dialog\s*\{[\s\S]*overflow-y:\s*auto;[\s\S]*overflow-x:\s*hidden;/);
+  assert.match(template, /\.my-service-detail-dialog\s*\{[\s\S]*width:\s*min\(760px, calc\(100vw - 32px\)\);/);
+  assert.match(template, /\.detail-heading > div,[\s\S]*\.my-service-orders,[\s\S]*\.order-row > div\s*\{[\s\S]*min-width:\s*0;/);
+  assert.match(template, /\.order-row\s*\{[\s\S]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\) auto;/);
+});
+
 test('my-services bot picker trigger, outside click, and Escape close the menu', async () => {
   const { context, elements, documentListeners, fetchUrls } = createContext({
     profiles: [
@@ -590,6 +599,67 @@ test('my-services bot picker trigger, outside click, and Escape close the menu',
   await dispatchDocumentEvent(documentListeners, 'keydown', { key: 'Escape' });
   assert.equal(menu.hidden, true);
   assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+});
+
+test('my-services service pagination only shows available directions', async () => {
+  const { context, elements, documentListeners, fetchUrls, orderRequestsByService } = createContext({
+    fetchServicesPage: (url) => {
+      const page = Number(new URL(url, 'http://localhost').searchParams.get('page') || '1');
+      return {
+        page,
+        pageSize: 20,
+        total: 60,
+        totalPages: 3,
+        items: [service(`service-page-${page}`, `Service Page ${page}`)],
+      };
+    },
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => orderRequestsByService.has('service-page-1'), 'page 1 order request');
+  assert.equal(elements['[data-services-page-prev]'].hidden, true);
+  assert.equal(elements['[data-services-page-next]'].hidden, false);
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: elements['[data-services-page-next]'] });
+  await waitFor(
+    () => fetchUrls.some((url) => url.startsWith('/api/services/owned?') && new URL(url, 'http://localhost').searchParams.get('page') === '2'),
+    'page 2 services request',
+  );
+  await waitFor(
+    () => elements['[data-services-page-prev]'].hidden === false && elements['[data-services-page-next]'].hidden === false,
+    'page 2 pagination render',
+  );
+  assert.equal(elements['[data-services-page-prev]'].hidden, false);
+  assert.equal(elements['[data-services-page-next]'].hidden, false);
+
+  await dispatchDocumentEvent(documentListeners, 'click', { target: elements['[data-services-page-next]'] });
+  await waitFor(
+    () => fetchUrls.some((url) => url.startsWith('/api/services/owned?') && new URL(url, 'http://localhost').searchParams.get('page') === '3'),
+    'page 3 services request',
+  );
+  await waitFor(
+    () => elements['[data-services-page-prev]'].hidden === false && elements['[data-services-page-next]'].hidden === true,
+    'page 3 pagination render',
+  );
+  assert.equal(elements['[data-services-page-prev]'].hidden, false);
+  assert.equal(elements['[data-services-page-next]'].hidden, true);
+});
+
+test('my-services service pagination is hidden when there is one page', async () => {
+  const { context, elements, fetchUrls } = createContext({
+    fetchServicesPage: () => ({
+      page: 1,
+      pageSize: 20,
+      total: 1,
+      totalPages: 1,
+      items: [service('single-service', 'Single Service')],
+    }),
+  });
+  vm.runInNewContext(buildMyServicesPageDefinition().script, context);
+
+  await waitFor(() => fetchUrls.some((url) => url.startsWith('/api/services/owned?')), 'startup services request');
+  assert.equal(elements['[data-services-page-prev]'].hidden, true);
+  assert.equal(elements['[data-services-page-next]'].hidden, true);
 });
 
 test('my-services bot option selection scopes URL, links, services, and clears stale detail state', async () => {
