@@ -414,8 +414,14 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
   const renderServices = (model) => {
     if (elements.pageLabel) elements.pageLabel.textContent = model.pageLabel;
     if (elements.listCount) elements.listCount.textContent = String(model.pagination.total);
-    if (elements.servicesPagePrev) elements.servicesPagePrev.disabled = !model.pagination.canPrevious;
-    if (elements.servicesPageNext) elements.servicesPageNext.disabled = !model.pagination.canNext;
+    if (elements.servicesPagePrev) {
+      elements.servicesPagePrev.hidden = !model.pagination.canPrevious;
+      elements.servicesPagePrev.disabled = !model.pagination.canPrevious;
+    }
+    if (elements.servicesPageNext) {
+      elements.servicesPageNext.hidden = !model.pagination.canNext;
+      elements.servicesPageNext.disabled = !model.pagination.canNext;
+    }
     if (!elements.list) return;
     if (!model.services.length) {
       elements.list.innerHTML = '<div class="ledger-empty"><strong>' + escapeHtml(model.emptyState.title) + '</strong><p>' + escapeHtml(model.emptyState.message) + '</p></div>';
