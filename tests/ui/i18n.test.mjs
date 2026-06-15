@@ -117,6 +117,8 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
   assert.equal(translate('zh-CN', 'bot.homepageMetaAppHelp'), '请先使用 metabot-homepage-guide 技能和 metabot-metaapp-publish 技能制作一个独一无二的 Bot Page，并以 MetaApp 协议封装上链，然后将 MetaApp pin ID 复制到这里。');
   assert.equal(translate('en', 'bot.homepageMetaAppHelpLabel'), 'How to get a MetaApp pin ID');
   assert.equal(translate('zh-CN', 'bot.homepageMetaAppHelpLabel'), '如何获取 MetaApp pin ID');
+  assert.equal(translate('en', 'bot.homepagePreviewMetaApp'), 'Preview');
+  assert.equal(translate('zh-CN', 'bot.homepagePreviewMetaApp'), 'Preview');
   assert.equal(translate('en', 'bot.homepageViewLink'), 'click here to view');
   assert.equal(translate('zh-CN', 'bot.homepageViewLink'), 'click here to view');
   assert.equal(translate('en', 'bot.homepageReadyToSave'), 'Homepage ready to save.');
