@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -540,6 +541,16 @@ test('my-services bot picker renders loaded profiles without an all-bots option'
   assert.match(menuHtml, /Alice/);
   assert.match(menuHtml, /BO/);
   assert.doesNotMatch(menuHtml, /All Bots/i);
+});
+
+test('my-services template styles the custom local Bot picker', () => {
+  const template = readFileSync(new URL('../../src/ui/pages/my-services/index.html', import.meta.url), 'utf8');
+
+  assert.match(template, /\.services-bot-filter\s*\{/);
+  assert.match(template, /\.services-bot-picker\s*\{/);
+  assert.match(template, /\.services-bot-trigger\s*\{[\s\S]*min-height:\s*36px;[\s\S]*border:\s*1px solid var\(--border2\);[\s\S]*border-radius:\s*6px;[\s\S]*background:\s*var\(--surface2\);/);
+  assert.match(template, /\.services-bot-menu\s*\{[\s\S]*position:\s*absolute;[\s\S]*max-height:\s*min\(320px, 52vh\);/);
+  assert.match(template, /\.services-bot-option:hover,[\s\S]*\.services-bot-option\[data-selected="true"\]/);
 });
 
 test('my-services bot picker trigger, outside click, and Escape close the menu', async () => {
