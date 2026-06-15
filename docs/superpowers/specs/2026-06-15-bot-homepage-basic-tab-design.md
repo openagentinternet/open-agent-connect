@@ -151,6 +151,13 @@ keeping the profile save flow explicit.
 
 MetaApp pin entry does not write chain data until `Save Public Identity`.
 
+Revoking a custom homepage also stays inside the same explicit save flow. The
+UI should stage a default-homepage intent first, then `Save Public Identity`
+should write a MetaID `revoke` operation for `/info/homepage`. OAC must not
+write a magic JSON value such as `{ "mode": "default" }` for this case; the
+absence of an active `/info/homepage` value means downstream readers should use
+the default Bot Page renderer.
+
 ## Data Model
 
 Extend the profile model with an optional homepage value. The stored local value
@@ -183,6 +190,13 @@ Store the local canonical JSON at:
 
 Add the path to `resolveMetabotPaths()` as `homepageStatePath` so reads and
 writes stay centralized. Do not introduce a legacy `.metabot/hot` path.
+
+The profile update input needs a tri-state homepage field:
+
+- omitted or `undefined`: leave the existing homepage unchanged;
+- object: write or replace the custom homepage JSON;
+- `null`: revoke `/info/homepage` and remove the local `homepage.json` value
+  after the chain write succeeds.
 
 ## Daemon And Upload Flow
 
@@ -232,6 +246,8 @@ Save:
 
 - If only Homepage changed, `Save Public Identity` should still be enabled and
   should write only `/info/homepage`.
+- If Homepage is explicitly cleared, `Save Public Identity` should revoke
+  `/info/homepage` and then restore the default Bot Page renderer locally.
 - If Homepage plus name/bio/avatar/provider fields changed, one save should
   write all changed profile metadata and show all returned txids in the existing
   success modal.

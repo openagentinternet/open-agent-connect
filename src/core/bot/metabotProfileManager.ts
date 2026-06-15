@@ -89,7 +89,7 @@ export interface UpdateMetabotInfoInput {
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
   allowChatSkills?: string[];
-  homepage?: MetabotHomepage;
+  homepage?: MetabotHomepage | null;
 }
 
 export interface SyncMetabotInfoToChainOptions {
@@ -800,7 +800,11 @@ export async function updateMetabotProfile(
     await writeChatSkillPolicy(paths.chatSkillPolicyPath, allowChatSkills);
   }
   if (homepage !== undefined) {
-    await writeMetabotHomepage(paths.homepageStatePath, homepage);
+    if (homepage === null) {
+      await removeFileIfExists(paths.homepageStatePath);
+    } else {
+      await writeMetabotHomepage(paths.homepageStatePath, homepage);
+    }
   }
 
   if (writeProviderBindings) {
@@ -834,12 +838,13 @@ export async function syncMetabotInfoToChain(
     contentType: string;
     payload: string;
     encoding?: 'utf-8' | 'base64';
+    operation?: 'create' | 'modify' | 'revoke';
   }): Promise<void> {
     if (results.length > 0) {
       await sleep(delayMs);
     }
     results.push(await signer.writePin({
-      operation,
+      operation: input.operation ?? operation,
       path: input.path,
       encryption: '0',
       version: '1.0',
@@ -908,12 +913,21 @@ export async function syncMetabotInfoToChain(
         }),
       });
     }
-    if (changed.has('homepage') && profile.homepage) {
-      await writeProfileInfo({
-        path: '/info/homepage',
-        contentType: 'application/json',
-        payload: serializeMetabotHomepagePayload(profile.homepage),
-      });
+    if (changed.has('homepage')) {
+      if (profile.homepage) {
+        await writeProfileInfo({
+          path: '/info/homepage',
+          contentType: 'application/json',
+          payload: serializeMetabotHomepagePayload(profile.homepage),
+        });
+      } else {
+        await writeProfileInfo({
+          operation: 'revoke',
+          path: '/info/homepage',
+          contentType: 'application/json',
+          payload: '',
+        });
+      }
     }
   }
 

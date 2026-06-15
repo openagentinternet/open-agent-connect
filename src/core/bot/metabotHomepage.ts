@@ -36,8 +36,9 @@ function validateHomepageUri(uri: string): void {
   }
 }
 
-export function normalizeMetabotHomepage(value: unknown): MetabotHomepage | undefined {
+export function normalizeMetabotHomepage(value: unknown): MetabotHomepage | null | undefined {
   if (value === undefined) return undefined;
+  if (value === null) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Homepage must be an object with uri, renderer, and contentType.');
   }
@@ -49,7 +50,7 @@ export function normalizeMetabotHomepage(value: unknown): MetabotHomepage | unde
   return { uri, renderer, contentType };
 }
 
-export function sameMetabotHomepage(left: MetabotHomepage | undefined, right: MetabotHomepage | undefined): boolean {
+export function sameMetabotHomepage(left: MetabotHomepage | null | undefined, right: MetabotHomepage | null | undefined): boolean {
   if (!left && !right) return true;
   if (!left || !right) return false;
   return left.uri === right.uri
@@ -70,7 +71,7 @@ export async function readMetabotHomepage(filePath: string): Promise<MetabotHome
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
   try {
-    return normalizeMetabotHomepage(JSON.parse(trimmed));
+    return normalizeMetabotHomepage(JSON.parse(trimmed)) ?? undefined;
   } catch {
     return undefined;
   }

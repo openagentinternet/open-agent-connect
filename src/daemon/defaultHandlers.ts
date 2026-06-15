@@ -1361,7 +1361,7 @@ function buildMetabotChainProfile(
   current: MetabotProfileFull,
   update: UpdateMetabotInfoInput,
 ): MetabotProfileFull {
-  return {
+  const profile: MetabotProfileFull = {
     ...current,
     name: update.name ?? current.name,
     bio: update.bio ?? current.bio,
@@ -1374,8 +1374,15 @@ function buildMetabotChainProfile(
     primaryProvider: update.primaryProvider !== undefined ? update.primaryProvider : (current.primaryProvider ?? null),
     fallbackProvider: update.fallbackProvider !== undefined ? update.fallbackProvider : (current.fallbackProvider ?? null),
     allowChatSkills: update.allowChatSkills !== undefined ? update.allowChatSkills : current.allowChatSkills,
-    ...(update.homepage !== undefined ? { homepage: update.homepage } : {}),
   };
+  if (update.homepage !== undefined) {
+    if (update.homepage === null) {
+      delete profile.homepage;
+    } else {
+      profile.homepage = update.homepage;
+    }
+  }
+  return profile;
 }
 
 async function validateMetabotProviderAvailability(

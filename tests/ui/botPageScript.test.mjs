@@ -249,6 +249,8 @@ test('bot page Basic tab renders dedicated Homepage panel with Metafile and Meta
   assert.match(root.innerHTML, /data-homepage-file-input/);
   assert.match(root.innerHTML, /data-field="homepage-metaapp-pin"/);
   assert.match(root.innerHTML, /data-act="preview-homepage-metaapp"/);
+  assert.match(root.innerHTML, /data-act="use-default-homepage"/);
+  assert.match(root.innerHTML, /Use Default/);
   assert.match(root.innerHTML, />Preview<\/button>/);
   assert.doesNotMatch(root.innerHTML, /data-act="set-homepage-metaapp"/);
   assert.match(root.innerHTML, /data-act="toggle-homepage-help"/);
@@ -282,6 +284,62 @@ test('bot page Basic tab keeps the default homepage renderer view link', () => {
   assert.match(root.innerHTML, /Default Bot Page renderer is active\./);
   assert.match(root.innerHTML, /data-act="view-homepage"/);
   assert.match(root.innerHTML, /click here to view/);
+});
+
+test('bot page Use Default homepage action stages a revoke save payload', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-homepage-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
+    '[data-field="homepage-metaapp-pin"]': field(''),
+  };
+  let requestBody = null;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice',
+              name: 'Alice',
+              bio: 'Original public bio.',
+            },
+            chainWrites: [],
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+    homepage: {
+      uri: 'metaapp://metaapp-pin-123',
+      renderer: 'metaapp',
+      contentType: 'application/vnd.metaapp',
+    },
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderPublicIdentityTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  context.useDefaultHomepage();
+  await context.savePublicIdentity();
+
+  assert.deepEqual(requestBody, { homepage: null });
+  assert.equal(context.state._pendingHomepage, undefined);
 });
 
 test('bot page Homepage help toggles an inline MetaApp guide popover', () => {

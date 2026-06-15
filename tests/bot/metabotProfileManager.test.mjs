@@ -293,6 +293,35 @@ test('updateMetabotProfile persists homepage JSON under runtime state', async (t
   assert.deepEqual(persisted, homepage);
 });
 
+test('updateMetabotProfile clears homepage when explicitly set to null', async (t) => {
+  const homeDir = await createProfileHome('metabot-homepage-clear-profile-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const created = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage Clear Bot',
+    bio: 'Original bio.',
+  });
+  const paths = resolveMetabotPaths(created.homeDir);
+
+  await updateMetabotProfile(systemHomeDir, created.slug, {
+    homepage: {
+      uri: 'metaapp://metaapp-pin-123',
+      renderer: 'metaapp',
+      contentType: 'application/vnd.metaapp',
+    },
+  });
+  await access(paths.homepageStatePath);
+
+  const cleared = await updateMetabotProfile(systemHomeDir, created.slug, { homepage: null });
+  const loaded = await getMetabotProfile(systemHomeDir, created.slug);
+
+  assert.equal(cleared.homepage, undefined);
+  assert.equal(loaded.homepage, undefined);
+  await assert.rejects(access(paths.homepageStatePath), { code: 'ENOENT' });
+});
+
 test('updateMetabotProfile preserves allowChatSkills when omitted and clears when explicitly empty', async () => {
   const systemHomeDir = await createSystemHome();
   const created = await createMetabotProfile(systemHomeDir, { name: 'Policy Preserve Bot' });
@@ -592,6 +621,54 @@ test('syncMetabotInfoToChain writes homepage JSON to /info/homepage on MVC', asy
   assert.equal(calls[0].contentType, 'application/json');
   assert.equal(calls[0].encoding, 'utf-8');
   assert.deepEqual(JSON.parse(calls[0].payload), homepage);
+});
+
+test('syncMetabotInfoToChain revokes /info/homepage when homepage is cleared', async () => {
+  const calls = [];
+  const signer = {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({}),
+    writePin: async (input) => {
+      calls.push(input);
+      return {
+        txids: [`tx-${calls.length}`],
+        pinId: `pin-${calls.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: 'gid',
+        mvcAddress: 'addr',
+      };
+    },
+  };
+
+  const results = await syncMetabotInfoToChain(signer, {
+    name: 'Alice',
+    slug: 'alice',
+    aliases: [],
+    homeDir: '/tmp/alice',
+    globalMetaId: 'gid',
+    mvcAddress: 'addr',
+    createdAt: 1,
+    updatedAt: 2,
+    bio: 'Public bio',
+    role: 'Role',
+    soul: 'Soul',
+    goal: 'Goal',
+    primaryProvider: 'codex',
+    fallbackProvider: null,
+    allowChatSkills: [],
+  }, ['homepage'], { delayMs: 0 });
+
+  assert.equal(results.length, 1);
+  assert.equal(calls[0].operation, 'revoke');
+  assert.equal(calls[0].path, '/info/homepage');
+  assert.equal(calls[0].payload, '');
+  assert.equal(calls[0].network, 'mvc');
+  assert.equal(calls[0].contentType, 'application/json');
 });
 
 test('syncMetabotInfoToChain preserves name and avatar writes while splitting profile info', async () => {
