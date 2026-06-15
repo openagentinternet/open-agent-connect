@@ -215,14 +215,18 @@ function homepagePanelMarkup(profile){
   var homepage=homepageDraft(profile);
   var finalUri=homepage&&homepage.uri;
   var status=homepageKind(homepage);
+  var viewDisabled=profile&&profile.globalMetaId?'':' disabled';
+  var viewLink=' <button type="button" class="homepage-view-link" data-act="view-homepage"'+viewDisabled+'>'+esc(uiText('bot.homepageViewLink','click here to view'))+'</button>';
+  var finalCopy=finalUri?uiText('bot.homepageFinalUri','Final URI')+': '+finalUri:uiText('bot.homepageDefaultActive','Default Bot Page renderer is active.');
+  var helpCopy=uiText('bot.homepageMetaAppHelp','Use the metabot-homepage-guide skill and metabot-metaapp-publish skill to create a unique Bot Page, package and publish it on-chain through the MetaApp protocol, then paste the MetaApp pin ID here.');
   return '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label>'+
     '<div class="homepage-panel" data-homepage-panel>'+
       '<div class="homepage-panel-head"><div><div class="homepage-panel-title">'+esc(uiText('bot.homepage','Homepage'))+'</div><div class="homepage-panel-subtitle">'+esc(uiText('bot.homepageSource','Custom Bot page source'))+'</div></div><span class="homepage-status-pill">'+esc(status)+'</span></div>'+
       '<div class="homepage-source-grid">'+
         '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetafile','Metafile'))+'</div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetafileNote','Upload a local file and save it as metafile://<pinId>.'))+'</div><div class="homepage-metaapp-row"><button type="button" class="btn btn-sm" data-act="upload-homepage"'+(state._homepageUploadWorking?' disabled':'')+'>'+esc(uiText('bot.upload','Upload'))+'</button><input type="file" data-homepage-file-input hidden /></div></div>'+
-        '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetaApp','MetaApp'))+'<span class="homepage-help" title="'+esc(uiText('bot.homepageMetaAppHelp','Copy the pin ID from your MetaApp publish result or MetaApp details page.'))+'">?</span></div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetaAppNote','Paste a MetaApp pin ID and save it as metaapp://<pinId>.'))+'</div><div class="homepage-metaapp-row"><input data-field="homepage-metaapp-pin" placeholder="'+esc(uiText('bot.homepagePinPlaceholder','MetaApp pin ID'))+'" /><button type="button" class="btn btn-sm" data-act="set-homepage-metaapp">'+esc(uiText('bot.homepageSetMetaApp','Set'))+'</button></div></div>'+
+        '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetaApp','MetaApp'))+'<span class="homepage-help-wrap" data-homepage-help><button type="button" class="homepage-help" data-act="toggle-homepage-help" aria-label="'+esc(uiText('bot.homepageMetaAppHelpLabel','How to get a MetaApp pin ID'))+'" aria-expanded="false" aria-controls="homepage-metaapp-help">?</button><span class="homepage-help-popover" id="homepage-metaapp-help" data-homepage-help-popover role="tooltip">'+esc(helpCopy)+'</span></span></div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetaAppNote','Paste a MetaApp pin ID and save it as metaapp://<pinId>.'))+'</div><div class="homepage-metaapp-row"><input data-field="homepage-metaapp-pin" placeholder="'+esc(uiText('bot.homepagePinPlaceholder','MetaApp pin ID'))+'" /><button type="button" class="btn btn-sm" data-act="set-homepage-metaapp">'+esc(uiText('bot.homepageSetMetaApp','Set'))+'</button></div></div>'+
       '</div>'+
-      '<div class="homepage-final-uri">'+esc(finalUri?uiText('bot.homepageFinalUri','Final URI')+': '+finalUri:uiText('bot.homepageDefaultActive','Default Bot Page renderer is active.'))+'</div>'+
+      '<div class="homepage-final-uri">'+esc(finalCopy)+viewLink+'</div>'+
       '<div class="save-status" data-homepage-status></div>'+
     '</div></div>';
 }
@@ -643,6 +647,13 @@ function renderHomepageDraftStatus(message,tone){
 function rerenderPublicIdentityForHomepage(){
   renderPublicIdentityTab({preserveDraft:true});
 }
+function toggleHomepageHelp(button){
+  var wrap=button&&button.closest&&button.closest('[data-homepage-help]');
+  if(!wrap||!wrap.classList)return;
+  var open=!(wrap.classList.contains&&wrap.classList.contains('open'));
+  wrap.classList.toggle('open',open);
+  if(button.setAttribute)button.setAttribute('aria-expanded',open?'true':'false');
+}
 function setHomepageMetaAppDraft(){
   var input=q('[data-field="homepage-metaapp-pin"]');
   try{
@@ -696,6 +707,8 @@ function wireHomepageControls(){
   if(upload&&input)upload.addEventListener('click',function(){input.click()});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleHomepageUploadFile(file)});
   var set=q('[data-act="set-homepage-metaapp"]');if(set)set.addEventListener('click',setHomepageMetaAppDraft);
+  var help=q('[data-act="toggle-homepage-help"]');if(help)help.addEventListener('click',function(event){if(event&&event.preventDefault)event.preventDefault();toggleHomepageHelp(this)});
+  var view=q('[data-act="view-homepage"]');if(view)view.addEventListener('click',viewSelectedBotPage);
 }
 
 function changedValue(payload,field,next,current){

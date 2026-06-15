@@ -563,6 +563,11 @@
         font-weight: 650;
         margin-bottom: 6px;
       }
+      .homepage-help-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
       .homepage-metaapp-row {
         display: flex;
         align-items: center;
@@ -580,9 +585,47 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        background: var(--surface);
         color: var(--muted);
+        font: inherit;
         font-size: 12px;
-        cursor: help;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+      }
+      .homepage-help:hover,
+      .homepage-help:focus-visible {
+        color: var(--text);
+        border-color: var(--border2);
+      }
+      .homepage-help-popover {
+        position: absolute;
+        z-index: 20;
+        top: calc(100% + 8px);
+        right: 0;
+        width: min(320px, calc(100vw - 36px));
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--card);
+        box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1.5;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-4px);
+        transition: opacity .15s ease, transform .15s ease, visibility .15s ease;
+        visibility: hidden;
+      }
+      .homepage-help-wrap:hover .homepage-help-popover,
+      .homepage-help-wrap:focus-within .homepage-help-popover,
+      .homepage-help-wrap.open .homepage-help-popover {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+        visibility: visible;
       }
       .homepage-status-pill {
         border: 1px solid var(--border);
@@ -596,6 +639,22 @@
         margin-top: 10px;
         overflow-wrap: anywhere;
         word-break: break-all;
+      }
+      .homepage-view-link {
+        margin-left: 6px;
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        cursor: pointer;
+        font: inherit;
+        padding: 0;
+        text-decoration: underline;
+        word-break: normal;
+      }
+      .homepage-view-link:disabled {
+        color: var(--muted);
+        cursor: not-allowed;
+        text-decoration: none;
       }
       .provider-picker {
         position: relative;

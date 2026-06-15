@@ -226,6 +226,7 @@ test('bot page Basic tab renders dedicated Homepage panel with Metafile and Meta
   context.state.profiles = [{
     slug: 'alice-bot',
     name: 'Alice',
+    globalMetaId: 'gm-alice',
     bio: 'Builds wallet automation.',
     primaryProvider: 'codex',
     fallbackProvider: 'openclaw',
@@ -248,8 +249,77 @@ test('bot page Basic tab renders dedicated Homepage panel with Metafile and Meta
   assert.match(root.innerHTML, /data-homepage-file-input/);
   assert.match(root.innerHTML, /data-field="homepage-metaapp-pin"/);
   assert.match(root.innerHTML, /data-act="set-homepage-metaapp"/);
+  assert.match(root.innerHTML, /data-act="toggle-homepage-help"/);
+  assert.match(root.innerHTML, /data-homepage-help-popover/);
+  assert.match(root.innerHTML, /metabot-homepage-guide/);
+  assert.match(root.innerHTML, /metabot-metaapp-publish/);
+  assert.match(root.innerHTML, /data-act="view-homepage"/);
+  assert.match(root.innerHTML, /click here to view/);
   assert.match(root.innerHTML, /metaapp:\/\/metaapp-pin-123/);
   assert.doesNotMatch(root.innerHTML, /Homepage package upload will be available later/);
+});
+
+test('bot page Homepage help toggles an inline MetaApp guide popover', () => {
+  let open = false;
+  const wrapper = {
+    classList: {
+      toggle: (name, enabled) => {
+        if (name === 'open') open = Boolean(enabled);
+      },
+      contains: (name) => name === 'open' && open,
+    },
+  };
+  const button = {
+    expanded: 'false',
+    closest: (selector) => (selector === '[data-homepage-help]' ? wrapper : null),
+    getAttribute: (name) => (name === 'aria-expanded' ? button.expanded : null),
+    setAttribute: (name, value) => {
+      if (name === 'aria-expanded') button.expanded = String(value);
+    },
+  };
+  const context = createBotScriptContext();
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.toggleHomepageHelp(button);
+
+  assert.equal(open, true);
+  assert.equal(button.expanded, 'true');
+
+  context.toggleHomepageHelp(button);
+
+  assert.equal(open, false);
+  assert.equal(button.expanded, 'false');
+});
+
+test('bot page Homepage view link opens the selected public Bot Page', () => {
+  const listeners = new Map();
+  const viewLink = {
+    addEventListener: (eventName, handler) => listeners.set(eventName, handler),
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-act="view-homepage"]': viewLink,
+    },
+    window: {
+      location: {
+        href: '/ui/bot',
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    globalMetaId: 'gm-alice',
+  }];
+
+  context.wireHomepageControls();
+  listeners.get('click')();
+
+  assert.equal(context.window.location.href, '/browser/metaid/gm-alice');
 });
 
 test('bot page saveInfo preserves unavailable provider bindings when saving unrelated profile fields', () => {
