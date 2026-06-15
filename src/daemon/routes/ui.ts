@@ -28,18 +28,20 @@ const PLATFORM_ASSET_CONTENT_TYPES: Record<string, string> = {
   '.jpeg': 'image/jpeg',
 };
 
-const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, () => LocalUiPageDefinition>> = {
-  'hub': buildHubPageDefinition,
-  'publish': buildPublishPageDefinition,
-  'my-services': buildMyServicesPageDefinition,
-  'trace': buildTracePageDefinition,
-  'refund': buildRefundPageDefinition,
-  'bot': buildBotPageDefinition,
+type LocalUiPageBuilder = (i18n: LocalUiI18nContext) => LocalUiPageDefinition;
+
+const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
+  'hub': () => buildHubPageDefinition(),
+  'publish': () => buildPublishPageDefinition(),
+  'my-services': (i18n) => buildMyServicesPageDefinition({ i18n }),
+  'trace': () => buildTracePageDefinition(),
+  'refund': () => buildRefundPageDefinition(),
+  'bot': () => buildBotPageDefinition(),
   'conversations': buildConversationsPageDefinition,
   'services': buildServicesPageDefinition,
   'settings': buildSettingsPageDefinition,
-  'loom': buildLoomPageDefinition,
-  'metaapps': buildMetaAppsPageDefinition,
+  'loom': () => buildLoomPageDefinition(),
+  'metaapps': () => buildMetaAppsPageDefinition(),
 };
 
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
@@ -133,7 +135,7 @@ function buildPageDefinition(page: MetabotUiPageName, i18n: LocalUiI18nContext):
   if (!builder) {
     throw new Error(`Local UI page is not registered: ${page}`);
   }
-  return page === 'settings' ? buildSettingsPageDefinition(i18n) : builder();
+  return builder(i18n);
 }
 
 async function renderBuiltInPage(page: MetabotUiPageName, languagePreference?: string | null): Promise<string> {

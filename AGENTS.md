@@ -148,6 +148,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Prefer small, frequent commits. Commit each independent, verifiable unit of work as soon as it is complete.
 - For every modification or newly added feature, create one commit.
 - Before committing, make sure the relevant local verification steps pass for your changes. Prefer the smallest meaningful verification set instead of defaulting to the full suite.
+- When adding or changing local UI copy, route user-visible strings through the i18n dictionaries and verify English plus Simplified Chinese coverage; keep proper nouns and protocol terms such as MetaID, MetaBot, Bot, Trace, Session, txid, and GlobalMetaID untranslated unless product copy explicitly says otherwise.
 - When merging completed work into `main`, use `git merge --no-ff` to preserve the feature merge point.
 - MetaBot storage and directory layout changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
 - Do not introduce new code or documentation that depends on the legacy `.metabot/hot` layout unless you are explicitly documenting historical behavior.

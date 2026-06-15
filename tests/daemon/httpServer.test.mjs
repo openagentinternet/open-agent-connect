@@ -2975,6 +2975,26 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.doesNotMatch(nav, /href="\/ui\/my-services"/);
 });
 
+test('GET /ui/services supports zh-CN page copy beyond the shared nav', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/services?lang=zh-CN`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /<html lang="zh-CN">/);
+  assert.match(html, /data-i18n-key="services\.toolbarTitle">服务<\/h1>/);
+  assert.match(html, /data-i18n-key="services\.toolbarLabel">管理已发布的本地 Bot 服务。<\/p>/);
+  assert.match(html, /href="\/ui\/publish"[^>]*data-i18n-key="services\.publishService">发布服务<\/a>/);
+  assert.match(html, /href="\/ui\/refund"[^>]*data-i18n-key="services\.serviceRefunds">服务退款<\/a>/);
+  assert.match(html, /data-i18n-key="services\.refresh">刷新<\/button>/);
+  assert.match(html, /data-i18n-key="services\.publishedServices">已发布服务<\/h2>/);
+  assert.doesNotMatch(html, />Published Services<\/h2>/);
+  assert.doesNotMatch(html, />Loading local services\.\.\.<\/p>/);
+  assert.doesNotMatch(html, />Refresh<\/button>/);
+});
+
 test('GET /ui/conversations renders the local-Bot scoped IM conversations workspace', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
@@ -3018,6 +3038,27 @@ test('GET /ui/conversations renders the local-Bot scoped IM conversations worksp
   assert.match(nav, /href="\/ui\/conversations"[^>]*>Conversations(?: \*)?<\/a>/);
   assert.doesNotMatch(nav, /href="\/ui\/trace"/);
   assert.doesNotMatch(nav, /href="\/ui\/refund"/);
+});
+
+test('GET /ui/conversations supports zh-CN page copy beyond the shared nav', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/conversations?lang=zh-CN&local=gm-local-alice&peer=gm-remote-bob`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /<html lang="zh-CN">/);
+  assert.match(html, /data-i18n-key="conversations\.localBot">本地 Bot<\/label>/);
+  assert.match(html, /data-i18n-key="conversations\.titleShort">对话<\/h1>/);
+  assert.match(html, /data-i18n-key="conversations\.loading">正在加载对话\.\.\.<\/p>/);
+  assert.match(html, /data-i18n-key="conversations\.refresh">刷新<\/button>/);
+  assert.match(html, /data-i18n-key="conversations\.selectConversation">选择一个对话<\/h2>/);
+  assert.match(html, /data-i18n-key="conversations\.chooseRemoteBot">选择远程 Bot<\/span>/);
+  assert.match(html, /data-i18n-key="conversations\.readonlyStatus">Agent-to-agent 对话 · 不支持人工回复<\/div>/);
+  assert.doesNotMatch(html, />Loading conversations\.\.\.<\/p>/);
+  assert.doesNotMatch(html, />Refresh<\/button>/);
+  assert.doesNotMatch(html, />Choose a remote Bot<\/span>/);
 });
 
 test('GET /ui/settings renders the Provider Console settings home', async (t) => {
