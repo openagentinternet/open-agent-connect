@@ -521,16 +521,81 @@
       .provider-field {
         position: relative;
       }
-      .homepage-row {
+      .homepage-panel {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 14px;
+        background: var(--panel-soft);
+      }
+      .homepage-panel-head {
         display: flex;
         align-items: center;
+        justify-content: space-between;
         gap: 12px;
-        flex-wrap: wrap;
+        margin-bottom: 12px;
       }
-      .homepage-renderer-label {
+      .homepage-panel-title {
+        font-weight: 700;
+      }
+      .homepage-panel-subtitle,
+      .homepage-source-note,
+      .homepage-final-uri {
         color: var(--muted);
         font-size: 12px;
-        line-height: 1.4;
+        line-height: 1.45;
+      }
+      .homepage-source-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+      }
+      .homepage-source-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--card);
+        padding: 12px;
+        min-width: 0;
+      }
+      .homepage-source-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 650;
+        margin-bottom: 6px;
+      }
+      .homepage-metaapp-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .homepage-metaapp-row input {
+        min-width: 0;
+      }
+      .homepage-help {
+        width: 18px;
+        height: 18px;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 12px;
+        cursor: help;
+      }
+      .homepage-status-pill {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 4px 9px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1;
+      }
+      .homepage-final-uri {
+        margin-top: 10px;
+        overflow-wrap: anywhere;
+        word-break: break-all;
       }
       .provider-picker {
         position: relative;
@@ -1308,6 +1373,13 @@
         .runtime-row,
         .mnemonic-grid {
           grid-template-columns: 1fr;
+        }
+        .homepage-source-grid {
+          grid-template-columns: 1fr;
+        }
+        .homepage-metaapp-row {
+          align-items: stretch;
+          flex-direction: column;
         }
         .runtime-modal-box {
           width: min(100%, calc(100vw - 24px));

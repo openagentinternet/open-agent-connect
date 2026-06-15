@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageUploadWorking:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -39,6 +39,50 @@ function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profi
 function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.selectBotBeforeConversations','Select a Bot before opening conversations'));return}window.location.href='/ui/conversations?local='+encodeURIComponent(profile.globalMetaId)}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
+function normalizeHomepage(value){
+  if(!value||typeof value!=='object')return null;
+  var uri=String(value.uri||'').trim();
+  if(!uri)return null;
+  var renderer=String(value.renderer||'').trim()||(/^metaapp:\/\//i.test(uri)?'metaapp':'auto');
+  var contentType=String(value.contentType||'').trim()||(renderer==='metaapp'?'application/vnd.metaapp':'application/octet-stream');
+  return {uri:uri,renderer:renderer,contentType:contentType};
+}
+function sameHomepage(left,right){
+  left=normalizeHomepage(left);right=normalizeHomepage(right);
+  if(!left&&!right)return true;
+  if(!left||!right)return false;
+  return left.uri===right.uri&&left.renderer===right.renderer&&left.contentType===right.contentType;
+}
+function homepageDraft(profile){
+  if(state._pendingHomepage!==undefined)return state._pendingHomepage;
+  return normalizeHomepage(profile&&profile.homepage);
+}
+function homepageKind(homepage){
+  homepage=normalizeHomepage(homepage);
+  if(!homepage)return uiText('bot.homepageDefault','Default');
+  if(/^metaapp:\/\//i.test(homepage.uri))return uiText('bot.homepageMetaApp','MetaApp');
+  return uiText('bot.homepageMetafile','Metafile');
+}
+function normalizeMetaAppHomepageInput(value){
+  var pin=String(value==null?'':value).trim();
+  if(/^metaapp:\/\//i.test(pin))pin=pin.slice('metaapp://'.length).trim();
+  if(!pin||/\s/u.test(pin))throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
+  return {uri:'metaapp://'+pin,renderer:'metaapp',contentType:'application/vnd.metaapp'};
+}
+function dataUrlBase64(value){
+  var text=String(value||'');
+  var marker=';base64,';
+  var index=text.indexOf(marker);
+  return index>=0?text.slice(index+marker.length):'';
+}
+function readFileAsDataUrl(file){
+  return new Promise(function(resolve,reject){
+    var reader=new FileReader();
+    reader.onload=function(){resolve(String(reader.result||''))};
+    reader.onerror=function(){reject(new Error(uiText('bot.uploadFailed','Upload failed')))};
+    reader.readAsDataURL(file);
+  });
+}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
 function providerRuntime(provider){return state.runtimes.find(function(r){return r.provider===provider})||null}
@@ -152,6 +196,21 @@ function providerPickerMarkup(field,label,selected,allowNone,touched){
   }
   html+='</div></div></div>';
   return html;
+}
+function homepagePanelMarkup(profile){
+  var homepage=homepageDraft(profile);
+  var finalUri=homepage&&homepage.uri;
+  var status=homepageKind(homepage);
+  return '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label>'+
+    '<div class="homepage-panel" data-homepage-panel>'+
+      '<div class="homepage-panel-head"><div><div class="homepage-panel-title">'+esc(uiText('bot.homepage','Homepage'))+'</div><div class="homepage-panel-subtitle">'+esc(uiText('bot.homepageSource','Custom Bot page source'))+'</div></div><span class="homepage-status-pill">'+esc(status)+'</span></div>'+
+      '<div class="homepage-source-grid">'+
+        '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetafile','Metafile'))+'</div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetafileNote','Upload a local file and save it as metafile://<pinId>.'))+'</div><div class="homepage-metaapp-row"><button type="button" class="btn btn-sm" data-act="upload-homepage"'+(state._homepageUploadWorking?' disabled':'')+'>'+esc(uiText('bot.upload','Upload'))+'</button><input type="file" data-homepage-file-input hidden /></div></div>'+
+        '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetaApp','MetaApp'))+'<span class="homepage-help" title="'+esc(uiText('bot.homepageMetaAppHelp','Copy the pin ID from your MetaApp publish result or MetaApp details page.'))+'">?</span></div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetaAppNote','Paste a MetaApp pin ID and save it as metaapp://<pinId>.'))+'</div><div class="homepage-metaapp-row"><input data-field="homepage-metaapp-pin" placeholder="'+esc(uiText('bot.homepagePinPlaceholder','MetaApp pin ID'))+'" /><button type="button" class="btn btn-sm" data-act="set-homepage-metaapp">'+esc(uiText('bot.homepageSetMetaApp','Set'))+'</button></div></div>'+
+      '</div>'+
+      '<div class="homepage-final-uri">'+esc(finalUri?uiText('bot.homepageFinalUri','Final URI')+': '+finalUri:uiText('bot.homepageDefaultActive','Default Bot Page renderer is active.'))+'</div>'+
+      '<div class="save-status" data-homepage-status></div>'+
+    '</div></div>';
 }
 function wireProviderPickers(){
   qq('[data-provider-toggle]').forEach(function(btn){
@@ -411,6 +470,7 @@ function selectMetabot(slug){
   state.selectedSlug=slug;
   state.originalProfile=state.profiles.find(function(p){return p.slug===slug})||null;
   state._pendingAvatar=undefined;
+  state._pendingHomepage=undefined;
   renderMetabotList();
   renderDetailHeader(state.originalProfile);
   setDetailVisible(Boolean(state.originalProfile));
@@ -491,7 +551,7 @@ function renderPublicIdentityTab(options){
         providerPickerMarkup('fallbackProvider',uiText('bot.fallbackLlmProvider','Fallback LLM Provider'),fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
       '</div>'+
       '<div class="field field-full"><label for="bot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label><textarea id="bot-bio" data-field="bio">'+esc(bioValue)+'</textarea></div>'+
-      '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label><div class="homepage-row"><button type="button" class="btn btn-sm" data-act="upload-homepage">'+esc(uiText('bot.upload','Upload'))+'</button><span class="homepage-renderer-label">'+esc(uiText('bot.defaultRenderer','Default Bot Page renderer'))+'</span></div></div>'+
+      homepagePanelMarkup(profile)+
     '</div>'+
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">'+esc(uiText('bot.savePublicIdentity','Save Public Identity'))+'</button><span class="save-status" data-save-status></span></div></div>';
   var input=q('[data-avatar-input]');
@@ -499,7 +559,7 @@ function renderPublicIdentityTab(options){
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleAvatarUpload(file)});
   wireProviderPickers();
-  var homepage=q('[data-act="upload-homepage"]');if(homepage)homepage.addEventListener('click',openHomepageUploadPlaceholder);
+  wireHomepageControls();
   var save=q('[data-act="save-public-identity"]');if(save)save.addEventListener('click',savePublicIdentity);
   focusBotManagementTarget();
 }
@@ -565,6 +625,62 @@ function handleAvatarUpload(file){
     var remove=q('[data-act="remove-avatar"]');if(remove)remove.hidden=false;
   });
 }
+function renderHomepageDraftStatus(message,tone){
+  var status=q('[data-homepage-status]');
+  if(status){status.textContent=message||'';status.className='save-status '+(tone||'')}
+}
+function rerenderPublicIdentityForHomepage(){
+  renderPublicIdentityTab({preserveDraft:true});
+}
+function setHomepageMetaAppDraft(){
+  var input=q('[data-field="homepage-metaapp-pin"]');
+  try{
+    state._pendingHomepage=normalizeMetaAppHomepageInput(input&&input.value);
+    rerenderPublicIdentityForHomepage();
+    renderHomepageDraftStatus(uiText('bot.homepageReadyToSave','Homepage ready to save.'),'success');
+  }catch(error){
+    renderHomepageDraftStatus(error.message,'error');
+  }
+}
+function handleHomepageUploadFile(file){
+  var profile=selectedProfile();if(!profile||!profile.slug||!file)return Promise.resolve();
+  state._homepageUploadWorking=true;
+  renderHomepageDraftStatus(uiText('bot.homepageUploading','Uploading homepage file...'),'saving');
+  return readFileAsDataUrl(file).then(function(dataUrl){
+    var base64=dataUrlBase64(dataUrl);
+    return api('/api/bot/profiles/'+encodeURIComponent(profile.slug)+'/homepage/upload',{
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({
+        fileName:file.name||'homepage-upload',
+        contentType:file.type||'application/octet-stream',
+        base64:base64,
+      }),
+    });
+  }).then(function(r){
+    var data=r.data||{};
+    if(!data.pinId)throw new Error(uiText('bot.uploadFailed','Upload failed'));
+    state._pendingHomepage={
+      uri:'metafile://'+data.pinId,
+      renderer:'auto',
+      contentType:data.contentType||file.type||'application/octet-stream',
+    };
+    rerenderPublicIdentityForHomepage();
+    renderHomepageDraftStatus(uiText('bot.homepageReadyToSave','Homepage ready to save.'),'success');
+  }).catch(function(error){
+    renderHomepageDraftStatus(error.message||String(error),'error');
+  }).finally(function(){
+    state._homepageUploadWorking=false;
+    var upload=q('[data-act="upload-homepage"]');if(upload)upload.disabled=false;
+  });
+}
+function wireHomepageControls(){
+  var input=q('[data-homepage-file-input]');
+  var upload=q('[data-act="upload-homepage"]');
+  if(upload&&input)upload.addEventListener('click',function(){input.click()});
+  if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleHomepageUploadFile(file)});
+  var set=q('[data-act="set-homepage-metaapp"]');if(set)set.addEventListener('click',setHomepageMetaAppDraft);
+}
 
 function changedValue(payload,field,next,current){
   if(next!==current)payload[field]=next;
@@ -626,9 +742,6 @@ function chainSuccessBodyMarkup(input){
 }
 function showChainSuccessModal(input){
   openDynamicModal(input.title,chainSuccessBodyMarkup(input),{boxClass:'modal-box-wide'});
-}
-function openHomepageUploadPlaceholder(){
-  openDynamicModal(uiText('bot.defaultRenderer','Default Bot Page renderer'),'<div class="modal-body"><p class="modal-note">'+esc(uiText('bot.homepageUploadLater','Homepage package upload will be available later. This Bot is using the default Bot Page renderer.'))+'</p></div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">'+esc(uiText('bot.ok','OK'))+'</button></div>');
 }
 function walletChainConfig(chain){return WALLET_CHAINS.find(function(row){return row.chain===chain})||WALLET_CHAINS[0]}
 function walletDisplayUnit(chain){return walletChainConfig(chain).displayUnit}
@@ -915,6 +1028,7 @@ function savePublicIdentity(){
   var primaryEl=q('[data-field="primaryProvider"]');var fallbackEl=q('[data-field="fallbackProvider"]');
   if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
   if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
+  if(state._pendingHomepage!==undefined&&!sameHomepage(state._pendingHomepage,profile.homepage))payload.homepage=state._pendingHomepage;
   if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
   if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
@@ -924,6 +1038,7 @@ function savePublicIdentity(){
     if(state.selectedSlug!==profileSlug)return;
     state.originalProfile=updated;
     state._pendingAvatar=undefined;
+    state._pendingHomepage=undefined;
     renderMetabotList();
     renderDetailHeader(updated);
     renderPublicIdentityTab({preserveDraft:false});

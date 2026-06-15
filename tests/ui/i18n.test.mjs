@@ -109,6 +109,14 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
   assert.equal(translate('zh-CN', 'bot.defaultRenderer'), '默认 Bot Page 渲染器');
   assert.equal(translate('en', 'bot.homepageUploadLater'), 'Homepage package upload will be available later. This Bot is using the default Bot Page renderer.');
   assert.equal(translate('zh-CN', 'bot.homepageUploadLater'), '主页包上传稍后开放。当前 Bot 使用默认 Bot Page 渲染器。');
+  assert.equal(translate('en', 'bot.homepageMetafile'), 'Metafile');
+  assert.equal(translate('zh-CN', 'bot.homepageMetafile'), 'MetaFile');
+  assert.equal(translate('en', 'bot.homepageMetaApp'), 'MetaApp');
+  assert.equal(translate('zh-CN', 'bot.homepageMetaApp'), 'MetaApp');
+  assert.equal(translate('en', 'bot.homepageMetaAppHelp'), 'Copy the pin ID from your MetaApp publish result or MetaApp details page.');
+  assert.equal(translate('zh-CN', 'bot.homepageMetaAppHelp'), '从 MetaApp 发布结果或详情页复制 pin ID。');
+  assert.equal(translate('en', 'bot.homepageReadyToSave'), 'Homepage ready to save.');
+  assert.equal(translate('zh-CN', 'bot.homepageReadyToSave'), '主页已准备保存。');
   assert.equal(translate('en', 'bot.identityCreatedBasicInfoReady'), 'The on-chain identity has been created. Public Identity is ready for optional edits.');
   assert.equal(translate('zh-CN', 'bot.identityCreatedBasicInfoReady'), '链上身份已创建。公开身份已可继续编辑。');
   assert.equal(translate('en', 'bot.chainCreatePendingMessage'), 'Data is being written on-chain. Please wait 15-30 seconds.');
