@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageUploadWorking:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -39,6 +39,20 @@ function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profi
 function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.selectBotBeforeConversations','Select a Bot before opening conversations'));return}window.location.href='/ui/conversations?local='+encodeURIComponent(profile.globalMetaId)}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
+function clearSelectedProfileDrafts(){
+  state._pendingAvatar=undefined;
+  state._pendingHomepage=undefined;
+  state._homepageUploadWorking=false;
+  state._homepageUploadToken+=1;
+}
+function setSelectedSlug(slug,options){
+  options=options||{};
+  var next=String(slug||'');
+  var changed=state.selectedSlug!==next;
+  state.selectedSlug=next;
+  if(changed||options.clearDrafts)clearSelectedProfileDrafts();
+  state.originalProfile=selectedProfile();
+}
 function normalizeHomepage(value){
   if(!value||typeof value!=='object')return null;
   var uri=String(value.uri||'').trim();
@@ -66,7 +80,7 @@ function homepageKind(homepage){
 function normalizeMetaAppHomepageInput(value){
   var pin=String(value==null?'':value).trim();
   if(/^metaapp:\/\//i.test(pin))pin=pin.slice('metaapp://'.length).trim();
-  if(!pin||/\s/u.test(pin))throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
+  if(!pin||/\s/u.test(pin)||/:\/\//.test(pin))throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
   return {uri:'metaapp://'+pin,renderer:'metaapp',contentType:'application/vnd.metaapp'};
 }
 function dataUrlBase64(value){
@@ -467,10 +481,7 @@ function setDetailVisible(visible){
 function selectMetabot(slug){
   if(!slug)return;
   state._sensitiveModalToken=null;
-  state.selectedSlug=slug;
-  state.originalProfile=state.profiles.find(function(p){return p.slug===slug})||null;
-  state._pendingAvatar=undefined;
-  state._pendingHomepage=undefined;
+  setSelectedSlug(slug,{clearDrafts:true});
   renderMetabotList();
   renderDetailHeader(state.originalProfile);
   setDetailVisible(Boolean(state.originalProfile));
@@ -644,11 +655,13 @@ function setHomepageMetaAppDraft(){
 }
 function handleHomepageUploadFile(file){
   var profile=selectedProfile();if(!profile||!profile.slug||!file)return Promise.resolve();
+  var profileSlug=profile.slug;
+  var uploadToken=++state._homepageUploadToken;
   state._homepageUploadWorking=true;
   renderHomepageDraftStatus(uiText('bot.homepageUploading','Uploading homepage file...'),'saving');
   return readFileAsDataUrl(file).then(function(dataUrl){
     var base64=dataUrlBase64(dataUrl);
-    return api('/api/bot/profiles/'+encodeURIComponent(profile.slug)+'/homepage/upload',{
+    return api('/api/bot/profiles/'+encodeURIComponent(profileSlug)+'/homepage/upload',{
       method:'POST',
       headers:{'content-type':'application/json'},
       body:JSON.stringify({
@@ -658,20 +671,23 @@ function handleHomepageUploadFile(file){
       }),
     });
   }).then(function(r){
+    if(state.selectedSlug!==profileSlug||state._homepageUploadToken!==uploadToken)return;
     var data=r.data||{};
-    if(!data.pinId)throw new Error(uiText('bot.uploadFailed','Upload failed'));
+    var uri=String(data.metafileUri||data.uri||'').trim();
+    if(!uri&&data.pinId)uri='metafile://'+data.pinId;
+    if(!uri)throw new Error(uiText('bot.uploadFailed','Upload failed'));
     state._pendingHomepage={
-      uri:'metafile://'+data.pinId,
+      uri:uri,
       renderer:'auto',
       contentType:data.contentType||file.type||'application/octet-stream',
     };
     rerenderPublicIdentityForHomepage();
     renderHomepageDraftStatus(uiText('bot.homepageReadyToSave','Homepage ready to save.'),'success');
   }).catch(function(error){
-    renderHomepageDraftStatus(error.message||String(error),'error');
+    if(state.selectedSlug===profileSlug&&state._homepageUploadToken===uploadToken)renderHomepageDraftStatus(error.message||String(error),'error');
   }).finally(function(){
-    state._homepageUploadWorking=false;
-    var upload=q('[data-act="upload-homepage"]');if(upload)upload.disabled=false;
+    if(state._homepageUploadToken===uploadToken)state._homepageUploadWorking=false;
+    if(state.selectedSlug===profileSlug){var upload=q('[data-act="upload-homepage"]');if(upload)upload.disabled=false}
   });
 }
 function wireHomepageControls(){
@@ -967,8 +983,7 @@ function confirmDeleteMetabot(profile){
   renderDeleteModal(profile,{type:'saving',text:uiText('bot.deletingLocalBotData','Deleting local Bot data...')});
   api('/api/bot/profiles/'+encodeURIComponent(profile.slug),{method:'DELETE'}).then(function(){
     closeDynamicModal();
-    state.selectedSlug='';
-    state.originalProfile=null;
+    setSelectedSlug('');
     state.sessions=[];
     return loadProfiles().then(function(){return loadSessions()});
   }).catch(function(error){
@@ -1207,7 +1222,7 @@ function switchTab(tab,silent){
 }
 
 function loadStats(){renderStats();return Promise.resolve()}
-function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
+function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();if(!state.selectedSlug&&state.profiles.length)setSelectedSlug(state.profiles[0].slug);if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))setSelectedSlug(state.profiles[0]&&state.profiles[0].slug||'');state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
 function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){
@@ -1400,7 +1415,7 @@ function createMetabot(){
   if(host)body.host=host;
   return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     var profile=r.data&&r.data.profile||{};
-    state.selectedSlug=profile.slug||state.selectedSlug;
+    setSelectedSlug(profile.slug||state.selectedSlug);
     state.selectedTab='publicIdentity';
     renderCreateChainSuccess(profile);
     return loadProfiles().catch(function(error){showToast(error.message)});
@@ -1457,7 +1472,7 @@ function botManagementRouteRequest(){
 }
 function applyBotManagementRouteRequest(){
   var request=botManagementRouteRequest();
-  if(request.profile&&state.profiles.some(function(profile){return profile.slug===request.profile}))state.selectedSlug=request.profile;
+  if(request.profile&&state.profiles.some(function(profile){return profile.slug===request.profile}))setSelectedSlug(request.profile);
   if(request.tab)state.selectedTab=request.tab;
 }
 function focusBotManagementTarget(){

@@ -1347,6 +1347,24 @@ test('bot page MetaApp homepage input normalizes bare pin IDs into save payload'
   });
 });
 
+test('bot page MetaApp homepage input rejects malformed double-prefix values', () => {
+  const fields = {
+    '[data-homepage-status]': field(),
+    '[data-field="homepage-metaapp-pin"]': field(' metaapp://metaapp://metaapp-pin-123 '),
+  };
+  let renderCount = 0;
+  const context = createBotScriptContext({ elements: fields });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.renderPublicIdentityTab = () => { renderCount += 1; };
+
+  context.setHomepageMetaAppDraft();
+
+  assert.equal(context.state._pendingHomepage, undefined);
+  assert.equal(renderCount, 0);
+  assert.match(fields['[data-homepage-status]'].className, /error/);
+});
+
 test('bot page homepage upload success stores Metafile draft and save payload', async () => {
   const fields = {
     '[data-save-status]': field(),
@@ -1389,7 +1407,7 @@ test('bot page homepage upload success stores Metafile draft and save payload', 
               name: 'Alice',
               bio: 'Original public bio.',
               homepage: {
-                uri: 'metafile://file-pin-123',
+                uri: 'metafile://file-pin-123.png',
                 renderer: 'auto',
                 contentType: 'image/png',
               },
@@ -1432,11 +1450,100 @@ test('bot page homepage upload success stores Metafile draft and save payload', 
   });
   assert.deepEqual(saveRequest, {
     homepage: {
-      uri: 'metafile://file-pin-123',
+      uri: 'metafile://file-pin-123.png',
       renderer: 'auto',
       contentType: 'image/png',
     },
   });
+});
+
+test('bot page homepage upload ignores stale completion after selection changes', async () => {
+  const uploadJson = deferred();
+  const fields = {
+    '[data-homepage-status]': field(),
+    '[data-act="upload-homepage"]': field(),
+  };
+  let uploadRequest = null;
+  let renderCount = 0;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (url, options) => {
+      uploadRequest = { url, body: JSON.parse(options.body) };
+      return Promise.resolve({
+        ok: true,
+        json: () => uploadJson.promise,
+      });
+    },
+    globals: {
+      FileReader: class {
+        readAsDataURL() {
+          this.result = `data:image/png;base64,${Buffer.from('pngdata').toString('base64')}`;
+          this.onload();
+        }
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [
+    { slug: 'alice', name: 'Alice', bio: 'Original public bio.' },
+    { slug: 'bob', name: 'Bob', bio: 'Bob public bio.' },
+  ];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderPublicIdentityTab = () => { renderCount += 1; };
+
+  const upload = context.handleHomepageUploadFile({ name: 'cover.png', type: 'image/png' });
+  await waitFor(() => uploadRequest !== null, 'homepage upload request');
+  context.state.selectedSlug = 'bob';
+  context.state.originalProfile = context.state.profiles[1];
+  uploadJson.resolve({
+    ok: true,
+    data: {
+      pinId: 'file-pin-123',
+      metafileUri: 'metafile://file-pin-123.png',
+      contentType: 'image/png',
+    },
+  });
+
+  await upload;
+
+  assert.equal(uploadRequest.url, '/api/bot/profiles/alice/homepage/upload');
+  assert.equal(context.state.selectedSlug, 'bob');
+  assert.equal(context.state._pendingHomepage, undefined);
+  assert.equal(renderCount, 0);
+});
+
+test('bot page loadProfiles clears pending homepage when selected Bot changes', async () => {
+  const context = createBotScriptContext({
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          profiles: [{ slug: 'bob', name: 'Bob', bio: 'Bob public bio.' }],
+        },
+      }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state._pendingHomepage = {
+    uri: 'metaapp://alice-homepage',
+    renderer: 'metaapp',
+    contentType: 'application/vnd.metaapp',
+  };
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.setDetailVisible = () => {};
+  context.renderCurrentTab = () => {};
+  context.renderStats = () => {};
+
+  await context.loadProfiles();
+
+  assert.equal(context.state.selectedSlug, 'bob');
+  assert.equal(context.state._pendingHomepage, undefined);
 });
 
 test('bot page public identity reset reverts profile draft and clears pending avatar', () => {
