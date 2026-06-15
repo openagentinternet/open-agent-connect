@@ -2238,7 +2238,7 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   assert.match(html, /data-tab="publicIdentity"/);
   assert.match(html, /data-tab="behavior"/);
   assert.match(html, /data-tab="chatSkills"/);
-  assert.match(html, /data-tab="services"/);
+  assert.doesNotMatch(html, /data-tab="services"/);
   assert.match(html, /data-tab="advanced"/);
   assert.doesNotMatch(html, /data-tab="info"/);
   assert.doesNotMatch(html, /data-tab="history"/);
