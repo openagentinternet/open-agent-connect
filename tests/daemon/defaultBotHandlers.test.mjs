@@ -1572,6 +1572,110 @@ test('default bot updateProfile validates allowChatSkills and writes chain chatS
   assert.deepEqual(updated.allowChatSkills, ['metabot-help']);
 });
 
+test('default bot updateProfile writes homepage chain data before local state', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-homepage-update-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage Save Bot',
+    bio: 'Original bio.',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-homepage-save-bot',
+    mvcAddress: 'addr-homepage-save-bot',
+  });
+
+  const homepage = {
+    uri: 'metaapp://metaapp-pin-123',
+    renderer: 'metaapp',
+    contentType: 'application/vnd.metaapp',
+  };
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      if (input.path === '/info/homepage') {
+        const beforeLocalSave = await getMetabotProfile(systemHomeDir, profile.slug);
+        assert.equal(beforeLocalSave.homepage, undefined);
+      }
+      return {
+        txids: [`homepage-save-tx-${writeCalls.length}`],
+        pinId: `homepage-save-pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-homepage-save-bot',
+        mvcAddress: 'addr-homepage-save-bot',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    homepage,
+  });
+  const updated = await getMetabotProfile(systemHomeDir, profile.slug);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/homepage']);
+  assert.equal(writeCalls[0].contentType, 'application/json');
+  assert.deepEqual(JSON.parse(writeCalls[0].payload), homepage);
+  assert.deepEqual(result.data.profile.homepage, homepage);
+  assert.deepEqual(updated.homepage, homepage);
+});
+
+test('default bot updateProfile rejects invalid homepage input without calling signer', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-homepage-invalid-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Invalid Homepage Bot',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-invalid-homepage-bot',
+    mvcAddress: 'addr-invalid-homepage-bot',
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async () => {
+      throw new Error('signer should not be called for invalid homepage input');
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    homepage: {
+      uri: 'https://example.com/not-supported',
+      renderer: 'auto',
+      contentType: 'text/html',
+    },
+  });
+  const afterFailure = await getMetabotProfile(systemHomeDir, profile.slug);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_metabot_profile_update');
+  assert.match(result.message, /metafile:\/\/ or metaapp:\/\//i);
+  assert.equal(afterFailure.homepage, undefined);
+});
+
 test('default bot updateProfile rejects unavailable allowChatSkills without calling signer', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {

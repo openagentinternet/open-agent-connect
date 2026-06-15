@@ -60,6 +60,10 @@ import {
   updateMetabotProfile,
   validateAvatarDataUrl,
 } from '../core/bot/metabotProfileManager';
+import {
+  normalizeMetabotHomepage,
+  sameMetabotHomepage,
+} from '../core/bot/metabotHomepage';
 import type {
   CreateMetabotInput,
   MetabotProfileFull,
@@ -1111,6 +1115,9 @@ function buildMetabotUpdateInput(input: Record<string, unknown>): UpdateMetabotI
   if (hasOwnField(input, 'allowChatSkills')) {
     update.allowChatSkills = normalizeAllowChatSkills(input.allowChatSkills);
   }
+  if (hasOwnField(input, 'homepage')) {
+    update.homepage = normalizeMetabotHomepage(input.homepage);
+  }
   return update;
 }
 
@@ -1329,6 +1336,12 @@ function calculateMetabotChangedFields(
   ) {
     changedFields.push('allowChatSkills');
   }
+  if (
+    update.homepage !== undefined
+    && !sameMetabotHomepage(update.homepage, current.homepage)
+  ) {
+    changedFields.push('homepage');
+  }
   return changedFields;
 }
 
@@ -1349,6 +1362,7 @@ function buildMetabotChainProfile(
     primaryProvider: update.primaryProvider !== undefined ? update.primaryProvider : (current.primaryProvider ?? null),
     fallbackProvider: update.fallbackProvider !== undefined ? update.fallbackProvider : (current.fallbackProvider ?? null),
     allowChatSkills: update.allowChatSkills !== undefined ? update.allowChatSkills : current.allowChatSkills,
+    ...(update.homepage !== undefined ? { homepage: update.homepage } : {}),
   };
 }
 
