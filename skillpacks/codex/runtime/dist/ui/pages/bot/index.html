@@ -635,12 +635,12 @@
       }
       .chat-skills-field {
         display: grid;
-        gap: 8px;
+        gap: 10px;
       }
       .chat-skill-picker {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
-        gap: 8px;
+        gap: 10px;
         align-items: center;
       }
       .chat-skill-picker select {
@@ -657,7 +657,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
-        min-height: 28px;
+        min-height: 32px;
         align-items: center;
       }
       .skill-chip {
@@ -1385,7 +1385,6 @@
             <button class="tab-btn active" data-tab="publicIdentity" data-i18n-key="bot.publicIdentity">Public Identity</button>
             <button class="tab-btn" data-tab="behavior" data-i18n-key="bot.behavior">Behavior</button>
             <button class="tab-btn" data-tab="chatSkills" data-i18n-key="bot.chatSkills">Chat Skills</button>
-            <button class="tab-btn" data-tab="services" data-i18n-key="bot.services">Services</button>
             <button class="tab-btn" data-tab="advanced" data-i18n-key="bot.advanced">Advanced</button>
           </div>
           <div class="tab-content" data-tab-content hidden>
@@ -1400,11 +1399,6 @@
             <div class="tab-panel" data-tab-panel="chatSkills">
               <div data-chat-skills-content>
                 <div class="session-empty"><p data-i18n-key="bot.chatSkillsPlaceholder">Chat skill controls will be available here.</p></div>
-              </div>
-            </div>
-            <div class="tab-panel" data-tab-panel="services">
-              <div data-services-content>
-                <div class="session-empty"><p data-i18n-key="bot.servicesPlaceholder">Service publishing entries will be available here.</p></div>
               </div>
             </div>
             <div class="tab-panel" data-tab-panel="advanced">

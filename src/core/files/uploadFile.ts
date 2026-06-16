@@ -53,6 +53,49 @@ export interface UploadLocalFileToChainResult {
   globalMetaId: string;
 }
 
+export interface UploadFileBufferToChainResult extends UploadLocalFileToChainResult {}
+
+export async function uploadFileBufferToChain(input: {
+  fileName: string;
+  data: Buffer;
+  contentType?: string;
+  network?: string;
+  signer: Signer;
+}): Promise<UploadFileBufferToChainResult> {
+  const fileName = path.basename(normalizeText(input.fileName) || 'upload.bin');
+  const extension = path.extname(fileName).toLowerCase();
+  const contentType = normalizeText(input.contentType) || inferUploadContentType(fileName);
+  const network = normalizeText(input.network) || 'mvc';
+  if (network.toLowerCase() === 'doge') {
+    throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');
+  }
+  if (!input.data.length) {
+    throw new Error('File upload requires non-empty file data.');
+  }
+
+  const chainWrite = await input.signer.writePin({
+    path: '/file',
+    payload: input.data.toString('base64'),
+    contentType,
+    encoding: 'base64',
+    network,
+  });
+
+  return {
+    pinId: chainWrite.pinId,
+    txids: chainWrite.txids,
+    totalCost: chainWrite.totalCost,
+    network: chainWrite.network,
+    filePath: fileName,
+    fileName,
+    contentType,
+    bytes: input.data.byteLength,
+    extension,
+    metafileUri: `metafile://${chainWrite.pinId}${extension}`,
+    globalMetaId: chainWrite.globalMetaId,
+  };
+}
+
 export async function uploadLocalFileToChain(input: {
   filePath: string;
   contentType?: string;

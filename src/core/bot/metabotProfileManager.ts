@@ -18,6 +18,13 @@ import { createFileSecretStore } from '../secrets/fileSecretStore';
 import type { LocalIdentitySecrets } from '../secrets/secretStore';
 import { createRuntimeStateStore } from '../state/runtimeStateStore';
 import {
+  normalizeMetabotHomepage,
+  readMetabotHomepage,
+  serializeMetabotHomepagePayload,
+  writeMetabotHomepage,
+  type MetabotHomepage,
+} from './metabotHomepage';
+import {
   isLlmProvider,
   normalizeLlmBinding,
 } from '../llm/llmTypes';
@@ -39,7 +46,7 @@ const DEFAULT_ROLE = 'You are a helpful AI assistant.';
 const DEFAULT_SOUL = 'You are friendly and professional.';
 const DEFAULT_GOAL = 'Your goal is to help users accomplish their tasks effectively.';
 const CHAIN_SYNC_DELAY_MS = 3_000;
-const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
+const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
 
 export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 
@@ -52,6 +59,7 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
   allowChatSkills: string[];
+  homepage?: MetabotHomepage;
 }
 
 export interface CreateMetabotInput {
@@ -81,6 +89,7 @@ export interface UpdateMetabotInfoInput {
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
   allowChatSkills?: string[];
+  homepage?: MetabotHomepage | null;
 }
 
 export interface SyncMetabotInfoToChainOptions {
@@ -347,7 +356,7 @@ async function readProfileProviderBindings(profile: IdentityProfileRecord): Prom
 
 async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<MetabotProfileFull> {
   const paths = resolveMetabotPaths(profile.homeDir);
-  const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills] = await Promise.all([
+  const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage] = await Promise.all([
     readTextFile(paths.bioMdPath),
     readTextFile(paths.roleMdPath),
     readTextFile(paths.soulMdPath),
@@ -355,6 +364,7 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     readTextFile(resolveAvatarPath(profile.homeDir)),
     readProfileProviderBindings(profile),
     readChatSkillPolicy(paths.chatSkillPolicyPath),
+    readMetabotHomepage(paths.homepageStatePath),
   ]);
 
   return {
@@ -367,6 +377,7 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     primaryProvider: providerBindings.primaryProvider,
     fallbackProvider: providerBindings.fallbackProvider,
     allowChatSkills,
+    ...(homepage ? { homepage } : {}),
   };
 }
 
@@ -737,6 +748,9 @@ export async function updateMetabotProfile(
   const allowChatSkills = input.allowChatSkills === undefined
     ? undefined
     : normalizeAllowChatSkills(input.allowChatSkills);
+  const homepage = input.homepage === undefined
+    ? undefined
+    : normalizeMetabotHomepage(input.homepage);
   const writeProviderBindings = await buildProviderBindingWrite({
     profile: current,
     primaryProvider: input.primaryProvider === undefined
@@ -785,6 +799,13 @@ export async function updateMetabotProfile(
   if (allowChatSkills !== undefined) {
     await writeChatSkillPolicy(paths.chatSkillPolicyPath, allowChatSkills);
   }
+  if (homepage !== undefined) {
+    if (homepage === null) {
+      await removeFileIfExists(paths.homepageStatePath);
+    } else {
+      await writeMetabotHomepage(paths.homepageStatePath, homepage);
+    }
+  }
 
   if (writeProviderBindings) {
     await writeProviderBindings();
@@ -817,12 +838,13 @@ export async function syncMetabotInfoToChain(
     contentType: string;
     payload: string;
     encoding?: 'utf-8' | 'base64';
+    operation?: 'create' | 'modify' | 'revoke';
   }): Promise<void> {
     if (results.length > 0) {
       await sleep(delayMs);
     }
     results.push(await signer.writePin({
-      operation,
+      operation: input.operation ?? operation,
       path: input.path,
       encryption: '0',
       version: '1.0',
@@ -890,6 +912,22 @@ export async function syncMetabotInfoToChain(
           fallbackProvider: profile.fallbackProvider ?? null,
         }),
       });
+    }
+    if (changed.has('homepage')) {
+      if (profile.homepage) {
+        await writeProfileInfo({
+          path: '/info/homepage',
+          contentType: 'application/json',
+          payload: serializeMetabotHomepagePayload(profile.homepage),
+        });
+      } else {
+        await writeProfileInfo({
+          operation: 'revoke',
+          path: '/info/homepage',
+          contentType: 'application/json',
+          payload: '',
+        });
+      }
     }
   }
 

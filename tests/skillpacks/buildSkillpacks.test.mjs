@@ -260,6 +260,14 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.match(content, /metaapp view/);
   assert.match(content, /metaapp comment/);
   assert.match(content, /publish\/update.*explicit confirmation.*--confirm/i);
+  assert.match(content, /payloadPreview/);
+  assert.match(content, /coverImg/);
+  assert.match(content, /content.*browser runtime artifact/i);
+  assert.match(content, /Publish Wizard/i);
+  assert.match(content, /confirm the MetaBot actor before every on-chain write/i);
+  assert.match(content, /metabot file upload --from <bot-slug> --request-file/i);
+  assert.match(content, /metabot chain write --from <bot-slug> --request-file/i);
+  assert.match(content, /No Web2 URLs or local filesystem paths/i);
 });
 
 test('buildAgentConnectSkillpacks includes the Wiki creator as a self-contained scripted skill', async () => {

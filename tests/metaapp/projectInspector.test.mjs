@@ -75,13 +75,7 @@ test('inspectMetaAppProject detects a static index.html project at the project r
   assert.equal(manifest.indexFile, 'index.html');
   assert.equal(manifest.code, '');
   assert.equal(manifest.content, '');
-  assert.deepEqual(manifest.metadata.oac, {
-    projectType: 'static',
-    projectDir,
-    artifactDir: projectDir,
-    buildCommand: null,
-    packageManager: null,
-  });
+  assert.equal(manifest.metadata, undefined);
 });
 
 test('inspectMetaAppProject detects an npm package with an existing dist/index.html output', async () => {

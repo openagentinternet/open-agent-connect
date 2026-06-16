@@ -31,6 +31,7 @@ export interface MetabotPaths {
   privateChatStatePath: string;
   chatStrategiesPath: string;
   chatSkillPolicyPath: string;
+  homepageStatePath: string;
   bioMdPath: string;
   soulMdPath: string;
   goalMdPath: string;
@@ -158,6 +159,7 @@ function buildMetabotPaths(input: {
     privateChatStatePath: input.privateChatStatePath,
     chatStrategiesPath: input.chatStrategiesPath,
     chatSkillPolicyPath: input.chatSkillPolicyPath,
+    homepageStatePath: path.join(input.stateRoot, 'homepage.json'),
     bioMdPath: input.bioMdPath,
     soulMdPath: input.soulMdPath,
     goalMdPath: input.goalMdPath,

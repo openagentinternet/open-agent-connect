@@ -89,7 +89,6 @@ async function readMetaAppManifestFile(filePath) {
     return normalizeMetaAppManifestInput(JSON.parse(raw));
 }
 function buildMetaAppManifestDraft(plan) {
-    const overrideMetadata = isPlainObject(plan.manifest.metadata) ? plan.manifest.metadata : {};
     const draft = {
         ...plan.manifest,
         runtime: plan.manifest.runtime ?? 'browser',
@@ -97,18 +96,11 @@ function buildMetaAppManifestDraft(plan) {
         contentType: plan.manifest.contentType ?? 'application/zip',
         codeType: plan.manifest.codeType ?? 'application/zip',
         indexFile: plan.manifest.indexFile ?? plan.indexFile,
-        code: '',
-        content: '',
-        metadata: {
-            ...overrideMetadata,
-            oac: {
-                projectType: plan.projectType,
-                projectDir: plan.projectDir,
-                artifactDir: plan.artifactDir,
-                buildCommand: plan.buildCommand,
-                packageManager: plan.packageManager,
-            },
-        },
+        code: plan.manifest.code ?? '',
+        content: plan.manifest.content ?? '',
     };
+    if (isPlainObject(plan.manifest.metadata) && Object.keys(plan.manifest.metadata).length > 0) {
+        draft.metadata = { ...plan.manifest.metadata };
+    }
     return draft;
 }

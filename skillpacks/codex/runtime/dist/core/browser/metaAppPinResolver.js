@@ -107,6 +107,15 @@ function extractContentReference(value) {
         ?? object.metafile
         ?? object.pinId);
 }
+function firstContentReference(...values) {
+    for (const value of values) {
+        const reference = extractContentReference(value);
+        if (reference) {
+            return reference;
+        }
+    }
+    return '';
+}
 function extractMetafilePinId(reference) {
     if (!/^metafile:\/\//iu.test(reference)) {
         return null;
@@ -253,7 +262,7 @@ async function resolveMetaAppPinToRecord(input) {
         if (!protocol) {
             return (0, commandResult_1.commandFailed)('browser_resolve_failed', 'MetaApp protocol contentSummary is not valid JSON.');
         }
-        const contentReference = extractContentReference(protocol.content ?? protocol.code ?? protocol.metafile ?? protocol.file);
+        const contentReference = firstContentReference(protocol.content, protocol.code, protocol.metafile, protocol.file);
         const sourceContentType = normalizeText(protocol.contentType ?? protocol.content_type ?? protocol.codeType ?? protocol.code_type)
             || ZIP_CONTENT_TYPE;
         const indexFile = normalizeIndexFile(protocol.indexFile ?? protocol.index_file);

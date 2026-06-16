@@ -213,7 +213,7 @@ test('bot page Basic tab owns LLM providers and Persona tab owns role fields', (
   assert.match(personaRoot.innerHTML, /data-field="goal"/);
 });
 
-test('bot page Basic tab groups provider controls in one row and separates Homepage copy from Upload', () => {
+test('bot page Basic tab renders dedicated Homepage panel with Metafile and MetaApp controls', () => {
   const root = { innerHTML: '' };
   const context = createBotScriptContext({
     elements: {
@@ -226,9 +226,15 @@ test('bot page Basic tab groups provider controls in one row and separates Homep
   context.state.profiles = [{
     slug: 'alice-bot',
     name: 'Alice',
+    globalMetaId: 'gm-alice',
     bio: 'Builds wallet automation.',
     primaryProvider: 'codex',
     fallbackProvider: 'openclaw',
+    homepage: {
+      uri: 'metaapp://metaapp-pin-123',
+      renderer: 'metaapp',
+      contentType: 'application/vnd.metaapp',
+    },
   }];
   context.state.runtimes = [
     { id: 'runtime-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' },
@@ -238,7 +244,212 @@ test('bot page Basic tab groups provider controls in one row and separates Homep
   context.renderPublicIdentityTab();
 
   assert.match(root.innerHTML, /<div class="provider-row">[\s\S]*data-field="primaryProvider"[\s\S]*data-field="fallbackProvider"[\s\S]*<\/div>/);
-  assert.match(root.innerHTML, /<div class="homepage-row"><button type="button" class="btn btn-sm" data-act="upload-homepage">Upload<\/button><span class="homepage-renderer-label">Default Bot Page renderer<\/span><\/div>/);
+  assert.match(root.innerHTML, /data-homepage-panel/);
+  assert.match(root.innerHTML, /data-act="upload-homepage"/);
+  assert.match(root.innerHTML, /data-homepage-file-input/);
+  assert.match(root.innerHTML, /data-field="homepage-metaapp-pin"/);
+  assert.match(root.innerHTML, /data-act="preview-homepage-metaapp"/);
+  assert.match(root.innerHTML, /data-act="use-default-homepage"/);
+  assert.match(root.innerHTML, /Use Default/);
+  assert.match(root.innerHTML, />Preview<\/button>/);
+  assert.doesNotMatch(root.innerHTML, /data-act="set-homepage-metaapp"/);
+  assert.match(root.innerHTML, /data-act="toggle-homepage-help"/);
+  assert.match(root.innerHTML, /data-homepage-help-popover/);
+  assert.match(root.innerHTML, /metabot-homepage-guide/);
+  assert.match(root.innerHTML, /metabot-metaapp-publish/);
+  assert.doesNotMatch(root.innerHTML, /Final URI/);
+  assert.doesNotMatch(root.innerHTML, /metaapp:\/\/metaapp-pin-123/);
+  assert.doesNotMatch(root.innerHTML, /Homepage package upload will be available later/);
+});
+
+test('bot page Basic tab keeps the default homepage renderer view link', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': root,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    globalMetaId: 'gm-alice',
+    bio: 'Builds wallet automation.',
+  }];
+
+  context.renderPublicIdentityTab();
+
+  assert.match(root.innerHTML, /Default Bot Page renderer is active\./);
+  assert.match(root.innerHTML, /data-act="view-homepage"/);
+  assert.match(root.innerHTML, /click here to view/);
+});
+
+test('bot page Use Default homepage action stages a revoke save payload', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-homepage-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
+    '[data-field="homepage-metaapp-pin"]': field(''),
+  };
+  let requestBody = null;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice',
+              name: 'Alice',
+              bio: 'Original public bio.',
+            },
+            chainWrites: [],
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+    homepage: {
+      uri: 'metaapp://metaapp-pin-123',
+      renderer: 'metaapp',
+      contentType: 'application/vnd.metaapp',
+    },
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderPublicIdentityTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  context.useDefaultHomepage();
+  await context.savePublicIdentity();
+
+  assert.deepEqual(requestBody, { homepage: null });
+  assert.equal(context.state._pendingHomepage, undefined);
+});
+
+test('bot page Homepage help toggles an inline MetaApp guide popover', () => {
+  let open = false;
+  const wrapper = {
+    classList: {
+      toggle: (name, enabled) => {
+        if (name === 'open') open = Boolean(enabled);
+      },
+      contains: (name) => name === 'open' && open,
+    },
+  };
+  const button = {
+    expanded: 'false',
+    closest: (selector) => (selector === '[data-homepage-help]' ? wrapper : null),
+    getAttribute: (name) => (name === 'aria-expanded' ? button.expanded : null),
+    setAttribute: (name, value) => {
+      if (name === 'aria-expanded') button.expanded = String(value);
+    },
+  };
+  const context = createBotScriptContext();
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.toggleHomepageHelp(button);
+
+  assert.equal(open, true);
+  assert.equal(button.expanded, 'true');
+
+  context.toggleHomepageHelp(button);
+
+  assert.equal(open, false);
+  assert.equal(button.expanded, 'false');
+});
+
+test('bot page Homepage view link opens the selected public Bot Page', () => {
+  const listeners = new Map();
+  const viewLink = {
+    addEventListener: (eventName, handler) => listeners.set(eventName, handler),
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-act="view-homepage"]': viewLink,
+    },
+    window: {
+      location: {
+        href: '/ui/bot',
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    globalMetaId: 'gm-alice',
+  }];
+
+  context.wireHomepageControls();
+  listeners.get('click')();
+
+  assert.equal(context.window.location.href, '/browser/metaid/gm-alice');
+});
+
+test('bot page MetaApp Preview opens the entered MetaApp in Browser', () => {
+  const fields = {
+    '[data-homepage-status]': field(),
+    '[data-field="homepage-metaapp-pin"]': field(' metaapp-pin-123 '),
+  };
+  const context = createBotScriptContext({
+    elements: fields,
+    window: {
+      location: {
+        href: '/ui/bot',
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.previewHomepageMetaApp();
+
+  assert.equal(context.window.location.href, '/browser/metaapp/metaapp-pin-123');
+  assert.equal(context.state._pendingHomepage.uri, 'metaapp://metaapp-pin-123');
+  assert.equal(context.state._pendingHomepage.renderer, 'metaapp');
+  assert.equal(context.state._pendingHomepage.contentType, 'application/vnd.metaapp');
+});
+
+test('bot page MetaApp Preview rejects malformed values without navigation', () => {
+  const fields = {
+    '[data-homepage-status]': field(),
+    '[data-field="homepage-metaapp-pin"]': field(' metaapp://metaapp://metaapp-pin-123 '),
+  };
+  const context = createBotScriptContext({
+    elements: fields,
+    window: {
+      location: {
+        href: '/ui/bot',
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.previewHomepageMetaApp();
+
+  assert.equal(context.window.location.href, '/ui/bot');
+  assert.equal(context.state._pendingHomepage, undefined);
+  assert.match(fields['[data-homepage-status]'].className, /error/);
 });
 
 test('bot page saveInfo preserves unavailable provider bindings when saving unrelated profile fields', () => {
@@ -900,8 +1111,8 @@ test('bot page renders Basic tab with public identity and provider controls', ()
   assert.doesNotMatch(root.innerHTML, /Reset/);
   assert.match(root.innerHTML, /data-field="name"/);
   assert.match(root.innerHTML, /data-field="bio"/);
-  assert.doesNotMatch(root.innerHTML, /MetaApp/i);
-  assert.doesNotMatch(root.innerHTML, /PINID/i);
+  assert.match(root.innerHTML, /data-homepage-panel/);
+  assert.match(root.innerHTML, /data-field="homepage-metaapp-pin"/);
   assert.doesNotMatch(root.innerHTML, /data-field="role"/);
   assert.doesNotMatch(root.innerHTML, /data-field="soul"/);
   assert.doesNotMatch(root.innerHTML, /data-field="goal"/);
@@ -1276,18 +1487,345 @@ test('bot page saveBehavior ignores stale UI updates after selection changes', a
   assert.equal(successModalCount, 0);
 });
 
-test('bot page homepage upload opens a default renderer placeholder modal', () => {
-  const context = createBotScriptContext();
+test('bot page MetaApp homepage input normalizes bare pin IDs into save payload', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
+    '[data-field="homepage-metaapp-pin"]': field(' metaapp-pin-123 '),
+  };
+  let requestBody = null;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice',
+              name: 'Alice',
+              bio: 'Original public bio.',
+              homepage: {
+                uri: 'metaapp://metaapp-pin-123',
+                renderer: 'metaapp',
+                contentType: 'application/vnd.metaapp',
+              },
+            },
+            chainWrites: [],
+          },
+        }),
+      });
+    },
+  });
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderPublicIdentityTab = () => {};
+  context.showChainSuccessModal = () => {};
 
-  context.openHomepageUploadPlaceholder();
+  await context.savePublicIdentity();
 
-  const modal = context.document.querySelector('[data-modal-root]');
-  assert.match(modal.innerHTML, /Default Bot Page renderer/);
-  assert.match(modal.innerHTML, /Homepage package upload will be available later\. This Bot is using the default Bot Page renderer\./);
-  assert.doesNotMatch(modal.innerHTML, /MetaApp/i);
-  assert.doesNotMatch(modal.innerHTML, /PINID/i);
+  assert.deepEqual(requestBody, {
+    homepage: {
+      uri: 'metaapp://metaapp-pin-123',
+      renderer: 'metaapp',
+      contentType: 'application/vnd.metaapp',
+    },
+  });
+});
+
+test('bot page savePublicIdentity rejects malformed MetaApp homepage input', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-homepage-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
+    '[data-field="homepage-metaapp-pin"]': field(' metaapp://metaapp://metaapp-pin-123 '),
+  };
+  let requestCount = 0;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: () => {
+      requestCount += 1;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: {} }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+
+  await context.savePublicIdentity();
+
+  assert.equal(requestCount, 0);
+  assert.equal(context.state._pendingHomepage, undefined);
+  assert.match(fields['[data-homepage-status]'].className, /error/);
+});
+
+test('bot page savePublicIdentity lets a MetaApp input override a pending Metafile homepage', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
+    '[data-field="homepage-metaapp-pin"]': field(' metaapp-pin-456 '),
+  };
+  let requestBody = null;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice',
+              name: 'Alice',
+              bio: 'Original public bio.',
+              homepage: {
+                uri: 'metaapp://metaapp-pin-456',
+                renderer: 'metaapp',
+                contentType: 'application/vnd.metaapp',
+              },
+            },
+            chainWrites: [],
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.state._pendingHomepage = {
+    uri: 'metafile://file-pin-123.png',
+    renderer: 'auto',
+    contentType: 'image/png',
+  };
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderPublicIdentityTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  await context.savePublicIdentity();
+
+  assert.deepEqual(requestBody, {
+    homepage: {
+      uri: 'metaapp://metaapp-pin-456',
+      renderer: 'metaapp',
+      contentType: 'application/vnd.metaapp',
+    },
+  });
+});
+
+test('bot page homepage upload success stores Metafile draft and save payload', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-homepage-status]': field(),
+    '[data-act="upload-homepage"]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
+  };
+  let uploadRequest = null;
+  let saveRequest = null;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (url, options) => {
+      const body = JSON.parse(options.body);
+      if (url === '/api/bot/profiles/alice/homepage/upload') {
+        uploadRequest = body;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              pinId: 'file-pin-123',
+              metafileUri: 'metafile://file-pin-123.png',
+              contentType: 'image/png',
+              txids: ['tx-file-1'],
+              bytes: 7,
+            },
+          }),
+        });
+      }
+      saveRequest = body;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice',
+              name: 'Alice',
+              bio: 'Original public bio.',
+              homepage: {
+                uri: 'metafile://file-pin-123.png',
+                renderer: 'auto',
+                contentType: 'image/png',
+              },
+            },
+            chainWrites: [],
+          },
+        }),
+      });
+    },
+    globals: {
+      FileReader: class {
+        readAsDataURL() {
+          this.result = `data:image/png;base64,${Buffer.from('pngdata').toString('base64')}`;
+          this.onload();
+        }
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderPublicIdentityTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  await context.handleHomepageUploadFile({ name: 'cover.png', type: 'image/png' });
+  await context.savePublicIdentity();
+
+  assert.deepEqual(uploadRequest, {
+    fileName: 'cover.png',
+    contentType: 'image/png',
+    base64: Buffer.from('pngdata').toString('base64'),
+  });
+  assert.deepEqual(saveRequest, {
+    homepage: {
+      uri: 'metafile://file-pin-123.png',
+      renderer: 'auto',
+      contentType: 'image/png',
+    },
+  });
+});
+
+test('bot page homepage upload ignores stale completion after selection changes', async () => {
+  const uploadJson = deferred();
+  const fields = {
+    '[data-homepage-status]': field(),
+    '[data-act="upload-homepage"]': field(),
+  };
+  let uploadRequest = null;
+  let renderCount = 0;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (url, options) => {
+      uploadRequest = { url, body: JSON.parse(options.body) };
+      return Promise.resolve({
+        ok: true,
+        json: () => uploadJson.promise,
+      });
+    },
+    globals: {
+      FileReader: class {
+        readAsDataURL() {
+          this.result = `data:image/png;base64,${Buffer.from('pngdata').toString('base64')}`;
+          this.onload();
+        }
+      },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [
+    { slug: 'alice', name: 'Alice', bio: 'Original public bio.' },
+    { slug: 'bob', name: 'Bob', bio: 'Bob public bio.' },
+  ];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderPublicIdentityTab = () => { renderCount += 1; };
+
+  const upload = context.handleHomepageUploadFile({ name: 'cover.png', type: 'image/png' });
+  await waitFor(() => uploadRequest !== null, 'homepage upload request');
+  context.state.selectedSlug = 'bob';
+  context.state.originalProfile = context.state.profiles[1];
+  uploadJson.resolve({
+    ok: true,
+    data: {
+      pinId: 'file-pin-123',
+      metafileUri: 'metafile://file-pin-123.png',
+      contentType: 'image/png',
+    },
+  });
+
+  await upload;
+
+  assert.equal(uploadRequest.url, '/api/bot/profiles/alice/homepage/upload');
+  assert.equal(context.state.selectedSlug, 'bob');
+  assert.equal(context.state._pendingHomepage, undefined);
+  assert.equal(renderCount, 0);
+});
+
+test('bot page loadProfiles clears pending homepage when selected Bot changes', async () => {
+  const context = createBotScriptContext({
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          profiles: [{ slug: 'bob', name: 'Bob', bio: 'Bob public bio.' }],
+        },
+      }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state._pendingHomepage = {
+    uri: 'metaapp://alice-homepage',
+    renderer: 'metaapp',
+    contentType: 'application/vnd.metaapp',
+  };
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.setDetailVisible = () => {};
+  context.renderCurrentTab = () => {};
+  context.renderStats = () => {};
+
+  await context.loadProfiles();
+
+  assert.equal(context.state.selectedSlug, 'bob');
+  assert.equal(context.state._pendingHomepage, undefined);
 });
 
 test('bot page public identity reset reverts profile draft and clears pending avatar', () => {

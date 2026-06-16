@@ -133,6 +133,60 @@ test('resolveMetaAppPinToRecord downloads zip content and returns a local html i
   assert.equal(result.data.localUiUrl, '/api/metaapp/preview-assets/metaapp-preview-test/index.html');
 });
 
+test('resolveMetaAppPinToRecord falls back to code for legacy empty-content pins', async () => {
+  const zipBuffer = await makeZipBuffer('Legacy Code Package');
+  const extractDir = await mkdtemp(path.join(os.tmpdir(), 'oac-metaapp-legacy-extract-'));
+  const calls = [];
+
+  const result = await resolveMetaAppPinToRecord({
+    pinId: METAAPP_PIN_ID,
+    makeTempDir: async () => extractDir,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === `https://manapi.metaid.io/pin/${METAAPP_PIN_ID}`) {
+        return jsonResponse({
+          data: {
+            id: METAAPP_PIN_ID,
+            path: '/protocols/metaapp',
+            address: '1PublisherAddress',
+            timestamp: 1780833765,
+            contentSummary: JSON.stringify({
+              title: 'Legacy MetaApp',
+              appName: 'legacy-metaapp',
+              runtime: 'browser',
+              content: '',
+              code: `metafile://${ZIP_PIN_ID}.zip`,
+              contentType: 'application/zip',
+              indexFile: 'index.html',
+            }),
+          },
+        });
+      }
+      if (url === `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/${ZIP_PIN_ID}`) {
+        return bufferResponse(zipBuffer);
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+    createPreviewSession: async ({ artifactDir, indexFile }) => {
+      assert.equal(artifactDir, path.join(extractDir, 'app'));
+      assert.equal(indexFile, 'index.html');
+      assert.equal(await readFile(path.join(artifactDir, indexFile), 'utf8'), '<!doctype html><title>Legacy Code Package</title>');
+      return {
+        previewId: 'metaapp-preview-legacy-test',
+        localPreviewUrl: '/api/metaapp/preview-assets/metaapp-preview-legacy-test/index.html',
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    `https://manapi.metaid.io/pin/${METAAPP_PIN_ID}`,
+    `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/${ZIP_PIN_ID}`,
+  ]);
+  assert.equal(result.ok, true);
+  assert.equal(result.data.content, `metafile://${ZIP_PIN_ID}.zip`);
+  assert.equal(result.data.code, `metafile://${ZIP_PIN_ID}.zip`);
+});
+
 test('resolveMetaAppPinToRecord reuses a shared artifact cache without redownloading zip content', async () => {
   const zipBuffer = await makeZipBuffer('Cached Music Player');
   const artifactCache = createMetaAppArtifactCacheStore(await makeProfileRoot('shared-cache'), { now: () => 1780833765000 });
