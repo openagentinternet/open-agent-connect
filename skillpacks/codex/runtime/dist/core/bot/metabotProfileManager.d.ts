@@ -1,4 +1,5 @@
 import type { IdentityProfileRecord } from '../identity/identityProfiles';
+import { type MetabotHomepage } from './metabotHomepage';
 import type { LlmProvider, LlmRuntime } from '../llm/llmTypes';
 import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
@@ -12,6 +13,7 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
     primaryProvider?: LlmProvider | null;
     fallbackProvider?: LlmProvider | null;
     allowChatSkills: string[];
+    homepage?: MetabotHomepage;
 }
 export interface CreateMetabotInput {
     name: string;
@@ -38,6 +40,7 @@ export interface UpdateMetabotInfoInput {
     primaryProvider?: LlmProvider | null;
     fallbackProvider?: LlmProvider | null;
     allowChatSkills?: string[];
+    homepage?: MetabotHomepage | null;
 }
 export interface SyncMetabotInfoToChainOptions {
     delayMs?: number;

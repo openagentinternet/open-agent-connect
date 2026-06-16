@@ -15,7 +15,7 @@ function buildBotPageDefinition() {
 function buildBotPageScript() {
     return String.raw `var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -35,10 +35,74 @@ function resultSummary(s){if(!s||!s.result)return'-';if(s.result.output)return s
 function runtimeLabel(r){var name=r.displayName||r.provider||r.id||'-';var bits=[name];if(r.health)bits.push(r.health);if(r.version)bits.push('v'+r.version);return bits.join(' / ')}
 function shortId(v){v=String(v||'');if(!v)return'-';return v.length>18?v.slice(0,12)+'...'+v.slice(-4):v}
 function botBrowserPath(globalMetaId){return '/browser/metaid/'+encodeURIComponent(String(globalMetaId||'').trim())}
+function metaAppBrowserPath(pinId){return '/browser/metaapp/'+encodeURIComponent(String(pinId||'').trim())}
 function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.botPageUnavailable','Bot Page is unavailable until GlobalMetaID is ready'));return}window.location.href=botBrowserPath(profile.globalMetaId)}
 function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.selectBotBeforeConversations','Select a Bot before opening conversations'));return}window.location.href='/ui/conversations?local='+encodeURIComponent(profile.globalMetaId)}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
+function clearSelectedProfileDrafts(){
+  state._pendingAvatar=undefined;
+  state._pendingHomepage=undefined;
+  state._homepageUploadWorking=false;
+  state._homepageUploadToken+=1;
+}
+function setSelectedSlug(slug,options){
+  options=options||{};
+  var next=String(slug||'');
+  var changed=state.selectedSlug!==next;
+  state.selectedSlug=next;
+  if(changed||options.clearDrafts)clearSelectedProfileDrafts();
+  state.originalProfile=selectedProfile();
+}
+function normalizeHomepage(value){
+  if(!value||typeof value!=='object')return null;
+  var uri=String(value.uri||'').trim();
+  if(!uri)return null;
+  var renderer=String(value.renderer||'').trim()||(/^metaapp:\/\//i.test(uri)?'metaapp':'auto');
+  var contentType=String(value.contentType||'').trim()||(renderer==='metaapp'?'application/vnd.metaapp':'application/octet-stream');
+  return {uri:uri,renderer:renderer,contentType:contentType};
+}
+function sameHomepage(left,right){
+  left=normalizeHomepage(left);right=normalizeHomepage(right);
+  if(!left&&!right)return true;
+  if(!left||!right)return false;
+  return left.uri===right.uri&&left.renderer===right.renderer&&left.contentType===right.contentType;
+}
+function homepageDraft(profile){
+  if(state._pendingHomepage!==undefined)return state._pendingHomepage;
+  return normalizeHomepage(profile&&profile.homepage);
+}
+function homepageKind(homepage){
+  homepage=normalizeHomepage(homepage);
+  if(!homepage)return uiText('bot.homepageDefault','Default');
+  if(/^metaapp:\/\//i.test(homepage.uri))return uiText('bot.homepageMetaApp','MetaApp');
+  return uiText('bot.homepageMetafile','Metafile');
+}
+function normalizeMetaAppHomepageInput(value){
+  var pin=String(value==null?'':value).trim();
+  if(/^metaapp:\/\//i.test(pin))pin=pin.slice('metaapp://'.length).trim();
+  if(!pin||/\s/u.test(pin)||/:\/\//.test(pin))throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
+  return {uri:'metaapp://'+pin,renderer:'metaapp',contentType:'application/vnd.metaapp'};
+}
+function metaAppPinFromHomepage(homepage){
+  homepage=normalizeHomepage(homepage);
+  if(!homepage||!/^metaapp:\/\//i.test(homepage.uri))return '';
+  return homepage.uri.slice('metaapp://'.length);
+}
+function dataUrlBase64(value){
+  var text=String(value||'');
+  var marker=';base64,';
+  var index=text.indexOf(marker);
+  return index>=0?text.slice(index+marker.length):'';
+}
+function readFileAsDataUrl(file){
+  return new Promise(function(resolve,reject){
+    var reader=new FileReader();
+    reader.onload=function(){resolve(String(reader.result||''))};
+    reader.onerror=function(){reject(new Error(uiText('bot.uploadFailed','Upload failed')))};
+    reader.readAsDataURL(file);
+  });
+}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
 function providerRuntime(provider){return state.runtimes.find(function(r){return r.provider===provider})||null}
@@ -152,6 +216,28 @@ function providerPickerMarkup(field,label,selected,allowNone,touched){
   }
   html+='</div></div></div>';
   return html;
+}
+function homepagePanelMarkup(profile){
+  var homepage=homepageDraft(profile);
+  var finalUri=homepage&&homepage.uri;
+  var status=homepageKind(homepage);
+  var viewDisabled=profile&&profile.globalMetaId?'':' disabled';
+  var viewLink=' <button type="button" class="homepage-view-link" data-act="view-homepage"'+viewDisabled+'>'+esc(uiText('bot.homepageViewLink','click here to view'))+'</button>';
+  var defaultRendererLine=finalUri?'':'<div class="homepage-final-uri">'+esc(uiText('bot.homepageDefaultActive','Default Bot Page renderer is active.'))+viewLink+'</div>';
+  var defaultActionLine=finalUri?'<div class="homepage-actions"><button type="button" class="btn btn-sm btn-danger" data-act="use-default-homepage">'+esc(uiText('bot.homepageUseDefault','Use Default'))+'</button></div>':'';
+  var helpCopy=uiText('bot.homepageMetaAppHelp','Use the metabot-homepage-guide skill and metabot-metaapp-publish skill to create a unique Bot Page, package and publish it on-chain through the MetaApp protocol, then paste the MetaApp pin ID here.');
+  var metaAppPin=state._pendingHomepage!==undefined?metaAppPinFromHomepage(state._pendingHomepage):'';
+  return '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label>'+
+    '<div class="homepage-panel" data-homepage-panel>'+
+      '<div class="homepage-panel-head"><div><div class="homepage-panel-title">'+esc(uiText('bot.homepage','Homepage'))+'</div><div class="homepage-panel-subtitle">'+esc(uiText('bot.homepageSource','Custom Bot page source'))+'</div></div><span class="homepage-status-pill">'+esc(status)+'</span></div>'+
+      '<div class="homepage-source-grid">'+
+        '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetafile','Metafile'))+'</div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetafileNote','Upload a local file and save it as metafile://<pinId>.'))+'</div><div class="homepage-metaapp-row"><button type="button" class="btn btn-sm" data-act="upload-homepage"'+(state._homepageUploadWorking?' disabled':'')+'>'+esc(uiText('bot.upload','Upload'))+'</button><input type="file" data-homepage-file-input hidden /></div></div>'+
+        '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetaApp','MetaApp'))+'<span class="homepage-help-wrap" data-homepage-help><button type="button" class="homepage-help" data-act="toggle-homepage-help" aria-label="'+esc(uiText('bot.homepageMetaAppHelpLabel','How to get a MetaApp pin ID'))+'" aria-expanded="false" aria-controls="homepage-metaapp-help">?</button><span class="homepage-help-popover" id="homepage-metaapp-help" data-homepage-help-popover role="tooltip">'+esc(helpCopy)+'</span></span></div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetaAppNote','Paste a MetaApp pin ID and save it as metaapp://<pinId>.'))+'</div><div class="homepage-metaapp-row"><input data-field="homepage-metaapp-pin" placeholder="'+esc(uiText('bot.homepagePinPlaceholder','MetaApp pin ID'))+'" value="'+esc(metaAppPin)+'" /><button type="button" class="btn btn-sm" data-act="preview-homepage-metaapp">'+esc(uiText('bot.homepagePreviewMetaApp','Preview'))+'</button></div></div>'+
+      '</div>'+
+      defaultActionLine+
+      defaultRendererLine+
+      '<div class="save-status" data-homepage-status></div>'+
+    '</div></div>';
 }
 function wireProviderPickers(){
   qq('[data-provider-toggle]').forEach(function(btn){
@@ -408,9 +494,7 @@ function setDetailVisible(visible){
 function selectMetabot(slug){
   if(!slug)return;
   state._sensitiveModalToken=null;
-  state.selectedSlug=slug;
-  state.originalProfile=state.profiles.find(function(p){return p.slug===slug})||null;
-  state._pendingAvatar=undefined;
+  setSelectedSlug(slug,{clearDrafts:true});
   renderMetabotList();
   renderDetailHeader(state.originalProfile);
   setDetailVisible(Boolean(state.originalProfile));
@@ -491,7 +575,7 @@ function renderPublicIdentityTab(options){
         providerPickerMarkup('fallbackProvider',uiText('bot.fallbackLlmProvider','Fallback LLM Provider'),fallbackProviderValue,true,draft&&draft.fallbackProviderTouched)+
       '</div>'+
       '<div class="field field-full"><label for="bot-bio">'+esc(uiText('bot.publicBio','Public Bio'))+'</label><textarea id="bot-bio" data-field="bio">'+esc(bioValue)+'</textarea></div>'+
-      '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label><div class="homepage-row"><button type="button" class="btn btn-sm" data-act="upload-homepage">'+esc(uiText('bot.upload','Upload'))+'</button><span class="homepage-renderer-label">'+esc(uiText('bot.defaultRenderer','Default Bot Page renderer'))+'</span></div></div>'+
+      homepagePanelMarkup(profile)+
     '</div>'+
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-public-identity">'+esc(uiText('bot.savePublicIdentity','Save Public Identity'))+'</button><span class="save-status" data-save-status></span></div></div>';
   var input=q('[data-avatar-input]');
@@ -499,7 +583,7 @@ function renderPublicIdentityTab(options){
   var remove=q('[data-act="remove-avatar"]');if(remove)remove.addEventListener('click',function(){state._pendingAvatar='';renderAvatarPreview('');this.hidden=true});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleAvatarUpload(file)});
   wireProviderPickers();
-  var homepage=q('[data-act="upload-homepage"]');if(homepage)homepage.addEventListener('click',openHomepageUploadPlaceholder);
+  wireHomepageControls();
   var save=q('[data-act="save-public-identity"]');if(save)save.addEventListener('click',savePublicIdentity);
   focusBotManagementTarget();
 }
@@ -565,6 +649,90 @@ function handleAvatarUpload(file){
     var remove=q('[data-act="remove-avatar"]');if(remove)remove.hidden=false;
   });
 }
+function renderHomepageDraftStatus(message,tone){
+  var status=q('[data-homepage-status]');
+  if(status){status.textContent=message||'';status.className='save-status '+(tone||'')}
+}
+function rerenderPublicIdentityForHomepage(){
+  renderPublicIdentityTab({preserveDraft:true});
+}
+function toggleHomepageHelp(button){
+  var wrap=button&&button.closest&&button.closest('[data-homepage-help]');
+  if(!wrap||!wrap.classList)return;
+  var open=!(wrap.classList.contains&&wrap.classList.contains('open'));
+  wrap.classList.toggle('open',open);
+  if(button.setAttribute)button.setAttribute('aria-expanded',open?'true':'false');
+}
+function readMetaAppHomepageDraftFromInput(){
+  var input=q('[data-field="homepage-metaapp-pin"]');
+  var value=String(input&&input.value||'').trim();
+  if(!value)return undefined;
+  return normalizeMetaAppHomepageInput(value);
+}
+function previewHomepageMetaApp(){
+  try{
+    var draft=readMetaAppHomepageDraftFromInput();
+    if(!draft)throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
+    state._pendingHomepage=draft;
+    window.location.href=metaAppBrowserPath(metaAppPinFromHomepage(draft));
+  }catch(error){
+    renderHomepageDraftStatus(error.message,'error');
+  }
+}
+function useDefaultHomepage(){
+  state._pendingHomepage=null;
+  var metaAppInput=q('[data-field="homepage-metaapp-pin"]');if(metaAppInput)metaAppInput.value='';
+  rerenderPublicIdentityForHomepage();
+  renderHomepageDraftStatus(uiText('bot.homepageDefaultReadyToSave','Default homepage ready to save.'),'success');
+}
+function handleHomepageUploadFile(file){
+  var profile=selectedProfile();if(!profile||!profile.slug||!file)return Promise.resolve();
+  var profileSlug=profile.slug;
+  var uploadToken=++state._homepageUploadToken;
+  state._homepageUploadWorking=true;
+  renderHomepageDraftStatus(uiText('bot.homepageUploading','Uploading homepage file...'),'saving');
+  return readFileAsDataUrl(file).then(function(dataUrl){
+    var base64=dataUrlBase64(dataUrl);
+    return api('/api/bot/profiles/'+encodeURIComponent(profileSlug)+'/homepage/upload',{
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({
+        fileName:file.name||'homepage-upload',
+        contentType:file.type||'application/octet-stream',
+        base64:base64,
+      }),
+    });
+  }).then(function(r){
+    if(state.selectedSlug!==profileSlug||state._homepageUploadToken!==uploadToken)return;
+    var data=r.data||{};
+    var uri=String(data.metafileUri||data.uri||'').trim();
+    if(!uri&&data.pinId)uri='metafile://'+data.pinId;
+    if(!uri)throw new Error(uiText('bot.uploadFailed','Upload failed'));
+    state._pendingHomepage={
+      uri:uri,
+      renderer:'auto',
+      contentType:data.contentType||file.type||'application/octet-stream',
+    };
+    var metaAppInput=q('[data-field="homepage-metaapp-pin"]');if(metaAppInput)metaAppInput.value='';
+    rerenderPublicIdentityForHomepage();
+    renderHomepageDraftStatus(uiText('bot.homepageReadyToSave','Homepage ready to save.'),'success');
+  }).catch(function(error){
+    if(state.selectedSlug===profileSlug&&state._homepageUploadToken===uploadToken)renderHomepageDraftStatus(error.message||String(error),'error');
+  }).finally(function(){
+    if(state._homepageUploadToken===uploadToken)state._homepageUploadWorking=false;
+    if(state.selectedSlug===profileSlug){var upload=q('[data-act="upload-homepage"]');if(upload)upload.disabled=false}
+  });
+}
+function wireHomepageControls(){
+  var input=q('[data-homepage-file-input]');
+  var upload=q('[data-act="upload-homepage"]');
+  if(upload&&input)upload.addEventListener('click',function(){input.click()});
+  if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleHomepageUploadFile(file)});
+  var preview=q('[data-act="preview-homepage-metaapp"]');if(preview)preview.addEventListener('click',previewHomepageMetaApp);
+  var useDefault=q('[data-act="use-default-homepage"]');if(useDefault)useDefault.addEventListener('click',useDefaultHomepage);
+  var help=q('[data-act="toggle-homepage-help"]');if(help)help.addEventListener('click',function(event){if(event&&event.preventDefault)event.preventDefault();toggleHomepageHelp(this)});
+  var view=q('[data-act="view-homepage"]');if(view)view.addEventListener('click',viewSelectedBotPage);
+}
 
 function changedValue(payload,field,next,current){
   if(next!==current)payload[field]=next;
@@ -626,9 +794,6 @@ function chainSuccessBodyMarkup(input){
 }
 function showChainSuccessModal(input){
   openDynamicModal(input.title,chainSuccessBodyMarkup(input),{boxClass:'modal-box-wide'});
-}
-function openHomepageUploadPlaceholder(){
-  openDynamicModal(uiText('bot.defaultRenderer','Default Bot Page renderer'),'<div class="modal-body"><p class="modal-note">'+esc(uiText('bot.homepageUploadLater','Homepage package upload will be available later. This Bot is using the default Bot Page renderer.'))+'</p></div><div class="modal-actions"><button class="btn btn-primary" data-act="modal-close">'+esc(uiText('bot.ok','OK'))+'</button></div>');
 }
 function walletChainConfig(chain){return WALLET_CHAINS.find(function(row){return row.chain===chain})||WALLET_CHAINS[0]}
 function walletDisplayUnit(chain){return walletChainConfig(chain).displayUnit}
@@ -854,8 +1019,7 @@ function confirmDeleteMetabot(profile){
   renderDeleteModal(profile,{type:'saving',text:uiText('bot.deletingLocalBotData','Deleting local Bot data...')});
   api('/api/bot/profiles/'+encodeURIComponent(profile.slug),{method:'DELETE'}).then(function(){
     closeDynamicModal();
-    state.selectedSlug='';
-    state.originalProfile=null;
+    setSelectedSlug('');
     state.sessions=[];
     return loadProfiles().then(function(){return loadSessions()});
   }).catch(function(error){
@@ -915,6 +1079,14 @@ function savePublicIdentity(){
   var primaryEl=q('[data-field="primaryProvider"]');var fallbackEl=q('[data-field="fallbackProvider"]');
   if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
   if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
+  try{
+    var inputHomepage=readMetaAppHomepageDraftFromInput();
+    if(inputHomepage)state._pendingHomepage=inputHomepage;
+  }catch(error){
+    renderHomepageDraftStatus(error.message,'error');
+    return Promise.resolve();
+  }
+  if(state._pendingHomepage!==undefined&&!sameHomepage(state._pendingHomepage,profile.homepage))payload.homepage=state._pendingHomepage;
   if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
   if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
@@ -924,6 +1096,7 @@ function savePublicIdentity(){
     if(state.selectedSlug!==profileSlug)return;
     state.originalProfile=updated;
     state._pendingAvatar=undefined;
+    state._pendingHomepage=undefined;
     renderMetabotList();
     renderDetailHeader(updated);
     renderPublicIdentityTab({preserveDraft:false});
@@ -1092,7 +1265,7 @@ function switchTab(tab,silent){
 }
 
 function loadStats(){renderStats();return Promise.resolve()}
-function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();if(!state.selectedSlug&&state.profiles.length)state.selectedSlug=state.profiles[0].slug;if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))state.selectedSlug=state.profiles[0]&&state.profiles[0].slug||'';state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
+function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();if(!state.selectedSlug&&state.profiles.length)setSelectedSlug(state.profiles[0].slug);if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))setSelectedSlug(state.profiles[0]&&state.profiles[0].slug||'');state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
 function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){
@@ -1285,7 +1458,7 @@ function createMetabot(){
   if(host)body.host=host;
   return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     var profile=r.data&&r.data.profile||{};
-    state.selectedSlug=profile.slug||state.selectedSlug;
+    setSelectedSlug(profile.slug||state.selectedSlug);
     state.selectedTab='publicIdentity';
     renderCreateChainSuccess(profile);
     return loadProfiles().catch(function(error){showToast(error.message)});
@@ -1342,7 +1515,7 @@ function botManagementRouteRequest(){
 }
 function applyBotManagementRouteRequest(){
   var request=botManagementRouteRequest();
-  if(request.profile&&state.profiles.some(function(profile){return profile.slug===request.profile}))state.selectedSlug=request.profile;
+  if(request.profile&&state.profiles.some(function(profile){return profile.slug===request.profile}))setSelectedSlug(request.profile);
   if(request.tab)state.selectedTab=request.tab;
 }
 function focusBotManagementTarget(){

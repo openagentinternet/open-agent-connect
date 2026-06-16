@@ -1,24 +1,33 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildMyServicesPageDefinition = buildMyServicesPageDefinition;
+const i18n_1 = require("../../i18n");
 const viewModel_1 = require("./viewModel");
 function buildMyServicesPageDefinition(options = {}) {
+    const i18n = options.i18n ?? (0, i18n_1.createI18nContext)();
     const buildMyServicesPageViewModelSource = (0, viewModel_1.buildMyServicesPageViewModelRuntimeSource)();
     const page = options.page ?? 'my-services';
-    const title = options.title ?? 'My Services';
-    const eyebrow = options.eyebrow ?? 'Service Ledger';
-    const heading = options.heading ?? 'My Services';
-    const description = options.description ?? 'Manage locally published MetaBot skill services.';
-    const toolbarTitle = options.toolbarTitle ?? 'My Services';
-    const toolbarLabel = options.toolbarLabel ?? 'Loading local services...';
+    const title = options.title ?? i18n.t('myServices.title');
+    const eyebrow = options.eyebrow ?? i18n.t('myServices.eyebrow');
+    const heading = options.heading ?? i18n.t('myServices.heading');
+    const description = options.description ?? i18n.t('myServices.description');
+    const toolbarTitleKey = options.toolbarTitleKey ?? 'myServices.toolbarTitle';
+    const toolbarLabelKey = options.toolbarLabelKey ?? 'myServices.toolbarLabel';
+    const publishActionKey = options.publishActionKey ?? 'services.publishService';
+    const refundsActionKey = options.refundsActionKey ?? 'services.serviceRefunds';
+    const toolbarTitle = options.toolbarTitle ?? i18n.t(toolbarTitleKey);
+    const toolbarLabel = options.toolbarLabel ?? i18n.t(toolbarLabelKey);
+    const tx = (key, replacements) => i18n.t(key, replacements);
     const publishAction = options.includePublishAction
-        ? '<a class="btn btn-primary" href="/ui/publish" data-my-services-publish>Publish Service</a>'
+        ? `<a class="btn btn-primary" href="/ui/publish" data-my-services-publish data-i18n-key="${publishActionKey}">${tx(publishActionKey)}</a>`
         : '';
     const refundsAction = options.includeRefundsAction
-        ? '<a class="btn btn-primary" href="/ui/refund" data-my-services-refunds>Service Refunds</a>'
+        ? `<a class="btn btn-primary" href="/ui/refund" data-my-services-refunds data-i18n-key="${refundsActionKey}">${tx(refundsActionKey)}</a>`
         : '';
-    const orderTraceActionLabel = JSON.stringify(options.orderTraceActionLabel ?? 'Trace');
-    const orderSessionActionLabel = JSON.stringify(options.orderSessionActionLabel ?? 'Session');
+    const orderTraceActionLabel = JSON.stringify(options.orderTraceActionLabel ?? tx('services.trace'));
+    const orderSessionActionLabel = JSON.stringify(options.orderSessionActionLabel ?? tx('services.session'));
+    const orderTraceActionKey = JSON.stringify(options.orderTraceActionKey ?? 'services.trace');
+    const orderSessionActionKey = JSON.stringify(options.orderSessionActionKey ?? 'services.session');
     return {
         page,
         title,
@@ -30,20 +39,20 @@ function buildMyServicesPageDefinition(options = {}) {
       <section class="my-services-shell" data-my-services-shell>
         <div class="my-services-toolbar">
           <div>
-            <h1>${toolbarTitle}</h1>
-            <p data-my-services-page-label>${toolbarLabel}</p>
+            <h1 data-i18n-key="${toolbarTitleKey}">${toolbarTitle}</h1>
+            <p data-my-services-page-label data-i18n-key="${toolbarLabelKey}">${toolbarLabel}</p>
           </div>
           <div class="my-services-toolbar-actions">
             ${publishAction}
             ${refundsAction}
-            <button class="btn" type="button" data-my-services-refresh>Refresh</button>
+            <button class="btn" type="button" data-my-services-refresh data-i18n-key="services.refresh">${tx('services.refresh')}</button>
           </div>
         </div>
 
         <div class="my-services-notice" data-my-services-notice hidden></div>
 
         <div class="services-bot-filter">
-          <label id="services-bot-picker-label">Local Bot</label>
+          <label id="services-bot-picker-label" data-i18n-key="services.localBot">${tx('services.localBot')}</label>
           <div class="services-bot-picker" data-services-bot-picker>
             <button class="services-bot-trigger" type="button" data-services-bot-trigger aria-labelledby="services-bot-picker-label" aria-haspopup="listbox" aria-expanded="false">
               <span class="services-bot-current" data-services-bot-current></span>
@@ -56,13 +65,13 @@ function buildMyServicesPageDefinition(options = {}) {
         <div class="my-services-workspace">
           <section class="my-services-list-panel" aria-label="Published services">
             <div class="ledger-section-header">
-              <h2>Published Services</h2>
+              <h2 data-i18n-key="services.publishedServices">${tx('services.publishedServices')}</h2>
               <span data-my-services-list-count>0</span>
             </div>
             <div class="my-services-list" data-my-services-list></div>
             <div class="ledger-pagination">
-              <button class="btn btn-sm" type="button" data-services-page-prev>Previous</button>
-              <button class="btn btn-sm" type="button" data-services-page-next>Next</button>
+              <button class="btn btn-sm" type="button" data-services-page-prev data-i18n-key="services.previous">${tx('services.previous')}</button>
+              <button class="btn btn-sm" type="button" data-services-page-next data-i18n-key="services.next">${tx('services.next')}</button>
             </div>
           </section>
         </div>
@@ -71,15 +80,15 @@ function buildMyServicesPageDefinition(options = {}) {
           <div class="my-services-modal-dialog my-service-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="my-service-detail-title">
             <div class="modal-heading">
               <div>
-                <h2 id="my-service-detail-title">Service Detail</h2>
-                <p data-my-service-order-page-label>0 orders</p>
+                <h2 id="my-service-detail-title" data-i18n-key="services.serviceDetail">${tx('services.serviceDetail')}</h2>
+                <p data-my-service-order-page-label data-i18n-key="services.ordersZero">${tx('services.ordersZero')}</p>
               </div>
-              <button class="modal-close" type="button" data-my-service-detail-close aria-label="Close service detail modal">x</button>
+              <button class="modal-close" type="button" data-my-service-detail-close aria-label="${tx('services.closeServiceDetailModal')}">x</button>
             </div>
             <div data-my-service-detail-modal-body></div>
             <div class="ledger-pagination" data-my-service-order-pagination>
-              <button class="btn btn-sm" type="button" data-orders-page-prev>Previous</button>
-              <button class="btn btn-sm" type="button" data-orders-page-next>Next</button>
+              <button class="btn btn-sm" type="button" data-orders-page-prev data-i18n-key="services.previous">${tx('services.previous')}</button>
+              <button class="btn btn-sm" type="button" data-orders-page-next data-i18n-key="services.next">${tx('services.next')}</button>
             </div>
           </div>
         </div>
@@ -88,79 +97,79 @@ function buildMyServicesPageDefinition(options = {}) {
           <form class="my-services-modal-dialog my-services-edit-form" data-my-service-edit-form>
             <div class="modal-heading">
               <div>
-                <h2>Edit Service</h2>
-                <p>Broadcast a MetaID modify operation and update the local profile record.</p>
+                <h2 data-i18n-key="services.editService">${tx('services.editService')}</h2>
+                <p data-i18n-key="services.editDescription">${tx('services.editDescription')}</p>
               </div>
-              <button class="modal-close" type="button" data-my-service-edit-close aria-label="Close edit modal">x</button>
+              <button class="modal-close" type="button" data-my-service-edit-close aria-label="${tx('bot.close')}">x</button>
             </div>
 
             <div class="edit-form-grid">
               <label>
-                <span>Display Name</span>
+                <span data-i18n-key="services.displayName">${tx('services.displayName')}</span>
                 <input name="displayName" required />
               </label>
               <label>
-                <span>Service Name</span>
+                <span data-i18n-key="services.serviceName">${tx('services.serviceName')}</span>
                 <input name="serviceName" required />
               </label>
               <label class="wide-field">
-                <span>Description</span>
+                <span data-i18n-key="services.descriptionLabel">${tx('services.descriptionLabel')}</span>
                 <textarea name="description" rows="4" required></textarea>
               </label>
               <div class="wide-field">
-                <span>Provider Skills</span>
-                <div class="skill-picker" data-edit-provider-skill-picker aria-label="Provider skills">
+                <span data-i18n-key="services.providerSkills">${tx('services.providerSkills')}</span>
+                <div class="skill-picker" data-edit-provider-skill-picker aria-label="${tx('services.providerSkillAria')}">
                   <div class="skill-picker-row">
-                    <select data-edit-provider-skill-select aria-label="Provider skill to add">
-                      <option value="">Select a skill to add</option>
+                    <select data-edit-provider-skill-select aria-label="${tx('services.providerSkillSelectAria')}">
+                      <option value="" data-i18n-key="services.selectSkillToAdd">${tx('services.selectSkillToAdd')}</option>
                     </select>
-                    <button class="btn" type="button" data-edit-provider-skill-add>Add</button>
+                    <button class="btn" type="button" data-edit-provider-skill-add data-i18n-key="services.add">${tx('services.add')}</button>
                   </div>
                   <div class="skill-chip-list" data-edit-provider-skill-chips aria-live="polite">
-                    <p class="field-hint">No skill selected.</p>
+                    <p class="field-hint" data-i18n-key="services.noSkillSelected">${tx('services.noSkillSelected')}</p>
                   </div>
                 </div>
               </div>
               <label>
-                <span>Output Type</span>
+                <span data-i18n-key="services.outputType">${tx('services.outputType')}</span>
                 <select name="outputType" data-edit-output-type required></select>
               </label>
               <label class="wide-field">
-                <span>Execution Reminder</span>
+                <span data-i18n-key="services.executionReminder">${tx('services.executionReminder')}</span>
                 <textarea name="executionReminder" rows="3"></textarea>
               </label>
               <div>
-                <span>Payment Timing</span>
+                <span data-i18n-key="services.paymentTiming">${tx('services.paymentTiming')}</span>
                 <div class="segmented-control" data-edit-payment-timing>
-                  <label><input type="radio" name="paymentTiming" value="free" /> Free</label>
-                  <label><input type="radio" name="paymentTiming" value="prepaid" /> Prepaid</label>
+                  <label><input type="radio" name="paymentTiming" value="free" /> <span data-i18n-key="services.free">${tx('services.free')}</span></label>
+                  <label><input type="radio" name="paymentTiming" value="prepaid" /> <span data-i18n-key="services.prepaid">${tx('services.prepaid')}</span></label>
                 </div>
               </div>
               <label>
-                <span>Price</span>
+                <span data-i18n-key="services.price">${tx('services.price')}</span>
                 <input name="price" data-edit-price inputmode="decimal" required />
               </label>
               <label>
-                <span>Currency</span>
+                <span data-i18n-key="services.currency">${tx('services.currency')}</span>
                 <select name="currency" data-edit-currency required></select>
               </label>
               <div class="wide-field edit-cover-field">
-                <span>Cover Image</span>
+                <span data-i18n-key="services.coverImage">${tx('services.coverImage')}</span>
                 <div class="edit-cover-row">
                   <div class="edit-cover-preview" data-edit-cover-preview></div>
                   <div class="edit-cover-controls">
                     <input id="my-services-cover-input" type="file" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/svg+xml" data-edit-cover-input />
-                    <label class="btn" for="my-services-cover-input">Upload Image</label>
-                    <button class="btn" type="button" data-edit-cover-remove>Remove</button>
-                    <p data-edit-cover-note>Optional PNG, JPG, WebP, GIF, or SVG. Maximum 2MB.</p>
+                    <label class="btn" for="my-services-cover-input" data-i18n-key="services.uploadImage">${tx('services.uploadImage')}</label>
+                    <button class="btn" type="button" data-edit-cover-remove data-i18n-key="services.remove">${tx('services.remove')}</button>
+                    <p data-edit-cover-note data-i18n-key="services.coverNote">${tx('services.coverNote')}</p>
                   </div>
                 </div>
               </div>
             </div>
 
             <div class="modal-actions">
-              <button class="btn" type="button" data-my-service-edit-close>Cancel</button>
-              <button class="btn btn-primary" type="submit" data-my-service-edit-submit>Save Modify</button>
+              <button class="btn" type="button" data-my-service-edit-close data-i18n-key="services.cancel">${tx('services.cancel')}</button>
+              <button class="btn btn-primary" type="submit" data-my-service-edit-submit data-i18n-key="services.saveModify">${tx('services.saveModify')}</button>
             </div>
           </form>
         </div>
@@ -169,14 +178,14 @@ function buildMyServicesPageDefinition(options = {}) {
           <div class="my-services-modal-dialog revoke-dialog">
             <div class="modal-heading">
               <div>
-                <h2>Revoke Service</h2>
-                <p data-my-service-revoke-copy>This will broadcast a MetaID revoke operation.</p>
+                <h2 data-i18n-key="services.revokeService">${tx('services.revokeService')}</h2>
+                <p data-my-service-revoke-copy data-i18n-key="services.revokeDefaultCopy">${tx('services.revokeDefaultCopy')}</p>
               </div>
-              <button class="modal-close" type="button" data-my-service-revoke-close aria-label="Close revoke modal">x</button>
+              <button class="modal-close" type="button" data-my-service-revoke-close aria-label="${tx('bot.close')}">x</button>
             </div>
             <div class="modal-actions">
-              <button class="btn" type="button" data-my-service-revoke-close>Cancel</button>
-              <button class="btn btn-danger" type="button" data-my-service-revoke-confirm>Revoke</button>
+              <button class="btn" type="button" data-my-service-revoke-close data-i18n-key="services.cancel">${tx('services.cancel')}</button>
+              <button class="btn btn-danger" type="button" data-my-service-revoke-confirm data-i18n-key="services.revoke">${tx('services.revoke')}</button>
             </div>
           </div>
         </div>
@@ -186,6 +195,8 @@ function buildMyServicesPageDefinition(options = {}) {
   ${buildMyServicesPageViewModelSource}
   const ORDER_TRACE_ACTION_LABEL = ${orderTraceActionLabel};
   const ORDER_SESSION_ACTION_LABEL = ${orderSessionActionLabel};
+  const ORDER_TRACE_ACTION_KEY = ${orderTraceActionKey};
+  const ORDER_SESSION_ACTION_KEY = ${orderSessionActionKey};
 
   const ICON_MAX_BYTES = 2 * 1024 * 1024;
   const ICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/svg+xml']);
@@ -260,6 +271,54 @@ function buildMyServicesPageDefinition(options = {}) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+  const formatText = (template, replacements) => Object.keys(replacements || {}).reduce(
+    (text, name) => text.split('{' + name + '}').join(String(replacements[name])),
+    String(template == null ? '' : template)
+  );
+  const uiText = (key, fallback, replacements) => {
+    try {
+      if (typeof window !== 'undefined' && window.__oacLocalUiI18n && typeof window.__oacLocalUiI18n.t === 'function') {
+        const translated = window.__oacLocalUiI18n.t(key, replacements || {});
+        if (translated && translated !== key) return translated;
+      }
+    } catch {}
+    return formatText(fallback, replacements || {});
+  };
+  const countLabel = (pagination, oneKey, manyKey, oneFallback, manyFallback) => {
+    const page = pagination || {};
+    const currentPage = Math.max(1, Math.trunc(Number(page.page) || 1));
+    const totalPages = Math.max(1, Math.trunc(Number(page.totalPages) || 1));
+    const total = Math.max(0, Math.trunc(Number(page.total) || 0));
+    const noun = total === 1
+      ? uiText(oneKey, oneFallback)
+      : uiText(manyKey, manyFallback);
+    return currentPage + ' / ' + totalPages + ' · ' + total + ' ' + noun;
+  };
+  const knownTextKeys = {
+    'Free': 'services.free',
+    'Prepaid': 'services.prepaid',
+    'No price': 'services.noPrice',
+    'No payment': 'services.noPayment',
+    'No rating': 'services.noRating',
+    'Success': 'services.success',
+    'Refunded': 'services.refunded',
+    'Gross': 'services.gross',
+    'Net': 'services.net',
+    'Rating': 'services.rating',
+    'Completed': 'services.completed',
+    'Runtime unavailable': 'services.runtimeUnavailable',
+    'Unknown buyer': 'services.unknownBuyer',
+    'No session': 'services.noSession',
+    'Trace unavailable': 'services.traceUnavailable',
+    'Unbound skill': 'services.unboundSkill',
+    'Unknown MetaBot': 'services.unknownMetaBot',
+    'Unknown': 'services.unknown',
+  };
+  const localizeKnownText = (value) => {
+    const text = String(value == null ? '' : value);
+    const key = knownTextKeys[text];
+    return key ? uiText(key, text) : text;
+  };
 
   const normalizeTextClient = (value) => String(value || '').trim();
   const profileSlug = (profile) => normalizeTextClient(profile && profile.slug);
@@ -328,7 +387,7 @@ function buildMyServicesPageDefinition(options = {}) {
     const selected = selectedBotProfile();
     elements.botCurrent.innerHTML = selected
       ? profileAvatarMarkup(selected) + '<span>' + escapeHtml(normalizeTextClient(selected.name) || state.selectedBotSlug) + '</span>'
-      : '<span>No local Bot</span>';
+      : '<span>' + escapeHtml(uiText('services.noLocalBot', 'No local Bot')) + '</span>';
     elements.botTrigger.disabled = state.profiles.length === 0;
     elements.botMenu.innerHTML = state.profiles.map((profile) => {
       const slug = profileSlug(profile);
@@ -391,7 +450,7 @@ function buildMyServicesPageDefinition(options = {}) {
     elements.notice.hidden = false;
     elements.notice.dataset.tone = notice.tone;
     const txids = notice.txids.map((txid) => (
-      '<div class="notice-tx"><code>' + escapeHtml(txid) + '</code><button class="btn btn-sm" type="button" data-copy-value="' + escapeHtml(txid) + '">Copy</button></div>'
+      '<div class="notice-tx"><code>' + escapeHtml(txid) + '</code><button class="btn btn-sm" type="button" data-copy-value="' + escapeHtml(txid) + '">' + escapeHtml(uiText('services.copy', 'Copy')) + '</button></div>'
     )).join('');
     elements.notice.innerHTML = '<div><strong>' + escapeHtml(notice.title) + '</strong><p>' + escapeHtml(notice.message) + '</p></div>'
       + (notice.pinId ? '<code>' + escapeHtml(notice.pinId) + '</code>' : '')
@@ -399,19 +458,25 @@ function buildMyServicesPageDefinition(options = {}) {
   };
 
   const renderServices = (model) => {
-    if (elements.pageLabel) elements.pageLabel.textContent = model.pageLabel;
+    if (elements.pageLabel) elements.pageLabel.textContent = countLabel(model.pagination, 'services.pageNounOne', 'services.pageNounMany', 'service', 'services');
     if (elements.listCount) elements.listCount.textContent = String(model.pagination.total);
-    if (elements.servicesPagePrev) elements.servicesPagePrev.disabled = !model.pagination.canPrevious;
-    if (elements.servicesPageNext) elements.servicesPageNext.disabled = !model.pagination.canNext;
+    if (elements.servicesPagePrev) {
+      elements.servicesPagePrev.hidden = !model.pagination.canPrevious;
+      elements.servicesPagePrev.disabled = !model.pagination.canPrevious;
+    }
+    if (elements.servicesPageNext) {
+      elements.servicesPageNext.hidden = !model.pagination.canNext;
+      elements.servicesPageNext.disabled = !model.pagination.canNext;
+    }
     if (!elements.list) return;
     if (!model.services.length) {
-      elements.list.innerHTML = '<div class="ledger-empty"><strong>' + escapeHtml(model.emptyState.title) + '</strong><p>' + escapeHtml(model.emptyState.message) + '</p></div>';
+      elements.list.innerHTML = '<div class="ledger-empty"><strong>' + escapeHtml(uiText('services.noPublishedServicesTitle', model.emptyState.title)) + '</strong><p>' + escapeHtml(uiText('services.noPublishedServicesMessage', model.emptyState.message)) + '</p></div>';
       return;
     }
     elements.list.innerHTML = model.services.map((service) => {
       const selected = service.currentPinId === state.selectedServiceId ? ' data-selected="true"' : '';
       const metrics = service.metrics.map((metric) => (
-        '<div class="service-metric"><span>' + escapeHtml(metric.label) + '</span><strong>' + escapeHtml(metric.value) + '</strong></div>'
+        '<div class="service-metric"><span>' + escapeHtml(localizeKnownText(metric.label)) + '</span><strong>' + escapeHtml(localizeKnownText(metric.value)) + '</strong></div>'
       )).join('');
       const icon = service.iconUri
         ? '<img alt="" src="' + escapeHtml(service.iconUri) + '" />'
@@ -419,15 +484,15 @@ function buildMyServicesPageDefinition(options = {}) {
       return '<article class="service-row"' + selected + ' data-service-row="' + escapeHtml(service.currentPinId) + '">'
         + '<div class="service-cover">' + icon + '</div>'
         + '<div class="service-main">'
-        + '<div class="service-title-line"><h3><button class="service-title-button" type="button" data-service-title-action="details" data-service-id="' + escapeHtml(service.currentPinId) + '">' + escapeHtml(service.title) + '</button></h3><span>' + escapeHtml(service.priceLabel) + '</span></div>'
+        + '<div class="service-title-line"><h3><button class="service-title-button" type="button" data-service-title-action="details" data-service-id="' + escapeHtml(service.currentPinId) + '">' + escapeHtml(service.title) + '</button></h3><span>' + escapeHtml(localizeKnownText(service.priceLabel)) + '</span></div>'
         + '<p>' + escapeHtml(service.description || service.serviceName) + '</p>'
-        + '<div class="service-meta"><span>' + escapeHtml(service.skillLabel) + '</span><span>' + escapeHtml(service.outputTypeLabel) + '</span><span>' + escapeHtml(service.creatorLabel) + '</span><span>' + escapeHtml(service.updatedAtLabel) + '</span></div>'
+        + '<div class="service-meta"><span>' + escapeHtml(localizeKnownText(service.skillLabel)) + '</span><span>' + escapeHtml(service.outputTypeLabel) + '</span><span>' + escapeHtml(localizeKnownText(service.creatorLabel)) + '</span><span>' + escapeHtml(localizeKnownText(service.updatedAtLabel)) + '</span></div>'
         + '<div class="service-metrics">' + metrics + '</div>'
         + '</div>'
         + '<div class="service-actions">'
-        + '<button class="btn btn-sm" type="button" data-service-action="details" data-service-id="' + escapeHtml(service.currentPinId) + '">Details</button>'
-        + '<button class="btn btn-sm" type="button" data-service-action="edit" data-service-id="' + escapeHtml(service.currentPinId) + '"' + (service.canModify ? '' : ' disabled') + '>Edit</button>'
-        + '<button class="btn btn-sm btn-danger" type="button" data-service-action="revoke" data-service-id="' + escapeHtml(service.currentPinId) + '"' + (service.canRevoke ? '' : ' disabled') + '>Revoke</button>'
+        + '<button class="btn btn-sm" type="button" data-service-action="details" data-service-id="' + escapeHtml(service.currentPinId) + '">' + escapeHtml(uiText('services.details', 'Details')) + '</button>'
+        + '<button class="btn btn-sm" type="button" data-service-action="edit" data-service-id="' + escapeHtml(service.currentPinId) + '"' + (service.canModify ? '' : ' disabled') + '>' + escapeHtml(uiText('services.edit', 'Edit')) + '</button>'
+        + '<button class="btn btn-sm btn-danger" type="button" data-service-action="revoke" data-service-id="' + escapeHtml(service.currentPinId) + '"' + (service.canRevoke ? '' : ' disabled') + '>' + escapeHtml(uiText('services.revoke', 'Revoke')) + '</button>'
         + (service.blockedReason ? '<small>' + escapeHtml(service.blockedReason) + '</small>' : '')
         + '</div>'
         + '</article>';
@@ -435,40 +500,40 @@ function buildMyServicesPageDefinition(options = {}) {
   };
 
   const renderDetail = (model) => {
-    if (elements.orderPageLabel) elements.orderPageLabel.textContent = model.orderPageLabel;
+    if (elements.orderPageLabel) elements.orderPageLabel.textContent = countLabel(model.orderPagination, 'services.orderNounOne', 'services.orderNounMany', 'order', 'orders');
     if (elements.ordersPagePrev) elements.ordersPagePrev.disabled = !model.orderPagination.canPrevious || !model.selectedService;
     if (elements.ordersPageNext) elements.ordersPageNext.disabled = !model.orderPagination.canNext || !model.selectedService;
     if (!elements.detailModalBody) return;
     const selected = model.selectedService;
     if (!selected) {
-      elements.detailModalBody.innerHTML = '<div class="ledger-empty"><strong>No service selected</strong><p>Select a service to inspect orders and lifecycle actions.</p></div>';
+      elements.detailModalBody.innerHTML = '<div class="ledger-empty"><strong>' + escapeHtml(uiText('services.noServiceSelectedTitle', 'No service selected')) + '</strong><p>' + escapeHtml(uiText('services.noServiceSelectedMessage', 'Select a service to inspect orders and lifecycle actions.')) + '</p></div>';
       return;
     }
     const summaryHtml = '<div class="my-service-detail-summary"><div class="detail-heading"><div><h3>' + escapeHtml(selected.title) + '</h3><p>' + escapeHtml(selected.description || selected.serviceName) + '</p></div>'
       + '<div class="detail-actions">'
-      + '<button class="btn btn-sm" type="button" data-service-action="edit" data-service-id="' + escapeHtml(selected.currentPinId) + '"' + (selected.canModify ? '' : ' disabled') + '>Edit</button>'
-      + '<button class="btn btn-sm btn-danger" type="button" data-service-action="revoke" data-service-id="' + escapeHtml(selected.currentPinId) + '"' + (selected.canRevoke ? '' : ' disabled') + '>Revoke</button>'
+      + '<button class="btn btn-sm" type="button" data-service-action="edit" data-service-id="' + escapeHtml(selected.currentPinId) + '"' + (selected.canModify ? '' : ' disabled') + '>' + escapeHtml(uiText('services.edit', 'Edit')) + '</button>'
+      + '<button class="btn btn-sm btn-danger" type="button" data-service-action="revoke" data-service-id="' + escapeHtml(selected.currentPinId) + '"' + (selected.canRevoke ? '' : ' disabled') + '>' + escapeHtml(uiText('services.revoke', 'Revoke')) + '</button>'
       + '</div></div>'
       + '<dl class="detail-fields">'
-      + '<div><dt>Current Pin</dt><dd>' + escapeHtml(selected.currentPinId) + '</dd></div>'
-      + '<div><dt>Source Pin</dt><dd>' + escapeHtml(selected.sourceServicePinId) + '</dd></div>'
-      + '<div><dt>Skill</dt><dd>' + escapeHtml(selected.skillLabel) + '</dd></div>'
-      + '<div><dt>Price</dt><dd>' + escapeHtml(selected.priceLabel) + '</dd></div>'
+      + '<div><dt>' + escapeHtml(uiText('services.currentPin', 'Current Pin')) + '</dt><dd>' + escapeHtml(selected.currentPinId) + '</dd></div>'
+      + '<div><dt>' + escapeHtml(uiText('services.sourcePin', 'Source Pin')) + '</dt><dd>' + escapeHtml(selected.sourceServicePinId) + '</dd></div>'
+      + '<div><dt>' + escapeHtml(uiText('services.skill', 'Skill')) + '</dt><dd>' + escapeHtml(selected.skillLabel) + '</dd></div>'
+      + '<div><dt>' + escapeHtml(uiText('services.price', 'Price')) + '</dt><dd>' + escapeHtml(selected.priceLabel) + '</dd></div>'
       + '</dl></div>';
 
     if (!model.orders.length) {
-      elements.detailModalBody.innerHTML = summaryHtml + '<div class="ledger-empty"><strong>' + escapeHtml(model.orderEmptyState.title) + '</strong><p>' + escapeHtml(model.orderEmptyState.message) + '</p></div>';
+      elements.detailModalBody.innerHTML = summaryHtml + '<div class="ledger-empty"><strong>' + escapeHtml(uiText('services.noClosedOrdersTitle', model.orderEmptyState.title)) + '</strong><p>' + escapeHtml(uiText('services.noClosedOrdersMessage', model.orderEmptyState.message)) + '</p></div>';
       return;
     }
     const ordersHtml = model.orders.map((order) => (
       '<article class="order-row">'
-      + '<div><strong>' + escapeHtml(order.statusLabel) + '</strong><p>' + escapeHtml(order.buyerLabel) + '</p><p class="mono-text">' + escapeHtml(order.timeLabel) + '</p></div>'
-      + '<div><span>Payment</span><p class="mono-text">' + escapeHtml(order.paymentLabel) + '</p><p class="mono-text">' + escapeHtml(order.orderTxid) + '</p></div>'
-      + '<div><span>Rating</span><p>' + escapeHtml(order.ratingLabel) + '</p>' + (order.ratingComment ? '<p>' + escapeHtml(order.ratingComment) + '</p>' : '') + (order.ratingPinId ? '<p class="mono-text">' + escapeHtml(order.ratingPinId) + '</p>' : '') + '</div>'
-      + '<div><span>Runtime</span><p class="mono-text">' + escapeHtml(order.runtimeLabel) + '</p><p class="mono-text">' + escapeHtml(order.sessionLabel) + '</p></div>'
+      + '<div><strong>' + escapeHtml(localizeKnownText(order.statusLabel)) + '</strong><p>' + escapeHtml(localizeKnownText(order.buyerLabel)) + '</p><p class="mono-text">' + escapeHtml(order.timeLabel) + '</p></div>'
+      + '<div><span>' + escapeHtml(uiText('services.payment', 'Payment')) + '</span><p class="mono-text">' + escapeHtml(localizeKnownText(order.paymentLabel)) + '</p><p class="mono-text">' + escapeHtml(order.orderTxid) + '</p></div>'
+      + '<div><span>' + escapeHtml(uiText('services.rating', 'Rating')) + '</span><p>' + escapeHtml(localizeKnownText(order.ratingLabel)) + '</p>' + (order.ratingComment ? '<p>' + escapeHtml(order.ratingComment) + '</p>' : '') + (order.ratingPinId ? '<p class="mono-text">' + escapeHtml(order.ratingPinId) + '</p>' : '') + '</div>'
+      + '<div><span>' + escapeHtml(uiText('services.runtime', 'Runtime')) + '</span><p class="mono-text">' + escapeHtml(localizeKnownText(order.runtimeLabel)) + '</p><p class="mono-text">' + escapeHtml(localizeKnownText(order.sessionLabel)) + '</p></div>'
       + '<div class="order-actions">'
-      + '<a class="btn btn-sm" href="' + escapeHtml(order.traceHref) + '">' + escapeHtml(ORDER_TRACE_ACTION_LABEL) + '</a>'
-      + (order.sessionHref ? '<a class="btn btn-sm" href="' + escapeHtml(order.sessionHref) + '">' + escapeHtml(ORDER_SESSION_ACTION_LABEL) + '</a>' : '')
+      + '<a class="btn btn-sm" href="' + escapeHtml(order.traceHref) + '">' + escapeHtml(uiText(ORDER_TRACE_ACTION_KEY, ORDER_TRACE_ACTION_LABEL)) + '</a>'
+      + (order.sessionHref ? '<a class="btn btn-sm" href="' + escapeHtml(order.sessionHref) + '">' + escapeHtml(uiText(ORDER_SESSION_ACTION_KEY, ORDER_SESSION_ACTION_LABEL)) + '</a>' : '')
       + '</div>'
       + '</article>'
     )).join('');
@@ -525,7 +590,7 @@ function buildMyServicesPageDefinition(options = {}) {
     const selectedBotSlug = state.selectedBotSlug;
     state.error = null;
     if (!selectedBotSlug) {
-      throw new Error('No local Bot profile is available for Services.');
+      throw new Error(uiText('services.noLocalBotAvailable', 'No local Bot profile is available for Services.'));
     }
     const isStaleLoad = () => loadToken !== state.servicesLoadToken || state.selectedBotSlug !== selectedBotSlug;
     const fetchServicesPage = () => fetchJson('/api/services/owned?from=' + encodeURIComponent(selectedBotSlug) + '&page=' + encodeURIComponent(String(state.servicesPageNumber)) + '&pageSize=' + encodeURIComponent(String(state.servicesPageSize)) + '&refresh=' + (refresh ? 'true' : 'false'));
@@ -581,13 +646,13 @@ function buildMyServicesPageDefinition(options = {}) {
 
   const validateEditPayload = (payload) => {
     if (payload.paymentTiming !== 'free' && payload.paymentTiming !== 'prepaid') {
-      return 'Payment timing must be free or prepaid.';
+      return uiText('services.paymentTimingInvalid', 'Payment timing must be free or prepaid.');
     }
     if (!/^\\d+(?:\\.\\d+)?$/u.test(payload.price) || !Number.isFinite(Number(payload.price)) || Number(payload.price) < 0) {
-      return 'Price must be a non-negative decimal number.';
+      return uiText('services.priceInvalid', 'Price must be a non-negative decimal number.');
     }
     if (payload.paymentTiming === 'prepaid' && Number(payload.price) <= 0) {
-      return 'Prepaid service price must be greater than zero.';
+      return uiText('services.prepaidPriceInvalid', 'Prepaid service price must be greater than zero.');
     }
     return '';
   };
@@ -595,7 +660,7 @@ function buildMyServicesPageDefinition(options = {}) {
   const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Cover image could not be read.'));
+    reader.onerror = () => reject(new Error(uiText('services.coverReadFailed', 'Cover image could not be read.')));
     reader.readAsDataURL(file);
   });
 
@@ -648,10 +713,10 @@ function buildMyServicesPageDefinition(options = {}) {
     state.editSelectedProviderSkillValues = normalizedSelected;
 
     if (!normalizedOptions.length) {
-      elements.editProviderSkillSelect.innerHTML = '<option value="">No primary runtime skills available</option>';
+      elements.editProviderSkillSelect.innerHTML = '<option value="">' + escapeHtml(uiText('services.noRuntimeSkills', 'No primary runtime skills available')) + '</option>';
       elements.editProviderSkillSelect.disabled = true;
       elements.editProviderSkillAdd.disabled = true;
-      elements.editProviderSkillChips.innerHTML = '<p class="field-hint">No primary runtime skills available.</p>';
+      elements.editProviderSkillChips.innerHTML = '<p class="field-hint">' + escapeHtml(uiText('services.noRuntimeSkillsSentence', 'No primary runtime skills available.')) + '</p>';
       return;
     }
 
@@ -660,7 +725,7 @@ function buildMyServicesPageDefinition(options = {}) {
     if (!addableOptions.some((option) => option.value === state.editCandidateProviderSkillValue)) {
       state.editCandidateProviderSkillValue = '';
     }
-    elements.editProviderSkillSelect.innerHTML = '<option value="">Select a skill to add</option>' + addableOptions.map((option) => (
+    elements.editProviderSkillSelect.innerHTML = '<option value="">' + escapeHtml(uiText('services.selectSkillToAdd', 'Select a skill to add')) + '</option>' + addableOptions.map((option) => (
       '<option value="' + escapeHtml(option.value) + '">' + escapeHtml(option.label) + '</option>'
     )).join('');
     elements.editProviderSkillSelect.value = state.editCandidateProviderSkillValue;
@@ -672,10 +737,10 @@ function buildMyServicesPageDefinition(options = {}) {
           const option = optionByValue.get(value) || { value, label: value };
           return '<span class="skill-chip">'
             + '<span title="' + escapeHtml(option.value) + '">' + escapeHtml(option.label) + '</span>'
-            + '<button type="button" aria-label="Remove ' + escapeHtml(option.value) + '" title="Remove" data-edit-provider-skill-remove="' + escapeHtml(option.value) + '">x</button>'
+            + '<button type="button" aria-label="' + escapeHtml(uiText('services.remove', 'Remove') + ' ' + option.value) + '" title="' + escapeHtml(uiText('services.remove', 'Remove')) + '" data-edit-provider-skill-remove="' + escapeHtml(option.value) + '">x</button>'
             + '</span>';
         }).join('')
-      : '<p class="field-hint">No skill selected.</p>';
+      : '<p class="field-hint">' + escapeHtml(uiText('services.noSkillSelected', 'No skill selected.')) + '</p>';
   };
 
   const selectedEditPaymentTiming = () => {
@@ -761,8 +826,8 @@ function buildMyServicesPageDefinition(options = {}) {
     const service = findModelService(model, serviceId);
     if (elements.revokeCopy) {
       elements.revokeCopy.textContent = service
-        ? 'Revoke ' + service.title + ' at ' + service.currentPinId + '.'
-        : 'This will broadcast a MetaID revoke operation.';
+        ? uiText('services.revokeSpecificCopy', 'Revoke {title} at {pinId}.', { title: service.title, pinId: service.currentPinId })
+        : uiText('services.revokeDefaultCopy', 'This will broadcast a MetaID revoke operation.');
     }
     if (elements.revokeModal) elements.revokeModal.hidden = false;
   };
@@ -954,7 +1019,7 @@ function buildMyServicesPageDefinition(options = {}) {
     const copyValue = target.getAttribute('data-copy-value');
     if (copyValue) {
       await navigator.clipboard?.writeText(copyValue).catch(() => undefined);
-      target.textContent = 'Copied';
+      target.textContent = uiText('services.copied', 'Copied');
       return;
     }
     const action = target.getAttribute('data-service-action') || target.getAttribute('data-service-title-action');
@@ -999,7 +1064,7 @@ function buildMyServicesPageDefinition(options = {}) {
       const file = elements.editCoverInput.files && elements.editCoverInput.files[0];
       if (!file) return;
       if (!ICON_MIME_TYPES.has(file.type) || file.size > ICON_MAX_BYTES) {
-        if (elements.editCoverNote) elements.editCoverNote.textContent = 'Cover image must be a supported image of 2MB or less.';
+        if (elements.editCoverNote) elements.editCoverNote.textContent = uiText('services.coverImageInvalid', 'Cover image must be a supported image of 2MB or less.');
         elements.editCoverInput.value = '';
         return;
       }
@@ -1021,6 +1086,9 @@ function buildMyServicesPageDefinition(options = {}) {
   }
   if (elements.revokeConfirm) {
     elements.revokeConfirm.addEventListener('click', confirmRevoke);
+  }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('oac:i18n-changed', () => render());
   }
 
   initialize().catch(setError);

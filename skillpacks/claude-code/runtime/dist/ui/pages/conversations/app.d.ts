@@ -1,2 +1,3 @@
 import type { LocalUiPageDefinition } from '../types';
-export declare function buildConversationsPageDefinition(): LocalUiPageDefinition;
+import type { LocalUiI18nContext } from '../../i18n';
+export declare function buildConversationsPageDefinition(i18n?: LocalUiI18nContext): LocalUiPageDefinition;

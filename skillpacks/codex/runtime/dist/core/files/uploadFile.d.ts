@@ -13,6 +13,15 @@ export interface UploadLocalFileToChainResult {
     metafileUri: string;
     globalMetaId: string;
 }
+export interface UploadFileBufferToChainResult extends UploadLocalFileToChainResult {
+}
+export declare function uploadFileBufferToChain(input: {
+    fileName: string;
+    data: Buffer;
+    contentType?: string;
+    network?: string;
+    signer: Signer;
+}): Promise<UploadFileBufferToChainResult>;
 export declare function uploadLocalFileToChain(input: {
     filePath: string;
     contentType?: string;

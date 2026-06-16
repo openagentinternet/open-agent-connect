@@ -24,6 +24,7 @@ const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
 const llmTypes_1 = require("../core/llm/llmTypes");
 const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
+const metabotHomepage_1 = require("../core/bot/metabotHomepage");
 const publishService_1 = require("../core/services/publishService");
 const servicePublishChain_1 = require("../core/services/servicePublishChain");
 const myServices_1 = require("../core/services/myServices");
@@ -112,6 +113,17 @@ const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
+}
+function decodeRequiredBase64(value) {
+    const base64 = normalizeText(value);
+    if (!base64) {
+        throw new Error('Homepage upload requires base64 file data.');
+    }
+    const buffer = Buffer.from(base64, 'base64');
+    if (!buffer.length || buffer.toString('base64').replace(/=+$/u, '') !== base64.replace(/=+$/u, '')) {
+        throw new Error('Homepage upload base64 file data is invalid.');
+    }
+    return buffer;
 }
 function readErrorCode(error, fallback) {
     const code = error instanceof Error ? error.code : undefined;
@@ -750,6 +762,9 @@ function buildMetabotUpdateInput(input) {
     if (hasOwnField(input, 'allowChatSkills')) {
         update.allowChatSkills = (0, chatSkillPolicy_1.normalizeAllowChatSkills)(input.allowChatSkills);
     }
+    if (hasOwnField(input, 'homepage')) {
+        update.homepage = (0, metabotHomepage_1.normalizeMetabotHomepage)(input.homepage);
+    }
     return update;
 }
 function buildMetabotCreateInput(input) {
@@ -933,10 +948,14 @@ function calculateMetabotChangedFields(current, update) {
         && !sameStringArray(update.allowChatSkills, current.allowChatSkills)) {
         changedFields.push('allowChatSkills');
     }
+    if (update.homepage !== undefined
+        && !(0, metabotHomepage_1.sameMetabotHomepage)(update.homepage, current.homepage)) {
+        changedFields.push('homepage');
+    }
     return changedFields;
 }
 function buildMetabotChainProfile(current, update) {
-    return {
+    const profile = {
         ...current,
         name: update.name ?? current.name,
         bio: update.bio ?? current.bio,
@@ -950,6 +969,15 @@ function buildMetabotChainProfile(current, update) {
         fallbackProvider: update.fallbackProvider !== undefined ? update.fallbackProvider : (current.fallbackProvider ?? null),
         allowChatSkills: update.allowChatSkills !== undefined ? update.allowChatSkills : current.allowChatSkills,
     };
+    if (update.homepage !== undefined) {
+        if (update.homepage === null) {
+            delete profile.homepage;
+        }
+        else {
+            profile.homepage = update.homepage;
+        }
+    }
+    return profile;
 }
 async function validateMetabotProviderAvailability(profile, update) {
     const requestedProviders = [];
@@ -12327,6 +12355,32 @@ function createDefaultMetabotDaemonHandlers(input) {
                         return (0, commandResult_1.commandFailed)('profile_not_found', message);
                     }
                     return (0, commandResult_1.commandFailed)('metabot_profile_update_failed', message);
+                }
+            },
+            uploadHomepageFile: async (body) => {
+                const slug = normalizeText(body.slug);
+                const current = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!current) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${slug || '<missing>'}`);
+                }
+                if (!current.globalMetaId) {
+                    return (0, commandResult_1.commandFailed)('chain_identity_missing', 'This MetaBot has no chained identity yet, so homepage files cannot be uploaded safely.');
+                }
+                try {
+                    const network = await resolveFileUploadNetworkForHome(body.network, current.homeDir);
+                    const data = decodeRequiredBase64(body.base64);
+                    const profileSigner = createSignerForProfileHome(current.homeDir);
+                    const result = await (0, uploadFile_1.uploadFileBufferToChain)({
+                        fileName: normalizeText(body.fileName) || 'homepage-upload.bin',
+                        contentType: typeof body.contentType === 'string' ? body.contentType : undefined,
+                        network,
+                        data,
+                        signer: profileSigner,
+                    });
+                    return (0, commandResult_1.commandSuccess)(result);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('homepage_upload_failed', error instanceof Error ? error.message : String(error));
                 }
             },
             getWallet: async ({ slug }) => {

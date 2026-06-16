@@ -61,6 +61,7 @@ function buildMetabotPaths(input) {
         privateChatStatePath: input.privateChatStatePath,
         chatStrategiesPath: input.chatStrategiesPath,
         chatSkillPolicyPath: input.chatSkillPolicyPath,
+        homepageStatePath: node_path_1.default.join(input.stateRoot, 'homepage.json'),
         bioMdPath: input.bioMdPath,
         soulMdPath: input.soulMdPath,
         goalMdPath: input.goalMdPath,

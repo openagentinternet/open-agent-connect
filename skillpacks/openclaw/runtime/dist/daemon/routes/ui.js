@@ -30,17 +30,17 @@ const PLATFORM_ASSET_CONTENT_TYPES = {
     '.jpeg': 'image/jpeg',
 };
 const PAGE_BUILDERS = {
-    'hub': app_1.buildHubPageDefinition,
-    'publish': app_3.buildPublishPageDefinition,
-    'my-services': app_2.buildMyServicesPageDefinition,
-    'trace': app_5.buildTracePageDefinition,
-    'refund': app_4.buildRefundPageDefinition,
-    'bot': app_6.buildBotPageDefinition,
+    'hub': () => (0, app_1.buildHubPageDefinition)(),
+    'publish': () => (0, app_3.buildPublishPageDefinition)(),
+    'my-services': (i18n) => (0, app_2.buildMyServicesPageDefinition)({ i18n }),
+    'trace': () => (0, app_5.buildTracePageDefinition)(),
+    'refund': () => (0, app_4.buildRefundPageDefinition)(),
+    'bot': () => (0, app_6.buildBotPageDefinition)(),
     'conversations': app_7.buildConversationsPageDefinition,
     'services': app_10.buildServicesPageDefinition,
     'settings': app_11.buildSettingsPageDefinition,
-    'loom': app_8.buildLoomPageDefinition,
-    'metaapps': app_9.buildMetaAppsPageDefinition,
+    'loom': () => (0, app_8.buildLoomPageDefinition)(),
+    'metaapps': () => (0, app_9.buildMetaAppsPageDefinition)(),
 };
 const NAV_ITEMS = [
     { page: 'bot', labelKey: 'nav.botPage' },
@@ -117,7 +117,7 @@ function buildPageDefinition(page, i18n) {
     if (!builder) {
         throw new Error(`Local UI page is not registered: ${page}`);
     }
-    return page === 'settings' ? (0, app_11.buildSettingsPageDefinition)(i18n) : builder();
+    return builder(i18n);
 }
 async function renderBuiltInPage(page, languagePreference) {
     const i18n = (0, i18n_1.createI18nContext)(languagePreference);

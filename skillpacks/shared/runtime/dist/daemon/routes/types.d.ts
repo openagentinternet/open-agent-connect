@@ -288,6 +288,9 @@ export interface MetabotDaemonHttpHandlers {
         updateProfile?: (input: {
             slug: string;
         } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        uploadHomepageFile?: (input: {
+            slug: string;
+        } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         getConfig?: (input: {
             slug: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;

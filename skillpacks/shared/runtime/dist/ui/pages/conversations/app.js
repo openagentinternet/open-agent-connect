@@ -1,21 +1,22 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildConversationsPageDefinition = buildConversationsPageDefinition;
+const i18n_1 = require("../../i18n");
 const viewModel_1 = require("./viewModel");
-function buildConversationsPageDefinition() {
+function buildConversationsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     const buildConversationsPageViewModelSource = (0, viewModel_1.buildConversationsPageViewModelRuntimeSource)();
     return {
         page: 'conversations',
-        title: 'Conversations — Open Agent Connect',
-        eyebrow: 'Provider Console',
-        heading: 'Conversations',
-        description: 'Review peer conversations from one local Bot perspective.',
+        title: i18n.t('conversations.title'),
+        eyebrow: i18n.t('conversations.eyebrow'),
+        heading: i18n.t('conversations.heading'),
+        description: i18n.t('conversations.description'),
         panels: [],
         contentHtml: `
       <section class="conversations-shell" data-conversations-shell>
         <aside class="conversation-sidebar" aria-label="Bot conversations">
           <div class="conversation-local-picker">
-            <label id="local-bot-picker-label">Local Bot</label>
+            <label id="local-bot-picker-label" data-i18n-key="conversations.localBot">${i18n.t('conversations.localBot')}</label>
             <div class="local-bot-picker" data-local-bot-picker>
               <button class="local-bot-trigger" type="button" data-local-bot-trigger aria-labelledby="local-bot-picker-label" aria-haspopup="listbox" aria-expanded="false">
                 <span class="local-bot-current" data-local-bot-current></span>
@@ -26,22 +27,22 @@ function buildConversationsPageDefinition() {
           </div>
           <div class="conversation-section-header">
             <div>
-              <h1>Conversations</h1>
-              <p data-conversations-status>Loading conversations...</p>
+              <h1 data-i18n-key="conversations.titleShort">${i18n.t('conversations.titleShort')}</h1>
+              <p data-conversations-status data-i18n-key="conversations.loading">${i18n.t('conversations.loading')}</p>
             </div>
-            <button class="btn btn-sm" type="button" data-conversations-refresh>Refresh</button>
+            <button class="btn btn-sm" type="button" data-conversations-refresh data-i18n-key="conversations.refresh">${i18n.t('conversations.refresh')}</button>
           </div>
           <div class="conversation-list" data-conversation-list></div>
         </aside>
         <section class="conversation-thread" data-conversation-detail aria-label="Conversation thread">
           <header class="conversation-thread-header" data-conversation-detail-header>
             <div>
-              <h2>Select a conversation</h2>
-              <span>Choose a remote Bot</span>
+              <h2 data-i18n-key="conversations.selectConversation">${i18n.t('conversations.selectConversation')}</h2>
+              <span data-i18n-key="conversations.chooseRemoteBot">${i18n.t('conversations.chooseRemoteBot')}</span>
             </div>
           </header>
           <div class="conversation-messages" data-conversation-messages></div>
-          <div class="conversation-readonly-status" data-conversation-readonly-status>Agent-to-agent conversation · Human replies are disabled</div>
+          <div class="conversation-readonly-status" data-conversation-readonly-status data-i18n-key="conversations.readonlyStatus">${i18n.t('conversations.readonlyStatus')}</div>
         </section>
       </section>
     `,
@@ -66,6 +67,74 @@ function buildConversationsPageDefinition() {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+  const formatText = (template, replacements) => Object.keys(replacements || {}).reduce(
+    (text, name) => text.split('{' + name + '}').join(String(replacements[name])),
+    String(template == null ? '' : template)
+  );
+  const uiText = (key, fallback, replacements) => {
+    try {
+      if (typeof window !== 'undefined' && window.__oacLocalUiI18n && typeof window.__oacLocalUiI18n.t === 'function') {
+        const translated = window.__oacLocalUiI18n.t(key, replacements || {});
+        if (translated && translated !== key) return translated;
+      }
+    } catch {}
+    return formatText(fallback, replacements || {});
+  };
+  const localizeKnownText = (value) => {
+    const text = String(value == null ? '' : value);
+    const keys = {
+      Chat: 'conversations.chat',
+      Service: 'conversations.service',
+      Bot: 'conversations.bot',
+      Peer: 'conversations.peer',
+      'Local Bot': 'conversations.localBotRole',
+      'Remote Bot': 'conversations.remoteBotRole',
+      Unknown: 'conversations.unknown',
+      'Unknown peer': 'conversations.unknownPeer',
+      Active: 'conversations.active',
+    };
+    const key = keys[text];
+    return key ? uiText(key, text) : text;
+  };
+  const conversationCountLabel = (count) => {
+    const numeric = Math.max(0, Math.trunc(Number(count) || 0));
+    const noun = numeric === 1
+      ? uiText('conversations.conversationOne', 'conversation')
+      : uiText('conversations.conversationMany', 'conversations');
+    return numeric + ' ' + noun;
+  };
+  const messageCountLabel = (label) => {
+    const match = String(label || '').match(/^(\\d+) messages?$/u);
+    if (!match) return localizeKnownText(label);
+    const numeric = Number(match[1]);
+    const noun = numeric === 1
+      ? uiText('conversations.messageOne', 'message')
+      : uiText('conversations.messageMany', 'messages');
+    return numeric + ' ' + noun;
+  };
+  const localizeEmptyState = (emptyState) => {
+    const title = String(emptyState && emptyState.title || '');
+    const message = String(emptyState && emptyState.message || '');
+    if (title === 'No conversations yet') {
+      return {
+        title: uiText('conversations.noConversationsTitle', title),
+        message: uiText('conversations.noConversationsMessage', message),
+      };
+    }
+    if (title === 'No messages yet') {
+      return {
+        title: uiText('conversations.noMessagesTitle', title),
+        message: uiText('conversations.noMessagesMessage', message),
+      };
+    }
+    if (title === 'Select a conversation') {
+      return {
+        title: uiText('conversations.selectConversation', title),
+        message: uiText('conversations.detailChooseMessage', message),
+      };
+    }
+    return { title, message };
+  };
   const query = new URLSearchParams(window.location.search);
   const state = {
     localBots: [],
@@ -187,7 +256,7 @@ function buildConversationsPageDefinition() {
     const response = await fetch(url, { cache: 'no-store', ...(options || {}) });
     const payload = await response.json();
     if (!payload || payload.ok !== true) {
-      throw new Error((payload && payload.message) || 'Request failed.');
+      throw new Error((payload && payload.message) || uiText('conversations.requestFailed', 'Request failed.'));
     }
     return payload.data || payload;
   };
@@ -234,7 +303,7 @@ function buildConversationsPageDefinition() {
     const selected = model.localBots.find((bot) => bot.isSelected) || model.localBots[0] || null;
     elements.localBotCurrent.innerHTML = selected
       ? avatarImg(selected.avatar, selected.label, 'avatar') + '<span>' + escapeHtml(selected.label) + '</span>'
-      : '<span>No local Bot</span>';
+      : '<span>' + escapeHtml(uiText('conversations.noLocalBot', 'No local Bot')) + '</span>';
     elements.localBotTrigger.disabled = model.localBots.length === 0;
     elements.localBotMenu.innerHTML = model.localBots.map((bot) => (
       '<button type="button" class="local-bot-option" role="option" data-local-bot-option="' + escapeHtml(bot.globalMetaId) + '" data-selected="' + (bot.isSelected ? 'true' : 'false') + '" aria-selected="' + (bot.isSelected ? 'true' : 'false') + '">' +
@@ -251,7 +320,8 @@ function buildConversationsPageDefinition() {
   };
   const renderEmpty = (target, emptyState) => {
     if (!target) return;
-    target.innerHTML = '<div class="conversation-empty"><strong>' + escapeHtml(emptyState.title) + '</strong><p>' + escapeHtml(emptyState.message) + '</p></div>';
+    const localized = localizeEmptyState(emptyState);
+    target.innerHTML = '<div class="conversation-empty"><strong>' + escapeHtml(localized.title) + '</strong><p>' + escapeHtml(localized.message) + '</p></div>';
   };
   const renderList = (model) => {
     if (!elements.list) return;
@@ -270,9 +340,9 @@ function buildConversationsPageDefinition() {
         '<div class="conversation-row-main">' +
           '<div class="conversation-row-identity"><strong>' + escapeHtml(conversation.peerLabel) + '</strong></div>' +
           '<p>' + escapeHtml(conversation.latestText) + '</p>' +
-          '<div class="conversation-kind-list">' + conversation.kinds.map((kind) => '<span>' + escapeHtml(kind) + '</span>').join('') + '</div>' +
+          '<div class="conversation-kind-list">' + conversation.kinds.map((kind) => '<span>' + escapeHtml(localizeKnownText(kind)) + '</span>').join('') + '</div>' +
         '</div>' +
-        '<div class="conversation-row-meta"><span>' + escapeHtml(conversation.latestAtLabel) + '</span><span>' + escapeHtml(conversation.messageCountLabel) + '</span></div>';
+        '<div class="conversation-row-meta"><span>' + escapeHtml(conversation.latestAtLabel) + '</span><span>' + escapeHtml(messageCountLabel(conversation.messageCountLabel)) + '</span></div>';
       button.addEventListener('click', () => selectPeer(conversation.peerGlobalMetaId));
       elements.list.appendChild(button);
     });
@@ -300,11 +370,11 @@ function buildConversationsPageDefinition() {
   };
   const renderPlainText = (content) => {
     const text = String(content || '');
-    return text ? '<p>' + escapeHtml(text).replace(/\\r\\n?|\\n/gu, '<br>') + '</p>' : '<span class="muted">(empty)</span>';
+    return text ? '<p>' + escapeHtml(text).replace(/\\r\\n?|\\n/gu, '<br>') + '</p>' : '<span class="muted">' + escapeHtml(uiText('conversations.empty', '(empty)')) + '</span>';
   };
   const renderMarkdown = (content) => {
     const source = String(content || '').replace(/\\r\\n?/gu, '\\n');
-    if (!source.trim()) return '<span class="muted">(empty)</span>';
+    if (!source.trim()) return '<span class="muted">' + escapeHtml(uiText('conversations.empty', '(empty)')) + '</span>';
     const lines = source.split('\\n');
     const html = [];
     let paragraph = [];
@@ -371,7 +441,7 @@ function buildConversationsPageDefinition() {
     '<path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z" />' +
   '</svg>';
   const copyButton = (value, label, cls, toastMessage, extraAttrs) => value
-    ? '<button type="button" class="copy-action ' + escapeHtml(cls || '') + '"' + (extraAttrs || '') + ' data-copy-text="' + escapeHtml(value) + '" data-copy-toast-message="' + escapeHtml(toastMessage || '已复制') + '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '">' + copyIconSvg() + '</button>'
+    ? '<button type="button" class="copy-action ' + escapeHtml(cls || '') + '"' + (extraAttrs || '') + ' data-copy-text="' + escapeHtml(value) + '" data-copy-toast-message="' + escapeHtml(toastMessage || uiText('conversations.copied', 'Copied')) + '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '">' + copyIconSvg() + '</button>'
     : '';
   const showToast = (message) => {
     if (!elements.toast) return;
@@ -405,7 +475,7 @@ function buildConversationsPageDefinition() {
   };
   const copyTextToClipboard = async (value, toastMessage) => {
     if (!value) {
-      showToast('复制不可用');
+      showToast(uiText('conversations.copyUnavailable', 'Copy unavailable'));
       return;
     }
     let copied = false;
@@ -418,31 +488,31 @@ function buildConversationsPageDefinition() {
       }
     }
     if (!copied) copied = copyTextFallback(value);
-    showToast(copied ? toastMessage || '已复制' : '复制不可用');
+    showToast(copied ? toastMessage || uiText('conversations.copied', 'Copied') : uiText('conversations.copyUnavailable', 'Copy unavailable'));
   };
 
   const renderThreadHeader = (model) => {
     const selected = model.selectedConversation;
     if (!elements.detailHeader) return;
     if (!selected) {
-      elements.detailHeader.innerHTML = '<div><h2>Select a conversation</h2><span>Choose a remote Bot</span></div>';
+      elements.detailHeader.innerHTML = '<div><h2>' + escapeHtml(uiText('conversations.selectConversation', 'Select a conversation')) + '</h2><span>' + escapeHtml(uiText('conversations.chooseRemoteBot', 'Choose a remote Bot')) + '</span></div>';
       return;
     }
     const local = model.localBots.find((bot) => bot.globalMetaId === model.selectedLocalGlobalMetaId) || null;
-    const localLabel = selected.localBotLabel || (local && local.label) || 'Local Bot';
+    const localLabel = selected.localBotLabel || (local && local.label) || uiText('conversations.localBotRole', 'Local Bot');
     const localAvatar = (local && local.avatar) || selected.localAvatar;
     elements.detailHeader.innerHTML = '<div class="conversation-thread-participants">' +
-      '<div class="thread-participant">' + avatarImg(selected.peerAvatar, selected.peerLabel, 'thread-avatar') + '<div><strong>' + escapeHtml(selected.peerLabel) + '</strong><span>Remote Bot</span></div></div>' +
-      '<span class="conversation-id-chip"><span class="conversation-id-text">id: ' + escapeHtml(selected.conversationIdPreview || selected.conversationId) + '</span>' + copyButton(selected.conversationId, 'Copy conversation id', 'copy-conversation-id', '会话 ID 已复制', ' data-conversation-id-copy') + '</span>' +
-      '<div class="thread-participant thread-participant-local"><div><strong>' + escapeHtml(localLabel) + '</strong><span>Local Bot</span></div>' + avatarImg(localAvatar, localLabel, 'thread-avatar') + '</div>' +
+      '<div class="thread-participant">' + avatarImg(selected.peerAvatar, selected.peerLabel, 'thread-avatar') + '<div><strong>' + escapeHtml(selected.peerLabel) + '</strong><span>' + escapeHtml(uiText('conversations.remoteBotRole', 'Remote Bot')) + '</span></div></div>' +
+      '<span class="conversation-id-chip"><span class="conversation-id-text">id: ' + escapeHtml(selected.conversationIdPreview || selected.conversationId) + '</span>' + copyButton(selected.conversationId, uiText('conversations.copyConversationId', 'Copy conversation id'), 'copy-conversation-id', uiText('conversations.conversationIdCopied', 'Conversation ID copied'), ' data-conversation-id-copy') + '</span>' +
+      '<div class="thread-participant thread-participant-local"><div><strong>' + escapeHtml(localLabel) + '</strong><span>' + escapeHtml(uiText('conversations.localBotRole', 'Local Bot')) + '</span></div>' + avatarImg(localAvatar, localLabel, 'thread-avatar') + '</div>' +
     '</div>';
   };
   const renderMessage = (message, selected, model) => {
     const isLocal = message.directionLabel === 'Bot' || message.direction === 'outgoing' || message.direction === 'outbound';
     const local = model.localBots.find((bot) => bot.globalMetaId === model.selectedLocalGlobalMetaId) || null;
     const fallbackName = isLocal
-      ? selected.localBotLabel || (local && local.label) || 'Local Bot'
-      : selected.peerLabel || 'Remote Bot';
+      ? selected.localBotLabel || (local && local.label) || uiText('conversations.localBotRole', 'Local Bot')
+      : selected.peerLabel || uiText('conversations.remoteBotRole', 'Remote Bot');
     const fallbackAvatar = isLocal
       ? (local && local.avatar) || selected.localAvatar
       : selected.peerAvatar;
@@ -450,7 +520,7 @@ function buildConversationsPageDefinition() {
     const senderAvatar = message.senderAvatar || fallbackAvatar;
     const contentHtml = message.isMarkdown ? renderMarkdown(message.content) : renderPlainText(message.content);
     const txidHtml = message.txid
-      ? '<span class="msg-txid"><span class="msg-txid-text" data-message-txid-preview>txid: ' + escapeHtml(message.txidPreview) + '</span>' + copyButton(message.txid, 'Copy txid', 'copy-txid', 'TxID 已复制') + '</span>'
+      ? '<span class="msg-txid"><span class="msg-txid-text" data-message-txid-preview>txid: ' + escapeHtml(message.txidPreview) + '</span>' + copyButton(message.txid, uiText('conversations.copyTxid', 'Copy txid'), 'copy-txid', uiText('conversations.txidCopied', 'TxID copied')) + '</span>'
       : '<span class="msg-txid msg-txid-empty">txid: -</span>';
     const timeHtml = '<span class="msg-time">' + escapeHtml(message.timestampLabel) + '</span>';
     const metaHtml = isLocal ? txidHtml + timeHtml : timeHtml + txidHtml;
@@ -469,7 +539,7 @@ function buildConversationsPageDefinition() {
     if (!elements.messages) return;
     elements.messages.innerHTML = '';
     if (state.loadingMessages && !state.messages.length) {
-      elements.messages.innerHTML = '<div class="conversation-empty"><strong>Loading messages...</strong></div>';
+      elements.messages.innerHTML = '<div class="conversation-empty"><strong>' + escapeHtml(uiText('conversations.loadingMessages', 'Loading messages...')) + '</strong></div>';
       return;
     }
     if (!selected || !model.messages.length) {
@@ -480,7 +550,9 @@ function buildConversationsPageDefinition() {
       const older = document.createElement('button');
       older.type = 'button';
       older.className = 'btn btn-sm conversation-load-older';
-      older.textContent = state.loadingOlder ? 'Loading older...' : 'Load older';
+      older.textContent = state.loadingOlder
+        ? uiText('conversations.loadingOlder', 'Loading older...')
+        : uiText('conversations.loadOlder', 'Load older');
       older.disabled = state.loadingOlder;
       older.addEventListener('click', () => loadMessages({ appendOlder: true }));
       elements.messages.appendChild(older);
@@ -492,7 +564,7 @@ function buildConversationsPageDefinition() {
   const render = () => {
     const model = buildModel();
     if (elements.status) {
-      elements.status.textContent = state.error || (state.loading ? 'Loading conversations...' : model.conversations.length + ' conversation' + (model.conversations.length === 1 ? '' : 's'));
+      elements.status.textContent = state.error || (state.loading ? uiText('conversations.loading', 'Loading conversations...') : conversationCountLabel(model.conversations.length));
     }
     renderLocalBots(model);
     renderList(model);
@@ -531,7 +603,7 @@ function buildConversationsPageDefinition() {
       state.beforeCursor = pagination.beforeCursor || readBeforeCursor(state.messages);
       state.hasMoreBefore = pagination.hasMoreBefore === true;
     } catch (error) {
-      state.error = error.message || 'Conversation messages failed to load.';
+      state.error = error.message || uiText('conversations.messagesLoadFailed', 'Conversation messages failed to load.');
       if (!appendOlder) state.messages = [];
     } finally {
       state.loadingMessages = false;
@@ -576,7 +648,7 @@ function buildConversationsPageDefinition() {
         stickToBottom: stickToBottom || !preserveMessageScroll,
       });
     } catch (error) {
-      state.error = error.message || 'Conversations failed to load.';
+      state.error = error.message || uiText('conversations.conversationsLoadFailed', 'Conversations failed to load.');
       state.conversations = [];
       state.messages = [];
       state.loading = false;
@@ -662,6 +734,7 @@ function buildConversationsPageDefinition() {
   window.addEventListener('beforeunload', () => {
     if (state.eventSource) state.eventSource.close();
   });
+  window.addEventListener('oac:i18n-changed', () => render());
 
   loadProfiles()
     .then(() => {
@@ -670,7 +743,7 @@ function buildConversationsPageDefinition() {
       return loadConversations({ stickToBottom: true });
     })
     .catch((error) => {
-      state.error = error.message || 'Profiles failed to load.';
+      state.error = error.message || uiText('conversations.profilesLoadFailed', 'Profiles failed to load.');
       render();
     });
 })();`,

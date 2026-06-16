@@ -116,6 +116,17 @@ const handleBotRoutes = async (context) => {
         context.sendJson(status, result);
         return true;
     }
+    const homepageUploadMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/homepage\/upload$/);
+    if (homepageUploadMatch && req.method === 'POST') {
+        const slug = normalizeSlug(homepageUploadMatch[1]);
+        const body = await context.readJsonBody();
+        const result = handlers.bot?.uploadHomepageFile
+            ? await handlers.bot.uploadHomepageFile({ ...body, slug })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'MetaBot homepage upload handler not configured.');
+        const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
+        context.sendJson(status, result);
+        return true;
+    }
     const profileMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)$/);
     if (profileMatch && req.method === 'GET') {
         const slug = normalizeSlug(profileMatch[1]);

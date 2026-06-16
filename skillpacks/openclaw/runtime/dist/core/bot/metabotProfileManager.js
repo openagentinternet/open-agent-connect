@@ -27,6 +27,7 @@ const llmBindingStore_1 = require("../llm/llmBindingStore");
 const llmRuntimeStore_1 = require("../llm/llmRuntimeStore");
 const fileSecretStore_1 = require("../secrets/fileSecretStore");
 const runtimeStateStore_1 = require("../state/runtimeStateStore");
+const metabotHomepage_1 = require("./metabotHomepage");
 const llmTypes_1 = require("../llm/llmTypes");
 const chatSkillPolicy_1 = require("../services/chatSkillPolicy");
 const avatarChainWrite_1 = require("../identity/avatarChainWrite");
@@ -34,7 +35,7 @@ const DEFAULT_ROLE = 'You are a helpful AI assistant.';
 const DEFAULT_SOUL = 'You are friendly and professional.';
 const DEFAULT_GOAL = 'Your goal is to help users accomplish their tasks effectively.';
 const CHAIN_SYNC_DELAY_MS = 3_000;
-const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills']);
+const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
 var avatarChainWrite_2 = require("../identity/avatarChainWrite");
 Object.defineProperty(exports, "validateAvatarDataUrl", { enumerable: true, get: function () { return avatarChainWrite_2.validateAvatarDataUrl; } });
 function normalizeText(value) {
@@ -232,7 +233,7 @@ async function readProfileProviderBindings(profile) {
 }
 async function buildMetabotProfileFull(profile) {
     const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
-    const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills] = await Promise.all([
+    const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage] = await Promise.all([
         readTextFile(paths.bioMdPath),
         readTextFile(paths.roleMdPath),
         readTextFile(paths.soulMdPath),
@@ -240,6 +241,7 @@ async function buildMetabotProfileFull(profile) {
         readTextFile(resolveAvatarPath(profile.homeDir)),
         readProfileProviderBindings(profile),
         readChatSkillPolicy(paths.chatSkillPolicyPath),
+        (0, metabotHomepage_1.readMetabotHomepage)(paths.homepageStatePath),
     ]);
     return {
         ...profile,
@@ -251,6 +253,7 @@ async function buildMetabotProfileFull(profile) {
         primaryProvider: providerBindings.primaryProvider,
         fallbackProvider: providerBindings.fallbackProvider,
         allowChatSkills,
+        ...(homepage ? { homepage } : {}),
     };
 }
 async function listMetabotProfiles(systemHomeDir) {
@@ -587,6 +590,9 @@ async function updateMetabotProfile(systemHomeDir, slug, input) {
     const allowChatSkills = input.allowChatSkills === undefined
         ? undefined
         : (0, chatSkillPolicy_1.normalizeAllowChatSkills)(input.allowChatSkills);
+    const homepage = input.homepage === undefined
+        ? undefined
+        : (0, metabotHomepage_1.normalizeMetabotHomepage)(input.homepage);
     const writeProviderBindings = await buildProviderBindingWrite({
         profile: current,
         primaryProvider: input.primaryProvider === undefined
@@ -634,6 +640,14 @@ async function updateMetabotProfile(systemHomeDir, slug, input) {
     if (allowChatSkills !== undefined) {
         await writeChatSkillPolicy(paths.chatSkillPolicyPath, allowChatSkills);
     }
+    if (homepage !== undefined) {
+        if (homepage === null) {
+            await removeFileIfExists(paths.homepageStatePath);
+        }
+        else {
+            await (0, metabotHomepage_1.writeMetabotHomepage)(paths.homepageStatePath, homepage);
+        }
+    }
     if (writeProviderBindings) {
         await writeProviderBindings();
     }
@@ -656,7 +670,7 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
             await sleep(delayMs);
         }
         results.push(await signer.writePin({
-            operation,
+            operation: input.operation ?? operation,
             path: input.path,
             encryption: '0',
             version: '1.0',
@@ -721,6 +735,23 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
                     fallbackProvider: profile.fallbackProvider ?? null,
                 }),
             });
+        }
+        if (changed.has('homepage')) {
+            if (profile.homepage) {
+                await writeProfileInfo({
+                    path: '/info/homepage',
+                    contentType: 'application/json',
+                    payload: (0, metabotHomepage_1.serializeMetabotHomepagePayload)(profile.homepage),
+                });
+            }
+            else {
+                await writeProfileInfo({
+                    operation: 'revoke',
+                    path: '/info/homepage',
+                    contentType: 'application/json',
+                    payload: '',
+                });
+            }
         }
     }
     return results;
