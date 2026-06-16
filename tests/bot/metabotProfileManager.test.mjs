@@ -624,7 +624,7 @@ test('syncMetabotInfoToChain writes homepage JSON to /info/homepage on MVC', asy
   assert.deepEqual(JSON.parse(calls[0].payload), homepage);
 });
 
-test('syncMetabotInfoToChain revokes /info/homepage when homepage is cleared', async () => {
+test('syncMetabotInfoToChain writes empty create to /info/homepage when homepage is cleared', async () => {
   const calls = [];
   const signer = {
     getIdentity: async () => ({}),
@@ -665,7 +665,7 @@ test('syncMetabotInfoToChain revokes /info/homepage when homepage is cleared', a
   }, ['homepage'], { delayMs: 0 });
 
   assert.equal(results.length, 1);
-  assert.equal(calls[0].operation, 'revoke');
+  assert.equal(calls[0].operation, 'create');
   assert.equal(calls[0].path, '/info/homepage');
   assert.equal(calls[0].payload, '');
   assert.equal(calls[0].network, 'mvc');

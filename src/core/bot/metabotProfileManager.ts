@@ -922,7 +922,6 @@ export async function syncMetabotInfoToChain(
         });
       } else {
         await writeProfileInfo({
-          operation: 'revoke',
           path: '/info/homepage',
           contentType: 'application/json',
           payload: '',
