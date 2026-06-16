@@ -142,7 +142,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ## Conventions
 
 - Commit once for every round of modifications.
-- For every commit, use the `metabot-post-buzz` skill to post a detailed development diary of that round's changes on-chain.
+- For every commit, use the `metabot-post-buzz` skill without an additional confirmation prompt to post a detailed development diary of that round's changes on-chain with the `eric` Bot slug.
 - All documentation, SKILL documents, and code comments must be written in English.
 - When spawning review or test subagents, default to model `gpt-5.5`.
 - Prefer small, frequent commits. Commit each independent, verifiable unit of work as soon as it is complete.
