@@ -546,7 +546,7 @@ test('syncMetabotInfoToChain writes persona fields to one JSON path', async () =
     '/info/chatSkills',
     '/info/LLM',
   ]);
-  assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify', 'modify']);
+  assert.deepEqual(calls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
   assert.deepEqual(calls.map((call) => call.contentType), [
     'text/plain',
     'application/json',
@@ -617,6 +617,7 @@ test('syncMetabotInfoToChain writes homepage JSON to /info/homepage on MVC', asy
 
   assert.equal(results.length, 1);
   assert.deepEqual(calls.map((call) => call.path), ['/info/homepage']);
+  assert.equal(calls[0].operation, 'create');
   assert.equal(calls[0].network, 'mvc');
   assert.equal(calls[0].contentType, 'application/json');
   assert.equal(calls[0].encoding, 'utf-8');
@@ -671,7 +672,7 @@ test('syncMetabotInfoToChain revokes /info/homepage when homepage is cleared', a
   assert.equal(calls[0].contentType, 'application/json');
 });
 
-test('syncMetabotInfoToChain preserves name and avatar writes while splitting profile info', async () => {
+test('syncMetabotInfoToChain keeps /info writes as create even when caller requests modify', async () => {
   const calls = [];
   const signer = {
     getIdentity: async () => ({}),
@@ -710,10 +711,10 @@ test('syncMetabotInfoToChain preserves name and avatar writes while splitting pr
     primaryProvider: 'claude-code',
     fallbackProvider: 'codex',
     allowChatSkills: ['metabot-help'],
-  }, ['name', 'avatar', 'role', 'primaryProvider'], { delayMs: 0 });
+  }, ['name', 'avatar', 'role', 'primaryProvider'], { delayMs: 0, operation: 'modify' });
 
   assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/persona', '/info/LLM']);
-  assert.deepEqual(calls.map((call) => call.operation), ['modify', 'modify', 'modify', 'modify']);
+  assert.deepEqual(calls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
   assert.equal(calls[0].contentType, 'text/plain');
   assert.equal(calls[0].payload, 'Alice');
   assert.equal(calls[0].encoding, 'utf-8');

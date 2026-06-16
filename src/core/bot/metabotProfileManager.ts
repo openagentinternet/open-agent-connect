@@ -829,7 +829,7 @@ export async function syncMetabotInfoToChain(
   }
 
   const delayMs = options.delayMs ?? CHAIN_SYNC_DELAY_MS;
-  const operation = options.operation ?? 'modify';
+  const infoOperation = 'create';
   const changed = new Set(changedFields);
   const results: ChainWriteResult[] = [];
 
@@ -844,7 +844,7 @@ export async function syncMetabotInfoToChain(
       await sleep(delayMs);
     }
     results.push(await signer.writePin({
-      operation: input.operation ?? operation,
+      operation: input.operation ?? infoOperation,
       path: input.path,
       encryption: '0',
       version: '1.0',
@@ -868,7 +868,7 @@ export async function syncMetabotInfoToChain(
       await sleep(delayMs);
     }
     results.push(await signer.writePin(buildAvatarChainWriteRequest({
-      operation,
+      operation: infoOperation,
       avatarDataUrl: profile.avatarDataUrl ?? '',
       network: 'mvc',
     })));
