@@ -2253,7 +2253,7 @@ test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async
   const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
-  assert.match(nav, /href="\/ui\/bot"[^>]*>机器人页面<\/a>/);
+  assert.match(nav, /href="\/ui\/bot"[^>]*>Bot Page<\/a>/);
   assert.match(nav, /href="\/ui\/conversations"[^>]*>对话<\/a>/);
   assert.match(nav, /href="\/ui\/services"[^>]*>服务<\/a>/);
   assert.match(nav, /href="\/ui\/settings"[^>]*>设置<\/a>/);
