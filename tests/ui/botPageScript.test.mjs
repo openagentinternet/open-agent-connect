@@ -213,7 +213,7 @@ test('bot page Basic tab owns LLM providers and Persona tab owns role fields', (
   assert.match(personaRoot.innerHTML, /data-field="goal"/);
 });
 
-test('bot page Basic tab renders dedicated Homepage panel with Metafile and MetaApp controls', () => {
+test('bot page Basic tab renders Homepage source select from existing MetaApp chain data', () => {
   const root = { innerHTML: '' };
   const context = createBotScriptContext({
     elements: {
@@ -245,12 +245,15 @@ test('bot page Basic tab renders dedicated Homepage panel with Metafile and Meta
 
   assert.match(root.innerHTML, /<div class="provider-row">[\s\S]*data-field="primaryProvider"[\s\S]*data-field="fallbackProvider"[\s\S]*<\/div>/);
   assert.match(root.innerHTML, /data-homepage-panel/);
-  assert.match(root.innerHTML, /data-act="upload-homepage"/);
-  assert.match(root.innerHTML, /data-homepage-file-input/);
+  assert.match(root.innerHTML, /data-field="homepage-source"/);
+  assert.match(root.innerHTML, /<option value="default">Default<\/option>/);
+  assert.match(root.innerHTML, /<option value="metafile">Metafile<\/option>/);
+  assert.match(root.innerHTML, /<option value="metaapp" selected>MetaApp<\/option>/);
   assert.match(root.innerHTML, /data-field="homepage-metaapp-pin"/);
+  assert.match(root.innerHTML, /value="metaapp-pin-123"/);
   assert.match(root.innerHTML, /data-act="preview-homepage-metaapp"/);
-  assert.match(root.innerHTML, /data-act="use-default-homepage"/);
-  assert.match(root.innerHTML, /Use Default/);
+  assert.doesNotMatch(root.innerHTML, /data-act="upload-homepage"/);
+  assert.doesNotMatch(root.innerHTML, /data-homepage-file-input/);
   assert.match(root.innerHTML, />Preview<\/button>/);
   assert.doesNotMatch(root.innerHTML, /data-act="set-homepage-metaapp"/);
   assert.match(root.innerHTML, /data-act="toggle-homepage-help"/);
@@ -260,6 +263,37 @@ test('bot page Basic tab renders dedicated Homepage panel with Metafile and Meta
   assert.doesNotMatch(root.innerHTML, /Final URI/);
   assert.doesNotMatch(root.innerHTML, /metaapp:\/\/metaapp-pin-123/);
   assert.doesNotMatch(root.innerHTML, /Homepage package upload will be available later/);
+});
+
+test('bot page Basic tab renders Metafile upload control when existing homepage is a Metafile', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-info-content]': root,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    globalMetaId: 'gm-alice',
+    bio: 'Builds wallet automation.',
+    homepage: {
+      uri: 'metafile://homepage-file-pin.html',
+      renderer: 'auto',
+      contentType: 'text/html',
+    },
+  }];
+
+  context.renderPublicIdentityTab();
+
+  assert.match(root.innerHTML, /<option value="metafile" selected>Metafile<\/option>/);
+  assert.match(root.innerHTML, /data-act="upload-homepage"/);
+  assert.match(root.innerHTML, /data-homepage-file-input/);
+  assert.doesNotMatch(root.innerHTML, /data-field="homepage-metaapp-pin"/);
+  assert.doesNotMatch(root.innerHTML, /data-act="preview-homepage-metaapp"/);
 });
 
 test('bot page Basic tab keeps the default homepage renderer view link', () => {
@@ -286,13 +320,14 @@ test('bot page Basic tab keeps the default homepage renderer view link', () => {
   assert.match(root.innerHTML, /click here to view/);
 });
 
-test('bot page Use Default homepage action stages a revoke save payload', async () => {
+test('bot page Default homepage source clears an existing custom homepage on save', async () => {
   const fields = {
     '[data-save-status]': field(),
     '[data-homepage-status]': field(),
     '[data-act="save-public-identity"]': field(),
     '[data-field="name"]': field('Alice'),
     '[data-field="bio"]': field('Original public bio.'),
+    '[data-field="homepage-source"]': field('default'),
     '[data-field="homepage-metaapp-pin"]': field(''),
   };
   let requestBody = null;
@@ -335,11 +370,46 @@ test('bot page Use Default homepage action stages a revoke save payload', async 
   context.renderPublicIdentityTab = () => {};
   context.showChainSuccessModal = () => {};
 
-  context.useDefaultHomepage();
   await context.savePublicIdentity();
 
   assert.deepEqual(requestBody, { homepage: null });
-  assert.equal(context.state._pendingHomepage, undefined);
+});
+
+test('bot page Default homepage source ignores stale MetaApp input when unchanged from empty homepage', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-homepage-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Original public bio.'),
+    '[data-field="homepage-source"]': field('default'),
+    '[data-field="homepage-metaapp-pin"]': field(' stale-metaapp-pin '),
+  };
+  let requestCount = 0;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: () => {
+      requestCount += 1;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: {} }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+
+  await context.savePublicIdentity();
+
+  assert.equal(requestCount, 0);
+  assert.equal(fields['[data-save-status]'].textContent, 'No changes');
 });
 
 test('bot page Homepage help toggles an inline MetaApp guide popover', () => {
@@ -1103,7 +1173,10 @@ test('bot page renders Basic tab with public identity and provider controls', ()
   assert.match(root.innerHTML, /Public Bio/);
   assert.match(root.innerHTML, /Homepage/);
   assert.match(root.innerHTML, /Default Bot Page renderer/);
-  assert.match(root.innerHTML, /data-act="upload-homepage"/);
+  assert.match(root.innerHTML, /data-field="homepage-source"/);
+  assert.match(root.innerHTML, /<option value="default" selected>Default<\/option>/);
+  assert.match(root.innerHTML, /data-act="view-homepage"/);
+  assert.doesNotMatch(root.innerHTML, /data-act="upload-homepage"/);
   assert.match(root.innerHTML, /Primary LLM Provider/);
   assert.match(root.innerHTML, /Fallback LLM Provider/);
   assert.match(root.innerHTML, /data-field="primaryProvider"/);
@@ -1114,7 +1187,7 @@ test('bot page renders Basic tab with public identity and provider controls', ()
   assert.match(root.innerHTML, /data-field="name"/);
   assert.match(root.innerHTML, /data-field="bio"/);
   assert.match(root.innerHTML, /data-homepage-panel/);
-  assert.match(root.innerHTML, /data-field="homepage-metaapp-pin"/);
+  assert.doesNotMatch(root.innerHTML, /data-field="homepage-metaapp-pin"/);
   assert.doesNotMatch(root.innerHTML, /data-field="role"/);
   assert.doesNotMatch(root.innerHTML, /data-field="soul"/);
   assert.doesNotMatch(root.innerHTML, /data-field="goal"/);

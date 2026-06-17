@@ -123,8 +123,8 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
   assert.equal(translate('zh-CN', 'bot.homepageViewLink'), 'click here to view');
   assert.equal(translate('en', 'bot.homepageReadyToSave'), 'Homepage ready to save.');
   assert.equal(translate('zh-CN', 'bot.homepageReadyToSave'), '主页已准备保存。');
-  assert.equal(translate('en', 'bot.homepageUseDefault'), 'Use Default');
-  assert.equal(translate('zh-CN', 'bot.homepageUseDefault'), '使用默认主页');
+  assert.equal(translate('en', 'bot.homepageUploadRequired'), 'Upload a homepage file before saving.');
+  assert.equal(translate('zh-CN', 'bot.homepageUploadRequired'), '请先上传主页文件再保存。');
   assert.equal(translate('en', 'bot.homepageDefaultReadyToSave'), 'Default homepage ready to save.');
   assert.equal(translate('zh-CN', 'bot.homepageDefaultReadyToSave'), '默认主页已准备保存。');
   assert.equal(translate('en', 'bot.identityCreatedBasicInfoReady'), 'The on-chain identity has been created. Public Identity is ready for optional edits.');
