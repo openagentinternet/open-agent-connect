@@ -26,4 +26,7 @@ test('Bot /info protocol document covers current public profile fields', async (
   assert.match(content, /raw image bytes/u);
   assert.match(content, /allowPrivateChatSkills/u);
   assert.match(content, /allowGroupChatSkills/u);
+  assert.match(content, /examples only/u);
+  assert.match(content, /actual configuration/u);
+  assert.match(content, /include this field as an empty array/u);
 });

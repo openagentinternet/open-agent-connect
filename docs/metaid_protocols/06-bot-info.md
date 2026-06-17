@@ -133,6 +133,8 @@ The example above shows the tuple fields and an empty payload position; it is no
 - **Content-Type**: `application/json`
 - **Payload Schema**:
 
+The skill names below are examples only. Writers must populate both arrays from the Bot owner's actual configuration, not from the example values.
+
 ```json
 {
   "allowPrivateChatSkills": ["metabot-help", "metabot-wallet-manage"],
@@ -141,6 +143,6 @@ The example above shows the tuple fields and an empty payload position; it is no
 ```
 
 - **`allowPrivateChatSkills`**: Array of local skill directory names allowed during private chat replies. An empty array means private chat replies are not allowed to use local skills.
-- **`allowGroupChatSkills`**: Array of local skill directory names allowed during group chat replies. An empty array means group chat replies are not allowed to use local skills.
+- **`allowGroupChatSkills`**: Array of local skill directory names allowed during group chat replies. Writers should still include this field as an empty array when group chat skills are not configured or not supported by the current UI.
 - **Semantics**: Writers should include both arrays. Readers should treat missing arrays as empty arrays. Skill names are local host capabilities; publishing a skill name does not prove that the reader can execute it.
 - **Clear**: Empty payload.
