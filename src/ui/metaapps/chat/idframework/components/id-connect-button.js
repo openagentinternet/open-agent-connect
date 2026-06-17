@@ -535,9 +535,9 @@ class IdConnectButton extends HTMLElement {
     if (userData.name) {
       metaDatas.push({
         metaidData: {
-          operation: oldUserData.nameId ? 'modify' : 'create',
+          operation: 'create',
           body: userData.name,
-          path: oldUserData.nameId ? '@' + oldUserData.nameId : '/info/name',
+          path: '/info/name',
           contentType: 'text/plain'
         }
       });
@@ -545,9 +545,9 @@ class IdConnectButton extends HTMLElement {
     if (userData.bio) {
       metaDatas.push({
         metaidData: {
-          operation: oldUserData.bioId ? 'modify' : 'create',
+          operation: 'create',
           body: userData.bio,
-          path: oldUserData.bioId ? '@' + oldUserData.bioId : '/info/bio',
+          path: '/info/bio',
           contentType: 'text/plain'
         }
       });
@@ -564,13 +564,12 @@ class IdConnectButton extends HTMLElement {
         });
       }
     }
-    if (userData.chatpubkey != null && userData.chatpubkey !== '' && oldUserData && !oldUserData.chatpubkey) {
-      var chatpubkeyPath = oldUserData.chatpubkeyId ? '@' + oldUserData.chatpubkeyId : '/info/chatpubkey';
+    if (userData.chatpubkey != null && userData.chatpubkey !== '' && oldUserData && !oldUserData.chatpubkey && !oldUserData.chatpubkeyId) {
       metaDatas.push({
         metaidData: {
-          operation: oldUserData.chatpubkeyId ? 'modify' : 'create',
+          operation: 'create',
           body: userData.chatpubkey,
-          path: chatpubkeyPath,
+          path: '/info/chatpubkey',
           contentType: 'text/plain'
         }
       });

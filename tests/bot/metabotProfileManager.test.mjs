@@ -544,7 +544,7 @@ test('syncMetabotInfoToChain writes persona fields to one JSON path', async () =
     '/info/bio',
     '/info/persona',
     '/info/chatSkills',
-    '/info/LLM',
+    '/info/llm',
   ]);
   assert.deepEqual(calls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
   assert.deepEqual(calls.map((call) => call.contentType), [
@@ -714,7 +714,7 @@ test('syncMetabotInfoToChain keeps /info writes as create even when caller reque
     allowChatSkills: ['metabot-help'],
   }, ['name', 'avatar', 'role', 'primaryProvider'], { delayMs: 0, operation: 'modify' });
 
-  assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/persona', '/info/LLM']);
+  assert.deepEqual(calls.map((call) => call.path), ['/info/name', '/info/avatar', '/info/persona', '/info/llm']);
   assert.deepEqual(calls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
   assert.equal(calls[0].contentType, 'text/plain');
   assert.equal(calls[0].payload, 'Alice');

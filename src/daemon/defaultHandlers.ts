@@ -1169,8 +1169,22 @@ function buildMetabotCreateInput(input: Record<string, unknown>): CreateMetabotI
     if (allowChatSkills.length > 0) {
       throw new Error('allowChatSkills can be configured after MetaBot creation from the Bot detail page.');
     }
+    createInput.allowChatSkills = allowChatSkills;
   }
   return createInput;
+}
+
+function calculateMetabotCreateInfoFields(input: CreateMetabotInput): string[] {
+  const fields: string[] = [];
+  if (input.bio !== undefined) fields.push('bio');
+  if (input.role !== undefined) fields.push('role');
+  if (input.soul !== undefined) fields.push('soul');
+  if (input.goal !== undefined) fields.push('goal');
+  if (input.avatarDataUrl !== undefined) fields.push('avatar');
+  if (input.primaryProvider !== undefined) fields.push('primaryProvider');
+  if (input.fallbackProvider !== undefined) fields.push('fallbackProvider');
+  if (input.allowChatSkills !== undefined) fields.push('allowChatSkills');
+  return fields;
 }
 
 function normalizePreferredCreateProvider(value: unknown): LlmProvider | null {
@@ -14286,6 +14300,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const profileHomeDir = resolvedHome.homeDir;
+        const createInfoFields = calculateMetabotCreateInfoFields(createInput);
         createInput = await applyDefaultMetabotCreateProviders({
           createInput,
           homeDir: profileHomeDir,
@@ -14347,7 +14362,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const profileChainWrites = await syncMetabotInfoToChain(
             profileSigner,
             chainProfile,
-            [],
+            createInfoFields,
             {
               delayMs: input.identitySyncStepDelayMs,
               operation: 'create',

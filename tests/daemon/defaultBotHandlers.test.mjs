@@ -617,17 +617,27 @@ test('default bot createProfile bootstraps a chained identity before indexing th
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.slug, 'chain-bot');
   assert.match(result.data.profile.globalMetaId, /^idq/);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey']);
-  assert.deepEqual(writeCalls.map((call) => call.operation), ['create', 'create']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/persona']);
+  assert.deepEqual(writeCalls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
   assert.equal(writeCalls[0].contentType, 'text/plain');
   assert.equal(writeCalls[0].payload, 'Chain Bot');
-  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['tx-1', 'tx-2']);
+  assert.equal(writeCalls[2].contentType, 'image/png;binary');
+  assert.equal(Buffer.isBuffer(writeCalls[2].payload), true);
+  assert.equal(writeCalls[2].payload.toString('utf8'), 'fake');
+  assert.equal(writeCalls[2].encoding, 'binary');
+  assert.equal(writeCalls[3].contentType, 'application/json');
+  assert.deepEqual(JSON.parse(writeCalls[3].payload), {
+    role: 'Role after chain.',
+    soul: 'You are friendly and professional.',
+    goal: 'Your goal is to help users accomplish their tasks effectively.',
+  });
+  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['tx-1', 'tx-2', 'tx-3', 'tx-4']);
   assert.equal(stored.role, 'Role after chain.');
   assert.equal(stored.avatarDataUrl, 'data:image/png;base64,ZmFrZQ==');
   assert.equal(stored.globalMetaId, result.data.profile.globalMetaId);
 });
 
-test('default bot createProfile keeps optional profile fields local during minimal chain creation', async (t) => {
+test('default bot createProfile writes explicit optional profile fields before local persistence', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -648,7 +658,7 @@ test('default bot createProfile keeps optional profile fields local during minim
     }),
     createSignerForHome: () => makeSigner(async (input) => {
       writeCalls.push(input);
-      if (input.path === '/info/chatpubkey') {
+      if (input.path === '/info/avatar' || input.path === '/info/persona') {
         assert.deepEqual(await listIdentityProfiles(systemHomeDir), []);
         await assert.rejects(() => access(targetPaths.roleMdPath), /ENOENT/);
         await assert.rejects(() => access(path.join(targetHomeDir, 'avatar.txt')), /ENOENT/);
@@ -676,12 +686,13 @@ test('default bot createProfile keeps optional profile fields local during minim
   const stored = await getMetabotProfile(systemHomeDir, 'chain-first-draft-bot');
 
   assert.equal(result.ok, true);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/avatar', '/info/persona']);
+  assert.deepEqual(writeCalls.map((call) => call.operation), ['create', 'create', 'create', 'create']);
   assert.equal(stored.role, 'Chain first role.');
   assert.equal(stored.avatarDataUrl, 'data:image/png;base64,ZmFrZQ==');
 });
 
-test('default bot createProfile persists requested provider fields without chain LLM write', async (t) => {
+test('default bot createProfile writes explicitly requested providers to chain LLM info', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -711,7 +722,7 @@ test('default bot createProfile persists requested provider fields without chain
     createSignerForHome: () => makeSigner(async (input) => {
       signerCallCount += 1;
       writePaths.push(input.path);
-      if (input.path === '/info/LLM') {
+      if (input.path === '/info/llm') {
         llmPayloads.push(JSON.parse(input.payload));
       }
       return {
@@ -739,8 +750,11 @@ test('default bot createProfile persists requested provider fields without chain
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.primaryProvider, 'codex');
   assert.equal(result.data.profile.fallbackProvider, 'claude-code');
-  assert.deepEqual(writePaths, ['/info/name', '/info/chatpubkey']);
-  assert.deepEqual(llmPayloads, []);
+  assert.deepEqual(writePaths, ['/info/name', '/info/chatpubkey', '/info/llm']);
+  assert.deepEqual(llmPayloads, [{
+    primaryProvider: 'codex',
+    fallbackProvider: 'claude-code',
+  }]);
   assert.deepEqual(
     bindingState.bindings.map((binding) => [binding.role, binding.llmRuntimeId]).sort(),
     [
@@ -791,7 +805,7 @@ test('default bot createProfile rejects non-empty allowChatSkills before Bot det
   assert.deepEqual(signerCalls, []);
 });
 
-test('default bot createProfile accepts empty allowChatSkills as a no-op', async (t) => {
+test('default bot createProfile writes explicitly empty allowChatSkills to chain chatSkills info', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -829,7 +843,12 @@ test('default bot createProfile accepts empty allowChatSkills as a no-op', async
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.data.profile.allowChatSkills, []);
-  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey']);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/persona', '/info/chatSkills']);
+  assert.equal(writeCalls[3].contentType, 'application/json');
+  assert.deepEqual(JSON.parse(writeCalls[3].payload), {
+    allowPrivateChatSkills: [],
+    allowGroupChatSkills: [],
+  });
 });
 
 test('default bot createProfile rejects requested degraded providers before chain writes', async (t) => {
@@ -917,7 +936,7 @@ test('default bot createProfile prefers the requested host provider and falls ba
     createSignerForHome: () => makeSigner(async (input) => {
       signerCallCount += 1;
       writePaths.push(input.path);
-      if (input.path === '/info/LLM') {
+      if (input.path === '/info/llm') {
         llmPayloads.push(JSON.parse(input.payload));
       }
       return {

@@ -71,6 +71,7 @@ export interface CreateMetabotInput {
   avatarDataUrl?: string;
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
+  allowChatSkills?: string[];
 }
 
 export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
@@ -499,7 +500,7 @@ export function buildMetabotProfileDraftFromIdentity(input: CreateMetabotFromIde
     ...(avatar ? { avatarDataUrl: avatar } : {}),
     primaryProvider: input.primaryProvider === undefined ? null : validateProvider(input.primaryProvider),
     fallbackProvider: input.fallbackProvider === undefined ? null : validateProvider(input.fallbackProvider),
-    allowChatSkills: [],
+    allowChatSkills: input.allowChatSkills === undefined ? [] : normalizeAllowChatSkills(input.allowChatSkills),
   };
 }
 
@@ -906,7 +907,7 @@ export async function syncMetabotInfoToChain(
     }
     if (changed.has('primaryProvider') || changed.has('fallbackProvider')) {
       await writeProfileInfo({
-        path: '/info/LLM',
+        path: '/info/llm',
         contentType: 'application/json',
         payload: JSON.stringify({
           primaryProvider: profile.primaryProvider ?? null,
