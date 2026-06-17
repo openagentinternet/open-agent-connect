@@ -15,16 +15,15 @@ test('buildAvatarChainWriteRequest strips data URL prefix and writes binary imag
     network: 'mvc',
   });
 
-  assert.deepEqual(request, {
-    operation: 'modify',
-    path: '/info/avatar',
-    encryption: '0',
-    version: '1.0',
-    contentType: 'image/png;binary',
-    payload: 'ZmFrZQ==',
-    encoding: 'base64',
-    network: 'mvc',
-  });
+  assert.equal(request.operation, 'create');
+  assert.equal(request.path, '/info/avatar');
+  assert.equal(request.encryption, '0');
+  assert.equal(request.version, '1.0');
+  assert.equal(request.contentType, 'image/png;binary');
+  assert.equal(request.encoding, 'binary');
+  assert.equal(request.network, 'mvc');
+  assert.equal(Buffer.isBuffer(request.payload), true);
+  assert.equal(request.payload.toString('utf8'), 'fake');
 });
 
 test('buildAvatarChainWriteRequest preserves empty avatar clears without allowing data URL text writes', () => {
@@ -33,6 +32,7 @@ test('buildAvatarChainWriteRequest preserves empty avatar clears without allowin
     avatarDataUrl: '',
   });
 
+  assert.equal(request.operation, 'create');
   assert.equal(request.path, '/info/avatar');
   assert.equal(request.payload, '');
   assert.equal(request.contentType, 'text/plain');

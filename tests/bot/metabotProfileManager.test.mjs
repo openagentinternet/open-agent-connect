@@ -560,7 +560,8 @@ test('syncMetabotInfoToChain writes persona fields to one JSON path', async () =
     goal: 'Goal',
   });
   assert.deepEqual(JSON.parse(calls[2].payload), {
-    allowChatSkills: ['metabot-help', 'metabot-wallet-manage'],
+    allowPrivateChatSkills: ['metabot-help', 'metabot-wallet-manage'],
+    allowGroupChatSkills: [],
   });
   assert.deepEqual(JSON.parse(calls[3].payload), {
     primaryProvider: 'claude-code',
@@ -719,8 +720,9 @@ test('syncMetabotInfoToChain keeps /info writes as create even when caller reque
   assert.equal(calls[0].payload, 'Alice');
   assert.equal(calls[0].encoding, 'utf-8');
   assert.equal(calls[1].contentType, 'image/png;binary');
-  assert.equal(calls[1].payload, 'ZmFrZQ==');
-  assert.equal(calls[1].encoding, 'base64');
+  assert.equal(Buffer.isBuffer(calls[1].payload), true);
+  assert.equal(calls[1].payload.toString('utf8'), 'fake');
+  assert.equal(calls[1].encoding, 'binary');
   assert.equal(calls[2].contentType, 'application/json');
   assert.deepEqual(JSON.parse(calls[2].payload), {
     role: 'Role',

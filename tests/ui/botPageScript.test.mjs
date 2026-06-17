@@ -931,6 +931,8 @@ test('bot page renders chat skills tab for private conversation replies only', a
   await context.loadChatSkillOptions('alice-bot');
 
   assert.doesNotMatch(root.innerHTML, /<label>Chat Skills<\/label>/);
+  assert.match(root.innerHTML, /Private Chat Allowed Skills/);
+  assert.doesNotMatch(root.innerHTML, /<label>Chat Allowed Skills<\/label>/);
   assert.doesNotMatch(root.innerHTML, /private conversation replies/i);
   assert.match(root.innerHTML, /data-field="chatSkillSelect"/);
   assert.match(root.innerHTML, /class="btn btn-primary btn-sm" data-act="add-chat-skill"/);

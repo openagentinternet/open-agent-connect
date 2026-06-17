@@ -2,8 +2,9 @@ import { validateAvatarChainWriteRequest } from '../identity/avatarChainWrite';
 
 export type ChainWriteOperation = 'init' | 'create' | 'modify' | 'revoke';
 export type ChainWriteEncryption = '0' | '1' | '2';
-export type ChainWriteEncoding = 'utf-8' | 'base64';
+export type ChainWriteEncoding = 'utf-8' | 'base64' | 'binary';
 export type ChainWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
+export type ChainWritePayload = string | Buffer;
 
 export interface ChainWriteRequest {
   operation?: string;
@@ -11,7 +12,7 @@ export interface ChainWriteRequest {
   encryption?: string;
   version?: string;
   contentType?: string;
-  payload?: string;
+  payload?: ChainWritePayload;
   encoding?: string;
   network?: string;
 }
@@ -22,7 +23,7 @@ export interface NormalizedChainWriteRequest {
   encryption: ChainWriteEncryption;
   version: string;
   contentType: string;
-  payload: string;
+  payload: ChainWritePayload;
   encoding: ChainWriteEncoding;
   network: ChainWriteNetwork;
 }
@@ -44,6 +45,19 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+export function chainWritePayloadToBuffer(input: {
+  payload: ChainWritePayload;
+  encoding: ChainWriteEncoding;
+}): Buffer {
+  if (Buffer.isBuffer(input.payload)) {
+    return Buffer.from(input.payload);
+  }
+  if (input.encoding === 'base64') {
+    return Buffer.from(input.payload, 'base64');
+  }
+  return Buffer.from(input.payload, 'utf-8');
+}
+
 export function normalizeChainWriteRequest(input: ChainWriteRequest): NormalizedChainWriteRequest {
   const operation = normalizeText(input.operation).toLowerCase() || 'create';
   if (operation !== 'init' && operation !== 'create' && operation !== 'modify' && operation !== 'revoke') {
@@ -60,8 +74,10 @@ export function normalizeChainWriteRequest(input: ChainWriteRequest): Normalized
     throw new Error(`Unsupported chain write encryption value: ${input.encryption}`);
   }
 
-  const encoding = normalizeText(input.encoding).toLowerCase() || 'utf-8';
-  if (encoding !== 'utf-8' && encoding !== 'base64') {
+  const rawPayload = input.payload;
+  const payloadIsBuffer = Buffer.isBuffer(rawPayload);
+  const encoding = normalizeText(input.encoding).toLowerCase() || (payloadIsBuffer ? 'binary' : 'utf-8');
+  if (encoding !== 'utf-8' && encoding !== 'base64' && encoding !== 'binary') {
     throw new Error(`Unsupported chain write encoding: ${input.encoding}`);
   }
 
@@ -70,8 +86,17 @@ export function normalizeChainWriteRequest(input: ChainWriteRequest): Normalized
     throw new Error(`Unsupported chain write network: ${input.network}`);
   }
 
-  if (typeof input.payload !== 'string') {
-    throw new Error('Chain write payload must be a string.');
+  let payload: ChainWritePayload;
+  if (typeof rawPayload === 'string' || Buffer.isBuffer(rawPayload)) {
+    payload = rawPayload;
+  } else {
+    throw new Error('Chain write payload must be a string or Buffer.');
+  }
+  if (Buffer.isBuffer(payload) && encoding !== 'binary') {
+    throw new Error('Chain write Buffer payloads must use binary encoding.');
+  }
+  if (!Buffer.isBuffer(payload) && encoding === 'binary') {
+    throw new Error('Chain write binary payloads must be Buffers.');
   }
 
   const request: NormalizedChainWriteRequest = {
@@ -80,7 +105,7 @@ export function normalizeChainWriteRequest(input: ChainWriteRequest): Normalized
     encryption: encryption as ChainWriteEncryption,
     version: normalizeText(input.version) || '1.0',
     contentType: normalizeText(input.contentType) || 'application/json',
-    payload: input.payload,
+    payload,
     encoding: encoding as ChainWriteEncoding,
     network: network as ChainWriteNetwork,
   };

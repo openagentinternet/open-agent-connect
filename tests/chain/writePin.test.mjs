@@ -13,7 +13,7 @@ test('normalizeChainWriteRequest rejects /info/avatar data URL payloads', () => 
       contentType: 'image/png;binary',
       encoding: 'base64',
     }),
-    /Avatar payload must be raw image base64 without a data URL prefix/u,
+    /Avatar payload must be binary image bytes without a data URL prefix/u,
   );
 });
 
@@ -25,32 +25,47 @@ test('normalizeChainWriteRequest rejects non-empty /info/avatar text writes', ()
       contentType: 'text/plain',
       encoding: 'base64',
     }),
-    /Avatar contentType must be a supported binary image type/u,
+    /Avatar payload must be binary image bytes/u,
   );
 });
 
-test('normalizeChainWriteRequest rejects malformed /info/avatar base64 payloads', () => {
+test('normalizeChainWriteRequest rejects string /info/avatar image payloads', () => {
   assert.throws(
     () => normalizeChainWriteRequest({
       path: '/info/avatar',
-      payload: 'not raw base64!',
+      payload: 'ZmFrZQ==',
       contentType: 'image/png;binary',
       encoding: 'base64',
     }),
-    /Avatar payload must be raw image base64/u,
+    /Avatar payload must be binary image bytes/u,
   );
 });
 
-test('normalizeChainWriteRequest accepts raw base64 /info/avatar image writes', () => {
+test('normalizeChainWriteRequest accepts binary /info/avatar image writes', () => {
   const request = normalizeChainWriteRequest({
     path: '/info/avatar',
-    payload: 'ZmFrZQ==',
+    payload: Buffer.from('fake'),
     contentType: 'image/png;binary',
-    encoding: 'base64',
+    encoding: 'binary',
   });
 
   assert.equal(request.path, '/info/avatar');
-  assert.equal(request.payload, 'ZmFrZQ==');
+  assert.equal(Buffer.isBuffer(request.payload), true);
+  assert.equal(request.payload.toString('utf8'), 'fake');
   assert.equal(request.contentType, 'image/png;binary');
-  assert.equal(request.encoding, 'base64');
+  assert.equal(request.encoding, 'binary');
+});
+
+test('normalizeChainWriteRequest accepts empty /info/avatar clears', () => {
+  const request = normalizeChainWriteRequest({
+    path: '/info/avatar',
+    payload: '',
+    contentType: 'text/plain',
+    encoding: 'utf-8',
+  });
+
+  assert.equal(request.path, '/info/avatar');
+  assert.equal(request.payload, '');
+  assert.equal(request.contentType, 'text/plain');
+  assert.equal(request.encoding, 'utf-8');
 });

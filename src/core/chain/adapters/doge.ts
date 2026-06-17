@@ -7,7 +7,7 @@ import {
 } from '@metalet/utxo-wallet-service';
 import * as bitcoin from 'bitcoinjs-lib';
 import ECPairFactory from 'ecpair';
-import type { ChainWriteNetwork } from '../writePin';
+import { chainWritePayloadToBuffer, type ChainWriteNetwork } from '../writePin';
 import { parseAddressIndexFromPath } from '../../identity/deriveIdentity';
 import type {
   ChainAdapter,
@@ -607,9 +607,7 @@ export const dogeChainAdapter: ChainAdapter = {
       }
 
       // Build inscription data from the normalized request
-      const payloadBody = input.request.encoding === 'base64'
-        ? Buffer.from(input.request.payload, 'base64')
-        : Buffer.from(input.request.payload, 'utf-8');
+      const payloadBody = chainWritePayloadToBuffer(input.request);
 
       const metaidData: InscriptionData = {
         operation: input.request.operation,

@@ -11,7 +11,10 @@ const helperPaths = [
 async function loadHelper(fileUrl) {
   const source = await readFile(fileUrl, 'utf8');
   const script = new vm.Script(`${source.replace('export function buildAvatarMetaidData', 'function buildAvatarMetaidData')}\nexports.buildAvatarMetaidData = buildAvatarMetaidData;`);
-  const context = vm.createContext({ exports: {} });
+  const context = vm.createContext({
+    exports: {},
+    atob: (value) => Buffer.from(value, 'base64').toString('binary'),
+  });
   script.runInContext(context);
   return context.exports;
 }
@@ -22,16 +25,15 @@ test('metaapp avatar chain helper creates binary avatar metaidData', async () =>
     const metaidData = buildAvatarMetaidData({
       avatarBase64: 'ZmFrZQ==',
       avatarContentType: 'image/png',
-      avatarId: '',
+      avatarId: 'old-avatar-pin',
     });
 
-    assert.deepEqual(JSON.parse(JSON.stringify(metaidData)), {
-      operation: 'create',
-      body: 'ZmFrZQ==',
-      path: '/info/avatar',
-      encoding: 'base64',
-      contentType: 'image/png;binary',
-    });
+    assert.equal(metaidData.operation, 'create');
+    assert.equal(metaidData.path, '/info/avatar');
+    assert.equal(metaidData.encoding, 'binary');
+    assert.equal(metaidData.contentType, 'image/png;binary');
+    assert.equal(ArrayBuffer.isView(metaidData.body), true);
+    assert.deepEqual(Array.from(metaidData.body), Array.from(Buffer.from('fake')));
   }
 });
 

@@ -344,7 +344,7 @@ function chatAllowedSkillsMarkup(profile){
     return '<option value="'+esc(skill.skillName)+'">'+esc(label)+'</option>';
   }).join('');
   var note=status==='loading'?'<div class="save-status saving">'+esc(uiText('bot.loadingChatSkills','Loading chat skills...'))+'</div>':(status==='error'?'<div class="save-status error">'+esc(error||uiText('bot.chatSkillsLoadFailed','Failed to load chat skills.'))+'</div>':'');
-  return '<div class="field field-full chat-skills-field"><label>'+esc(uiText('bot.chatAllowedSkills','Chat Allowed Skills'))+'</label>'+
+  return '<div class="field field-full chat-skills-field"><label>'+esc(uiText('bot.chatAllowedSkills','Private Chat Allowed Skills：'))+'</label>'+
     '<div class="chat-skill-chips">'+chips+'</div>'+
     '<div class="chat-skill-picker"><select data-field="chatSkillSelect"'+(status==='loading'?' disabled':'')+'>'+optionHtml+'</select><button type="button" class="btn btn-primary btn-sm" data-act="add-chat-skill"'+(status==='loading'?' disabled':'')+'>'+esc(uiText('bot.add','Add'))+'</button></div>'+
     note+

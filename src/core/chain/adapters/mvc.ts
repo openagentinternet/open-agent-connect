@@ -5,7 +5,7 @@ import {
   CoinType,
   MvcWallet,
 } from '@metalet/utxo-wallet-service';
-import type { ChainWriteNetwork } from '../writePin';
+import { chainWritePayloadToBuffer, type ChainWriteNetwork } from '../writePin';
 import { parseAddressIndexFromPath } from '../../identity/deriveIdentity';
 import { isRetryableUtxoFundingError } from '../utxoBroadcastErrors';
 import type {
@@ -203,7 +203,7 @@ function buildOpReturnParts(input: ChainInscriptionInput['request']): Array<stri
     parts.push(input.encryption);
     parts.push(input.version);
     parts.push(input.contentType);
-    parts.push(Buffer.from(input.payload, input.encoding));
+    parts.push(chainWritePayloadToBuffer(input));
   }
   return parts;
 }

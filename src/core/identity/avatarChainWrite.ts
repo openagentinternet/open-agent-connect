@@ -29,19 +29,13 @@ function estimateDataUrlBytes(dataUrl: string): number {
   return Math.ceil(base64.length * 0.75);
 }
 
-function isRawBase64Payload(value: string): boolean {
-  const base64 = value.replace(/\s+/g, '');
-  if (!base64 || base64.length % 4 !== 0) return false;
-  return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(base64);
-}
-
-export function parseAvatarDataUrl(dataUrl: string): { mimeType: string; base64: string } | null {
+export function parseAvatarDataUrl(dataUrl: string): { mimeType: string; bytes: Buffer } | null {
   const match = normalizeText(dataUrl).match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/i);
   if (!match) return null;
   const mimeType = normalizeAvatarMimeType(match[1]);
   const base64 = match[2].replace(/\s+/g, '');
   if (!SUPPORTED_AVATAR_MIME_TYPES.has(mimeType) || !base64) return null;
-  return { mimeType, base64 };
+  return { mimeType, bytes: Buffer.from(base64, 'base64') };
 }
 
 export function validateAvatarDataUrl(dataUrl: string, maxBytes = MAX_AVATAR_BYTES): { valid: boolean; error?: string } {
@@ -74,7 +68,7 @@ export function buildAvatarChainWriteRequest(input: {
   const avatarPayload = normalizeText(input.avatarDataUrl);
   if (!avatarPayload) {
     return {
-      operation: input.operation ?? 'modify',
+      operation: 'create',
       path: AVATAR_CHAIN_PATH,
       encryption: '0',
       version: normalizeText(input.version) || '1.0',
@@ -91,39 +85,42 @@ export function buildAvatarChainWriteRequest(input: {
   }
 
   return {
-    operation: input.operation ?? 'modify',
+    operation: 'create',
     path: AVATAR_CHAIN_PATH,
     encryption: '0',
     version: normalizeText(input.version) || '1.0',
     contentType: avatarBinaryContentType(avatarData.mimeType),
-    payload: avatarData.base64,
-    encoding: 'base64',
+    payload: avatarData.bytes,
+    encoding: 'binary',
     ...(normalizeText(input.network) ? { network: normalizeText(input.network) } : {}),
   };
 }
 
 export function validateAvatarChainWriteRequest(input: {
   path: string;
-  payload: string;
+  payload: string | Buffer;
   contentType: string;
   encoding: string;
 }): void {
   if (input.path !== AVATAR_CHAIN_PATH) return;
 
   const payload = input.payload;
-  if (/^data:/iu.test(normalizeText(payload))) {
-    throw new Error('Avatar payload must be raw image base64 without a data URL prefix.');
+  if (typeof payload === 'string' && /^data:/iu.test(normalizeText(payload))) {
+    throw new Error('Avatar payload must be binary image bytes without a data URL prefix.');
   }
 
   if (payload === '') {
     const contentType = normalizeText(input.contentType).toLowerCase();
     const encoding = normalizeText(input.encoding).toLowerCase();
     if (contentType === 'text/plain' && encoding === 'utf-8') return;
-    if (SUPPORTED_AVATAR_MIME_TYPES.has(contentType.replace(/;binary$/iu, '')) && encoding === 'base64') return;
   }
 
-  if (input.encoding !== 'base64') {
-    throw new Error('Avatar encoding must be base64.');
+  if (!Buffer.isBuffer(payload) || payload.length === 0) {
+    throw new Error('Avatar payload must be binary image bytes.');
+  }
+
+  if (input.encoding !== 'binary') {
+    throw new Error('Avatar encoding must be binary.');
   }
 
   const contentType = normalizeText(input.contentType).toLowerCase();
@@ -135,9 +132,5 @@ export function validateAvatarChainWriteRequest(input: {
   const mimeType = normalizeAvatarMimeType(contentType.slice(0, -binarySuffix.length));
   if (!SUPPORTED_AVATAR_MIME_TYPES.has(mimeType)) {
     throw new Error('Avatar contentType must be a supported binary image type.');
-  }
-
-  if (!isRawBase64Payload(payload)) {
-    throw new Error('Avatar payload must be raw image base64.');
   }
 }

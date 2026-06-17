@@ -175,7 +175,7 @@ test('createLocalMnemonicSigner rejects malformed avatar writes before adapter i
       encoding: 'base64',
       network: 'mvc',
     }),
-    /Avatar payload must be raw image base64 without a data URL prefix/u,
+    /Avatar payload must be binary image bytes without a data URL prefix/u,
   );
   assert.equal(inscriptionCalls, 0);
 });

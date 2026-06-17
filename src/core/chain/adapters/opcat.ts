@@ -1,5 +1,5 @@
 import * as bitcoin from 'bitcoinjs-lib';
-import type { ChainWriteNetwork } from '../writePin';
+import { chainWritePayloadToBuffer, type ChainWriteNetwork } from '../writePin';
 import type {
   ChainAdapter,
   ChainBalance,
@@ -460,9 +460,7 @@ export const opcatChainAdapter: ChainAdapter = {
       }
 
       // 3. Build MetaID inscription payload
-      const payloadBody = input.request.encoding === 'base64'
-        ? Buffer.from(input.request.payload, 'base64')
-        : Buffer.from(input.request.payload, 'utf-8');
+      const payloadBody = chainWritePayloadToBuffer(input.request);
 
       const inscriptionPayload = buildMetaIdInscriptionPayload({
         operation: input.request.operation,

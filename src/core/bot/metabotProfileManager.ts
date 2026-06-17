@@ -899,7 +899,8 @@ export async function syncMetabotInfoToChain(
         path: '/info/chatSkills',
         contentType: 'application/json',
         payload: JSON.stringify({
-          allowChatSkills: normalizeAllowChatSkills(profile.allowChatSkills),
+          allowPrivateChatSkills: normalizeAllowChatSkills(profile.allowChatSkills),
+          allowGroupChatSkills: [],
         }),
       });
     }

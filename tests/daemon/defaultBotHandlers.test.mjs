@@ -1481,8 +1481,9 @@ test('default bot updateProfile returns chain write txids after saving a chained
   assert.equal(writeCalls[0].contentType, 'text/plain');
   assert.equal(writeCalls[0].payload, 'Chained Save Updated');
   assert.equal(writeCalls[1].contentType, 'image/png;binary');
-  assert.equal(writeCalls[1].payload, 'VXBkYXRlZA==');
-  assert.equal(writeCalls[1].encoding, 'base64');
+  assert.equal(Buffer.isBuffer(writeCalls[1].payload), true);
+  assert.equal(writeCalls[1].payload.toString('utf8'), 'Updated');
+  assert.equal(writeCalls[1].encoding, 'binary');
   assert.equal(writeCalls[2].contentType, 'text/plain');
   assert.equal(writeCalls[2].payload, 'Now writes Bot Pages.');
   assert.equal(writeCalls[3].contentType, 'application/json');
@@ -1543,7 +1544,10 @@ test('default bot updateProfile validates allowChatSkills and writes chain chatS
       if (input.path === '/info/chatSkills') {
         const beforeLocalSave = await getMetabotProfile(systemHomeDir, profile.slug);
         assert.deepEqual(beforeLocalSave.allowChatSkills, []);
-        assert.deepEqual(JSON.parse(input.payload).allowChatSkills, ['metabot-help']);
+        assert.deepEqual(JSON.parse(input.payload), {
+          allowPrivateChatSkills: ['metabot-help'],
+          allowGroupChatSkills: [],
+        });
       }
       return {
         txids: [`chat-skill-save-tx-${writeCalls.length}`],
@@ -1635,7 +1639,7 @@ test('default bot updateProfile writes homepage chain data before local state', 
   assert.deepEqual(updated.homepage, homepage);
 });
 
-test('default bot updateProfile revokes homepage before clearing local state', async (t) => {
+test('default bot updateProfile writes an empty homepage create before clearing local state', async (t) => {
   const homeDir = await createProfileHome('metabot-default-homepage-revoke-');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -1673,8 +1677,8 @@ test('default bot updateProfile revokes homepage before clearing local state', a
         assert.deepEqual(beforeLocalSave.homepage, homepage);
       }
       return {
-        txids: [`homepage-revoke-tx-${writeCalls.length}`],
-        pinId: `homepage-revoke-pin-${writeCalls.length}`,
+        txids: [`homepage-clear-tx-${writeCalls.length}`],
+        pinId: `homepage-clear-pin-${writeCalls.length}`,
         totalCost: 1,
         network: 'mvc',
         operation: input.operation,
@@ -1694,7 +1698,7 @@ test('default bot updateProfile revokes homepage before clearing local state', a
   const updated = await getMetabotProfile(systemHomeDir, profile.slug);
 
   assert.equal(result.ok, true);
-  assert.equal(writeCalls[0].operation, 'revoke');
+  assert.equal(writeCalls[0].operation, 'create');
   assert.equal(writeCalls[0].path, '/info/homepage');
   assert.equal(writeCalls[0].payload, '');
   assert.equal(writeCalls[0].contentType, 'application/json');
