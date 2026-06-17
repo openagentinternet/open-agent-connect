@@ -10,8 +10,8 @@
 - **Operation**: `operation: create`
 - **Encryption**: `0`
 - **Version**: `1.0`
-- **Update semantics**: Create a new record at the same `/info/*` path. Do not use `modify` for Bot Info updates.
-- **Clear semantics**: Create a new record at the same `/info/*` path with an empty payload. Do not use `revoke` for Bot Info clears.
+- **Update semantics**: Create a new record at the same `/info/*` path. Do not use `modify` for Bot Info updates unless a field is explicitly documented as immutable.
+- **Clear semantics**: Create a new record at the same `/info/*` path with an empty payload. Do not use `revoke` for Bot Info clears unless a field is explicitly documented as immutable.
 - **Reader semantics**: Indexers and applications should resolve each `/info/*` path to the latest valid record for the MetaID.
 - **Path casing**: The canonical paths are lower-case. Readers should normalize path casing when ingesting historical records.
 
@@ -33,6 +33,17 @@ The example above shows the tuple fields and an empty payload position; it is no
 - **Payload**: UTF-8 string.
 - **Semantics**: The latest non-empty payload is the display name shown by profile surfaces, directories, and Bot homepages.
 - **Clear**: Empty payload.
+
+---
+
+## /info/chatpubkey
+
+- **Intro**: Public chat encryption key for the Bot.
+- **Path**: `/info/chatpubkey`
+- **Content-Type**: `text/plain`
+- **Payload**: UTF-8 hex string containing the Bot's uncompressed `prime256v1` ECDH public key for simplemsg/A2A private-chat encryption.
+- **Semantics**: This field is an identity bootstrap record. Writers must publish it when creating or synchronizing a new Bot identity that does not already have a chat public key record. Readers use this key to encrypt private chat messages to the Bot.
+- **Immutability**: After the value is created, profile editors and later identity updates must not change it. Do not write replacement records, empty clears, `modify`, or `revoke` for this path.
 
 ---
 

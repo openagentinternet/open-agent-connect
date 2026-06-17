@@ -11,6 +11,7 @@ test('Bot /info protocol document covers current public profile fields', async (
 
   for (const protocolPath of [
     '/info/name',
+    '/info/chatpubkey',
     '/info/avatar',
     '/info/bio',
     '/info/llm',
@@ -22,6 +23,9 @@ test('Bot /info protocol document covers current public profile fields', async (
   }
 
   assert.match(content, /operation: create/u);
+  assert.match(content, /identity bootstrap record/u);
+  assert.match(content, /must not change it/u);
+  assert.match(content, /Do not write replacement records, empty clears, `modify`, or `revoke`/u);
   assert.match(content, /image\/\*;binary/u);
   assert.match(content, /raw image bytes/u);
   assert.match(content, /allowPrivateChatSkills/u);
