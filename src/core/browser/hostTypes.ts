@@ -9,7 +9,11 @@ export type BrowserActorCapability =
   | 'service-call'
   | 'wallet-sign'
   | 'payment'
-  | 'template-settings';
+  | 'template-settings'
+  | 'profile-management'
+  | 'chat-configuration'
+  | 'resource-sharing'
+  | 'message-view';
 
 export interface BrowserActor {
   id: string;
@@ -93,7 +97,18 @@ export type BrowserTrustedActionKind =
   | 'login'
   | 'edit-profile'
   | 'configure-chat'
-  | 'view-messages';
+  | 'view-messages'
+  | 'wallet-sign'
+  | 'payment'
+  | 'open-conversation'
+  | 'share-resource';
+
+export interface BrowserOpenConversationPayload {
+  conversationUri: string;
+  peerGlobalMetaId: string;
+  peerName?: string;
+  initialComposerText?: string;
+}
 
 export interface BrowserTrustedActionInput extends BrowserActorInput {
   resourceUri: string;
@@ -104,7 +119,12 @@ export interface BrowserTrustedActionInput extends BrowserActorInput {
 export interface BrowserTrustedActionResult {
   kind: BrowserTrustedActionKind;
   handled: boolean;
-  data?: unknown;
+  data?: {
+    href?: string;
+    route?: string;
+    copiedText?: string;
+    message?: string;
+  };
 }
 
 export interface BrowserHostAdapter {

@@ -7,6 +7,8 @@ const require = createRequire(import.meta.url);
 const { createBotHomepageClient } = require('../../dist/core/browser/botHomepageClient.js');
 const { buildBotPageResolveResult } = require('../../dist/core/browser/botPageResolver.js');
 
+const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+
 test('Bot homepage client fetches metaso-p2p botHomepage.v1 envelope', async () => {
   const calls = [];
   const fixture = JSON.parse(await readFile(new URL('../fixtures/browser/botHomepage.v1.json', import.meta.url), 'utf8'));
@@ -66,4 +68,32 @@ test('buildBotPageResolveResult accepts a selected Bot homepage template', async
 
   assert.equal(result.renderer.type, 'bot-page');
   assert.equal(result.renderer.templateId, 'compact-list');
+});
+
+test('buildBotPageResolveResult normalizes open-conversation homepage actions', async () => {
+  const fixture = JSON.parse(await readFile(new URL('../fixtures/browser/botHomepage.v1.json', import.meta.url), 'utf8'));
+  fixture.actions = [{
+    id: 'conversation',
+    kind: 'open-conversation',
+    label: 'Message',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    },
+  }];
+
+  const result = buildBotPageResolveResult({
+    uri: 'metaid://idq1fixturebot',
+    normalizedUri: 'metaid://idq1fixturebot',
+    homepage: fixture,
+    resolverUrl: 'https://so.example.test/api/bot-homepage/globalmetaid/idq1fixturebot',
+  });
+
+  const action = result.actions.find((candidate) => candidate.id === 'conversation');
+  assert.ok(action);
+  assert.equal(action.kind, 'open-conversation');
+  assert.deepEqual(action.payload, {
+    conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+  });
 });

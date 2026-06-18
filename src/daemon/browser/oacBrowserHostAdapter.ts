@@ -97,6 +97,21 @@ function readActionPayload(input: BrowserTrustedActionInput): Record<string, unk
     : {};
 }
 
+function trustedActionResultData(value: unknown): BrowserTrustedActionResult['data'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const source = value as Record<string, unknown>;
+  const data: NonNullable<BrowserTrustedActionResult['data']> = {};
+  for (const key of ['href', 'route', 'copiedText', 'message'] as const) {
+    const field = source[key];
+    if (typeof field === 'string' && field) {
+      data[key] = field;
+    }
+  }
+  return Object.keys(data).length ? data : undefined;
+}
+
 function ownerActorIdFromPayload(payload: Record<string, unknown>): string {
   return normalizeText(payload.ownerActorId);
 }
@@ -125,7 +140,7 @@ function wrapTrustedActionResult(
     data: {
       kind,
       handled: true,
-      data: result.data,
+      data: trustedActionResultData(result.data),
     },
   };
 }
