@@ -77,6 +77,34 @@ async function writeProfileSkill(profileHomeDir, skillName) {
   await writeFile(path.join(skillDir, 'SKILL.md'), `# ${skillName}\n`, 'utf8');
 }
 
+async function writeProjectSkill(profileHomeDir, platformDir, skillName) {
+  const skillDir = path.join(profileHomeDir, platformDir, 'skills', skillName);
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(path.join(skillDir, 'SKILL.md'), `# ${skillName}\n`, 'utf8');
+}
+
+async function writeRuntimeIdentity(homeDir, name = 'Runtime Bot') {
+  await createRuntimeStateStore(homeDir).writeState({
+    identity: {
+      metabotId: 1,
+      name,
+      createdAt: 1776836000000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: {
+        mvc: 'mvc-runtime-address',
+      },
+      mvcAddress: 'mvc-runtime-address',
+      metaId: 'metaid-runtime-bot',
+      globalMetaId: 'gm-runtime-bot',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+}
+
 function fakeBalanceAdapter(chain, calls) {
   return {
     network: chain,
@@ -2200,6 +2228,58 @@ test('default bot updateProfile uses the selected profile signer for non-active 
   assert.match(result.message, /Local identity mnemonic is missing from the secret store/);
   assert.doesNotMatch(result.message, /active signer should not be used/);
   assert.equal(afterFailure.name, 'Target Bot');
+});
+
+test('default services listPublishSkills does not list fallback runtime skills when primary is unavailable', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-services-', 'publish-primary-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'Publish Primary Bot');
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'unavailable'),
+      runtime('claude-code', 'runtime-claude', 'healthy'),
+    ],
+  });
+  await createLlmBindingStore(homeDir).write({
+    version: 1,
+    bindings: [
+      {
+        id: 'binding-publish-codex-primary',
+        metaBotSlug: 'publish-primary-bot',
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+      {
+        id: 'binding-publish-claude-fallback',
+        metaBotSlug: 'publish-primary-bot',
+        llmRuntimeId: 'runtime-claude',
+        role: 'fallback',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+    ],
+  });
+  await writeProjectSkill(homeDir, '.claude', 'metabot-claude-only');
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.services.listPublishSkills();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'primary_runtime_unavailable');
 });
 
 test('default bot stats and sessions aggregate executor history by MetaBot slug', async (t) => {
