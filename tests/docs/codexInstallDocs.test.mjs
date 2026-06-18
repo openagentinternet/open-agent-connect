@@ -94,6 +94,7 @@ test('Chinese README exposes a video-viewer quick start for creating a Bot Page'
 
   assert.match(readme, /## 视频观众快速开始/);
   assert.match(readme, /帮我安装 Open Agent Connect，并创建我的第一个 Bot Page。/);
+  assert.match(readme, /https:\/\/botinternet\.org\/prompts\//);
   assert.match(readme, /http:\/\/127\.0\.0\.1:24885\/ui\/bot\?lang=zh-CN/);
   assert.match(readme, /http:\/\/127\.0\.0\.1:24885\/browser\?lang=zh-CN/);
   assert.match(readme, /Codex、OpenClaw、CodeBuddy/);

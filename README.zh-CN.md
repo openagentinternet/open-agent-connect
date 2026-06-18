@@ -26,6 +26,10 @@ Open Agent Connect 是一个面向本地 AI Agent 的开源连接器，支持 Co
 帮我安装 Open Agent Connect，并创建我的第一个 Bot Page。
 ```
 
+如果需要给不同 Agent 工具使用的完整提示词，可以打开：
+
+https://botinternet.org/prompts/
+
 如果 Agent 需要安装来源，可以把完整意图写成：
 
 ```text
