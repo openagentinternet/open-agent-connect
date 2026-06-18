@@ -2,10 +2,11 @@
 
 ## Project
 
-Open Agent Connect (OAC) — an open-source connector that gives local AI agents a blockchain-backed network layer (identity, discovery, encrypted messaging, remote service calls, traces, payments). Two runtime entrypoints:
+Open Agent Connect (OAC) — an open-source connector that gives local AI agents a blockchain-backed network layer (identity, discovery, encrypted messaging, remote service calls, traces, payments). Three runtime entrypoints:
 
-- `metabot` (CLI + daemon) — the full Bot runtime: `dist/cli/main.ts`
-- `oac` — the installer CLI: `dist/oac/main.ts`
+- `metabot` (CLI + daemon) — the full Bot runtime: `dist/cli/main.js`
+- `oac` — the installer CLI: `dist/oac/main.js`
+- `browser-standalone` — the Agent Internet Browser standalone HTTP server: `dist/browser/standalone/main.js` (serves `http://127.0.0.1:8787/browser` by default)
 
 Node.js `>=20 <25`, CommonJS source compiled via TypeScript strict mode (`strict: true`, target ES2022). Compiled output lands in `dist/`. There is no separate lint command — TypeScript strict is the lint.
 
@@ -36,21 +37,26 @@ Key test rules:
 
 | Dir | Role |
 |---|---|
-| `src/cli/` | `metabot` binary, commands in `commands/` (one file per domain: identity, chat, network, services, etc.) |
-| `src/core/` | Domain logic modules: `identity/`, `discovery/`, `a2a/`, `secrets/`, `signing/`, `buzz/`, `chat/`, `files/`, `orders/`, `ratings/`, `contracts/`, `state/`, etc. |
-| `src/daemon/` | HTTP server (REST + SSE), one route file per domain, file-lock guarded (one instance per `~/.metabot`) |
+| `src/cli/` | `metabot` binary, commands in `commands/` (one file per domain: identity, chat, network, services, loom, metaapp, browser, etc.) |
+| `src/core/` | Domain logic modules: `bootstrap/`, `identity/`, `discovery/`, `a2a/`, `delegation/`, `secrets/`, `signing/`, `buzz/`, `chat/`, `files/`, `orders/`, `ratings/`, `contracts/`, `state/`, `loom/`, `metaapp/`, `llm/`, `browser/`, `bot/`, `wallet/`, `payments/`, `chain/`, `subsidy/`, `provider/`, `services/`, `skills/`, `host/`, `system/`, `platform/`, `compat/`, `config/`, etc. |
+| `src/daemon/` | HTTP server (REST + SSE), one route file per domain, file-lock guarded (one instance per `~/.metabot`); `browser/` bridges the Agent Internet Browser host/core adapters |
+| `src/browser/` | Agent Internet Browser app — HTTP handlers, menu model, and `standalone/` standalone server entrypoint |
 | `src/oac/` | `oac` installer CLI entrypoint |
-| `src/ui/` | Local HTML inspection pages (hub, trace, my-services, publish, refund, metaapps) |
+| `src/ui/` | Local HTML inspection pages (hub, trace, services, my-services, publish, refund, metaapps, bot, browser, conversations, loom, settings) and i18n |
 
 ### Storage layout (v2)
 
 All paths resolved centrally by `resolveMetabotPaths()` in `src/core/state/paths.ts`. Profile home must live under `~/.metabot/profiles/<slug>/`. The legacy `.metabot/hot` layout must not be used in new code.
 
 Key paths from a profile home (`~/.metabot/profiles/<slug>/`):
-- `.runtime/` — runtime state (config, secrets, daemon, sessions, A2A, LLM, locks)
-- `.runtime/state/` — domain state JSON files (provider-presence, rating-detail, private-chat, etc.)
+- `.runtime/` — runtime state (config, secrets, daemon, sessions, A2A, exports, locks)
+- `.runtime/state/` — domain state JSON files (provider-presence, rating-detail, private-chat, directory-seeds, homepage, etc.)
+- `.runtime/runtime.sqlite` — runtime DB
 - `~/.metabot/skills/` — installed host skills
+- `~/.metabot/services/` — global services directory + online `services.json` cache
+- `~/.metabot/LLM/` — LLM runtimes, secrets, and executor (sessions/transcripts)
 - `~/.metabot/manager/` — identity profiles, active home pointer
+- profile persona files: `BIO.md`, `SOUL.md`, `GOAL.md`, `ROLE.md`, `llmbindings.json`, `preferred-llm-runtime.json`
 
 ### Key patterns
 
@@ -64,6 +70,9 @@ Key paths from a profile home (`~/.metabot/profiles/<slug>/`):
 
 - `CLAUDE.md` — deeper architecture, source layout, behavioral guidelines
 - `DACT.md` — remote service discovery → delegation → trace/watch → rating closure
+- `docs/metaid_protocols/` — on-chain MetaID protocols (social, content, group, chat, loom, bot-info)
+- `docs/hosts/` — per-host (codex, claude-code, openclaw) install, update, and runbooks
+- `docs/acceptance/` — manual acceptance runbooks
 - `docs/superpowers/specs/` — design docs
 - `docs/superpowers/plans/` — implementation plans
 
