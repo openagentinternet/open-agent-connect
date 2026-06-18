@@ -2,7 +2,7 @@ import type { MetabotCommandResult } from '../contracts/commandResult';
 import type { BrowserResolveResult } from './types';
 export type BrowserHostKind = 'standalone' | 'oac' | 'idbots';
 export type BrowserActorKind = 'oac-bot' | 'idbots-agent' | 'wallet';
-export type BrowserActorCapability = 'private-chat' | 'service-call' | 'wallet-sign' | 'payment' | 'template-settings';
+export type BrowserActorCapability = 'private-chat' | 'service-call' | 'wallet-sign' | 'payment' | 'template-settings' | 'profile-management' | 'chat-configuration' | 'resource-sharing' | 'message-view';
 export interface BrowserActor {
     id: string;
     label: string;
@@ -66,7 +66,13 @@ export interface BrowserSettingsSnapshot {
     defaults: Record<string, unknown>;
     configPath?: string;
 }
-export type BrowserTrustedActionKind = 'private-chat' | 'service-call' | 'copy-uri' | 'open-settings' | 'login' | 'edit-profile' | 'configure-chat' | 'view-messages';
+export type BrowserTrustedActionKind = 'private-chat' | 'service-call' | 'copy-uri' | 'open-settings' | 'login' | 'edit-profile' | 'configure-chat' | 'view-messages' | 'wallet-sign' | 'payment' | 'open-conversation' | 'share-resource';
+export interface BrowserOpenConversationPayload {
+    conversationUri: string;
+    peerGlobalMetaId: string;
+    peerName?: string;
+    initialComposerText?: string;
+}
 export interface BrowserTrustedActionInput extends BrowserActorInput {
     resourceUri: string;
     kind: BrowserTrustedActionKind;
@@ -75,7 +81,12 @@ export interface BrowserTrustedActionInput extends BrowserActorInput {
 export interface BrowserTrustedActionResult {
     kind: BrowserTrustedActionKind;
     handled: boolean;
-    data?: unknown;
+    data?: {
+        href?: string;
+        route?: string;
+        copiedText?: string;
+        message?: string;
+    };
 }
 export interface BrowserHostAdapter {
     getRuntime(input?: BrowserRuntimeInput): Promise<MetabotCommandResult<BrowserRuntimeSnapshot>>;

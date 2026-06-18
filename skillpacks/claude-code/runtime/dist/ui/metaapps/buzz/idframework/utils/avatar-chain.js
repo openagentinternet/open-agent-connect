@@ -21,6 +21,16 @@ function isRawBase64Payload(value) {
   return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64);
 }
 
+function base64ToBytes(value) {
+  var base64 = value.replace(/\s+/g, '');
+  var binary = atob(base64);
+  var bytes = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 export function buildAvatarMetaidData(input) {
   var body = normalizeText(input && input.avatarBase64);
   if (!body) return null;
@@ -36,12 +46,11 @@ export function buildAvatarMetaidData(input) {
     throw new Error('Avatar contentType must be a supported binary image type.');
   }
 
-  var avatarId = normalizeText(input && input.avatarId);
   return {
-    operation: avatarId ? 'modify' : 'create',
-    body: body,
-    path: avatarId ? '@' + avatarId : AVATAR_PATH,
-    encoding: 'base64',
+    operation: 'create',
+    body: base64ToBytes(body),
+    path: AVATAR_PATH,
+    encoding: 'binary',
     contentType: mimeType + ';binary',
   };
 }

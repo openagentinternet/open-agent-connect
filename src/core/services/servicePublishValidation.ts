@@ -113,6 +113,7 @@ export async function validateServicePublishProviderSkills(
   });
   const catalogResult = await catalog.listPrimaryRuntimeSkills({
     metaBotSlug: input.metaBotSlug,
+    allowFallbackRuntime: false,
   });
 
   if (!catalogResult.ok) {

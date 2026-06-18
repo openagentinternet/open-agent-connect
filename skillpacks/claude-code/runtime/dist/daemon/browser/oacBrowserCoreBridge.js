@@ -122,6 +122,7 @@ function isOacTrustedActionKind(kind) {
         'edit-profile',
         'configure-chat',
         'view-messages',
+        'open-conversation',
     ].includes(kind);
 }
 function toOacTrustedActionInput(input) {

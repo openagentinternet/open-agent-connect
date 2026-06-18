@@ -113,7 +113,7 @@ function normalizeAction(value: unknown): BrowserTrustedAction | null {
   const id = stringField(value, 'id');
   const label = stringField(value, 'label');
   const kind = stringField(value, 'kind') as BrowserTrustedAction['kind'];
-  if (!id || !label || !['private-chat', 'service-list', 'service-call', 'copy', 'proof', 'creator'].includes(kind)) {
+  if (!id || !label || !['private-chat', 'service-list', 'service-call', 'copy', 'proof', 'creator', 'open-conversation'].includes(kind)) {
     return null;
   }
 

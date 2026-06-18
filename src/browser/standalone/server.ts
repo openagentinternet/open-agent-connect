@@ -91,7 +91,8 @@ function isBrowserPagePath(pathname: string): boolean {
   return pathname === '/'
     || pathname === '/browser'
     || pathname === '/ui/browser'
-    || /^\/browser\/(?:metaid|metaapp)\/[^/?#]+$/u.test(pathname);
+    || /^\/browser\/(?:metaid|metaapp|metafile)\/[^/?#]+$/u.test(pathname)
+    || /^\/browser\/map\/[^?#]+$/u.test(pathname);
 }
 
 function parsePreviewAssetPath(pathname: string): { previewId: string; assetPath: string } | null {

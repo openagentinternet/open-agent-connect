@@ -544,24 +544,27 @@
         font-size: 12px;
         line-height: 1.45;
       }
-      .homepage-source-grid {
+      .homepage-source-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
         gap: 12px;
+        align-items: end;
       }
-      .homepage-source-card {
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--card);
-        padding: 12px;
+      .homepage-source-select label {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .homepage-control-slot {
         min-width: 0;
       }
-      .homepage-source-title {
+      .homepage-control-row {
         display: flex;
         align-items: center;
-        gap: 6px;
-        font-weight: 650;
-        margin-bottom: 6px;
+        gap: 8px;
+        min-height: 36px;
       }
       .homepage-help-wrap {
         position: relative;
@@ -572,7 +575,6 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-top: 10px;
       }
       .homepage-metaapp-row input {
         min-width: 0;
@@ -639,11 +641,6 @@
         margin-top: 10px;
         overflow-wrap: anywhere;
         word-break: break-all;
-      }
-      .homepage-actions {
-        display: flex;
-        justify-content: flex-end;
-        margin-top: 10px;
       }
       .homepage-view-link {
         margin-left: 6px;
@@ -1438,9 +1435,11 @@
         .mnemonic-grid {
           grid-template-columns: 1fr;
         }
-        .homepage-source-grid {
+        .homepage-source-row {
           grid-template-columns: 1fr;
+          align-items: stretch;
         }
+        .homepage-control-row,
         .homepage-metaapp-row {
           align-items: stretch;
           flex-direction: column;

@@ -1,14 +1,15 @@
 export type ChainWriteOperation = 'init' | 'create' | 'modify' | 'revoke';
 export type ChainWriteEncryption = '0' | '1' | '2';
-export type ChainWriteEncoding = 'utf-8' | 'base64';
+export type ChainWriteEncoding = 'utf-8' | 'base64' | 'binary';
 export type ChainWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
+export type ChainWritePayload = string | Buffer;
 export interface ChainWriteRequest {
     operation?: string;
     path?: string;
     encryption?: string;
     version?: string;
     contentType?: string;
-    payload?: string;
+    payload?: ChainWritePayload;
     encoding?: string;
     network?: string;
 }
@@ -18,7 +19,7 @@ export interface NormalizedChainWriteRequest {
     encryption: ChainWriteEncryption;
     version: string;
     contentType: string;
-    payload: string;
+    payload: ChainWritePayload;
     encoding: ChainWriteEncoding;
     network: ChainWriteNetwork;
 }
@@ -34,4 +35,8 @@ export interface ChainWriteResult {
     globalMetaId: string;
     mvcAddress: string;
 }
+export declare function chainWritePayloadToBuffer(input: {
+    payload: ChainWritePayload;
+    encoding: ChainWriteEncoding;
+}): Buffer;
 export declare function normalizeChainWriteRequest(input: ChainWriteRequest): NormalizedChainWriteRequest;

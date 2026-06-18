@@ -1,5 +1,10 @@
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../contracts/commandResult';
 import type { MetaAppGalleryRecord } from '../metaapp/types';
+import {
+  resolveMapUriToResource,
+  resolveMetafilePinToResource,
+  type BrowserCommandResult,
+} from '@openagentinternet/agent-browser-core';
 import { createBotHomepageClient } from './botHomepageClient';
 import { buildBotPageResolveResult } from './botPageResolver';
 import { buildMetaAppResolveResult } from './metaAppResolver';
@@ -12,6 +17,13 @@ export interface ResolveBrowserResourceInput {
   fetch?: typeof fetch;
   metaAppLookup?: (pinId: string) => Promise<MetaAppGalleryRecord | null>;
   metaAppResolve?: (pinId: string) => Promise<MetabotCommandResult<MetaAppGalleryRecord>>;
+}
+
+function fromBrowserCommandResult(result: BrowserCommandResult<BrowserResolveResult>): MetabotCommandResult<BrowserResolveResult> {
+  if (result.ok) {
+    return commandSuccess(result.data);
+  }
+  return commandFailed(result.code, result.message, result.data ? { data: result.data } : undefined);
 }
 
 export async function resolveBrowserResource(input: ResolveBrowserResourceInput): Promise<MetabotCommandResult<BrowserResolveResult>> {
@@ -45,6 +57,24 @@ export async function resolveBrowserResource(input: ResolveBrowserResourceInput)
       homepage: homepage.data,
       resolverUrl: homepage.url,
       templateId: input.config.botHomepageTemplateId,
+    }));
+  }
+
+  if (parsed.scheme === 'map') {
+    return fromBrowserCommandResult(await resolveMapUriToResource({
+      uri: parsed.originalUri,
+      fetch: input.fetch,
+      manApiBaseUrl: input.config.manApiBaseUrl,
+    }));
+  }
+
+  if (parsed.scheme === 'metafile') {
+    return fromBrowserCommandResult(await resolveMetafilePinToResource({
+      uri: parsed.originalUri,
+      id: parsed.id,
+      fetch: input.fetch,
+      manApiBaseUrl: input.config.manApiBaseUrl,
+      metafileContentBaseUrl: input.config.metafileContentBaseUrl,
     }));
   }
 

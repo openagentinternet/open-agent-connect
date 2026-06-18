@@ -162,6 +162,7 @@ function createPlatformSkillCatalog(options) {
     return {
         async listPrimaryRuntimeSkills(input) {
             const metaBotSlug = normalizeText(input.metaBotSlug);
+            const allowFallbackRuntime = input.allowFallbackRuntime !== false;
             const [runtimeState, bindingState] = await Promise.all([
                 options.runtimeStore.read(),
                 options.bindingStore.read(),
@@ -183,7 +184,7 @@ function createPlatformSkillCatalog(options) {
                 : undefined;
             let binding = primaryBinding;
             let runtime = primaryRuntime;
-            if (!isUsableRuntime(primaryRuntime) && fallbackBinding && isUsableRuntime(fallbackRuntime)) {
+            if (allowFallbackRuntime && !isUsableRuntime(primaryRuntime) && fallbackBinding && isUsableRuntime(fallbackRuntime)) {
                 binding = fallbackBinding;
                 runtime = fallbackRuntime;
             }

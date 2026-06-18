@@ -1,8 +1,8 @@
 import type { DefaultWriteNetwork } from '../config/configTypes';
 import type { BotHomepageTemplateId } from './botHomepageTemplates';
-export type BrowserUriScheme = 'metaid' | 'metaapp';
-export type BrowserResourceType = 'bot' | 'metaapp' | 'unsupported';
-export type BrowserRendererType = 'bot-page' | 'html-iframe' | 'pdf' | 'image' | 'video' | 'unsupported';
+export type BrowserUriScheme = 'metaid' | 'metaapp' | 'metafile' | 'map';
+export type BrowserResourceType = 'bot' | 'metaapp' | 'document' | 'image' | 'pdf' | 'protocol' | 'conversation' | 'unsupported' | 'unknown';
+export type BrowserRendererType = 'bot-page' | 'html-iframe' | 'pdf' | 'image' | 'video' | 'protocol-pin' | 'host-action' | 'unsupported';
 export type BrowserResolutionState = 'resolved' | 'loading' | 'not_found' | 'error';
 export type BrowserVerificationState = 'verified' | 'partial' | 'unverified';
 export interface BotBrowserConfig {
@@ -66,7 +66,7 @@ export interface BrowserSourceSummary {
 export interface BrowserTrustedAction {
     id: string;
     label: string;
-    kind: 'private-chat' | 'service-list' | 'service-call' | 'copy' | 'proof' | 'creator';
+    kind: 'private-chat' | 'service-list' | 'service-call' | 'copy' | 'proof' | 'creator' | 'open-conversation';
     enabled?: boolean;
     requiresUsingIdentity?: boolean;
     uri?: string;

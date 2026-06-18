@@ -9,6 +9,9 @@ const {
   buildConversationsPageViewModelRuntimeSource,
 } = require('../../dist/ui/pages/conversations/viewModel.js');
 
+const LOCAL_GLOBAL_META_ID = 'idq1j3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+
 test('buildConversationsPageViewModel maps peer conversations into local-Bot scoped summaries', () => {
   const model = buildConversationsPageViewModel({
     localBots: [
@@ -181,6 +184,39 @@ test('buildConversationsPageViewModel selects only the requested peer when switc
   ]);
   assert.equal(model.selectedConversation.peerGlobalMetaId, 'gm-second');
   assert.equal(model.selectedConversation.conversationIdPreview, 'peer-gm-local-gm-second');
+});
+
+test('keeps selected peer when conversation has no history', () => {
+  const model = buildConversationsPageViewModel({
+    localBots: [
+      {
+        name: 'Local Bot',
+        slug: 'local-bot',
+        globalMetaId: LOCAL_GLOBAL_META_ID,
+      },
+    ],
+    selectedLocalGlobalMetaId: LOCAL_GLOBAL_META_ID,
+    selectedPeerGlobalMetaId: PEER_GLOBAL_META_ID,
+    conversations: [],
+    messages: [],
+  });
+
+  assert.equal(model.selectedLocalGlobalMetaId, LOCAL_GLOBAL_META_ID);
+  assert.equal(model.selectedPeerGlobalMetaId, PEER_GLOBAL_META_ID);
+  assert.equal(model.selectedConversation.peerGlobalMetaId, PEER_GLOBAL_META_ID);
+  assert.equal(model.selectedConversation.localGlobalMetaId, LOCAL_GLOBAL_META_ID);
+  assert.equal(model.selectedConversation.isSelected, true);
+  assert.deepEqual(model.conversations.map((conversation) => ({
+    localGlobalMetaId: conversation.localGlobalMetaId,
+    peerGlobalMetaId: conversation.peerGlobalMetaId,
+    isSelected: conversation.isSelected,
+  })), [
+    {
+      localGlobalMetaId: LOCAL_GLOBAL_META_ID,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      isSelected: true,
+    },
+  ]);
 });
 
 test('buildConversationsPageViewModel does not split service trace sessions into separate conversation rows', () => {

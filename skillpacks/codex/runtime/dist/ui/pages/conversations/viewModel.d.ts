@@ -43,6 +43,7 @@ export interface ConversationsEmptyStateViewModel {
 export interface ConversationsPageViewModel {
     localBots: LocalBotOptionViewModel[];
     selectedLocalGlobalMetaId: string;
+    selectedPeerGlobalMetaId: string;
     conversations: ConversationSummaryViewModel[];
     selectedConversation: ConversationSummaryViewModel | null;
     messages: ConversationMessageViewModel[];

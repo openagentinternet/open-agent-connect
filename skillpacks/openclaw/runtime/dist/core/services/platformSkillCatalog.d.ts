@@ -44,6 +44,7 @@ export type PrimaryRuntimeSkillCatalogResult = PrimaryRuntimeSkillCatalogSuccess
 export interface PlatformSkillCatalog {
     listPrimaryRuntimeSkills(input: {
         metaBotSlug: string;
+        allowFallbackRuntime?: boolean;
     }): Promise<PrimaryRuntimeSkillCatalogResult>;
 }
 export interface CreatePlatformSkillCatalogOptions {

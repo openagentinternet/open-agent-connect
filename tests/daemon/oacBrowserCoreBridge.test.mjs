@@ -11,6 +11,9 @@ const { createMetabotProfileFromIdentity, getMetabotProfile } = require('../../d
 const { commandFailed } = require('../../dist/core/contracts/commandResult.js');
 const { createMetaAppPreviewSessionRegistry } = require('../../dist/core/metaapp/previewSessions.js');
 
+const LOCAL_GLOBAL_META_ID = 'idq1j3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+
 async function createAdapter(input) {
   return createOacBrowserCoreHostAdapter({
     homeDir: input.homeDir,
@@ -279,4 +282,40 @@ test('OAC Browser core bridge preserves non-terminal service-call command states
     href: '/ui/trace?traceId=trace-manual',
   });
   assert.deepEqual(manualAction.data, { traceId: 'trace-manual' });
+});
+
+test('OAC Browser core bridge bridges open-conversation trusted actions', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-core-bridge-open-conversation');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Conversation Bridge Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18ConversationBridge',
+  });
+  const adapter = await createAdapter({
+    homeDir: profileHome,
+    systemHomeDir,
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data, {
+    kind: 'open-conversation',
+    handled: true,
+    data: {
+      href: `/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`,
+    },
+  });
 });

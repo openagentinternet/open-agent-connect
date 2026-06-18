@@ -24,6 +24,7 @@ export interface CreateMetabotInput {
     avatarDataUrl?: string;
     primaryProvider?: LlmProvider | null;
     fallbackProvider?: LlmProvider | null;
+    allowChatSkills?: string[];
 }
 export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
     homeDir: string;

@@ -5,11 +5,13 @@ import { resolveBrowserResource } from '../../core/browser/browserResolver';
 import type {
   BrowserActor,
   BrowserActorInput,
+  BrowserActorCapability,
   BrowserCacheClearInput,
   BrowserCacheClearResult,
   BrowserCacheInput,
   BrowserCacheSnapshot,
   BrowserHostAdapter,
+  BrowserOpenConversationPayload,
   BrowserResolveInput,
   BrowserRuntimeInput,
   BrowserRuntimeSnapshot,
@@ -26,7 +28,12 @@ import {
 } from '../../core/browser/settings';
 import type { BrowserResolveResult } from '../../core/browser/types';
 import { createConfigStore } from '../../core/config/configStore';
-import { commandFailed, commandSuccess, type MetabotCommandResult } from '../../core/contracts/commandResult';
+import {
+  commandFailed,
+  commandManualActionRequired,
+  commandSuccess,
+  type MetabotCommandResult,
+} from '../../core/contracts/commandResult';
 import { isLlmProvider } from '../../core/llm/llmTypes';
 import { createMetaAppArtifactCacheStore } from '../../core/metaapp/artifactCache';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
@@ -74,6 +81,14 @@ function buildMetaAppPreviewAssetUrl(previewId: string, assetPath: string): stri
   return `/api/metaapp/preview-assets/${encodedPreviewId}/${normalizedAssetPath}`;
 }
 
+function browserActorCapabilities(profile: MetabotProfileFull): BrowserActorCapability[] {
+  const capabilities: BrowserActorCapability[] = ['template-settings'];
+  if (normalizeText(profile.globalMetaId)) {
+    capabilities.unshift('private-chat', 'service-call', 'message-view');
+  }
+  return capabilities;
+}
+
 function profileToBrowserActor(profile: MetabotProfileFull, selectedHomeDir: string): BrowserActor {
   const isDefault = Boolean(selectedHomeDir && path.resolve(profile.homeDir) === selectedHomeDir);
   return {
@@ -83,7 +98,7 @@ function profileToBrowserActor(profile: MetabotProfileFull, selectedHomeDir: str
     globalMetaId: profile.globalMetaId,
     ...(profile.avatarDataUrl ? { avatar: profile.avatarDataUrl } : {}),
     isDefault,
-    capabilities: ['private-chat', 'service-call', 'template-settings'],
+    capabilities: browserActorCapabilities(profile),
   };
 }
 
@@ -97,6 +112,21 @@ function readActionPayload(input: BrowserTrustedActionInput): Record<string, unk
     : {};
 }
 
+function trustedActionResultData(value: unknown): BrowserTrustedActionResult['data'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const source = value as Record<string, unknown>;
+  const data: NonNullable<BrowserTrustedActionResult['data']> = {};
+  for (const key of ['href', 'route', 'copiedText', 'message'] as const) {
+    const field = source[key];
+    if (typeof field === 'string' && field) {
+      data[key] = field;
+    }
+  }
+  return Object.keys(data).length ? data : undefined;
+}
+
 function ownerActorIdFromPayload(payload: Record<string, unknown>): string {
   return normalizeText(payload.ownerActorId);
 }
@@ -104,6 +134,19 @@ function ownerActorIdFromPayload(payload: Record<string, unknown>): string {
 function botManagementHref(slug: string, tab: 'info' | 'history', focus: string): string {
   const query = new URLSearchParams({ profile: slug, tab, focus });
   return `/ui/bot?${query.toString()}`;
+}
+
+function findProfileByHomeDir(profiles: MetabotProfileFull[], homeDir: string): MetabotProfileFull | null {
+  const resolvedHomeDir = path.resolve(homeDir);
+  return profiles.find((profile) => path.resolve(profile.homeDir) === resolvedHomeDir) ?? null;
+}
+
+function conversationHref(localGlobalMetaId: string, peerGlobalMetaId: string): string {
+  const query = new URLSearchParams({
+    local: localGlobalMetaId,
+    peer: peerGlobalMetaId,
+  });
+  return `/ui/conversations?${query.toString()}`;
 }
 
 function createBotHref(env: NodeJS.ProcessEnv): string {
@@ -125,7 +168,7 @@ function wrapTrustedActionResult(
     data: {
       kind,
       handled: true,
-      data: result.data,
+      data: trustedActionResultData(result.data),
     },
   };
 }
@@ -341,6 +384,38 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
         request,
       });
       return wrapTrustedActionResult(actionInput.kind, result);
+    }
+
+    if (actionInput.kind === 'open-conversation') {
+      const openPayload = payload as Partial<BrowserOpenConversationPayload>;
+      const peerGlobalMetaId = normalizeText(openPayload.peerGlobalMetaId);
+      if (!peerGlobalMetaId) {
+        return commandFailed('invalid_browser_action', 'Browser open-conversation action requires peerGlobalMetaId.');
+      }
+      let profiles: MetabotProfileFull[];
+      try {
+        profiles = await listMetabotProfiles(input.systemHomeDir);
+      } catch (error) {
+        return commandFailed(
+          'browser_profile_list_failed',
+          error instanceof Error ? error.message : 'Browser open-conversation action could not list MetaBot profiles.',
+        );
+      }
+      const selectedProfile = findProfileByHomeDir(profiles, actor.homeDir);
+      const localGlobalMetaId = normalizeText(selectedProfile?.globalMetaId);
+      if (!selectedProfile || !localGlobalMetaId) {
+        return commandManualActionRequired(
+          'browser_identity_required',
+          'Open conversation requires a selected local Bot with a Global MetaID.',
+        );
+      }
+      return commandSuccess({
+        kind: 'open-conversation',
+        handled: true,
+        data: {
+          href: conversationHref(localGlobalMetaId, peerGlobalMetaId),
+        },
+      });
     }
 
     if (

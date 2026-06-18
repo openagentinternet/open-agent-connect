@@ -6,6 +6,9 @@ import vm from 'node:vm';
 const require = createRequire(import.meta.url);
 const { buildBrowserPageDefinition } = require('../../dist/ui/pages/browser/app.js');
 
+const LOCAL_GLOBAL_META_ID = 'idq1j3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+
 class FakeElement {
   constructor() {
     this.value = '';
@@ -129,19 +132,19 @@ function createContext(options = {}) {
       id: 'worker',
       label: 'Worker Bot',
       kind: 'oac-bot',
-      globalMetaId: 'idq1worker',
+      globalMetaId: LOCAL_GLOBAL_META_ID,
       isDefault: true,
-      capabilities: ['private-chat', 'service-call', 'template-settings'],
+      capabilities: ['private-chat', 'service-call', 'message-view', 'template-settings'],
     }],
     defaultActor: {
       id: 'worker',
       label: 'Worker Bot',
       kind: 'oac-bot',
-      globalMetaId: 'idq1worker',
+      globalMetaId: LOCAL_GLOBAL_META_ID,
       isDefault: true,
-      capabilities: ['private-chat', 'service-call', 'template-settings'],
+      capabilities: ['private-chat', 'service-call', 'message-view', 'template-settings'],
     },
-    defaultUri: 'metaid://idq1worker',
+    defaultUri: `metaid://${LOCAL_GLOBAL_META_ID}`,
     features: {
       privateChat: true,
       serviceCall: true,
@@ -272,7 +275,7 @@ test('browser renders the no-Bot and owner toolbar launch chrome in Simplified C
   assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /创建 Bot/);
 
   const owner = createContext({ language: 'zh-CN' });
-  owner.context.state.current.owner.globalMetaId = 'idq1worker';
+  owner.context.state.current.owner.globalMetaId = LOCAL_GLOBAL_META_ID;
   owner.context.state.current.title = 'Worker Bot';
 
   owner.context.renderOwnerToolbar();
@@ -308,6 +311,71 @@ test('service-call sends only after modal confirmation with Browser action contr
   });
   assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body, 'from'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.payload, 'input'), false);
+});
+
+test('open-conversation posts payload and follows safe conversation href', async () => {
+  const { context, requests } = createContext({
+    actionResponse: {
+      ok: true,
+      data: {
+        kind: 'open-conversation',
+        handled: true,
+        data: {
+          href: `/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`,
+        },
+      },
+    },
+  });
+
+  await context.handleTrustedAction({
+    id: 'message',
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    },
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/browser/actions?actorId=worker');
+  assert.deepEqual(requests[0].body, {
+    resourceUri: 'metaid://idq1target',
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    },
+  });
+  assert.equal(context.window.location.href, `/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`);
+});
+
+test('open-conversation blocks unsafe returned href', async () => {
+  const initialHref = 'http://127.0.0.1:3000/ui/browser';
+  const { context, requests } = createContext({
+    actionResponse: {
+      ok: true,
+      data: {
+        kind: 'open-conversation',
+        handled: true,
+        data: {
+          href: 'https://attacker.example/ui/conversations?local=x&peer=y',
+        },
+      },
+    },
+  });
+
+  await context.handleTrustedAction({
+    id: 'message',
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    },
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(context.window.location.href, initialHref);
+  assert.equal(context.state.status, 'error');
 });
 
 test('owner toolbar actions send Browser owner action payloads and follow returned href', async () => {

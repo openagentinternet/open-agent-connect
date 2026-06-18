@@ -5,6 +5,7 @@ exports.__clearPendingMvcSpentOutpointsForTests = __clearPendingMvcSpentOutpoint
 require("../../compat/nodeLocalStorage");
 const meta_contract_1 = require("meta-contract");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
+const writePin_1 = require("../writePin");
 const deriveIdentity_1 = require("../../identity/deriveIdentity");
 const utxoBroadcastErrors_1 = require("../utxoBroadcastErrors");
 const METALET_HOST = 'https://www.metalet.space';
@@ -139,7 +140,7 @@ function buildOpReturnParts(input) {
         parts.push(input.encryption);
         parts.push(input.version);
         parts.push(input.contentType);
-        parts.push(Buffer.from(input.payload, input.encoding));
+        parts.push((0, writePin_1.chainWritePayloadToBuffer)(input));
     }
     return parts;
 }

@@ -141,7 +141,9 @@ async function renderBuiltInPage(page, languagePreference) {
     return applyStaticI18n(injectTopbarChrome(html, i18n), i18n);
 }
 function isBrowserPagePath(pathname) {
-    return pathname === '/browser' || /^\/browser\/(?:metaid|metaapp)\/[^/]+$/.test(pathname);
+    return pathname === '/browser'
+        || /^\/browser\/(?:metaid|metaapp|metafile)\/[^/?#]+$/u.test(pathname)
+        || /^\/browser\/map\/[^?#]+$/u.test(pathname);
 }
 async function servePlatformAsset(context) {
     const { req, url } = context;

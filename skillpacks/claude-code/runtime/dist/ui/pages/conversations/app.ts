@@ -633,12 +633,9 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     try {
       const payload = await fetchJson(conversationUrl());
       state.conversations = Array.isArray(payload.conversations) ? payload.conversations : [];
-      const selectedStillExists = state.conversations.some((conversation) => conversation.peerGlobalMetaId === state.selectedPeerGlobalMetaId);
-      if ((!state.selectedPeerGlobalMetaId || !selectedStillExists) && state.conversations[0]) {
-        state.selectedPeerGlobalMetaId = state.conversations[0].peerGlobalMetaId;
-      }
-      if (state.selectedPeerGlobalMetaId && !state.conversations.length) {
-        state.selectedPeerGlobalMetaId = '';
+      const firstPeerGlobalMetaId = state.conversations[0] && state.conversations[0].peerGlobalMetaId;
+      if (!state.selectedPeerGlobalMetaId && firstPeerGlobalMetaId) {
+        state.selectedPeerGlobalMetaId = firstPeerGlobalMetaId;
       }
       setUrlState();
       state.loading = false;

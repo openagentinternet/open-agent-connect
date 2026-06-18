@@ -27,7 +27,7 @@ declare module '@openagentinternet/agent-browser-ui/browser' {
     label: string;
     icon: string;
     action: 'open-settings';
-    settingsTab: 'baseUrls' | 'templates' | 'cache';
+    settingsTab: 'baseUrls' | 'templates' | 'nameResolution' | 'cache';
   }
 
   export interface BrowserMenuSectionDefinition {
@@ -36,7 +36,7 @@ declare module '@openagentinternet/agent-browser-ui/browser' {
   }
 
   export interface BrowserSettingsTabDefinition {
-    id: 'baseUrls' | 'templates' | 'cache';
+    id: 'baseUrls' | 'templates' | 'nameResolution' | 'cache';
     label: string;
   }
 

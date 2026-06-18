@@ -47,6 +47,7 @@ export interface ConversationsEmptyStateViewModel {
 export interface ConversationsPageViewModel {
   localBots: LocalBotOptionViewModel[];
   selectedLocalGlobalMetaId: string;
+  selectedPeerGlobalMetaId: string;
   conversations: ConversationSummaryViewModel[];
   selectedConversation: ConversationSummaryViewModel | null;
   messages: ConversationMessageViewModel[];
@@ -227,6 +228,30 @@ function buildConversationId(record: Record<string, unknown>, localGlobalMetaId:
     || `peer-${localGlobalMetaId || 'local'}-${peerGlobalMetaId || 'peer'}`;
 }
 
+function buildSyntheticConversationSummary(
+  localGlobalMetaId: string,
+  peerGlobalMetaId: string,
+): ConversationSummaryViewModel {
+  const conversationId = buildConversationId({}, localGlobalMetaId, peerGlobalMetaId);
+  return {
+    conversationId,
+    conversationIdPreview: formatConversationIdPreview(conversationId),
+    localGlobalMetaId,
+    localAvatar: '',
+    peerLabel: peerGlobalMetaId,
+    peerGlobalMetaId,
+    peerAvatar: '',
+    latestText: `Conversation with ${peerGlobalMetaId}`,
+    latestAt: 0,
+    latestAtLabel: '-',
+    kinds: ['Chat'],
+    stateLabel: 'Active',
+    messageCountLabel: '0 messages',
+    localBotLabel: '',
+    isSelected: true,
+  };
+}
+
 function buildConversationSummary(
   row: unknown,
   selected: { conversationId: string; peerGlobalMetaId: string },
@@ -321,14 +346,21 @@ export function buildConversationsPageViewModel(input: ConversationsPageViewMode
     .map((row) => buildConversationSummary(row, selected))
     .filter((summary) => summary.peerGlobalMetaId)
     .sort((left, right) => right.latestAt - left.latestAt);
-  const activeSummary = selected.conversationId
+  const matchedSummary = selected.conversationId
     ? summaries.find((summary) => summary.conversationId === selected.conversationId) ?? null
     : selected.peerGlobalMetaId
       ? summaries.find((summary) => summary.peerGlobalMetaId === selected.peerGlobalMetaId) ?? null
       : summaries[0] ?? null;
+  const syntheticSummary = !matchedSummary && selected.peerGlobalMetaId
+    ? buildSyntheticConversationSummary(selectedLocalGlobalMetaId, selected.peerGlobalMetaId)
+    : null;
+  const activeSummary = matchedSummary ?? syntheticSummary;
   const selectedPeer = activeSummary?.peerGlobalMetaId ?? '';
   const selectedConversationId = activeSummary?.conversationId ?? '';
-  const conversations = summaries.map((summary) => ({
+  const displaySummaries = syntheticSummary
+    ? [syntheticSummary, ...summaries]
+    : summaries;
+  const conversations = displaySummaries.map((summary) => ({
     ...summary,
     isSelected: Boolean(
       (selectedPeer && summary.peerGlobalMetaId === selectedPeer)
@@ -348,6 +380,7 @@ export function buildConversationsPageViewModel(input: ConversationsPageViewMode
   return {
     localBots,
     selectedLocalGlobalMetaId,
+    selectedPeerGlobalMetaId: selectedPeer,
     conversations,
     selectedConversation,
     messages,
@@ -386,6 +419,7 @@ export function buildConversationsPageViewModelRuntimeSource(): string {
     normalizeKindLabels,
     buildLocalBotOption,
     buildConversationId,
+    buildSyntheticConversationSummary,
     buildConversationSummary,
     buildMessage,
     buildConversationsPageViewModel,

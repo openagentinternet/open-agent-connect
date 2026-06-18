@@ -15,7 +15,7 @@ function buildBotPageDefinition() {
 function buildBotPageScript() {
     return String.raw `var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -43,6 +43,7 @@ function selectedProfile(){return state.profiles.find(function(p){return p.slug=
 function clearSelectedProfileDrafts(){
   state._pendingAvatar=undefined;
   state._pendingHomepage=undefined;
+  state._homepageSource='';
   state._homepageUploadWorking=false;
   state._homepageUploadToken+=1;
 }
@@ -72,11 +73,30 @@ function homepageDraft(profile){
   if(state._pendingHomepage!==undefined)return state._pendingHomepage;
   return normalizeHomepage(profile&&profile.homepage);
 }
-function homepageKind(homepage){
+function homepageSourceFromHomepage(homepage){
   homepage=normalizeHomepage(homepage);
-  if(!homepage)return uiText('bot.homepageDefault','Default');
-  if(/^metaapp:\/\//i.test(homepage.uri))return uiText('bot.homepageMetaApp','MetaApp');
-  return uiText('bot.homepageMetafile','Metafile');
+  if(!homepage)return'default';
+  return /^metaapp:\/\//i.test(homepage.uri)?'metaapp':'metafile';
+}
+function homepageSourceValue(profile){
+  if(state._homepageSource)return state._homepageSource;
+  return homepageSourceFromHomepage(homepageDraft(profile));
+}
+function selectedHomepageSource(profile){
+  var select=q('[data-field="homepage-source"]');
+  var value=String(select&&select.value||'').trim();
+  if(value==='default'||value==='metafile'||value==='metaapp')return value;
+  var metaAppInput=q('[data-field="homepage-metaapp-pin"]');
+  if(!select&&String(metaAppInput&&metaAppInput.value||'').trim())return'metaapp';
+  return homepageSourceValue(profile);
+}
+function homepageSourceOptionMarkup(value,label,selected){
+  return '<option value="'+esc(value)+'"'+(value===selected?' selected':'')+'>'+esc(label)+'</option>';
+}
+function homepageSourceOptionsMarkup(selected){
+  return homepageSourceOptionMarkup('default',uiText('bot.homepageDefault','Default'),selected)+
+    homepageSourceOptionMarkup('metafile',uiText('bot.homepageMetafile','Metafile'),selected)+
+    homepageSourceOptionMarkup('metaapp',uiText('bot.homepageMetaApp','MetaApp'),selected);
 }
 function normalizeMetaAppHomepageInput(value){
   var pin=String(value==null?'':value).trim();
@@ -219,23 +239,30 @@ function providerPickerMarkup(field,label,selected,allowNone,touched){
 }
 function homepagePanelMarkup(profile){
   var homepage=homepageDraft(profile);
-  var finalUri=homepage&&homepage.uri;
-  var status=homepageKind(homepage);
+  var source=homepageSourceValue(profile);
+  var status=source==='default'?uiText('bot.homepageDefault','Default'):(source==='metaapp'?uiText('bot.homepageMetaApp','MetaApp'):uiText('bot.homepageMetafile','Metafile'));
   var viewDisabled=profile&&profile.globalMetaId?'':' disabled';
   var viewLink=' <button type="button" class="homepage-view-link" data-act="view-homepage"'+viewDisabled+'>'+esc(uiText('bot.homepageViewLink','click here to view'))+'</button>';
-  var defaultRendererLine=finalUri?'':'<div class="homepage-final-uri">'+esc(uiText('bot.homepageDefaultActive','Default Bot Page renderer is active.'))+viewLink+'</div>';
-  var defaultActionLine=finalUri?'<div class="homepage-actions"><button type="button" class="btn btn-sm btn-danger" data-act="use-default-homepage">'+esc(uiText('bot.homepageUseDefault','Use Default'))+'</button></div>':'';
   var helpCopy=uiText('bot.homepageMetaAppHelp','Use the metabot-homepage-guide skill and metabot-metaapp-publish skill to create a unique Bot Page, package and publish it on-chain through the MetaApp protocol, then paste the MetaApp pin ID here.');
-  var metaAppPin=state._pendingHomepage!==undefined?metaAppPinFromHomepage(state._pendingHomepage):'';
+  var metaAppSource=source==='metaapp'?(state._pendingHomepage!==undefined?state._pendingHomepage:profile&&profile.homepage):null;
+  var metaAppPin=metaAppPinFromHomepage(metaAppSource);
+  var control='';
+  if(source==='default'){
+    control='<div class="homepage-final-uri">'+esc(uiText('bot.homepageDefaultActive','Default Bot Page renderer is active.'))+viewLink+'</div>';
+  }else if(source==='metafile'){
+    control='<div class="homepage-source-note">'+esc(uiText('bot.homepageMetafileNote','Upload a local file and save it as metafile://<pinId>.'))+'</div>'+
+      '<div class="homepage-control-row"><button type="button" class="btn btn-sm" data-act="upload-homepage"'+(state._homepageUploadWorking?' disabled':'')+'>'+esc(uiText('bot.upload','Upload'))+'</button><input type="file" data-homepage-file-input hidden /></div>';
+  }else{
+    control='<div class="homepage-source-note">'+esc(uiText('bot.homepageMetaAppNote','Paste a MetaApp pin ID and save it as metaapp://<pinId>.'))+'</div>'+
+      '<div class="homepage-control-row homepage-metaapp-row"><input data-field="homepage-metaapp-pin" placeholder="'+esc(uiText('bot.homepagePinPlaceholder','MetaApp pin ID'))+'" value="'+esc(metaAppPin)+'" /><button type="button" class="btn btn-sm" data-act="preview-homepage-metaapp">'+esc(uiText('bot.homepagePreviewMetaApp','Preview'))+'</button><span class="homepage-help-wrap" data-homepage-help><button type="button" class="homepage-help" data-act="toggle-homepage-help" aria-label="'+esc(uiText('bot.homepageMetaAppHelpLabel','How to get a MetaApp pin ID'))+'" aria-expanded="false" aria-controls="homepage-metaapp-help">?</button><span class="homepage-help-popover" id="homepage-metaapp-help" data-homepage-help-popover role="tooltip">'+esc(helpCopy)+'</span></span></div>';
+  }
   return '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label>'+
     '<div class="homepage-panel" data-homepage-panel>'+
       '<div class="homepage-panel-head"><div><div class="homepage-panel-title">'+esc(uiText('bot.homepage','Homepage'))+'</div><div class="homepage-panel-subtitle">'+esc(uiText('bot.homepageSource','Custom Bot page source'))+'</div></div><span class="homepage-status-pill">'+esc(status)+'</span></div>'+
-      '<div class="homepage-source-grid">'+
-        '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetafile','Metafile'))+'</div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetafileNote','Upload a local file and save it as metafile://<pinId>.'))+'</div><div class="homepage-metaapp-row"><button type="button" class="btn btn-sm" data-act="upload-homepage"'+(state._homepageUploadWorking?' disabled':'')+'>'+esc(uiText('bot.upload','Upload'))+'</button><input type="file" data-homepage-file-input hidden /></div></div>'+
-        '<div class="homepage-source-card"><div class="homepage-source-title">'+esc(uiText('bot.homepageMetaApp','MetaApp'))+'<span class="homepage-help-wrap" data-homepage-help><button type="button" class="homepage-help" data-act="toggle-homepage-help" aria-label="'+esc(uiText('bot.homepageMetaAppHelpLabel','How to get a MetaApp pin ID'))+'" aria-expanded="false" aria-controls="homepage-metaapp-help">?</button><span class="homepage-help-popover" id="homepage-metaapp-help" data-homepage-help-popover role="tooltip">'+esc(helpCopy)+'</span></span></div><div class="homepage-source-note">'+esc(uiText('bot.homepageMetaAppNote','Paste a MetaApp pin ID and save it as metaapp://<pinId>.'))+'</div><div class="homepage-metaapp-row"><input data-field="homepage-metaapp-pin" placeholder="'+esc(uiText('bot.homepagePinPlaceholder','MetaApp pin ID'))+'" value="'+esc(metaAppPin)+'" /><button type="button" class="btn btn-sm" data-act="preview-homepage-metaapp">'+esc(uiText('bot.homepagePreviewMetaApp','Preview'))+'</button></div></div>'+
+      '<div class="homepage-source-row">'+
+        '<div class="homepage-source-select"><label for="homepage-source">'+esc(uiText('bot.homepageSource','Custom Bot page source'))+'</label><select id="homepage-source" data-field="homepage-source">'+homepageSourceOptionsMarkup(source)+'</select></div>'+
+        '<div class="homepage-control-slot" data-homepage-control-slot>'+control+'</div>'+
       '</div>'+
-      defaultActionLine+
-      defaultRendererLine+
       '<div class="save-status" data-homepage-status></div>'+
     '</div></div>';
 }
@@ -344,7 +371,7 @@ function chatAllowedSkillsMarkup(profile){
     return '<option value="'+esc(skill.skillName)+'">'+esc(label)+'</option>';
   }).join('');
   var note=status==='loading'?'<div class="save-status saving">'+esc(uiText('bot.loadingChatSkills','Loading chat skills...'))+'</div>':(status==='error'?'<div class="save-status error">'+esc(error||uiText('bot.chatSkillsLoadFailed','Failed to load chat skills.'))+'</div>':'');
-  return '<div class="field field-full chat-skills-field"><label>'+esc(uiText('bot.chatAllowedSkills','Chat Allowed Skills'))+'</label>'+
+  return '<div class="field field-full chat-skills-field"><label>'+esc(uiText('bot.chatAllowedSkills','Private Chat Allowed Skills：'))+'</label>'+
     '<div class="chat-skill-chips">'+chips+'</div>'+
     '<div class="chat-skill-picker"><select data-field="chatSkillSelect"'+(status==='loading'?' disabled':'')+'>'+optionHtml+'</select><button type="button" class="btn btn-primary btn-sm" data-act="add-chat-skill"'+(status==='loading'?' disabled':'')+'>'+esc(uiText('bot.add','Add'))+'</button></div>'+
     note+
@@ -663,27 +690,53 @@ function toggleHomepageHelp(button){
   wrap.classList.toggle('open',open);
   if(button.setAttribute)button.setAttribute('aria-expanded',open?'true':'false');
 }
-function readMetaAppHomepageDraftFromInput(){
+function readMetaAppHomepageDraftFromInput(options){
+  options=options||{};
   var input=q('[data-field="homepage-metaapp-pin"]');
   var value=String(input&&input.value||'').trim();
   if(!value)return undefined;
-  return normalizeMetaAppHomepageInput(value);
+  try{
+    return normalizeMetaAppHomepageInput(value);
+  }catch(error){
+    if(options.optional)return undefined;
+    throw error;
+  }
+}
+function readHomepageDraftForSave(profile){
+  var source=selectedHomepageSource(profile);
+  if(source==='default')return null;
+  if(source==='metaapp'){
+    var metaAppDraft=readMetaAppHomepageDraftFromInput();
+    if(!metaAppDraft)throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
+    return metaAppDraft;
+  }
+  var pending=normalizeHomepage(state._pendingHomepage);
+  if(pending&&homepageSourceFromHomepage(pending)==='metafile')return pending;
+  var current=normalizeHomepage(profile&&profile.homepage);
+  if(current&&homepageSourceFromHomepage(current)==='metafile')return current;
+  throw new Error(uiText('bot.homepageUploadRequired','Upload a homepage file before saving.'));
 }
 function previewHomepageMetaApp(){
   try{
     var draft=readMetaAppHomepageDraftFromInput();
     if(!draft)throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
     state._pendingHomepage=draft;
+    state._homepageSource='metaapp';
     window.location.href=metaAppBrowserPath(metaAppPinFromHomepage(draft));
   }catch(error){
     renderHomepageDraftStatus(error.message,'error');
   }
 }
-function useDefaultHomepage(){
-  state._pendingHomepage=null;
-  var metaAppInput=q('[data-field="homepage-metaapp-pin"]');if(metaAppInput)metaAppInput.value='';
+function handleHomepageSourceChange(){
+  var profile=selectedProfile();
+  var source=selectedHomepageSource(profile);
+  state._homepageSource=source;
+  state._homepageUploadWorking=false;
+  state._homepageUploadToken+=1;
+  if(source==='default')state._pendingHomepage=null;
+  else state._pendingHomepage=undefined;
   rerenderPublicIdentityForHomepage();
-  renderHomepageDraftStatus(uiText('bot.homepageDefaultReadyToSave','Default homepage ready to save.'),'success');
+  if(source==='default')renderHomepageDraftStatus(uiText('bot.homepageDefaultReadyToSave','Default homepage ready to save.'),'success');
 }
 function handleHomepageUploadFile(file){
   var profile=selectedProfile();if(!profile||!profile.slug||!file)return Promise.resolve();
@@ -713,6 +766,7 @@ function handleHomepageUploadFile(file){
       renderer:'auto',
       contentType:data.contentType||file.type||'application/octet-stream',
     };
+    state._homepageSource='metafile';
     var metaAppInput=q('[data-field="homepage-metaapp-pin"]');if(metaAppInput)metaAppInput.value='';
     rerenderPublicIdentityForHomepage();
     renderHomepageDraftStatus(uiText('bot.homepageReadyToSave','Homepage ready to save.'),'success');
@@ -726,10 +780,10 @@ function handleHomepageUploadFile(file){
 function wireHomepageControls(){
   var input=q('[data-homepage-file-input]');
   var upload=q('[data-act="upload-homepage"]');
+  var source=q('[data-field="homepage-source"]');if(source)source.addEventListener('change',handleHomepageSourceChange);
   if(upload&&input)upload.addEventListener('click',function(){input.click()});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleHomepageUploadFile(file)});
   var preview=q('[data-act="preview-homepage-metaapp"]');if(preview)preview.addEventListener('click',previewHomepageMetaApp);
-  var useDefault=q('[data-act="use-default-homepage"]');if(useDefault)useDefault.addEventListener('click',useDefaultHomepage);
   var help=q('[data-act="toggle-homepage-help"]');if(help)help.addEventListener('click',function(event){if(event&&event.preventDefault)event.preventDefault();toggleHomepageHelp(this)});
   var view=q('[data-act="view-homepage"]');if(view)view.addEventListener('click',viewSelectedBotPage);
 }
@@ -1080,8 +1134,8 @@ function savePublicIdentity(){
   if(primaryEl&&primaryEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'primaryProvider',primaryEl.value||null,profile.primaryProvider||null);
   if(fallbackEl&&fallbackEl.getAttribute('data-provider-touched')==='1')changedValue(payload,'fallbackProvider',fallbackEl.value||null,profile.fallbackProvider||null);
   try{
-    var inputHomepage=readMetaAppHomepageDraftFromInput();
-    if(inputHomepage)state._pendingHomepage=inputHomepage;
+    var inputHomepage=readHomepageDraftForSave(profile);
+    if(inputHomepage!==undefined)state._pendingHomepage=inputHomepage;
   }catch(error){
     renderHomepageDraftStatus(error.message,'error');
     return Promise.resolve();
@@ -1097,6 +1151,7 @@ function savePublicIdentity(){
     state.originalProfile=updated;
     state._pendingAvatar=undefined;
     state._pendingHomepage=undefined;
+    state._homepageSource='';
     renderMetabotList();
     renderDetailHeader(updated);
     renderPublicIdentityTab({preserveDraft:false});
@@ -1178,6 +1233,8 @@ function saveChatSkills(){
 
 function resetPublicIdentity(){
   state._pendingAvatar=undefined;
+  state._pendingHomepage=undefined;
+  state._homepageSource='';
   var profile=selectedProfile();
   state.originalProfile=profile;
   renderPublicIdentityTab({preserveDraft:false});
