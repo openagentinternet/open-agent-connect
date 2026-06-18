@@ -11,6 +11,9 @@ const {
   browserWaiting,
 } = require('@openagentinternet/agent-browser-host-contract');
 
+const LOCAL_GLOBAL_META_ID = 'idq1j3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+
 async function startServer() {
   const calls = {
     context: [],
@@ -34,7 +37,7 @@ async function startServer() {
             kind: 'oac-bot',
             globalMetaId: 'idq1alice',
             isDefault: true,
-            capabilities: ['private-chat', 'service-call', 'template-settings'],
+            capabilities: ['private-chat', 'service-call', 'message-view', 'template-settings'],
           }],
           defaultActor: {
             id: 'alice',
@@ -42,7 +45,7 @@ async function startServer() {
             kind: 'oac-bot',
             globalMetaId: 'idq1alice',
             isDefault: true,
-            capabilities: ['private-chat', 'service-call', 'template-settings'],
+            capabilities: ['private-chat', 'service-call', 'message-view', 'template-settings'],
           },
           defaultUri: 'metaid://idq1alice',
           features: {
@@ -134,6 +137,15 @@ async function startServer() {
         if (input.kind === 'open-settings') {
           return browserManualActionRequired('browser_settings_required', 'Open Browser settings.', {
             action: { label: 'Open settings', href: '/ui/settings' },
+          });
+        }
+        if (input.kind === 'open-conversation') {
+          return browserSuccess({
+            kind: input.kind,
+            handled: true,
+            data: {
+              href: `/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`,
+            },
           });
         }
         return browserSuccess({ kind: input.kind, handled: true, data: { accepted: true } });
@@ -230,6 +242,43 @@ test('POST /api/browser/actions forwards owner trusted action payload and actorI
       ownerActorId: 'alice',
       ownerGlobalMetaId: 'idq1alice',
       currentUri: 'metaid://idq1alice',
+    },
+  }]);
+});
+
+test('POST /api/browser/actions forwards open-conversation trusted action payload and actorId', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/api/browser/actions?actorId=alice`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      resourceUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      kind: 'open-conversation',
+      payload: {
+        conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+        peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      },
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload.data, {
+    kind: 'open-conversation',
+    handled: true,
+    data: {
+      href: `/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`,
+    },
+  });
+  assert.deepEqual(calls.actions, [{
+    actorId: 'alice',
+    resourceUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
     },
   }]);
 });

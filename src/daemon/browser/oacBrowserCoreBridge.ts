@@ -147,6 +147,7 @@ function isOacTrustedActionKind(kind: BrowserTrustedActionInput['kind']): kind i
     'edit-profile',
     'configure-chat',
     'view-messages',
+    'open-conversation',
   ].includes(kind);
 }
 

@@ -12,6 +12,10 @@ const { commandFailed } = require('../../dist/core/contracts/commandResult.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createMetaAppPreviewSessionRegistry } = require('../../dist/core/metaapp/previewSessions.js');
 
+const LOCAL_GLOBAL_META_ID = 'idq1j3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const FORGED_LOCAL_GLOBAL_META_ID = 'idq1y3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+
 async function createAdapter(input) {
   return createOacBrowserHostAdapter({
     homeDir: input.homeDir,
@@ -45,13 +49,13 @@ test('OAC browser host adapter exposes MetaBot profiles as Browser actors', asyn
   const active = await createMetabotProfileFromIdentity(systemHomeDir, {
     name: 'Active Browser Bot',
     homeDir: profileHome,
-    globalMetaId: 'idq1activebrowser',
+    globalMetaId: LOCAL_GLOBAL_META_ID,
     mvcAddress: '18ActiveBrowser',
   });
   const other = await createMetabotProfileFromIdentity(systemHomeDir, {
     name: 'Other Browser Bot',
     homeDir: path.join(systemHomeDir, '.metabot', 'profiles', 'other-browser-bot'),
-    globalMetaId: 'idq1otherbrowser',
+    globalMetaId: PEER_GLOBAL_META_ID,
     mvcAddress: '18OtherBrowser',
   });
 
@@ -88,17 +92,17 @@ test('OAC browser host adapter exposes MetaBot profiles as Browser actors', asyn
         id: active.slug,
         label: 'Active Browser Bot',
         kind: 'oac-bot',
-        globalMetaId: 'idq1activebrowser',
+        globalMetaId: LOCAL_GLOBAL_META_ID,
         isDefault: false,
-        capabilities: ['private-chat', 'service-call', 'template-settings'],
+        capabilities: ['private-chat', 'service-call', 'message-view', 'template-settings'],
       },
       {
         id: other.slug,
         label: 'Other Browser Bot',
         kind: 'oac-bot',
-        globalMetaId: 'idq1otherbrowser',
+        globalMetaId: PEER_GLOBAL_META_ID,
         isDefault: true,
-        capabilities: ['private-chat', 'service-call', 'template-settings'],
+        capabilities: ['private-chat', 'service-call', 'message-view', 'template-settings'],
       },
     ].sort((left, right) => left.id.localeCompare(right.id)),
   );
@@ -176,12 +180,14 @@ test('OAC browser host adapter keeps local OAC actors without a globalMetaId', a
     kind: actor.kind,
     globalMetaId: actor.globalMetaId,
     isDefault: actor.isDefault,
+    capabilities: actor.capabilities,
   })), [
     {
       id: active.slug,
       kind: 'oac-bot',
       globalMetaId: '',
       isDefault: true,
+      capabilities: ['template-settings'],
     },
   ]);
 });
@@ -344,7 +350,7 @@ test('OAC browser host adapter maps private chat trusted actions to OAC chat inp
   assert.equal(result.ok, true);
   assert.equal(result.data.kind, 'private-chat');
   assert.equal(result.data.handled, true);
-  assert.deepEqual(result.data.data, { pinId: 'chat-pin' });
+  assert.equal(result.data.data, undefined);
   assert.deepEqual(calls, [{
     from: active.slug,
     to: 'idq1target',
@@ -589,6 +595,135 @@ test('OAC browser host adapter rejects owner actions without ownerActorId even w
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'invalid_browser_action');
+});
+
+test('OAC browser host adapter returns safe local conversation href for open-conversation', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-open-conversation');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Conversation Action Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18ConversationAction',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      href: 'https://attacker.example/steal',
+      localGlobalMetaId: FORGED_LOCAL_GLOBAL_META_ID,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data, {
+    kind: 'open-conversation',
+    handled: true,
+    data: {
+      href: `/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`,
+    },
+  });
+});
+
+test('OAC browser host adapter rejects open-conversation without peerGlobalMetaId', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-open-conversation-no-peer');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Conversation Missing Peer Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18ConversationMissingPeer',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'map://simplemsg/conversation',
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: 'map://simplemsg/conversation',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'invalid_browser_action');
+});
+
+test('OAC browser host adapter requires a selected actor with a Global MetaID for open-conversation', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-open-conversation-no-local');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfile(systemHomeDir, {
+    name: 'Conversation Pending Bot',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'manual_action_required');
+  assert.equal(result.code, 'browser_identity_required');
+});
+
+test('OAC browser host adapter ignores payload local identity fields for open-conversation', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-open-conversation-ignore-local');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Conversation Ignore Local Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18ConversationIgnoreLocal',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+    kind: 'open-conversation',
+    payload: {
+      conversationUri: `map://simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+      peerGlobalMetaId: PEER_GLOBAL_META_ID,
+      localGlobalMetaId: FORGED_LOCAL_GLOBAL_META_ID,
+      from: FORGED_LOCAL_GLOBAL_META_ID,
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.data.href, `/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`);
+  assert.ok(!result.data.data.href.includes(FORGED_LOCAL_GLOBAL_META_ID));
 });
 
 test('OAC browser host adapter rejects incomplete trusted action payloads', async (t) => {
