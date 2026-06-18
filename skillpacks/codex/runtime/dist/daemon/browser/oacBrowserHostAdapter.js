@@ -33,6 +33,13 @@ function buildMetaAppPreviewAssetUrl(previewId, assetPath) {
         .join('/');
     return `/api/metaapp/preview-assets/${encodedPreviewId}/${normalizedAssetPath}`;
 }
+function browserActorCapabilities(profile) {
+    const capabilities = ['template-settings'];
+    if (normalizeText(profile.globalMetaId)) {
+        capabilities.unshift('private-chat', 'service-call', 'message-view');
+    }
+    return capabilities;
+}
 function profileToBrowserActor(profile, selectedHomeDir) {
     const isDefault = Boolean(selectedHomeDir && node_path_1.default.resolve(profile.homeDir) === selectedHomeDir);
     return {
@@ -42,7 +49,7 @@ function profileToBrowserActor(profile, selectedHomeDir) {
         globalMetaId: profile.globalMetaId,
         ...(profile.avatarDataUrl ? { avatar: profile.avatarDataUrl } : {}),
         isDefault,
-        capabilities: ['private-chat', 'service-call', 'template-settings'],
+        capabilities: browserActorCapabilities(profile),
     };
 }
 function toBrowserRecord(value) {
@@ -53,12 +60,37 @@ function readActionPayload(input) {
         ? input.payload
         : {};
 }
+function trustedActionResultData(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return undefined;
+    }
+    const source = value;
+    const data = {};
+    for (const key of ['href', 'route', 'copiedText', 'message']) {
+        const field = source[key];
+        if (typeof field === 'string' && field) {
+            data[key] = field;
+        }
+    }
+    return Object.keys(data).length ? data : undefined;
+}
 function ownerActorIdFromPayload(payload) {
     return normalizeText(payload.ownerActorId);
 }
 function botManagementHref(slug, tab, focus) {
     const query = new URLSearchParams({ profile: slug, tab, focus });
     return `/ui/bot?${query.toString()}`;
+}
+function findProfileByHomeDir(profiles, homeDir) {
+    const resolvedHomeDir = node_path_1.default.resolve(homeDir);
+    return profiles.find((profile) => node_path_1.default.resolve(profile.homeDir) === resolvedHomeDir) ?? null;
+}
+function conversationHref(localGlobalMetaId, peerGlobalMetaId) {
+    const query = new URLSearchParams({
+        local: localGlobalMetaId,
+        peer: peerGlobalMetaId,
+    });
+    return `/ui/conversations?${query.toString()}`;
 }
 function createBotHref(env) {
     const query = new URLSearchParams({ mode: 'create' });
@@ -76,7 +108,7 @@ function wrapTrustedActionResult(kind, result) {
         data: {
             kind,
             handled: true,
-            data: result.data,
+            data: trustedActionResultData(result.data),
         },
     };
 }
@@ -279,6 +311,32 @@ function createOacBrowserHostAdapter(input) {
                 request,
             });
             return wrapTrustedActionResult(actionInput.kind, result);
+        }
+        if (actionInput.kind === 'open-conversation') {
+            const openPayload = payload;
+            const peerGlobalMetaId = normalizeText(openPayload.peerGlobalMetaId);
+            if (!peerGlobalMetaId) {
+                return (0, commandResult_1.commandFailed)('invalid_browser_action', 'Browser open-conversation action requires peerGlobalMetaId.');
+            }
+            let profiles;
+            try {
+                profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(input.systemHomeDir);
+            }
+            catch (error) {
+                return (0, commandResult_1.commandFailed)('browser_profile_list_failed', error instanceof Error ? error.message : 'Browser open-conversation action could not list MetaBot profiles.');
+            }
+            const selectedProfile = findProfileByHomeDir(profiles, actor.homeDir);
+            const localGlobalMetaId = normalizeText(selectedProfile?.globalMetaId);
+            if (!selectedProfile || !localGlobalMetaId) {
+                return (0, commandResult_1.commandManualActionRequired)('browser_identity_required', 'Open conversation requires a selected local Bot with a Global MetaID.');
+            }
+            return (0, commandResult_1.commandSuccess)({
+                kind: 'open-conversation',
+                handled: true,
+                data: {
+                    href: conversationHref(localGlobalMetaId, peerGlobalMetaId),
+                },
+            });
         }
         if (actionInput.kind === 'edit-profile' ||
             actionInput.kind === 'configure-chat' ||

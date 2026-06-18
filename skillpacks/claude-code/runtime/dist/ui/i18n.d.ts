@@ -56,7 +56,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.homepageViewLink': "click here to view";
         readonly 'bot.homepageUploading': "Uploading homepage file...";
         readonly 'bot.homepageReadyToSave': "Homepage ready to save.";
-        readonly 'bot.homepageUseDefault': "Use Default";
+        readonly 'bot.homepageUploadRequired': "Upload a homepage file before saving.";
         readonly 'bot.homepageDefaultReadyToSave': "Default homepage ready to save.";
         readonly 'bot.homepageInvalidMetaAppPin': "Enter a MetaApp pin ID without spaces.";
         readonly 'bot.savePublicIdentity': "Save Public Identity";
@@ -72,7 +72,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.primaryLlmProvider': "Primary LLM Provider";
         readonly 'bot.fallbackLlmProvider': "Fallback LLM Provider";
         readonly 'bot.chatSkillsNote': "Choose which skills can be used for private conversation replies.";
-        readonly 'bot.chatAllowedSkills': "Chat Allowed Skills";
+        readonly 'bot.chatAllowedSkills': "Private Chat Allowed Skills：";
         readonly 'bot.noChatSkillsAllowed': "No chat skills allowed yet.";
         readonly 'bot.selectSkill': "Select a skill";
         readonly 'bot.add': "Add";
@@ -417,7 +417,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.homepageViewLink': "click here to view";
         readonly 'bot.homepageUploading': "正在上传主页文件...";
         readonly 'bot.homepageReadyToSave': "主页已准备保存。";
-        readonly 'bot.homepageUseDefault': "使用默认主页";
+        readonly 'bot.homepageUploadRequired': "请先上传主页文件再保存。";
         readonly 'bot.homepageDefaultReadyToSave': "默认主页已准备保存。";
         readonly 'bot.homepageInvalidMetaAppPin': "请输入不含空格的 MetaApp pin ID。";
         readonly 'bot.savePublicIdentity': "保存公开身份";
@@ -433,7 +433,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.primaryLlmProvider': "主 LLM 提供方";
         readonly 'bot.fallbackLlmProvider': "备用 LLM 提供方";
         readonly 'bot.chatSkillsNote': "选择可用于私聊回复的技能。";
-        readonly 'bot.chatAllowedSkills': "聊天允许技能";
+        readonly 'bot.chatAllowedSkills': "私聊允许技能：";
         readonly 'bot.noChatSkillsAllowed': "还没有允许的聊天技能。";
         readonly 'bot.selectSkill': "选择技能";
         readonly 'bot.add': "添加";

@@ -4,14 +4,14 @@ export interface BrowserMenuItemDefinition {
     label: string;
     icon: string;
     action: 'open-settings';
-    settingsTab: 'baseUrls' | 'templates' | 'cache';
+    settingsTab: 'baseUrls' | 'templates' | 'nameResolution' | 'cache';
 }
 export interface BrowserMenuSectionDefinition {
     id: string;
     items: BrowserMenuItemDefinition[];
 }
 export interface BrowserSettingsTabDefinition {
-    id: 'baseUrls' | 'templates' | 'cache';
+    id: 'baseUrls' | 'templates' | 'nameResolution' | 'cache';
     label: string;
 }
 export interface BrowserBaseUrlFieldDefinition {

@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.opcatChainAdapter = void 0;
 const bitcoin = __importStar(require("bitcoinjs-lib"));
+const writePin_1 = require("../writePin");
 const OPCAT_WALLET_API = 'https://wallet-api.opcatlabs.io';
 const OPCAT_DUST_LIMIT = 1;
 const DEFAULT_OPCAT_FEE_RATE = 0.001;
@@ -385,9 +386,7 @@ exports.opcatChainAdapter = {
                 throw new Error('MetaBot OPCAT balance is insufficient for this chain write.');
             }
             // 3. Build MetaID inscription payload
-            const payloadBody = input.request.encoding === 'base64'
-                ? Buffer.from(input.request.payload, 'base64')
-                : Buffer.from(input.request.payload, 'utf-8');
+            const payloadBody = (0, writePin_1.chainWritePayloadToBuffer)(input.request);
             const inscriptionPayload = buildMetaIdInscriptionPayload({
                 operation: input.request.operation,
                 path: input.request.path,

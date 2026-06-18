@@ -367,7 +367,7 @@ function buildMetabotProfileDraftFromIdentity(input) {
         ...(avatar ? { avatarDataUrl: avatar } : {}),
         primaryProvider: input.primaryProvider === undefined ? null : validateProvider(input.primaryProvider),
         fallbackProvider: input.fallbackProvider === undefined ? null : validateProvider(input.fallbackProvider),
-        allowChatSkills: [],
+        allowChatSkills: input.allowChatSkills === undefined ? [] : (0, chatSkillPolicy_1.normalizeAllowChatSkills)(input.allowChatSkills),
     };
 }
 async function createMetabotProfileFromIdentity(systemHomeDir, input) {
@@ -662,7 +662,7 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
         return [];
     }
     const delayMs = options.delayMs ?? CHAIN_SYNC_DELAY_MS;
-    const operation = options.operation ?? 'modify';
+    const infoOperation = 'create';
     const changed = new Set(changedFields);
     const results = [];
     async function writeProfileInfo(input) {
@@ -670,7 +670,7 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
             await sleep(delayMs);
         }
         results.push(await signer.writePin({
-            operation: input.operation ?? operation,
+            operation: input.operation ?? infoOperation,
             path: input.path,
             encryption: '0',
             version: '1.0',
@@ -692,7 +692,7 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
             await sleep(delayMs);
         }
         results.push(await signer.writePin((0, avatarChainWrite_1.buildAvatarChainWriteRequest)({
-            operation,
+            operation: infoOperation,
             avatarDataUrl: profile.avatarDataUrl ?? '',
             network: 'mvc',
         })));
@@ -722,13 +722,14 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
                 path: '/info/chatSkills',
                 contentType: 'application/json',
                 payload: JSON.stringify({
-                    allowChatSkills: (0, chatSkillPolicy_1.normalizeAllowChatSkills)(profile.allowChatSkills),
+                    allowPrivateChatSkills: (0, chatSkillPolicy_1.normalizeAllowChatSkills)(profile.allowChatSkills),
+                    allowGroupChatSkills: [],
                 }),
             });
         }
         if (changed.has('primaryProvider') || changed.has('fallbackProvider')) {
             await writeProfileInfo({
-                path: '/info/LLM',
+                path: '/info/llm',
                 contentType: 'application/json',
                 payload: JSON.stringify({
                     primaryProvider: profile.primaryProvider ?? null,
@@ -746,7 +747,6 @@ async function syncMetabotInfoToChain(signer, profile, changedFields, options = 
             }
             else {
                 await writeProfileInfo({
-                    operation: 'revoke',
                     path: '/info/homepage',
                     contentType: 'application/json',
                     payload: '',

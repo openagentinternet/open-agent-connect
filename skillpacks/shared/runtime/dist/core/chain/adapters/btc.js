@@ -263,9 +263,11 @@ exports.btcChainAdapter = {
         if (!utxos.length) {
             throw new Error('MetaBot BTC balance is insufficient for this chain write.');
         }
-        const payloadBody = input.request.encoding === 'base64'
-            ? Buffer.from(input.request.payload, 'base64').toString('utf-8')
-            : input.request.payload;
+        const payloadBody = Buffer.isBuffer(input.request.payload)
+            ? Buffer.from(input.request.payload)
+            : input.request.encoding === 'base64'
+                ? Buffer.from(input.request.payload, 'base64').toString('utf-8')
+                : input.request.payload;
         const signResult = wallet.signTx(utxo_wallet_service_1.SignType.INSCRIBE_METAIDPIN, {
             utxos: utxos.map((utxo) => ({
                 txId: utxo.txId,

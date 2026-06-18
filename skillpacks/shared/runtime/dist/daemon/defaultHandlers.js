@@ -803,8 +803,29 @@ function buildMetabotCreateInput(input) {
         if (allowChatSkills.length > 0) {
             throw new Error('allowChatSkills can be configured after MetaBot creation from the Bot detail page.');
         }
+        createInput.allowChatSkills = allowChatSkills;
     }
     return createInput;
+}
+function calculateMetabotCreateInfoFields(input) {
+    const fields = [];
+    if (input.bio !== undefined)
+        fields.push('bio');
+    if (input.role !== undefined)
+        fields.push('role');
+    if (input.soul !== undefined)
+        fields.push('soul');
+    if (input.goal !== undefined)
+        fields.push('goal');
+    if (input.avatarDataUrl !== undefined)
+        fields.push('avatar');
+    if (input.primaryProvider !== undefined)
+        fields.push('primaryProvider');
+    if (input.fallbackProvider !== undefined)
+        fields.push('fallbackProvider');
+    if (input.allowChatSkills !== undefined)
+        fields.push('allowChatSkills');
+    return fields;
 }
 function normalizePreferredCreateProvider(value) {
     const provider = normalizeText(value);
@@ -12190,6 +12211,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('name_taken', resolvedHome.message);
                 }
                 const profileHomeDir = resolvedHome.homeDir;
+                const createInfoFields = calculateMetabotCreateInfoFields(createInput);
                 createInput = await applyDefaultMetabotCreateProviders({
                     createInput,
                     homeDir: profileHomeDir,
@@ -12246,7 +12268,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         globalMetaId: identity.globalMetaId,
                         mvcAddress: identity.mvcAddress,
                     });
-                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, [], {
+                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, createInfoFields, {
                         delayMs: input.identitySyncStepDelayMs,
                         operation: 'create',
                     });

@@ -2,10 +2,17 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveBrowserResource = resolveBrowserResource;
 const commandResult_1 = require("../contracts/commandResult");
+const agent_browser_core_1 = require("@openagentinternet/agent-browser-core");
 const botHomepageClient_1 = require("./botHomepageClient");
 const botPageResolver_1 = require("./botPageResolver");
 const metaAppResolver_1 = require("./metaAppResolver");
 const uri_1 = require("./uri");
+function fromBrowserCommandResult(result) {
+    if (result.ok) {
+        return (0, commandResult_1.commandSuccess)(result.data);
+    }
+    return (0, commandResult_1.commandFailed)(result.code, result.message, result.data ? { data: result.data } : undefined);
+}
 async function resolveBrowserResource(input) {
     let parsed;
     try {
@@ -35,6 +42,22 @@ async function resolveBrowserResource(input) {
             homepage: homepage.data,
             resolverUrl: homepage.url,
             templateId: input.config.botHomepageTemplateId,
+        }));
+    }
+    if (parsed.scheme === 'map') {
+        return fromBrowserCommandResult(await (0, agent_browser_core_1.resolveMapUriToResource)({
+            uri: parsed.originalUri,
+            fetch: input.fetch,
+            manApiBaseUrl: input.config.manApiBaseUrl,
+        }));
+    }
+    if (parsed.scheme === 'metafile') {
+        return fromBrowserCommandResult(await (0, agent_browser_core_1.resolveMetafilePinToResource)({
+            uri: parsed.originalUri,
+            id: parsed.id,
+            fetch: input.fetch,
+            manApiBaseUrl: input.config.manApiBaseUrl,
+            metafileContentBaseUrl: input.config.metafileContentBaseUrl,
         }));
     }
     let record;

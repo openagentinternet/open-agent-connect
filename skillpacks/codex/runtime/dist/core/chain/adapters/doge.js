@@ -41,6 +41,7 @@ require("../../compat/nodeLocalStorage");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
 const bitcoin = __importStar(require("bitcoinjs-lib"));
 const ecpair_1 = __importDefault(require("ecpair"));
+const writePin_1 = require("../writePin");
 const deriveIdentity_1 = require("../../identity/deriveIdentity");
 const METALET_HOST = 'https://www.metalet.space';
 const NET = 'livenet';
@@ -471,9 +472,7 @@ exports.dogeChainAdapter = {
                 throw new Error('MetaBot DOGE balance is insufficient for this chain write.');
             }
             // Build inscription data from the normalized request
-            const payloadBody = input.request.encoding === 'base64'
-                ? Buffer.from(input.request.payload, 'base64')
-                : Buffer.from(input.request.payload, 'utf-8');
+            const payloadBody = (0, writePin_1.chainWritePayloadToBuffer)(input.request);
             const metaidData = {
                 operation: input.request.operation,
                 path: input.request.path,
