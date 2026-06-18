@@ -3065,6 +3065,9 @@ test('GET /ui/conversations renders the local-Bot scoped IM conversations worksp
   assert.match(html, /\/api\/conversations\/events\?local=/);
   assert.match(html, /query\.get\('local'\)/);
   assert.match(html, /query\.get\('peer'\)/);
+  assert.doesNotMatch(html, /selectedStillExists/);
+  assert.doesNotMatch(html, /state\.selectedPeerGlobalMetaId && !state\.conversations\.length/);
+  assert.doesNotMatch(html, /state\.selectedPeerGlobalMetaId = state\.conversations\[0\]\.peerGlobalMetaId/);
   assert.doesNotMatch(html, /trace-shell/);
   assert.doesNotMatch(html, /\/api\/trace\/sessions\?all=true/);
   assert.doesNotMatch(html, /\/api\/chat\/private\/conversations/);
