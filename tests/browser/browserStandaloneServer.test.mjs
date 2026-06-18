@@ -12,6 +12,8 @@ const { writeMetaAppZipArchive } = require('../../dist/core/metaapp/zipArchive.j
 
 const METAAPP_PIN_ID = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0';
 const ZIP_PIN_ID = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
+const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const MAP_PIN_ID = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0';
 
 async function listen(server) {
   await new Promise((resolve) => {
@@ -72,6 +74,24 @@ test('standalone Browser server serves Browser pages and shared CSS', async (t) 
   assert.equal(cssResponse.status, 200);
   assert.match(cssResponse.headers.get('content-type'), /text\/css/);
   assert.match(await cssResponse.text(), /MetaBot UI/);
+});
+
+test('standalone Browser server serves Browser shell for MAP route wrappers', async (t) => {
+  const server = createStandaloneBrowserServer();
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = await listen(server);
+
+  const paths = [
+    `/browser/map/simplebuzz/pin/${MAP_PIN_ID}`,
+    `/browser/map/simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`,
+  ];
+  for (const pathname of paths) {
+    const response = await fetch(`${baseUrl}${pathname}`);
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(html, /Agent Internet Browser/);
+    assert.match(html, /data-browser-shell/);
+  }
 });
 
 test('standalone Browser server exposes runtime, settings, cache, and action routes', async (t) => {

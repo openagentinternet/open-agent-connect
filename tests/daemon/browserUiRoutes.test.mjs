@@ -5,6 +5,9 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { createHttpServer } = require('../../dist/daemon/httpServer.js');
 
+const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const MAP_PIN_ID = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0';
+
 async function startServer() {
   const server = createHttpServer();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -47,6 +50,30 @@ test('GET Browser deep links serve the Agent Internet Browser shell', async (t) 
   assert.match(metaIdHtml, /data-browser-uri-input/);
   assert.match(metaAppHtml, /Agent Internet Browser/);
   assert.match(metaAppHtml, /data-browser-uri-input/);
+});
+
+test('serves Browser shell for /browser/map/simplebuzz/pin MAP routes', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/browser/map/simplebuzz/pin/${MAP_PIN_ID}`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /Agent Internet Browser/);
+  assert.match(html, /data-browser-uri-input/);
+});
+
+test('serves Browser shell for /browser/map/simplemsg/conversation MAP routes', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/browser/map/simplemsg/conversation?peer=${PEER_GLOBAL_META_ID}`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /Agent Internet Browser/);
+  assert.match(html, /data-browser-uri-input/);
 });
 
 test('Browser default shell hides drawer and inspector by default and avoids rejected labels', async (t) => {
