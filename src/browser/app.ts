@@ -21,6 +21,18 @@ export interface BrowserPageDefinition {
   script: string;
 }
 
+const OAC_BROWSER_SCRIPT_ADAPTERS = `
+if (typeof endpointWithActor === 'function' && typeof browserEndpoints === 'object') {
+  browserSettingsEndpoint = function browserSettingsEndpoint() {
+    return endpointWithActor(browserEndpoints.settings);
+  };
+}
+`;
+
 export function buildBrowserPageDefinition(): BrowserPageDefinition {
-  return buildAbcBrowserPageDefinition() as BrowserPageDefinition;
+  const definition = buildAbcBrowserPageDefinition() as BrowserPageDefinition;
+  return {
+    ...definition,
+    script: `${definition.script}\n${OAC_BROWSER_SCRIPT_ADAPTERS}`,
+  };
 }

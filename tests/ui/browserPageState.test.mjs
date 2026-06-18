@@ -547,7 +547,7 @@ test('Browser resolve errors clear visible Owner Mode toolbar', async () => {
   assert.equal(ownerToolbar.innerHTML, '');
 });
 
-test('Browser resource chip prefers MetaApp title over publisher identity', async () => {
+test('Browser resource chip uses MetaApp publisher identity from ABC UI contract', async () => {
   const { elements, fetchCalls } = createBrowserContext({
     resolveResponse: (uri) => ({
       ok: true,
@@ -567,7 +567,8 @@ test('Browser resource chip prefers MetaApp title over publisher identity', asyn
 
   await waitFor(() => fetchCalls.length === 2, 'MetaApp resource render');
 
-  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /Fixture MetaApp/);
+  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /idq1publisher/);
+  assert.doesNotMatch(elements['[data-browser-resource-chip]'].innerHTML, /Fixture MetaApp/);
 });
 
 test('Browser using identity selector switches identity and reloads current URI without history entry', async () => {
@@ -616,13 +617,15 @@ test('Browser menu is data-driven and opens cache management settings', async ()
 
   assert.ok(Array.isArray(context.browserMenuSections));
   assert.equal(context.browserMenuSections[0].items[0].id, 'settings');
-  assert.equal(context.browserMenuSections[0].items[1].id, 'templates');
-  assert.equal(context.browserMenuSections[0].items[2].id, 'cache');
+  assert.equal(context.browserMenuSections[0].items[1].id, 'name-resolution');
+  assert.equal(context.browserMenuSections[0].items[2].id, 'templates');
+  assert.equal(context.browserMenuSections[0].items[3].id, 'cache');
 
   elements['[data-browser-menu-trigger]'].click();
   assert.equal(elements['[data-browser-menu]'].hidden, false);
   assert.equal(elements['[data-browser-menu-trigger]'].getAttribute('aria-expanded'), 'true');
   assert.match(elements['[data-browser-menu]'].innerHTML, /Settings/);
+  assert.match(elements['[data-browser-menu]'].innerHTML, /Name Resolution/);
   assert.match(elements['[data-browser-menu]'].innerHTML, /Bot Page Templates/);
   assert.match(elements['[data-browser-menu]'].innerHTML, /Cache Management/);
 
@@ -630,6 +633,7 @@ test('Browser menu is data-driven and opens cache management settings', async ()
 
   assert.equal(elements['[data-browser-modal-root]'].hidden, false);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /Base URLs/);
+  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Name Resolution/);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /Templates/);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /Cache/);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /\/tmp\/\.metabot\/cache\/metaapps/);

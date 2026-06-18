@@ -257,6 +257,24 @@ test('publish validation fails when primary runtime is unavailable', async () =>
   assert.equal(result.code, 'primary_runtime_unavailable');
 });
 
+test('publish validation does not use fallback runtime skills when primary runtime is unavailable', async () => {
+  const context = await createValidationContext({ withSkill: false, health: 'unavailable' });
+  await writeSkill(path.join(context.systemHome, '.claude', 'skills'), 'metabot-weather');
+
+  const result = await validateServicePublishProviderSkill({
+    metaBotSlug: context.slug,
+    providerSkill: 'metabot-weather',
+    runtimeStore: context.runtimeStore,
+    bindingStore: context.bindingStore,
+    systemHomeDir: context.systemHome,
+    projectRoot: context.profileRoot,
+    env: {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'primary_runtime_unavailable');
+});
+
 test('publish validation fails when primary runtime is degraded', async () => {
   const context = await createValidationContext({ health: 'degraded' });
   const result = await validateServicePublishProviderSkill({

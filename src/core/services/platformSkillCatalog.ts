@@ -65,7 +65,10 @@ export type PrimaryRuntimeSkillCatalogResult =
   | PrimaryRuntimeSkillCatalogFailure;
 
 export interface PlatformSkillCatalog {
-  listPrimaryRuntimeSkills(input: { metaBotSlug: string }): Promise<PrimaryRuntimeSkillCatalogResult>;
+  listPrimaryRuntimeSkills(input: {
+    metaBotSlug: string;
+    allowFallbackRuntime?: boolean;
+  }): Promise<PrimaryRuntimeSkillCatalogResult>;
 }
 
 export interface CreatePlatformSkillCatalogOptions {
@@ -261,6 +264,7 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
   return {
     async listPrimaryRuntimeSkills(input) {
       const metaBotSlug = normalizeText(input.metaBotSlug);
+      const allowFallbackRuntime = input.allowFallbackRuntime !== false;
       const [runtimeState, bindingState] = await Promise.all([
         options.runtimeStore.read(),
         options.bindingStore.read(),
@@ -283,7 +287,7 @@ export function createPlatformSkillCatalog(options: CreatePlatformSkillCatalogOp
         : undefined;
       let binding: LlmBinding = primaryBinding;
       let runtime = primaryRuntime;
-      if (!isUsableRuntime(primaryRuntime) && fallbackBinding && isUsableRuntime(fallbackRuntime)) {
+      if (allowFallbackRuntime && !isUsableRuntime(primaryRuntime) && fallbackBinding && isUsableRuntime(fallbackRuntime)) {
         binding = fallbackBinding;
         runtime = fallbackRuntime;
       }
