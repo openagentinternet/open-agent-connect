@@ -9708,7 +9708,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                     projectRoot: profileRuntimeStateStore.paths.profileRoot,
                     env: process.env,
                 });
-                const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug });
+                const result = await catalog.listPrimaryRuntimeSkills({
+                    metaBotSlug,
+                    allowFallbackRuntime: false,
+                });
                 if (!result.ok) {
                     return (0, commandResult_1.commandFailed)(result.code, result.message);
                 }
