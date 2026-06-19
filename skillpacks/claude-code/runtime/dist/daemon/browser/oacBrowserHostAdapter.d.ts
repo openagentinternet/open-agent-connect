@@ -1,4 +1,4 @@
-import type { BrowserHostAdapter } from '../../core/browser/hostTypes';
+import type { BrowserHostAdapter } from '@openagentinternet/agent-browser-host-contract';
 import { type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;

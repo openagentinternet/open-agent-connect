@@ -92,8 +92,6 @@ const btc_1 = require("../core/chain/adapters/btc");
 const doge_1 = require("../core/chain/adapters/doge");
 const opcat_1 = require("../core/chain/adapters/opcat");
 const configStore_1 = require("../core/config/configStore");
-const runtimeContext_1 = require("../core/browser/runtimeContext");
-const oacBrowserCoreBridge_1 = require("./browser/oacBrowserCoreBridge");
 const oacBrowserHostAdapter_1 = require("./browser/oacBrowserHostAdapter");
 const configTypes_1 = require("../core/config/configTypes");
 const metawebReplyWaiter_1 = require("../core/a2a/metawebReplyWaiter");
@@ -8509,9 +8507,33 @@ function createDefaultMetabotDaemonHandlers(input) {
         env: process.env,
     };
     const browserHostAdapter = (0, oacBrowserHostAdapter_1.createOacBrowserHostAdapter)(browserHostAdapterInput);
-    const browserCoreHostAdapter = (0, oacBrowserCoreBridge_1.createOacBrowserCoreHostAdapter)(browserHostAdapterInput);
     function browserActorId(request) {
         return request.actorId || request.from || undefined;
+    }
+    function browserContextFromRuntime(snapshot) {
+        const usingIdentities = snapshot.actors
+            .filter((actor) => actor.kind === 'oac-bot')
+            .map((actor) => ({
+            slug: actor.id,
+            name: actor.label,
+            globalMetaId: actor.globalMetaId ?? '',
+            ...(actor.avatar ? { avatar: actor.avatar } : {}),
+            isDefault: actor.id === snapshot.defaultActor?.id,
+        }));
+        const defaultUsingIdentity = snapshot.defaultActor?.kind === 'oac-bot' && snapshot.defaultActor.globalMetaId
+            ? {
+                slug: snapshot.defaultActor.id,
+                name: snapshot.defaultActor.label,
+                globalMetaId: snapshot.defaultActor.globalMetaId,
+                ...(snapshot.defaultActor.avatar ? { avatar: snapshot.defaultActor.avatar } : {}),
+                isDefault: true,
+            }
+            : null;
+        return {
+            usingIdentities,
+            defaultUsingIdentity,
+            defaultUri: snapshot.defaultUri,
+        };
     }
     async function readMetaAppRecordForUpdate(actorHomeDir, targetPinId) {
         const indexer = (0, indexerClient_1.createMetaAppIndexerClient)();
@@ -8652,7 +8674,7 @@ function createDefaultMetabotDaemonHandlers(input) {
     }));
     const handlers = {
         browser: {
-            getRuntime: async (request = {}) => browserCoreHostAdapter.getRuntime({
+            getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
                 actorId: browserActorId(request),
             }),
             getContext: async (request = {}) => {
@@ -8660,27 +8682,27 @@ function createDefaultMetabotDaemonHandlers(input) {
                     actorId: browserActorId(request),
                 });
                 if (!runtime.ok) {
-                    return (0, agent_browser_host_contract_1.browserFailure)(runtime.code || 'browser_runtime_failed', runtime.message || 'Browser runtime is unavailable.');
+                    return runtime;
                 }
-                return (0, agent_browser_host_contract_1.browserSuccess)((0, runtimeContext_1.browserRuntimeToContextResult)(runtime.data));
+                return (0, agent_browser_host_contract_1.browserSuccess)(browserContextFromRuntime(runtime.data));
             },
-            getSettings: async (request = {}) => browserCoreHostAdapter.getSettings({
+            getSettings: async (request = {}) => browserHostAdapter.getSettings({
                 actorId: browserActorId(request),
             }),
-            updateSettings: async (request) => browserCoreHostAdapter.updateSettings({
+            updateSettings: async (request) => browserHostAdapter.updateSettings({
                 actorId: browserActorId(request),
                 browser: request.browser,
             }),
-            getCache: async (request = {}) => browserCoreHostAdapter.getCache({
+            getCache: async (request = {}) => browserHostAdapter.getCache({
                 actorId: browserActorId(request),
             }),
-            clearCache: async (request) => browserCoreHostAdapter.clearCache({
+            clearCache: async (request) => browserHostAdapter.clearCache({
                 actorId: browserActorId(request),
                 scope: request.scope,
                 pinId: request.pinId,
                 cacheKey: request.cacheKey,
             }),
-            resolve: async (request) => browserCoreHostAdapter.resolveResource({
+            resolve: async (request) => browserHostAdapter.resolveResource({
                 actorId: browserActorId(request),
                 uri: request.uri,
             }),
@@ -8693,7 +8715,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if (request.payload) {
                     Object.assign(actionRequest, { payload: request.payload });
                 }
-                return browserCoreHostAdapter.runTrustedAction(actionRequest);
+                return browserHostAdapter.runTrustedAction(actionRequest);
             },
         },
         config: {
