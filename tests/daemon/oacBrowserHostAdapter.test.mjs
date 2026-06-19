@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp } from 'node:fs/promises';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
@@ -12,10 +14,41 @@ const { createMetabotProfile, createMetabotProfileFromIdentity, getMetabotProfil
 const { commandFailed } = require('../../dist/core/contracts/commandResult.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createMetaAppPreviewSessionRegistry } = require('../../dist/core/metaapp/previewSessions.js');
+const { writeMetaAppZipArchive } = require('../../dist/core/metaapp/zipArchive.js');
 
 const LOCAL_GLOBAL_META_ID = 'idq1j3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
 const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
 const FORGED_LOCAL_GLOBAL_META_ID = 'idq1y3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const METAAPP_PIN_ID = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0';
+const ZIP_PIN_ID = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
+
+async function makeMetaAppZipBuffer(title = 'Adapter Preview App') {
+  const projectDir = await mkdtemp(path.join(os.tmpdir(), 'oac-adapter-metaapp-project-'));
+  await mkdir(path.join(projectDir, 'app'), { recursive: true });
+  await writeFile(path.join(projectDir, 'app', 'index.html'), `<!doctype html><title>${title}</title>`, 'utf8');
+  const archiveDir = await mkdtemp(path.join(os.tmpdir(), 'oac-adapter-metaapp-archive-'));
+  const archivePath = path.join(archiveDir, 'metaapp.zip');
+  await writeMetaAppZipArchive({ sourceDir: projectDir, outFile: archivePath });
+  return readFile(archivePath);
+}
+
+function jsonResponse(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => 'application/json' },
+    json: async () => body,
+  };
+}
+
+function bufferResponse(buffer, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => 'application/zip' },
+    arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+  };
+}
 
 async function createAdapter(input) {
   return createOacBrowserHostAdapter({
@@ -317,6 +350,59 @@ test('OAC browser host adapter resolves metaid URIs with the selected profile Br
   assert.equal(resolved.data.renderer.templateId, 'compact-list');
 });
 
+test('OAC browser host adapter resolves zip-backed metaapp URIs to local preview assets', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-metaapp-preview');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const zipBuffer = await makeMetaAppZipBuffer();
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'MetaApp Preview Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1metaapppreview',
+    mvcAddress: '18MetaAppPreview',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    fetch: async (url) => {
+      if (url === `https://manapi.metaid.io/pin/${METAAPP_PIN_ID}`) {
+        return jsonResponse({
+          data: {
+            id: METAAPP_PIN_ID,
+            path: '/protocols/metaapp',
+            address: '1PublisherAddress',
+            timestamp: 1780833765,
+            contentSummary: JSON.stringify({
+              title: 'Adapter Preview App',
+              appName: 'adapter-preview-app',
+              version: '1.2.3',
+              runtime: 'browser',
+              content: `metafile://${ZIP_PIN_ID}.zip`,
+              contentType: 'application/zip',
+              indexFile: 'index.html',
+            }),
+          },
+        });
+      }
+      if (url === `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/${ZIP_PIN_ID}`) {
+        return bufferResponse(zipBuffer);
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+  });
+
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: `metaapp://${METAAPP_PIN_ID}`,
+  });
+
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.data.resourceType, 'metaapp');
+  assert.equal(resolved.data.renderer.type, 'html-iframe');
+  assert.match(resolved.data.renderer.url, /^\/api\/metaapp\/preview-assets\/metaapp-preview-[^/]+\/index\.html$/);
+});
+
 test('OAC browser host adapter satisfies the published host conformance harness', async (t) => {
   const profileHome = await createProfileHome('oac-browser-adapter-conformance');
   t.after(async () => cleanupProfileHome(profileHome));
@@ -475,6 +561,31 @@ test('OAC browser host adapter maps private chat trusted actions to OAC chat inp
     to: 'idq1target',
     content: 'Hello from Browser',
   }]);
+});
+
+test('OAC browser host adapter keeps copy-uri actor-agnostic', async () => {
+  const adapter = await createAdapter({
+    homeDir: '/tmp/oac-browser-copy-uri',
+    systemHomeDir: '/tmp/oac-browser-copy-uri-system',
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: 'missing',
+    resourceUri: 'metaapp://fixture',
+    kind: 'copy-uri',
+    payload: {
+      currentUri: 'metaapp://fixture',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data, {
+    kind: 'copy-uri',
+    handled: true,
+    data: {
+      copiedText: 'metaapp://fixture',
+    },
+  });
 });
 
 test('OAC browser host adapter maps service trusted actions to OAC service input', async (t) => {

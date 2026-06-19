@@ -25,7 +25,9 @@ import type {
 } from '@openagentinternet/agent-browser-host-contract';
 import {
   applyBrowserSettingsUpdate,
+  type BrowserCommandResult as CoreBrowserCommandResult,
   createBrowserSettingsSnapshot,
+  type MetaAppGalleryRecord,
   resolveBrowserConfig,
   resolveBrowserResource,
   resolveMetaAppPinToRecord,
@@ -41,6 +43,7 @@ import type {
   BrowserCommandWaitingOptions,
 } from '@openagentinternet/agent-browser-host-contract';
 import { createConfigStore } from '../../core/config/configStore';
+import { resolveMetaAppPinToRecord as resolveLocalMetaAppPinToRecord } from '../../core/browser/metaAppPinResolver';
 import {
   type MetabotCommandResult,
 } from '../../core/contracts/commandResult';
@@ -79,6 +82,16 @@ function normalizePreferredCreateHost(value: unknown): string | null {
 
 function actorSelector(input?: BrowserActorInput & { from?: string }): string {
   return normalizeText(input?.actorId) || normalizeText(input?.from);
+}
+
+function buildMetaAppPreviewAssetUrl(previewId: string, assetPath: string): string {
+  const encodedPreviewId = encodeURIComponent(previewId);
+  const normalizedAssetPath = assetPath
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  return `/api/metaapp/preview-assets/${encodedPreviewId}/${normalizedAssetPath}`;
 }
 
 function browserActorCapabilities(profile: MetabotProfileFull): BrowserActorCapability[] {
@@ -135,6 +148,29 @@ function browserFailureCode(result: MetabotCommandResult<unknown>): string {
 
 function browserFailureMessage(result: MetabotCommandResult<unknown>): string {
   return normalizeText((result as { message?: unknown }).message) || 'OAC Browser command failed.';
+}
+
+function isZipMetaAppRecord(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const contentType = normalizeText(record.contentType).toLowerCase();
+  const content = normalizeText(record.content).toLowerCase();
+  const code = normalizeText(record.code).toLowerCase();
+  return contentType === 'application/zip'
+    || contentType.includes('/zip')
+    || contentType.includes('+zip')
+    || content.endsWith('.zip')
+    || code.endsWith('.zip');
+}
+
+function toBrowserResolveCommandResult<T>(result: MetabotCommandResult<T>): CoreBrowserCommandResult<T> {
+  if (result.ok) {
+    return browserSuccess(result.data);
+  }
+  const data = browserResultData(result.data);
+  return browserFailure(browserFailureCode(result), browserFailureMessage(result), data ? { data } : {});
 }
 
 function toBrowserFailure(result: MetabotCommandResult<unknown>): BrowserCommandFailure {
@@ -401,30 +437,49 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     if ('failure' in actor) return toBrowserResult(actor.failure);
     const config = await createConfigStore(actor.homeDir).read();
     const browserConfig = resolveBrowserConfig(config, env);
+    const artifactCache = createMetaAppArtifactCacheStore(actor.homeDir);
     return resolveBrowserResource({
       uri: resolveInput.uri,
       config: browserConfig,
       fetch: fetchImpl,
-      metaAppResolve: (pinId) => resolveMetaAppPinToRecord({
-        pinId,
-        fetch: fetchImpl,
-        manApiBaseUrl: browserConfig.manApiBaseUrl,
-        metafileContentBaseUrl: browserConfig.metafileContentBaseUrl,
-      }),
+      metaAppResolve: async (pinId): Promise<CoreBrowserCommandResult<MetaAppGalleryRecord>> => {
+        const resolved = await resolveMetaAppPinToRecord({
+          pinId,
+          fetch: fetchImpl,
+          manApiBaseUrl: browserConfig.manApiBaseUrl,
+          metafileContentBaseUrl: browserConfig.metafileContentBaseUrl,
+        });
+        if (!resolved.ok || normalizeText(resolved.data.localUiUrl) || !isZipMetaAppRecord(resolved.data)) {
+          return resolved;
+        }
+        return toBrowserResolveCommandResult(await resolveLocalMetaAppPinToRecord({
+          pinId,
+          fetch: fetchImpl,
+          manApiBaseUrl: browserConfig.manApiBaseUrl,
+          artifactCache,
+          createPreviewSession: ({ artifactDir, indexFile }) => {
+            const session = input.metaAppPreviewSessions.create({ artifactDir, indexFile });
+            return {
+              previewId: session.previewId,
+              localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+            };
+          },
+        }));
+      },
     });
   }
 
   async function runTrustedAction(
     actionInput: BrowserTrustedActionInput & { from?: string },
   ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    if (actionInput.kind === 'copy-uri') {
+      return copyUriTrustedActionResult(actionInput);
+    }
+
     const actor = await resolveActor(actionInput);
     if ('failure' in actor) return toBrowserResult(actor.failure);
     const from = actorSelector(actionInput);
     const payload = readActionPayload(actionInput);
-
-    if (actionInput.kind === 'copy-uri') {
-      return copyUriTrustedActionResult(actionInput);
-    }
 
     if (actionInput.kind === 'private-chat') {
       const to = normalizeText(payload.to) || normalizeText(payload.targetGlobalMetaId);
