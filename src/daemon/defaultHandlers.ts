@@ -297,7 +297,7 @@ import { btcChainAdapter } from '../core/chain/adapters/btc';
 import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
-import type { BrowserContextResult } from '../core/browser/types';
+import type { BrowserContextResult } from '@openagentinternet/agent-browser-core';
 import { createOacBrowserHostAdapter } from './browser/oacBrowserHostAdapter';
 import {
   DEFAULT_WRITE_NETWORKS,
