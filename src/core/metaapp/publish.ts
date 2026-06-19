@@ -25,7 +25,7 @@ import type {
 } from './types';
 import { writeMetaAppZipArchive } from './zipArchive';
 
-const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>.zip';
+const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>';
 
 export interface UploadLikeResult {
   pinId?: string;
@@ -124,6 +124,14 @@ function normalizeStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function stripZipSuffixFromMetafileUri(value: string): string {
+  const normalized = normalizeText(value);
+  if (!/^metafile:\/\//iu.test(normalized)) {
+    return normalized;
+  }
+  return normalized.replace(/\.zip(?=([?#].*)?$)/iu, '');
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -200,10 +208,11 @@ function finalizeManifestForWrite(input: {
   const fallbackAppName = slugFromProjectDir(input.plan.projectDir);
   const title = normalizeText(input.manifest.title) || normalizeText(input.manifest.appName) || fallbackAppName;
   const appName = normalizeText(input.manifest.appName) || slugFromProjectDir(title);
-  const explicitCode = normalizeText(input.manifest.code);
+  const artifactUri = stripZipSuffixFromMetafileUri(input.artifactUri);
+  const explicitCode = stripZipSuffixFromMetafileUri(normalizeText(input.manifest.code));
   const code = explicitCode || (
     input.plan.projectType === 'static' || input.compatibilityMirrorContent
-      ? input.artifactUri
+      ? artifactUri
       : ''
   );
 
@@ -217,7 +226,7 @@ function finalizeManifestForWrite(input: {
     contentType: normalizeText(input.manifest.contentType) || 'application/zip',
     codeType: normalizeText(input.manifest.codeType) || 'application/zip',
     code,
-    content: input.artifactUri,
+    content: artifactUri,
     contentHash: input.contentHash,
   };
 }
@@ -365,11 +374,11 @@ async function createConfirmationData(
 function uploadArtifactUri(upload: UploadLikeResult): string {
   const metafileUri = normalizeText(upload.metafileUri);
   if (metafileUri) {
-    return metafileUri;
+    return stripZipSuffixFromMetafileUri(metafileUri);
   }
   const pinId = normalizeText(upload.pinId);
   if (pinId) {
-    return `metafile://${pinId}.zip`;
+    return `metafile://${pinId}`;
   }
   throw new Error('Upload result did not include a metafile URI or pinId.');
 }

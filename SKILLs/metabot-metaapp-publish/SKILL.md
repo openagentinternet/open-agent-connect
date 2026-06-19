@@ -106,7 +106,7 @@ If the human explicitly chooses BTC or OPCAT for file uploads, pass `--chain btc
   "runtime": "browser",
   "version": "1.0.0",
   "indexFile": "index.html",
-  "content": "metafile://zip-pin.zip",
+  "content": "metafile://zip-pin",
   "contentType": "application/zip",
   "code": "",
   "codeType": "application/zip",

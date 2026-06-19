@@ -18,7 +18,7 @@ const pinId_1 = require("./pinId");
 const projectInspector_1 = require("./projectInspector");
 const share_1 = require("./share");
 const zipArchive_1 = require("./zipArchive");
-const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>.zip';
+const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -30,6 +30,13 @@ function normalizeStringArray(value) {
         .filter((entry) => typeof entry === 'string')
         .map((entry) => entry.trim())
         .filter(Boolean);
+}
+function stripZipSuffixFromMetafileUri(value) {
+    const normalized = normalizeText(value);
+    if (!/^metafile:\/\//iu.test(normalized)) {
+        return normalized;
+    }
+    return normalized.replace(/\.zip(?=([?#].*)?$)/iu, '');
 }
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
@@ -89,9 +96,10 @@ function finalizeManifestForWrite(input) {
     const fallbackAppName = slugFromProjectDir(input.plan.projectDir);
     const title = normalizeText(input.manifest.title) || normalizeText(input.manifest.appName) || fallbackAppName;
     const appName = normalizeText(input.manifest.appName) || slugFromProjectDir(title);
-    const explicitCode = normalizeText(input.manifest.code);
+    const artifactUri = stripZipSuffixFromMetafileUri(input.artifactUri);
+    const explicitCode = stripZipSuffixFromMetafileUri(normalizeText(input.manifest.code));
     const code = explicitCode || (input.plan.projectType === 'static' || input.compatibilityMirrorContent
-        ? input.artifactUri
+        ? artifactUri
         : '');
     return {
         ...input.manifest,
@@ -103,7 +111,7 @@ function finalizeManifestForWrite(input) {
         contentType: normalizeText(input.manifest.contentType) || 'application/zip',
         codeType: normalizeText(input.manifest.codeType) || 'application/zip',
         code,
-        content: input.artifactUri,
+        content: artifactUri,
         contentHash: input.contentHash,
     };
 }
@@ -216,11 +224,11 @@ async function createConfirmationData(input, deps, plan, manifest) {
 function uploadArtifactUri(upload) {
     const metafileUri = normalizeText(upload.metafileUri);
     if (metafileUri) {
-        return metafileUri;
+        return stripZipSuffixFromMetafileUri(metafileUri);
     }
     const pinId = normalizeText(upload.pinId);
     if (pinId) {
-        return `metafile://${pinId}.zip`;
+        return `metafile://${pinId}`;
     }
     throw new Error('Upload result did not include a metafile URI or pinId.');
 }
