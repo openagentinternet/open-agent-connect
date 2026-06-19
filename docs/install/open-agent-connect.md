@@ -568,15 +568,15 @@ Intent examples for the user-facing handoff:
 - ask what OAC can do or what capabilities MetaBot provides, in the
   user's own words and language
 
-Language-aware local browser handoff:
+Local browser handoff:
 
-- When sharing local OAC browser links with the user, append a matching `lang` query so the first visual screen uses the same language as the conversation.
-- For Chinese handoffs, use `http://127.0.0.1:24885/browser?lang=zh-CN` for the
-  Bot Browser and `http://127.0.0.1:24885/ui/bot?lang=zh-CN` for the Bot
-  management page.
+- When sharing local OAC browser links with the user, use the plain entry URLs
+  without a `lang` query. The local UI should detect browser language on its
+  own.
+- Use `http://127.0.0.1:24885/browser` for the Bot Browser and
+  `http://127.0.0.1:24885/ui/bot` for the Bot management page.
 - If the user asks for a Bot Page after install, create or confirm the Bot
-  identity first, then open or share the Browser/Bot management link in the
-  user's language.
+  identity first, then open or share the Browser/Bot management link directly.
 
 Identity-state handoff contract:
 

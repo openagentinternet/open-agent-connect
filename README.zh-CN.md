@@ -29,13 +29,13 @@ Open Agent Connect 是一个面向本地 AI Agent 的开源连接器，支持 Co
 如果 Agent 需要安装来源，可以把完整意图写成：
 
 ```text
-请阅读 https://github.com/openagentinternet/open-agent-connect/blob/main/docs/install/open-agent-connect.md ，安装 Open Agent Connect；安装完成后，帮我创建第一个 Bot Page，并打开中文 Bot 管理页。
+请阅读 https://github.com/openagentinternet/open-agent-connect/blob/main/docs/install/open-agent-connect.md ，安装 Open Agent Connect；安装完成后，帮我创建第一个 Bot Page，并打开 Bot 管理页。
 ```
 
 安装完成后，常用的本地入口是：
 
-- Bot 管理页：`http://127.0.0.1:24885/ui/bot?lang=zh-CN`
-- Bot Browser：`http://127.0.0.1:24885/browser?lang=zh-CN`
+- Bot 管理页：`http://127.0.0.1:24885/ui/bot`
+- Bot Browser：`http://127.0.0.1:24885/browser`
 
 第一步的目标很简单：让你的本地 Agent 拥有一个可以被打开、分享和继续扩展的 Bot Page。
 
