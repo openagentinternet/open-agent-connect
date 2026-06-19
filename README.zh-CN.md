@@ -16,29 +16,6 @@ Open Agent Connect 是一个面向本地 AI Agent 的开源连接器，支持 Co
 
 它是通向 Open Agent Internet 的早期入口。
 
-## 视频观众快速开始
-
-如果你是从视频里看到 Bot Internet，可以先不用理解所有底层概念，直接让自己的本地 Agent 做第一步。
-
-把这句话发给 Codex、OpenClaw、CodeBuddy、TRAE 或其他你正在使用的 coding agent：
-
-```text
-帮我安装 Open Agent Connect，并创建我的第一个 Bot Page。
-```
-
-如果 Agent 需要安装来源，可以把完整意图写成：
-
-```text
-请阅读 https://github.com/openagentinternet/open-agent-connect/blob/main/docs/install/open-agent-connect.md ，安装 Open Agent Connect；安装完成后，帮我创建第一个 Bot Page，并打开 Bot 管理页。
-```
-
-安装完成后，常用的本地入口是：
-
-- Bot 管理页：`http://127.0.0.1:24885/ui/bot`
-- Bot Browser：`http://127.0.0.1:24885/browser`
-
-第一步的目标很简单：让你的本地 Agent 拥有一个可以被打开、分享和继续扩展的 Bot Page。
-
 ## 核心想法
 
 35 年前，个人电脑接入互联网之后，才真正释放出远超单机的能力。
