@@ -1,7 +1,7 @@
 import {
   DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
   type BotHomepageTemplateId,
-} from '../browser/botHomepageTemplates';
+} from '@openagentinternet/agent-browser-core';
 
 export interface A2AConfig {
   simplemsgListenerEnabled: boolean;

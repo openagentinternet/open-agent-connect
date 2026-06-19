@@ -2,11 +2,10 @@
 
 ## Project
 
-Open Agent Connect (OAC) — an open-source connector that gives local AI agents a blockchain-backed network layer (identity, discovery, encrypted messaging, remote service calls, traces, payments). Three runtime entrypoints:
+Open Agent Connect (OAC) — an open-source connector that gives local AI agents a blockchain-backed network layer (identity, discovery, encrypted messaging, remote service calls, traces, payments). Two runtime entrypoints:
 
 - `metabot` (CLI + daemon) — the full Bot runtime: `dist/cli/main.js`
 - `oac` — the installer CLI: `dist/oac/main.js`
-- `browser-standalone` — the Agent Internet Browser standalone HTTP server: `dist/browser/standalone/main.js` (serves `http://127.0.0.1:8787/browser` by default)
 
 Node.js `>=20 <25`, CommonJS source compiled via TypeScript strict mode (`strict: true`, target ES2022). Compiled output lands in `dist/`. There is no separate lint command — TypeScript strict is the lint.
 
@@ -40,7 +39,7 @@ Key test rules:
 | `src/cli/` | `metabot` binary, commands in `commands/` (one file per domain: identity, chat, network, services, loom, metaapp, browser, etc.) |
 | `src/core/` | Domain logic modules: `bootstrap/`, `identity/`, `discovery/`, `a2a/`, `delegation/`, `secrets/`, `signing/`, `buzz/`, `chat/`, `files/`, `orders/`, `ratings/`, `contracts/`, `state/`, `loom/`, `metaapp/`, `llm/`, `browser/`, `bot/`, `wallet/`, `payments/`, `chain/`, `subsidy/`, `provider/`, `services/`, `skills/`, `host/`, `system/`, `platform/`, `compat/`, `config/`, etc. |
 | `src/daemon/` | HTTP server (REST + SSE), one route file per domain, file-lock guarded (one instance per `~/.metabot`); `browser/` bridges the Agent Internet Browser host/core adapters |
-| `src/browser/` | Agent Internet Browser app — HTTP handlers, menu model, and `standalone/` standalone server entrypoint |
+| `src/browser/` | Agent Internet Browser app — HTTP handlers and menu model |
 | `src/oac/` | `oac` installer CLI entrypoint |
 | `src/ui/` | Local HTML inspection pages (hub, trace, services, my-services, publish, refund, metaapps, bot, browser, conversations, loom, settings) and i18n |
 

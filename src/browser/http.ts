@@ -10,7 +10,7 @@ import {
   BrowserTrustedActionKind,
   BrowserTrustedActionResult,
 } from '@openagentinternet/agent-browser-host-contract';
-import type { BrowserContextResult } from '../core/browser/types';
+import type { BrowserContextResult } from '@openagentinternet/agent-browser-core';
 
 export type Awaitable<T> = T | Promise<T>;
 

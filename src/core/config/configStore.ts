@@ -1,9 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { normalizeBotHomepageTemplateId } from '@openagentinternet/agent-browser-core';
 
 import { resolveMetabotHomeSelection } from '../state/homeSelection';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
-import { normalizeBotHomepageTemplateId } from '../browser/botHomepageTemplates';
 import {
   createDefaultConfig,
   type DefaultWriteNetwork,

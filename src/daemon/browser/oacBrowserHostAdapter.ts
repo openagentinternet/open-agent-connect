@@ -1,32 +1,22 @@
 import path from 'node:path';
-import { listMetabotProfiles, type MetabotProfileFull } from '../../core/bot/metabotProfileManager';
-import { resolveBrowserConfig } from '../../core/browser/config';
-import { resolveBrowserResource } from '../../core/browser/browserResolver';
-import type {
-  BrowserActor,
-  BrowserActorInput,
-  BrowserActorCapability,
-  BrowserCacheClearInput,
-  BrowserCacheClearResult,
-  BrowserCacheInput,
-  BrowserCacheSnapshot,
-  BrowserHostAdapter,
-  BrowserOpenConversationPayload,
-  BrowserResolveInput,
-  BrowserRuntimeInput,
-  BrowserRuntimeSnapshot,
-  BrowserSettingsInput,
-  BrowserSettingsSnapshot,
-  BrowserSettingsUpdateInput,
-  BrowserTrustedActionInput,
-  BrowserTrustedActionResult,
-} from '../../core/browser/hostTypes';
-import { resolveMetaAppPinToRecord } from '../../core/browser/metaAppPinResolver';
 import {
   applyBrowserSettingsUpdate,
+  buildMetafileAcceleratedContentUrl,
+  buildMetafileContentUrl,
   createBrowserSettingsSnapshot,
-} from '../../core/browser/settings';
-import type { BrowserResolveResult } from '../../core/browser/types';
+  resolveBrowserConfig,
+  resolveBrowserResource,
+  resolveMetaAppPinToRecord,
+} from '@openagentinternet/agent-browser-core';
+import type {
+  BrowserActor,
+  BrowserActorCapability,
+  BrowserOpenConversationPayload,
+  BrowserResolveResult,
+  BrowserRuntimeSnapshot,
+  BrowserTrustedActionResult,
+} from '@openagentinternet/agent-browser-host-contract';
+import { listMetabotProfiles, type MetabotProfileFull } from '../../core/bot/metabotProfileManager';
 import { createConfigStore } from '../../core/config/configStore';
 import {
   commandFailed,
@@ -35,8 +25,73 @@ import {
   type MetabotCommandResult,
 } from '../../core/contracts/commandResult';
 import { isLlmProvider } from '../../core/llm/llmTypes';
-import { createMetaAppArtifactCacheStore } from '../../core/metaapp/artifactCache';
+import { createMetaAppArtifactCacheStore, normalizeMetaAppModifyHistory } from '../../core/metaapp/artifactCache';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
+
+export interface BrowserActorInput {
+  actorId?: string;
+  from?: string;
+}
+
+export type BrowserRuntimeInput = BrowserActorInput;
+
+export interface BrowserResolveInput extends BrowserActorInput {
+  uri: string;
+}
+
+export type BrowserSettingsInput = BrowserActorInput;
+
+export interface BrowserSettingsUpdateInput extends BrowserActorInput {
+  browser?: Record<string, unknown>;
+}
+
+export type BrowserCacheInput = BrowserActorInput;
+
+export interface BrowserCacheClearInput extends BrowserActorInput {
+  scope?: string;
+  pinId?: string;
+  cacheKey?: string;
+}
+
+export type BrowserCacheSnapshot = Record<string, unknown>;
+export type BrowserCacheClearResult = Record<string, unknown>;
+
+export interface BrowserSettingsSnapshot {
+  browser: Record<string, unknown>;
+  effectiveBrowser: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+  configPath?: string;
+}
+
+export type BrowserTrustedActionKind =
+  | 'private-chat'
+  | 'service-call'
+  | 'copy-uri'
+  | 'open-settings'
+  | 'login'
+  | 'edit-profile'
+  | 'configure-chat'
+  | 'view-messages'
+  | 'wallet-sign'
+  | 'payment'
+  | 'open-conversation'
+  | 'share-resource';
+
+export interface BrowserTrustedActionInput extends BrowserActorInput {
+  resourceUri: string;
+  kind: BrowserTrustedActionKind;
+  payload?: Record<string, unknown>;
+}
+
+export interface BrowserHostAdapter {
+  getRuntime(input?: BrowserRuntimeInput): Promise<MetabotCommandResult<BrowserRuntimeSnapshot>>;
+  resolveResource(input: BrowserResolveInput): Promise<MetabotCommandResult<BrowserResolveResult>>;
+  getSettings(input?: BrowserSettingsInput): Promise<MetabotCommandResult<BrowserSettingsSnapshot>>;
+  updateSettings(input: BrowserSettingsUpdateInput): Promise<MetabotCommandResult<BrowserSettingsSnapshot>>;
+  getCache(input?: BrowserCacheInput): Promise<MetabotCommandResult<BrowserCacheSnapshot>>;
+  clearCache(input: BrowserCacheClearInput): Promise<MetabotCommandResult<BrowserCacheClearResult>>;
+  runTrustedAction(input: BrowserTrustedActionInput): Promise<MetabotCommandResult<BrowserTrustedActionResult>>;
+}
 
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
 type OacBrowserActionHandler = (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
@@ -65,6 +120,32 @@ function normalizeText(value: unknown): string {
 function normalizePreferredCreateHost(value: unknown): string | null {
   const provider = normalizeText(value);
   return provider && provider !== 'custom' && isLlmProvider(provider) ? provider : null;
+}
+
+function extractMetafilePinId(reference: string): string | null {
+  if (!/^metafile:\/\//iu.test(reference)) {
+    return null;
+  }
+  const withoutScheme = reference.slice('metafile://'.length).split(/[?#]/u, 1)[0] ?? '';
+  if (!withoutScheme || withoutScheme.includes('/') || withoutScheme.includes('\\')) {
+    return null;
+  }
+  const withoutExtension = withoutScheme.replace(/\.[A-Za-z0-9]+$/u, '');
+  return withoutExtension || null;
+}
+
+function downloadUrlsForReference(contentReference: string, metafileContentBaseUrl?: string): string[] {
+  const metafilePinId = extractMetafilePinId(contentReference);
+  if (metafilePinId) {
+    return [
+      buildMetafileAcceleratedContentUrl(metafileContentBaseUrl, metafilePinId),
+      buildMetafileContentUrl(metafileContentBaseUrl, metafilePinId),
+    ];
+  }
+  if (/^https?:\/\//iu.test(contentReference)) {
+    return [contentReference];
+  }
+  return [];
 }
 
 function actorSelector(input?: BrowserActorInput): string {
@@ -104,6 +185,44 @@ function profileToBrowserActor(profile: MetabotProfileFull, selectedHomeDir: str
 
 function toBrowserRecord(value: object): Record<string, unknown> {
   return { ...value };
+}
+
+function toBrowserSettingsSnapshot(
+  snapshot: ReturnType<typeof createBrowserSettingsSnapshot>,
+): BrowserSettingsSnapshot {
+  return {
+    browser: toBrowserRecord(snapshot.browser),
+    effectiveBrowser: toBrowserRecord(snapshot.effectiveBrowser),
+    defaults: toBrowserRecord(snapshot.defaults),
+    ...(snapshot.configPath ? { configPath: snapshot.configPath } : {}),
+  };
+}
+
+function toMetabotResolveResult(
+  result: Awaited<ReturnType<typeof resolveBrowserResource>>,
+): MetabotCommandResult<BrowserResolveResult> {
+  if (result.ok) {
+    return commandSuccess(result.data);
+  }
+  return commandFailed(result.code, result.message, result.data);
+}
+
+async function downloadMetaAppArchive(input: {
+  fetch: typeof fetch;
+  contentReference: string;
+  metafileContentBaseUrl?: string;
+}): Promise<Buffer | null> {
+  for (const url of downloadUrlsForReference(input.contentReference, input.metafileContentBaseUrl)) {
+    const response = await input.fetch(url).catch(() => null);
+    if (!response?.ok) {
+      continue;
+    }
+    const body = Buffer.from(await response.arrayBuffer());
+    if (body.length > 0) {
+      return body;
+    }
+  }
+  return null;
 }
 
 function readActionPayload(input: BrowserTrustedActionInput): Record<string, unknown> {
@@ -234,11 +353,11 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     if ('failure' in actor) return actor.failure;
     const targetConfigStore = createConfigStore(actor.homeDir);
     const config = await targetConfigStore.read();
-    return commandSuccess(createBrowserSettingsSnapshot({
+    return commandSuccess(toBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
       config,
       configPath: targetConfigStore.paths.configPath,
       env,
-    }));
+    })));
   }
 
   async function updateSettings(settingsInput: BrowserSettingsUpdateInput): Promise<MetabotCommandResult<BrowserSettingsSnapshot>> {
@@ -250,11 +369,11 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       const next = applyBrowserSettingsUpdate(current, settingsInput.browser);
       await targetConfigStore.set(next);
       const saved = await targetConfigStore.read();
-      return commandSuccess(createBrowserSettingsSnapshot({
+      return commandSuccess(toBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
         config: saved,
         configPath: targetConfigStore.paths.configPath,
         env,
-      }));
+      })));
     } catch (error) {
       return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
     }
@@ -301,7 +420,8 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     if ('failure' in actor) return actor.failure;
     const config = await createConfigStore(actor.homeDir).read();
     const browserConfig = resolveBrowserConfig(config, env);
-    return resolveBrowserResource({
+    const artifactCache = createMetaAppArtifactCacheStore(actor.homeDir);
+    return toMetabotResolveResult(await resolveBrowserResource({
       uri: resolveInput.uri,
       config: browserConfig,
       fetch: fetchImpl,
@@ -309,16 +429,40 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
         pinId,
         fetch: fetchImpl,
         manApiBaseUrl: browserConfig.manApiBaseUrl,
-        artifactCache: createMetaAppArtifactCacheStore(actor.homeDir),
-        createPreviewSession: ({ artifactDir, indexFile }) => {
-          const session = input.metaAppPreviewSessions.create({ artifactDir, indexFile });
+        metafileContentBaseUrl: browserConfig.metafileContentBaseUrl,
+        createPreviewSession: async (previewInput) => {
+          const artifactDescriptor = {
+            metaAppPinId: previewInput.pinId,
+            contentReference: previewInput.contentReference,
+            contentType: previewInput.contentType,
+            indexFile: previewInput.indexFile,
+            modifyHistory: normalizeMetaAppModifyHistory(
+              previewInput.pinRecord.modify_history ?? previewInput.pinRecord.modifyHistory,
+            ),
+          };
+          const artifact = await artifactCache.getArtifact(artifactDescriptor)
+            ?? await (async () => {
+              const archive = await downloadMetaAppArchive({
+                fetch: fetchImpl,
+                contentReference: previewInput.contentReference,
+                metafileContentBaseUrl: browserConfig.metafileContentBaseUrl,
+              });
+              if (!archive) {
+                throw new Error('MetaApp ZIP content could not be downloaded.');
+              }
+              return artifactCache.writeArtifact({ ...artifactDescriptor, archive });
+            })();
+          const session = input.metaAppPreviewSessions.create({
+            artifactDir: artifact.artifactDir,
+            indexFile: previewInput.indexFile,
+          });
           return {
             previewId: session.previewId,
-            localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+            localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, previewInput.indexFile),
           };
         },
       }),
-    });
+    }));
   }
 
   async function runTrustedAction(

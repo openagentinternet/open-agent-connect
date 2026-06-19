@@ -18,9 +18,22 @@ import {
   type BrowserTrustedActionInput,
   type BrowserTrustedActionResult,
 } from '@openagentinternet/agent-browser-host-contract';
-import type { BrowserTrustedActionInput as OacBrowserTrustedActionInput } from '../../core/browser/hostTypes';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 import { createOacBrowserHostAdapter, type CreateOacBrowserHostAdapterInput } from './oacBrowserHostAdapter';
+
+type OacBrowserTrustedActionKind =
+  | 'private-chat'
+  | 'service-call'
+  | 'open-settings'
+  | 'login'
+  | 'edit-profile'
+  | 'configure-chat'
+  | 'view-messages'
+  | 'open-conversation';
+
+type OacBrowserTrustedActionInput = Omit<BrowserTrustedActionInput, 'kind'> & {
+  kind: OacBrowserTrustedActionKind;
+};
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

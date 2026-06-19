@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -48,4 +50,9 @@ test('OAC can import published Agent Browser packages', () => {
 test('OAC pins consumed Agent Browser packages to one exact shared version', () => {
   const rootPackage = require('../../package.json');
   assertExactSharedBrowserPins(rootPackage);
+});
+
+test('OAC build output does not include a local browser core mirror', () => {
+  const distBrowserCoreDir = path.join(process.cwd(), 'dist', 'core', 'browser');
+  assert.equal(existsSync(distBrowserCoreDir), false, 'dist/core/browser should not exist after build');
 });

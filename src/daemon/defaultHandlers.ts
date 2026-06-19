@@ -295,8 +295,9 @@ import { mvcChainAdapter } from '../core/chain/adapters/mvc';
 import { btcChainAdapter } from '../core/chain/adapters/btc';
 import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { opcatChainAdapter } from '../core/chain/adapters/opcat';
+import type { BrowserContextResult, BrowserUsingIdentity } from '@openagentinternet/agent-browser-core';
+import type { BrowserRuntimeSnapshot } from '@openagentinternet/agent-browser-host-contract';
 import { createConfigStore } from '../core/config/configStore';
-import { browserRuntimeToContextResult } from '../core/browser/runtimeContext';
 import { createOacBrowserCoreHostAdapter } from './browser/oacBrowserCoreBridge';
 import { createOacBrowserHostAdapter } from './browser/oacBrowserHostAdapter';
 import {
@@ -346,6 +347,40 @@ const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function actorToUsingIdentity(actor: BrowserRuntimeSnapshot['actors'][number]): BrowserUsingIdentity | null {
+  if (actor.kind !== 'oac-bot') {
+    return null;
+  }
+
+  return {
+    slug: actor.id,
+    name: actor.label,
+    globalMetaId: actor.globalMetaId ?? '',
+    ...(actor.avatar ? { avatar: actor.avatar } : {}),
+    isDefault: actor.isDefault,
+  };
+}
+
+function actorToDefaultUsingIdentity(actor: BrowserRuntimeSnapshot['defaultActor']): BrowserUsingIdentity | null {
+  if (!actor || actor.kind !== 'oac-bot' || !actor.globalMetaId) {
+    return null;
+  }
+
+  return actorToUsingIdentity(actor);
+}
+
+function browserRuntimeToContextResult(snapshot: BrowserRuntimeSnapshot): BrowserContextResult {
+  const usingIdentities = snapshot.actors
+    .map(actorToUsingIdentity)
+    .filter((identity): identity is BrowserUsingIdentity => Boolean(identity));
+
+  return {
+    usingIdentities,
+    defaultUsingIdentity: actorToDefaultUsingIdentity(snapshot.defaultActor),
+    defaultUri: snapshot.defaultUri,
+  };
 }
 
 function decodeRequiredBase64(value: unknown): Buffer {
