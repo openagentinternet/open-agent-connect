@@ -43,12 +43,16 @@ import type {
   BrowserCommandWaitingOptions,
 } from '@openagentinternet/agent-browser-host-contract';
 import { createConfigStore } from '../../core/config/configStore';
-import { resolveMetaAppPinToRecord as resolveLocalMetaAppPinToRecord } from '../../core/browser/metaAppPinResolver';
 import {
   type MetabotCommandResult,
 } from '../../core/contracts/commandResult';
+import { buildMetafileContentUrls } from '../../core/files/metafileUrls';
 import { isLlmProvider } from '../../core/llm/llmTypes';
-import { createMetaAppArtifactCacheStore } from '../../core/metaapp/artifactCache';
+import {
+  createMetaAppArtifactCacheStore,
+  normalizeMetaAppModifyHistory,
+  type MetaAppArtifactCacheStore,
+} from '../../core/metaapp/artifactCache';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
 
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
@@ -150,27 +154,94 @@ function browserFailureMessage(result: MetabotCommandResult<unknown>): string {
   return normalizeText((result as { message?: unknown }).message) || 'OAC Browser command failed.';
 }
 
-function isZipMetaAppRecord(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  const contentType = normalizeText(record.contentType).toLowerCase();
-  const content = normalizeText(record.content).toLowerCase();
-  const code = normalizeText(record.code).toLowerCase();
-  return contentType === 'application/zip'
-    || contentType.includes('/zip')
-    || contentType.includes('+zip')
-    || content.endsWith('.zip')
-    || code.endsWith('.zip');
+function isZipMetaAppContent(contentType: string, contentReference: string): boolean {
+  const normalizedContentType = normalizeText(contentType).toLowerCase();
+  const normalizedReference = normalizeText(contentReference).toLowerCase().split(/[?#]/u, 1)[0] ?? '';
+  return normalizedContentType === 'application/zip'
+    || normalizedContentType.includes('/zip')
+    || normalizedContentType.includes('+zip')
+    || normalizedReference.endsWith('.zip');
 }
 
-function toBrowserResolveCommandResult<T>(result: MetabotCommandResult<T>): CoreBrowserCommandResult<T> {
-  if (result.ok) {
-    return browserSuccess(result.data);
+function extractMetafilePinId(contentReference: string): string {
+  if (!/^metafile:\/\//iu.test(contentReference)) {
+    return '';
   }
-  const data = browserResultData(result.data);
-  return browserFailure(browserFailureCode(result), browserFailureMessage(result), data ? { data } : {});
+  const withoutScheme = contentReference.slice('metafile://'.length).split(/[?#]/u, 1)[0] ?? '';
+  if (!withoutScheme || withoutScheme.includes('/') || withoutScheme.includes('\\')) {
+    return '';
+  }
+  return withoutScheme.replace(/\.[A-Za-z0-9]+$/u, '');
+}
+
+function metaAppArchiveUrls(contentReference: string): string[] {
+  const normalizedReference = normalizeText(contentReference);
+  if (!normalizedReference) {
+    return [];
+  }
+  const metafilePinId = extractMetafilePinId(normalizedReference);
+  if (metafilePinId) {
+    const urls = buildMetafileContentUrls(metafilePinId);
+    return [urls.accelerateUrl, urls.contentUrl, urls.legacyContentUrl];
+  }
+  return /^https?:\/\//iu.test(normalizedReference) ? [normalizedReference] : [];
+}
+
+async function downloadMetaAppArchive(
+  fetchImpl: typeof fetch,
+  contentReference: string,
+): Promise<Buffer | null> {
+  for (const url of metaAppArchiveUrls(contentReference)) {
+    const response = await fetchImpl(url).catch(() => null);
+    if (!response?.ok || typeof response.arrayBuffer !== 'function') {
+      continue;
+    }
+    const archive = Buffer.from(await response.arrayBuffer());
+    if (archive.byteLength > 0) {
+      return archive;
+    }
+  }
+  return null;
+}
+
+async function resolveMetaAppPreviewUrl(input: {
+  pinId: string;
+  contentReference: string;
+  contentType: string;
+  indexFile: string;
+  pinRecord: Record<string, unknown>;
+  artifactCache: MetaAppArtifactCacheStore;
+  metaAppPreviewSessions: MetaAppPreviewSessions;
+  fetchImpl: typeof fetch;
+}): Promise<string> {
+  if (!isZipMetaAppContent(input.contentType, input.contentReference)) {
+    return '';
+  }
+
+  const modifyHistory = normalizeMetaAppModifyHistory(
+    input.pinRecord.modify_history ?? input.pinRecord.modifyHistory,
+  );
+  const descriptor = {
+    metaAppPinId: input.pinId,
+    contentReference: normalizeText(input.contentReference),
+    contentType: normalizeText(input.contentType) || 'application/octet-stream',
+    indexFile: normalizeText(input.indexFile) || 'index.html',
+    modifyHistory,
+  };
+  let artifact = await input.artifactCache.getArtifact(descriptor);
+  if (!artifact) {
+    const archive = await downloadMetaAppArchive(input.fetchImpl, descriptor.contentReference);
+    if (!archive) {
+      throw new Error('MetaApp ZIP content could not be downloaded.');
+    }
+    artifact = await input.artifactCache.writeArtifact({ ...descriptor, archive });
+  }
+
+  const session = input.metaAppPreviewSessions.create({
+    artifactDir: artifact.artifactDir,
+    indexFile: artifact.indexFile,
+  });
+  return buildMetaAppPreviewAssetUrl(session.previewId, artifact.indexFile);
 }
 
 function toBrowserFailure(result: MetabotCommandResult<unknown>): BrowserCommandFailure {
@@ -443,28 +514,24 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       config: browserConfig,
       fetch: fetchImpl,
       metaAppResolve: async (pinId): Promise<CoreBrowserCommandResult<MetaAppGalleryRecord>> => {
-        const resolved = await resolveMetaAppPinToRecord({
+        return resolveMetaAppPinToRecord({
           pinId,
           fetch: fetchImpl,
           manApiBaseUrl: browserConfig.manApiBaseUrl,
           metafileContentBaseUrl: browserConfig.metafileContentBaseUrl,
+          createPreviewSession: async ({ contentReference, contentType, indexFile, pinRecord }) => ({
+            localPreviewUrl: await resolveMetaAppPreviewUrl({
+              pinId,
+              contentReference,
+              contentType,
+              indexFile,
+              pinRecord,
+              artifactCache,
+              metaAppPreviewSessions: input.metaAppPreviewSessions,
+              fetchImpl,
+            }),
+          }),
         });
-        if (!resolved.ok || normalizeText(resolved.data.localUiUrl) || !isZipMetaAppRecord(resolved.data)) {
-          return resolved;
-        }
-        return toBrowserResolveCommandResult(await resolveLocalMetaAppPinToRecord({
-          pinId,
-          fetch: fetchImpl,
-          manApiBaseUrl: browserConfig.manApiBaseUrl,
-          artifactCache,
-          createPreviewSession: ({ artifactDir, indexFile }) => {
-            const session = input.metaAppPreviewSessions.create({ artifactDir, indexFile });
-            return {
-              previewId: session.previewId,
-              localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
-            };
-          },
-        }));
       },
     });
   }
