@@ -3,6 +3,7 @@ import type { Dirent } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { browserFailure, browserSuccess } from '@openagentinternet/agent-browser-host-contract';
+import type { BrowserRuntimeSnapshot } from '@openagentinternet/agent-browser-host-contract';
 import {
   commandAwaitingConfirmation,
   commandFailed,
@@ -296,8 +297,7 @@ import { btcChainAdapter } from '../core/chain/adapters/btc';
 import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
-import { browserRuntimeToContextResult } from '../core/browser/runtimeContext';
-import { createOacBrowserCoreHostAdapter } from './browser/oacBrowserCoreBridge';
+import type { BrowserContextResult } from '../core/browser/types';
 import { createOacBrowserHostAdapter } from './browser/oacBrowserHostAdapter';
 import {
   DEFAULT_WRITE_NETWORKS,
@@ -10294,10 +10294,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
     env: process.env,
   };
   const browserHostAdapter = createOacBrowserHostAdapter(browserHostAdapterInput);
-  const browserCoreHostAdapter = createOacBrowserCoreHostAdapter(browserHostAdapterInput);
 
   function browserActorId(request: { actorId?: string; from?: string }): string | undefined {
     return request.actorId || request.from || undefined;
+  }
+
+  function browserContextFromRuntime(snapshot: BrowserRuntimeSnapshot): BrowserContextResult {
+    const usingIdentities = snapshot.actors
+      .filter((actor) => actor.kind === 'oac-bot')
+      .map((actor) => ({
+        slug: actor.id,
+        name: actor.label,
+        globalMetaId: actor.globalMetaId ?? '',
+        ...(actor.avatar ? { avatar: actor.avatar } : {}),
+        isDefault: actor.id === snapshot.defaultActor?.id,
+      }));
+    const defaultUsingIdentity = snapshot.defaultActor?.kind === 'oac-bot' && snapshot.defaultActor.globalMetaId
+      ? {
+          slug: snapshot.defaultActor.id,
+          name: snapshot.defaultActor.label,
+          globalMetaId: snapshot.defaultActor.globalMetaId,
+          ...(snapshot.defaultActor.avatar ? { avatar: snapshot.defaultActor.avatar } : {}),
+          isDefault: true,
+        }
+      : null;
+
+    return {
+      usingIdentities,
+      defaultUsingIdentity,
+      defaultUri: snapshot.defaultUri,
+    };
   }
 
   async function readMetaAppRecordForUpdate(actorHomeDir: string, targetPinId: string): Promise<MetaAppGalleryRecord | null> {
@@ -10446,7 +10472,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
   const handlers: MetabotDaemonHttpHandlers = {
     browser: {
-      getRuntime: async (request = {}) => browserCoreHostAdapter.getRuntime({
+      getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
         actorId: browserActorId(request),
       }),
       getContext: async (request = {}) => {
@@ -10454,35 +10480,32 @@ export function createDefaultMetabotDaemonHandlers(input: {
           actorId: browserActorId(request),
         });
         if (!runtime.ok) {
-          return browserFailure(
-            runtime.code || 'browser_runtime_failed',
-            runtime.message || 'Browser runtime is unavailable.',
-          );
+          return runtime;
         }
-        return browserSuccess(browserRuntimeToContextResult(runtime.data));
+        return browserSuccess(browserContextFromRuntime(runtime.data));
       },
-      getSettings: async (request = {}) => browserCoreHostAdapter.getSettings({
+      getSettings: async (request = {}) => browserHostAdapter.getSettings({
         actorId: browserActorId(request),
       }),
-      updateSettings: async (request) => browserCoreHostAdapter.updateSettings({
+      updateSettings: async (request) => browserHostAdapter.updateSettings({
         actorId: browserActorId(request),
         browser: request.browser,
       }),
-      getCache: async (request = {}) => browserCoreHostAdapter.getCache({
+      getCache: async (request = {}) => browserHostAdapter.getCache({
         actorId: browserActorId(request),
       }),
-      clearCache: async (request) => browserCoreHostAdapter.clearCache({
+      clearCache: async (request) => browserHostAdapter.clearCache({
         actorId: browserActorId(request),
         scope: request.scope,
         pinId: request.pinId,
         cacheKey: request.cacheKey,
       }),
-      resolve: async (request) => browserCoreHostAdapter.resolveResource({
+      resolve: async (request) => browserHostAdapter.resolveResource({
         actorId: browserActorId(request),
         uri: request.uri,
       }),
       runTrustedAction: async (request) => {
-        const actionRequest: Parameters<typeof browserCoreHostAdapter.runTrustedAction>[0] = {
+        const actionRequest: Parameters<typeof browserHostAdapter.runTrustedAction>[0] = {
           actorId: browserActorId(request),
           resourceUri: request.resourceUri,
           kind: request.kind,
@@ -10490,7 +10513,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (request.payload) {
           Object.assign(actionRequest, { payload: request.payload });
         }
-        return browserCoreHostAdapter.runTrustedAction(actionRequest);
+        return browserHostAdapter.runTrustedAction(actionRequest);
       },
     },
     config: {

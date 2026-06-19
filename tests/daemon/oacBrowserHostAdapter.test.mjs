@@ -6,6 +6,7 @@ import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
+const { assertBrowserHostConformance } = require('@openagentinternet/agent-browser-test-harness');
 const { createOacBrowserHostAdapter } = require('../../dist/daemon/browser/oacBrowserHostAdapter.js');
 const { createMetabotProfile, createMetabotProfileFromIdentity, getMetabotProfile } = require('../../dist/core/bot/metabotProfileManager.js');
 const { commandFailed } = require('../../dist/core/contracts/commandResult.js');
@@ -316,6 +317,124 @@ test('OAC browser host adapter resolves metaid URIs with the selected profile Br
   assert.equal(resolved.data.renderer.templateId, 'compact-list');
 });
 
+test('OAC browser host adapter satisfies the published host conformance harness', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-conformance');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Conformance Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1conformancebot',
+    mvcAddress: '18ConformanceBot',
+  });
+  const fixture = JSON.parse(await readFile(new URL('../fixtures/browser/botHomepage.v1.json', import.meta.url), 'utf8'));
+  const adapter = await createAdapter({
+    homeDir: profileHome,
+    systemHomeDir,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ code: 0, message: '', data: fixture }),
+    }),
+  });
+
+  await assertBrowserHostConformance({
+    adapter,
+    expectedHostKind: 'oac',
+    sampleUri: 'metaid://idq1fixturebot',
+  });
+});
+
+test('OAC browser host adapter maps resolved Bot pages to BrowserResolveResult actions', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-envelope');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Envelope Adapter Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1envelopeadapter',
+    mvcAddress: '18EnvelopeAdapter',
+  });
+  const fixture = JSON.parse(await readFile(new URL('../fixtures/browser/botHomepage.v1.json', import.meta.url), 'utf8'));
+  fixture.actions = fixture.actions.map((action) => action.id === 'message'
+    ? {
+        ...action,
+        payload: {
+          targetGlobalMetaId: 'idq1fixturebot',
+        },
+      }
+    : action);
+  fixture.actions.push({
+    id: 'service-call-current',
+    label: 'Request Fixture Review',
+    kind: 'service-call',
+    enabled: true,
+    serviceId: 'service-current-pin',
+    payload: {
+      providerGlobalMetaId: 'idq1fixturebot',
+    },
+  });
+  const adapter = await createAdapter({
+    homeDir: profileHome,
+    systemHomeDir,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ code: 0, message: '', data: fixture }),
+    }),
+  });
+
+  const resolved = await adapter.resolveResource({ uri: 'metaid://idq1fixturebot' });
+
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.data.resourceType, 'bot');
+  assert.equal(resolved.data.renderer.type, 'bot-page');
+  assert.deepEqual(resolved.data.owner, {
+    kind: 'bot',
+    globalMetaId: 'idq1fixturebot',
+    metaid: 'metaid-fixture',
+    address: '18FixtureAddress',
+    name: 'Fixture Bot',
+    avatar: 'https://so.example.test/content/avatar-pin',
+    online: true,
+    verificationState: 'partial',
+  });
+  const privateChat = resolved.data.actions.find((action) => action.kind === 'private-chat');
+  assert.deepEqual(privateChat, {
+    id: 'message',
+    label: 'Message',
+    kind: 'private-chat',
+    enabled: true,
+    requiresUsingIdentity: true,
+    payload: {
+      targetGlobalMetaId: 'idq1fixturebot',
+    },
+  });
+
+  const serviceCall = resolved.data.actions.find((action) => action.kind === 'service-call');
+  assert.deepEqual(serviceCall, {
+    id: 'service-call-current',
+    label: 'Request Fixture Review',
+    kind: 'service-call',
+    enabled: true,
+    serviceId: 'service-current-pin',
+    payload: {
+      providerGlobalMetaId: 'idq1fixturebot',
+    },
+  });
+
+  const copyUri = resolved.data.actions.find((action) => action.kind === 'copy');
+  assert.deepEqual(copyUri, {
+    id: 'copy-uri',
+    label: 'Copy URI',
+    kind: 'copy',
+    enabled: true,
+    uri: 'metaid://idq1fixturebot',
+  });
+});
+
 test('OAC browser host adapter maps private chat trusted actions to OAC chat input', async (t) => {
   const profileHome = await createProfileHome('oac-browser-adapter-private-action');
   t.after(async () => cleanupProfileHome(profileHome));
@@ -452,6 +571,114 @@ test('OAC browser host adapter preserves waiting command states for runtime trus
   assert.equal(result.state, 'waiting');
   assert.equal(result.code, 'order_sent_awaiting_provider');
   assert.equal(result.data.traceId, 'trace-waiting');
+});
+
+test('OAC browser host adapter preserves non-terminal service-call command states', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-waiting-action');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Waiting Adapter Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1waitingadapter',
+    mvcAddress: '18WaitingAdapter',
+  });
+  const adapter = await createAdapter({
+    homeDir: profileHome,
+    systemHomeDir,
+    serviceCall: async (input) => {
+      const userTask = input.request?.userTask;
+      if (userTask === 'Use route fallback') {
+        return {
+          ok: false,
+          state: 'waiting',
+          code: 'order_sent_awaiting_provider',
+          message: 'Order sent. Waiting for response...',
+          pollAfterMs: 3000,
+          data: { traceId: 'trace waiting/route' },
+        };
+      }
+      if (userTask === 'Needs manual action') {
+        return {
+          ok: false,
+          state: 'manual_action_required',
+          code: 'service_call_needs_confirmation',
+          message: 'Confirm the service request in the trace view.',
+          localUiUrl: '/ui/trace?traceId=trace-manual',
+          data: { traceId: 'trace-manual' },
+        };
+      }
+      return {
+        ok: false,
+        state: 'waiting',
+        code: 'order_sent_awaiting_provider',
+        message: 'Order sent. Waiting for response...',
+        pollAfterMs: 3000,
+        localUiUrl: '/ui/trace?traceId=trace-waiting',
+        data: { traceId: 'trace-waiting' },
+      };
+    },
+  });
+
+  const withHref = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1provider',
+    kind: 'service-call',
+    payload: {
+      servicePinId: 'service-pin',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Use local UI URL',
+    },
+  });
+
+  assert.equal(withHref.ok, false);
+  assert.equal(withHref.state, 'waiting');
+  assert.equal(withHref.code, 'order_sent_awaiting_provider');
+  assert.match(withHref.message, /^Order sent\. Waiting for response/);
+  assert.deepEqual(withHref.action, {
+    label: 'Open details',
+    href: '/ui/trace?traceId=trace-waiting',
+  });
+  assert.deepEqual(withHref.data, { traceId: 'trace-waiting' });
+
+  const withRoute = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1provider',
+    kind: 'service-call',
+    payload: {
+      servicePinId: 'service-pin',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Use route fallback',
+    },
+  });
+
+  assert.equal(withRoute.ok, false);
+  assert.equal(withRoute.state, 'waiting');
+  assert.equal(withRoute.code, 'order_sent_awaiting_provider');
+  assert.match(withRoute.message, /^Order sent\. Waiting for response/);
+  assert.deepEqual(withRoute.data, { traceId: 'trace waiting/route' });
+
+  const manualAction = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaid://idq1provider',
+    kind: 'service-call',
+    payload: {
+      servicePinId: 'service-pin',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Needs manual action',
+    },
+  });
+
+  assert.equal(manualAction.ok, false);
+  assert.equal(manualAction.state, 'manual_action_required');
+  assert.equal(manualAction.code, 'service_call_needs_confirmation');
+  assert.match(manualAction.message, /^Confirm the service request/);
+  assert.deepEqual(manualAction.action, {
+    label: 'Open details',
+    href: '/ui/trace?traceId=trace-manual',
+  });
+  assert.deepEqual(manualAction.data, { traceId: 'trace-manual' });
 });
 
 test('OAC browser host adapter maps owner trusted actions to Bot management routes', async (t) => {
