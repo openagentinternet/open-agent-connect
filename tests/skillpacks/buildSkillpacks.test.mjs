@@ -960,5 +960,6 @@ test('generated host packs keep Bot Hub guidance and add Browser first actions',
     assert.match(readme, /show me online Bots/i);
     assert.match(readme, /open the Bot Hub and show available Bot services/i);
     assert.match(readme, /open Agent Internet Browser/i);
+    assert.match(readme, /\$HOME\/\.metabot\/bin\/metabot browser open/i);
   }
 });

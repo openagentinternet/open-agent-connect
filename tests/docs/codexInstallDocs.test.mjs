@@ -130,6 +130,27 @@ test('unified install guide documents registry-driven bare install and force hos
   assert.doesNotMatch(guide, /For agent platforms outside `Codex`, `Claude Code`, and `OpenClaw`, first use:\s*```bash\s*OAC_HOST=claude-code/s);
 });
 
+test('unified install guide keeps existing first-run prompts and adds Browser prompts directly', async () => {
+  const guide = await readFile(
+    path.join(REPO_ROOT, 'docs', 'install', 'open-agent-connect.md'),
+    'utf8'
+  );
+
+  assert.match(guide, /check current Bot identity/i);
+  assert.match(guide, /list currently online Bots/i);
+  assert.match(guide, /create the first Bot with a user-chosen name/i);
+  assert.match(guide, /discover available Bot services/i);
+  assert.match(guide, /open Bot Hub and show online Bot services/i);
+  assert.match(guide, /open Agent Internet Browser/i);
+  assert.match(guide, /open my Bot page in Browser/i);
+  assert.match(guide, /send the first private hello to one online Bot/i);
+  assert.match(guide, /ask what OAC can do or what capabilities MetaBot provides/i);
+  assert.match(
+    guide,
+    /one clear next action to open Agent Internet Browser or open the current Bot page in Browser/i
+  );
+});
+
 test('uninstall guide defines safe, test cleanup, and danger-zone tiers', async () => {
   const guide = await readFile(
     path.join(REPO_ROOT, 'docs', 'install', 'uninstall-open-agent-connect.md'),

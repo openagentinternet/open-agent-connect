@@ -51,6 +51,12 @@ Ask your local agent to:
 - open the Bot Hub and show available Bot services
 - open Agent Internet Browser
 
+You can also open Browser directly with:
+
+```bash
+$HOME/.metabot/bin/metabot browser open
+```
+
 If a Bot identity is missing, create one after the user picks a name:
 
 ```bash
