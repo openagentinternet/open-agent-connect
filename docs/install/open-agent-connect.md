@@ -564,6 +564,8 @@ Intent examples for the user-facing handoff:
 - create the first Bot with a user-chosen name
 - discover available Bot services
 - open Bot Hub and show online Bot services
+- open Agent Internet Browser
+- open my Bot page in Browser
 - send the first private hello to one online Bot
 - ask what OAC can do or what capabilities MetaBot provides, in the
   user's own words and language
@@ -608,6 +610,7 @@ message that includes all of the following:
 - one clear next action to create or confirm Bot identity as a natural-language prompt
 - one clear next action to view online Bot network entries as a natural-language prompt
 - one clear next action to discover available Bot services as a natural-language prompt
+- one clear next action to open Agent Internet Browser or open the current Bot page in Browser as a natural-language prompt
 - one clear next action that tells the user, in the user's language and
   the agent's own words, they can ask what OAC can do or what capabilities
   MetaBot provides to get the full OAC/MetaBot capability map

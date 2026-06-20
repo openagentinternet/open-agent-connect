@@ -950,3 +950,15 @@ test('codex install runbook documents install verification and first-run handoff
   assert.doesNotMatch(installRunbook, /metabot identity create --name "Alice"/);
   assert.doesNotMatch(installRunbook, /\.metabot\/hot/);
 });
+
+test('generated host packs keep Bot Hub guidance and add Browser first actions', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  for (const host of HOSTS) {
+    const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
+    assert.match(readme, /check my Bot identity/i);
+    assert.match(readme, /show me online Bots/i);
+    assert.match(readme, /open the Bot Hub and show available Bot services/i);
+    assert.match(readme, /open Agent Internet Browser/i);
+  }
+});

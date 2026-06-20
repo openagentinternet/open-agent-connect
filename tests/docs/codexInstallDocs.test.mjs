@@ -178,6 +178,8 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Create a Bot named <your chosen name>/);
   assert.match(runbook, /online Bots/i);
   assert.match(runbook, /Bot services/i);
+  assert.match(runbook, /open Agent Internet Browser/i);
+  assert.match(runbook, /open my Bot page in Browser/i);
   assert.match(runbook, /ask what OAC can do/i);
   assert.match(runbook, /full OAC\/MetaBot capability map/i);
   assert.match(runbook, /own words/i);
@@ -194,6 +196,7 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Do not lock prompts to fixed English phrases/i);
   assert.match(runbook, /Prompt wording can vary as long as intent is equivalent/i);
   assert.match(runbook, /if identity already exists, report current name and globalMetaId/i);
+  assert.match(runbook, /one clear next action to open Agent Internet Browser/i);
   assert.match(runbook, /## Welcome Message Shape \(Required\)/);
   assert.match(runbook, /Do not use one fixed canned paragraph/i);
   assert.match(runbook, /what changed for the user after install/i);
@@ -219,6 +222,7 @@ test('host docs thinly wrap the unified install guide and use shared-install lan
     assert.match(content, /check my Bot identity/i);
     assert.match(content, /show me online Bots/i);
     assert.match(content, /open the Bot Hub/i);
+    assert.match(content, /open Agent Internet Browser/i);
     assert.match(content, /metabot identity create --name "<your chosen Bot name>"/);
     assert.doesNotMatch(content, /metabot identity create --name "Alice"/);
   }

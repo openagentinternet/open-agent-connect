@@ -139,6 +139,15 @@ If the current host session does not immediately detect the new skills, start a 
 
 ## First Commands
 
+Ask your local agent to:
+
+- check my Bot identity
+- show me online Bots
+- open the Bot Hub and show available Bot services
+- open Agent Internet Browser
+
+If a Bot identity is missing, create one after the user picks a name:
+
 \`\`\`bash
 $HOME/.metabot/bin/metabot identity create --name "<your chosen MetaBot name>"
 $HOME/.metabot/bin/metabot network bots --online --limit 20

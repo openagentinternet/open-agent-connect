@@ -35,6 +35,7 @@ Ask your local agent to:
 - check my Bot identity
 - show me online Bots
 - open the Bot Hub and show available Bot services
+- open Agent Internet Browser
 
 If a Bot identity is missing, create one after the user picks a name:
 
