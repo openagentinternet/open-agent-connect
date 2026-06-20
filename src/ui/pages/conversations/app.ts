@@ -282,9 +282,26 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const response = await fetch(url, { cache: 'no-store', ...(options || {}) });
     const payload = await response.json();
     if (!payload || payload.ok !== true) {
-      throw new Error((payload && payload.message) || uiText('conversations.requestFailed', 'Request failed.'));
+      const error = new Error((payload && payload.message) || uiText('conversations.requestFailed', 'Request failed.'));
+      if (payload && typeof payload.code === 'string') error.code = payload.code;
+      throw error;
     }
     return payload.data || payload;
+  };
+  const guidanceErrorMessage = (error) => {
+    const code = String(error && error.code || '');
+    const messages = {
+      bad_request: uiText('conversations.guidanceInvalid', 'Guidance is invalid.'),
+      missing_local: uiText('conversations.guidanceInvalid', 'Guidance is invalid.'),
+      missing_peer: uiText('conversations.guidanceConversationNotFound', 'Select an existing conversation before sending guidance.'),
+      missing_guidance: uiText('conversations.guidanceInvalid', 'Guidance is invalid.'),
+      conversation_not_found: uiText('conversations.guidanceConversationNotFound', 'Select an existing conversation before sending guidance.'),
+      profile_not_found: uiText('conversations.guidanceProfileUnavailable', 'The selected local Bot is no longer available.'),
+      identity_missing: uiText('conversations.guidanceIdentityMissing', 'Create a local Bot identity before sending guidance.'),
+      not_implemented: uiText('conversations.guidanceUnavailable', 'Guided replies are unavailable right now.'),
+      conversation_guidance_failed: uiText('conversations.guidanceFailed', 'Guidance failed.'),
+    };
+    return messages[code] || uiText('conversations.guidanceFailed', 'Guidance failed.');
   };
   const buildModel = () => buildConversationsPageViewModel({
     localBots: state.localBots,
@@ -350,11 +367,11 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const localized = localizeEmptyState(emptyState);
     target.innerHTML = '<div class="conversation-empty"><strong>' + escapeHtml(localized.title) + '</strong><p>' + escapeHtml(localized.message) + '</p></div>';
   };
-  const resetGuidanceComposer = () => {
+  const resetGuidanceComposer = (status) => {
     state.guidanceOpen = false;
     state.guidanceDraft = '';
     state.guidanceSubmitting = false;
-    state.guidanceStatus = '';
+    state.guidanceStatus = String(status || '');
   };
   const renderList = (model) => {
     if (!elements.list) return;
@@ -743,12 +760,12 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
         }),
       });
       if (state.selectedLocalGlobalMetaId !== targetLocal || state.selectedPeerGlobalMetaId !== targetPeer) return;
-      resetGuidanceComposer();
+      resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
       render();
       await loadConversations({ stickToBottom: true });
     } catch (error) {
       if (state.selectedLocalGlobalMetaId !== targetLocal || state.selectedPeerGlobalMetaId !== targetPeer) return;
-      state.guidanceStatus = error.message || uiText('conversations.guidanceFailed', 'Guidance failed.');
+      state.guidanceStatus = guidanceErrorMessage(error);
     } finally {
       state.guidanceSubmitting = false;
       render();

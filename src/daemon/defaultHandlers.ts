@@ -5629,6 +5629,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
         peerGlobalMetaId: inputForConversation.peerGlobalMetaId,
         limit: 20,
       });
+      if (result.messages.length === 0) {
+        return null;
+      }
       const firstMessage = result.messages[0] ?? null;
       const lastMessage = result.messages[result.messages.length - 1] ?? null;
       const now = Date.now();
@@ -5719,12 +5722,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
 
     const createdAt = Date.now();
-    const pendingConversation = await profilePrivateChatStateStore.setPendingGuidance(
+    const pendingGuidance = await profilePrivateChatStateStore.setPendingGuidanceAndClaim(
       conversation.conversationId,
       guidanceText,
       createdAt,
+      { now: createdAt },
     );
-    if (!pendingConversation) {
+    if (!pendingGuidance) {
       return commandFailed('conversation_not_found', 'No conversation found for this peer.');
     }
 
@@ -5759,6 +5763,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           runtimeResolver,
           llmExecutor: input.llmExecutor,
           metaBotSlug: profileMetaBotSlug,
+          allowTemplateFallback: false,
           allowedChatSkillsResolver: createPrivateChatAllowedSkillsResolver({
             paths: profileRuntimeStateStore.paths,
             metaBotSlug: profileMetaBotSlug,
@@ -5790,7 +5795,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
       localGlobalMetaId: state.identity.globalMetaId,
       peerGlobalMetaId,
     });
-    await orchestrator.handleLocalGuidedTurn(peerGlobalMetaId);
+    await orchestrator.handleLocalGuidedTurn(peerGlobalMetaId, {
+      guidanceToConsume: pendingGuidance.claim,
+    });
 
     const latestConversation = await profilePrivateChatStateStore.getConversationByPeer(peerGlobalMetaId);
     const guidanceConsumed = Boolean(

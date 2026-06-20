@@ -13,6 +13,7 @@ const { createA2AConversationStore } = require('../../dist/core/a2a/conversation
 const { createChatStrategyStore } = require('../../dist/core/chat/chatStrategyStore.js');
 const { loadChatPersona } = require('../../dist/core/chat/chatPersonaLoader.js');
 const { createDefaultChatReplyRunner } = require('../../dist/core/chat/defaultChatReplyRunner.js');
+const { createHostLlmChatReplyRunner } = require('../../dist/core/chat/hostLlmChatReplyRunner.js');
 const { createPrivateChatAutoReplyOrchestrator } = require('../../dist/core/chat/privateChatAutoReply.js');
 
 async function createTempProfileHome() {
@@ -691,6 +692,87 @@ test('auto-reply keeps pending guidance when the runner skips the turn', async (
   assert.equal(harness.writes.length, 0);
 });
 
+test('auto-reply keeps pending guidance when a guided inbound turn hits host LLM template fallback', async () => {
+  const now = 1_770_000_000_000;
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const harness = await createAutoReplyHarness({
+    now,
+    replyRunner: createHostLlmChatReplyRunner({
+      runtimeResolver: {
+        async resolveRuntime() {
+          return { runtime, bindingId: 'binding-1' };
+        },
+        async selectMetaBot() {
+          return null;
+        },
+        async markBindingUsed() {},
+        async markRuntimeUnavailable() {},
+      },
+      llmExecutor: {
+        async execute() {
+          return 'llm-session-failed';
+        },
+        async getSession(sessionId) {
+          return {
+            sessionId,
+            status: 'failed',
+            result: {
+              status: 'failed',
+              output: '',
+              error: 'backend failed',
+              durationMs: 1,
+            },
+          };
+        },
+      },
+      metaBotSlug: 'test-slug',
+      pollIntervalMs: 1,
+    }),
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(
+    conversationId,
+    'Ask for the delivery date.',
+    now - 500,
+  );
+
+  await harness.handleInbound({
+    content: 'Can you follow up now?',
+    messagePinId: 'incoming-pin-guided-host-fallback',
+  });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, 'Ask for the delivery date.');
+  assert.equal(conversation.pendingGuidanceCreatedAt, now - 500);
+  assert.equal(harness.writes.length, 0);
+});
+
 test('auto-reply keeps pending guidance when the outbound send fails', async () => {
   const now = 1_770_000_000_000;
   const harness = await createAutoReplyHarness({
@@ -914,6 +996,62 @@ test('guided local turns can reopen a closed conversation when pending guidance 
 
   assert.equal(harness.runnerInputs.length, 2);
   assert.equal(harness.runnerInputs[1].conversation.turnCount, 2);
+});
+
+test('guided local turns do not send a stale claimed guidance after a newer guidance replaces it', async () => {
+  const now = 1_770_000_000_000;
+  let harness;
+  harness = await createAutoReplyHarness({
+    now,
+    replyRunner: async (input) => {
+      if (input.operatorGuidanceText === 'older guidance') {
+        await harness.stateStore.setPendingGuidance(
+          `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`,
+          'newer guidance',
+          now + 1,
+        );
+      }
+      return {
+        state: 'reply',
+        content: `guided:${input.operatorGuidanceText}`,
+      };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 4,
+    lastDirection: 'outbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'older guidance',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.writes.length, 0);
+  let conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, 'newer guidance');
+  assert.equal(conversation.pendingGuidanceCreatedAt, now + 1);
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.writes.length, 1);
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(
+    messages.filter((message) => message.direction === 'outbound').at(-1)?.content,
+    'guided:newer guidance',
+  );
+  conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
 });
 
 test('guided local turns are a no-op for closed conversations without pending guidance', async () => {

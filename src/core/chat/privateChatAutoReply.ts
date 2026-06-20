@@ -35,7 +35,12 @@ export interface PrivateChatAutoReplyDependencies {
 
 export interface PrivateChatAutoReplyOrchestrator {
   handleInboundMessage(message: PrivateChatInboundMessage): Promise<void>;
-  handleLocalGuidedTurn(peerGlobalMetaId: string): Promise<void>;
+  handleLocalGuidedTurn(
+    peerGlobalMetaId: string,
+    options?: {
+      guidanceToConsume?: PrivateChatPendingGuidanceClaim | null;
+    },
+  ): Promise<void>;
 }
 
 interface RateLimiterState {
@@ -77,6 +82,22 @@ function parseExtensions(content: string): Record<string, unknown> | null {
     // Not JSON, no extensions.
   }
   return null;
+}
+
+async function pendingGuidanceClaimStillMatchesState(
+  stateStore: PrivateChatStateStore,
+  conversationId: string,
+  claim: PrivateChatPendingGuidanceClaim,
+): Promise<boolean> {
+  const state = await stateStore.readState();
+  const conversation = state.conversations.find(entry => entry.conversationId === conversationId) ?? null;
+  return Boolean(
+    conversation
+    && normalizeText(conversation.pendingGuidanceText) === claim.guidanceText
+    && conversation.pendingGuidanceCreatedAt === claim.createdAt
+    && conversation.pendingGuidanceLeaseId === claim.leaseId
+    && conversation.pendingGuidanceLeaseExpiresAt === claim.leaseExpiresAt
+  );
 }
 
 function findFinalNonEmptyLineIndex(lines: string[]): number {
@@ -245,6 +266,20 @@ export function createPrivateChatAutoReplyOrchestrator(
   }): Promise<PrivateChatConversation | null> {
     let outboundReply: SentPrivateChatReply | null = null;
     try {
+      if (
+        input.guidanceToConsume
+        && !(await pendingGuidanceClaimStillMatchesState(
+          deps.stateStore,
+          input.conversation.conversationId,
+          input.guidanceToConsume,
+        ))
+      ) {
+        await deps.stateStore.releasePendingGuidanceClaimIfMatches(
+          input.conversation.conversationId,
+          input.guidanceToConsume,
+        ).catch(() => null);
+        return null;
+      }
       outboundReply = await sendReplyMessage(
         input.selfGlobalMetaId,
         input.peerGlobalMetaId,
@@ -539,7 +574,7 @@ export function createPrivateChatAutoReplyOrchestrator(
 
       rateLimiter.replyTimestamps.push(getNow());
     },
-    async handleLocalGuidedTurn(peerGlobalMetaId) {
+    async handleLocalGuidedTurn(peerGlobalMetaId, options = {}) {
       const selfGlobalMetaId = await deps.selfGlobalMetaId();
       if (!selfGlobalMetaId) return;
 
@@ -553,10 +588,11 @@ export function createPrivateChatAutoReplyOrchestrator(
       const strategy = conversation.strategyId
         ? await deps.strategyStore.getStrategy(conversation.strategyId)
         : null;
-      const guidanceToConsume = await deps.stateStore.claimPendingGuidance(
-        conversation.conversationId,
-        { now: getNow() },
-      );
+      const guidanceToConsume = options.guidanceToConsume
+        ?? await deps.stateStore.claimPendingGuidance(
+          conversation.conversationId,
+          { now: getNow() },
+        );
       if (!guidanceToConsume) return;
       const runnerConversation = conversation.state === 'closed'
         ? {

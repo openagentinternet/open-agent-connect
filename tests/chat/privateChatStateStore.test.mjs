@@ -268,6 +268,48 @@ test('setPendingGuidance replaces older unconsumed guidance', async () => {
   assert.equal(replaced?.pendingGuidanceLeaseExpiresAt ?? null, null);
 });
 
+test('setPendingGuidanceAndClaim atomically replaces guidance with an active lease', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+
+  await store.upsertConversation({
+    conversationId: 'pc-self-peer',
+    peerGlobalMetaId: 'peer-gm-1',
+    peerName: 'PeerBot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: 1000,
+    updatedAt: 1000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+
+  const claimed = await store.setPendingGuidanceAndClaim(
+    'pc-self-peer',
+    'newer guidance',
+    2222,
+    { now: 3000, leaseMs: 4000 },
+  );
+
+  assert.ok(claimed);
+  assert.equal(claimed.claim.guidanceText, 'newer guidance');
+  assert.equal(claimed.claim.createdAt, 2222);
+  assert.equal(claimed.claim.leaseExpiresAt, 7000);
+  assert.equal(claimed.conversation.pendingGuidanceText, 'newer guidance');
+  assert.equal(claimed.conversation.pendingGuidanceCreatedAt, 2222);
+  assert.equal(claimed.conversation.pendingGuidanceLeaseId, claimed.claim.leaseId);
+  assert.equal(claimed.conversation.pendingGuidanceLeaseExpiresAt, 7000);
+
+  const persisted = await store.getConversationByPeer('peer-gm-1');
+  assert.equal(persisted?.pendingGuidanceText, 'newer guidance');
+  assert.equal(persisted?.pendingGuidanceCreatedAt, 2222);
+  assert.equal(persisted?.pendingGuidanceLeaseId, claimed.claim.leaseId);
+  assert.equal(persisted?.pendingGuidanceLeaseExpiresAt, 7000);
+});
+
 test('clearPendingGuidanceIfMatches only clears the matching guidance', async () => {
   const { profileRoot } = await createTempProfileHome();
   const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));

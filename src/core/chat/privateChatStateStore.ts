@@ -38,6 +38,18 @@ export interface PrivateChatStateStore {
     guidanceText: string,
     createdAt: number,
   ): Promise<PrivateChatConversation | null>;
+  setPendingGuidanceAndClaim(
+    conversationId: string,
+    guidanceText: string,
+    createdAt: number,
+    options?: {
+      now?: number;
+      leaseMs?: number;
+    },
+  ): Promise<{
+    conversation: PrivateChatConversation;
+    claim: PrivateChatPendingGuidanceClaim;
+  } | null>;
   claimPendingGuidance(
     conversationId: string,
     options?: {
@@ -331,6 +343,50 @@ export function createPrivateChatStateStore(
         return { ...state, conversations };
       });
       return updatedConversation;
+    },
+
+    async setPendingGuidanceAndClaim(conversationId, guidanceText, createdAt, options = {}) {
+      let updatedConversation: PrivateChatConversation | null = null;
+      let claim: PrivateChatPendingGuidanceClaim | null = null;
+      const normalizedGuidanceText = normalizeText(guidanceText);
+      const now = typeof options.now === 'number' ? options.now : Date.now();
+      const leaseMs = typeof options.leaseMs === 'number'
+        ? Math.max(1, Math.trunc(options.leaseMs))
+        : DEFAULT_PENDING_GUIDANCE_LEASE_MS;
+      await this.updateState(state => {
+        const conversations = replaceConversation(state.conversations, conversationId, conversation => {
+          if (!normalizedGuidanceText) {
+            updatedConversation = {
+              ...conversation,
+              pendingGuidanceText: null,
+              pendingGuidanceCreatedAt: null,
+              pendingGuidanceLeaseId: null,
+              pendingGuidanceLeaseExpiresAt: null,
+            };
+            return updatedConversation;
+          }
+          const leaseId = buildPendingGuidanceLeaseId();
+          const leaseExpiresAt = now + leaseMs;
+          updatedConversation = {
+            ...conversation,
+            pendingGuidanceText: normalizedGuidanceText,
+            pendingGuidanceCreatedAt: createdAt,
+            pendingGuidanceLeaseId: leaseId,
+            pendingGuidanceLeaseExpiresAt: leaseExpiresAt,
+          };
+          claim = {
+            guidanceText: normalizedGuidanceText,
+            createdAt,
+            leaseId,
+            leaseExpiresAt,
+          };
+          return updatedConversation;
+        });
+        return { ...state, conversations };
+      });
+      return updatedConversation && claim
+        ? { conversation: updatedConversation, claim }
+        : null;
     },
 
     async claimPendingGuidance(conversationId, options = {}) {

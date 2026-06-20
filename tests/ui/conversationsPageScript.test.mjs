@@ -286,6 +286,8 @@ test('submits footer guidance for the selected conversation, disables send in fl
 
   assert.equal(input.value, '');
   assert.equal(form.hidden, true);
+  const status = context.__elements.get('[data-guidance-status]');
+  assert.equal(status.textContent, 'Guidance sent for the next local turn.');
 });
 
 test('keeps failed guidance visible and shows a local error status', async () => {
@@ -332,6 +334,7 @@ test('keeps failed guidance visible and shows a local error status', async () =>
           ok: true,
           json: async () => ({
             ok: false,
+            code: 'conversation_guidance_failed',
             message: 'Guidance submit failed.',
           }),
         };
@@ -355,7 +358,7 @@ test('keeps failed guidance visible and shows a local error status', async () =>
 
   assert.equal(form.hidden, false);
   assert.equal(input.value, 'Stay visible on error.');
-  assert.equal(status.textContent, 'Guidance submit failed.');
+  assert.equal(status.textContent, 'Guidance failed.');
 
   await waitFor(
     () => list.children.some((child) => child.dataset.peerGlobalMetaId === secondPeerGlobalMetaId),
