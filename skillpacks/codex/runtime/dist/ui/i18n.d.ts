@@ -11,6 +11,7 @@ export declare const DICTIONARIES: {
         readonly 'nav.services': "Services";
         readonly 'nav.settings': "Settings";
         readonly 'action.openBrowser': "Open Browser";
+        readonly 'action.openInBrowser': "Open in Browser";
         readonly 'action.openBotPage': "Open Bot Page";
         readonly 'bot.noBotsYet': "No Bots yet";
         readonly 'bot.addBot': "+ Add Bot";
@@ -372,6 +373,7 @@ export declare const DICTIONARIES: {
         readonly 'nav.services': "服务";
         readonly 'nav.settings': "设置";
         readonly 'action.openBrowser': "打开浏览器";
+        readonly 'action.openInBrowser': "在浏览器中打开";
         readonly 'action.openBotPage': "打开 Bot Page";
         readonly 'bot.noBotsYet': "还没有 Bot";
         readonly 'bot.addBot': "创建 Bot";
