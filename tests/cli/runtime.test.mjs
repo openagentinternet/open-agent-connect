@@ -1382,6 +1382,23 @@ test('browser open --uri encodes the resource uri on the dedicated browser route
   assert.notEqual(browserUrl.pathname, '/ui/browser');
 });
 
+test('browser open preserves surrounding `--uri` whitespace while still using the dedicated browser route', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['browser', 'open', '--uri', ' metaid://idq1alice ']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  const browserUrl = new URL(opened.payload.data.localUiUrl);
+  assert.equal(browserUrl.pathname, '/browser');
+  assert.equal(browserUrl.searchParams.get('uri'), ' metaid://idq1alice ');
+  assert.notEqual(browserUrl.pathname, '/ui/browser');
+});
+
 test('metaapp view returns a local metaapps gallery url for one pin id', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));

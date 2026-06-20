@@ -368,6 +368,21 @@ test('runCli dispatches `metabot browser open --uri` and encodes the resource ur
   });
 });
 
+test('runCli preserves the raw `--uri` token value when opening the browser', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['browser', 'open', '--uri', ' metaid://idq1alice '], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.browser, [{ uri: ' metaid://idq1alice ' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      localUiUrl: '/browser?uri=%20metaid%3A%2F%2Fidq1alice%20',
+    },
+  });
+});
+
 test('runCli dispatches provider console `metabot ui open --page` values', async () => {
   for (const page of ['conversations', 'services', 'settings']) {
     const harness = createHarness();
@@ -411,6 +426,32 @@ test('runCli rejects `metabot browser open --uri` without a non-empty value', as
     state: 'failed',
     code: 'invalid_flag',
     message: 'Missing value for --uri.',
+  });
+});
+
+test('runCli rejects unsupported flags and stray arguments for `metabot browser open`', async () => {
+  const unsupportedFlagHarness = createHarness();
+  const unsupportedFlagExitCode = await runCli(['browser', 'open', '--page', 'browser'], unsupportedFlagHarness.context);
+
+  assert.equal(unsupportedFlagExitCode, 1);
+  assert.deepEqual(unsupportedFlagHarness.calls.browser, []);
+  assert.deepEqual(parseLastJson(unsupportedFlagHarness.stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Unsupported flag: --page.',
+  });
+
+  const strayArgumentHarness = createHarness();
+  const strayArgumentExitCode = await runCli(['browser', 'open', 'garbage'], strayArgumentHarness.context);
+
+  assert.equal(strayArgumentExitCode, 1);
+  assert.deepEqual(strayArgumentHarness.calls.browser, []);
+  assert.deepEqual(parseLastJson(strayArgumentHarness.stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Unexpected argument: garbage.',
   });
 });
 

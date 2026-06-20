@@ -2,18 +2,36 @@ import { commandFailed, type MetabotCommandResult } from '../../core/contracts/c
 import { commandUnknownSubcommand } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
-function readBrowserUri(args: string[]): string | MetabotCommandResult<never> | undefined {
-  const uriIndex = args.indexOf('--uri');
-  if (uriIndex === -1) {
-    return undefined;
+function parseBrowserOpenArgs(args: string[]): {
+  uri?: string;
+  error?: MetabotCommandResult<never>;
+} {
+  let uri: string | undefined;
+
+  for (let index = 1; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === '--uri') {
+      const rawValue = args[index + 1];
+      if (typeof rawValue !== 'string' || rawValue.startsWith('--') || !rawValue.trim()) {
+        return {
+          error: commandFailed('invalid_flag', 'Missing value for --uri.'),
+        };
+      }
+      uri = rawValue;
+      index += 1;
+      continue;
+    }
+    if (token.startsWith('--')) {
+      return {
+        error: commandFailed('invalid_flag', `Unsupported flag: ${token}.`),
+      };
+    }
+    return {
+      error: commandFailed('invalid_flag', `Unexpected argument: ${token}.`),
+    };
   }
 
-  const rawValue = args[uriIndex + 1];
-  if (typeof rawValue !== 'string' || rawValue.startsWith('--') || !rawValue.trim()) {
-    return commandFailed('invalid_flag', 'Missing value for --uri.');
-  }
-
-  return rawValue.trim();
+  return { uri };
 }
 
 export async function runBrowserCommand(
@@ -24,9 +42,9 @@ export async function runBrowserCommand(
     return commandUnknownSubcommand(`browser ${args.join(' ')}`.trim());
   }
 
-  const uri = readBrowserUri(args);
-  if (uri && typeof uri !== 'string') {
-    return uri;
+  const parsed = parseBrowserOpenArgs(args);
+  if (parsed.error) {
+    return parsed.error;
   }
 
   const handler = context.dependencies.browser?.open;
@@ -34,5 +52,5 @@ export async function runBrowserCommand(
     return commandFailed('not_implemented', 'Browser open handler is not configured.');
   }
 
-  return handler(uri ? { uri } : {});
+  return handler(parsed.uri ? { uri: parsed.uri } : {});
 }
