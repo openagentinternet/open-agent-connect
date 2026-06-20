@@ -231,6 +231,9 @@ test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic a
   assert.match(content, /optional `--from <bot-slug>`/);
   assert.match(content, /same language/i);
   assert.match(content, /natural-language examples/i);
+  assert.match(content, /Open Agent Internet Browser/i);
+  assert.match(content, /Open my Bot page/i);
+  assert.match(content, /Open a published MetaApp in Browser/i);
 });
 
 test('buildAgentConnectSkillpacks includes the Browser open workflow skill', async () => {
@@ -281,6 +284,7 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.match(content, /metabot file upload --from <bot-slug> --request-file/i);
   assert.match(content, /metabot chain write --from <bot-slug> --request-file/i);
   assert.match(content, /No Web2 URLs or local filesystem paths/i);
+  assert.match(content, /open the published MetaApp in Browser/i);
 });
 
 test('buildAgentConnectSkillpacks includes the Wiki creator as a self-contained scripted skill', async () => {
@@ -659,6 +663,9 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /same language the human is currently using/i);
   assert.match(content, /Do not lock follow-up prompts to fixed wording/i);
   assert.match(content, /intent is equivalent and triggers the same skills/i);
+  assert.match(content, /open the first Bot page in Browser/i);
+  assert.match(content, /open the selected Bot homepage in Browser/i);
+  assert.match(content, /open the provider Bot page in Browser/i);
   assert.match(content, /## In Scope/);
   assert.match(content, /## Out of Scope/);
   assert.match(content, /## Handoff To/);
@@ -687,6 +694,7 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /user chosen\s+name as part of the onboarding experience/i);
   assert.match(content, /show online Bots/i);
   assert.match(content, /show available Bot services/i);
+  assert.match(content, /open my Bot page in Browser/i);
   assert.match(content, /create a MetaBot/i);
   assert.match(content, /create a Bot/i);
   assert.match(content, /create a bot/i);
@@ -703,6 +711,16 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /## Handoff To/);
   assert.doesNotMatch(content, /PROFILE_SLUG/);
   assert.doesNotMatch(content, /\.metabot\/hot/);
+});
+
+test('buildAgentConnectSkillpacks publishes Browser follow-ups in remote-service and homepage shared skills', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const remoteService = await readFile(sharedSkillFile(outputRoot, 'metabot-call-remote-service'), 'utf8');
+  assert.match(remoteService, /open the provider Bot page in Browser/i);
+
+  const homepageGuide = await readFile(sharedSkillFile(outputRoot, 'metabot-homepage-guide'), 'utf8');
+  assert.match(homepageGuide, /open the homepage MetaApp in Browser/i);
 });
 
 test('buildAgentConnectSkillpacks publishes provider service lifecycle commands in the shared pack', async () => {

@@ -226,6 +226,7 @@ $HOME/.metabot/bin/metabot metaapp comment --pin-id <pinid> --comment <text> --f
 - `metaapp share --announce` should quote or reference the MetaApp pin in the buzz announcement and must confirm the actor before the announcement write.
 - `metaapp comment` writes against the target MetaApp pin using the existing comment protocol and must confirm the actor first.
 - Treat the local gallery as the built-in `metaapps` page so the same content can be opened from `metaapp view` or `ui open --page metaapps`.
+- After publish, update, share, or gallery results, include a natural-language follow-up to open the published MetaApp in Browser.
 
 ## In Scope
 

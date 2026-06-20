@@ -118,9 +118,12 @@ $HOME/.metabot/bin/metabot network sources remove --base-url http://127.0.0.1:48
 - Do not lock follow-up prompts to fixed wording.
 - Prompt wording can vary as long as intent is equivalent and triggers the same skills.
 - After a Bot list, include at least one concrete follow-up prompt intent:
+  - open the first Bot page in Browser
+  - open the selected Bot homepage in Browser
   - view online Bot services
   - message the first online Bot
 - After a services list, include at least one concrete follow-up prompt intent:
+  - open the provider Bot page in Browser
   - get more online Bot services (when skill supports fetching more, use `--limit 50`)
   - query service details (user specifies a row number or service name)
   - request execution of a service (user specifies a row number or service name)
