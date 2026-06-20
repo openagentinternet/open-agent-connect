@@ -26,6 +26,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+provider\s+/m);
   assert.match(output, /^\s+host\s+/m);
   assert.match(output, /^\s+trace\s+/m);
+  assert.match(output, /^\s+browser\s+/m);
   assert.match(output, /^\s+system\s+/m);
   assert.match(output, /^\s+loom\s+/m);
   assert.match(output, /^\s+metaapp\s+/m);
@@ -52,6 +53,7 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'browser'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'metaapp'));
   assert.equal(output.subcommands.some((entry) => entry.name === 'master'), false);
   assert.equal(output.subcommands.some((entry) => entry.name === 'evolution'), false);
@@ -967,6 +969,63 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.ok(output.examples.includes('metabot ui open --page conversations --from alice'));
   assert.ok(output.examples.includes('metabot ui open --page settings'));
   assert.ok(output.examples.includes('metabot ui open --page metaapps'));
+});
+
+test('runCli prints browser group help with the open subcommand', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['browser', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot browser <subcommand>/m);
+  assert.match(output, /^\s+open\s+/m);
+  assert.equal(output.includes('"ok"'), false);
+});
+
+test('runCli documents browser open json help with uri examples and browser url output', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['browser', 'open', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['browser', 'open']);
+  assert.equal(output.command, 'metabot browser open');
+  assert.equal(output.usage, 'metabot browser open [--uri <resource-uri>]');
+  const uriFlag = output.optionalFlags.find((entry) => entry.flag === '--uri');
+  assert.ok(uriFlag);
+  assert.match(uriFlag.description, /optional Browser resource URI/i);
+  assert.ok(output.examples.includes('metabot browser open --uri metaid://<globalMetaId>'));
+  assert.ok(output.examples.includes('metabot browser open --uri metaapp://<pinId>'));
+  assert.ok(output.examples.includes('metabot browser open --uri metafile://<pinId>'));
+  assert.ok(output.successFields.includes('localUiUrl'));
+});
+
+test('runCli keeps browser out of ui open page help', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['ui', 'open', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.doesNotMatch(output.summary, /\bbrowser\b/i);
+  assert.doesNotMatch(output.requiredFlags[0].description, /\bbrowser\b/i);
+  for (const example of output.examples) {
+    assert.doesNotMatch(example, /\bbrowser\b/i);
+  }
 });
 
 test('runCli prints machine-readable help for `metabot chat private --help --json`', async () => {

@@ -1948,6 +1948,19 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     });
   }
 
+  async function openLocalBrowserPage(input: {
+    uri?: string;
+  }): Promise<MetabotCommandResult<unknown>> {
+    const baseUrl = await ensureDaemonBaseUrl(context);
+    const query = new URLSearchParams();
+    if (input.uri) query.set('uri', input.uri);
+    const suffix = query.size ? `?${query.toString()}` : '';
+    return commandSuccess({
+      ...(input.uri ? { uri: input.uri } : {}),
+      localUiUrl: `${baseUrl}/browser${suffix}`,
+    });
+  }
+
   return {
     config: {
       get: async (input) => {
@@ -2029,6 +2042,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     buzz: {
       post: async (input) => requestJson(context, 'POST', '/api/buzz/post', input),
+    },
+    browser: {
+      open: async (input) => openLocalBrowserPage(input),
     },
     chain: {
       write: async (input) => requestJson(context, 'POST', '/api/chain/write', input),
@@ -3089,6 +3105,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
   return {
     config: { ...defaults.config, ...provided.config },
     buzz: { ...defaults.buzz, ...provided.buzz },
+    browser: { ...defaults.browser, ...provided.browser },
     metaapp: { ...defaults.metaapp, ...provided.metaapp },
     chain: { ...defaults.chain, ...provided.chain },
     daemon: { ...defaults.daemon, ...provided.daemon },

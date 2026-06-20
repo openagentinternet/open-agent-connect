@@ -13,6 +13,9 @@ export interface CliDependencies {
   buzz?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  browser?: {
+    open?: (input: { uri?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   metaapp?: {
     preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
