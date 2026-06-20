@@ -3306,6 +3306,18 @@ test('GET /ui/metaapps gallery script filters gallery-loop links and unsafe comm
   assert.doesNotMatch(invalidRender.detailHtml, /href="\/browser\/metaapp\//);
 });
 
+test('GET /ui/metaapps supports zh-CN Browser action copy in the built page script', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/metaapps?lang=zh-CN`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /<html lang="zh-CN">/);
+  assert.match(html, /actionLink\(browserMetaApp, "在浏览器中打开"\)/);
+});
+
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
