@@ -3280,6 +3280,7 @@ test('GET /ui/metaapps gallery script filters gallery-loop links and unsafe comm
   const actionLinks = readMetaAppsActionLinks(validRender.detailHtml);
   assert.equal(actionLinks.find((link) => link.label === 'Open')?.href, metawebUrl);
   assert.equal(actionLinks.find((link) => link.label === 'Run')?.href, metawebUrl);
+  assert.equal(actionLinks.find((link) => link.label === 'Open in Browser')?.href, `/browser/metaapp/${validPinId}`);
   assert.ok(actionLinks.every((link) => link.href !== galleryUrl));
   assert.doesNotMatch(validRender.detailHtml, /href="\/ui\/metaapps\?pinId=/);
   assert.match(validRender.detailHtml, /Copy comment command/);
@@ -3301,6 +3302,8 @@ test('GET /ui/metaapps gallery script filters gallery-loop links and unsafe comm
 
   assert.doesNotMatch(invalidRender.detailHtml, /Copy comment command/);
   assert.doesNotMatch(invalidRender.detailHtml, /metabot metaapp comment --pin-id/);
+  assert.doesNotMatch(invalidRender.detailHtml, /Open in Browser/);
+  assert.doesNotMatch(invalidRender.detailHtml, /href="\/browser\/metaapp\//);
 });
 
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {

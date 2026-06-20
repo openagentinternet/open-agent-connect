@@ -143,6 +143,8 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
 test('Simplified Chinese UI keeps Bot as a proper noun', () => {
   assert.equal(translate('zh-CN', 'nav.botPage'), 'Bot Page');
   assert.equal(translate('zh-CN', 'action.openBotPage'), '打开 Bot Page');
+  assert.equal(translate('en', 'action.openInBrowser'), 'Open in Browser');
+  assert.equal(translate('zh-CN', 'action.openInBrowser'), '在浏览器中打开');
 
   const botAsCommonNounEntries = Object.entries(DICTIONARIES['zh-CN'])
     .filter(([, copy]) => copy.includes('机器人'));
