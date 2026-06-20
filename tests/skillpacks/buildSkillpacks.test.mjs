@@ -17,6 +17,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',
+  'metabot-browser-open',
   'metabot-call-remote-service',
   'metabot-chat-privatechat',
   'metabot-omni-reader',
@@ -46,7 +47,7 @@ const EXPECTED_TRACE_WATCH_LINE = '$HOME/.metabot/bin/metabot trace watch --from
 const EXPECTED_TRACE_GET_LINE = '$HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id trace-123';
 const EXPECTED_TRACE_UI_LINE = '$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id trace-123';
 const BARE_METABOT_COMMAND_PATTERN =
-  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution|metaapp)\b/;
+  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution|browser|metaapp)\b/;
 
 function escapeForRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -230,6 +231,18 @@ test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic a
   assert.match(content, /optional `--from <bot-slug>`/);
   assert.match(content, /same language/i);
   assert.match(content, /natural-language examples/i);
+});
+
+test('buildAgentConnectSkillpacks includes the Browser open workflow skill', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-browser-open'), 'utf8');
+  assert.match(content, /^name:\s*metabot-browser-open$/m);
+  assert.match(content, /Open Agent Internet Browser/i);
+  assert.match(content, /metabot browser open/);
+  assert.match(content, /metaid:\/\//);
+  assert.match(content, /metaapp:\/\//);
+  assert.match(content, /metafile:\/\//);
 });
 
 test('buildAgentConnectSkillpacks includes the Loom wish-to-task publishing workflow skill', async () => {

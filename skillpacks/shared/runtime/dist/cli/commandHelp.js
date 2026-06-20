@@ -167,6 +167,7 @@ exports.ROOT_COMMAND_HELP = {
         { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
         { name: 'host', summary: 'Project shared MetaBot skills into one host-native skills root.' },
         { name: 'trace', summary: 'Watch or inspect structured remote delegation traces.' },
+        { name: 'browser', summary: 'Open the dedicated Agent Internet Browser UI and optional deep links.' },
         { name: 'ui', summary: 'Open local human-only HTML pages backed by the MetaBot runtime.' },
         { name: 'skills', summary: 'Resolve shared-default or host-specific skill contracts for install/runtime use.' },
         { name: 'system', summary: 'Update or uninstall local Open Agent Connect runtime assets.' },
@@ -2211,6 +2212,40 @@ const COMMAND_HELP_SPECS = [
         examples: [
             'metabot system uninstall',
             'metabot system uninstall --all --confirm-token DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS',
+        ],
+    },
+    {
+        commandPath: ['browser'],
+        summary: 'Open the dedicated Agent Internet Browser UI and optional deep links.',
+        usage: 'metabot browser <subcommand>',
+        subcommands: [
+            { name: 'open', summary: 'Open the Agent Internet Browser page, optionally deep-linked to one resource URI.' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
+        commandPath: ['browser', 'open'],
+        summary: 'Open the dedicated Agent Internet Browser page, optionally deep-linked to one Browser resource URI.',
+        usage: 'metabot browser open [--uri <resource-uri>]',
+        optionalFlags: [
+            {
+                flag: '--uri',
+                value: '<resource-uri>',
+                description: 'Optional Browser resource URI to preload, such as metaid://<globalMetaId>, metaapp://<pinId>, or metafile://<pinId>.',
+            },
+            HELP_JSON_FLAG,
+        ],
+        successFields: [
+            'localUiUrl',
+        ],
+        failureSemantics: [
+            'Fails when --uri is provided without a non-empty value or the local daemon cannot build the browser URL.',
+        ],
+        examples: [
+            'metabot browser open',
+            'metabot browser open --uri metaid://<globalMetaId>',
+            'metabot browser open --uri metaapp://<pinId>',
+            'metabot browser open --uri metafile://<pinId>',
         ],
     },
     {

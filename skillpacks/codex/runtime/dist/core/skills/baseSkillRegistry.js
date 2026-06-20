@@ -45,6 +45,27 @@ const BASE_SKILL_REGISTRY = {
             remoteDelegation: false,
         },
     },
+    'metabot-browser-open': {
+        skillName: 'metabot-browser-open',
+        title: 'MetaBot Browser Open',
+        summary: 'Open Agent Internet Browser for public Bot pages, MetaApps, and MetaFiles through the local Browser entrypoint.',
+        instructions: 'Use the Browser CLI directly. Open Browser with no URI when the human asks for the Browser itself. When a Bot page, MetaApp, or MetaFile target is already known, pass the corresponding metaid://, metaapp://, or metafile:// URI. Do not search, create identities, or open Bot Hub from this skill.',
+        commandTemplate: 'metabot browser open',
+        outputExpectation: 'Return the Browser localUiUrl plus the opened URI when one was requested.',
+        fallbackPolicy: 'If the target resource is unknown, ask for the Bot globalMetaId, MetaApp pinId, or MetaFile pinId instead of guessing.',
+        scope: {
+            allowedCommands: [
+                'metabot browser open',
+                'metabot browser open --uri metaid://idq1example',
+                'metabot browser open --uri metaapp://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
+                'metabot browser open --uri metafile://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
+            ],
+            chainRead: false,
+            chainWrite: false,
+            localUiOpen: true,
+            remoteDelegation: false,
+        },
+    },
 };
 function cloneScope(scope) {
     return {

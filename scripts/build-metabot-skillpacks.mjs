@@ -17,6 +17,7 @@ const METABOT_SKILLS = [
   'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',
+  'metabot-browser-open',
   'metabot-call-remote-service',
   'metabot-chat-privatechat',
   'metabot-omni-reader',
