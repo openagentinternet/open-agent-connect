@@ -10,6 +10,7 @@ import { runProviderCommand } from './commands/provider';
 import { runServicesCommand } from './commands/services';
 import { runBuzzCommand } from './commands/buzz';
 import { runBotCommand } from './commands/bot';
+import { runBrowserCommand } from './commands/browser';
 import { runChainCommand } from './commands/chain';
 import { runChatCommand } from './commands/chat';
 import { runFileCommand } from './commands/file';
@@ -76,6 +77,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'bot':
           result = await runBotCommand(rest, context);
+          break;
+        case 'browser':
+          result = await runBrowserCommand(rest, context);
           break;
         case 'chain':
           result = await runChainCommand(rest, context);

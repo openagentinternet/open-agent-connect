@@ -1348,6 +1348,40 @@ test('ui open chat returns the bundled Chat entry html url', async (t) => {
   assert.match(opened.payload.data.localUiUrl, /\/ui\/chat\/app\/chat\.html$/);
 });
 
+test('browser open returns the dedicated browser url instead of a ui route', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['browser', 'open']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  const browserUrl = new URL(opened.payload.data.localUiUrl);
+  assert.equal(browserUrl.pathname, '/browser');
+  assert.equal(browserUrl.search, '');
+  assert.notEqual(browserUrl.pathname, '/ui/browser');
+});
+
+test('browser open --uri encodes the resource uri on the dedicated browser route', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['browser', 'open', '--uri', 'metaid://idq1alice']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  const browserUrl = new URL(opened.payload.data.localUiUrl);
+  assert.equal(browserUrl.pathname, '/browser');
+  assert.equal(browserUrl.searchParams.get('uri'), 'metaid://idq1alice');
+  assert.notEqual(browserUrl.pathname, '/ui/browser');
+});
+
 test('metaapp view returns a local metaapps gallery url for one pin id', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));

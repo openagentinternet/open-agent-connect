@@ -17,6 +17,7 @@ function createHarness(options = {}) {
   const stdout = [];
   const stderr = [];
   const calls = {
+    browser: [],
     daemon: [],
     doctor: [],
     identity: [],
@@ -41,6 +42,16 @@ function createHarness(options = {}) {
       stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
       stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
       dependencies: {
+        browser: {
+          open: async (input) => {
+            calls.browser.push(input);
+            return commandSuccess({
+              localUiUrl: input.uri
+                ? `/browser?uri=${encodeURIComponent(input.uri)}`
+                : '/browser',
+            });
+          },
+        },
         daemon: {
           start: async () => {
             calls.daemon.push({ command: 'start' });
@@ -327,6 +338,36 @@ test('runCli dispatches `metabot ui open --page` and returns the local UI URL', 
   });
 });
 
+test('runCli dispatches `metabot browser open` and returns the browser url', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['browser', 'open'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.browser, [{}]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      localUiUrl: '/browser',
+    },
+  });
+});
+
+test('runCli dispatches `metabot browser open --uri` and encodes the resource uri', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['browser', 'open', '--uri', 'metaid://idq1alice'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.browser, [{ uri: 'metaid://idq1alice' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      localUiUrl: '/browser?uri=metaid%3A%2F%2Fidq1alice',
+    },
+  });
+});
+
 test('runCli dispatches provider console `metabot ui open --page` values', async () => {
   for (const page of ['conversations', 'services', 'settings']) {
     const harness = createHarness();
@@ -343,6 +384,34 @@ test('runCli dispatches provider console `metabot ui open --page` values', async
       },
     });
   }
+});
+
+test('runCli rejects unknown browser subcommands before opening', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['browser', 'unknown'], harness.context);
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(harness.calls.browser, []);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'unknown_command',
+    message: 'Unknown command: browser unknown',
+  });
+});
+
+test('runCli rejects `metabot browser open --uri` without a non-empty value', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['browser', 'open', '--uri'], harness.context);
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(harness.calls.browser, []);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Missing value for --uri.',
+  });
 });
 
 test('runCli rejects unknown and retired `metabot ui open --page` values before opening', async () => {
