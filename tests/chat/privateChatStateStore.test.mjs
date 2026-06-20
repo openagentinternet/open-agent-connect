@@ -44,6 +44,8 @@ test('upsertConversation persists and can be retrieved', async () => {
     lastDirection: 'inbound',
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
   };
 
   await store.upsertConversation(conv);
@@ -67,6 +69,8 @@ test('upsertConversation replaces existing conversation with same id', async () 
     lastDirection: 'inbound',
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
   };
 
   await store.upsertConversation(conv);
@@ -115,6 +119,8 @@ test('getConversationByPeer returns the active conversation for a peer', async (
     lastDirection: 'outbound',
     createdAt: 1000,
     updatedAt: 2000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
   });
 
   await store.upsertConversation({
@@ -128,6 +134,8 @@ test('getConversationByPeer returns the active conversation for a peer', async (
     lastDirection: 'inbound',
     createdAt: 3000,
     updatedAt: 4000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
   });
 
   const found = await store.getConversationByPeer('peer-gm-1');
@@ -167,4 +175,124 @@ test('corrupt JSON file is quarantined and empty state returned', async () => {
   assert.equal(state.version, 1);
   assert.deepEqual(state.conversations, []);
   assert.deepEqual(state.messages, []);
+});
+
+test('readState normalizes legacy conversations without pending guidance keys', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const store = createPrivateChatStateStore(paths);
+
+  await store.readState();
+  await fs.writeFile(paths.privateChatStatePath, JSON.stringify({
+    version: 1,
+    conversations: [
+      {
+        conversationId: 'pc-self-peer',
+        peerGlobalMetaId: 'peer-gm-1',
+        peerName: 'PeerBot',
+        topic: null,
+        strategyId: null,
+        state: 'active',
+        turnCount: 1,
+        lastDirection: 'inbound',
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
+    ],
+    messages: [],
+  }, null, 2), 'utf8');
+
+  const state = await store.readState();
+  assert.equal(state.conversations.length, 1);
+  assert.equal(state.conversations[0].pendingGuidanceText, null);
+  assert.equal(state.conversations[0].pendingGuidanceCreatedAt, null);
+
+  const conversation = await store.getConversationByPeer('peer-gm-1');
+  assert.equal(conversation?.pendingGuidanceText, null);
+  assert.equal(conversation?.pendingGuidanceCreatedAt, null);
+});
+
+test('setPendingGuidance stores one-shot guidance on a conversation', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+
+  await store.upsertConversation({
+    conversationId: 'pc-self-peer',
+    peerGlobalMetaId: 'peer-gm-1',
+    peerName: 'PeerBot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: 1000,
+    updatedAt: 1000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+
+  const updated = await store.setPendingGuidance('pc-self-peer', 'bring it back to pricing', 1234);
+
+  assert.equal(updated?.pendingGuidanceText, 'bring it back to pricing');
+  assert.equal(updated?.pendingGuidanceCreatedAt, 1234);
+  const persisted = await store.getConversationByPeer('peer-gm-1');
+  assert.equal(persisted?.pendingGuidanceText, 'bring it back to pricing');
+  assert.equal(persisted?.pendingGuidanceCreatedAt, 1234);
+});
+
+test('setPendingGuidance replaces older unconsumed guidance', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+
+  await store.upsertConversation({
+    conversationId: 'pc-self-peer',
+    peerGlobalMetaId: 'peer-gm-1',
+    peerName: 'PeerBot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: 1000,
+    updatedAt: 1000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+
+  await store.setPendingGuidance('pc-self-peer', 'older guidance', 1111);
+  const replaced = await store.setPendingGuidance('pc-self-peer', 'newer guidance', 2222);
+
+  assert.equal(replaced?.pendingGuidanceText, 'newer guidance');
+  assert.equal(replaced?.pendingGuidanceCreatedAt, 2222);
+});
+
+test('clearPendingGuidanceIfMatches only clears the matching guidance', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+
+  await store.upsertConversation({
+    conversationId: 'pc-self-peer',
+    peerGlobalMetaId: 'peer-gm-1',
+    peerName: 'PeerBot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: 1000,
+    updatedAt: 1000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+
+  await store.setPendingGuidance('pc-self-peer', 'older guidance', 1111);
+  await store.setPendingGuidance('pc-self-peer', 'newer guidance', 2222);
+
+  const untouched = await store.clearPendingGuidanceIfMatches('pc-self-peer', 'older guidance', 1111);
+  assert.equal(untouched?.pendingGuidanceText, 'newer guidance');
+  assert.equal(untouched?.pendingGuidanceCreatedAt, 2222);
+
+  const cleared = await store.clearPendingGuidanceIfMatches('pc-self-peer', 'newer guidance', 2222);
+  assert.equal(cleared?.pendingGuidanceText, null);
+  assert.equal(cleared?.pendingGuidanceCreatedAt, null);
 });

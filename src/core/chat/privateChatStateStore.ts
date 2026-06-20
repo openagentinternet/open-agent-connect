@@ -25,6 +25,16 @@ export interface PrivateChatStateStore {
     updater: (state: PrivateChatState) => PrivateChatState | Promise<PrivateChatState>,
   ): Promise<PrivateChatState>;
   upsertConversation(conv: PrivateChatConversation): Promise<PrivateChatConversation>;
+  setPendingGuidance(
+    conversationId: string,
+    guidanceText: string,
+    createdAt: number,
+  ): Promise<PrivateChatConversation | null>;
+  clearPendingGuidanceIfMatches(
+    conversationId: string,
+    guidanceText: string,
+    createdAt: number,
+  ): Promise<PrivateChatConversation | null>;
   appendMessages(messages: PrivateChatMessage[]): Promise<PrivateChatMessage[]>;
   getConversationByPeer(peerGlobalMetaId: string): Promise<PrivateChatConversation | null>;
   getRecentMessages(conversationId: string, limit?: number): Promise<PrivateChatMessage[]>;
@@ -40,6 +50,19 @@ function cloneEmptyState(): PrivateChatState {
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeConversation(
+  conversation: PrivateChatConversation | Record<string, unknown>,
+): PrivateChatConversation {
+  const source = conversation as Record<string, unknown>;
+  return {
+    ...(conversation as PrivateChatConversation),
+    pendingGuidanceText:
+      typeof source.pendingGuidanceText === 'string' ? source.pendingGuidanceText : null,
+    pendingGuidanceCreatedAt:
+      typeof source.pendingGuidanceCreatedAt === 'number' ? source.pendingGuidanceCreatedAt : null,
+  };
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
@@ -182,12 +205,24 @@ function normalizeState(value: PrivateChatState | null): PrivateChatState {
   return {
     version: typeof source.version === 'number' ? source.version : PRIVATE_CHAT_STATE_SCHEMA_VERSION,
     conversations: Array.isArray(source.conversations)
-      ? (source.conversations as PrivateChatConversation[]).slice(-MAX_CONVERSATIONS)
+      ? (source.conversations as Array<PrivateChatConversation | Record<string, unknown>>)
+          .slice(-MAX_CONVERSATIONS)
+          .map(normalizeConversation)
       : [],
     messages: Array.isArray(source.messages)
       ? (source.messages as PrivateChatMessage[]).slice(-MAX_MESSAGES)
       : [],
   };
+}
+
+function replaceConversation(
+  conversations: PrivateChatConversation[],
+  conversationId: string,
+  updater: (conversation: PrivateChatConversation) => PrivateChatConversation,
+): PrivateChatConversation[] {
+  return conversations.map(conversation =>
+    conversation.conversationId === conversationId ? updater(conversation) : conversation,
+  );
 }
 
 export function createPrivateChatStateStore(
@@ -242,10 +277,49 @@ export function createPrivateChatStateStore(
         ...state,
         conversations: [
           ...state.conversations.filter(c => c.conversationId !== conv.conversationId),
-          conv,
+          normalizeConversation(conv),
         ],
       }));
-      return conv;
+      return normalizeConversation(conv);
+    },
+
+    async setPendingGuidance(conversationId, guidanceText, createdAt) {
+      let updatedConversation: PrivateChatConversation | null = null;
+      await this.updateState(state => {
+        const conversations = replaceConversation(state.conversations, conversationId, conversation => {
+          updatedConversation = {
+            ...conversation,
+            pendingGuidanceText: guidanceText,
+            pendingGuidanceCreatedAt: createdAt,
+          };
+          return updatedConversation;
+        });
+        return { ...state, conversations };
+      });
+      return updatedConversation;
+    },
+
+    async clearPendingGuidanceIfMatches(conversationId, guidanceText, createdAt) {
+      let updatedConversation: PrivateChatConversation | null = null;
+      await this.updateState(state => {
+        const conversations = replaceConversation(state.conversations, conversationId, conversation => {
+          if (
+            conversation.pendingGuidanceText !== guidanceText ||
+            conversation.pendingGuidanceCreatedAt !== createdAt
+          ) {
+            updatedConversation = conversation;
+            return conversation;
+          }
+          updatedConversation = {
+            ...conversation,
+            pendingGuidanceText: null,
+            pendingGuidanceCreatedAt: null,
+          };
+          return updatedConversation;
+        });
+        return { ...state, conversations };
+      });
+      return updatedConversation;
     },
 
     async appendMessages(messages) {

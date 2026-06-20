@@ -42,6 +42,7 @@ function makeInput(overrides = {}) {
       maxIdleMs: 300000,
       exitCriteria: 'Both parties understand each other capabilities',
     },
+    operatorGuidanceText: null,
     inboundMessage: {
       conversationId: 'pc-self-peer',
       messageId: 'm3',
@@ -233,6 +234,25 @@ test('host LLM chat runner injects chain write actor rules from metaBotSlug', as
 
 test('buildChatPrompt ends with Reply now:', () => {
   const prompt = buildChatPrompt(makeInput());
+  assert.ok(prompt.endsWith('Reply now:'));
+});
+
+test('buildChatPrompt includes a local-only operator guidance section when present', () => {
+  const prompt = buildChatPrompt(makeInput({
+    operatorGuidanceText: 'Steer the thread back to delivery timing.',
+  }));
+  assert.match(prompt, /## Operator Guidance/);
+  assert.match(prompt, /local-only private guidance/);
+  assert.match(prompt, /Do not present it as peer-authored text/);
+  assert.match(prompt, /Steer the thread back to delivery timing\./);
+});
+
+test('buildChatPrompt remains valid without inboundMessage for operator-triggered turns', () => {
+  const prompt = buildChatPrompt(makeInput({
+    inboundMessage: null,
+    operatorGuidanceText: 'Politely reopen the earlier pricing question.',
+  }));
+  assert.match(prompt, /## Chat History/);
   assert.ok(prompt.endsWith('Reply now:'));
 });
 

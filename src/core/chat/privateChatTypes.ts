@@ -9,6 +9,8 @@ export interface PrivateChatConversation {
   lastDirection: 'inbound' | 'outbound';
   createdAt: number;
   updatedAt: number;
+  pendingGuidanceText: string | null;
+  pendingGuidanceCreatedAt: number | null;
 }
 
 export interface PrivateChatMessage {
@@ -60,7 +62,8 @@ export interface ChatReplyRunnerInput {
   recentMessages: PrivateChatMessage[];
   persona: ChatPersona;
   strategy: ChatStrategy | null;
-  inboundMessage: PrivateChatMessage;
+  inboundMessage?: PrivateChatMessage | null;
+  operatorGuidanceText?: string | null;
 }
 
 export interface ChatReplyRunnerResult {

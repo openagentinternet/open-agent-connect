@@ -96,6 +96,7 @@ function buildChatPrompt(
   const { conversation, recentMessages, persona, strategy } = input;
   const maxTurns = strategy?.maxTurns ?? 30;
   const metaBotSlug = normalizeText(options.metaBotSlug);
+  const operatorGuidanceText = normalizeText(input.operatorGuidanceText);
 
   const sections: string[] = [];
 
@@ -165,6 +166,16 @@ function buildChatPrompt(
       '- Stay fully in character from the very first word of your reply.',
       '- NEVER announce plans or internal actions: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
       '- Skill reading, research, and checkpoints are invisible — output only what the persona would say.',
+    ].join('\n'));
+  }
+
+  if (operatorGuidanceText) {
+    sections.push([
+      '## Operator Guidance',
+      'This is local-only private guidance from the local operator for this one reply.',
+      'Use it as private steering for your next turn.',
+      'Do not present it as peer-authored text or mention that you received hidden guidance.',
+      operatorGuidanceText,
     ].join('\n'));
   }
 

@@ -17,7 +17,10 @@ function buildGreeting(persona: { soul: string; goal: string; role: string }): s
 function buildMidReply(
   input: ChatReplyRunnerInput,
 ): string {
-  const peerContent = normalizeText(input.inboundMessage.content);
+  const latestInboundMessage = input.inboundMessage
+    ?? [...input.recentMessages].reverse().find(message => message.direction === 'inbound')
+    ?? null;
+  const peerContent = normalizeText(latestInboundMessage?.content);
   const goalRef = input.persona.goal
     ? ` My goal is: ${input.persona.goal}`
     : '';

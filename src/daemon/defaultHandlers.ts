@@ -613,6 +613,8 @@ async function generateProviderOrderProtocolReplyText(
       lastDirection: 'inbound',
       createdAt: now,
       updatedAt: now,
+      pendingGuidanceText: null,
+      pendingGuidanceCreatedAt: null,
     },
     recentMessages: [
       {

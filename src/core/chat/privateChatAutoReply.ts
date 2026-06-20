@@ -201,21 +201,20 @@ export function createPrivateChatAutoReplyOrchestrator(
 
       // ---- Shared: conversation lifecycle & message storage ----
 
-      let conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
-      if (!conversation) {
-        conversation = {
-          conversationId,
-          peerGlobalMetaId,
-          peerName: null,
-          topic: null,
-          strategyId: config.defaultStrategyId,
-          state: 'active',
-          turnCount: 0,
-          lastDirection: 'inbound',
-          createdAt: now,
-          updatedAt: now,
-        };
-      }
+      let conversation: PrivateChatConversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId) ?? {
+        conversationId,
+        peerGlobalMetaId,
+        peerName: null,
+        topic: null,
+        strategyId: config.defaultStrategyId,
+        state: 'active',
+        turnCount: 0,
+        lastDirection: 'inbound',
+        createdAt: now,
+        updatedAt: now,
+        pendingGuidanceText: null,
+        pendingGuidanceCreatedAt: null,
+      };
 
       const strategy = conversation.strategyId
         ? await deps.strategyStore.getStrategy(conversation.strategyId)
