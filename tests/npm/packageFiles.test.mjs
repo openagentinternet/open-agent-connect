@@ -151,6 +151,10 @@ test('npm package includes runtime install inputs and excludes generated/develop
   assertExcludesPrefix(paths, 'skillpacks/codex/runtime/node_modules/');
   assertExcludesPrefix(paths, 'skillpacks/claude-code/runtime/node_modules/');
   assertExcludesPrefix(paths, 'skillpacks/openclaw/runtime/node_modules/');
+  assertExcludesPrefix(paths, 'dist/browser/standalone/');
+  assertExcludesPrefix(paths, 'dist/core/browser/');
+  assertExcludesPrefix(paths, 'src/core/browser/');
+  assertExcludesPrefix(paths, 'dist/daemon/browser/oacBrowserCoreBridge');
   assertExcludesPrefix(paths, '.github/');
   assertExcludesSegment(paths, '/evals/');
   assert.ok(

@@ -1,5 +1,5 @@
 import { type BrowserCacheClearResult, type BrowserCacheSnapshot, type BrowserCommandResult, type BrowserResolveResult, BrowserRuntimeSnapshot, type BrowserSettingsSnapshot, BrowserTrustedActionInput, BrowserTrustedActionResult } from '@openagentinternet/agent-browser-host-contract';
-import type { BrowserContextResult } from '../core/browser/types';
+import type { BrowserContextResult } from '@openagentinternet/agent-browser-core';
 export type Awaitable<T> = T | Promise<T>;
 export interface BrowserHttpHandlers {
     getRuntime?: (input?: {

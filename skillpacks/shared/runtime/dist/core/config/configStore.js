@@ -6,9 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createConfigStore = createConfigStore;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const agent_browser_core_1 = require("@openagentinternet/agent-browser-core");
 const homeSelection_1 = require("../state/homeSelection");
 const paths_1 = require("../state/paths");
-const botHomepageTemplates_1 = require("../browser/botHomepageTemplates");
 const configTypes_1 = require("./configTypes");
 async function ensureLayout(paths) {
     await node_fs_1.promises.mkdir(node_path_1.default.dirname(paths.configPath), { recursive: true });
@@ -78,7 +78,7 @@ function normalizeConfig(input) {
             metafileContentBaseUrl: normalizeString(browserSource.metafileContentBaseUrl) || defaults.browser.metafileContentBaseUrl,
             manApiBaseUrl,
             blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,
-            botHomepageTemplateId: (0, botHomepageTemplates_1.normalizeBotHomepageTemplateId)(browserSource.botHomepageTemplateId, defaults.browser.botHomepageTemplateId),
+            botHomepageTemplateId: (0, agent_browser_core_1.normalizeBotHomepageTemplateId)(browserSource.botHomepageTemplateId, defaults.browser.botHomepageTemplateId),
             defaultChainName: (0, configTypes_1.isDefaultWriteNetwork)(browserDefaultChainName)
                 ? browserDefaultChainName
                 : defaults.chain.defaultWriteNetwork,

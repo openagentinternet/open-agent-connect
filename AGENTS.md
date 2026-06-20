@@ -37,8 +37,8 @@ Key test rules:
 | Dir | Role |
 |---|---|
 | `src/cli/` | `metabot` binary, commands in `commands/` (one file per domain: identity, chat, network, services, loom, metaapp, browser, etc.) |
-| `src/core/` | Domain logic modules: `bootstrap/`, `identity/`, `discovery/`, `a2a/`, `delegation/`, `secrets/`, `signing/`, `buzz/`, `chat/`, `files/`, `orders/`, `ratings/`, `contracts/`, `state/`, `loom/`, `metaapp/`, `llm/`, `browser/`, `bot/`, `wallet/`, `payments/`, `chain/`, `subsidy/`, `provider/`, `services/`, `skills/`, `host/`, `system/`, `platform/`, `compat/`, `config/`, etc. |
-| `src/daemon/` | HTTP server (REST + SSE), one route file per domain, file-lock guarded (one instance per `~/.metabot`); `browser/` bridges the Agent Internet Browser host/core adapters |
+| `src/core/` | Domain logic modules: `bootstrap/`, `identity/`, `discovery/`, `a2a/`, `delegation/`, `secrets/`, `signing/`, `buzz/`, `chat/`, `files/`, `orders/`, `ratings/`, `contracts/`, `state/`, `loom/`, `metaapp/`, `llm/`, `bot/`, `wallet/`, `payments/`, `chain/`, `subsidy/`, `provider/`, `services/`, `skills/`, `host/`, `system/`, `platform/`, `compat/`, `config/`, etc. |
+| `src/daemon/` | HTTP server (REST + SSE), one route file per domain, file-lock guarded (one instance per `~/.metabot`); `browser/` contains the OAC Browser host adapter and route glue |
 | `src/browser/` | Agent Internet Browser app — HTTP handlers and menu model |
 | `src/oac/` | `oac` installer CLI entrypoint |
 | `src/ui/` | Local HTML inspection pages (hub, trace, services, my-services, publish, refund, metaapps, bot, browser, conversations, loom, settings) and i18n |

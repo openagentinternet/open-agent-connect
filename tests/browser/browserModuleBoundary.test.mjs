@@ -64,18 +64,31 @@ test('Browser API route boundary uses the published host contract result shape',
   assert.doesNotMatch(contents, /\.\.\/core\/contracts\/commandResult/);
 });
 
-test('OAC default Browser handlers use the ABC host contract bridge', () => {
-  const contents = readFileSync(new URL('../../dist/daemon/defaultHandlers.js', import.meta.url), 'utf8');
+test('Browser module output no longer exports standalone host helpers', () => {
+  assert.equal(browserModule.createStandaloneBrowserHostAdapter, undefined);
+  assert.equal(browserModule.createStandaloneBrowserServer, undefined);
 
-  assert.match(contents, /oacBrowserCoreBridge/);
-  assert.match(contents, /createOacBrowserCoreHostAdapter/);
+  const contents = readFileSync(new URL('../../dist/browser/index.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(contents, /standalone\/adapter/);
+  assert.doesNotMatch(contents, /standalone\/server/);
 });
 
-test('OAC default Browser context keeps the legacy host adapter available', () => {
+test('OAC default Browser handlers use exactly one Browser adapter', () => {
   const contents = readFileSync(new URL('../../dist/daemon/defaultHandlers.js', import.meta.url), 'utf8');
 
-  assert.match(contents, /oacBrowserHostAdapter/);
   assert.match(contents, /createOacBrowserHostAdapter/);
+  assert.doesNotMatch(contents, /oacBrowserCoreBridge/);
+  assert.doesNotMatch(contents, /createOacBrowserCoreHostAdapter/);
+  assert.doesNotMatch(contents, /browserRuntimeToContextResult/);
+});
+
+test('OAC Browser adapter consumes published ABC packages directly', () => {
+  const contents = readFileSync(new URL('../../dist/daemon/browser/oacBrowserHostAdapter.js', import.meta.url), 'utf8');
+
+  assert.match(contents, /@openagentinternet\/agent-browser-host-contract/);
+  assert.match(contents, /@openagentinternet\/agent-browser-core/);
+  assert.doesNotMatch(contents, /\.\.\/\.\.\/core\/browser\//);
+  assert.doesNotMatch(contents, /browser\/standalone/);
 });
 
 test('Browser page declarations keep ABC UI package subpath private', () => {

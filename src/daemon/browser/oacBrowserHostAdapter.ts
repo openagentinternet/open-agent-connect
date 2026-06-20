@@ -1,97 +1,59 @@
 import path from 'node:path';
+import { listMetabotProfiles, type MetabotProfileFull } from '../../core/bot/metabotProfileManager';
+import type {
+  BrowserActor,
+  BrowserActorCapability,
+  BrowserActorInput,
+  BrowserCacheClearInput,
+  BrowserCacheClearResult,
+  BrowserCacheInput,
+  BrowserCacheSnapshot,
+  BrowserCommandFailureOptions,
+  BrowserCommandResult,
+  BrowserFollowUpAction,
+  BrowserHostAdapter,
+  BrowserOpenConversationPayload,
+  BrowserResolveInput,
+  BrowserResolveResult,
+  BrowserRuntimeInput,
+  BrowserRuntimeSnapshot,
+  BrowserSettingsInput,
+  BrowserSettingsSnapshot,
+  BrowserSettingsUpdateInput,
+  BrowserTrustedActionInput,
+  BrowserTrustedActionResult,
+} from '@openagentinternet/agent-browser-host-contract';
 import {
   applyBrowserSettingsUpdate,
-  buildMetafileAcceleratedContentUrl,
-  buildMetafileContentUrl,
+  type BrowserCommandResult as CoreBrowserCommandResult,
   createBrowserSettingsSnapshot,
+  type MetaAppGalleryRecord,
   resolveBrowserConfig,
   resolveBrowserResource,
   resolveMetaAppPinToRecord,
 } from '@openagentinternet/agent-browser-core';
-import type {
-  BrowserActor,
-  BrowserActorCapability,
-  BrowserOpenConversationPayload,
-  BrowserResolveResult,
-  BrowserRuntimeSnapshot,
-  BrowserTrustedActionResult,
+import {
+  browserFailure,
+  browserManualActionRequired,
+  browserSuccess,
+  browserWaiting,
 } from '@openagentinternet/agent-browser-host-contract';
-import { listMetabotProfiles, type MetabotProfileFull } from '../../core/bot/metabotProfileManager';
+import type {
+  BrowserCommandFailure,
+  BrowserCommandWaitingOptions,
+} from '@openagentinternet/agent-browser-host-contract';
 import { createConfigStore } from '../../core/config/configStore';
 import {
-  commandFailed,
-  commandManualActionRequired,
-  commandSuccess,
   type MetabotCommandResult,
 } from '../../core/contracts/commandResult';
+import { buildMetafileContentUrls } from '../../core/files/metafileUrls';
 import { isLlmProvider } from '../../core/llm/llmTypes';
-import { createMetaAppArtifactCacheStore, normalizeMetaAppModifyHistory } from '../../core/metaapp/artifactCache';
+import {
+  createMetaAppArtifactCacheStore,
+  normalizeMetaAppModifyHistory,
+  type MetaAppArtifactCacheStore,
+} from '../../core/metaapp/artifactCache';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
-
-export interface BrowserActorInput {
-  actorId?: string;
-  from?: string;
-}
-
-export type BrowserRuntimeInput = BrowserActorInput;
-
-export interface BrowserResolveInput extends BrowserActorInput {
-  uri: string;
-}
-
-export type BrowserSettingsInput = BrowserActorInput;
-
-export interface BrowserSettingsUpdateInput extends BrowserActorInput {
-  browser?: Record<string, unknown>;
-}
-
-export type BrowserCacheInput = BrowserActorInput;
-
-export interface BrowserCacheClearInput extends BrowserActorInput {
-  scope?: string;
-  pinId?: string;
-  cacheKey?: string;
-}
-
-export type BrowserCacheSnapshot = Record<string, unknown>;
-export type BrowserCacheClearResult = Record<string, unknown>;
-
-export interface BrowserSettingsSnapshot {
-  browser: Record<string, unknown>;
-  effectiveBrowser: Record<string, unknown>;
-  defaults: Record<string, unknown>;
-  configPath?: string;
-}
-
-export type BrowserTrustedActionKind =
-  | 'private-chat'
-  | 'service-call'
-  | 'copy-uri'
-  | 'open-settings'
-  | 'login'
-  | 'edit-profile'
-  | 'configure-chat'
-  | 'view-messages'
-  | 'wallet-sign'
-  | 'payment'
-  | 'open-conversation'
-  | 'share-resource';
-
-export interface BrowserTrustedActionInput extends BrowserActorInput {
-  resourceUri: string;
-  kind: BrowserTrustedActionKind;
-  payload?: Record<string, unknown>;
-}
-
-export interface BrowserHostAdapter {
-  getRuntime(input?: BrowserRuntimeInput): Promise<MetabotCommandResult<BrowserRuntimeSnapshot>>;
-  resolveResource(input: BrowserResolveInput): Promise<MetabotCommandResult<BrowserResolveResult>>;
-  getSettings(input?: BrowserSettingsInput): Promise<MetabotCommandResult<BrowserSettingsSnapshot>>;
-  updateSettings(input: BrowserSettingsUpdateInput): Promise<MetabotCommandResult<BrowserSettingsSnapshot>>;
-  getCache(input?: BrowserCacheInput): Promise<MetabotCommandResult<BrowserCacheSnapshot>>;
-  clearCache(input: BrowserCacheClearInput): Promise<MetabotCommandResult<BrowserCacheClearResult>>;
-  runTrustedAction(input: BrowserTrustedActionInput): Promise<MetabotCommandResult<BrowserTrustedActionResult>>;
-}
 
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
 type OacBrowserActionHandler = (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
@@ -122,33 +84,7 @@ function normalizePreferredCreateHost(value: unknown): string | null {
   return provider && provider !== 'custom' && isLlmProvider(provider) ? provider : null;
 }
 
-function extractMetafilePinId(reference: string): string | null {
-  if (!/^metafile:\/\//iu.test(reference)) {
-    return null;
-  }
-  const withoutScheme = reference.slice('metafile://'.length).split(/[?#]/u, 1)[0] ?? '';
-  if (!withoutScheme || withoutScheme.includes('/') || withoutScheme.includes('\\')) {
-    return null;
-  }
-  const withoutExtension = withoutScheme.replace(/\.[A-Za-z0-9]+$/u, '');
-  return withoutExtension || null;
-}
-
-function downloadUrlsForReference(contentReference: string, metafileContentBaseUrl?: string): string[] {
-  const metafilePinId = extractMetafilePinId(contentReference);
-  if (metafilePinId) {
-    return [
-      buildMetafileAcceleratedContentUrl(metafileContentBaseUrl, metafilePinId),
-      buildMetafileContentUrl(metafileContentBaseUrl, metafilePinId),
-    ];
-  }
-  if (/^https?:\/\//iu.test(contentReference)) {
-    return [contentReference];
-  }
-  return [];
-}
-
-function actorSelector(input?: BrowserActorInput): string {
+function actorSelector(input?: BrowserActorInput & { from?: string }): string {
   return normalizeText(input?.actorId) || normalizeText(input?.from);
 }
 
@@ -187,42 +123,162 @@ function toBrowserRecord(value: object): Record<string, unknown> {
   return { ...value };
 }
 
-function toBrowserSettingsSnapshot(
-  snapshot: ReturnType<typeof createBrowserSettingsSnapshot>,
-): BrowserSettingsSnapshot {
-  return {
-    browser: toBrowserRecord(snapshot.browser),
-    effectiveBrowser: toBrowserRecord(snapshot.effectiveBrowser),
-    defaults: toBrowserRecord(snapshot.defaults),
-    ...(snapshot.configPath ? { configPath: snapshot.configPath } : {}),
+function browserRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function followUpActionFromOac(result: MetabotCommandResult<unknown>): BrowserFollowUpAction | undefined {
+  const resultData = browserRecord(result.data);
+  const href = normalizeText((result as { localUiUrl?: unknown }).localUiUrl);
+  const traceId = normalizeText(resultData.traceId);
+  const route = href ? '' : traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '';
+  if (!href && !route) return undefined;
+  const action: BrowserFollowUpAction = {
+    label: normalizeText((result as { actionLabel?: unknown }).actionLabel) || 'Open details',
   };
+  if (href) action.href = href;
+  if (route) action.route = route;
+  return action;
 }
 
-function toMetabotResolveResult(
-  result: Awaited<ReturnType<typeof resolveBrowserResource>>,
-): MetabotCommandResult<BrowserResolveResult> {
-  if (result.ok) {
-    return commandSuccess(result.data);
+function browserResultData(value: unknown): Record<string, unknown> | undefined {
+  const data = browserRecord(value);
+  return Object.keys(data).length ? data : undefined;
+}
+
+function browserFailureCode(result: MetabotCommandResult<unknown>): string {
+  return normalizeText((result as { code?: unknown }).code) || normalizeText((result as { state?: unknown }).state) || 'browser_oac_failure';
+}
+
+function browserFailureMessage(result: MetabotCommandResult<unknown>): string {
+  return normalizeText((result as { message?: unknown }).message) || 'OAC Browser command failed.';
+}
+
+function isZipMetaAppContent(contentType: string, contentReference: string): boolean {
+  const normalizedContentType = normalizeText(contentType).toLowerCase();
+  const normalizedReference = normalizeText(contentReference).toLowerCase().split(/[?#]/u, 1)[0] ?? '';
+  return normalizedContentType === 'application/zip'
+    || normalizedContentType.includes('/zip')
+    || normalizedContentType.includes('+zip')
+    || normalizedReference.endsWith('.zip');
+}
+
+function extractMetafilePinId(contentReference: string): string {
+  if (!/^metafile:\/\//iu.test(contentReference)) {
+    return '';
   }
-  return commandFailed(result.code, result.message, result.data);
+  const withoutScheme = contentReference.slice('metafile://'.length).split(/[?#]/u, 1)[0] ?? '';
+  if (!withoutScheme || withoutScheme.includes('/') || withoutScheme.includes('\\')) {
+    return '';
+  }
+  return withoutScheme.replace(/\.[A-Za-z0-9]+$/u, '');
 }
 
-async function downloadMetaAppArchive(input: {
-  fetch: typeof fetch;
-  contentReference: string;
-  metafileContentBaseUrl?: string;
-}): Promise<Buffer | null> {
-  for (const url of downloadUrlsForReference(input.contentReference, input.metafileContentBaseUrl)) {
-    const response = await input.fetch(url).catch(() => null);
-    if (!response?.ok) {
+function metaAppArchiveUrls(contentReference: string): string[] {
+  const normalizedReference = normalizeText(contentReference);
+  if (!normalizedReference) {
+    return [];
+  }
+  const metafilePinId = extractMetafilePinId(normalizedReference);
+  if (metafilePinId) {
+    const urls = buildMetafileContentUrls(metafilePinId);
+    return [urls.accelerateUrl, urls.contentUrl, urls.legacyContentUrl];
+  }
+  return /^https?:\/\//iu.test(normalizedReference) ? [normalizedReference] : [];
+}
+
+async function downloadMetaAppArchive(
+  fetchImpl: typeof fetch,
+  contentReference: string,
+): Promise<Buffer | null> {
+  for (const url of metaAppArchiveUrls(contentReference)) {
+    const response = await fetchImpl(url).catch(() => null);
+    if (!response?.ok || typeof response.arrayBuffer !== 'function') {
       continue;
     }
-    const body = Buffer.from(await response.arrayBuffer());
-    if (body.length > 0) {
-      return body;
+    const archive = Buffer.from(await response.arrayBuffer());
+    if (archive.byteLength > 0) {
+      return archive;
     }
   }
   return null;
+}
+
+async function resolveMetaAppPreviewUrl(input: {
+  pinId: string;
+  contentReference: string;
+  contentType: string;
+  indexFile: string;
+  pinRecord: Record<string, unknown>;
+  artifactCache: MetaAppArtifactCacheStore;
+  metaAppPreviewSessions: MetaAppPreviewSessions;
+  fetchImpl: typeof fetch;
+}): Promise<string> {
+  if (!isZipMetaAppContent(input.contentType, input.contentReference)) {
+    return '';
+  }
+
+  const modifyHistory = normalizeMetaAppModifyHistory(
+    input.pinRecord.modify_history ?? input.pinRecord.modifyHistory,
+  );
+  const descriptor = {
+    metaAppPinId: input.pinId,
+    contentReference: normalizeText(input.contentReference),
+    contentType: normalizeText(input.contentType) || 'application/octet-stream',
+    indexFile: normalizeText(input.indexFile) || 'index.html',
+    modifyHistory,
+  };
+  let artifact = await input.artifactCache.getArtifact(descriptor);
+  if (!artifact) {
+    const archive = await downloadMetaAppArchive(input.fetchImpl, descriptor.contentReference);
+    if (!archive) {
+      throw new Error('MetaApp ZIP content could not be downloaded.');
+    }
+    artifact = await input.artifactCache.writeArtifact({ ...descriptor, archive });
+  }
+
+  const session = input.metaAppPreviewSessions.create({
+    artifactDir: artifact.artifactDir,
+    indexFile: artifact.indexFile,
+  });
+  return buildMetaAppPreviewAssetUrl(session.previewId, artifact.indexFile);
+}
+
+function toBrowserFailure(result: MetabotCommandResult<unknown>): BrowserCommandFailure {
+  const options: BrowserCommandFailureOptions = {};
+  const action = followUpActionFromOac(result);
+  const data = browserResultData(result.data);
+  if (action) options.action = action;
+  if (data) options.data = data;
+  return browserFailure(browserFailureCode(result), browserFailureMessage(result), options);
+}
+
+function toBrowserResult<T>(result: MetabotCommandResult<T>): BrowserCommandResult<T> {
+  if (result.ok) {
+    return browserSuccess(result.data);
+  }
+
+  if (result.state === 'waiting') {
+    const options: BrowserCommandWaitingOptions = {};
+    const pollAfterMs = (result as { pollAfterMs?: unknown }).pollAfterMs;
+    const action = followUpActionFromOac(result);
+    const data = browserResultData(result.data);
+    if (typeof pollAfterMs === 'number') options.pollAfterMs = pollAfterMs;
+    if (action) options.action = action;
+    if (data) options.data = data;
+    return browserWaiting(browserFailureCode(result), browserFailureMessage(result), options);
+  }
+
+  if (result.state === 'manual_action_required') {
+    const options: BrowserCommandFailureOptions = {};
+    const action = followUpActionFromOac(result);
+    const data = browserResultData(result.data);
+    if (action) options.action = action;
+    if (data) options.data = data;
+    return browserManualActionRequired(browserFailureCode(result), browserFailureMessage(result), options);
+  }
+
+  return toBrowserFailure(result);
 }
 
 function readActionPayload(input: BrowserTrustedActionInput): Record<string, unknown> {
@@ -275,21 +331,53 @@ function createBotHref(env: NodeJS.ProcessEnv): string {
   return `/ui/bot?${query.toString()}`;
 }
 
-function wrapTrustedActionResult(
+function toHostBrowserSettingsSnapshot(snapshot: ReturnType<typeof createBrowserSettingsSnapshot>): BrowserSettingsSnapshot {
+  return {
+    browser: toBrowserRecord(snapshot.browser ?? {}),
+    effectiveBrowser: toBrowserRecord(snapshot.effectiveBrowser ?? {}),
+    defaults: toBrowserRecord(snapshot.defaults ?? {}),
+    ...(snapshot.configPath ? { configPath: snapshot.configPath } : {}),
+  };
+}
+
+function toBrowserTrustedActionResult(
   kind: BrowserTrustedActionInput['kind'],
   result: MetabotCommandResult<unknown>,
-): MetabotCommandResult<BrowserTrustedActionResult> {
+) : BrowserCommandResult<BrowserTrustedActionResult> {
   if (!result.ok) {
-    return result as MetabotCommandResult<BrowserTrustedActionResult>;
+    return toBrowserResult(result as MetabotCommandResult<BrowserTrustedActionResult>);
   }
-  return {
-    ...result,
-    data: {
-      kind,
-      handled: true,
+
+  return browserSuccess({
+    kind,
+    handled: true,
+    ...(trustedActionResultData(result.data) ? {
       data: trustedActionResultData(result.data),
+    } : {}),
+  });
+}
+
+function copyUriTrustedActionResult(actionInput: BrowserTrustedActionInput): BrowserCommandResult<BrowserTrustedActionResult> {
+  const payload = readActionPayload(actionInput);
+  const copiedText = normalizeText(payload.uri) || normalizeText(payload.currentUri) || normalizeText(actionInput.resourceUri);
+  return browserSuccess({
+    kind: 'copy-uri',
+    handled: true,
+    data: {
+      copiedText,
     },
-  };
+  });
+}
+
+function successTrustedActionResult(
+  kind: BrowserTrustedActionInput['kind'],
+  data?: BrowserTrustedActionResult['data'],
+): BrowserCommandResult<BrowserTrustedActionResult> {
+  return browserSuccess({
+    kind,
+    handled: true,
+    ...(data ? { data } : {}),
+  });
 }
 
 export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterInput): BrowserHostAdapter {
@@ -297,12 +385,12 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
   const fetchImpl = input.fetch ?? globalThis.fetch;
 
   async function resolveActor(
-    actorInput?: BrowserActorInput,
+    actorInput?: BrowserActorInput & { from?: string },
   ): Promise<OacBrowserActorContext | { failure: MetabotCommandResult<never> }> {
     return input.resolveActorWriteContext(actorSelector(actorInput));
   }
 
-  async function getRuntime(runtimeInput: BrowserRuntimeInput = {}): Promise<MetabotCommandResult<BrowserRuntimeSnapshot>> {
+  async function getRuntime(runtimeInput: BrowserRuntimeInput & { from?: string } = {}): Promise<BrowserCommandResult<BrowserRuntimeSnapshot>> {
     const requestedActor = actorSelector(runtimeInput);
     const activeHomeDir = path.resolve(input.homeDir);
     const profiles = await listMetabotProfiles(input.systemHomeDir).catch(() => [] as MetabotProfileFull[]);
@@ -311,7 +399,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       : profiles.find((profile) => path.resolve(profile.homeDir) === activeHomeDir) ?? profiles[0] ?? null;
 
     if (requestedActor && !selectedProfile) {
-      return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedActor}`);
+      return browserFailure('profile_not_found', `MetaBot profile not found: ${requestedActor}`);
     }
 
     const selectedHomeDir = selectedProfile ? path.resolve(selectedProfile.homeDir) : '';
@@ -320,7 +408,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       ? actors.find((actor) => actor.id === selectedProfile.slug) ?? null
       : null;
 
-    return commandSuccess({
+    return browserSuccess({
       host: {
         kind: 'oac',
         name: 'Open Agent Connect',
@@ -348,47 +436,47 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     });
   }
 
-  async function getSettings(settingsInput: BrowserSettingsInput = {}): Promise<MetabotCommandResult<BrowserSettingsSnapshot>> {
+  async function getSettings(settingsInput: BrowserSettingsInput & { from?: string } = {}): Promise<BrowserCommandResult<BrowserSettingsSnapshot>> {
     const actor = await resolveActor(settingsInput);
-    if ('failure' in actor) return actor.failure;
+    if ('failure' in actor) return toBrowserResult(actor.failure);
     const targetConfigStore = createConfigStore(actor.homeDir);
     const config = await targetConfigStore.read();
-    return commandSuccess(toBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
+    return browserSuccess(toHostBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
       config,
       configPath: targetConfigStore.paths.configPath,
       env,
     })));
   }
 
-  async function updateSettings(settingsInput: BrowserSettingsUpdateInput): Promise<MetabotCommandResult<BrowserSettingsSnapshot>> {
+  async function updateSettings(settingsInput: BrowserSettingsUpdateInput & { from?: string }): Promise<BrowserCommandResult<BrowserSettingsSnapshot>> {
     const actor = await resolveActor(settingsInput);
-    if ('failure' in actor) return actor.failure;
+    if ('failure' in actor) return toBrowserResult(actor.failure);
     const targetConfigStore = createConfigStore(actor.homeDir);
     const current = await targetConfigStore.read();
     try {
       const next = applyBrowserSettingsUpdate(current, settingsInput.browser);
       await targetConfigStore.set(next);
       const saved = await targetConfigStore.read();
-      return commandSuccess(toBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
+      return browserSuccess(toHostBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
         config: saved,
         configPath: targetConfigStore.paths.configPath,
         env,
       })));
     } catch (error) {
-      return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+      return browserFailure('invalid_argument', error instanceof Error ? error.message : String(error));
     }
   }
 
-  async function getCache(cacheInput: BrowserCacheInput = {}): Promise<MetabotCommandResult<BrowserCacheSnapshot>> {
+  async function getCache(cacheInput: BrowserCacheInput & { from?: string } = {}): Promise<BrowserCommandResult<BrowserCacheSnapshot>> {
     const actor = await resolveActor(cacheInput);
-    if ('failure' in actor) return actor.failure;
+    if ('failure' in actor) return toBrowserResult(actor.failure);
     const stats = await createMetaAppArtifactCacheStore(actor.homeDir).getStats();
-    return commandSuccess(toBrowserRecord(stats));
+    return browserSuccess(toBrowserRecord(stats));
   }
 
-  async function clearCache(cacheInput: BrowserCacheClearInput): Promise<MetabotCommandResult<BrowserCacheClearResult>> {
+  async function clearCache(cacheInput: BrowserCacheClearInput & { from?: string }): Promise<BrowserCommandResult<BrowserCacheClearResult>> {
     const actor = await resolveActor(cacheInput);
-    if ('failure' in actor) return actor.failure;
+    if ('failure' in actor) return toBrowserResult(actor.failure);
     try {
       const scope = normalizeText(cacheInput.scope) || 'all';
       if (scope === 'pin') {
@@ -396,80 +484,67 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
           scope,
           pinId: normalizeText(cacheInput.pinId),
         });
-        return commandSuccess(toBrowserRecord(result));
+        return browserSuccess(toBrowserRecord(result));
       }
       if (scope === 'artifact') {
         const result = await createMetaAppArtifactCacheStore(actor.homeDir).clear({
           scope,
           cacheKey: normalizeText(cacheInput.cacheKey),
         });
-        return commandSuccess(toBrowserRecord(result));
+        return browserSuccess(toBrowserRecord(result));
       }
       if (scope === 'all') {
         const result = await createMetaAppArtifactCacheStore(actor.homeDir).clear({ scope });
-        return commandSuccess(toBrowserRecord(result));
+        return browserSuccess(toBrowserRecord(result));
       }
-      return commandFailed('invalid_argument', 'Unsupported Browser cache clear scope.');
+      return browserFailure('invalid_argument', 'Unsupported Browser cache clear scope.');
     } catch (error) {
-      return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+      return browserFailure('invalid_argument', error instanceof Error ? error.message : String(error));
     }
   }
 
-  async function resolveResource(resolveInput: BrowserResolveInput): Promise<MetabotCommandResult<BrowserResolveResult>> {
+  async function resolveResource(resolveInput: BrowserResolveInput & { from?: string }): Promise<BrowserCommandResult<BrowserResolveResult>> {
     const actor = await resolveActor(resolveInput);
-    if ('failure' in actor) return actor.failure;
+    if ('failure' in actor) return toBrowserResult(actor.failure);
     const config = await createConfigStore(actor.homeDir).read();
     const browserConfig = resolveBrowserConfig(config, env);
     const artifactCache = createMetaAppArtifactCacheStore(actor.homeDir);
-    return toMetabotResolveResult(await resolveBrowserResource({
+    return resolveBrowserResource({
       uri: resolveInput.uri,
       config: browserConfig,
       fetch: fetchImpl,
-      metaAppResolve: (pinId) => resolveMetaAppPinToRecord({
-        pinId,
-        fetch: fetchImpl,
-        manApiBaseUrl: browserConfig.manApiBaseUrl,
-        metafileContentBaseUrl: browserConfig.metafileContentBaseUrl,
-        createPreviewSession: async (previewInput) => {
-          const artifactDescriptor = {
-            metaAppPinId: previewInput.pinId,
-            contentReference: previewInput.contentReference,
-            contentType: previewInput.contentType,
-            indexFile: previewInput.indexFile,
-            modifyHistory: normalizeMetaAppModifyHistory(
-              previewInput.pinRecord.modify_history ?? previewInput.pinRecord.modifyHistory,
-            ),
-          };
-          const artifact = await artifactCache.getArtifact(artifactDescriptor)
-            ?? await (async () => {
-              const archive = await downloadMetaAppArchive({
-                fetch: fetchImpl,
-                contentReference: previewInput.contentReference,
-                metafileContentBaseUrl: browserConfig.metafileContentBaseUrl,
-              });
-              if (!archive) {
-                throw new Error('MetaApp ZIP content could not be downloaded.');
-              }
-              return artifactCache.writeArtifact({ ...artifactDescriptor, archive });
-            })();
-          const session = input.metaAppPreviewSessions.create({
-            artifactDir: artifact.artifactDir,
-            indexFile: previewInput.indexFile,
-          });
-          return {
-            previewId: session.previewId,
-            localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, previewInput.indexFile),
-          };
-        },
-      }),
-    }));
+      metaAppResolve: async (pinId): Promise<CoreBrowserCommandResult<MetaAppGalleryRecord>> => {
+        return resolveMetaAppPinToRecord({
+          pinId,
+          fetch: fetchImpl,
+          manApiBaseUrl: browserConfig.manApiBaseUrl,
+          metafileContentBaseUrl: browserConfig.metafileContentBaseUrl,
+          createPreviewSession: async ({ contentReference, contentType, indexFile, pinRecord }) => ({
+            localPreviewUrl: await resolveMetaAppPreviewUrl({
+              pinId,
+              contentReference,
+              contentType,
+              indexFile,
+              pinRecord,
+              artifactCache,
+              metaAppPreviewSessions: input.metaAppPreviewSessions,
+              fetchImpl,
+            }),
+          }),
+        });
+      },
+    });
   }
 
   async function runTrustedAction(
-    actionInput: BrowserTrustedActionInput,
-  ): Promise<MetabotCommandResult<BrowserTrustedActionResult>> {
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    if (actionInput.kind === 'copy-uri') {
+      return copyUriTrustedActionResult(actionInput);
+    }
+
     const actor = await resolveActor(actionInput);
-    if ('failure' in actor) return actor.failure;
+    if ('failure' in actor) return toBrowserResult(actor.failure);
     const from = actorSelector(actionInput);
     const payload = readActionPayload(actionInput);
 
@@ -477,10 +552,10 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       const to = normalizeText(payload.to) || normalizeText(payload.targetGlobalMetaId);
       const content = normalizeText(payload.content) || normalizeText(payload.message);
       if (!to || !content) {
-        return commandFailed('invalid_browser_action', 'Browser private-chat action requires to and content.');
+        return browserFailure('invalid_browser_action', 'Browser private-chat action requires to and content.');
       }
       if (!input.privateChat) {
-        return commandFailed('browser_action_not_supported', 'Browser private-chat action is not supported by the OAC adapter.');
+        return browserFailure('browser_action_not_supported', 'Browser private-chat action is not supported by the OAC adapter.');
       }
       const result = await input.privateChat({
         ...(from ? { from } : {}),
@@ -490,7 +565,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
         ...(normalizeText(payload.peerChatPublicKey) ? { peerChatPublicKey: normalizeText(payload.peerChatPublicKey) } : {}),
         ...(normalizeText(payload.network) ? { network: normalizeText(payload.network) } : {}),
       });
-      return wrapTrustedActionResult(actionInput.kind, result);
+      return toBrowserTrustedActionResult(actionInput.kind, result);
     }
 
     if (actionInput.kind === 'service-call') {
@@ -498,13 +573,13 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       const providerGlobalMetaId = normalizeText(payload.providerGlobalMetaId);
       const userTask = normalizeText(payload.userTask) || normalizeText(payload.rawRequest);
       if (!servicePinId || !providerGlobalMetaId || !userTask) {
-        return commandFailed(
+        return browserFailure(
           'invalid_browser_action',
           'Browser service-call action requires servicePinId, providerGlobalMetaId, and userTask.',
         );
       }
       if (!input.serviceCall) {
-        return commandFailed('browser_action_not_supported', 'Browser service-call action is not supported by the OAC adapter.');
+        return browserFailure('browser_action_not_supported', 'Browser service-call action is not supported by the OAC adapter.');
       }
       const request: Record<string, unknown> = {
         servicePinId,
@@ -527,20 +602,20 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
         ...(from ? { from } : {}),
         request,
       });
-      return wrapTrustedActionResult(actionInput.kind, result);
+      return toBrowserTrustedActionResult(actionInput.kind, result);
     }
 
     if (actionInput.kind === 'open-conversation') {
       const openPayload = payload as Partial<BrowserOpenConversationPayload>;
       const peerGlobalMetaId = normalizeText(openPayload.peerGlobalMetaId);
       if (!peerGlobalMetaId) {
-        return commandFailed('invalid_browser_action', 'Browser open-conversation action requires peerGlobalMetaId.');
+        return browserFailure('invalid_browser_action', 'Browser open-conversation action requires peerGlobalMetaId.');
       }
       let profiles: MetabotProfileFull[];
       try {
         profiles = await listMetabotProfiles(input.systemHomeDir);
       } catch (error) {
-        return commandFailed(
+        return browserFailure(
           'browser_profile_list_failed',
           error instanceof Error ? error.message : 'Browser open-conversation action could not list MetaBot profiles.',
         );
@@ -548,17 +623,13 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       const selectedProfile = findProfileByHomeDir(profiles, actor.homeDir);
       const localGlobalMetaId = normalizeText(selectedProfile?.globalMetaId);
       if (!selectedProfile || !localGlobalMetaId) {
-        return commandManualActionRequired(
+        return browserManualActionRequired(
           'browser_identity_required',
           'Open conversation requires a selected local Bot with a Global MetaID.',
         );
       }
-      return commandSuccess({
-        kind: 'open-conversation',
-        handled: true,
-        data: {
-          href: conversationHref(localGlobalMetaId, peerGlobalMetaId),
-        },
+      return successTrustedActionResult('open-conversation', {
+        href: conversationHref(localGlobalMetaId, peerGlobalMetaId),
       });
     }
 
@@ -569,34 +640,30 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     ) {
       const ownerActorId = ownerActorIdFromPayload(payload);
       if (!ownerActorId) {
-        return commandFailed('invalid_browser_action', 'Browser owner action requires ownerActorId.');
+        return browserFailure('invalid_browser_action', 'Browser owner action requires ownerActorId.');
       }
       let profiles: MetabotProfileFull[];
       try {
         profiles = await listMetabotProfiles(input.systemHomeDir);
       } catch (error) {
-        return commandFailed(
+        return browserFailure(
           'browser_profile_list_failed',
           error instanceof Error ? error.message : 'Browser owner action could not list MetaBot profiles.',
         );
       }
       const ownerProfile = profiles.find((profile) => profile.slug === ownerActorId) ?? null;
       if (!ownerProfile) {
-        return commandFailed('profile_not_found', `MetaBot profile not found: ${ownerActorId}`);
+        return browserFailure('profile_not_found', `MetaBot profile not found: ${ownerActorId}`);
       }
       const href = actionInput.kind === 'edit-profile'
         ? botManagementHref(ownerProfile.slug, 'info', 'profile')
         : actionInput.kind === 'configure-chat'
           ? botManagementHref(ownerProfile.slug, 'info', 'chat')
           : botManagementHref(ownerProfile.slug, 'history', 'messages');
-      return commandSuccess({
-        kind: actionInput.kind,
-        handled: true,
-        data: { href },
-      });
+      return successTrustedActionResult(actionInput.kind, { href });
     }
 
-    return commandFailed(
+    return browserFailure(
       'browser_action_not_supported',
       `Browser trusted action is not supported by the OAC adapter yet: ${actionInput.kind}`,
     );

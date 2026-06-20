@@ -14,7 +14,6 @@
     "node": ">=20 <25"
   },
   "bin": {
-    "browser-standalone": "dist/browser/standalone/main.js",
     "metabot": "dist/cli/main.js",
     "oac": "dist/oac/main.js"
   },

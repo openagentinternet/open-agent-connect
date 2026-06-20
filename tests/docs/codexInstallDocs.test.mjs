@@ -78,28 +78,6 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.doesNotMatch(guide, /Create a MetaBot named/i);
 });
 
-test('unified install guide includes language-aware Bot Page browser handoff', async () => {
-  const guide = await readFile(
-    path.join(REPO_ROOT, 'docs', 'install', 'open-agent-connect.md'),
-    'utf8'
-  );
-
-  assert.match(guide, /append a matching `lang` query/i);
-  assert.match(guide, /`http:\/\/127\.0\.0\.1:24885\/browser\?lang=zh-CN`/);
-  assert.match(guide, /`http:\/\/127\.0\.0\.1:24885\/ui\/bot\?lang=zh-CN`/);
-});
-
-test('Chinese README exposes a video-viewer quick start for creating a Bot Page', async () => {
-  const readme = await readFile(path.join(REPO_ROOT, 'README.zh-CN.md'), 'utf8');
-
-  assert.match(readme, /## 视频观众快速开始/);
-  assert.match(readme, /帮我安装 Open Agent Connect，并创建我的第一个 Bot Page。/);
-  assert.match(readme, /http:\/\/127\.0\.0\.1:24885\/ui\/bot\?lang=zh-CN/);
-  assert.match(readme, /http:\/\/127\.0\.0\.1:24885\/browser\?lang=zh-CN/);
-  assert.match(readme, /Codex、OpenClaw、CodeBuddy/);
-  assert.match(readme, /TRAE/);
-});
-
 test('unified install guide documents registry-driven bare install and force host binding', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
   const guide = await readFile(

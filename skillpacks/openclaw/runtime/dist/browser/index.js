@@ -1,12 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createStandaloneBrowserServer = exports.createStandaloneBrowserHostAdapter = exports.renderBrowserPageHtml = exports.statusForBrowserResult = exports.handleBrowserApiRoutes = void 0;
+exports.renderBrowserPageHtml = exports.statusForBrowserResult = exports.handleBrowserApiRoutes = void 0;
 var http_1 = require("./http");
 Object.defineProperty(exports, "handleBrowserApiRoutes", { enumerable: true, get: function () { return http_1.handleBrowserApiRoutes; } });
 Object.defineProperty(exports, "statusForBrowserResult", { enumerable: true, get: function () { return http_1.statusForBrowserResult; } });
 var page_1 = require("./page");
 Object.defineProperty(exports, "renderBrowserPageHtml", { enumerable: true, get: function () { return page_1.renderBrowserPageHtml; } });
-var adapter_1 = require("./standalone/adapter");
-Object.defineProperty(exports, "createStandaloneBrowserHostAdapter", { enumerable: true, get: function () { return adapter_1.createStandaloneBrowserHostAdapter; } });
-var server_1 = require("./standalone/server");
-Object.defineProperty(exports, "createStandaloneBrowserServer", { enumerable: true, get: function () { return server_1.createStandaloneBrowserServer; } });
