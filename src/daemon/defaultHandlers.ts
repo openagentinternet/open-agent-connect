@@ -158,7 +158,16 @@ import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import { sendPrivateChat } from '../core/chat/privateChat';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import { createDefaultChatReplyRunner } from '../core/chat/defaultChatReplyRunner';
-import type { ChatPersona, ChatReplyRunner, ChatReplyRunnerInput } from '../core/chat/privateChatTypes';
+import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
+import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
+import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
+import type {
+  ChatPersona,
+  ChatReplyRunner,
+  ChatReplyRunnerInput,
+  PrivateChatConversation,
+} from '../core/chat/privateChatTypes';
 import type { ChainWriteRequest, ChainWriteResult } from '../core/chain/writePin';
 import {
   buildPrivateConversationResponse,
@@ -4491,6 +4500,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
   providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
   testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
+  conversationGuidanceReplyRunner?: ChatReplyRunner;
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   // Create default adapter registry if none provided (backward compat)
@@ -5600,6 +5610,240 @@ export function createDefaultMetabotDaemonHandlers(input: {
         : createPrivateChatStateStore(actor.homeDir),
       autoReplyConfig: resolveAutoReplyConfigForHome(actor.homeDir),
     };
+  }
+
+  async function ensurePrivateChatConversationForPeer(inputForConversation: {
+    homeDir: string;
+    stateStore: ReturnType<typeof createPrivateChatStateStore>;
+    localGlobalMetaId: string;
+    peerGlobalMetaId: string;
+  }): Promise<PrivateChatConversation | null> {
+    const existing = await inputForConversation.stateStore.getConversationByPeer(inputForConversation.peerGlobalMetaId);
+    if (existing) {
+      return existing;
+    }
+    try {
+      const result = await readPeerConversationMessages({
+        homeDir: inputForConversation.homeDir,
+        localGlobalMetaId: inputForConversation.localGlobalMetaId,
+        peerGlobalMetaId: inputForConversation.peerGlobalMetaId,
+        limit: 20,
+      });
+      const firstMessage = result.messages[0] ?? null;
+      const lastMessage = result.messages[result.messages.length - 1] ?? null;
+      const now = Date.now();
+      const conversation: PrivateChatConversation = {
+        conversationId: `pc-${inputForConversation.localGlobalMetaId}-${inputForConversation.peerGlobalMetaId}`,
+        peerGlobalMetaId: inputForConversation.peerGlobalMetaId,
+        peerName: normalizeText(result.peerBot.name) || null,
+        topic: null,
+        strategyId: null,
+        state: 'active',
+        turnCount: 0,
+        lastDirection: lastMessage?.direction === 'incoming' ? 'inbound' : 'outbound',
+        createdAt: firstMessage?.timestamp ?? now,
+        updatedAt: lastMessage?.timestamp ?? now,
+        pendingGuidanceText: null,
+        pendingGuidanceCreatedAt: null,
+        pendingGuidanceLeaseId: null,
+        pendingGuidanceLeaseExpiresAt: null,
+      };
+      await inputForConversation.stateStore.upsertConversation(conversation);
+      return conversation;
+    } catch {
+      return null;
+    }
+  }
+
+  async function readLatestA2AConversationMessage(inputForMessage: {
+    homeDir: string;
+    localGlobalMetaId: string;
+    peerGlobalMetaId: string;
+  }): Promise<A2AConversationMessage | null> {
+    try {
+      const result = await readPeerConversationMessages({
+        homeDir: inputForMessage.homeDir,
+        localGlobalMetaId: inputForMessage.localGlobalMetaId,
+        peerGlobalMetaId: inputForMessage.peerGlobalMetaId,
+        limit: 1,
+      });
+      return result.messages[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function runConversationGuidanceTurn(inputForTurn: {
+    local: string;
+    peer: string;
+    guidance: string;
+  }): Promise<MetabotCommandResult<unknown>> {
+    const profile = await resolveMetabotProfileBySelector(inputForTurn.local);
+    if (!profile) {
+      return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(inputForTurn.local) || '<missing>'}`);
+    }
+    const profileHomeDir = path.resolve(profile.homeDir);
+    const profileRuntimeStateStore = profileHomeDir === path.resolve(input.homeDir)
+      ? runtimeStateStore
+      : createRuntimeStateStore(profileHomeDir);
+    const profilePrivateChatStateStore = profileHomeDir === path.resolve(input.homeDir)
+      ? privateChatStateStore
+      : createPrivateChatStateStore(profileHomeDir);
+    const profileSigner = profileHomeDir === path.resolve(input.homeDir)
+      ? signer
+      : createSignerForProfileHome(profileHomeDir);
+    const profileAutoReplyConfig = resolveAutoReplyConfigForHome(profileHomeDir);
+
+    const state = await profileRuntimeStateStore.readState();
+    if (!state.identity) {
+      return commandFailed('identity_missing', 'Create a local MetaBot identity before sending guided conversation turns.');
+    }
+
+    const peerGlobalMetaId = normalizeText(inputForTurn.peer);
+    if (!peerGlobalMetaId) {
+      return commandFailed('missing_peer', 'peer is required.');
+    }
+    const guidanceText = normalizeText(inputForTurn.guidance);
+    if (!guidanceText) {
+      return commandFailed('missing_guidance', 'guidance is required.');
+    }
+
+    const conversation = await ensurePrivateChatConversationForPeer({
+      homeDir: profileHomeDir,
+      stateStore: profilePrivateChatStateStore,
+      localGlobalMetaId: state.identity.globalMetaId,
+      peerGlobalMetaId,
+    });
+    if (!conversation) {
+      return commandFailed('conversation_not_found', 'No conversation found for this peer.');
+    }
+
+    const createdAt = Date.now();
+    const pendingConversation = await profilePrivateChatStateStore.setPendingGuidance(
+      conversation.conversationId,
+      guidanceText,
+      createdAt,
+    );
+    if (!pendingConversation) {
+      return commandFailed('conversation_not_found', 'No conversation found for this peer.');
+    }
+
+    const profileMetaBotSlug = path.basename(profileRuntimeStateStore.paths.profileRoot);
+    const profileLlmRuntimeStore = profileHomeDir === path.resolve(input.homeDir)
+      ? llmRuntimeStore
+      : createLlmRuntimeStore(profileHomeDir);
+    const profileLlmBindingStore = profileHomeDir === path.resolve(input.homeDir)
+      ? llmBindingStore
+      : createLlmBindingStore(profileHomeDir);
+    const guidanceReplyRunner = input.conversationGuidanceReplyRunner
+      ?? (() => {
+        if (!input.llmExecutor) {
+          return async () => {
+            throw new Error('LLM runtime is unavailable for guided conversation turns.');
+          };
+        }
+        const runtimeResolver = createLlmRuntimeResolver({
+          runtimeStore: profileLlmRuntimeStore,
+          bindingStore: profileLlmBindingStore,
+          getPreferredRuntimeId: async () => {
+            try {
+              const raw = await fs.readFile(profileRuntimeStateStore.paths.preferredLlmRuntimePath, 'utf8');
+              const data = JSON.parse(raw) as { runtimeId?: string | null };
+              return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+            } catch {
+              return null;
+            }
+          },
+        });
+        return createHostLlmChatReplyRunner({
+          runtimeResolver,
+          llmExecutor: input.llmExecutor,
+          metaBotSlug: profileMetaBotSlug,
+          allowedChatSkillsResolver: createPrivateChatAllowedSkillsResolver({
+            paths: profileRuntimeStateStore.paths,
+            metaBotSlug: profileMetaBotSlug,
+            runtimeStore: profileLlmRuntimeStore,
+            bindingStore: profileLlmBindingStore,
+            env: process.env,
+            logWarning: (scope, message) => console.warn(scope, message),
+          }),
+          logWarning: (scope, message) => console.warn(scope, message),
+        });
+      })();
+    const previousMessages = await profilePrivateChatStateStore.getRecentMessages(conversation.conversationId, 1);
+    const previousPrivateChatMessage = previousMessages.at(-1) ?? null;
+    const orchestrator = createPrivateChatAutoReplyOrchestrator({
+      stateStore: profilePrivateChatStateStore,
+      strategyStore: createChatStrategyStore(profileHomeDir),
+      paths: profileRuntimeStateStore.paths,
+      signer: profileSigner,
+      selfGlobalMetaId: async () => {
+        const latestState = await profileRuntimeStateStore.readState();
+        return latestState.identity?.globalMetaId ?? null;
+      },
+      resolvePeerChatPublicKey,
+      replyRunner: guidanceReplyRunner,
+    }, profileAutoReplyConfig);
+
+    const previousA2AMessage = await readLatestA2AConversationMessage({
+      homeDir: profileHomeDir,
+      localGlobalMetaId: state.identity.globalMetaId,
+      peerGlobalMetaId,
+    });
+    await orchestrator.handleLocalGuidedTurn(peerGlobalMetaId);
+
+    const latestConversation = await profilePrivateChatStateStore.getConversationByPeer(peerGlobalMetaId);
+    const guidanceConsumed = Boolean(
+      latestConversation
+      && latestConversation.pendingGuidanceText === null
+      && latestConversation.pendingGuidanceCreatedAt === null
+    );
+    if (!guidanceConsumed) {
+      return commandFailed(
+        'conversation_guidance_failed',
+        'Failed to generate or send the guided outbound turn.',
+      );
+    }
+    const latestPrivateChatMessages = await profilePrivateChatStateStore.getRecentMessages(
+      latestConversation?.conversationId ?? conversation.conversationId,
+      1,
+    );
+    const latestPrivateChatMessage = latestPrivateChatMessages.at(-1) ?? null;
+
+    const latestA2AMessage = await readLatestA2AConversationMessage({
+      homeDir: profileHomeDir,
+      localGlobalMetaId: state.identity.globalMetaId,
+      peerGlobalMetaId,
+    });
+    if (latestA2AMessage && latestA2AMessage.messageId !== previousA2AMessage?.messageId) {
+      publishConversationEvent({
+        type: 'conversation-message',
+        localGlobalMetaId: state.identity.globalMetaId,
+        peerGlobalMetaId,
+        messageId: latestA2AMessage.messageId,
+        timestamp: latestA2AMessage.timestamp,
+        kind: latestA2AMessage.kind,
+        protocolTag: latestA2AMessage.protocolTag ?? null,
+      });
+    }
+
+    return commandSuccess({
+      localGlobalMetaId: state.identity.globalMetaId,
+      peerGlobalMetaId,
+      conversationId: latestConversation?.conversationId ?? conversation.conversationId,
+      state: latestConversation?.state ?? conversation.state,
+      guidanceApplied: Boolean(
+        latestPrivateChatMessage
+        && latestPrivateChatMessage.direction === 'outbound'
+        && latestPrivateChatMessage.messageId !== previousPrivateChatMessage?.messageId
+      ),
+      guidanceConsumed: true,
+      messageId: latestPrivateChatMessage?.messageId ?? null,
+      pinId: latestPrivateChatMessage?.messagePinId ?? null,
+      txids: latestA2AMessage?.messageId === latestPrivateChatMessage?.messageId
+        ? (Array.isArray(latestA2AMessage?.txids) ? latestA2AMessage.txids : [])
+        : [],
+    });
   }
 
   async function resolveLlmProfileForActor(inputProfile: { from?: unknown; slug?: unknown } = {}): Promise<
@@ -13377,6 +13621,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
       },
+      guidance: async (rawInput) => runConversationGuidanceTurn({
+        local: normalizeText(rawInput.local),
+        peer: normalizeText(rawInput.peer),
+        guidance: normalizeText(rawInput.guidance),
+      }),
       streamEvents: async (rawInput) => {
         const profile = await resolveMetabotProfileBySelector(rawInput.local);
         const localGlobalMetaId = profile?.globalMetaId ?? normalizeText(rawInput.local);

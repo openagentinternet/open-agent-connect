@@ -167,6 +167,11 @@ export interface MetabotDaemonHttpHandlers {
       after?: number;
       limit?: number;
     }) => Awaitable<MetabotCommandResult<unknown>>;
+    guidance?: (input: {
+      local: string;
+      peer: string;
+      guidance: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
     streamEvents?: (input: {
       local: string;
       signal?: AbortSignal;
