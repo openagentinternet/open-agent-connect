@@ -16,6 +16,14 @@ const LOCKFILE_BASE_DELAY_MS = 25;
 const LOCKFILE_MAX_ATTEMPTS = 200;
 const LOCKFILE_STALE_WITH_PID_MS = 5 * 60 * 1000;
 const LOCKFILE_STALE_WITHOUT_PID_MS = 30_000;
+const DEFAULT_PENDING_GUIDANCE_LEASE_MS = 5 * 60 * 1000;
+
+export interface PrivateChatPendingGuidanceClaim {
+  guidanceText: string;
+  createdAt: number;
+  leaseId: string;
+  leaseExpiresAt: number;
+}
 
 export interface PrivateChatStateStore {
   paths: MetabotPaths;
@@ -30,10 +38,22 @@ export interface PrivateChatStateStore {
     guidanceText: string,
     createdAt: number,
   ): Promise<PrivateChatConversation | null>;
+  claimPendingGuidance(
+    conversationId: string,
+    options?: {
+      now?: number;
+      leaseMs?: number;
+    },
+  ): Promise<PrivateChatPendingGuidanceClaim | null>;
+  releasePendingGuidanceClaimIfMatches(
+    conversationId: string,
+    claim: PrivateChatPendingGuidanceClaim,
+  ): Promise<PrivateChatConversation | null>;
   clearPendingGuidanceIfMatches(
     conversationId: string,
     guidanceText: string,
     createdAt: number,
+    leaseId?: string | null,
   ): Promise<PrivateChatConversation | null>;
   appendMessages(messages: PrivateChatMessage[]): Promise<PrivateChatMessage[]>;
   getConversationByPeer(peerGlobalMetaId: string): Promise<PrivateChatConversation | null>;
@@ -56,13 +76,24 @@ function normalizeConversation(
   conversation: PrivateChatConversation | Record<string, unknown>,
 ): PrivateChatConversation {
   const source = conversation as Record<string, unknown>;
+  const pendingGuidanceText = normalizeText(source.pendingGuidanceText);
   return {
     ...(conversation as PrivateChatConversation),
-    pendingGuidanceText:
-      typeof source.pendingGuidanceText === 'string' ? source.pendingGuidanceText : null,
+    pendingGuidanceText: pendingGuidanceText || null,
     pendingGuidanceCreatedAt:
-      typeof source.pendingGuidanceCreatedAt === 'number' ? source.pendingGuidanceCreatedAt : null,
+      pendingGuidanceText && typeof source.pendingGuidanceCreatedAt === 'number'
+        ? source.pendingGuidanceCreatedAt
+        : null,
+    pendingGuidanceLeaseId:
+      typeof source.pendingGuidanceLeaseId === 'string' ? source.pendingGuidanceLeaseId : null,
+    pendingGuidanceLeaseExpiresAt:
+      typeof source.pendingGuidanceLeaseExpiresAt === 'number' ? source.pendingGuidanceLeaseExpiresAt : null,
   };
+}
+
+function buildPendingGuidanceLeaseId(): string {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `guidance-lease-${Date.now()}-${random}`;
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
@@ -285,12 +316,15 @@ export function createPrivateChatStateStore(
 
     async setPendingGuidance(conversationId, guidanceText, createdAt) {
       let updatedConversation: PrivateChatConversation | null = null;
+      const normalizedGuidanceText = normalizeText(guidanceText);
       await this.updateState(state => {
         const conversations = replaceConversation(state.conversations, conversationId, conversation => {
           updatedConversation = {
             ...conversation,
-            pendingGuidanceText: guidanceText,
-            pendingGuidanceCreatedAt: createdAt,
+            pendingGuidanceText: normalizedGuidanceText || null,
+            pendingGuidanceCreatedAt: normalizedGuidanceText ? createdAt : null,
+            pendingGuidanceLeaseId: null,
+            pendingGuidanceLeaseExpiresAt: null,
           };
           return updatedConversation;
         });
@@ -299,13 +333,79 @@ export function createPrivateChatStateStore(
       return updatedConversation;
     },
 
-    async clearPendingGuidanceIfMatches(conversationId, guidanceText, createdAt) {
+    async claimPendingGuidance(conversationId, options = {}) {
+      let claim: PrivateChatPendingGuidanceClaim | null = null;
+      const now = typeof options.now === 'number' ? options.now : Date.now();
+      const leaseMs = typeof options.leaseMs === 'number'
+        ? Math.max(1, Math.trunc(options.leaseMs))
+        : DEFAULT_PENDING_GUIDANCE_LEASE_MS;
+      await this.updateState(state => {
+        const conversations = replaceConversation(state.conversations, conversationId, conversation => {
+          const guidanceText = normalizeText(conversation.pendingGuidanceText);
+          const createdAt = conversation.pendingGuidanceCreatedAt;
+          if (!guidanceText || typeof createdAt !== 'number') {
+            return conversation;
+          }
+          const activeLeaseId = normalizeText(conversation.pendingGuidanceLeaseId);
+          const activeLeaseExpiresAt = conversation.pendingGuidanceLeaseExpiresAt;
+          if (
+            activeLeaseId
+            && typeof activeLeaseExpiresAt === 'number'
+            && activeLeaseExpiresAt > now
+          ) {
+            return conversation;
+          }
+          const leaseId = buildPendingGuidanceLeaseId();
+          const leaseExpiresAt = now + leaseMs;
+          claim = {
+            guidanceText,
+            createdAt,
+            leaseId,
+            leaseExpiresAt,
+          };
+          return {
+            ...conversation,
+            pendingGuidanceLeaseId: leaseId,
+            pendingGuidanceLeaseExpiresAt: leaseExpiresAt,
+          };
+        });
+        return { ...state, conversations };
+      });
+      return claim;
+    },
+
+    async releasePendingGuidanceClaimIfMatches(conversationId, claim) {
+      let updatedConversation: PrivateChatConversation | null = null;
+      await this.updateState(state => {
+        const conversations = replaceConversation(state.conversations, conversationId, conversation => {
+          if (
+            conversation.pendingGuidanceText !== claim.guidanceText ||
+            conversation.pendingGuidanceCreatedAt !== claim.createdAt ||
+            conversation.pendingGuidanceLeaseId !== claim.leaseId
+          ) {
+            updatedConversation = conversation;
+            return conversation;
+          }
+          updatedConversation = {
+            ...conversation,
+            pendingGuidanceLeaseId: null,
+            pendingGuidanceLeaseExpiresAt: null,
+          };
+          return updatedConversation;
+        });
+        return { ...state, conversations };
+      });
+      return updatedConversation;
+    },
+
+    async clearPendingGuidanceIfMatches(conversationId, guidanceText, createdAt, leaseId = null) {
       let updatedConversation: PrivateChatConversation | null = null;
       await this.updateState(state => {
         const conversations = replaceConversation(state.conversations, conversationId, conversation => {
           if (
             conversation.pendingGuidanceText !== guidanceText ||
-            conversation.pendingGuidanceCreatedAt !== createdAt
+            conversation.pendingGuidanceCreatedAt !== createdAt ||
+            (leaseId && conversation.pendingGuidanceLeaseId !== leaseId)
           ) {
             updatedConversation = conversation;
             return conversation;
@@ -314,6 +414,8 @@ export function createPrivateChatStateStore(
             ...conversation,
             pendingGuidanceText: null,
             pendingGuidanceCreatedAt: null,
+            pendingGuidanceLeaseId: null,
+            pendingGuidanceLeaseExpiresAt: null,
           };
           return updatedConversation;
         });

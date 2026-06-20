@@ -11,6 +11,8 @@ export interface PrivateChatConversation {
   updatedAt: number;
   pendingGuidanceText: string | null;
   pendingGuidanceCreatedAt: number | null;
+  pendingGuidanceLeaseId?: string | null;
+  pendingGuidanceLeaseExpiresAt?: number | null;
 }
 
 export interface PrivateChatMessage {

@@ -2,7 +2,7 @@ import { sendPrivateChat } from './privateChat';
 import { loadChatPersona } from './chatPersonaLoader';
 import { persistA2AConversationMessageBestEffort } from '../a2a/conversationPersistence';
 import { classifySimplemsgContent } from '../a2a/simplemsgClassifier';
-import type { PrivateChatStateStore } from './privateChatStateStore';
+import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './privateChatStateStore';
 import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
 import type { Signer } from '../signing/signer';
@@ -35,6 +35,7 @@ export interface PrivateChatAutoReplyDependencies {
 
 export interface PrivateChatAutoReplyOrchestrator {
   handleInboundMessage(message: PrivateChatInboundMessage): Promise<void>;
+  handleLocalGuidedTurn(peerGlobalMetaId: string): Promise<void>;
 }
 
 interface RateLimiterState {
@@ -45,6 +46,12 @@ interface SentPrivateChatReply {
   pinId: string | null;
   txids: string[];
   network: string | null;
+}
+
+interface PreparedOutboundTurn {
+  content: string;
+  extensions: Record<string, unknown> | null;
+  shouldClose: boolean;
 }
 
 function normalizeText(value: unknown): string {
@@ -185,6 +192,154 @@ export function createPrivateChatAutoReplyOrchestrator(
     }
   }
 
+  async function prepareOutboundTurn(input: {
+    conversation: PrivateChatConversation;
+    recentMessages: PrivateChatMessage[];
+    persona: Awaited<ReturnType<typeof loadChatPersona>>;
+    strategy: Awaited<ReturnType<ChatStrategyStore['getStrategy']>>;
+    inboundMessage: PrivateChatMessage | null;
+    operatorGuidanceText?: string | null;
+  }): Promise<PreparedOutboundTurn | null> {
+    let runnerResult;
+    try {
+      runnerResult = await deps.replyRunner({
+        conversation: input.conversation,
+        recentMessages: input.recentMessages,
+        persona: input.persona,
+        strategy: input.strategy,
+        inboundMessage: input.inboundMessage,
+        operatorGuidanceText: input.operatorGuidanceText ?? null,
+      });
+    } catch {
+      return null;
+    }
+
+    if (runnerResult.state === 'skip') {
+      return null;
+    }
+
+    let content = normalizeText(runnerResult.content);
+    const shouldClose = runnerResult.state === 'end_conversation' || hasFinalByeLine(content);
+    if (shouldClose) {
+      content = ensureFinalByeLine(content);
+    }
+    if (!content) {
+      return null;
+    }
+
+    return {
+      content,
+      extensions: shouldClose ? null : runnerResult.extensions ?? null,
+      shouldClose,
+    };
+  }
+
+  async function commitOutboundTurn(input: {
+    selfGlobalMetaId: string;
+    peerGlobalMetaId: string;
+    conversation: PrivateChatConversation;
+    content: string;
+    extensions: Record<string, unknown> | null;
+    shouldClose: boolean;
+    guidanceToConsume?: PrivateChatPendingGuidanceClaim | null;
+  }): Promise<PrivateChatConversation | null> {
+    let outboundReply: SentPrivateChatReply | null = null;
+    try {
+      outboundReply = await sendReplyMessage(
+        input.selfGlobalMetaId,
+        input.peerGlobalMetaId,
+        input.content,
+        input.extensions,
+      );
+      if (!outboundReply) {
+        if (input.guidanceToConsume) {
+          await deps.stateStore.releasePendingGuidanceClaimIfMatches(
+            input.conversation.conversationId,
+            input.guidanceToConsume,
+          );
+        }
+        return null;
+      }
+
+      const timestamp = getNow();
+      const outboundRecord: PrivateChatMessage = {
+        conversationId: input.conversation.conversationId,
+        messageId: outboundReply.pinId || buildMessageId(timestamp),
+        direction: 'outbound',
+        senderGlobalMetaId: input.selfGlobalMetaId,
+        content: input.content,
+        messagePinId: outboundReply.pinId,
+        extensions: input.extensions,
+        timestamp,
+      };
+
+      await deps.stateStore.appendMessages([outboundRecord]);
+      await persistA2AConversationMessageBestEffort({
+        paths: deps.paths,
+        local: {
+          globalMetaId: input.selfGlobalMetaId,
+        },
+        peer: {
+          globalMetaId: input.peerGlobalMetaId,
+        },
+        message: {
+          messageId: outboundRecord.messageId,
+          direction: 'outgoing',
+          content: outboundRecord.content,
+          pinId: outboundRecord.messagePinId,
+          txid: outboundReply.txids[0] ?? null,
+          txids: outboundReply.txids,
+          chain: outboundReply.network ?? 'mvc',
+          timestamp: outboundRecord.timestamp,
+        },
+      });
+
+      const latestConversation = await deps.stateStore.getConversationByPeer(input.peerGlobalMetaId);
+      let updatedConversation: PrivateChatConversation = {
+        ...input.conversation,
+        state: input.shouldClose ? 'closed' : 'active',
+        lastDirection: 'outbound',
+        updatedAt: timestamp,
+        pendingGuidanceText: latestConversation?.pendingGuidanceText ?? input.conversation.pendingGuidanceText,
+        pendingGuidanceCreatedAt:
+          latestConversation?.pendingGuidanceCreatedAt ?? input.conversation.pendingGuidanceCreatedAt,
+        pendingGuidanceLeaseId:
+          latestConversation?.pendingGuidanceLeaseId ?? input.conversation.pendingGuidanceLeaseId ?? null,
+        pendingGuidanceLeaseExpiresAt:
+          latestConversation?.pendingGuidanceLeaseExpiresAt ?? input.conversation.pendingGuidanceLeaseExpiresAt ?? null,
+      };
+      await deps.stateStore.upsertConversation(updatedConversation);
+
+      if (input.guidanceToConsume) {
+        updatedConversation = await deps.stateStore.clearPendingGuidanceIfMatches(
+          input.conversation.conversationId,
+          input.guidanceToConsume.guidanceText,
+          input.guidanceToConsume.createdAt,
+          input.guidanceToConsume.leaseId,
+        ) ?? updatedConversation;
+      }
+
+      return updatedConversation;
+    } catch {
+      if (input.guidanceToConsume) {
+        if (outboundReply) {
+          await deps.stateStore.clearPendingGuidanceIfMatches(
+            input.conversation.conversationId,
+            input.guidanceToConsume.guidanceText,
+            input.guidanceToConsume.createdAt,
+            input.guidanceToConsume.leaseId,
+          ).catch(() => null);
+        } else {
+          await deps.stateStore.releasePendingGuidanceClaimIfMatches(
+            input.conversation.conversationId,
+            input.guidanceToConsume,
+          ).catch(() => null);
+        }
+      }
+      return null;
+    }
+  }
+
   return {
     async handleInboundMessage(message) {
       if (!config.enabled) return;
@@ -214,6 +369,8 @@ export function createPrivateChatAutoReplyOrchestrator(
         updatedAt: now,
         pendingGuidanceText: null,
         pendingGuidanceCreatedAt: null,
+        pendingGuidanceLeaseId: null,
+        pendingGuidanceLeaseExpiresAt: null,
       };
 
       const strategy = conversation.strategyId
@@ -313,57 +470,35 @@ export function createPrivateChatAutoReplyOrchestrator(
       if (conversation.state !== 'active') return;
       if (!checkRateLimit(rateLimiter, now)) return;
 
+      const guidanceWasPending = Boolean(
+        normalizeText(conversation.pendingGuidanceText)
+        && typeof conversation.pendingGuidanceCreatedAt === 'number',
+      );
+      const guidanceToConsume = guidanceWasPending
+        ? await deps.stateStore.claimPendingGuidance(
+            conversation.conversationId,
+            { now: getNow() },
+          )
+        : null;
+      if (guidanceWasPending && !guidanceToConsume) {
+        return;
+      }
+
       const maxTurns = strategy?.maxTurns ?? DEFAULT_MAX_TURNS;
 
-      // Check hard turn limit.
-      if (conversation.turnCount >= maxTurns) {
-        const closingContent = ensureFinalByeLine('It was great chatting with you. Let us continue another time.');
-        const closingReply = await sendReplyMessage(
+      // Check hard turn limit unless an operator-guided turn must run now.
+      if (conversation.turnCount >= maxTurns && !guidanceToConsume) {
+        const committedConversation = await commitOutboundTurn({
           selfGlobalMetaId,
           peerGlobalMetaId,
-          closingContent,
-          null,
-        );
-        const closingPinId = closingReply?.pinId ?? null;
-
-        const outboundRecord: PrivateChatMessage = {
-          conversationId: conversation.conversationId,
-          messageId: closingPinId || buildMessageId(getNow()),
-          direction: 'outbound',
-          senderGlobalMetaId: selfGlobalMetaId,
-          content: closingContent,
-          messagePinId: closingPinId,
+          conversation,
+          content: ensureFinalByeLine('It was great chatting with you. Let us continue another time.'),
           extensions: null,
-          timestamp: getNow(),
-        };
-        await deps.stateStore.appendMessages([outboundRecord]);
-        await persistA2AConversationMessageBestEffort({
-          paths: deps.paths,
-          local: {
-            globalMetaId: selfGlobalMetaId,
-          },
-          peer: {
-            globalMetaId: peerGlobalMetaId,
-          },
-          message: {
-            messageId: outboundRecord.messageId,
-            direction: 'outgoing',
-            content: outboundRecord.content,
-            pinId: outboundRecord.messagePinId,
-            txid: closingReply?.txids[0] ?? null,
-            txids: closingReply?.txids ?? [],
-            chain: closingReply?.network ?? 'mvc',
-            timestamp: outboundRecord.timestamp,
-          },
+          shouldClose: true,
         });
-        rateLimiter.replyTimestamps.push(getNow());
-        conversation = {
-          ...conversation,
-          state: 'closed',
-          lastDirection: 'outbound',
-          updatedAt: getNow(),
-        };
-        await deps.stateStore.upsertConversation(conversation);
+        if (committedConversation) {
+          rateLimiter.replyTimestamps.push(getNow());
+        }
         return;
       }
 
@@ -373,84 +508,99 @@ export function createPrivateChatAutoReplyOrchestrator(
         conversation.conversationId,
         DEFAULT_RECENT_MESSAGES_LIMIT,
       );
-
-      let runnerResult;
-      try {
-        runnerResult = await deps.replyRunner({
-          conversation,
-          recentMessages,
-          persona,
-          strategy,
-          inboundMessage: inboundMessageRecord,
-        });
-      } catch {
+      const preparedTurn = await prepareOutboundTurn({
+        conversation,
+        recentMessages,
+        persona,
+        strategy,
+        inboundMessage: inboundMessageRecord,
+        operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
+      });
+      if (!preparedTurn) {
+        if (guidanceToConsume) {
+          await deps.stateStore.releasePendingGuidanceClaimIfMatches(
+            conversation.conversationId,
+            guidanceToConsume,
+          );
+        }
         return;
       }
 
-      // Process runner result.
-      if (runnerResult.state === 'skip') return;
-
-      let replyContent = normalizeText(runnerResult.content);
-      const shouldClose = runnerResult.state === 'end_conversation' || hasFinalByeLine(replyContent);
-      if (shouldClose) {
-        replyContent = ensureFinalByeLine(replyContent);
-      }
-      const replyExtensions: Record<string, unknown> | null = shouldClose
-        ? null
-        : runnerResult.extensions ?? null;
-
-      if (!replyContent) return;
-
-      // Send reply.
-      const outboundReply = await sendReplyMessage(
+      const committedConversation = await commitOutboundTurn({
         selfGlobalMetaId,
         peerGlobalMetaId,
-        replyContent,
-        replyExtensions,
-      );
-      const outboundPinId = outboundReply?.pinId ?? null;
-
-      const outboundRecord: PrivateChatMessage = {
-        conversationId: conversation.conversationId,
-        messageId: outboundPinId || buildMessageId(getNow()),
-        direction: 'outbound',
-        senderGlobalMetaId: selfGlobalMetaId,
-        content: replyContent,
-        messagePinId: outboundPinId,
-        extensions: replyExtensions,
-        timestamp: getNow(),
-      };
-
-      await deps.stateStore.appendMessages([outboundRecord]);
-      await persistA2AConversationMessageBestEffort({
-        paths: deps.paths,
-        local: {
-          globalMetaId: selfGlobalMetaId,
-        },
-        peer: {
-          globalMetaId: peerGlobalMetaId,
-        },
-        message: {
-          messageId: outboundRecord.messageId,
-          direction: 'outgoing',
-          content: outboundRecord.content,
-          pinId: outboundRecord.messagePinId,
-          txid: outboundReply?.txids[0] ?? null,
-          txids: outboundReply?.txids ?? [],
-          chain: outboundReply?.network ?? 'mvc',
-          timestamp: outboundRecord.timestamp,
-        },
+        conversation,
+        content: preparedTurn.content,
+        extensions: preparedTurn.extensions,
+        shouldClose: preparedTurn.shouldClose,
+        guidanceToConsume,
       });
+      if (!committedConversation) return;
 
       rateLimiter.replyTimestamps.push(getNow());
+    },
+    async handleLocalGuidedTurn(peerGlobalMetaId) {
+      const selfGlobalMetaId = await deps.selfGlobalMetaId();
+      if (!selfGlobalMetaId) return;
 
-      conversation = {
-        ...conversation,
-        state: shouldClose ? 'closed' : 'active',
-        lastDirection: 'outbound',
-        updatedAt: getNow(),
-      };
-      await deps.stateStore.upsertConversation(conversation);
+      const normalizedPeerGlobalMetaId = normalizeText(peerGlobalMetaId);
+      if (!normalizedPeerGlobalMetaId) return;
+
+      const conversation = await deps.stateStore.getConversationByPeer(normalizedPeerGlobalMetaId);
+      if (!conversation) return;
+      if (conversation.state !== 'active' && conversation.state !== 'closed') return;
+
+      const strategy = conversation.strategyId
+        ? await deps.strategyStore.getStrategy(conversation.strategyId)
+        : null;
+      const guidanceToConsume = await deps.stateStore.claimPendingGuidance(
+        conversation.conversationId,
+        { now: getNow() },
+      );
+      if (!guidanceToConsume) return;
+      const runnerConversation = conversation.state === 'closed'
+        ? {
+          ...conversation,
+          state: 'active' as const,
+          turnCount: 1,
+        }
+        : {
+          ...conversation,
+          turnCount: conversation.turnCount + 1,
+        };
+      const persona = await loadChatPersona(deps.paths);
+      const recentMessages = await deps.stateStore.getRecentMessages(
+        conversation.conversationId,
+        DEFAULT_RECENT_MESSAGES_LIMIT,
+      );
+      const preparedTurn = await prepareOutboundTurn({
+        conversation: runnerConversation,
+        recentMessages,
+        persona,
+        strategy,
+        inboundMessage: null,
+        operatorGuidanceText: guidanceToConsume.guidanceText,
+      });
+      if (!preparedTurn) {
+        await deps.stateStore.releasePendingGuidanceClaimIfMatches(
+          conversation.conversationId,
+          guidanceToConsume,
+        );
+        return;
+      }
+
+      const committedConversation = await commitOutboundTurn({
+        selfGlobalMetaId,
+        peerGlobalMetaId: normalizedPeerGlobalMetaId,
+        conversation: runnerConversation,
+        content: preparedTurn.content,
+        extensions: preparedTurn.extensions,
+        shouldClose: preparedTurn.shouldClose,
+        guidanceToConsume,
+      });
+      if (!committedConversation) return;
+
+      rateLimiter.replyTimestamps.push(getNow());
     },
   };
 }

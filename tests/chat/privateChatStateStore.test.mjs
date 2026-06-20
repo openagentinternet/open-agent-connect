@@ -231,7 +231,7 @@ test('setPendingGuidance stores one-shot guidance on a conversation', async () =
     pendingGuidanceCreatedAt: null,
   });
 
-  const updated = await store.setPendingGuidance('pc-self-peer', 'bring it back to pricing', 1234);
+  const updated = await store.setPendingGuidance('pc-self-peer', '  bring it back to pricing  ', 1234);
 
   assert.equal(updated?.pendingGuidanceText, 'bring it back to pricing');
   assert.equal(updated?.pendingGuidanceCreatedAt, 1234);
@@ -264,6 +264,8 @@ test('setPendingGuidance replaces older unconsumed guidance', async () => {
 
   assert.equal(replaced?.pendingGuidanceText, 'newer guidance');
   assert.equal(replaced?.pendingGuidanceCreatedAt, 2222);
+  assert.equal(replaced?.pendingGuidanceLeaseId ?? null, null);
+  assert.equal(replaced?.pendingGuidanceLeaseExpiresAt ?? null, null);
 });
 
 test('clearPendingGuidanceIfMatches only clears the matching guidance', async () => {
@@ -295,4 +297,89 @@ test('clearPendingGuidanceIfMatches only clears the matching guidance', async ()
   const cleared = await store.clearPendingGuidanceIfMatches('pc-self-peer', 'newer guidance', 2222);
   assert.equal(cleared?.pendingGuidanceText, null);
   assert.equal(cleared?.pendingGuidanceCreatedAt, null);
+});
+
+test('claimPendingGuidance grants one active lease at a time and release keeps guidance pending', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+
+  await store.upsertConversation({
+    conversationId: 'pc-self-peer',
+    peerGlobalMetaId: 'peer-gm-1',
+    peerName: 'PeerBot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: 1000,
+    updatedAt: 1000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+
+  await store.setPendingGuidance('pc-self-peer', '  guide the next turn  ', 1234);
+  const firstClaim = await store.claimPendingGuidance('pc-self-peer', { now: 2000, leaseMs: 5000 });
+  const blockedClaim = await store.claimPendingGuidance('pc-self-peer', { now: 2001, leaseMs: 5000 });
+
+  assert.equal(firstClaim?.guidanceText, 'guide the next turn');
+  assert.equal(blockedClaim, null);
+
+  const released = await store.releasePendingGuidanceClaimIfMatches('pc-self-peer', firstClaim);
+  assert.equal(released?.pendingGuidanceText, 'guide the next turn');
+  assert.equal(released?.pendingGuidanceCreatedAt, 1234);
+  assert.equal(released?.pendingGuidanceLeaseId ?? null, null);
+  assert.equal(released?.pendingGuidanceLeaseExpiresAt ?? null, null);
+
+  const secondClaim = await store.claimPendingGuidance('pc-self-peer', { now: 2002, leaseMs: 5000 });
+  assert.ok(secondClaim);
+  assert.notEqual(secondClaim.leaseId, firstClaim.leaseId);
+});
+
+test('claimPendingGuidance can replace a stale lease and clearPendingGuidanceIfMatches respects lease ownership', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+
+  await store.upsertConversation({
+    conversationId: 'pc-self-peer',
+    peerGlobalMetaId: 'peer-gm-1',
+    peerName: 'PeerBot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: 1000,
+    updatedAt: 1000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+
+  await store.setPendingGuidance('pc-self-peer', 'guide the next turn', 1234);
+  const firstClaim = await store.claimPendingGuidance('pc-self-peer', { now: 2000, leaseMs: 10 });
+  const secondClaim = await store.claimPendingGuidance('pc-self-peer', { now: 2011, leaseMs: 5000 });
+
+  assert.ok(firstClaim);
+  assert.ok(secondClaim);
+  assert.notEqual(secondClaim.leaseId, firstClaim.leaseId);
+
+  const untouched = await store.clearPendingGuidanceIfMatches(
+    'pc-self-peer',
+    'guide the next turn',
+    1234,
+    firstClaim.leaseId,
+  );
+  assert.equal(untouched?.pendingGuidanceText, 'guide the next turn');
+  assert.equal(untouched?.pendingGuidanceLeaseId, secondClaim.leaseId);
+
+  const cleared = await store.clearPendingGuidanceIfMatches(
+    'pc-self-peer',
+    'guide the next turn',
+    1234,
+    secondClaim.leaseId,
+  );
+  assert.equal(cleared?.pendingGuidanceText, null);
+  assert.equal(cleared?.pendingGuidanceCreatedAt, null);
+  assert.equal(cleared?.pendingGuidanceLeaseId ?? null, null);
+  assert.equal(cleared?.pendingGuidanceLeaseExpiresAt ?? null, null);
 });

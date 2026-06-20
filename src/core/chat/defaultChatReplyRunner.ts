@@ -46,6 +46,14 @@ export function createDefaultChatReplyRunner(): ChatReplyRunner {
   return (input: ChatReplyRunnerInput): ChatReplyRunnerResult => {
     const maxTurns = input.strategy?.maxTurns ?? 30;
     const turnCount = input.conversation.turnCount;
+    const isOperatorGuidedTurn = !input.inboundMessage && Boolean(normalizeText(input.operatorGuidanceText));
+
+    if (isOperatorGuidedTurn) {
+      return {
+        state: 'reply',
+        content: buildMidReply(input),
+      };
+    }
 
     // First turn: send a greeting introducing ourselves.
     if (turnCount <= 1) {
