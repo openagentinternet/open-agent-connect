@@ -1,7 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildMetaAppsPageDefinition = buildMetaAppsPageDefinition;
-function buildMetaAppsPageDefinition() {
+const i18n_1 = require("../../i18n");
+function buildMetaAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     return {
         page: 'metaapps',
         title: 'MetaApps',
@@ -27,10 +28,10 @@ function buildMetaAppsPageDefinition() {
         </section>
       </section>
     `,
-        script: buildMetaAppsPageScript(),
+        script: buildMetaAppsPageScript(i18n.t('action.openInBrowser')),
     };
 }
-function buildMetaAppsPageScript() {
+function buildMetaAppsPageScript(openInBrowserLabel) {
     return `(() => {
   const queryParams = new URLSearchParams(window.location.search);
   const elements = {
@@ -212,6 +213,10 @@ function buildMetaAppsPageScript() {
     return '';
   }
 
+  function browserMetaAppUrl(pinId) {
+    return isMetaAppPinId(pinId) ? '/browser/metaapp/' + encodeURIComponent(String(pinId).trim()) : '';
+  }
+
   function setStatus(message, mode) {
     if (!elements.status) return;
     elements.status.textContent = message;
@@ -268,6 +273,7 @@ function buildMetaAppsPageScript() {
     const download = downloadUrl(record);
     const safeShareTarget = safeUrl(record.metawebUrl) || localDetail;
     const validPinId = isMetaAppPinId(record.pinId) ? String(record.pinId).trim() : '';
+    const browserMetaApp = browserMetaAppUrl(validPinId);
     const commentCommand = validPinId ? 'metabot metaapp comment --pin-id ' + validPinId + ' --comment ""' : '';
     const status = statusLabel(record);
     const latest = latestLabel(record);
@@ -290,6 +296,7 @@ function buildMetaAppsPageScript() {
       + '</header>'
       + (record.intro || record.prompt ? '<p class="metaapps-summary">' + escapeHtml(record.intro || record.prompt) + '</p>' : '')
       + '<div class="metaapps-actions">'
+      + actionLink(browserMetaApp, ${JSON.stringify(openInBrowserLabel)})
       + actionLink(open, 'Open')
       + actionLink(run, 'Run')
       + (localDetail && localDetail !== open && localDetail !== run ? actionLink(localDetail, 'Local detail') : '')

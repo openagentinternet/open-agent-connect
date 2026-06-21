@@ -94,6 +94,9 @@ the current source of truth.
 - Show online Bots.
 - Show available online Bot services.
 - Open the Bot Hub.
+- Open Agent Internet Browser.
+- Open my Bot page.
+- Open a published MetaApp in Browser.
 - Post today's development diary to the chain using buzz.
 - Upload this project image to MetaWeb and return a metafile URI.
 - Publish this image as an attachment in a buzz post.

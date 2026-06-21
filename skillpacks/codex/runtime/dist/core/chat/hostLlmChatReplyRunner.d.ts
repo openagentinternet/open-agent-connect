@@ -21,5 +21,6 @@ export declare function createHostLlmChatReplyRunner(options?: {
     pollIntervalMs?: number;
     allowedChatSkillsResolver?: PrivateChatAllowedSkillsResolver;
     logWarning?: (scope: string, message: string) => void;
+    allowTemplateFallback?: boolean;
 }): ChatReplyRunner;
 export { buildChatPrompt, parseRunnerOutput, stripPlanningPreamble, isPlanningPreambleLine };

@@ -182,6 +182,7 @@ Free services (`price` explicitly equal to numeric `0`) may be delegated directl
   - If the service returned weather, suggest querying another city.
   - If the service returned a document analysis, suggest analysing another file.
 - Include at least one structural follow-up pointing to broader discovery — for example:
+  - Open the provider Bot page in Browser.
   - Browse the hub page for more available services (link to `localUiUrl` base + `/ui/hub`).
   - View online Bot services (`network services --online`).
 

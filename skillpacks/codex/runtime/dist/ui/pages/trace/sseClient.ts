@@ -739,6 +739,19 @@ function avatarImg(src, fallback, cls) {
   return '<img class="' + cls + '" src="' + escHtml(src) + '" alt="" loading="lazy" data-fallback="' + escHtml(fallback) + '" onerror="if(this.src!==this.dataset.fallback)this.src=this.dataset.fallback" />';
 }
 
+function botBrowserPath(globalMetaId) {
+  var normalized = normalizeText(globalMetaId);
+  return normalized ? '/browser/metaid/' + encodeURIComponent(normalized) : '';
+}
+
+function botBrowserAvatar(globalMetaId, src, fallback, cls) {
+  var href = botBrowserPath(globalMetaId);
+  var image = avatarImg(src, fallback, cls);
+  return href
+    ? '<a class="bot-browser-avatar-link" href="' + escHtml(href) + '" target="_blank" rel="noopener noreferrer" aria-label="Open in Browser">' + image + '</a>'
+    : image;
+}
+
 async function resolveProfile(gmid) {
   if (!gmid) return { name: '', avatar: '' };
   const cached = profileCache.get(gmid);
@@ -1062,7 +1075,7 @@ async function renderSessionDetail() {
   const headerHtml =
     '<div class="detail-header">' +
       '<div class="detail-header-participant">' +
-        avatarImg(peerAvatar, getInitialsAvatar(peerName, detail.peerGlobalMetaId), 'participant-avatar') +
+        botBrowserAvatar(detail.peerGlobalMetaId, peerAvatar, getInitialsAvatar(peerName, detail.peerGlobalMetaId), 'participant-avatar') +
         '<div class="participant-info">' +
           '<div class="participant-name">' + escHtml(peerName) + '</div>' +
           '<div class="participant-role">Remote · ' + escHtml(detail.role === 'caller' ? 'Provider' : 'Caller') + '</div>' +
@@ -1082,7 +1095,7 @@ async function renderSessionDetail() {
     '</div>';
 
   const messagesHtml = detail.messages.length
-    ? '<div class="messages-list">' + detail.messages.map(msg => renderMessage(msg, localName, peerName, localAvatar, peerAvatar)).join('') + '</div>'
+    ? '<div class="messages-list">' + detail.messages.map(msg => renderMessage(msg, localName, peerName, localAvatar, peerAvatar, detail.peerGlobalMetaId)).join('') + '</div>'
     : '<div class="messages-empty"><span class="mono">No transcript messages recorded for this session.</span></div>';
   const refundActionHtml = detail.refundActionRequired
     ? '<div class="detail-refund-alert">'
@@ -1282,7 +1295,7 @@ function hydrateMediaPlayback(root) {
   });
 }
 
-function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
+function renderMessage(msg, localName, peerName, localAvatar, peerAvatar, peerGlobalMetaId) {
   if (msg.tone === 'system') {
     return '<div class="msg-system"><span>' + escHtml(msg.content) + '</span></div>';
   }
@@ -1302,6 +1315,9 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   const isLocal = msg.tone === 'local';
   const name = isLocal ? localName : peerName;
   const avatar = isLocal ? localAvatar : peerAvatar;
+  const avatarHtml = isLocal
+    ? avatarImg(avatar, getInitialsAvatar(localName, ''), 'msg-avatar')
+    : botBrowserAvatar(peerGlobalMetaId, avatar, getInitialsAvatar(peerName, ''), 'msg-avatar');
   const structuredMetafiles = normalizeMessageArtifacts(msg.deliveryArtifacts);
   const usingTextMetafiles = structuredMetafiles.length === 0;
   const metafiles = usingTextMetafiles ? extractMetafiles(msg.content) : structuredMetafiles;
@@ -1322,7 +1338,7 @@ function renderMessage(msg, localName, peerName, localAvatar, peerAvatar) {
   }
   const metafileHtml = metafiles.map(renderMetafilePreview).join('');
   return '<div class="msg-row ' + (isLocal ? 'msg-local' : 'msg-peer') + '">' +
-    avatarImg(avatar, isLocal ? getInitialsAvatar(localName, '') : getInitialsAvatar(peerName, ''), 'msg-avatar') +
+    avatarHtml +
     '<div class="msg-body">' +
       '<div class="msg-name">' + escHtml(name) + '</div>' +
       '<div class="msg-bubble ' + (isLocal ? 'bubble-local' : 'bubble-peer') + '">' + (contentHtml || '<span class="muted">(empty)</span>') + '</div>' +

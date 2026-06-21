@@ -1495,6 +1495,17 @@ function createDefaultCliDependencies(context) {
             localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${suffix}`,
         });
     }
+    async function openLocalBrowserPage(input) {
+        const baseUrl = await ensureDaemonBaseUrl(context);
+        const query = new URLSearchParams();
+        if (input.uri)
+            query.set('uri', input.uri);
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return (0, commandResult_1.commandSuccess)({
+            ...(input.uri ? { uri: input.uri } : {}),
+            localUiUrl: `${baseUrl}/browser${suffix}`,
+        });
+    }
     return {
         config: {
             get: async (input) => {
@@ -1567,6 +1578,9 @@ function createDefaultCliDependencies(context) {
         },
         buzz: {
             post: async (input) => requestJson(context, 'POST', '/api/buzz/post', input),
+        },
+        browser: {
+            open: async (input) => openLocalBrowserPage(input),
         },
         chain: {
             write: async (input) => requestJson(context, 'POST', '/api/chain/write', input),
@@ -2588,6 +2602,7 @@ function mergeCliDependencies(context) {
     return {
         config: { ...defaults.config, ...provided.config },
         buzz: { ...defaults.buzz, ...provided.buzz },
+        browser: { ...defaults.browser, ...provided.browser },
         metaapp: { ...defaults.metaapp, ...provided.metaapp },
         chain: { ...defaults.chain, ...provided.chain },
         daemon: { ...defaults.daemon, ...provided.daemon },

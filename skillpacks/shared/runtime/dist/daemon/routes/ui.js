@@ -40,7 +40,7 @@ const PAGE_BUILDERS = {
     'services': app_10.buildServicesPageDefinition,
     'settings': app_11.buildSettingsPageDefinition,
     'loom': () => (0, app_8.buildLoomPageDefinition)(),
-    'metaapps': () => (0, app_9.buildMetaAppsPageDefinition)(),
+    'metaapps': app_9.buildMetaAppsPageDefinition,
 };
 const NAV_ITEMS = [
     { page: 'bot', labelKey: 'nav.botPage' },

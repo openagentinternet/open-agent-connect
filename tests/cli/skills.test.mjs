@@ -192,6 +192,26 @@ test('runCli supports `metabot skills resolve --skill metabot-network-manage --f
   );
 });
 
+test('runCli supports `metabot skills resolve --skill metabot-browser-open --format json`', async () => {
+  const homeDir = createProfileHome('metabot-cli-skills-browser-json-');
+  const result = await runSkillsCli(homeDir, [
+    'skills',
+    'resolve',
+    '--skill',
+    'metabot-browser-open',
+    '--format',
+    'json',
+  ]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.host, 'shared');
+  assert.equal(result.payload.data.contract.skillName, 'metabot-browser-open');
+  assert.equal(result.payload.data.contract.commandTemplate, 'metabot browser open');
+  assert.equal(result.payload.data.contract.scope.localUiOpen, true);
+  assert.equal(result.payload.data.contract.scope.chainWrite, false);
+});
+
 test('runCli no-host json shape keeps top-level host and marks shared-default resolution', async () => {
   const homeDir = createProfileHome('metabot-cli-skills-no-host-json-shape-');
   const result = await runSkillsCli(homeDir, [

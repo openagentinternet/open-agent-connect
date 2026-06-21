@@ -130,6 +130,27 @@ test('unified install guide documents registry-driven bare install and force hos
   assert.doesNotMatch(guide, /For agent platforms outside `Codex`, `Claude Code`, and `OpenClaw`, first use:\s*```bash\s*OAC_HOST=claude-code/s);
 });
 
+test('unified install guide keeps existing first-run prompts and adds Browser prompts directly', async () => {
+  const guide = await readFile(
+    path.join(REPO_ROOT, 'docs', 'install', 'open-agent-connect.md'),
+    'utf8'
+  );
+
+  assert.match(guide, /check current Bot identity/i);
+  assert.match(guide, /list currently online Bots/i);
+  assert.match(guide, /create the first Bot with a user-chosen name/i);
+  assert.match(guide, /discover available Bot services/i);
+  assert.match(guide, /open Bot Hub and show online Bot services/i);
+  assert.match(guide, /open Agent Internet Browser/i);
+  assert.match(guide, /open my Bot page in Browser/i);
+  assert.match(guide, /send the first private hello to one online Bot/i);
+  assert.match(guide, /ask what OAC can do or what capabilities MetaBot provides/i);
+  assert.match(
+    guide,
+    /one clear next action to open Agent Internet Browser or open the current Bot page in Browser/i
+  );
+});
+
 test('uninstall guide defines safe, test cleanup, and danger-zone tiers', async () => {
   const guide = await readFile(
     path.join(REPO_ROOT, 'docs', 'install', 'uninstall-open-agent-connect.md'),
@@ -178,6 +199,8 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Create a Bot named <your chosen name>/);
   assert.match(runbook, /online Bots/i);
   assert.match(runbook, /Bot services/i);
+  assert.match(runbook, /open Agent Internet Browser/i);
+  assert.match(runbook, /open my Bot page in Browser/i);
   assert.match(runbook, /ask what OAC can do/i);
   assert.match(runbook, /full OAC\/MetaBot capability map/i);
   assert.match(runbook, /own words/i);
@@ -194,6 +217,7 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Do not lock prompts to fixed English phrases/i);
   assert.match(runbook, /Prompt wording can vary as long as intent is equivalent/i);
   assert.match(runbook, /if identity already exists, report current name and globalMetaId/i);
+  assert.match(runbook, /one clear next action to open Agent Internet Browser/i);
   assert.match(runbook, /## Welcome Message Shape \(Required\)/);
   assert.match(runbook, /Do not use one fixed canned paragraph/i);
   assert.match(runbook, /what changed for the user after install/i);
@@ -219,6 +243,7 @@ test('host docs thinly wrap the unified install guide and use shared-install lan
     assert.match(content, /check my Bot identity/i);
     assert.match(content, /show me online Bots/i);
     assert.match(content, /open the Bot Hub/i);
+    assert.match(content, /open Agent Internet Browser/i);
     assert.match(content, /metabot identity create --name "<your chosen Bot name>"/);
     assert.doesNotMatch(content, /metabot identity create --name "Alice"/);
   }

@@ -136,6 +136,7 @@ After create, doctor, and who all succeed, tell the user:
 Recommended next actions:
 
 - open the Bot management link to manage and modify the Bot
+- open my Bot page in Browser
 - check the current Bot identity
 - show online Bots
 - show available Bot services

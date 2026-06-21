@@ -69,8 +69,36 @@ const handleConversationRoutes = async (context) => {
     const { req, url, handlers } = context;
     if (url.pathname !== '/api/conversations'
         && url.pathname !== '/api/conversations/messages'
-        && url.pathname !== '/api/conversations/events') {
+        && url.pathname !== '/api/conversations/events'
+        && url.pathname !== '/api/conversations/guidance') {
         return false;
+    }
+    if (url.pathname === '/api/conversations/guidance') {
+        if (req.method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const body = await context.readJsonBody();
+        const local = normalizeText(body.local);
+        if (!local) {
+            context.sendJson(400, (0, commandResult_1.commandFailed)('missing_local', 'local is required.'));
+            return true;
+        }
+        const peer = normalizeText(body.peer);
+        if (!peer) {
+            context.sendJson(400, (0, commandResult_1.commandFailed)('missing_peer', 'peer is required.'));
+            return true;
+        }
+        const guidance = normalizeText(body.guidance);
+        if (!guidance) {
+            context.sendJson(400, (0, commandResult_1.commandFailed)('missing_guidance', 'guidance is required.'));
+            return true;
+        }
+        const result = handlers.conversations?.guidance
+            ? await handlers.conversations.guidance({ local, peer, guidance })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Conversation guidance handler is not configured.');
+        sendCommandResult(context, result);
+        return true;
     }
     if (req.method !== 'GET') {
         context.sendMethodNotAllowed(['GET']);

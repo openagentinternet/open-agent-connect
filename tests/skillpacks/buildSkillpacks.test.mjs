@@ -17,6 +17,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',
+  'metabot-browser-open',
   'metabot-call-remote-service',
   'metabot-chat-privatechat',
   'metabot-omni-reader',
@@ -46,7 +47,7 @@ const EXPECTED_TRACE_WATCH_LINE = '$HOME/.metabot/bin/metabot trace watch --from
 const EXPECTED_TRACE_GET_LINE = '$HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id trace-123';
 const EXPECTED_TRACE_UI_LINE = '$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id trace-123';
 const BARE_METABOT_COMMAND_PATTERN =
-  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution|metaapp)\b/;
+  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution|browser|metaapp)\b/;
 
 function escapeForRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -230,6 +231,21 @@ test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic a
   assert.match(content, /optional `--from <bot-slug>`/);
   assert.match(content, /same language/i);
   assert.match(content, /natural-language examples/i);
+  assert.match(content, /Open Agent Internet Browser/i);
+  assert.match(content, /Open my Bot page/i);
+  assert.match(content, /Open a published MetaApp in Browser/i);
+});
+
+test('buildAgentConnectSkillpacks includes the Browser open workflow skill', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-browser-open'), 'utf8');
+  assert.match(content, /^name:\s*metabot-browser-open$/m);
+  assert.match(content, /Open Agent Internet Browser/i);
+  assert.match(content, /metabot browser open/);
+  assert.match(content, /metaid:\/\//);
+  assert.match(content, /metaapp:\/\//);
+  assert.match(content, /metafile:\/\//);
 });
 
 test('buildAgentConnectSkillpacks includes the Loom wish-to-task publishing workflow skill', async () => {
@@ -268,6 +284,7 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.match(content, /metabot file upload --from <bot-slug> --request-file/i);
   assert.match(content, /metabot chain write --from <bot-slug> --request-file/i);
   assert.match(content, /No Web2 URLs or local filesystem paths/i);
+  assert.match(content, /open the published MetaApp in Browser/i);
 });
 
 test('buildAgentConnectSkillpacks includes the Wiki creator as a self-contained scripted skill', async () => {
@@ -646,6 +663,9 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /same language the human is currently using/i);
   assert.match(content, /Do not lock follow-up prompts to fixed wording/i);
   assert.match(content, /intent is equivalent and triggers the same skills/i);
+  assert.match(content, /open the first Bot page in Browser/i);
+  assert.match(content, /open the selected Bot homepage in Browser/i);
+  assert.match(content, /open the provider Bot page in Browser/i);
   assert.match(content, /## In Scope/);
   assert.match(content, /## Out of Scope/);
   assert.match(content, /## Handoff To/);
@@ -674,6 +694,7 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /user chosen\s+name as part of the onboarding experience/i);
   assert.match(content, /show online Bots/i);
   assert.match(content, /show available Bot services/i);
+  assert.match(content, /open my Bot page in Browser/i);
   assert.match(content, /create a MetaBot/i);
   assert.match(content, /create a Bot/i);
   assert.match(content, /create a bot/i);
@@ -690,6 +711,16 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /## Handoff To/);
   assert.doesNotMatch(content, /PROFILE_SLUG/);
   assert.doesNotMatch(content, /\.metabot\/hot/);
+});
+
+test('buildAgentConnectSkillpacks publishes Browser follow-ups in remote-service and homepage shared skills', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const remoteService = await readFile(sharedSkillFile(outputRoot, 'metabot-call-remote-service'), 'utf8');
+  assert.match(remoteService, /open the provider Bot page in Browser/i);
+
+  const homepageGuide = await readFile(sharedSkillFile(outputRoot, 'metabot-homepage-guide'), 'utf8');
+  assert.match(homepageGuide, /open the homepage MetaApp in Browser/i);
 });
 
 test('buildAgentConnectSkillpacks publishes provider service lifecycle commands in the shared pack', async () => {
@@ -936,4 +967,17 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /do not manually edit `\.runtime\/` files/i);
   assert.doesNotMatch(installRunbook, /metabot identity create --name "Alice"/);
   assert.doesNotMatch(installRunbook, /\.metabot\/hot/);
+});
+
+test('generated host packs keep Bot Hub guidance and add Browser first actions', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  for (const host of HOSTS) {
+    const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
+    assert.match(readme, /check my Bot identity/i);
+    assert.match(readme, /show me online Bots/i);
+    assert.match(readme, /open the Bot Hub and show available Bot services/i);
+    assert.match(readme, /open Agent Internet Browser/i);
+    assert.match(readme, /\$HOME\/\.metabot\/bin\/metabot browser open/i);
+  }
 });

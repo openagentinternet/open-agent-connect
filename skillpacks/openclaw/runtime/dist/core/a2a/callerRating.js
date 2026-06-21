@@ -171,6 +171,8 @@ async function generateBuyerServiceRating(input) {
         lastDirection: 'inbound',
         createdAt: now,
         updatedAt: now,
+        pendingGuidanceText: null,
+        pendingGuidanceCreatedAt: null,
     };
     const recentMessages = [
         {

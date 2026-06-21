@@ -3383,6 +3383,11 @@ test('GET /ui/metaapps gallery script filters gallery-loop links and unsafe comm
   const actionLinks = readMetaAppsActionLinks(validRender.detailHtml);
   assert.equal(actionLinks.find((link) => link.label === 'Open')?.href, metawebUrl);
   assert.equal(actionLinks.find((link) => link.label === 'Run')?.href, metawebUrl);
+  assert.equal(actionLinks.find((link) => link.label === 'Open in Browser')?.href, `/browser/metaapp/${validPinId}`);
+  assert.match(
+    validRender.detailHtml,
+    new RegExp(`<a class="metaapps-action" href="/browser/metaapp/${validPinId}" target="_blank" rel="noreferrer">Open in Browser</a>`),
+  );
   assert.ok(actionLinks.every((link) => link.href !== galleryUrl));
   assert.doesNotMatch(validRender.detailHtml, /href="\/ui\/metaapps\?pinId=/);
   assert.match(validRender.detailHtml, /Copy comment command/);
@@ -3404,6 +3409,20 @@ test('GET /ui/metaapps gallery script filters gallery-loop links and unsafe comm
 
   assert.doesNotMatch(invalidRender.detailHtml, /Copy comment command/);
   assert.doesNotMatch(invalidRender.detailHtml, /metabot metaapp comment --pin-id/);
+  assert.doesNotMatch(invalidRender.detailHtml, /Open in Browser/);
+  assert.doesNotMatch(invalidRender.detailHtml, /href="\/browser\/metaapp\//);
+});
+
+test('GET /ui/metaapps supports zh-CN Browser action copy in the built page script', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/ui/metaapps?lang=zh-CN`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /<html lang="zh-CN">/);
+  assert.match(html, /actionLink\(browserMetaApp, "在浏览器中打开"\)/);
 });
 
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {

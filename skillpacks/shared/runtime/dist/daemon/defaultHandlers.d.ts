@@ -129,5 +129,6 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
     providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
     testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
+    conversationGuidanceReplyRunner?: ChatReplyRunner;
 }): MetabotDaemonHttpHandlers;
 export {};

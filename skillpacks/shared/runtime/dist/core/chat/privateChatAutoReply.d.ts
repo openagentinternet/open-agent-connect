@@ -1,4 +1,4 @@
-import type { PrivateChatStateStore } from './privateChatStateStore';
+import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './privateChatStateStore';
 import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
 import type { Signer } from '../signing/signer';
@@ -15,5 +15,8 @@ export interface PrivateChatAutoReplyDependencies {
 }
 export interface PrivateChatAutoReplyOrchestrator {
     handleInboundMessage(message: PrivateChatInboundMessage): Promise<void>;
+    handleLocalGuidedTurn(peerGlobalMetaId: string, options?: {
+        guidanceToConsume?: PrivateChatPendingGuidanceClaim | null;
+    }): Promise<void>;
 }
 export declare function createPrivateChatAutoReplyOrchestrator(deps: PrivateChatAutoReplyDependencies, config: PrivateChatAutoReplyConfig): PrivateChatAutoReplyOrchestrator;

@@ -209,6 +209,18 @@
         justify-items: end;
         white-space: nowrap;
       }
+      .bot-browser-avatar-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
+        border-radius: 999px;
+        text-decoration: none;
+      }
+      .bot-browser-avatar-link:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
       .avatar,
       .conversation-row-avatar,
       .msg-avatar,
@@ -223,6 +235,9 @@
       .conversation-row-avatar {
         width: 34px;
         height: 34px;
+      }
+      img[data-bot-browser-open] {
+        cursor: pointer;
       }
       .conversation-thread {
         min-width: 0;

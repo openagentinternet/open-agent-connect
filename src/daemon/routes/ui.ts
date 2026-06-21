@@ -41,7 +41,7 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'services': buildServicesPageDefinition,
   'settings': buildSettingsPageDefinition,
   'loom': () => buildLoomPageDefinition(),
-  'metaapps': () => buildMetaAppsPageDefinition(),
+  'metaapps': buildMetaAppsPageDefinition,
 };
 
 const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [

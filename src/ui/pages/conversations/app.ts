@@ -263,10 +263,39 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       '</svg>'
     );
   };
-  const avatarImg = (src, label, cls) => {
+  const avatarImg = (src, label, cls, attrs) => {
     const fallback = getInitialsAvatar(label, src);
     const resolved = normalizeAvatarUrl(src) || fallback;
-    return '<img class="' + escapeHtml(cls) + '" src="' + escapeHtml(resolved) + '" alt="" loading="lazy" data-avatar-fallback="' + escapeHtml(fallback) + '" />';
+    return '<img class="' + escapeHtml(cls) + '" src="' + escapeHtml(resolved) + '" alt="" loading="lazy" data-avatar-fallback="' + escapeHtml(fallback) + '"' + (attrs || '') + ' />';
+  };
+  const botBrowserPath = (globalMetaId) => {
+    const normalized = normalizeText(globalMetaId);
+    return normalized ? '/browser/metaid/' + encodeURIComponent(normalized) : '';
+  };
+  const openBotBrowserWindow = (globalMetaId) => {
+    const href = botBrowserPath(globalMetaId);
+    if (!href || typeof window === 'undefined' || !window || typeof window.open !== 'function') return false;
+    window.open(href, '_blank', 'noopener,noreferrer');
+    return true;
+  };
+  const botBrowserAvatarLink = (globalMetaId, src, label, cls) => {
+    const href = botBrowserPath(globalMetaId);
+    const image = avatarImg(src, label, cls);
+    return href
+      ? '<a class="bot-browser-avatar-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer" aria-label="' + escapeHtml(uiText('action.openInBrowser', 'Open in Browser')) + '">' + image + '</a>'
+      : image;
+  };
+  const handleBotBrowserAvatarClick = (event) => {
+    const target = event && event.target && typeof event.target.closest === 'function'
+      ? event.target.closest('[data-bot-browser-open]')
+      : null;
+    const globalMetaId = target && typeof target.getAttribute === 'function'
+      ? normalizeText(target.getAttribute('data-bot-browser-open'))
+      : '';
+    if (!globalMetaId) return false;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    return openBotBrowserWindow(globalMetaId);
   };
   const hydrateAvatarFallbacks = (root) => {
     (root || document).querySelectorAll('img[data-avatar-fallback]:not([data-avatar-bound])').forEach((img) => {
@@ -386,14 +415,22 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       button.className = 'conversation-row';
       button.dataset.selected = conversation.isSelected ? 'true' : 'false';
       button.dataset.peerGlobalMetaId = conversation.peerGlobalMetaId;
-      button.innerHTML = avatarImg(conversation.peerAvatar, conversation.peerLabel, 'conversation-row-avatar') +
+      button.innerHTML = avatarImg(
+        conversation.peerAvatar,
+        conversation.peerLabel,
+        'conversation-row-avatar',
+        ' data-bot-browser-open="' + escapeHtml(conversation.peerGlobalMetaId) + '"',
+      ) +
         '<div class="conversation-row-main">' +
           '<div class="conversation-row-identity"><strong>' + escapeHtml(conversation.peerLabel) + '</strong></div>' +
           '<p>' + escapeHtml(conversation.latestText) + '</p>' +
           '<div class="conversation-kind-list">' + conversation.kinds.map((kind) => '<span>' + escapeHtml(localizeKnownText(kind)) + '</span>').join('') + '</div>' +
         '</div>' +
         '<div class="conversation-row-meta"><span>' + escapeHtml(conversation.latestAtLabel) + '</span><span>' + escapeHtml(messageCountLabel(conversation.messageCountLabel)) + '</span></div>';
-      button.addEventListener('click', () => selectPeer(conversation.peerGlobalMetaId));
+      button.addEventListener('click', (event) => {
+        if (handleBotBrowserAvatarClick(event)) return;
+        selectPeer(conversation.peerGlobalMetaId);
+      });
       elements.list.appendChild(button);
     });
   };
@@ -569,7 +606,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const localLabel = selected.localBotLabel || (local && local.label) || uiText('conversations.localBotRole', 'Local Bot');
     const localAvatar = (local && local.avatar) || selected.localAvatar;
     elements.detailHeader.innerHTML = '<div class="conversation-thread-participants">' +
-      '<div class="thread-participant">' + avatarImg(selected.peerAvatar, selected.peerLabel, 'thread-avatar') + '<div><strong>' + escapeHtml(selected.peerLabel) + '</strong><span>' + escapeHtml(uiText('conversations.remoteBotRole', 'Remote Bot')) + '</span></div></div>' +
+      '<div class="thread-participant">' + botBrowserAvatarLink(selected.peerGlobalMetaId, selected.peerAvatar, selected.peerLabel, 'thread-avatar') + '<div><strong>' + escapeHtml(selected.peerLabel) + '</strong><span>' + escapeHtml(uiText('conversations.remoteBotRole', 'Remote Bot')) + '</span></div></div>' +
       '<span class="conversation-id-chip"><span class="conversation-id-text">id: ' + escapeHtml(selected.conversationIdPreview || selected.conversationId) + '</span>' + copyButton(selected.conversationId, uiText('conversations.copyConversationId', 'Copy conversation id'), 'copy-conversation-id', uiText('conversations.conversationIdCopied', 'Conversation ID copied'), ' data-conversation-id-copy') + '</span>' +
       '<div class="thread-participant thread-participant-local"><div><strong>' + escapeHtml(localLabel) + '</strong><span>' + escapeHtml(uiText('conversations.localBotRole', 'Local Bot')) + '</span></div>' + avatarImg(localAvatar, localLabel, 'thread-avatar') + '</div>' +
     '</div>';
@@ -585,6 +622,9 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       : selected.peerAvatar;
     const senderName = message.senderLabel || fallbackName;
     const senderAvatar = message.senderAvatar || fallbackAvatar;
+    const avatarHtml = isLocal
+      ? avatarImg(senderAvatar, senderName, 'msg-avatar')
+      : botBrowserAvatarLink(selected.peerGlobalMetaId, senderAvatar, senderName, 'msg-avatar');
     const contentHtml = message.isMarkdown ? renderMarkdown(message.content) : renderPlainText(message.content);
     const txidHtml = message.txid
       ? '<span class="msg-txid"><span class="msg-txid-text" data-message-txid-preview>txid: ' + escapeHtml(message.txidPreview) + '</span>' + copyButton(message.txid, uiText('conversations.copyTxid', 'Copy txid'), 'copy-txid', uiText('conversations.txidCopied', 'TxID copied')) + '</span>'
@@ -592,7 +632,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const timeHtml = '<span class="msg-time">' + escapeHtml(message.timestampLabel) + '</span>';
     const metaHtml = isLocal ? txidHtml + timeHtml : timeHtml + txidHtml;
     return '<article class="msg-row ' + (isLocal ? 'msg-local' : 'msg-peer') + '" data-message-direction="' + (isLocal ? 'local' : 'peer') + '">' +
-      avatarImg(senderAvatar, senderName, 'msg-avatar') +
+      avatarHtml +
       '<div class="msg-body">' +
         '<div class="msg-name">' + escapeHtml(senderName) + '</div>' +
         '<div class="msg-bubble ' + (isLocal ? 'bubble-local' : 'bubble-peer') + '">' + contentHtml + '</div>' +

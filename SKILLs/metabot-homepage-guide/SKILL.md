@@ -203,6 +203,7 @@ After publish or update succeeds, report returned fields when present:
 - `firstPinId`
 - `metawebUrl`
 - `localUiUrl`
+- a natural-language follow-up to open the homepage MetaApp in Browser
 
 ## Validation Checklist
 
