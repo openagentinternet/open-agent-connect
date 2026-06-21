@@ -1382,6 +1382,31 @@ test('browser open --uri uses the Browser MetaID deep-link route', async (t) => 
   assert.notEqual(browserUrl.pathname, '/ui/browser');
 });
 
+test('browser open --uri uses Browser MetaApp and MetaFile deep-link routes', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const pinId = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0';
+  const cases = [
+    [`metaapp://${pinId}`, `/browser/metaapp/${pinId}`],
+    [`metafile://${pinId}`, `/browser/metafile/${pinId}`],
+  ];
+
+  for (const [uri, pathname] of cases) {
+    const opened = await runCommand(homeDir, ['browser', 'open', '--uri', uri]);
+
+    assert.equal(opened.exitCode, 0);
+    assert.equal(opened.payload.ok, true);
+    const browserUrl = new URL(opened.payload.data.localUiUrl);
+    assert.equal(browserUrl.pathname, pathname);
+    assert.equal(browserUrl.search, '');
+    assert.notEqual(browserUrl.pathname, '/ui/browser');
+  }
+});
+
 test('browser open preserves surrounding `--uri` whitespace while still using the dedicated browser route', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
