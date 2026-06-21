@@ -2,10 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runSystemCommand = runSystemCommand;
 const commandResult_1 = require("../../core/contracts/commandResult");
+const types_1 = require("../../core/system/types");
 const helpers_1 = require("./helpers");
-const SUPPORTED_HOSTS = ['codex', 'claude-code', 'openclaw'];
 function isSupportedHost(value) {
-    return SUPPORTED_HOSTS.includes(value);
+    return types_1.SUPPORTED_SYSTEM_HOSTS.includes(value);
 }
 function parseKnownFlags(args, valueFlags, booleanFlags) {
     const valueFlagSet = new Set(valueFlags);
@@ -47,7 +47,7 @@ async function runSystemCommand(args, context) {
         }
         const host = (0, helpers_1.readFlagValue)(args, '--host');
         if (host && !isSupportedHost(host)) {
-            return (0, commandResult_1.commandFailed)('invalid_argument', `Unsupported --host value: ${host}. Legacy release-pack update supports only: ${SUPPORTED_HOSTS.join(', ')}. Omit --host for the npm-first registry-driven update path.`);
+            return (0, commandResult_1.commandFailed)('invalid_argument', `Unsupported --host value: ${host}. Legacy release-pack update supports only: ${types_1.SUPPORTED_SYSTEM_HOSTS.join(', ')}. Omit --host for the npm-first registry-driven update path.`);
         }
         const version = (0, helpers_1.readFlagValue)(args, '--target-version') || undefined;
         return handler({

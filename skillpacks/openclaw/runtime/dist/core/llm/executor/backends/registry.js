@@ -14,6 +14,7 @@ const kiro_1 = require("./kiro");
 const openclaw_1 = require("./openclaw");
 const opencode_1 = require("./opencode");
 const pi_1 = require("./pi");
+const zcode_1 = require("./zcode");
 const FACTORY_BY_EXECUTOR_KIND = {
     'claude-stream-json': claude_1.claudeBackendFactory,
     'codex-app-server': codex_1.codexBackendFactory,
@@ -27,6 +28,7 @@ const FACTORY_BY_EXECUTOR_KIND = {
     'acp-kimi': kimi_1.kimiBackendFactory,
     'acp-kiro': kiro_1.kiroBackendFactory,
     'codebuddy-stream-json': codebuddy_1.codeBuddyBackendFactory,
+    'zcode-json': zcode_1.zcodeBackendFactory,
 };
 function createRegistryBackendFactories() {
     return Object.fromEntries((0, platformRegistry_1.getRuntimePlatforms)().map((platform) => [

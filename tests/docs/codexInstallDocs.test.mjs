@@ -109,7 +109,8 @@ test('unified install guide documents registry-driven bare install and force hos
   assert.match(guide, /oac install --host openclaw/);
   assert.match(guide, /advanced force-bind/i);
   assert.match(guide, /runtime discovery and `\/ui\/bot` logos come from `platformRegistry\.ts`/i);
-  assert.match(guide, /Runtime discovery requires a real CLI executable, not just a desktop app bundle/i);
+  assert.match(guide, /Runtime discovery requires a real CLI executable/i);
+  assert.match(guide, /known app-bundled CLI paths/i);
   assert.match(guide, /It is `healthy` only after the backend returns non-empty\s+text to a short readiness prompt/i);
   assert.match(guide, /Primary\/Fallback provider pickers\s+only list `healthy` runtimes/i);
   assert.match(guide, /`OAC_<PROVIDER>_PATH`/);

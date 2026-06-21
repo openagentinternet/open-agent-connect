@@ -44,3 +44,22 @@ Before running this checklist, complete the shared install flow from `docs/insta
 - confirm `${OPENCLAW_HOME:-$HOME/.openclaw}/skills/metabot-call-remote-service` is a host skill link
 - start a fresh OpenClaw session if the current one does not pick up new skills
 - verify one no-host resolve call: `metabot skills resolve --skill metabot-network-directory --format markdown`
+
+## ZCode
+
+- run `metabot host bind-skills --host zcode`
+- confirm `$HOME/.zcode/skills/metabot-network-manage` is a host skill link
+- confirm `$HOME/.zcode/skills/metabot-chat-privatechat` is a host skill link
+- confirm `$HOME/.zcode/skills/metabot-call-remote-service` is a host skill link
+- start a fresh ZCode session if the current one does not pick up new skills
+- verify one no-host resolve call: `metabot skills resolve --skill metabot-network-directory --format markdown`
+
+## WorkBuddy
+
+- run `metabot host bind-skills --host workbuddy`
+- confirm `$HOME/.workbuddy/skills/metabot-network-manage` is a host skill link
+- confirm `$HOME/.workbuddy/skills/metabot-chat-privatechat` is a host skill link
+- confirm `$HOME/.workbuddy/skills/metabot-call-remote-service` is a host skill link
+- confirm `$HOME/.codebuddy/skills/metabot-network-manage` is also a host skill link for CodeBuddy-compatible WorkBuddy discovery
+- start a fresh WorkBuddy session if the current one does not pick up new skills
+- verify one no-host resolve call: `metabot skills resolve --skill metabot-network-directory --format markdown`

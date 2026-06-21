@@ -50,7 +50,7 @@ const STRICT_ISOLATION_USER_HOME_FILES: Partial<Record<string, string[]>> = {
   'claude-code': ['.claude.json'],
 };
 
-const STRICT_ISOLATION_SOURCE_HOME_PROVIDERS = new Set<string>(['cursor']);
+const STRICT_ISOLATION_SOURCE_HOME_PROVIDERS = new Set<string>(['cursor', 'codebuddy', 'zcode', 'workbuddy']);
 
 function createSessionId(): string {
   return `llm_${randomUUID()}`;

@@ -1,4 +1,4 @@
-export type SystemHost = 'codex' | 'claude-code' | 'openclaw';
+export type SystemHost = 'codex' | 'claude-code' | 'openclaw' | 'zcode' | 'workbuddy';
 export interface SystemUpdateInput {
     systemHomeDir: string;
     host?: SystemHost;

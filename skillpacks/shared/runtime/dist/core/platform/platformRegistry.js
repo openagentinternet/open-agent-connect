@@ -308,6 +308,58 @@ exports.PLATFORM_DEFINITIONS = [
             multicaReferencePath: 'agent/codebuddy.go',
         },
     },
+    {
+        id: 'zcode',
+        displayName: 'ZCode',
+        logoPath: '/ui/assets/platforms/generic.svg',
+        runtime: {
+            binaryNames: ['zcode'],
+            versionArgs: ['--version'],
+            authEnv: ['ZCODE_API_KEY', 'Z_AI_API_KEY', 'ZAI_API_KEY', 'BIGMODEL_API_KEY'],
+            capabilities: DEFAULT_CAPABILITIES,
+            defaultExecutablePaths: ['/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'],
+        },
+        skills: {
+            roots: [
+                { id: 'zcode-home', kind: 'global', path: '~/.zcode/skills', autoBind: 'when-parent-exists' },
+                { id: 'zcode-project', kind: 'project', path: '.zcode/skills', autoBind: 'manual' },
+            ],
+        },
+        executor: {
+            kind: 'zcode-json',
+            backendFactoryExport: 'zcodeBackendFactory',
+            launchCommand: 'zcode --prompt <prompt> --json --mode yolo --no-browser',
+            multicaReferencePath: 'agent/zcode.go',
+        },
+    },
+    {
+        id: 'workbuddy',
+        displayName: 'WorkBuddy',
+        logoPath: '/ui/assets/platforms/generic.svg',
+        runtime: {
+            binaryNames: ['codebuddy', 'cbc'],
+            versionArgs: ['--version'],
+            authEnv: ['WORKBUDDY_API_KEY'],
+            capabilities: DEFAULT_CAPABILITIES,
+            envAliases: [],
+            pathSearchBinaryNames: [],
+            defaultExecutablePaths: ['/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy'],
+        },
+        skills: {
+            roots: [
+                { id: 'workbuddy-home', kind: 'global', path: '~/.workbuddy/skills', autoBind: 'when-parent-exists' },
+                { id: 'workbuddy-codebuddy-home', kind: 'global', path: '~/.codebuddy/skills', autoBind: 'when-parent-exists' },
+                { id: 'workbuddy-project', kind: 'project', path: '.workbuddy/skills', autoBind: 'manual' },
+                { id: 'workbuddy-codebuddy-project', kind: 'project', path: '.codebuddy/skills', autoBind: 'manual' },
+            ],
+        },
+        executor: {
+            kind: 'codebuddy-stream-json',
+            backendFactoryExport: 'codeBuddyBackendFactory',
+            launchCommand: 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions',
+            multicaReferencePath: 'agent/workbuddy.go',
+        },
+    },
 ];
 exports.SUPPORTED_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS.map((platform) => platform.id);
 exports.RUNTIME_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS

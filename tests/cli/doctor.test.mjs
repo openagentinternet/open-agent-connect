@@ -12,6 +12,25 @@ const {
 } = require('../../dist/core/contracts/commandResult.js');
 const pkg = require('../../package.json');
 
+const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile']);
+
+function resolveHarnessBrowserPath(uri) {
+  if (!uri) {
+    return '/browser';
+  }
+
+  const match = uri.trim() === uri
+    ? /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)$/iu.exec(uri)
+    : null;
+  const scheme = match?.[1]?.toLowerCase();
+  const resourceId = match?.[2];
+  if (scheme && resourceId && BROWSER_DEEP_LINK_SCHEMES.has(scheme)) {
+    return `/browser/${scheme}/${encodeURIComponent(resourceId)}`;
+  }
+
+  return `/browser?uri=${encodeURIComponent(uri)}`;
+}
+
 function createHarness(options = {}) {
   const homeDir = options.homeDir ?? '/tmp/metabot-cli-doctor-test-home';
   const stdout = [];
@@ -46,9 +65,7 @@ function createHarness(options = {}) {
           open: async (input) => {
             calls.browser.push(input);
             return commandSuccess({
-              localUiUrl: input.uri
-                ? `/browser?uri=${encodeURIComponent(input.uri)}`
-                : '/browser',
+              localUiUrl: resolveHarnessBrowserPath(input.uri),
             });
           },
         },
@@ -353,7 +370,7 @@ test('runCli dispatches `metabot browser open` and returns the browser url', asy
   });
 });
 
-test('runCli dispatches `metabot browser open --uri` and encodes the resource uri', async () => {
+test('runCli dispatches `metabot browser open --uri` and returns the deep-link route', async () => {
   const harness = createHarness();
   const exitCode = await runCli(['browser', 'open', '--uri', 'metaid://idq1alice'], harness.context);
 
@@ -363,9 +380,26 @@ test('runCli dispatches `metabot browser open --uri` and encodes the resource ur
     ok: true,
     state: 'success',
     data: {
-      localUiUrl: '/browser?uri=metaid%3A%2F%2Fidq1alice',
+      localUiUrl: '/browser/metaid/idq1alice',
     },
   });
+});
+
+test('runCli dispatches MetaApp and MetaFile browser resources as deep-link routes', async () => {
+  const pinId = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0';
+  const cases = [
+    [`metaapp://${pinId}`, `/browser/metaapp/${pinId}`],
+    [`metafile://${pinId}`, `/browser/metafile/${pinId}`],
+  ];
+
+  for (const [uri, localUiUrl] of cases) {
+    const harness = createHarness();
+    const exitCode = await runCli(['browser', 'open', '--uri', uri], harness.context);
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(harness.calls.browser, [{ uri }]);
+    assert.equal(parseLastJson(harness.stdout).data.localUiUrl, localUiUrl);
+  }
 });
 
 test('runCli preserves the raw `--uri` token value when opening the browser', async () => {

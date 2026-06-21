@@ -1,0 +1,10 @@
+export const assert: any;
+export const toArray: any;
+export const zero2: any;
+export const toHex: any;
+export const encode: any;
+export function getNAF(num: any, w: any, bits: any): any[];
+export function getJSF(k1: any, k2: any): never[][];
+export function cachedProperty(obj: any, name: any, computer: any): void;
+export function parseBytes(bytes: any): any;
+export function intFromLE(bytes: any): any;

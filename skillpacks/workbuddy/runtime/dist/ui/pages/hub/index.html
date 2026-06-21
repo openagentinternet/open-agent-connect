@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      /* Hub-specific: service table cell styles */
+      .svc-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+      .svc-desc { font-size: 12px; color: var(--muted); max-width: 340px; line-height: 1.45; }
+      .svc-provider-name { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+      .svc-provider-gmid { font-size: 11px; font-family: var(--mono); color: var(--dim); word-break: break-all; max-width: 180px; }
+      .svc-price { font-family: var(--mono); font-size: 12px; color: var(--amber); white-space: nowrap; }
+      .svc-skill {
+        font-family: var(--mono); font-size: 11px; color: var(--muted);
+        background: var(--surface2); border: 1px solid var(--border2);
+        border-radius: 4px; padding: 2px 7px; display: inline-block; white-space: nowrap;
+      }
+      .last-seen { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+      .section-updated { margin-left: auto; font-size: 11px; font-family: var(--mono); color: var(--dim); }
+      .svc-action { white-space: nowrap; }
+      .svc-get-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 40;
+      }
+      .svc-get-modal-backdrop[hidden] { display: none; }
+      .svc-get-modal {
+        width: min(460px, calc(100vw - 32px));
+        background: var(--surface);
+        border: 1px solid var(--border2);
+        border-radius: var(--radius);
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+        padding: 14px;
+      }
+      .svc-get-title {
+        font-size: 12px;
+        color: var(--text);
+        margin-bottom: 10px;
+      }
+      .svc-get-row { display: flex; gap: 8px; align-items: center; }
+      .svc-get-prompt {
+        flex: 1;
+        min-height: 56px;
+        max-height: 120px;
+        resize: vertical;
+        background: var(--surface2);
+        border: 1px solid var(--border2);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 12px;
+        padding: 8px 10px;
+      }
+      @media (max-width: 768px) {
+        .data-table th:nth-child(4),
+        .data-table td:nth-child(4),
+        .data-table th:nth-child(5),
+        .data-table td:nth-child(5),
+        .data-table th:nth-child(7),
+        .data-table td:nth-child(7) { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">Service Hub</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+
+      <main class="content">
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-label">Online Services</div>
+            <div class="stat-value green" data-online-count>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Listed</div>
+            <div class="stat-value" data-total-count>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Top Service</div>
+            <div class="stat-value sm" data-top-service>—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Directory Source</div>
+            <div class="stat-value sm" data-directory-mode>—</div>
+          </div>
+        </div>
+
+        <div class="section-header">
+          <span class="section-title">LIVE SERVICES</span>
+          <span class="section-badge" data-online-badge>0 online</span>
+          <span class="section-updated" data-directory-updated></span>
+          <button class="btn btn-sm" id="refresh-btn">↻ refresh</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Provider</th>
+                <th>Price</th>
+                <th>Skill</th>
+                <th>Status</th>
+                <th>Last Seen</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody data-service-list>
+              <tr><td colspan="7" class="table-empty"><strong>Loading…</strong>fetching online services</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Agent Hub — Yellow Pages Directory -->
+        <div data-service-directory data-directory-empty hidden style="display:none"></div>
+      </main>
+    </div>
+    <div class="svc-get-modal-backdrop" data-svc-get-modal-backdrop hidden>
+      <div class="svc-get-modal" data-svc-get-modal>
+        <div class="svc-get-title">Please copy the following prompt into your agent chat window:</div>
+        <div class="svc-get-row">
+          <textarea class="svc-get-prompt" data-svc-get-prompt readonly></textarea>
+          <button class="btn btn-sm" type="button" data-svc-copy-btn>Copy</button>
+          <button class="btn btn-sm" type="button" data-svc-close-btn>Close</button>
+        </div>
+      </div>
+    </div>
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

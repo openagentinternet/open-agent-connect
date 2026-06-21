@@ -2209,9 +2209,9 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['system', 'update'],
     summary: 'Update Open Agent Connect. Defaults to npm-first package update and registry-driven oac install.',
-    usage: 'metabot system update [--host <codex|claude-code|openclaw>] [--target-version <tag>] [--dry-run]',
+    usage: 'metabot system update [--host <codex|claude-code|openclaw|zcode|workbuddy>] [--target-version <tag>] [--dry-run]',
     optionalFlags: [
-      { flag: '--host', value: '<codex|claude-code|openclaw>', description: 'Legacy release-pack update target. Omit for npm-first 11-platform registry update.' },
+      { flag: '--host', value: '<codex|claude-code|openclaw|zcode|workbuddy>', description: 'Legacy release-pack update target. Omit for npm-first 14-platform registry update.' },
       { flag: '--target-version', value: '<tag>', description: 'Optional explicit version. npm mode accepts tags such as latest or v0.2.7.' },
       { flag: '--dry-run', description: 'Print the update plan without downloading, installing, or rebinding.' },
       HELP_JSON_FLAG,
@@ -2230,7 +2230,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Without --host, runs npm i -g open-agent-connect@<version> and then oac install so registry roots for all supported platforms are rebound.',
-      'With --host, uses the legacy release-pack updater for codex, claude-code, or openclaw only.',
+      'With --host, uses the legacy release-pack updater for codex, claude-code, openclaw, zcode, or workbuddy only.',
       'Fails with download_failed, install_artifact_invalid, or install_failed when the update execution cannot complete.',
     ],
     examples: [

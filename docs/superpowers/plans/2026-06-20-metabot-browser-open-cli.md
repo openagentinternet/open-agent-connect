@@ -36,6 +36,21 @@
 Update `tests/cli/doctor.test.mjs` so the harness can inject a Browser dependency and assert the new command surface directly:
 
 ```js
+const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile']);
+
+function resolveHarnessBrowserPath(uri) {
+  if (!uri) return '/browser';
+  const match = uri.trim() === uri
+    ? /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)$/iu.exec(uri)
+    : null;
+  const scheme = match?.[1]?.toLowerCase();
+  const resourceId = match?.[2];
+  if (scheme && resourceId && BROWSER_DEEP_LINK_SCHEMES.has(scheme)) {
+    return `/browser/${scheme}/${encodeURIComponent(resourceId)}`;
+  }
+  return `/browser?uri=${encodeURIComponent(uri)}`;
+}
+
 function createHarness(options = {}) {
   const homeDir = options.homeDir ?? '/tmp/metabot-cli-doctor-test-home';
   const stdout = [];
@@ -70,12 +85,7 @@ function createHarness(options = {}) {
           open: async (input) => {
             calls.browser.push(input);
             return commandSuccess({
-              localUiUrl: (() => {
-                const query = new URLSearchParams();
-                if (input.uri) query.set('uri', input.uri);
-                const suffix = query.size ? `?${query.toString()}` : '';
-                return `/browser${suffix}`;
-              })(),
+              localUiUrl: resolveHarnessBrowserPath(input.uri),
             });
           },
         },
@@ -187,7 +197,7 @@ test('runCli dispatches `metabot browser open` and returns the local Browser URL
   });
 });
 
-test('runCli dispatches `metabot browser open --uri` and returns the encoded Browser URL', async () => {
+test('runCli dispatches `metabot browser open --uri` and returns the deep-link route', async () => {
   const harness = createHarness();
   const exitCode = await runCli(['browser', 'open', '--uri', 'metaid://idq1alice'], harness.context);
 
@@ -197,7 +207,7 @@ test('runCli dispatches `metabot browser open --uri` and returns the encoded Bro
     ok: true,
     state: 'success',
     data: {
-      localUiUrl: '/browser?uri=metaid%3A%2F%2Fidq1alice',
+      localUiUrl: '/browser/metaid/idq1alice',
     },
   });
 });
@@ -338,11 +348,9 @@ async function openLocalBrowser(input: {
   uri?: string;
 }): Promise<MetabotCommandResult<unknown>> {
   const baseUrl = await ensureDaemonBaseUrl(context);
-  const query = new URLSearchParams();
-  if (input.uri) query.set('uri', input.uri);
-  const suffix = query.size ? `?${query.toString()}` : '';
+  const localPath = input.uri ? resolveLocalBrowserPath(input.uri) : '/browser';
   return commandSuccess({
-    localUiUrl: `${baseUrl}/browser${suffix}`,
+    localUiUrl: `${baseUrl}${localPath}`,
   });
 }
 ```
@@ -398,7 +406,7 @@ Run:
 npm run build && node --test tests/cli/doctor.test.mjs tests/cli/runtime.test.mjs
 ```
 
-Expected: PASS. The Browser dispatch tests should return `/browser` and `/browser?uri=...`, and the runtime tests should prove the default dependency path stays on `/browser`, not `/ui/browser`.
+Expected: PASS. The Browser dispatch tests should return `/browser` and `/browser/<scheme>/<resource-id>` for canonical Browser resource URIs, and the runtime tests should prove the default dependency path stays on `/browser`, not `/ui/browser`.
 
 - [ ] **Step 5: Commit the Browser command plumbing**
 

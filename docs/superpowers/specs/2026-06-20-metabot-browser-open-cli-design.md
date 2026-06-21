@@ -63,8 +63,9 @@ metabot browser open --uri 'metafile://<pinId>'
 `metabot browser open --uri <resource-uri>`
 
 - opens the Browser shell with an initial Browser resource URI
-- returns a `localUiUrl` pointing at `/browser?uri=<encoded>`
-- accepts the URI as opaque user input; the CLI does not validate Browser URI schemes in v1
+- returns a canonical `localUiUrl` at `/browser/<scheme>/<resource-id>` for clean `metaid://`, `metaapp://`, and `metafile://` URIs
+- returns `/browser?uri=<encoded>` only for non-canonical or unsupported URI values so the Browser shell can surface the parse/resolve result directly
+- accepts the URI as user input; the CLI only recognizes the supported Browser schemes for path deep links in v1
 
 ### Flag Naming
 
@@ -78,7 +79,7 @@ Reason:
 
 ## URI Handling Rules
 
-The CLI accepts the `--uri` value exactly as passed by the user and forwards it through URL query encoding.
+The CLI accepts the `--uri` value exactly as passed by the user. It maps clean Browser resource URIs to path deep links when the value has no surrounding whitespace, uses one of the supported schemes, and contains only a resource id after `://`.
 
 Examples:
 
@@ -86,9 +87,15 @@ Examples:
 - `metaapp://8544d8...i0`
 - `metafile://8544d8...i0`
 
-The presence of `:`, `/`, or other URI punctuation is not a problem because the final `localUiUrl` is built through `URLSearchParams`, which encodes the query value safely.
+These become:
 
-V1 intentionally does not normalize case, trim internal whitespace, or reject unknown schemes. The CLI only trims surrounding whitespace from the flag value before deciding whether the flag is present.
+- `/browser/metaid/idq1alice`
+- `/browser/metaapp/8544d8...i0`
+- `/browser/metafile/8544d8...i0`
+
+Values that do not match this canonical shape fall back to `/browser?uri=<encoded>`. The Browser shell then owns parse and resolve errors instead of silently redirecting to a default Bot page.
+
+V1 intentionally does not normalize case, trim internal whitespace, or reject unknown schemes before forwarding them. The CLI only trims surrounding whitespace from the flag value before deciding whether the flag is present.
 
 ## Compatibility Decision
 
@@ -130,7 +137,8 @@ The Browser opener should:
 
 - ensure the daemon base URL the same way other local UI entrypoints do;
 - return `${baseUrl}/browser` when `uri` is absent;
-- return `${baseUrl}/browser?uri=${encoded}` when `uri` is present.
+- return `${baseUrl}/browser/<scheme>/<resource-id>` for canonical `metaid://`, `metaapp://`, and `metafile://` resource URIs;
+- return `${baseUrl}/browser?uri=${encoded}` for non-canonical or unsupported URI values.
 
 The returned payload should follow the same machine-first command envelope style already used by other CLI commands:
 
@@ -139,7 +147,7 @@ The returned payload should follow the same machine-first command envelope style
   "ok": true,
   "state": "success",
   "data": {
-    "localUiUrl": "http://127.0.0.1:24885/browser?uri=metaid%3A%2F%2Fidq1alice"
+    "localUiUrl": "http://127.0.0.1:24885/browser/metaid/idq1alice"
   }
 }
 ```
@@ -183,16 +191,18 @@ Do not add Browser-specific URI validation errors in this change.
 Add focused tests that prove:
 
 1. `runCli(['browser', 'open'])` dispatches to the new Browser dependency and returns `/browser`
-2. `runCli(['browser', 'open', '--uri', 'metaid://idq1alice'])` forwards the raw URI and returns `/browser?uri=metaid%3A%2F%2Fidq1alice`
-3. unknown Browser subcommands fail cleanly
+2. `runCli(['browser', 'open', '--uri', 'metaid://idq1alice'])` forwards the raw URI and returns `/browser/metaid/idq1alice`
+3. `runCli(['browser', 'open', '--uri', 'metaapp://<pinId>'])` and `metafile://<pinId>` return `/browser/metaapp/<pinId>` and `/browser/metafile/<pinId>`
+4. unknown Browser subcommands fail cleanly
 
 ### Runtime URL Builder Tests
 
 Add or update tests around the default CLI dependency implementation to prove:
 
 1. Browser open without `uri` returns `${baseUrl}/browser`
-2. Browser open with `uri` returns `${baseUrl}/browser?uri=<encoded>`
-3. Browser open does not route through `/ui/browser`
+2. Browser open with canonical Browser resource URIs returns `${baseUrl}/browser/<scheme>/<resource-id>`
+3. Browser open with non-canonical URI values falls back to `${baseUrl}/browser?uri=<encoded>`
+4. Browser open does not route through `/ui/browser`
 
 ### Help Tests
 
@@ -226,7 +236,7 @@ Potential future work, intentionally excluded from this change:
 - `metabot browser settings ...`
 - `metabot browser cache ...`
 - scheme-aware convenience commands
-- direct CLI support for `/browser/metaid/<id>` style deep links
+- additional Browser resource schemes beyond `metaid`, `metaapp`, and `metafile`
 - deprecating or removing `/ui/browser`
 
 Keeping v1 narrow reduces risk and keeps the command boundary obvious.

@@ -11,6 +11,7 @@ import { kiroBackendFactory } from './kiro';
 import { openClawBackendFactory } from './openclaw';
 import { opencodeBackendFactory } from './opencode';
 import { piBackendFactory } from './pi';
+import { zcodeBackendFactory } from './zcode';
 import type { LlmBackendFactory } from './backend';
 
 const FACTORY_BY_EXECUTOR_KIND: Record<PlatformExecutorKind, LlmBackendFactory> = {
@@ -26,6 +27,7 @@ const FACTORY_BY_EXECUTOR_KIND: Record<PlatformExecutorKind, LlmBackendFactory> 
   'acp-kimi': kimiBackendFactory,
   'acp-kiro': kiroBackendFactory,
   'codebuddy-stream-json': codeBuddyBackendFactory,
+  'zcode-json': zcodeBackendFactory,
 };
 
 export function createRegistryBackendFactories(): Record<string, LlmBackendFactory> {

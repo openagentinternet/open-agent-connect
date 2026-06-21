@@ -123,29 +123,25 @@ async function resolveExecutablesViaLoginShell(names, env = process.env) {
 function normalizeEnvKey(value) {
     return value.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase();
 }
-function providerPathEnvNames(provider, platform) {
+function providerEnvAliases(provider, platform) {
     const aliases = new Set();
     aliases.add(normalizeEnvKey(provider));
-    for (const binaryName of platform.runtime.binaryNames) {
+    for (const binaryName of platform.runtime.envAliases ?? platform.runtime.binaryNames) {
         aliases.add(normalizeEnvKey(binaryName));
     }
     if (provider === 'claude-code')
         aliases.add('CLAUDE');
-    return [...aliases].flatMap((alias) => [
+    return [...aliases];
+}
+function providerPathEnvNames(provider, platform) {
+    return providerEnvAliases(provider, platform).flatMap((alias) => [
         `OAC_${alias}_PATH`,
         `METABOT_${alias}_PATH`,
         `OPEN_AGENT_CONNECT_${alias}_PATH`,
     ]);
 }
 function providerModelEnvNames(provider, platform) {
-    const aliases = new Set();
-    aliases.add(normalizeEnvKey(provider));
-    for (const binaryName of platform.runtime.binaryNames) {
-        aliases.add(normalizeEnvKey(binaryName));
-    }
-    if (provider === 'claude-code')
-        aliases.add('CLAUDE');
-    return [...aliases].flatMap((alias) => [
+    return providerEnvAliases(provider, platform).flatMap((alias) => [
         `OAC_${alias}_MODEL`,
         `METABOT_${alias}_MODEL`,
         `OPEN_AGENT_CONNECT_${alias}_MODEL`,
@@ -159,7 +155,10 @@ function providerModelFromEnv(provider, platform, env) {
     }
     return undefined;
 }
-async function executableCandidatesForProvider(provider, platform, binaryName, pathDirs, env, shellResolvedExecutables) {
+function providerPathSearchBinaryNames(platform) {
+    return platform.runtime.pathSearchBinaryNames ?? platform.runtime.binaryNames;
+}
+async function executableCandidatesForProvider(provider, platform, pathDirs, env, shellResolvedExecutables) {
     const candidates = [];
     const seen = new Set();
     const add = (candidate) => {
@@ -169,13 +168,30 @@ async function executableCandidatesForProvider(provider, platform, binaryName, p
         seen.add(trimmed);
         candidates.push(trimmed);
     };
+    const addExecutableIfPresent = async (candidate) => {
+        const trimmed = candidate?.trim();
+        if (!trimmed || seen.has(trimmed))
+            return;
+        try {
+            await node_fs_1.promises.access(trimmed, node_fs_1.promises.constants.X_OK);
+            add(trimmed);
+        }
+        catch {
+            // App-bundled defaults are optional and should not create unavailable runtimes when absent.
+        }
+    };
     for (const envName of providerPathEnvNames(provider, platform)) {
         add(env[envName]);
     }
-    for (const candidate of await findExecutablesInPath(binaryName, pathDirs)) {
-        add(candidate);
+    for (const binaryName of providerPathSearchBinaryNames(platform)) {
+        for (const candidate of await findExecutablesInPath(binaryName, pathDirs)) {
+            add(candidate);
+        }
+        add(shellResolvedExecutables?.[binaryName]);
     }
-    add(shellResolvedExecutables?.[binaryName]);
+    for (const candidate of platform.runtime.defaultExecutablePaths ?? []) {
+        await addExecutableIfPresent(candidate);
+    }
     return candidates;
 }
 async function readExecutableVersion(binaryPath, versionArgs = ['--version'], timeoutMs = 5_000, env = process.env) {
@@ -279,12 +295,12 @@ function readinessSucceeded(result) {
 function readinessTimeoutForProvider(provider, override) {
     if (override !== undefined)
         return override;
-    return ['codex', 'cursor', 'claude-code'].includes(provider)
+    return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
         ? SLOW_START_READINESS_TIMEOUT_MS
         : DEFAULT_READINESS_TIMEOUT_MS;
 }
 function readinessSemanticInactivityTimeoutForProvider(provider, readinessTimeoutMs) {
-    return ['codex', 'cursor', 'claude-code'].includes(provider)
+    return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
         ? readinessTimeoutMs
         : Math.min(readinessTimeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS);
 }
@@ -353,40 +369,38 @@ async function discoverProvider(provider, pathDirs, options) {
     const env = options?.env ?? process.env;
     const readinessProbe = options?.readinessProbe ?? defaultRuntimeReadinessProbe;
     const readinessTimeoutMs = readinessTimeoutForProvider(provider, options?.readinessTimeoutMs);
-    for (const binaryName of platform.runtime.binaryNames) {
-        const binaryPaths = await executableCandidatesForProvider(provider, platform, binaryName, pathDirs, env, options?.shellResolvedExecutables);
-        for (const binaryPath of binaryPaths) {
-            const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], 5_000, env);
-            if (versionProbe.ok) {
-                const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
-                const readiness = await readinessProbe({
-                    runtime,
-                    env,
-                    timeoutMs: readinessTimeoutMs,
-                    cwd: options?.cwd,
-                });
-                const checkedAt = (options?.now ?? (() => new Date().toISOString()))();
-                if (readinessSucceeded(readiness)) {
-                    return {
-                        ...runtime,
-                        health: 'healthy',
-                        healthReason: undefined,
-                        healthCheckedAt: checkedAt,
-                        updatedAt: checkedAt,
-                    };
-                }
-                firstDetectedRuntime ??= {
+    const binaryPaths = await executableCandidatesForProvider(provider, platform, pathDirs, env, options?.shellResolvedExecutables);
+    for (const binaryPath of binaryPaths) {
+        const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], 5_000, env);
+        if (versionProbe.ok) {
+            const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
+            const readiness = await readinessProbe({
+                runtime,
+                env,
+                timeoutMs: readinessTimeoutMs,
+                cwd: options?.cwd,
+            });
+            const checkedAt = (options?.now ?? (() => new Date().toISOString()))();
+            if (readinessSucceeded(readiness)) {
+                return {
                     ...runtime,
-                    health: 'detected',
-                    healthReason: readiness.message ?? 'Readiness probe did not return a usable response.',
+                    health: 'healthy',
+                    healthReason: undefined,
                     healthCheckedAt: checkedAt,
                     updatedAt: checkedAt,
                 };
-                continue;
             }
-            if (!firstUnavailableCandidate) {
-                firstUnavailableCandidate = { binaryPath, versionProbe };
-            }
+            firstDetectedRuntime ??= {
+                ...runtime,
+                health: 'detected',
+                healthReason: readiness.message ?? 'Readiness probe did not return a usable response.',
+                healthCheckedAt: checkedAt,
+                updatedAt: checkedAt,
+            };
+            continue;
+        }
+        if (!firstUnavailableCandidate) {
+            firstUnavailableCandidate = { binaryPath, versionProbe };
         }
     }
     if (firstDetectedRuntime)

@@ -12,7 +12,9 @@ export type PlatformId =
   | 'cursor'
   | 'kimi'
   | 'kiro'
-  | 'codebuddy';
+  | 'codebuddy'
+  | 'zcode'
+  | 'workbuddy';
 
 export type RuntimePlatformId = PlatformId;
 
@@ -28,7 +30,8 @@ export type PlatformExecutorKind =
   | 'cursor-stream-json'
   | 'acp-kimi'
   | 'acp-kiro'
-  | 'codebuddy-stream-json';
+  | 'codebuddy-stream-json'
+  | 'zcode-json';
 
 export interface PlatformDefinition {
   id: PlatformId;
@@ -39,6 +42,9 @@ export interface PlatformDefinition {
     versionArgs: string[];
     authEnv: string[];
     capabilities: string[];
+    envAliases?: string[];
+    pathSearchBinaryNames?: string[];
+    defaultExecutablePaths?: string[];
   };
   skills: {
     roots: PlatformSkillRoot[];
@@ -354,6 +360,58 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       backendFactoryExport: 'codeBuddyBackendFactory',
       launchCommand: 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions',
       multicaReferencePath: 'agent/codebuddy.go',
+    },
+  },
+  {
+    id: 'zcode',
+    displayName: 'ZCode',
+    logoPath: '/ui/assets/platforms/generic.svg',
+    runtime: {
+      binaryNames: ['zcode'],
+      versionArgs: ['--version'],
+      authEnv: ['ZCODE_API_KEY', 'Z_AI_API_KEY', 'ZAI_API_KEY', 'BIGMODEL_API_KEY'],
+      capabilities: DEFAULT_CAPABILITIES,
+      defaultExecutablePaths: ['/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'],
+    },
+    skills: {
+      roots: [
+        { id: 'zcode-home', kind: 'global', path: '~/.zcode/skills', autoBind: 'when-parent-exists' },
+        { id: 'zcode-project', kind: 'project', path: '.zcode/skills', autoBind: 'manual' },
+      ],
+    },
+    executor: {
+      kind: 'zcode-json',
+      backendFactoryExport: 'zcodeBackendFactory',
+      launchCommand: 'zcode --prompt <prompt> --json --mode yolo --no-browser',
+      multicaReferencePath: 'agent/zcode.go',
+    },
+  },
+  {
+    id: 'workbuddy',
+    displayName: 'WorkBuddy',
+    logoPath: '/ui/assets/platforms/generic.svg',
+    runtime: {
+      binaryNames: ['codebuddy', 'cbc'],
+      versionArgs: ['--version'],
+      authEnv: ['WORKBUDDY_API_KEY'],
+      capabilities: DEFAULT_CAPABILITIES,
+      envAliases: [],
+      pathSearchBinaryNames: [],
+      defaultExecutablePaths: ['/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy'],
+    },
+    skills: {
+      roots: [
+        { id: 'workbuddy-home', kind: 'global', path: '~/.workbuddy/skills', autoBind: 'when-parent-exists' },
+        { id: 'workbuddy-codebuddy-home', kind: 'global', path: '~/.codebuddy/skills', autoBind: 'when-parent-exists' },
+        { id: 'workbuddy-project', kind: 'project', path: '.workbuddy/skills', autoBind: 'manual' },
+        { id: 'workbuddy-codebuddy-project', kind: 'project', path: '.codebuddy/skills', autoBind: 'manual' },
+      ],
+    },
+    executor: {
+      kind: 'codebuddy-stream-json',
+      backendFactoryExport: 'codeBuddyBackendFactory',
+      launchCommand: 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions',
+      multicaReferencePath: 'agent/workbuddy.go',
     },
   },
 ];
