@@ -3281,6 +3281,10 @@ test('GET /ui/metaapps gallery script filters gallery-loop links and unsafe comm
   assert.equal(actionLinks.find((link) => link.label === 'Open')?.href, metawebUrl);
   assert.equal(actionLinks.find((link) => link.label === 'Run')?.href, metawebUrl);
   assert.equal(actionLinks.find((link) => link.label === 'Open in Browser')?.href, `/browser/metaapp/${validPinId}`);
+  assert.match(
+    validRender.detailHtml,
+    new RegExp(`<a class="metaapps-action" href="/browser/metaapp/${validPinId}" target="_blank" rel="noreferrer">Open in Browser</a>`),
+  );
   assert.ok(actionLinks.every((link) => link.href !== galleryUrl));
   assert.doesNotMatch(validRender.detailHtml, /href="\/ui\/metaapps\?pinId=/);
   assert.match(validRender.detailHtml, /Copy comment command/);

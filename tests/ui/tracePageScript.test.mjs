@@ -666,6 +666,14 @@ test('trace page header renders remote on the left, local on the right, avatars,
   assert.match(detail.innerHTML, /aria-label="Copy trace id"/);
 });
 
+test('trace page links only remote Bot avatars to Browser Bot Pages in a new window', async () => {
+  const { detail } = await runTraceScriptWithUrl('?traceId=trace-weather-1&sessionId=session-weather-1');
+
+  const peerHref = '/browser/metaid/idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz';
+  assert.match(detail.innerHTML, new RegExp(`href="${peerHref}"[^>]*target="_blank"`));
+  assert.doesNotMatch(detail.innerHTML, /href="\/browser\/metaid\/idq-local"/);
+});
+
 test('trace page prefers latest profile avatars over stale or placeholder trace avatars', async () => {
   const latestLocalAvatar = '98a8137e6cc4b4352332faa7a7dd3a48b528eafd182035c15dea746b0e3590bdi0';
   const staleLocalAvatar = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0';
