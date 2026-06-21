@@ -1365,7 +1365,7 @@ test('browser open returns the dedicated browser url instead of a ui route', asy
   assert.notEqual(browserUrl.pathname, '/ui/browser');
 });
 
-test('browser open --uri encodes the resource uri on the dedicated browser route', async (t) => {
+test('browser open --uri uses the Browser MetaID deep-link route', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
@@ -1377,8 +1377,8 @@ test('browser open --uri encodes the resource uri on the dedicated browser route
   assert.equal(opened.exitCode, 0);
   assert.equal(opened.payload.ok, true);
   const browserUrl = new URL(opened.payload.data.localUiUrl);
-  assert.equal(browserUrl.pathname, '/browser');
-  assert.equal(browserUrl.searchParams.get('uri'), 'metaid://idq1alice');
+  assert.equal(browserUrl.pathname, '/browser/metaid/idq1alice');
+  assert.equal(browserUrl.search, '');
   assert.notEqual(browserUrl.pathname, '/ui/browser');
 });
 

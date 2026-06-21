@@ -635,6 +635,21 @@ function resolveLocalUiPath(page) {
     }
     return `/ui/${page}`;
 }
+const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile']);
+function resolveLocalBrowserPath(uri) {
+    const trimmedUri = uri.trim();
+    const match = trimmedUri === uri
+        ? /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)$/iu.exec(uri)
+        : null;
+    const scheme = match?.[1]?.toLowerCase();
+    const resourceId = match?.[2];
+    if (scheme && resourceId && BROWSER_DEEP_LINK_SCHEMES.has(scheme)) {
+        return `/browser/${scheme}/${encodeURIComponent(resourceId)}`;
+    }
+    const query = new URLSearchParams();
+    query.set('uri', uri);
+    return `/browser?${query.toString()}`;
+}
 async function sleep(ms) {
     await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1497,13 +1512,12 @@ function createDefaultCliDependencies(context) {
     }
     async function openLocalBrowserPage(input) {
         const baseUrl = await ensureDaemonBaseUrl(context);
-        const query = new URLSearchParams();
-        if (input.uri)
-            query.set('uri', input.uri);
-        const suffix = query.size ? `?${query.toString()}` : '';
+        const browserPath = input.uri
+            ? resolveLocalBrowserPath(input.uri)
+            : '/browser';
         return (0, commandResult_1.commandSuccess)({
             ...(input.uri ? { uri: input.uri } : {}),
-            localUiUrl: `${baseUrl}/browser${suffix}`,
+            localUiUrl: `${baseUrl}${browserPath}`,
         });
     }
     return {
