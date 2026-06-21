@@ -133,7 +133,8 @@ test('bot page template uses an icon-only online indicator and copy buttons in t
   assert.match(template, /@keyframes bot-create-chain-flow/);
   assert.match(template, /@keyframes bot-create-chain-pulse/);
   assert.match(template, /\.create-chain-modal\s*\{/);
-  assert.match(template, /\.detail-panel\s*\{[^}]*max-width:\s*800px;[^}]*margin:\s*0 auto;/s);
+  assert.match(template, /\.bot-workspace\s*\{[^}]*max-width:\s*1280px;[^}]*margin:\s*16px auto 24px;/s);
+  assert.match(template, /\.detail-panel\s*\{[^}]*flex:\s*1 1 auto;[^}]*max-width:\s*none;/s);
   assert.match(template, /\.tab-bar\s*\{[^}]*overflow-x:\s*auto;/s);
   assert.doesNotMatch(template, /data-live-indicator[^>]*>Live by default<\/span>/);
   assert.doesNotMatch(template, /data-copy-bot-uri[^>]*data-i18n-key="bot\.copy">Copy<\/button>/);
