@@ -154,14 +154,18 @@ function normalizeEnvKey(value: string): string {
   return value.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase();
 }
 
-function providerPathEnvNames(provider: LlmProvider, platform: RuntimePlatformDefinition): string[] {
+function providerEnvAliases(provider: LlmProvider, platform: RuntimePlatformDefinition): string[] {
   const aliases = new Set<string>();
   aliases.add(normalizeEnvKey(provider));
-  for (const binaryName of platform.runtime.binaryNames) {
+  for (const binaryName of platform.runtime.envAliases ?? platform.runtime.binaryNames) {
     aliases.add(normalizeEnvKey(binaryName));
   }
   if (provider === 'claude-code') aliases.add('CLAUDE');
-  return [...aliases].flatMap((alias) => [
+  return [...aliases];
+}
+
+function providerPathEnvNames(provider: LlmProvider, platform: RuntimePlatformDefinition): string[] {
+  return providerEnvAliases(provider, platform).flatMap((alias) => [
     `OAC_${alias}_PATH`,
     `METABOT_${alias}_PATH`,
     `OPEN_AGENT_CONNECT_${alias}_PATH`,
@@ -169,13 +173,7 @@ function providerPathEnvNames(provider: LlmProvider, platform: RuntimePlatformDe
 }
 
 function providerModelEnvNames(provider: LlmProvider, platform: RuntimePlatformDefinition): string[] {
-  const aliases = new Set<string>();
-  aliases.add(normalizeEnvKey(provider));
-  for (const binaryName of platform.runtime.binaryNames) {
-    aliases.add(normalizeEnvKey(binaryName));
-  }
-  if (provider === 'claude-code') aliases.add('CLAUDE');
-  return [...aliases].flatMap((alias) => [
+  return providerEnvAliases(provider, platform).flatMap((alias) => [
     `OAC_${alias}_MODEL`,
     `METABOT_${alias}_MODEL`,
     `OPEN_AGENT_CONNECT_${alias}_MODEL`,
@@ -190,10 +188,13 @@ function providerModelFromEnv(provider: LlmProvider, platform: RuntimePlatformDe
   return undefined;
 }
 
+function providerPathSearchBinaryNames(platform: RuntimePlatformDefinition): string[] {
+  return platform.runtime.pathSearchBinaryNames ?? platform.runtime.binaryNames;
+}
+
 async function executableCandidatesForProvider(
   provider: LlmProvider,
   platform: RuntimePlatformDefinition,
-  binaryName: string,
   pathDirs: string[],
   env: NodeJS.ProcessEnv,
   shellResolvedExecutables?: Record<string, string>,
@@ -216,13 +217,16 @@ async function executableCandidatesForProvider(
       // App-bundled defaults are optional and should not create unavailable runtimes when absent.
     }
   };
+
   for (const envName of providerPathEnvNames(provider, platform)) {
     add(env[envName]);
   }
-  for (const candidate of await findExecutablesInPath(binaryName, pathDirs)) {
-    add(candidate);
+  for (const binaryName of providerPathSearchBinaryNames(platform)) {
+    for (const candidate of await findExecutablesInPath(binaryName, pathDirs)) {
+      add(candidate);
+    }
+    add(shellResolvedExecutables?.[binaryName]);
   }
-  add(shellResolvedExecutables?.[binaryName]);
   for (const candidate of platform.runtime.defaultExecutablePaths ?? []) {
     await addExecutableIfPresent(candidate);
   }
@@ -455,52 +459,49 @@ export async function discoverProvider(
   const env = options?.env ?? process.env;
   const readinessProbe = options?.readinessProbe ?? defaultRuntimeReadinessProbe;
   const readinessTimeoutMs = readinessTimeoutForProvider(provider, options?.readinessTimeoutMs);
-  for (const binaryName of platform.runtime.binaryNames) {
-    const binaryPaths = await executableCandidatesForProvider(
-      provider,
-      platform,
-      binaryName,
-      pathDirs,
+  const binaryPaths = await executableCandidatesForProvider(
+    provider,
+    platform,
+    pathDirs,
+    env,
+    options?.shellResolvedExecutables,
+  );
+  for (const binaryPath of binaryPaths) {
+    const versionProbe = await probeExecutableVersion(
+      binaryPath,
+      platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
+      5_000,
       env,
-      options?.shellResolvedExecutables,
     );
-    for (const binaryPath of binaryPaths) {
-      const versionProbe = await probeExecutableVersion(
-        binaryPath,
-        platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
-        5_000,
+    if (versionProbe.ok) {
+      const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
+      const readiness = await readinessProbe({
+        runtime,
         env,
-      );
-      if (versionProbe.ok) {
-        const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
-        const readiness = await readinessProbe({
-          runtime,
-          env,
-          timeoutMs: readinessTimeoutMs,
-          cwd: options?.cwd,
-        });
-        const checkedAt = (options?.now ?? (() => new Date().toISOString()))();
-        if (readinessSucceeded(readiness)) {
-          return {
-            ...runtime,
-            health: 'healthy',
-            healthReason: undefined,
-            healthCheckedAt: checkedAt,
-            updatedAt: checkedAt,
-          };
-        }
-        firstDetectedRuntime ??= {
+        timeoutMs: readinessTimeoutMs,
+        cwd: options?.cwd,
+      });
+      const checkedAt = (options?.now ?? (() => new Date().toISOString()))();
+      if (readinessSucceeded(readiness)) {
+        return {
           ...runtime,
-          health: 'detected',
-          healthReason: readiness.message ?? 'Readiness probe did not return a usable response.',
+          health: 'healthy',
+          healthReason: undefined,
           healthCheckedAt: checkedAt,
           updatedAt: checkedAt,
         };
-        continue;
       }
-      if (!firstUnavailableCandidate) {
-        firstUnavailableCandidate = { binaryPath, versionProbe };
-      }
+      firstDetectedRuntime ??= {
+        ...runtime,
+        health: 'detected',
+        healthReason: readiness.message ?? 'Readiness probe did not return a usable response.',
+        healthCheckedAt: checkedAt,
+        updatedAt: checkedAt,
+      };
+      continue;
+    }
+    if (!firstUnavailableCandidate) {
+      firstUnavailableCandidate = { binaryPath, versionProbe };
     }
   }
 

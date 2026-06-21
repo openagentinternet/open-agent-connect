@@ -339,8 +339,10 @@ exports.PLATFORM_DEFINITIONS = [
         runtime: {
             binaryNames: ['codebuddy', 'cbc'],
             versionArgs: ['--version'],
-            authEnv: ['WORKBUDDY_API_KEY', 'CODEBUDDY_API_KEY'],
+            authEnv: ['WORKBUDDY_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            envAliases: [],
+            pathSearchBinaryNames: [],
             defaultExecutablePaths: ['/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy'],
         },
         skills: {

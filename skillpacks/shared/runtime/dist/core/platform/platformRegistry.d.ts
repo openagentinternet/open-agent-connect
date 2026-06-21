@@ -10,6 +10,8 @@ export interface PlatformDefinition {
         versionArgs: string[];
         authEnv: string[];
         capabilities: string[];
+        envAliases?: string[];
+        pathSearchBinaryNames?: string[];
         defaultExecutablePaths?: string[];
     };
     skills: {

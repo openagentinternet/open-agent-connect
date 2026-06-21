@@ -118,7 +118,11 @@ test('platform registry defines managed runtime metadata and install skill roots
   assert.deepEqual(getRuntimePlatforms().map((platform) => platform.id), SUPPORTED_LLM_PROVIDERS);
   assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'codebuddy').executor.backendFactoryExport, 'codeBuddyBackendFactory');
   assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'zcode').executor.backendFactoryExport, 'zcodeBackendFactory');
-  assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'workbuddy').executor.backendFactoryExport, 'codeBuddyBackendFactory');
+  const workbuddy = PLATFORM_DEFINITIONS.find((platform) => platform.id === 'workbuddy');
+  assert.equal(workbuddy.executor.backendFactoryExport, 'codeBuddyBackendFactory');
+  assert.deepEqual(workbuddy.runtime.authEnv, ['WORKBUDDY_API_KEY']);
+  assert.deepEqual(workbuddy.runtime.envAliases, []);
+  assert.deepEqual(workbuddy.runtime.pathSearchBinaryNames, []);
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'codex'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'codebuddy' && root.path === '~/.codebuddy/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'zcode' && root.path === '~/.zcode/skills'));
@@ -128,89 +132,89 @@ test('platform registry defines managed runtime metadata and install skill roots
 });
 
 test('runtime discovery uses expanded provider metadata and environment auth checks', async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-discovery-'));
-  const binDir = path.join(tempRoot, 'bin');
-  await mkdir(binDir, { recursive: true });
-  const copilotPath = path.join(binDir, 'copilot');
-  const cursorPath = path.join(binDir, 'cursor-agent');
-  const geminiPath = path.join(binDir, 'gemini');
-  const kiroPath = path.join(binDir, 'kiro-cli');
-  const opencodePath = path.join(binDir, 'opencode');
-  const codeBuddyPath = path.join(binDir, 'codebuddy');
-  const zcodePath = path.join(binDir, 'zcode');
-  await writeFile(copilotPath, '#!/bin/sh\necho "copilot 1.2.3"\n', 'utf8');
-  await writeFile(cursorPath, '#!/bin/sh\necho "cursor-agent 3.4.5"\n', 'utf8');
-  await writeFile(geminiPath, '#!/bin/sh\necho "gemini 2.3.4"\n', 'utf8');
-  await writeFile(kiroPath, '#!/bin/sh\necho "kiro-cli 5.6.7"\n', 'utf8');
-  await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
-  await writeFile(codeBuddyPath, '#!/bin/sh\necho "CodeBuddy 2.0.0"\n', 'utf8');
-  await writeFile(zcodePath, '#!/bin/sh\necho "0.14.8"\n', 'utf8');
-  await chmod(copilotPath, 0o755);
-  await chmod(cursorPath, 0o755);
-  await chmod(geminiPath, 0o755);
-  await chmod(kiroPath, 0o755);
-  await chmod(opencodePath, 0o755);
-  await chmod(codeBuddyPath, 0o755);
-  await chmod(zcodePath, 0o755);
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-discovery-'));
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const copilotPath = path.join(binDir, 'copilot');
+    const cursorPath = path.join(binDir, 'cursor-agent');
+    const geminiPath = path.join(binDir, 'gemini');
+    const kiroPath = path.join(binDir, 'kiro-cli');
+    const opencodePath = path.join(binDir, 'opencode');
+    const codeBuddyPath = path.join(binDir, 'codebuddy');
+    const zcodePath = path.join(binDir, 'zcode');
+    await writeFile(copilotPath, '#!/bin/sh\necho "copilot 1.2.3"\n', 'utf8');
+    await writeFile(cursorPath, '#!/bin/sh\necho "cursor-agent 3.4.5"\n', 'utf8');
+    await writeFile(geminiPath, '#!/bin/sh\necho "gemini 2.3.4"\n', 'utf8');
+    await writeFile(kiroPath, '#!/bin/sh\necho "kiro-cli 5.6.7"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await writeFile(codeBuddyPath, '#!/bin/sh\necho "CodeBuddy 2.0.0"\n', 'utf8');
+    await writeFile(zcodePath, '#!/bin/sh\necho "0.14.8"\n', 'utf8');
+    await chmod(copilotPath, 0o755);
+    await chmod(cursorPath, 0o755);
+    await chmod(geminiPath, 0o755);
+    await chmod(kiroPath, 0o755);
+    await chmod(opencodePath, 0o755);
+    await chmod(codeBuddyPath, 0o755);
+    await chmod(zcodePath, 0o755);
 
-  const result = await discoverLlmRuntimes({
-    env: {
-      PATH: binDir,
-      GEMINI_API_KEY: 'test-gemini-key',
-      GITHUB_TOKEN: 'test-github-token',
-      OPENAI_API_KEY: 'test-openai-key',
-    },
-    now: () => '2026-05-06T00:00:00.000Z',
-    readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    const result = await discoverLlmRuntimes({
+      env: {
+        PATH: binDir,
+        GEMINI_API_KEY: 'test-gemini-key',
+        GITHUB_TOKEN: 'test-github-token',
+        OPENAI_API_KEY: 'test-openai-key',
+      },
+      now: () => '2026-05-06T00:00:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(
+      result.runtimes.map((runtime) => runtime.provider),
+      ['copilot', 'opencode', 'gemini', 'cursor', 'kiro', 'codebuddy', 'zcode'],
+    );
+
+    for (const runtime of result.runtimes) {
+      assert.ok(runtime.displayName);
+      assert.match(runtime.logoPath, /^\/ui\/assets\/platforms\/.+\.svg$/);
+      assert.ok(Array.isArray(runtime.capabilities));
+      assert.ok(runtime.capabilities.length >= 1);
+      assert.ok(runtime.version);
+      assert.ok(['unknown', 'authenticated', 'unauthenticated'].includes(runtime.authState));
+    }
+
+    const gemini = result.runtimes.find((runtime) => runtime.provider === 'gemini');
+    assert.equal(gemini.displayName, 'Gemini CLI');
+    assert.equal(gemini.binaryPath, geminiPath);
+    assert.equal(gemini.version, '2.3.4');
+    assert.equal(gemini.authState, 'authenticated');
+    assert.equal(gemini.health, 'healthy');
+
+    const opencode = result.runtimes.find((runtime) => runtime.provider === 'opencode');
+    assert.equal(opencode.displayName, 'OpenCode');
+    assert.equal(opencode.authState, 'authenticated');
+
+    const copilot = result.runtimes.find((runtime) => runtime.provider === 'copilot');
+    assert.equal(copilot.binaryPath, copilotPath);
+    assert.equal(copilot.authState, 'authenticated');
+
+    const cursor = result.runtimes.find((runtime) => runtime.provider === 'cursor');
+    assert.equal(cursor.binaryPath, cursorPath);
+
+    const kiro = result.runtimes.find((runtime) => runtime.provider === 'kiro');
+    assert.equal(kiro.binaryPath, kiroPath);
+
+    const codebuddy = result.runtimes.find((runtime) => runtime.provider === 'codebuddy');
+    assert.equal(codebuddy.binaryPath, codeBuddyPath);
+    assert.equal(codebuddy.version, '2.0.0');
+
+    const zcode = result.runtimes.find((runtime) => runtime.provider === 'zcode');
+    assert.equal(zcode.binaryPath, zcodePath);
+    assert.equal(zcode.version, '0.14.8');
+
+    assert.equal(result.runtimes.some((runtime) => runtime.provider === 'workbuddy'), false);
   });
-
-  assert.equal(result.errors.length, 0);
-  assert.deepEqual(
-    result.runtimes.map((runtime) => runtime.provider),
-    ['copilot', 'opencode', 'gemini', 'cursor', 'kiro', 'codebuddy', 'zcode', 'workbuddy'],
-  );
-
-  for (const runtime of result.runtimes) {
-    assert.ok(runtime.displayName);
-    assert.match(runtime.logoPath, /^\/ui\/assets\/platforms\/.+\.svg$/);
-    assert.ok(Array.isArray(runtime.capabilities));
-    assert.ok(runtime.capabilities.length >= 1);
-    assert.ok(runtime.version);
-    assert.ok(['unknown', 'authenticated', 'unauthenticated'].includes(runtime.authState));
-  }
-
-  const gemini = result.runtimes.find((runtime) => runtime.provider === 'gemini');
-  assert.equal(gemini.displayName, 'Gemini CLI');
-  assert.equal(gemini.binaryPath, geminiPath);
-  assert.equal(gemini.version, '2.3.4');
-  assert.equal(gemini.authState, 'authenticated');
-  assert.equal(gemini.health, 'healthy');
-
-  const opencode = result.runtimes.find((runtime) => runtime.provider === 'opencode');
-  assert.equal(opencode.displayName, 'OpenCode');
-  assert.equal(opencode.authState, 'authenticated');
-
-  const copilot = result.runtimes.find((runtime) => runtime.provider === 'copilot');
-  assert.equal(copilot.binaryPath, copilotPath);
-  assert.equal(copilot.authState, 'authenticated');
-
-  const cursor = result.runtimes.find((runtime) => runtime.provider === 'cursor');
-  assert.equal(cursor.binaryPath, cursorPath);
-
-  const kiro = result.runtimes.find((runtime) => runtime.provider === 'kiro');
-  assert.equal(kiro.binaryPath, kiroPath);
-
-  const codebuddy = result.runtimes.find((runtime) => runtime.provider === 'codebuddy');
-  assert.equal(codebuddy.binaryPath, codeBuddyPath);
-  assert.equal(codebuddy.version, '2.0.0');
-
-  const zcode = result.runtimes.find((runtime) => runtime.provider === 'zcode');
-  assert.equal(zcode.binaryPath, zcodePath);
-  assert.equal(zcode.version, '0.14.8');
-
-  const workbuddy = result.runtimes.find((runtime) => runtime.provider === 'workbuddy');
-  assert.equal(workbuddy.binaryPath, codeBuddyPath);
-  assert.equal(workbuddy.version, '2.0.0');
 });
 
 test('runtime discovery can use registry default executable paths for app-bundled CLIs', async () => {
@@ -310,6 +314,60 @@ test('runtime discovery honors explicit provider path environment overrides outs
   });
 });
 
+test('runtime discovery keeps WorkBuddy independent from CodeBuddy path aliases', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-workbuddy-path-'));
+    const binDir = path.join(tempRoot, 'external-bin');
+    await mkdir(binDir, { recursive: true });
+    const codebuddyPath = path.join(binDir, 'codebuddy');
+    const workbuddyPath = path.join(binDir, 'workbuddy-codebuddy');
+    await writeFile(codebuddyPath, '#!/bin/sh\necho "CodeBuddy 2.0.0"\n', 'utf8');
+    await writeFile(workbuddyPath, '#!/bin/sh\necho "2.103.3"\n', 'utf8');
+    await chmod(codebuddyPath, 0o755);
+    await chmod(workbuddyPath, 0o755);
+
+    const codeBuddyOnly = await discoverLlmRuntimes({
+      env: {
+        PATH: '',
+        OAC_CODEBUDDY_PATH: codebuddyPath,
+        OAC_CODEBUDDY_MODEL: 'codebuddy-model',
+        CODEBUDDY_API_KEY: 'codebuddy-key',
+      },
+      now: () => '2026-06-21T03:00:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(codeBuddyOnly.errors.length, 0);
+    assert.deepEqual(codeBuddyOnly.runtimes.map((runtime) => runtime.provider), ['codebuddy']);
+    assert.equal(codeBuddyOnly.runtimes[0].binaryPath, codebuddyPath);
+    assert.equal(codeBuddyOnly.runtimes[0].model, 'codebuddy-model');
+    assert.equal(codeBuddyOnly.runtimes[0].authState, 'authenticated');
+
+    const withWorkBuddy = await discoverLlmRuntimes({
+      env: {
+        PATH: '',
+        OAC_CODEBUDDY_PATH: codebuddyPath,
+        OAC_WORKBUDDY_PATH: workbuddyPath,
+        OAC_CODEBUDDY_MODEL: 'codebuddy-model',
+        OAC_WORKBUDDY_MODEL: 'workbuddy-model',
+        CODEBUDDY_API_KEY: 'codebuddy-key',
+        WORKBUDDY_API_KEY: 'workbuddy-key',
+      },
+      now: () => '2026-06-21T03:05:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(withWorkBuddy.errors.length, 0);
+    assert.deepEqual(withWorkBuddy.runtimes.map((runtime) => runtime.provider), ['codebuddy', 'workbuddy']);
+    assert.equal(withWorkBuddy.runtimes[0].binaryPath, codebuddyPath);
+    assert.equal(withWorkBuddy.runtimes[0].model, 'codebuddy-model');
+    assert.equal(withWorkBuddy.runtimes[0].authState, 'authenticated');
+    assert.equal(withWorkBuddy.runtimes[1].binaryPath, workbuddyPath);
+    assert.equal(withWorkBuddy.runtimes[1].model, 'workbuddy-model');
+    assert.equal(withWorkBuddy.runtimes[1].authState, 'authenticated');
+  });
+});
+
 test('runtime discovery uses login-shell resolved executables when daemon PATH misses a provider', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-shell-path-'));
@@ -327,11 +385,9 @@ test('runtime discovery uses login-shell resolved executables when daemon PATH m
     });
 
     assert.equal(result.errors.length, 0);
-    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['codebuddy', 'workbuddy']);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['codebuddy']);
     assert.equal(result.runtimes[0].binaryPath, codebuddyPath);
-    assert.equal(result.runtimes[1].binaryPath, codebuddyPath);
     assert.equal(result.runtimes[0].health, 'healthy');
-    assert.equal(result.runtimes[1].health, 'healthy');
   });
 });
 
