@@ -107,7 +107,7 @@
         border: 1px solid var(--border2);
         border-radius: 8px;
         background: var(--surface);
-        box-shadow: 0 16px 36px rgba(0,0,0,.3);
+        box-shadow: var(--shadow);
       }
       .services-bot-option {
         width: 100%;
@@ -252,11 +252,11 @@
         gap: 16px;
         padding: 16px;
         align-items: start;
-        box-shadow: 0 1px 0 rgba(255,255,255,.02), 0 14px 36px rgba(0,0,0,.12);
+        box-shadow: var(--shadow);
       }
       .service-row[data-selected="true"] {
-        border-color: rgba(34,197,94,.38);
-        background: linear-gradient(180deg, rgba(34,197,94,.08), rgba(34,197,94,.03));
+        border-color: var(--accent-border);
+        background: var(--accent-dim);
       }
       .service-cover,
       .edit-cover-preview {
@@ -483,7 +483,7 @@
         border-radius: 8px;
         background: var(--surface);
         padding: 18px;
-        box-shadow: 0 22px 60px rgba(0,0,0,.38);
+        box-shadow: var(--shadow);
       }
       .my-service-detail-dialog {
         width: min(760px, calc(100vw - 32px));
