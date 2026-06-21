@@ -42,7 +42,22 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
             </div>
           </header>
           <div class="conversation-messages" data-conversation-messages></div>
-          <div class="conversation-readonly-status" data-conversation-readonly-status data-i18n-key="conversations.readonlyStatus">${i18n.t('conversations.readonlyStatus')}</div>
+          <footer class="conversation-guidance-footer" data-conversation-guidance>
+            <div class="conversation-readonly-status" data-conversation-readonly-status data-i18n-key="conversations.readonlyStatus">${i18n.t('conversations.readonlyStatus')}</div>
+            <button class="btn btn-sm" type="button" data-guidance-toggle data-i18n-key="conversations.guidanceToggle">${i18n.t('conversations.guidanceToggle')}</button>
+            <form class="conversation-guidance-form" data-guidance-form hidden>
+              <input
+                class="input"
+                type="text"
+                data-guidance-input
+                placeholder="${i18n.t('conversations.guidancePlaceholder')}"
+                aria-label="${i18n.t('conversations.guidancePlaceholder')}"
+              />
+              <button class="btn btn-sm" type="submit" data-guidance-send data-i18n-key="conversations.guidanceSend">${i18n.t('conversations.guidanceSend')}</button>
+              <button class="btn btn-sm btn-ghost" type="button" data-guidance-cancel data-i18n-key="conversations.guidanceCancel">${i18n.t('conversations.guidanceCancel')}</button>
+            </form>
+            <div class="conversation-guidance-status" data-guidance-status aria-live="polite"></div>
+          </footer>
         </section>
       </section>
     `,
@@ -59,6 +74,13 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     list: document.querySelector('[data-conversation-list]'),
     detailHeader: document.querySelector('[data-conversation-detail-header]'),
     messages: document.querySelector('[data-conversation-messages]'),
+    guidance: document.querySelector('[data-conversation-guidance]'),
+    guidanceToggle: document.querySelector('[data-guidance-toggle]'),
+    guidanceForm: document.querySelector('[data-guidance-form]'),
+    guidanceInput: document.querySelector('[data-guidance-input]'),
+    guidanceSend: document.querySelector('[data-guidance-send]'),
+    guidanceCancel: document.querySelector('[data-guidance-cancel]'),
+    guidanceStatus: document.querySelector('[data-guidance-status]'),
     toast: document.querySelector('[data-copy-toast]'),
   };
   const escapeHtml = (value) => String(value == null ? '' : value)
@@ -150,6 +172,10 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     beforeCursor: null,
     hasMoreBefore: false,
     botPickerOpen: false,
+    guidanceOpen: false,
+    guidanceDraft: '',
+    guidanceSubmitting: false,
+    guidanceStatus: '',
   };
 
   const AVATAR_CONTENT_PATH_PREFIXES = [
@@ -256,9 +282,26 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const response = await fetch(url, { cache: 'no-store', ...(options || {}) });
     const payload = await response.json();
     if (!payload || payload.ok !== true) {
-      throw new Error((payload && payload.message) || uiText('conversations.requestFailed', 'Request failed.'));
+      const error = new Error((payload && payload.message) || uiText('conversations.requestFailed', 'Request failed.'));
+      if (payload && typeof payload.code === 'string') error.code = payload.code;
+      throw error;
     }
     return payload.data || payload;
+  };
+  const guidanceErrorMessage = (error) => {
+    const code = String(error && error.code || '');
+    const messages = {
+      bad_request: uiText('conversations.guidanceInvalid', 'Guidance is invalid.'),
+      missing_local: uiText('conversations.guidanceInvalid', 'Guidance is invalid.'),
+      missing_peer: uiText('conversations.guidanceConversationNotFound', 'Select an existing conversation before sending guidance.'),
+      missing_guidance: uiText('conversations.guidanceInvalid', 'Guidance is invalid.'),
+      conversation_not_found: uiText('conversations.guidanceConversationNotFound', 'Select an existing conversation before sending guidance.'),
+      profile_not_found: uiText('conversations.guidanceProfileUnavailable', 'The selected local Bot is no longer available.'),
+      identity_missing: uiText('conversations.guidanceIdentityMissing', 'Create a local Bot identity before sending guidance.'),
+      not_implemented: uiText('conversations.guidanceUnavailable', 'Guided replies are unavailable right now.'),
+      conversation_guidance_failed: uiText('conversations.guidanceFailed', 'Guidance failed.'),
+    };
+    return messages[code] || uiText('conversations.guidanceFailed', 'Guidance failed.');
   };
   const buildModel = () => buildConversationsPageViewModel({
     localBots: state.localBots,
@@ -284,6 +327,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     return url;
   };
   const eventsUrl = () => '/api/conversations/events?local=' + encodeURIComponent(state.selectedLocalGlobalMetaId);
+  const hasGuidanceTarget = () => Boolean(state.selectedLocalGlobalMetaId && state.selectedPeerGlobalMetaId);
   const scrollToBottom = () => {
     if (!elements.messages) return;
     elements.messages.scrollTop = elements.messages.scrollHeight;
@@ -323,6 +367,12 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const localized = localizeEmptyState(emptyState);
     target.innerHTML = '<div class="conversation-empty"><strong>' + escapeHtml(localized.title) + '</strong><p>' + escapeHtml(localized.message) + '</p></div>';
   };
+  const resetGuidanceComposer = (status) => {
+    state.guidanceOpen = false;
+    state.guidanceDraft = '';
+    state.guidanceSubmitting = false;
+    state.guidanceStatus = String(status || '');
+  };
   const renderList = (model) => {
     if (!elements.list) return;
     elements.list.innerHTML = '';
@@ -346,6 +396,23 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       button.addEventListener('click', () => selectPeer(conversation.peerGlobalMetaId));
       elements.list.appendChild(button);
     });
+  };
+  const renderGuidanceComposer = (model) => {
+    const selected = model.selectedConversation;
+    const hasTarget = Boolean(selected && hasGuidanceTarget());
+    if (elements.guidance) elements.guidance.hidden = !hasTarget;
+    if (!elements.guidanceToggle || !elements.guidanceForm || !elements.guidanceInput || !elements.guidanceSend || !elements.guidanceCancel || !elements.guidanceStatus) {
+      return;
+    }
+    elements.guidanceToggle.hidden = !hasTarget || state.guidanceOpen;
+    elements.guidanceToggle.disabled = !hasTarget || state.guidanceSubmitting;
+    elements.guidanceForm.hidden = !hasTarget || !state.guidanceOpen;
+    elements.guidanceInput.value = state.guidanceDraft;
+    elements.guidanceInput.disabled = state.guidanceSubmitting;
+    elements.guidanceSend.disabled = state.guidanceSubmitting || !state.guidanceDraft.trim();
+    elements.guidanceCancel.disabled = state.guidanceSubmitting;
+    elements.guidanceStatus.textContent = state.guidanceStatus;
+    elements.guidanceStatus.hidden = !state.guidanceStatus;
   };
 
   const safeHref = (rawHref) => {
@@ -569,6 +636,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     renderLocalBots(model);
     renderList(model);
     renderDetail(model);
+    renderGuidanceComposer(model);
     hydrateAvatarFallbacks(document);
   };
 
@@ -673,12 +741,43 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     };
     state.eventSource = source;
   };
+  const submitGuidance = async () => {
+    state.guidanceDraft = String(elements.guidanceInput && elements.guidanceInput.value || state.guidanceDraft || '');
+    if (!hasGuidanceTarget() || !state.guidanceDraft.trim() || state.guidanceSubmitting) return;
+    const targetLocal = state.selectedLocalGlobalMetaId;
+    const targetPeer = state.selectedPeerGlobalMetaId;
+    state.guidanceSubmitting = true;
+    state.guidanceStatus = '';
+    render();
+    try {
+      await fetchJson('/api/conversations/guidance', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          local: targetLocal,
+          peer: targetPeer,
+          guidance: state.guidanceDraft.trim(),
+        }),
+      });
+      if (state.selectedLocalGlobalMetaId !== targetLocal || state.selectedPeerGlobalMetaId !== targetPeer) return;
+      resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
+      render();
+      await loadConversations({ stickToBottom: true });
+    } catch (error) {
+      if (state.selectedLocalGlobalMetaId !== targetLocal || state.selectedPeerGlobalMetaId !== targetPeer) return;
+      state.guidanceStatus = guidanceErrorMessage(error);
+    } finally {
+      state.guidanceSubmitting = false;
+      render();
+    }
+  };
   const selectPeer = async (peerGlobalMetaId) => {
     if (!peerGlobalMetaId || peerGlobalMetaId === state.selectedPeerGlobalMetaId) return;
     state.selectedPeerGlobalMetaId = peerGlobalMetaId;
     state.messages = [];
     state.beforeCursor = null;
     state.hasMoreBefore = false;
+    resetGuidanceComposer();
     setUrlState();
     render();
     await loadMessages({ stickToBottom: true });
@@ -690,6 +789,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     state.messages = [];
     state.beforeCursor = null;
     state.hasMoreBefore = false;
+    resetGuidanceComposer();
     setUrlState();
     openEvents();
     await loadConversations({ stickToBottom: true });
@@ -706,6 +806,32 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
   }
   if (elements.localBotTrigger) {
     elements.localBotTrigger.addEventListener('click', () => setBotPickerOpen(!state.botPickerOpen));
+  }
+  if (elements.guidanceToggle) {
+    elements.guidanceToggle.addEventListener('click', () => {
+      if (!hasGuidanceTarget()) return;
+      state.guidanceOpen = true;
+      state.guidanceStatus = '';
+      render();
+    });
+  }
+  if (elements.guidanceInput) {
+    elements.guidanceInput.addEventListener('input', () => {
+      state.guidanceDraft = String(elements.guidanceInput && elements.guidanceInput.value || '');
+      render();
+    });
+  }
+  if (elements.guidanceForm) {
+    elements.guidanceForm.addEventListener('submit', async (event) => {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      await submitGuidance();
+    });
+  }
+  if (elements.guidanceCancel) {
+    elements.guidanceCancel.addEventListener('click', () => {
+      resetGuidanceComposer();
+      render();
+    });
   }
   document.addEventListener('click', (event) => {
     const target = event.target instanceof Element ? event.target : null;

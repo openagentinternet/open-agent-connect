@@ -13,6 +13,7 @@ const { createA2AConversationStore } = require('../../dist/core/a2a/conversation
 const { createChatStrategyStore } = require('../../dist/core/chat/chatStrategyStore.js');
 const { loadChatPersona } = require('../../dist/core/chat/chatPersonaLoader.js');
 const { createDefaultChatReplyRunner } = require('../../dist/core/chat/defaultChatReplyRunner.js');
+const { createHostLlmChatReplyRunner } = require('../../dist/core/chat/hostLlmChatReplyRunner.js');
 const { createPrivateChatAutoReplyOrchestrator } = require('../../dist/core/chat/privateChatAutoReply.js');
 
 async function createTempProfileHome() {
@@ -87,6 +88,10 @@ async function createAutoReplyHarness(options = {}) {
   const runnerInputs = [];
   const stateStore = createPrivateChatStateStore(paths);
   const strategyStore = createChatStrategyStore(paths);
+  const hasResolvePeerChatPublicKeyOverride = Object.prototype.hasOwnProperty.call(
+    options,
+    'resolvePeerChatPublicKey',
+  );
   const nowFn = typeof options.now === 'function'
     ? options.now
     : () => options.now ?? 1_770_000_000_000;
@@ -107,6 +112,9 @@ async function createAutoReplyHarness(options = {}) {
         };
       },
       async writePin(input) {
+        if (options.writePinError) {
+          throw options.writePinError;
+        }
         writes.push(input);
         return {
           txids: ['reply-tx-1'],
@@ -123,7 +131,9 @@ async function createAutoReplyHarness(options = {}) {
       },
     },
     selfGlobalMetaId: async () => localGlobalMetaId,
-    resolvePeerChatPublicKey: async () => peerKeys.publicKeyHex,
+    resolvePeerChatPublicKey: async () => (
+      hasResolvePeerChatPublicKeyOverride ? options.resolvePeerChatPublicKey : peerKeys.publicKeyHex
+    ),
     replyRunner: async (input) => {
       runnerInputs.push(input);
       if (options.replyRunner) {
@@ -136,12 +146,13 @@ async function createAutoReplyHarness(options = {}) {
     },
     now: nowFn,
   }, {
-    enabled: true,
+    enabled: options.enabled ?? true,
     acceptPolicy: 'accept_all',
     defaultStrategyId: options.defaultStrategyId ?? null,
   });
 
   return {
+    orchestrator,
     paths,
     localKeys,
     peerKeys,
@@ -164,6 +175,9 @@ async function createAutoReplyHarness(options = {}) {
         },
         ...overrides,
       });
+    },
+    async handleLocalGuidedTurn(targetPeerGlobalMetaId = peerGlobalMetaId) {
+      return orchestrator.handleLocalGuidedTurn(targetPeerGlobalMetaId);
     },
   };
 }
@@ -283,6 +297,43 @@ test('defaultChatReplyRunner returns end_conversation near max turns', () => {
 
   assert.equal(result.state, 'end_conversation');
   assert.match(result.content, /\nBye$/);
+});
+
+test('defaultChatReplyRunner keeps operator-triggered turns without an inbound message on a continuation path', () => {
+  const runner = createDefaultChatReplyRunner();
+  const result = runner({
+    conversation: {
+      conversationId: 'c1',
+      peerGlobalMetaId: 'peer',
+      peerName: null,
+      topic: null,
+      strategyId: null,
+      state: 'closed',
+      turnCount: 29,
+      lastDirection: 'outbound',
+      createdAt: 1000,
+      updatedAt: 2000,
+      pendingGuidanceText: 'Reopen the thread and ask for the missing delivery date.',
+      pendingGuidanceCreatedAt: 1500,
+    },
+    recentMessages: [{
+      conversationId: 'c1',
+      messageId: 'm28',
+      direction: 'inbound',
+      senderGlobalMetaId: 'peer',
+      content: 'Could you follow up with the exact delivery date when you can?',
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1800,
+    }],
+    persona: { soul: '', goal: '', role: '' },
+    strategy: { id: 'test', maxTurns: 30, maxIdleMs: 300000, exitCriteria: '' },
+    inboundMessage: null,
+    operatorGuidanceText: 'Reopen the thread and ask for the missing delivery date.',
+  });
+
+  assert.equal(result.state, 'reply');
+  assert.doesNotMatch(result.content, /\nBye$/);
 });
 
 test('auto-reply persists inbound and outbound private chat messages to the unified A2A store', async () => {
@@ -528,6 +579,539 @@ test('auto-reply records inbound messages for closed conversations without reope
   assert.ok(messages.find((message) => message.messagePinId === 'incoming-pin-after-closed'));
 });
 
+test('auto-reply consumes matching pending guidance only after a successful inbound-triggered outbound reply', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 4,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(
+    conversationId,
+    'Bring the topic back to the delivery date.',
+    now - 500,
+  );
+
+  await harness.handleInbound({
+    content: 'Can you tell me more?',
+    messagePinId: 'incoming-pin-guided-inbound',
+  });
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(
+    harness.runnerInputs[0].operatorGuidanceText,
+    'Bring the topic back to the delivery date.',
+  );
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
+});
+
+test('auto-reply keeps pending guidance when the runner throws before a reply is generated', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    replyRunner: async () => {
+      throw new Error('runner failed');
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(conversationId, 'Ask for the missing txid.', now - 500);
+
+  await harness.handleInbound({
+    content: 'I think I already sent it.',
+    messagePinId: 'incoming-pin-runner-throws',
+  });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, 'Ask for the missing txid.');
+  assert.equal(conversation.pendingGuidanceCreatedAt, now - 500);
+  assert.equal(harness.writes.length, 0);
+});
+
+test('auto-reply keeps pending guidance when the runner skips the turn', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    replyResult: { state: 'skip' },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(conversationId, 'Ask whether they want a refund.', now - 500);
+
+  await harness.handleInbound({
+    content: 'Actually I have one more question.',
+    messagePinId: 'incoming-pin-runner-skip',
+  });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, 'Ask whether they want a refund.');
+  assert.equal(conversation.pendingGuidanceCreatedAt, now - 500);
+  assert.equal(harness.writes.length, 0);
+});
+
+test('auto-reply keeps pending guidance when a guided inbound turn hits host LLM template fallback', async () => {
+  const now = 1_770_000_000_000;
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const harness = await createAutoReplyHarness({
+    now,
+    replyRunner: createHostLlmChatReplyRunner({
+      runtimeResolver: {
+        async resolveRuntime() {
+          return { runtime, bindingId: 'binding-1' };
+        },
+        async selectMetaBot() {
+          return null;
+        },
+        async markBindingUsed() {},
+        async markRuntimeUnavailable() {},
+      },
+      llmExecutor: {
+        async execute() {
+          return 'llm-session-failed';
+        },
+        async getSession(sessionId) {
+          return {
+            sessionId,
+            status: 'failed',
+            result: {
+              status: 'failed',
+              output: '',
+              error: 'backend failed',
+              durationMs: 1,
+            },
+          };
+        },
+      },
+      metaBotSlug: 'test-slug',
+      pollIntervalMs: 1,
+    }),
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(
+    conversationId,
+    'Ask for the delivery date.',
+    now - 500,
+  );
+
+  await harness.handleInbound({
+    content: 'Can you follow up now?',
+    messagePinId: 'incoming-pin-guided-host-fallback',
+  });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, 'Ask for the delivery date.');
+  assert.equal(conversation.pendingGuidanceCreatedAt, now - 500);
+  assert.equal(harness.writes.length, 0);
+});
+
+test('auto-reply keeps pending guidance when the outbound send fails', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    resolvePeerChatPublicKey: null,
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(
+    conversationId,
+    'Bring them back to the payment reference.',
+    now - 500,
+  );
+
+  await harness.handleInbound({
+    content: 'Can we continue?',
+    messagePinId: 'incoming-pin-send-fails',
+  });
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, 'Bring them back to the payment reference.');
+  assert.equal(conversation.pendingGuidanceCreatedAt, now - 500);
+
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(messages.filter((message) => message.direction === 'outbound').length, 0);
+});
+
+test('auto-reply consumes pending guidance when send succeeds but outbound conversation persistence fails', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(
+    conversationId,
+    'Ask them to confirm the destination address.',
+    now - 500,
+  );
+
+  const originalUpsertConversation = harness.stateStore.upsertConversation.bind(harness.stateStore);
+  harness.stateStore.upsertConversation = async (conversation) => {
+    if (conversation.conversationId === conversationId && conversation.lastDirection === 'outbound') {
+      throw new Error('persist failed after send');
+    }
+    return originalUpsertConversation(conversation);
+  };
+
+  await harness.handleInbound({
+    content: 'Please continue.',
+    messagePinId: 'incoming-pin-persist-fails-after-send',
+  });
+
+  assert.equal(harness.writes.length, 1);
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
+  assert.equal(conversation.pendingGuidanceLeaseId, null);
+  assert.equal(conversation.pendingGuidanceLeaseExpiresAt, null);
+
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(messages.filter((message) => message.direction === 'outbound').length, 1);
+});
+
+test('guided local turns consume pending guidance when send succeeds but outbound conversation persistence fails', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 4,
+    lastDirection: 'outbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'Bring the topic back to the delivery timeline.',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+
+  const originalUpsertConversation = harness.stateStore.upsertConversation.bind(harness.stateStore);
+  harness.stateStore.upsertConversation = async (conversation) => {
+    if (conversation.conversationId === conversationId && conversation.lastDirection === 'outbound') {
+      throw new Error('persist failed after send');
+    }
+    return originalUpsertConversation(conversation);
+  };
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.writes.length, 1);
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
+  assert.equal(conversation.pendingGuidanceLeaseId, null);
+  assert.equal(conversation.pendingGuidanceLeaseExpiresAt, null);
+
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(messages.filter((message) => message.direction === 'outbound').length, 1);
+});
+
+test('auto-reply backs off while another initiator holds the active guidance claim', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(conversationId, 'Only one local turn may use this.', now - 500);
+  const activeClaim = await harness.stateStore.claimPendingGuidance(conversationId, { now, leaseMs: 5_000 });
+  assert.ok(activeClaim);
+
+  await harness.handleInbound({
+    content: 'Can you follow up now?',
+    messagePinId: 'incoming-pin-guidance-claimed',
+  });
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, 'Only one local turn may use this.');
+  assert.equal(conversation.pendingGuidanceLeaseId, activeClaim.leaseId);
+});
+
+test('guided local turns can reopen a closed conversation when pending guidance exists', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'closed',
+    turnCount: 30,
+    lastDirection: 'outbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'Reopen the thread and ask for the exact delivery date.',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+  await harness.stateStore.appendMessages([{
+    conversationId,
+    messageId: 'history-inbound-1',
+    direction: 'inbound',
+    senderGlobalMetaId: harness.peerGlobalMetaId,
+    content: 'Let us stop here for now.',
+    messagePinId: 'history-pin-1',
+    extensions: null,
+    timestamp: now - 2_000,
+  }]);
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.runnerInputs[0].inboundMessage, null);
+  assert.equal(
+    harness.runnerInputs[0].operatorGuidanceText,
+    'Reopen the thread and ask for the exact delivery date.',
+  );
+  assert.equal(harness.writes.length, 1);
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
+  assert.equal(conversation.turnCount, 1);
+  assert.equal(conversation.lastDirection, 'outbound');
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
+
+  await harness.handleInbound({
+    content: 'Thanks, can you confirm the exact time too?',
+    messagePinId: 'incoming-pin-after-guided-reopen',
+  });
+
+  assert.equal(harness.runnerInputs.length, 2);
+  assert.equal(harness.runnerInputs[1].conversation.turnCount, 2);
+});
+
+test('guided local turns do not send a stale claimed guidance after a newer guidance replaces it', async () => {
+  const now = 1_770_000_000_000;
+  let harness;
+  harness = await createAutoReplyHarness({
+    now,
+    replyRunner: async (input) => {
+      if (input.operatorGuidanceText === 'older guidance') {
+        await harness.stateStore.setPendingGuidance(
+          `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`,
+          'newer guidance',
+          now + 1,
+        );
+      }
+      return {
+        state: 'reply',
+        content: `guided:${input.operatorGuidanceText}`,
+      };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 4,
+    lastDirection: 'outbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'older guidance',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.writes.length, 0);
+  let conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, 'newer guidance');
+  assert.equal(conversation.pendingGuidanceCreatedAt, now + 1);
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.writes.length, 1);
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(
+    messages.filter((message) => message.direction === 'outbound').at(-1)?.content,
+    'guided:newer guidance',
+  );
+  conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
+});
+
+test('guided local turns are a no-op for closed conversations without pending guidance', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'closed',
+    turnCount: 30,
+    lastDirection: 'outbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 30);
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
+});
+
+test('guided local turns still run when inbound auto-reply is disabled', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now, enabled: false });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 4,
+    lastDirection: 'outbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'Steer the thread back to delivery timing.',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.writes.length, 1);
+});
+
 test('auto-reply reopens closed conversations after the idle window elapses', async () => {
   const now = 1_770_000_000_000;
   const harness = await createAutoReplyHarness({ now });
@@ -666,6 +1250,48 @@ test('auto-reply hard limit emits canonical visible Bye without close extensions
   const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
   assert.equal(conversation.state, 'closed');
   assert.equal(conversation.turnCount, 30);
+});
+
+test('auto-reply applies pending guidance before falling back to the hard turn limit close', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 29,
+    lastDirection: 'inbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'Answer the question directly instead of closing the thread.',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+
+  await withImmediateTimers(() => harness.handleInbound({
+    content: 'one more question',
+    messagePinId: 'incoming-pin-limit-guided',
+  }));
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(
+    harness.runnerInputs[0].operatorGuidanceText,
+    'Answer the question directly instead of closing the thread.',
+  );
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const outbound = messages.find((message) => message.direction === 'outbound');
+  assert.ok(outbound);
+  assert.equal(outbound.content, 'reply from LLM');
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
+  assert.equal(conversation.turnCount, 30);
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
 });
 
 test('auto-reply passes inbound turn count above 20 through to the runner', async () => {

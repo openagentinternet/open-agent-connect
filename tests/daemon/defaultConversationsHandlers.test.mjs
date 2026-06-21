@@ -9,7 +9,10 @@ import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../help
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
+const { createPrivateChatStateStore } = require('../../dist/core/chat/privateChatStateStore.js');
 const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
+const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
 const LOCAL_GLOBAL_META_ID = 'idq1localhandler000000000000000000000000';
@@ -55,6 +58,20 @@ function chatSigner(pair, writeCalls = []) {
         contentType: input.contentType,
         encoding: input.encoding ?? 'utf-8',
       };
+    },
+  };
+}
+
+function failingChatSigner(pair, message = 'chat write failed') {
+  return {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({
+      globalMetaId: LOCAL_GLOBAL_META_ID,
+      privateKeyHex: pair.privateKeyHex,
+      chatPublicKey: pair.publicKeyHex,
+    }),
+    writePin: async () => {
+      throw new Error(message);
     },
   };
 }
@@ -187,6 +204,8 @@ async function createFixture(t, options = {}) {
       systemHomeDir,
       signer: options.signer ?? readOnlySigner(),
       fetchPeerChatPublicKey: options.fetchPeerChatPublicKey,
+      llmExecutor: options.llmExecutor,
+      conversationGuidanceReplyRunner: options.conversationGuidanceReplyRunner,
       getDaemonRecord: () => null,
     }),
   };
@@ -290,4 +309,407 @@ test('default conversation event stream publishes a message event after A2A pers
   assert.equal(event.value.localGlobalMetaId, LOCAL_GLOBAL_META_ID);
   assert.equal(event.value.peerGlobalMetaId, PEER_GLOBAL_META_ID);
   assert.equal(event.value.kind, 'private_chat');
+});
+
+test('default conversation guidance reopens a closed conversation, sends one guided turn, and clears pending guidance', async (t) => {
+  const localPair = createIdentityPair();
+  const peerPair = createIdentityPair();
+  const writeCalls = [];
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: chatSigner(localPair, writeCalls),
+    fetchPeerChatPublicKey: async () => peerPair.publicKeyHex,
+    conversationGuidanceReplyRunner: async () => ({
+      state: 'reply',
+      content: 'Please confirm the delivery date.',
+    }),
+  });
+  const privateChatStateStore = createPrivateChatStateStore(homeDir);
+  await privateChatStateStore.upsertConversation({
+    conversationId: `pc-${LOCAL_GLOBAL_META_ID}-${PEER_GLOBAL_META_ID}`,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    peerName: 'Remote Bot',
+    topic: null,
+    strategyId: null,
+    state: 'closed',
+    turnCount: 2,
+    lastDirection: 'inbound',
+    createdAt: BASE_TIME + 1,
+    updatedAt: BASE_TIME + 10,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+    pendingGuidanceLeaseId: null,
+    pendingGuidanceLeaseExpiresAt: null,
+  });
+
+  const stream = await handlers.conversations.streamEvents({
+    local: LOCAL_GLOBAL_META_ID,
+  });
+  const iterator = stream[Symbol.asyncIterator]();
+  const initial = await iterator.next();
+  const nextEvent = iterator.next();
+
+  const guided = await handlers.conversations.guidance({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    guidance: 'Reopen the thread and ask for the delivery date.',
+  });
+
+  const event = await Promise.race([
+    nextEvent,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timed out waiting for guided conversation SSE event')), 2000);
+    }),
+  ]);
+  await iterator.return?.();
+
+  assert.equal(initial.value.type, 'conversation-update');
+  assert.equal(guided.ok, true);
+  assert.equal(guided.data.guidanceApplied, true);
+  assert.equal(guided.data.guidanceConsumed, true);
+  assert.equal(guided.data.pinId, 'chat-live-pin-1');
+  assert.deepEqual(guided.data.txids, ['chat-live-tx-1']);
+  assert.equal(writeCalls.length, 1);
+  assert.equal(event.value.type, 'conversation-message');
+  assert.equal(event.value.localGlobalMetaId, LOCAL_GLOBAL_META_ID);
+  assert.equal(event.value.peerGlobalMetaId, PEER_GLOBAL_META_ID);
+
+  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+  assert.equal(conversation?.state, 'active');
+  assert.equal(conversation?.lastDirection, 'outbound');
+  assert.equal(conversation?.turnCount, 1);
+  assert.equal(conversation?.pendingGuidanceText, null);
+  assert.equal(conversation?.pendingGuidanceCreatedAt, null);
+
+  const messages = await handlers.conversations.messages({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    limit: 50,
+  });
+  assert.equal(messages.ok, true);
+  assert.equal(messages.data.messages.at(-1)?.content, 'Please confirm the delivery date.');
+});
+
+test('default conversation guidance keeps pending guidance when reply generation fails', async (t) => {
+  const localPair = createIdentityPair();
+  const peerPair = createIdentityPair();
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: chatSigner(localPair, []),
+    fetchPeerChatPublicKey: async () => peerPair.publicKeyHex,
+    conversationGuidanceReplyRunner: async () => {
+      throw new Error('runner exploded');
+    },
+  });
+  const privateChatStateStore = createPrivateChatStateStore(homeDir);
+  await privateChatStateStore.upsertConversation({
+    conversationId: `pc-${LOCAL_GLOBAL_META_ID}-${PEER_GLOBAL_META_ID}`,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    peerName: 'Remote Bot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'inbound',
+    createdAt: BASE_TIME + 1,
+    updatedAt: BASE_TIME + 2,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+    pendingGuidanceLeaseId: null,
+    pendingGuidanceLeaseExpiresAt: null,
+  });
+
+  const guided = await handlers.conversations.guidance({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    guidance: 'Ask for the missing txid.',
+  });
+
+  assert.equal(guided.ok, false);
+  assert.equal(guided.code, 'conversation_guidance_failed');
+  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+  assert.equal(conversation?.pendingGuidanceText, 'Ask for the missing txid.');
+  assert.ok(typeof conversation?.pendingGuidanceCreatedAt === 'number');
+  assert.equal(conversation?.pendingGuidanceLeaseId ?? null, null);
+  assert.equal(conversation?.pendingGuidanceLeaseExpiresAt ?? null, null);
+});
+
+test('default conversation guidance keeps pending guidance when send fails', async (t) => {
+  const localPair = createIdentityPair();
+  const peerPair = createIdentityPair();
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: failingChatSigner(localPair),
+    fetchPeerChatPublicKey: async () => peerPair.publicKeyHex,
+    conversationGuidanceReplyRunner: async () => ({
+      state: 'reply',
+      content: 'Bring the topic back to the payment reference.',
+    }),
+  });
+  const privateChatStateStore = createPrivateChatStateStore(homeDir);
+  await privateChatStateStore.upsertConversation({
+    conversationId: `pc-${LOCAL_GLOBAL_META_ID}-${PEER_GLOBAL_META_ID}`,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    peerName: 'Remote Bot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'inbound',
+    createdAt: BASE_TIME + 1,
+    updatedAt: BASE_TIME + 2,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+    pendingGuidanceLeaseId: null,
+    pendingGuidanceLeaseExpiresAt: null,
+  });
+
+  const guided = await handlers.conversations.guidance({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    guidance: 'Bring the topic back to the payment reference.',
+  });
+
+  assert.equal(guided.ok, false);
+  assert.equal(guided.code, 'conversation_guidance_failed');
+  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+  assert.equal(conversation?.pendingGuidanceText, 'Bring the topic back to the payment reference.');
+  assert.ok(typeof conversation?.pendingGuidanceCreatedAt === 'number');
+  assert.equal(conversation?.pendingGuidanceLeaseId ?? null, null);
+  assert.equal(conversation?.pendingGuidanceLeaseExpiresAt ?? null, null);
+});
+
+test('default conversation guidance keeps pending guidance when host LLM fallback is disabled', async (t) => {
+  const localPair = createIdentityPair();
+  const peerPair = createIdentityPair();
+  const writeCalls = [];
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: chatSigner(localPair, writeCalls),
+    fetchPeerChatPublicKey: async () => peerPair.publicKeyHex,
+    llmExecutor: {
+      async execute() {
+        return 'llm-session-failed';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'failed',
+          result: {
+            status: 'failed',
+            output: '',
+            error: 'backend failed',
+            durationMs: 1,
+          },
+        };
+      },
+    },
+  });
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [
+      {
+        id: 'runtime-codex',
+        provider: 'codex',
+        displayName: 'Codex',
+        binaryPath: '/bin/codex',
+        authState: 'authenticated',
+        health: 'healthy',
+        capabilities: ['streaming'],
+        lastSeenAt: '2026-05-05T00:00:00.000Z',
+        createdAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.000Z',
+      },
+    ],
+  });
+  await createLlmBindingStore(homeDir).write({
+    version: 1,
+    bindings: [
+      {
+        id: 'binding-eric-primary',
+        metaBotSlug: 'eric',
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.000Z',
+      },
+    ],
+  });
+  const privateChatStateStore = createPrivateChatStateStore(homeDir);
+  await privateChatStateStore.upsertConversation({
+    conversationId: `pc-${LOCAL_GLOBAL_META_ID}-${PEER_GLOBAL_META_ID}`,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    peerName: 'Remote Bot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'inbound',
+    createdAt: BASE_TIME + 1,
+    updatedAt: BASE_TIME + 2,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+    pendingGuidanceLeaseId: null,
+    pendingGuidanceLeaseExpiresAt: null,
+  });
+
+  const guided = await handlers.conversations.guidance({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    guidance: 'Ask for the delivery date.',
+  });
+
+  assert.equal(guided.ok, false);
+  assert.equal(guided.code, 'conversation_guidance_failed');
+  assert.equal(writeCalls.length, 0);
+  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+  assert.equal(conversation?.pendingGuidanceText, 'Ask for the delivery date.');
+  assert.ok(typeof conversation?.pendingGuidanceCreatedAt === 'number');
+});
+
+test('default conversation guidance rejects peers without an existing conversation', async (t) => {
+  const { handlers } = await createFixture(t);
+
+  const guided = await handlers.conversations.guidance({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: 'idq1missingpeer000000000000000000000000000',
+    guidance: 'Start a brand new thread.',
+  });
+
+  assert.equal(guided.ok, false);
+  assert.equal(guided.code, 'conversation_not_found');
+});
+
+test('default conversation guidance holds the pending guidance lease until its proactive turn runs', async (t) => {
+  const localPair = createIdentityPair();
+  const peerPair = createIdentityPair();
+  const writeCalls = [];
+  let releaseRunner;
+  const runnerGate = new Promise((resolve) => {
+    releaseRunner = resolve;
+  });
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: chatSigner(localPair, writeCalls),
+    fetchPeerChatPublicKey: async () => peerPair.publicKeyHex,
+    conversationGuidanceReplyRunner: async (input) => {
+      await runnerGate;
+      return {
+        state: 'reply',
+        content: `guided:${input.operatorGuidanceText}`,
+      };
+    },
+  });
+  const privateChatStateStore = createPrivateChatStateStore(homeDir);
+  const conversationId = `pc-${LOCAL_GLOBAL_META_ID}-${PEER_GLOBAL_META_ID}`;
+  await privateChatStateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    peerName: 'Remote Bot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'inbound',
+    createdAt: BASE_TIME + 1,
+    updatedAt: BASE_TIME + 2,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+    pendingGuidanceLeaseId: null,
+    pendingGuidanceLeaseExpiresAt: null,
+  });
+
+  const guidedPromise = handlers.conversations.guidance({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    guidance: 'Ask for the delivery date right now.',
+  });
+
+  let leasedConversation = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    leasedConversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+    if (leasedConversation?.pendingGuidanceLeaseId) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.ok(leasedConversation?.pendingGuidanceLeaseId);
+  const competingClaim = await privateChatStateStore.claimPendingGuidance(
+    conversationId,
+    { now: BASE_TIME + 100 },
+  );
+  assert.equal(competingClaim, null);
+
+  releaseRunner();
+  const guided = await guidedPromise;
+
+  assert.equal(guided.ok, true);
+  assert.equal(guided.data.guidanceApplied, true);
+  assert.equal(writeCalls.length, 1);
+  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+  assert.equal(conversation?.pendingGuidanceText, null);
+  assert.equal(conversation?.pendingGuidanceCreatedAt, null);
+  assert.equal(conversation?.pendingGuidanceLeaseId, null);
+});
+
+test('default conversation guidance replaces older pending guidance before a later successful send', async (t) => {
+  const localPair = createIdentityPair();
+  const peerPair = createIdentityPair();
+  let shouldFail = true;
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: chatSigner(localPair, []),
+    fetchPeerChatPublicKey: async () => peerPair.publicKeyHex,
+    conversationGuidanceReplyRunner: async (input) => {
+      if (shouldFail) {
+        throw new Error('runner exploded');
+      }
+      return {
+        state: 'reply',
+        content: `guided:${input.operatorGuidanceText}`,
+      };
+    },
+  });
+  const privateChatStateStore = createPrivateChatStateStore(homeDir);
+  await privateChatStateStore.upsertConversation({
+    conversationId: `pc-${LOCAL_GLOBAL_META_ID}-${PEER_GLOBAL_META_ID}`,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    peerName: 'Remote Bot',
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 2,
+    lastDirection: 'inbound',
+    createdAt: BASE_TIME + 1,
+    updatedAt: BASE_TIME + 2,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+    pendingGuidanceLeaseId: null,
+    pendingGuidanceLeaseExpiresAt: null,
+  });
+
+  const firstAttempt = await handlers.conversations.guidance({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    guidance: 'older guidance',
+  });
+  assert.equal(firstAttempt.ok, false);
+  const pendingAfterFailure = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+  assert.equal(pendingAfterFailure?.pendingGuidanceText, 'older guidance');
+
+  shouldFail = false;
+  const secondAttempt = await handlers.conversations.guidance({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    guidance: 'newer guidance',
+  });
+
+  assert.equal(secondAttempt.ok, true);
+  const messages = await handlers.conversations.messages({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    limit: 50,
+  });
+  assert.equal(messages.ok, true);
+  assert.equal(messages.data.messages.at(-1)?.content, 'guided:newer guidance');
+
+  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+  assert.equal(conversation?.pendingGuidanceText, null);
+  assert.equal(conversation?.pendingGuidanceCreatedAt, null);
 });

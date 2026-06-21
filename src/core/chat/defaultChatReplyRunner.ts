@@ -17,7 +17,10 @@ function buildGreeting(persona: { soul: string; goal: string; role: string }): s
 function buildMidReply(
   input: ChatReplyRunnerInput,
 ): string {
-  const peerContent = normalizeText(input.inboundMessage.content);
+  const latestInboundMessage = input.inboundMessage
+    ?? [...input.recentMessages].reverse().find(message => message.direction === 'inbound')
+    ?? null;
+  const peerContent = normalizeText(latestInboundMessage?.content);
   const goalRef = input.persona.goal
     ? ` My goal is: ${input.persona.goal}`
     : '';
@@ -43,6 +46,14 @@ export function createDefaultChatReplyRunner(): ChatReplyRunner {
   return (input: ChatReplyRunnerInput): ChatReplyRunnerResult => {
     const maxTurns = input.strategy?.maxTurns ?? 30;
     const turnCount = input.conversation.turnCount;
+    const isOperatorGuidedTurn = !input.inboundMessage && Boolean(normalizeText(input.operatorGuidanceText));
+
+    if (isOperatorGuidedTurn) {
+      return {
+        state: 'reply',
+        content: buildMidReply(input),
+      };
+    }
 
     // First turn: send a greeting introducing ourselves.
     if (turnCount <= 1) {

@@ -96,6 +96,7 @@ function buildChatPrompt(
   const { conversation, recentMessages, persona, strategy } = input;
   const maxTurns = strategy?.maxTurns ?? 30;
   const metaBotSlug = normalizeText(options.metaBotSlug);
+  const operatorGuidanceText = normalizeText(input.operatorGuidanceText);
 
   const sections: string[] = [];
 
@@ -165,6 +166,16 @@ function buildChatPrompt(
       '- Stay fully in character from the very first word of your reply.',
       '- NEVER announce plans or internal actions: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
       '- Skill reading, research, and checkpoints are invisible — output only what the persona would say.',
+    ].join('\n'));
+  }
+
+  if (operatorGuidanceText) {
+    sections.push([
+      '## Operator Guidance',
+      'This is local-only private guidance from the local operator for this one reply.',
+      'Use it as private steering for your next turn.',
+      'Do not present it as peer-authored text or mention that you received hidden guidance.',
+      operatorGuidanceText,
     ].join('\n'));
   }
 
@@ -300,6 +311,7 @@ export function createHostLlmChatReplyRunner(options?: {
   pollIntervalMs?: number;
   allowedChatSkillsResolver?: PrivateChatAllowedSkillsResolver;
   logWarning?: (scope: string, message: string) => void;
+  allowTemplateFallback?: boolean;
 }): ChatReplyRunner {
   const runtimeResolver = options?.runtimeResolver;
   const llmExecutor = options?.llmExecutor;
@@ -309,11 +321,16 @@ export function createHostLlmChatReplyRunner(options?: {
   const allowedChatSkillsResolver = options?.allowedChatSkillsResolver;
   const enforceSkillScope = Boolean(allowedChatSkillsResolver);
   const logWarning = options?.logWarning;
+  const allowTemplateFallback = options?.allowTemplateFallback ?? true;
   const fallbackRunner = createDefaultChatReplyRunner();
 
-  // If no resolver provided, fall back to template-only replies.
+  // If no resolver provided, either fall back to template-only replies or skip.
   if (!runtimeResolver || !llmExecutor) {
-    return fallbackRunner;
+    return async (input: ChatReplyRunnerInput): Promise<ChatReplyRunnerResult> => (
+      allowTemplateFallback && !normalizeText(input.operatorGuidanceText)
+        ? fallbackRunner(input)
+        : { state: 'skip' }
+    );
   }
 
   return async (input: ChatReplyRunnerInput): Promise<ChatReplyRunnerResult> => {
@@ -328,6 +345,8 @@ export function createHostLlmChatReplyRunner(options?: {
     }
     const prompt = buildChatPrompt(input, allowedSkillScope, { metaBotSlug });
     const excludeRuntimeIds = new Set<string>();
+    const templateFallbackAllowedForTurn = allowTemplateFallback
+      && !normalizeText(input.operatorGuidanceText);
 
     // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
     for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
@@ -351,8 +370,8 @@ export function createHostLlmChatReplyRunner(options?: {
       }
     }
 
-    // All runtimes failed — fall back to template-only reply.
-    return fallbackRunner(input);
+    // All runtimes failed — either fall back to template-only reply or skip.
+    return templateFallbackAllowedForTurn ? fallbackRunner(input) : { state: 'skip' };
   };
 }
 

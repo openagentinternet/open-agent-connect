@@ -34,6 +34,7 @@ async function startServer(options = {}) {
     conversationList: [],
     conversationMessages: [],
     conversationEvents: [],
+    conversationGuidance: [],
     networkServices: [],
     networkBots: [],
     chatConversation: [],
@@ -367,6 +368,18 @@ async function startServer(options = {}) {
           peerGlobalMetaId: 'gm-remote-bob',
           messageId: 'msg-live-1',
         };
+      },
+      guidance: async (input) => {
+        calls.conversationGuidance.push(input);
+        return commandSuccess({
+          localGlobalMetaId: input.local,
+          peerGlobalMetaId: input.peer,
+          guidanceApplied: true,
+          guidanceConsumed: true,
+          messageId: 'msg-guided-1',
+          pinId: 'pin-guided-1',
+          txids: ['tx-guided-1'],
+        });
       },
     },
     chat: {
@@ -2762,6 +2775,83 @@ test('GET /api/conversations/events streams conversation updates scoped to a loc
   assert.match(body, /"peerGlobalMetaId":"gm-remote-bob"/);
 });
 
+test('POST /api/conversations/guidance validates payload and forwards one-shot guidance to the conversations handler', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const wrongMethodResponse = await fetch(`${server.baseUrl}/api/conversations/guidance`);
+  const response = await fetch(`${server.baseUrl}/api/conversations/guidance`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      local: 'gm-local-alice',
+      peer: 'gm-remote-bob',
+      guidance: 'Ask for the exact delivery date.',
+    }),
+  });
+  const payload = await response.json();
+
+  const missingLocalResponse = await fetch(`${server.baseUrl}/api/conversations/guidance`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      peer: 'gm-remote-bob',
+      guidance: 'Ask for the exact delivery date.',
+    }),
+  });
+  const missingLocalPayload = await missingLocalResponse.json();
+
+  const missingPeerResponse = await fetch(`${server.baseUrl}/api/conversations/guidance`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      local: 'gm-local-alice',
+      guidance: 'Ask for the exact delivery date.',
+    }),
+  });
+  const missingPeerPayload = await missingPeerResponse.json();
+
+  const missingGuidanceResponse = await fetch(`${server.baseUrl}/api/conversations/guidance`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      local: 'gm-local-alice',
+      peer: 'gm-remote-bob',
+    }),
+  });
+  const missingGuidancePayload = await missingGuidanceResponse.json();
+
+  assert.equal(wrongMethodResponse.status, 405);
+  assert.equal(response.status, 200);
+  assert.deepEqual(server.calls.conversationGuidance, [
+    {
+      local: 'gm-local-alice',
+      peer: 'gm-remote-bob',
+      guidance: 'Ask for the exact delivery date.',
+    },
+  ]);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.localGlobalMetaId, 'gm-local-alice');
+  assert.equal(payload.data.peerGlobalMetaId, 'gm-remote-bob');
+  assert.equal(payload.data.guidanceApplied, true);
+  assert.equal(payload.data.guidanceConsumed, true);
+  assert.equal(payload.data.messageId, 'msg-guided-1');
+  assert.equal(payload.data.pinId, 'pin-guided-1');
+  assert.deepEqual(payload.data.txids, ['tx-guided-1']);
+
+  assert.equal(missingLocalResponse.status, 400);
+  assert.equal(missingLocalPayload.ok, false);
+  assert.equal(missingLocalPayload.code, 'missing_local');
+
+  assert.equal(missingPeerResponse.status, 400);
+  assert.equal(missingPeerPayload.ok, false);
+  assert.equal(missingPeerPayload.code, 'missing_peer');
+
+  assert.equal(missingGuidanceResponse.status, 400);
+  assert.equal(missingGuidancePayload.ok, false);
+  assert.equal(missingGuidancePayload.code, 'missing_guidance');
+});
+
 test('GET /api/trace/:traceId/events returns server-sent trace status events for the local inspector', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -3046,8 +3136,18 @@ test('GET /ui/conversations renders the local-Bot scoped IM conversations worksp
   assert.match(html, /data-conversation-list/);
   assert.match(html, /data-conversation-messages/);
   assert.match(html, /data-conversation-readonly-status/);
+  assert.match(html, /data-conversation-guidance/);
+  assert.match(html, /data-guidance-toggle/);
+  assert.match(html, /data-guidance-form/);
+  assert.match(html, /data-guidance-input/);
+  assert.match(html, /data-guidance-send/);
+  assert.match(html, /data-guidance-cancel/);
+  assert.match(html, /data-guidance-status/);
   assert.match(html, /Agent-to-agent conversation/);
   assert.match(html, /Human replies are disabled/);
+  assert.match(html, /Guide/);
+  assert.match(html, /Send/);
+  assert.match(html, /Cancel/);
   assert.match(html, /data-copy-toast/);
   assert.match(html, /data-copy-text/);
   assert.match(html, /data-conversation-id-copy/);
@@ -3057,12 +3157,12 @@ test('GET /ui/conversations renders the local-Bot scoped IM conversations worksp
   assert.match(html, /txidPreview/);
   assert.doesNotMatch(html, /data-conversation-input/);
   assert.doesNotMatch(html, /data-conversation-send/);
-  assert.doesNotMatch(html, /conversation-composer/);
   assert.doesNotMatch(html, /\/api\/chat\/private/);
   assert.match(html, /\/api\/bot\/profiles/);
   assert.match(html, /\/api\/conversations\?local=/);
   assert.match(html, /\/api\/conversations\/messages\?local=/);
   assert.match(html, /\/api\/conversations\/events\?local=/);
+  assert.match(html, /\/api\/conversations\/guidance/);
   assert.match(html, /query\.get\('local'\)/);
   assert.match(html, /query\.get\('peer'\)/);
   assert.doesNotMatch(html, /trace-shell/);
@@ -3090,6 +3190,9 @@ test('GET /ui/conversations supports zh-CN page copy beyond the shared nav', asy
   assert.match(html, /data-i18n-key="conversations\.selectConversation">选择一个对话<\/h2>/);
   assert.match(html, /data-i18n-key="conversations\.chooseRemoteBot">选择远程 Bot<\/span>/);
   assert.match(html, /data-i18n-key="conversations\.readonlyStatus">Agent-to-agent 对话 · 不支持人工回复<\/div>/);
+  assert.match(html, /data-i18n-key="conversations\.guidanceToggle">引导<\/button>/);
+  assert.match(html, /data-i18n-key="conversations\.guidanceSend">发送<\/button>/);
+  assert.match(html, /data-i18n-key="conversations\.guidanceCancel">取消<\/button>/);
   assert.doesNotMatch(html, />Loading conversations\.\.\.<\/p>/);
   assert.doesNotMatch(html, />Refresh<\/button>/);
   assert.doesNotMatch(html, />Choose a remote Bot<\/span>/);

@@ -42,6 +42,7 @@ function makeInput(overrides = {}) {
       maxIdleMs: 300000,
       exitCriteria: 'Both parties understand each other capabilities',
     },
+    operatorGuidanceText: null,
     inboundMessage: {
       conversationId: 'pc-self-peer',
       messageId: 'm3',
@@ -233,6 +234,25 @@ test('host LLM chat runner injects chain write actor rules from metaBotSlug', as
 
 test('buildChatPrompt ends with Reply now:', () => {
   const prompt = buildChatPrompt(makeInput());
+  assert.ok(prompt.endsWith('Reply now:'));
+});
+
+test('buildChatPrompt includes a local-only operator guidance section when present', () => {
+  const prompt = buildChatPrompt(makeInput({
+    operatorGuidanceText: 'Steer the thread back to delivery timing.',
+  }));
+  assert.match(prompt, /## Operator Guidance/);
+  assert.match(prompt, /local-only private guidance/);
+  assert.match(prompt, /Do not present it as peer-authored text/);
+  assert.match(prompt, /Steer the thread back to delivery timing\./);
+});
+
+test('buildChatPrompt remains valid without inboundMessage for operator-triggered turns', () => {
+  const prompt = buildChatPrompt(makeInput({
+    inboundMessage: null,
+    operatorGuidanceText: 'Politely reopen the earlier pricing question.',
+  }));
+  assert.match(prompt, /## Chat History/);
   assert.ok(prompt.endsWith('Reply now:'));
 });
 
@@ -498,6 +518,98 @@ test('host LLM chat runner falls back when the injected executor fails', async (
   assert.equal(result.state, 'reply');
   assert.match(result.content, /Thanks for/);
   assert.deepEqual(resolverCalls.markRuntimeUnavailable, ['llm-runtime-1']);
+});
+
+test('host LLM chat runner skips instead of template fallback when disabled', async () => {
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const llmExecutor = {
+    async execute() {
+      return 'llm-session-failed';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'failed',
+        result: {
+          status: 'failed',
+          output: '',
+          error: 'backend failed',
+          durationMs: 1,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    allowTemplateFallback: false,
+  });
+
+  const result = await runner(makeInput({
+    inboundMessage: null,
+    operatorGuidanceText: 'Ask the peer for the delivery date.',
+  }));
+
+  assert.deepEqual(result, { state: 'skip' });
+});
+
+test('host LLM chat runner skips instead of template fallback when operator guidance is present', async () => {
+  const runtime = {
+    id: 'llm-runtime-1',
+    provider: 'codex',
+    displayName: 'Codex',
+    binaryPath: '/bin/codex',
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+  const llmExecutor = {
+    async execute() {
+      return 'llm-session-failed';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'failed',
+        result: {
+          status: 'failed',
+          output: '',
+          error: 'backend failed',
+          durationMs: 1,
+        },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+  });
+
+  const result = await runner(makeInput({
+    operatorGuidanceText: 'Ask the peer for the delivery date.',
+  }));
+
+  assert.deepEqual(result, { state: 'skip' });
 });
 
 test('host LLM chat runner does not globally mark a strict scoped runtime unavailable', async () => {
