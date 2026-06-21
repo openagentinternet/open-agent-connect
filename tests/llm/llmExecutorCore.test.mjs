@@ -24,10 +24,12 @@ const {
   createOpenClawBackend,
   createOpenCodeBackend,
   createPiBackend,
+  createZCodeBackend,
   createRegistryBackendFactories,
   injectSkills,
   openClawBackendFactory,
   codeBuddyBackendFactory,
+  zcodeBackendFactory,
   resolveProviderSkillRoot,
 } = require('../../dist/core/llm/executor/index.js');
 const {
@@ -206,6 +208,20 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(codebuddy.executor.backendFactoryExport, 'codeBuddyBackendFactory');
   assert.equal(codebuddy.executor.launchCommand, 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions');
 
+  const zcode = getPlatformDefinition('zcode');
+  assert.equal(zcode.id, 'zcode');
+  assert.equal(zcode.displayName, 'ZCode');
+  assert.equal(zcode.executor.kind, 'zcode-json');
+  assert.equal(zcode.executor.backendFactoryExport, 'zcodeBackendFactory');
+  assert.equal(zcode.executor.launchCommand, 'zcode --prompt <prompt> --json --mode yolo --no-browser');
+
+  const workbuddy = getPlatformDefinition('workbuddy');
+  assert.equal(workbuddy.id, 'workbuddy');
+  assert.equal(workbuddy.displayName, 'WorkBuddy');
+  assert.equal(workbuddy.executor.kind, 'codebuddy-stream-json');
+  assert.equal(workbuddy.executor.backendFactoryExport, 'codeBuddyBackendFactory');
+  assert.equal(workbuddy.executor.launchCommand, 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions');
+
   const opencode = getPlatformDefinition('opencode');
   assert.equal(opencode.executor.launchCommand, 'opencode run --format json --dangerously-skip-permissions --dir <cwd>');
 });
@@ -220,6 +236,8 @@ test('registry backend factory helper covers every managed provider and CLI runt
   assert.equal(factories.codex, codexBackendFactory);
   assert.equal(factories.openclaw, openClawBackendFactory);
   assert.equal(factories.codebuddy, codeBuddyBackendFactory);
+  assert.equal(factories.zcode, zcodeBackendFactory);
+  assert.equal(factories.workbuddy, codeBuddyBackendFactory);
 
   const base = await createTempDir();
   const executor = new LlmExecutor({
@@ -558,6 +576,8 @@ test('skill injector resolves provider roots from registry project skill roots',
   assert.equal(resolveProviderSkillRoot('codex', cwd), path.join(cwd, '.codex', 'skills'));
   assert.equal(resolveProviderSkillRoot('openclaw', cwd), path.join(cwd, '.openclaw', 'skills'));
   assert.equal(resolveProviderSkillRoot('gemini', cwd), path.join(cwd, '.gemini', 'skills'));
+  assert.equal(resolveProviderSkillRoot('zcode', cwd), path.join(cwd, '.zcode', 'skills'));
+  assert.equal(resolveProviderSkillRoot('workbuddy', cwd), path.join(cwd, '.workbuddy', 'skills'));
   assert.equal(resolveProviderSkillRoot('hermes', cwd), path.join(cwd, '.agent_context', 'skills'));
   assert.equal(resolveProviderSkillRoot('cursor', cwd), path.join(cwd, '.agent_context', 'skills'));
   assert.equal(
@@ -1020,6 +1040,74 @@ test('LlmExecutor strict skill isolation preserves Cursor home-backed auth while
   const session = await executor.getSession(sessionId);
   assert.equal(session.result.status, 'completed');
   assert.equal(session.result.output, 'cursor-isolated');
+});
+
+test('LlmExecutor strict skill isolation preserves app-backed provider home auth while isolating cwd', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+  await fs.mkdir(path.join(originalHome, '.workbuddy', 'skills', 'metabot-secret'), { recursive: true });
+  await fs.mkdir(path.join(originalHome, '.zcode', 'skills', 'metabot-secret'), { recursive: true });
+  await fs.writeFile(path.join(originalHome, '.workbuddy', 'skills', 'metabot-secret', 'SKILL.md'), '# WorkBuddy Secret\n', 'utf8');
+  await fs.writeFile(path.join(originalHome, '.zcode', 'skills', 'metabot-secret', 'SKILL.md'), '# ZCode Secret\n', 'utf8');
+
+  for (const provider of ['zcode', 'workbuddy', 'codebuddy']) {
+    const executor = new LlmExecutor({
+      sessionsRoot: path.join(base, `sessions-${provider}`),
+      transcriptsRoot: path.join(base, `transcripts-${provider}`),
+      skillsRoot: sourceRoot,
+      systemHomeDir: originalHome,
+      env: {
+        HOME: originalHome,
+        PWD: originalCwd,
+      },
+      backends: {
+        [provider]: () => ({
+          provider,
+          async execute(request) {
+            assert.notEqual(path.resolve(request.cwd), path.resolve(originalCwd));
+            assert.equal(path.resolve(request.env.HOME), path.resolve(originalHome));
+            assert.equal(path.resolve(request.env.PWD), path.resolve(request.cwd));
+            const providerSkillDir = provider === 'zcode'
+              ? '.zcode'
+              : provider === 'workbuddy'
+                ? '.workbuddy'
+                : '.codebuddy';
+            assert.equal(
+              await pathExists(path.join(request.cwd, providerSkillDir, 'skills', 'metabot-weather', 'SKILL.md')),
+              true,
+            );
+            return {
+              status: 'completed',
+              output: `${provider}-isolated`,
+              durationMs: 1,
+            };
+          },
+        }),
+      },
+    });
+
+    const sessionId = await executor.execute({
+      runtimeId: `runtime-${provider}`,
+      runtime: { ...runtime, provider, binaryPath: '/bin/agent' },
+      prompt: 'Use weather only',
+      cwd: originalCwd,
+      skills: ['metabot-weather'],
+      skillSourcePaths: {
+        'metabot-weather': allowedSource,
+      },
+      skillIsolation: 'strict',
+    });
+
+    await collectEvents(executor.streamEvents(sessionId));
+    const session = await executor.getSession(sessionId);
+    assert.equal(session.result.status, 'completed');
+    assert.equal(session.result.output, `${provider}-isolated`);
+  }
 });
 
 test('LlmExecutor preserves the provided system prompt and single-item skills array', async () => {
@@ -1913,6 +2001,68 @@ send({ type: 'result', session_id: 'codebuddy-session-result', result: 'CodeBudd
   assert.equal(result.usage.codebuddy.outputTokens, 22);
   assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['CodeBuddy ']);
   assert.equal(events.some((event) => event.type === 'thinking' && event.content === 'codebuddy thinking'), true);
+  assert.equal(events.some((event) => event.type === 'tool_use' && event.tool === 'Read'), true);
+  assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
+});
+
+test('ZCode backend launches JSON prompt mode and normalizes events', async () => {
+  const base = await createTempDir();
+  const argsPath = path.join(base, 'args.json');
+  const cwdPath = path.join(base, 'cwd.txt');
+  const binaryPath = await writeExecutableScript(base, 'fake-zcode.js', `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.writeFileSync(process.env.FAKE_ZCODE_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+fs.writeFileSync(process.env.FAKE_ZCODE_CWD_PATH, process.cwd());
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+send({ type: 'system/init', session_id: 'zcode-session-1' });
+send({ type: 'assistant', message: { content: [
+  { type: 'thinking', text: 'zcode thinking' },
+  { type: 'text', text: 'ZCode ' },
+  { type: 'tool_use', id: 'tool-zcode', name: 'Read', input: { file: 'x' } }
+] } });
+send({ type: 'tool_result', tool_id: 'tool-zcode', output: 'ok' });
+send({ type: 'result', session_id: 'zcode-session-result', result: 'ZCode done', usage: { input_tokens: 31, output_tokens: 32 } });
+`);
+  const backend = createZCodeBackend(binaryPath, { FAKE_ZCODE_ARGS_PATH: argsPath, FAKE_ZCODE_CWD_PATH: cwdPath });
+  const events = [];
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_zcode',
+      runtime: { ...runtime, provider: 'zcode', binaryPath },
+      prompt: 'hello zcode',
+      systemPrompt: 'system zcode',
+      cwd: base,
+      resumeSessionId: 'zcode-old',
+      extraArgs: ['--json', '--prompt', 'ignored', '--target', 'dashboard'],
+    },
+    { emit: (event) => events.push(event) },
+    new AbortController().signal,
+  );
+
+  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
+  assert.deepEqual(args.slice(0, 2), ['--prompt', 'system zcode\n\nhello zcode']);
+  assert.ok(args.includes('--json'));
+  assert.ok(args.includes('--no-browser'));
+  assert.ok(args.includes('--cwd'));
+  assert.ok(args.includes(base));
+  assert.ok(args.includes('--mode'));
+  assert.ok(args.includes('yolo'));
+  assert.ok(args.includes('--resume'));
+  assert.ok(args.includes('zcode-old'));
+  assert.ok(args.includes('--target'));
+  assert.ok(args.includes('dashboard'));
+  assert.equal(args.filter((arg) => arg === '--prompt').length, 1);
+  assert.equal(args.filter((arg) => arg === '--json').length, 1);
+  await assertSameRealpath(await fs.readFile(cwdPath, 'utf8'), base);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'ZCode ');
+  assert.equal(result.providerSessionId, 'zcode-session-result');
+  assert.equal(result.usage.zcode.inputTokens, 31);
+  assert.equal(result.usage.zcode.outputTokens, 32);
+  assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['ZCode ']);
+  assert.equal(events.some((event) => event.type === 'thinking' && event.content === 'zcode thinking'), true);
   assert.equal(events.some((event) => event.type === 'tool_use' && event.tool === 'Read'), true);
   assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
 });

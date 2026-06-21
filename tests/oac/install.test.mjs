@@ -83,7 +83,7 @@ test('runOac help shows primary bare install flow and registry platform host lis
   assert.match(result.stdout, /oac install/);
   assert.match(result.stdout, /oac doctor/);
   assert.match(result.stdout, /uninstall\s+Remove OAC shim/);
-  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy>/);
+  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy>/);
 });
 
 test('runOac installs shared skills, metabot shim, and codex host bindings for an explicit host', async (t) => {
@@ -296,6 +296,41 @@ test('runOac install can force-bind CodeBuddy skill roots', async (t) => {
   assert.equal(codebuddy.payload.ok, true);
   assert.equal(codebuddy.payload.data.host, 'codebuddy');
   assert.ok(codebuddy.payload.data.boundRoots.some((root) => root.platformId === 'codebuddy' && root.rootId === 'codebuddy-home'));
+  await assertSymlinkPointsTo(
+    path.join(systemHome, '.codebuddy', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
+  );
+});
+
+test('runOac install can force-bind ZCode skill roots', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-force-zcode-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const zcode = await runOacCli(systemHome, ['install', '--host', 'zcode']);
+  assert.equal(zcode.exitCode, 0);
+  assert.equal(zcode.payload.ok, true);
+  assert.equal(zcode.payload.data.host, 'zcode');
+  assert.ok(zcode.payload.data.boundRoots.some((root) => root.platformId === 'zcode' && root.rootId === 'zcode-home'));
+  await assertSymlinkPointsTo(
+    path.join(systemHome, '.zcode', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
+  );
+});
+
+test('runOac install can force-bind WorkBuddy and CodeBuddy-compatible skill roots', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-force-workbuddy-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const workbuddy = await runOacCli(systemHome, ['install', '--host', 'workbuddy']);
+  assert.equal(workbuddy.exitCode, 0);
+  assert.equal(workbuddy.payload.ok, true);
+  assert.equal(workbuddy.payload.data.host, 'workbuddy');
+  assert.ok(workbuddy.payload.data.boundRoots.some((root) => root.platformId === 'workbuddy' && root.rootId === 'workbuddy-home'));
+  assert.ok(workbuddy.payload.data.boundRoots.some((root) => root.platformId === 'workbuddy' && root.rootId === 'workbuddy-codebuddy-home'));
+  await assertSymlinkPointsTo(
+    path.join(systemHome, '.workbuddy', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
+  );
   await assertSymlinkPointsTo(
     path.join(systemHome, '.codebuddy', 'skills', 'metabot-help'),
     path.join(systemHome, '.metabot', 'skills', 'metabot-help'),

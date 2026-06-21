@@ -11,4 +11,4 @@ class SystemCommandError extends Error {
     }
 }
 exports.SystemCommandError = SystemCommandError;
-exports.SUPPORTED_SYSTEM_HOSTS = ['codex', 'claude-code', 'openclaw'];
+exports.SUPPORTED_SYSTEM_HOSTS = ['codex', 'claude-code', 'openclaw', 'zcode', 'workbuddy'];

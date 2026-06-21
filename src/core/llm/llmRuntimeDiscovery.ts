@@ -206,6 +206,16 @@ async function executableCandidatesForProvider(
     seen.add(trimmed);
     candidates.push(trimmed);
   };
+  const addExecutableIfPresent = async (candidate: string | undefined) => {
+    const trimmed = candidate?.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    try {
+      await fs.access(trimmed, fs.constants.X_OK);
+      add(trimmed);
+    } catch {
+      // App-bundled defaults are optional and should not create unavailable runtimes when absent.
+    }
+  };
   for (const envName of providerPathEnvNames(provider, platform)) {
     add(env[envName]);
   }
@@ -213,6 +223,9 @@ async function executableCandidatesForProvider(
     add(candidate);
   }
   add(shellResolvedExecutables?.[binaryName]);
+  for (const candidate of platform.runtime.defaultExecutablePaths ?? []) {
+    await addExecutableIfPresent(candidate);
+  }
   return candidates;
 }
 
@@ -342,7 +355,7 @@ function readinessSucceeded(result: RuntimeReadinessProbeResult): boolean {
 
 function readinessTimeoutForProvider(provider: LlmProvider, override?: number): number {
   if (override !== undefined) return override;
-  return ['codex', 'cursor', 'claude-code'].includes(provider)
+  return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
     ? SLOW_START_READINESS_TIMEOUT_MS
     : DEFAULT_READINESS_TIMEOUT_MS;
 }
@@ -351,7 +364,7 @@ export function readinessSemanticInactivityTimeoutForProvider(
   provider: LlmProvider,
   readinessTimeoutMs: number,
 ): number {
-  return ['codex', 'cursor', 'claude-code'].includes(provider)
+  return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
     ? readinessTimeoutMs
     : Math.min(readinessTimeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS);
 }

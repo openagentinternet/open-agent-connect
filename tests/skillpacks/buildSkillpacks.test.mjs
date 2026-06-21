@@ -12,7 +12,7 @@ const BUILD_SCRIPT_URL = pathToFileURL(path.join(REPO_ROOT, 'scripts/build-metab
 const execFile = promisify(execFileCallback);
 
 const SHARED_PACK = 'shared';
-const HOSTS = ['codex', 'claude-code', 'openclaw'];
+const HOSTS = ['codex', 'claude-code', 'openclaw', 'zcode', 'workbuddy'];
 const EXPECTED_METABOT_SKILLS = [
   'metabot-help',
   'metabot-identity-manage',
@@ -85,6 +85,10 @@ function expectedHostSkillRoot(homeDir, host) {
       return path.join(homeDir, '.claude', 'skills');
     case 'openclaw':
       return path.join(homeDir, '.openclaw', 'skills');
+    case 'zcode':
+      return path.join(homeDir, '.zcode', 'skills');
+    case 'workbuddy':
+      return path.join(homeDir, '.workbuddy', 'skills');
     default:
       throw new Error(`Unsupported host: ${host}`);
   }
@@ -322,6 +326,8 @@ test('buildAgentConnectSkillpacks renders shared skills without host-specific ad
   assert.doesNotMatch(helpSkill, /--host codex/);
   assert.doesNotMatch(helpSkill, /--host claude-code/);
   assert.doesNotMatch(helpSkill, /--host openclaw/);
+  assert.doesNotMatch(helpSkill, /--host zcode/);
+  assert.doesNotMatch(helpSkill, /--host workbuddy/);
 });
 
 test('repository tracked shared and host-wrapper skillpack artifacts stay in sync with a fresh build', async (t) => {

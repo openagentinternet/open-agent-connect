@@ -18,7 +18,7 @@ const STRICT_ISOLATION_PLATFORM_HOME_FILES = {
 const STRICT_ISOLATION_USER_HOME_FILES = {
     'claude-code': ['.claude.json'],
 };
-const STRICT_ISOLATION_SOURCE_HOME_PROVIDERS = new Set(['cursor']);
+const STRICT_ISOLATION_SOURCE_HOME_PROVIDERS = new Set(['cursor', 'codebuddy', 'zcode', 'workbuddy']);
 function createSessionId() {
     return `llm_${(0, node_crypto_1.randomUUID)()}`;
 }

@@ -1,4 +1,4 @@
-export type SystemHost = 'codex' | 'claude-code' | 'openclaw';
+export type SystemHost = 'codex' | 'claude-code' | 'openclaw' | 'zcode' | 'workbuddy';
 
 export interface SystemUpdateInput {
   systemHomeDir: string;
@@ -48,4 +48,4 @@ export class SystemCommandError extends Error {
   }
 }
 
-export const SUPPORTED_SYSTEM_HOSTS: SystemHost[] = ['codex', 'claude-code', 'openclaw'];
+export const SUPPORTED_SYSTEM_HOSTS: SystemHost[] = ['codex', 'claude-code', 'openclaw', 'zcode', 'workbuddy'];

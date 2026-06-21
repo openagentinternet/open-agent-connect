@@ -111,6 +111,24 @@ test('oac-dev-mode supports Cursor host binding for cross-platform acceptance', 
   assert.match(result.stdout, /Host: cursor/);
 });
 
+test('oac-dev-mode supports WorkBuddy host binding for app-backed acceptance', async (t) => {
+  const result = await runDevMode(t, ['--host', 'workbuddy', '--skip-build']);
+
+  assert.doesNotMatch(result.commands, /^npm run build$/m);
+  assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host workbuddy$/m);
+  assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host workbuddy$/m);
+  assert.match(result.stdout, /Host: workbuddy/);
+});
+
+test('oac-dev-mode supports ZCode host binding for app-backed acceptance', async (t) => {
+  const result = await runDevMode(t, ['--host', 'zcode', '--skip-build']);
+
+  assert.doesNotMatch(result.commands, /^npm run build$/m);
+  assert.match(result.commands, /^node .*dist\/oac\/main\.js install --host zcode$/m);
+  assert.match(result.commands, /^node .*dist\/oac\/main\.js doctor --host zcode$/m);
+  assert.match(result.stdout, /Host: zcode/);
+});
+
 test('oac-dev-mode can skip the build for skill-only or static UI checks', async (t) => {
   const result = await runDevMode(t, ['--skip-build']);
 

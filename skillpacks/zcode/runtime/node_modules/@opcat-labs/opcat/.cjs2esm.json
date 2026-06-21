@@ -1,0 +1,18 @@
+{
+  "input": ["cjs"],
+  "ignore": [],
+  "output": "esm",
+  "forceDirectory": null,
+  "modules": [],
+  "extension": {
+    "use": "js",
+    "ignore": []
+  },
+  "addModuleEntry": false,
+  "addPackageJson": false,
+  "filesWithShebang": [],
+  "codemod": {
+    "path": "",
+    "files": ["cjs", "exports"]
+  }
+}

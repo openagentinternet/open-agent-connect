@@ -4,6 +4,8 @@
   "skillpacks": {
     "codex": "0.2.21",
     "claude-code": "0.2.21",
-    "openclaw": "0.2.21"
+    "openclaw": "0.2.21",
+    "zcode": "0.2.21",
+    "workbuddy": "0.2.21"
   }
 }

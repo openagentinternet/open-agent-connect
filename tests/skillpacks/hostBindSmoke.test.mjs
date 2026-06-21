@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const BUILD_SCRIPT_URL = pathToFileURL(path.join(REPO_ROOT, 'scripts/build-metabot-skillpacks.mjs')).href;
 const SHARED_PACK = 'shared';
-const HOSTS = ['codex', 'claude-code', 'openclaw'];
+const HOSTS = ['codex', 'claude-code', 'openclaw', 'zcode', 'workbuddy'];
 const execFile = promisify(execFileCallback);
 
 let builtSkillpacksPromise;
@@ -42,6 +42,10 @@ function expectedHostSkillRoot(homeDir, host) {
       return path.join(homeDir, '.claude', 'skills');
     case 'openclaw':
       return path.join(homeDir, '.openclaw', 'skills');
+    case 'zcode':
+      return path.join(homeDir, '.zcode', 'skills');
+    case 'workbuddy':
+      return path.join(homeDir, '.workbuddy', 'skills');
     default:
       throw new Error(`Unsupported host: ${host}`);
   }

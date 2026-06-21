@@ -45,6 +45,14 @@ const HOSTS = {
     displayName: 'OpenClaw',
     defaultSkillRoot: '${OPENCLAW_HOME:-$HOME/.openclaw}/skills',
   },
+  zcode: {
+    displayName: 'ZCode',
+    defaultSkillRoot: '$HOME/.zcode/skills',
+  },
+  workbuddy: {
+    displayName: 'WorkBuddy',
+    defaultSkillRoot: '$HOME/.workbuddy/skills',
+  },
 };
 
 const GENERATED_JUNK_FILENAMES = new Set(['.DS_Store']);

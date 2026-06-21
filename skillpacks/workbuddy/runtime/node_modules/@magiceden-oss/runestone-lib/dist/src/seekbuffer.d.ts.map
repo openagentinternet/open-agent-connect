@@ -1,0 +1,1 @@
+{"version":3,"file":"seekbuffer.d.ts","sourceRoot":"","sources":["../../src/seekbuffer.ts"],"names":[],"mappings":";AAAA,qBAAa,UAAU;IAGT,OAAO,CAAC,MAAM;IAFnB,SAAS,EAAE,MAAM,CAAK;gBAET,MAAM,EAAE,MAAM;IAElC,SAAS,IAAI,MAAM,GAAG,SAAS;IAQ/B,UAAU,IAAI,OAAO;CAGtB"}

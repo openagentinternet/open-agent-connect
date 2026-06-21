@@ -35,6 +35,8 @@ Current supported host roots are registry-driven and match `oac install`:
 - `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
 - `Kiro CLI`: `$HOME/.kiro/skills`
 - `CodeBuddy`: `$HOME/.codebuddy/skills`
+- `ZCode`: `$HOME/.zcode/skills`
+- `WorkBuddy`: `$HOME/.workbuddy/skills` and `$HOME/.codebuddy/skills`
 - Shared standard root: `$HOME/.agents/skills`
 
 For other Claude Code-compatible hosts, also remove any `metabot-*` links you
@@ -149,6 +151,8 @@ remove_metabot_host_symlinks "$HOME/.kimi/skills"
 remove_metabot_host_symlinks "$HOME/.config/agents/skills"
 remove_metabot_host_symlinks "$HOME/.kiro/skills"
 remove_metabot_host_symlinks "$HOME/.codebuddy/skills"
+remove_metabot_host_symlinks "$HOME/.zcode/skills"
+remove_metabot_host_symlinks "$HOME/.workbuddy/skills"
 
 rm -f "$HOME/.metabot/bin/metabot"
 ```
@@ -171,7 +175,9 @@ for root in \
   "$HOME/.kimi/skills" \
   "$HOME/.config/agents/skills" \
   "$HOME/.kiro/skills" \
-  "$HOME/.codebuddy/skills"; do
+  "$HOME/.codebuddy/skills" \
+  "$HOME/.zcode/skills" \
+  "$HOME/.workbuddy/skills"; do
   test ! -L "$root/metabot-identity-manage"
 done
 test -d "$HOME/.metabot/profiles" || true

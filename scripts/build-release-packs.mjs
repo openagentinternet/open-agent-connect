@@ -7,7 +7,7 @@ const execFile = promisify(execFileCallback);
 const REPO_ROOT = path.resolve(new URL('.', import.meta.url).pathname, '..');
 const SKILLPACKS_DIR = path.join(REPO_ROOT, 'skillpacks');
 const RELEASE_PACKS_DIR = path.join(REPO_ROOT, 'release', 'packs');
-const HOSTS = ['codex', 'claude-code', 'openclaw'];
+const HOSTS = ['codex', 'claude-code', 'openclaw', 'zcode', 'workbuddy'];
 
 await rm(RELEASE_PACKS_DIR, { recursive: true, force: true });
 await mkdir(RELEASE_PACKS_DIR, { recursive: true });

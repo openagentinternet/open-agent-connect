@@ -1,0 +1,10 @@
+{
+    "mappings": "",
+    "sources": [
+        "stdin",
+        "txUtil.scrypt"
+    ],
+    "names": [],
+    "version": 3,
+    "file": "stdin"
+}

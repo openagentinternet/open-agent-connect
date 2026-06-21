@@ -126,10 +126,13 @@ Supported platforms:
 - `kimi` - Kimi
 - `kiro` - Kiro CLI
 - `codebuddy` - CodeBuddy
+- `zcode` - ZCode
+- `workbuddy` - WorkBuddy
 
-Runtime discovery requires a real CLI executable, not just a desktop app bundle.
-The daemon first checks explicit path overrides, then the daemon `PATH`, then
-the user's login shell path. A provider is `detected` when its binary is found
+Runtime discovery requires a real CLI executable. The daemon first checks
+explicit path overrides, then the daemon `PATH`, then the user's login shell
+path, then known app-bundled CLI paths for platforms that ship a local CLI
+inside the desktop app bundle. A provider is `detected` when its binary is found
 and `--version` works. It is `healthy` only after the backend returns non-empty
 text to a short readiness prompt. `/ui/bot` Primary/Fallback provider pickers
 only list `healthy` runtimes.
@@ -150,7 +153,7 @@ Default model overrides use the same aliases with `_MODEL`:
 `<PROVIDER>` is the upper-case provider or binary name with punctuation replaced
 by `_`, for example `OAC_OPENCODE_PATH`, `METABOT_KIRO_CLI_PATH`,
 `OPEN_AGENT_CONNECT_CLAUDE_PATH`, `OAC_CODEBUDDY_PATH`, or
-`METABOT_OPENCODE_MODEL`.
+`OAC_ZCODE_PATH`, `OAC_WORKBUDDY_PATH`, or `METABOT_OPENCODE_MODEL`.
 
 Skills are installed once under `~/.metabot/skills`. Host roots contain skill
 links pointing to `~/.metabot/skills/metabot-*`: symlinks on POSIX platforms and
@@ -187,6 +190,8 @@ Host-native roots used by the built-in binder:
 - `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
 - `Kiro CLI`: `$HOME/.kiro/skills`
 - `CodeBuddy`: `$HOME/.codebuddy/skills`
+- `ZCode`: `$HOME/.zcode/skills`
+- `WorkBuddy`: `$HOME/.workbuddy/skills` and `$HOME/.codebuddy/skills`
 - Shared standard root: `$HOME/.agents/skills`
 
 On Windows, `$HOME` in this guide means the resolved user home. `oac install`
@@ -261,8 +266,9 @@ installer. Use this path when npm is unavailable, when a pinned `OAC_VERSION`
 archive is required, or when debugging release-pack installation specifically.
 
 Release packs are host-specific compatibility artifacts for `codex`,
-`claude-code`, and `openclaw`. They are not the primary path for registry-driven
-multi-platform install. For all supported platforms, prefer the npm path above.
+`claude-code`, `openclaw`, `zcode`, and `workbuddy`. They are not the primary
+path for registry-driven multi-platform install. For all supported platforms,
+prefer the npm path above.
 Use a release pack only when npm is unavailable or when explicitly debugging one
 of those compatibility packs.
 
@@ -273,11 +279,11 @@ set -euo pipefail
 OAC_REPO="${OAC_REPO:-openagentinternet/open-agent-connect}"
 
 case "$OAC_HOST" in
-  codex|claude-code|openclaw)
+  codex|claude-code|openclaw|zcode|workbuddy)
     OAC_HOST_PACK="$OAC_HOST"
     ;;
   *)
-    echo "Unsupported release-pack OAC_HOST '$OAC_HOST'. Release packs are available for codex, claude-code, and openclaw." >&2
+    echo "Unsupported release-pack OAC_HOST '$OAC_HOST'. Release packs are available for codex, claude-code, openclaw, zcode, and workbuddy." >&2
     echo "For registry-driven platform install, use: npm i -g open-agent-connect && oac install" >&2
     exit 1
     ;;
@@ -358,6 +364,8 @@ metabot host bind-skills --host codex
 metabot host bind-skills --host claude-code
 metabot host bind-skills --host openclaw
 metabot host bind-skills --host gemini
+metabot host bind-skills --host zcode
+metabot host bind-skills --host workbuddy
 ```
 
 This keeps one canonical shared skill root while exposing the same `metabot-*`
@@ -462,6 +470,12 @@ case "${OAC_HOST:-claude-code}" in
     ;;
   openclaw)
     HOST_SKILL_ROOT="${OPENCLAW_HOME:-$HOME/.openclaw}/skills"
+    ;;
+  zcode)
+    HOST_SKILL_ROOT="$HOME/.zcode/skills"
+    ;;
+  workbuddy)
+    HOST_SKILL_ROOT="$HOME/.workbuddy/skills"
     ;;
 esac
 
@@ -725,9 +739,9 @@ Notes:
 - defaults to latest release
 - designed for non-interactive scheduling (for example cron)
 - use `--dry-run` to preview planned update actions
-- `--host` is legacy release-pack update mode for `codex`, `claude-code`, and
-  `openclaw` compatibility packs only
-- do not use `--host` for the 11-platform npm-first install path; omit it so
+- `--host` is legacy release-pack update mode for `codex`, `claude-code`,
+  `openclaw`, `zcode`, and `workbuddy` compatibility packs only
+- do not use `--host` for the 14-platform npm-first install path; omit it so
   `oac install` can rebind all registry roots
 
 ## Uninstall

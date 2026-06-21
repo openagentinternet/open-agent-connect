@@ -1,0 +1,29 @@
+{
+    "version": 8,
+    "compilerVersion": "1.17.1+commit.3385a0d",
+    "contract": "Util",
+    "md5": "7ce2c8d167a8dc55605a317b2e0bb80a",
+    "structs": [],
+    "library": [
+        {
+            "name": "Util",
+            "params": [],
+            "properties": [],
+            "genericTypes": []
+        }
+    ],
+    "alias": [],
+    "abi": [
+        {
+            "type": "constructor",
+            "params": []
+        }
+    ],
+    "stateProps": [],
+    "buildType": "debug",
+    "file": "",
+    "asm": "",
+    "hex": "",
+    "sources": [],
+    "sourceMap": []
+}

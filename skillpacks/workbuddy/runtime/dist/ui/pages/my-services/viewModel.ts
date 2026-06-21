@@ -1,0 +1,586 @@
+export interface MyServiceMetricViewModel {
+  label: string;
+  value: string;
+}
+
+export interface MyServicesPaginationViewModel {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  canPrevious: boolean;
+  canNext: boolean;
+}
+
+export interface MyServiceListEntryViewModel {
+  key: string;
+  id: string;
+  currentPinId: string;
+  sourceServicePinId: string;
+  title: string;
+  serviceName: string;
+  description: string;
+  iconUri: string;
+  iconLabel: string;
+  providerSkills: string[];
+  skillLabel: string;
+  outputTypeLabel: string;
+  priceLabel: string;
+  paymentTiming: string;
+  paymentTimingLabel: string;
+  creatorLabel: string;
+  updatedAtLabel: string;
+  metrics: MyServiceMetricViewModel[];
+  canModify: boolean;
+  canRevoke: boolean;
+  blockedReason: string;
+}
+
+export interface MyServiceOrderEntryViewModel {
+  key: string;
+  statusLabel: string;
+  buyerLabel: string;
+  paymentLabel: string;
+  paymentTxid: string;
+  orderTxid: string;
+  servicePinId: string;
+  timeLabel: string;
+  ratingLabel: string;
+  ratingComment: string;
+  ratingPinId: string;
+  traceHref: string;
+  traceLabel: string;
+  sessionHref: string;
+  sessionLabel: string;
+  runtimeLabel: string;
+}
+
+export interface MyServiceEditFormViewModel {
+  serviceId: string;
+  displayName: string;
+  serviceName: string;
+  description: string;
+  providerSkills: string[];
+  providerSkill: string;
+  outputType: string;
+  price: string;
+  currency: string;
+  paymentTiming: string;
+  settlementKind: string;
+  executionReminder: string;
+  serviceIconUri: string;
+  serviceIconPreviewUri: string;
+}
+
+export interface MyServicesNoticeViewModel {
+  tone: 'success' | 'error' | 'warning' | 'neutral';
+  title: string;
+  message: string;
+  txids: string[];
+  pinId: string;
+}
+
+export interface MyServicesEmptyStateViewModel {
+  title: string;
+  message: string;
+}
+
+export interface MyServicesPageViewModel {
+  services: MyServiceListEntryViewModel[];
+  selectedService: MyServiceListEntryViewModel | null;
+  orders: MyServiceOrderEntryViewModel[];
+  editForm: MyServiceEditFormViewModel | null;
+  notice: MyServicesNoticeViewModel | null;
+  pageLabel: string;
+  orderPageLabel: string;
+  pagination: MyServicesPaginationViewModel;
+  orderPagination: MyServicesPaginationViewModel;
+  emptyState: MyServicesEmptyStateViewModel;
+  orderEmptyState: MyServicesEmptyStateViewModel;
+  currencyOptions: string[];
+  outputTypeOptions: string[];
+}
+
+function normalizeText(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
+}
+
+function normalizeNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function stripQueryAndFragment(value: string): string {
+  return value.split(/[?#]/u)[0] ?? value;
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//iu.test(value);
+}
+
+function isLikelyServiceIconPinId(value: string): boolean {
+  return /^[0-9a-f]{64}(?:i\d+)?$/iu.test(value) || /^[A-Za-z0-9._:-]{8,256}$/u.test(value);
+}
+
+function extractServiceIconPinReference(value: unknown): string {
+  const raw = normalizeText(value);
+  if (!raw || /^(data:|blob:)/iu.test(raw)) return '';
+  if (/^metafile:\/\//iu.test(raw)) {
+    const pinId = stripQueryAndFragment(raw.slice('metafile://'.length).trim());
+    return isLikelyServiceIconPinId(pinId) ? pinId : '';
+  }
+
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  const prefixes = [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ];
+  for (const prefix of prefixes) {
+    if (path.toLowerCase().startsWith(prefix.toLowerCase())) {
+      const pinId = decodeURIComponent(stripQueryAndFragment(path.slice(prefix.length).trim()));
+      return isLikelyServiceIconPinId(pinId) ? pinId : '';
+    }
+  }
+
+  const bare = stripQueryAndFragment(raw);
+  if (!bare.includes('/') && !bare.includes('\\') && isLikelyServiceIconPinId(bare)) {
+    return bare;
+  }
+  return '';
+}
+
+function isServiceIconContentReference(value: unknown): boolean {
+  const raw = normalizeText(value);
+  if (!raw) return false;
+  if (/^metafile:\/\//iu.test(raw)) return true;
+  const path = (() => {
+    if (isHttpUrl(raw)) {
+      try {
+        return new URL(raw).pathname;
+      } catch {
+        return '';
+      }
+    }
+    return raw;
+  })();
+  return [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ].some((prefix) => path.toLowerCase().startsWith(prefix.toLowerCase()));
+}
+
+function formatServiceIconRenderUri(value: unknown): string {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  if (/^(data:|blob:)/iu.test(raw)) return raw;
+  const pinRef = extractServiceIconPinReference(raw);
+  if (pinRef) return `/api/file/avatar?ref=${encodeURIComponent(pinRef)}`;
+  if (isServiceIconContentReference(raw)) return '';
+  return raw;
+}
+
+function readObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function readArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeUnique(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function normalizeProviderSkills(record: Record<string, unknown>): string[] {
+  const plural = readArray(record.providerSkills).map((entry) => normalizeText(entry));
+  const legacyArray = readArray(record.providerSkill).map((entry) => normalizeText(entry));
+  const legacyString = normalizeText(record.providerSkill);
+  return normalizeUnique([...plural, ...legacyArray, legacyString]);
+}
+
+function normalizePaymentTiming(record: Record<string, unknown>): string {
+  const raw = normalizeText(record.paymentTiming).toLowerCase();
+  if (raw === 'free' || raw === 'prepaid') return raw;
+  const price = Number(normalizeText(record.price));
+  return Number.isFinite(price) && price === 0 ? 'free' : 'prepaid';
+}
+
+function formatPaymentTimingLabel(value: unknown): string {
+  const timing = normalizeText(value).toLowerCase();
+  if (timing === 'free') return 'Free';
+  return 'Prepaid';
+}
+
+function formatCount(value: unknown): string {
+  const numeric = normalizeNumber(value);
+  return Number.isFinite(numeric) ? String(Math.trunc(numeric)) : '0';
+}
+
+function formatTimestamp(value: unknown): string {
+  const raw = normalizeText(value);
+  const numeric = Number(value);
+  let date: Date | null = null;
+  if (Number.isFinite(numeric) && numeric > 0) {
+    date = new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric);
+  } else if (raw) {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) date = new Date(parsed);
+  }
+  if (!date || !Number.isFinite(date.getTime())) return raw || 'Unknown';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return [
+    `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`,
+    `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`,
+  ].join(' ');
+}
+
+function formatPrice(record: Record<string, unknown>): string {
+  if (normalizePaymentTiming(record) === 'free') return 'Free';
+  const price = normalizeText(record.price);
+  const currency = normalizeText(record.currency);
+  return [price, currency].filter(Boolean).join(' ') || 'No price';
+}
+
+function formatAmount(record: Record<string, unknown>): string {
+  const amount = normalizeText(record.paymentAmount);
+  const currency = normalizeText(record.paymentCurrency);
+  return [amount, currency].filter(Boolean).join(' ') || 'No payment';
+}
+
+function formatServiceInitials(displayName: string, serviceName: string): string {
+  const source = displayName || serviceName || 'Service';
+  const words = source.split(/[\s_-]+/u).map((part) => part.trim()).filter(Boolean);
+  const initials = words.length > 1
+    ? `${words[0][0] ?? ''}${words[1][0] ?? ''}`
+    : source.slice(0, 2);
+  return initials.toUpperCase() || 'SV';
+}
+
+function formatRating(record: Record<string, unknown>): string {
+  const ratingAvg = normalizeNumber(record.ratingAvg);
+  const ratingCount = normalizeNumber(record.ratingCount);
+  if (!ratingCount || !ratingAvg) return 'No rating';
+  const rounded = Number.isInteger(ratingAvg) ? String(ratingAvg) : ratingAvg.toFixed(1).replace(/\.0$/u, '');
+  return `${rounded} / 5 · ${Math.trunc(ratingCount)}`;
+}
+
+function formatStatusLabel(value: unknown): string {
+  switch (normalizeText(value)) {
+    case 'completed':
+      return 'Completed';
+    case 'refunded':
+      return 'Refunded';
+    default:
+      return normalizeText(value) || 'Unknown';
+  }
+}
+
+function formatOrderTime(record: Record<string, unknown>): string {
+  const status = normalizeText(record.status);
+  const timestamp = status === 'refunded'
+    ? record.refundCompletedAt || record.createdAt
+    : record.deliveredAt || record.createdAt;
+  return formatTimestamp(timestamp);
+}
+
+function formatOrderRating(record: Record<string, unknown>): {
+  label: string;
+  comment: string;
+  pinId: string;
+} {
+  const rating = readObject(record.rating);
+  const rate = normalizeNumber(rating.rate);
+  if (!rate) {
+    return { label: 'No rating', comment: '', pinId: '' };
+  }
+  return {
+    label: `${Number.isInteger(rate) ? String(rate) : rate.toFixed(1)} / 5`,
+    comment: normalizeText(rating.comment),
+    pinId: normalizeText(rating.pinId),
+  };
+}
+
+function formatPageLabel(page: Record<string, unknown>, noun: string): string {
+  const currentPage = Math.max(1, Math.trunc(normalizeNumber(page.page) || 1));
+  const totalPages = Math.max(1, Math.trunc(normalizeNumber(page.totalPages) || 1));
+  const total = Math.max(0, Math.trunc(normalizeNumber(page.total)));
+  return `${currentPage} / ${totalPages} · ${total} ${noun}`;
+}
+
+function buildPagination(page: Record<string, unknown>): MyServicesPaginationViewModel {
+  const currentPage = Math.max(1, Math.trunc(normalizeNumber(page.page) || 1));
+  const pageSize = Math.max(1, Math.trunc(normalizeNumber(page.pageSize) || 1));
+  const total = Math.max(0, Math.trunc(normalizeNumber(page.total)));
+  const totalPages = Math.max(1, Math.trunc(normalizeNumber(page.totalPages) || 1));
+  return {
+    page: currentPage,
+    pageSize,
+    total,
+    totalPages,
+    canPrevious: currentPage > 1,
+    canNext: total > 0 && currentPage < totalPages,
+  };
+}
+
+function buildServiceEntry(entry: unknown): MyServiceListEntryViewModel | null {
+  const record = readObject(entry);
+  const currentPinId = normalizeText(record.currentPinId) || normalizeText(record.id);
+  if (!currentPinId) return null;
+  const displayName = normalizeText(record.displayName) || normalizeText(record.serviceName) || 'Service';
+  const serviceName = normalizeText(record.serviceName) || 'unknown-service';
+  const currency = normalizeText(record.currency);
+  const creatorName = normalizeText(record.creatorMetabotName);
+  const creatorSlug = normalizeText(record.creatorMetabotSlug);
+  const providerSkills = normalizeProviderSkills(record);
+  const paymentTiming = normalizePaymentTiming(record);
+  const priceLabel = formatPrice(record);
+  return {
+    key: currentPinId,
+    id: normalizeText(record.id) || currentPinId,
+    currentPinId,
+    sourceServicePinId: normalizeText(record.sourceServicePinId) || currentPinId,
+    title: displayName,
+    serviceName,
+    description: normalizeText(record.description),
+    iconUri: formatServiceIconRenderUri(record.serviceIcon),
+    iconLabel: formatServiceInitials(displayName, serviceName),
+    providerSkills,
+    skillLabel: providerSkills.join(', ') || 'Unbound skill',
+    outputTypeLabel: normalizeText(record.outputType) || 'text',
+    priceLabel,
+    paymentTiming,
+    paymentTimingLabel: formatPaymentTimingLabel(paymentTiming),
+    creatorLabel: [creatorName, creatorSlug].filter(Boolean).join(' · ') || 'Unknown MetaBot',
+    updatedAtLabel: formatTimestamp(record.updatedAt),
+    metrics: [
+      { label: 'Success', value: formatCount(record.successCount) },
+      { label: 'Refunded', value: formatCount(record.refundCount) },
+      { label: 'Gross', value: [normalizeText(record.grossRevenue) || '0', currency].filter(Boolean).join(' ') },
+      { label: 'Net', value: [normalizeText(record.netIncome) || '0', currency].filter(Boolean).join(' ') },
+      { label: 'Rating', value: formatRating(record) },
+    ],
+    canModify: record.canModify === true,
+    canRevoke: record.canRevoke === true,
+    blockedReason: normalizeText(record.blockedReason),
+  };
+}
+
+function buildOrderEntry(entry: unknown): MyServiceOrderEntryViewModel | null {
+  const record = readObject(entry);
+  const id = normalizeText(record.id);
+  if (!id) return null;
+  const paymentTxid = normalizeText(record.paymentTxid);
+  const orderTxid = normalizeText(record.orderMessageTxid);
+  const traceId = normalizeText(record.traceId);
+  const sessionId = normalizeText(record.coworkSessionId);
+  const rating = formatOrderRating(record);
+  const runtimeLabel = [
+    normalizeText(record.runtimeProvider),
+    normalizeText(record.runtimeId),
+    normalizeText(record.llmSessionId),
+  ].filter(Boolean).join(' · ') || 'Runtime unavailable';
+  return {
+    key: id,
+    statusLabel: formatStatusLabel(record.status),
+    buyerLabel: normalizeText(record.counterpartyName) || normalizeText(record.counterpartyGlobalMetaid) || 'Unknown buyer',
+    paymentLabel: [formatAmount(record), paymentTxid].filter(Boolean).join(' · '),
+    paymentTxid,
+    orderTxid,
+    servicePinId: normalizeText(record.servicePinId),
+    timeLabel: formatOrderTime(record),
+    ratingLabel: rating.label,
+    ratingComment: rating.comment,
+    ratingPinId: rating.pinId,
+    traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
+    traceLabel: traceId || 'Trace unavailable',
+    sessionHref: sessionId ? `/ui/trace?sessionId=${encodeURIComponent(sessionId)}` : '',
+    sessionLabel: sessionId || 'No session',
+    runtimeLabel,
+  };
+}
+
+function buildEditForm(selected: MyServiceListEntryViewModel | null, rawSelected: Record<string, unknown> | null): MyServiceEditFormViewModel | null {
+  if (!selected || !rawSelected) return null;
+  const providerSkills = normalizeProviderSkills(rawSelected);
+  const paymentTiming = normalizePaymentTiming(rawSelected);
+  return {
+    serviceId: selected.currentPinId,
+    displayName: selected.title,
+    serviceName: selected.serviceName,
+    description: selected.description,
+    providerSkills,
+    providerSkill: providerSkills[0] || normalizeText(rawSelected.providerSkill),
+    outputType: normalizeText(rawSelected.outputType) || 'text',
+    price: normalizeText(rawSelected.price),
+    currency: normalizeText(rawSelected.currency) || 'BTC',
+    paymentTiming,
+    settlementKind: normalizeText(rawSelected.settlementKind).toLowerCase() || 'native',
+    executionReminder: normalizeText(rawSelected.executionReminder),
+    serviceIconUri: normalizeText(rawSelected.serviceIcon),
+    serviceIconPreviewUri: formatServiceIconRenderUri(rawSelected.serviceIcon),
+  };
+}
+
+function buildNotice(input: {
+  mutationResult?: Record<string, unknown> | null;
+  error?: Record<string, unknown> | null;
+}): MyServicesNoticeViewModel | null {
+  const error = readObject(input.error);
+  const errorMessage = normalizeText(error.message);
+  if (errorMessage) {
+    return {
+      tone: 'error',
+      title: 'My Services error',
+      message: errorMessage,
+      txids: [],
+      pinId: '',
+    };
+  }
+
+  const result = readObject(input.mutationResult);
+  const txids = readArray(result.txids).map((entry) => normalizeText(entry)).filter(Boolean);
+  const operation = normalizeText(result.operation);
+  if (!operation && txids.length === 0 && !normalizeText(result.pinId)) {
+    return null;
+  }
+  const operationLabel = operation === 'revoke'
+    ? 'Revoke'
+    : operation === 'modify'
+      ? 'Modify'
+      : 'Service';
+  const warning = normalizeText(result.warning);
+  if (warning) {
+    return {
+      tone: 'warning',
+      title: `${operationLabel} warning`,
+      message: warning,
+      txids,
+      pinId: normalizeText(result.pinId),
+    };
+  }
+  return {
+    tone: 'success',
+    title: `${operationLabel} broadcast`,
+    message: 'Local state has been updated after the chain write.',
+    txids,
+    pinId: normalizeText(result.pinId),
+  };
+}
+
+export function buildMyServicesPageViewModel(input: {
+  servicesPage?: Record<string, unknown> | null;
+  ordersPage?: Record<string, unknown> | null;
+  selectedServiceId?: string | null;
+  mutationResult?: Record<string, unknown> | null;
+  error?: Record<string, unknown> | null;
+}): MyServicesPageViewModel {
+  const servicesPage = readObject(input.servicesPage);
+  const rawServices = readArray(servicesPage.items);
+  const services = rawServices
+    .map((entry) => buildServiceEntry(entry))
+    .filter((entry): entry is MyServiceListEntryViewModel => Boolean(entry));
+  const selectedServiceId = normalizeText(input.selectedServiceId);
+  const selectedIndex = selectedServiceId
+    ? services.findIndex((service) => service.currentPinId === selectedServiceId || service.sourceServicePinId === selectedServiceId || service.id === selectedServiceId)
+    : -1;
+  const selectedService = selectedIndex >= 0 ? services[selectedIndex] : services[0] ?? null;
+  const rawSelected = selectedIndex >= 0
+    ? readObject(rawServices[selectedIndex])
+    : selectedService
+      ? readObject(rawServices[0])
+      : null;
+  const ordersPage = readObject(input.ordersPage);
+  const orders = readArray(ordersPage.items)
+    .map((entry) => buildOrderEntry(entry))
+    .filter((entry): entry is MyServiceOrderEntryViewModel => Boolean(entry));
+
+  return {
+    services,
+    selectedService,
+    orders,
+    editForm: buildEditForm(selectedService, rawSelected),
+    notice: buildNotice({
+      mutationResult: input.mutationResult ?? null,
+      error: input.error ?? null,
+    }),
+    pageLabel: formatPageLabel(servicesPage, 'services'),
+    orderPageLabel: formatPageLabel(ordersPage, 'orders'),
+    pagination: buildPagination(servicesPage),
+    orderPagination: buildPagination(ordersPage),
+    emptyState: {
+      title: 'No published services',
+      message: 'Local MetaBot profiles have no active skill services yet.',
+    },
+    orderEmptyState: {
+      title: 'No closed orders',
+      message: 'Completed and refunded seller orders for this service will appear here.',
+    },
+    currencyOptions: ['BTC', 'SPACE', 'DOGE', 'BTC-OPCAT'],
+    outputTypeOptions: ['text', 'image', 'video', 'audio', 'other'],
+  };
+}
+
+export function buildMyServicesPageViewModelRuntimeSource(): string {
+  return [
+    normalizeText,
+    normalizeNumber,
+    stripQueryAndFragment,
+    isHttpUrl,
+    isLikelyServiceIconPinId,
+    extractServiceIconPinReference,
+    isServiceIconContentReference,
+    formatServiceIconRenderUri,
+    readObject,
+    readArray,
+    normalizeUnique,
+    normalizeProviderSkills,
+    normalizePaymentTiming,
+    formatPaymentTimingLabel,
+    formatCount,
+    formatTimestamp,
+    formatPrice,
+    formatAmount,
+    formatServiceInitials,
+    formatRating,
+    formatStatusLabel,
+    formatOrderTime,
+    formatOrderRating,
+    formatPageLabel,
+    buildPagination,
+    buildServiceEntry,
+    buildOrderEntry,
+    buildEditForm,
+    buildNotice,
+    buildMyServicesPageViewModel,
+  ].map((fn) => fn.toString()).join('\n\n');
+}

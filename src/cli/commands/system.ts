@@ -1,12 +1,10 @@
 import { commandFailed, type MetabotCommandResult } from '../../core/contracts/commandResult';
-import type { SystemHost } from '../../core/system/types';
+import { SUPPORTED_SYSTEM_HOSTS, type SystemHost } from '../../core/system/types';
 import { commandUnknownSubcommand, hasFlag, readFlagValue } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
-const SUPPORTED_HOSTS: SystemHost[] = ['codex', 'claude-code', 'openclaw'];
-
 function isSupportedHost(value: string): value is SystemHost {
-  return SUPPORTED_HOSTS.includes(value as SystemHost);
+  return SUPPORTED_SYSTEM_HOSTS.includes(value as SystemHost);
 }
 
 function parseKnownFlags(args: string[], valueFlags: string[], booleanFlags: string[]): { error?: MetabotCommandResult<never> } {
@@ -55,7 +53,7 @@ export async function runSystemCommand(
     if (host && !isSupportedHost(host)) {
       return commandFailed(
         'invalid_argument',
-        `Unsupported --host value: ${host}. Legacy release-pack update supports only: ${SUPPORTED_HOSTS.join(', ')}. Omit --host for the npm-first registry-driven update path.`,
+        `Unsupported --host value: ${host}. Legacy release-pack update supports only: ${SUPPORTED_SYSTEM_HOSTS.join(', ')}. Omit --host for the npm-first registry-driven update path.`,
       );
     }
     const version = readFlagValue(args, '--target-version') || undefined;

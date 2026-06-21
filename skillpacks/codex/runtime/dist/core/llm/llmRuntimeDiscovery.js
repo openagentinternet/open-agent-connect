@@ -169,6 +169,18 @@ async function executableCandidatesForProvider(provider, platform, binaryName, p
         seen.add(trimmed);
         candidates.push(trimmed);
     };
+    const addExecutableIfPresent = async (candidate) => {
+        const trimmed = candidate?.trim();
+        if (!trimmed || seen.has(trimmed))
+            return;
+        try {
+            await node_fs_1.promises.access(trimmed, node_fs_1.promises.constants.X_OK);
+            add(trimmed);
+        }
+        catch {
+            // App-bundled defaults are optional and should not create unavailable runtimes when absent.
+        }
+    };
     for (const envName of providerPathEnvNames(provider, platform)) {
         add(env[envName]);
     }
@@ -176,6 +188,9 @@ async function executableCandidatesForProvider(provider, platform, binaryName, p
         add(candidate);
     }
     add(shellResolvedExecutables?.[binaryName]);
+    for (const candidate of platform.runtime.defaultExecutablePaths ?? []) {
+        await addExecutableIfPresent(candidate);
+    }
     return candidates;
 }
 async function readExecutableVersion(binaryPath, versionArgs = ['--version'], timeoutMs = 5_000, env = process.env) {
@@ -279,12 +294,12 @@ function readinessSucceeded(result) {
 function readinessTimeoutForProvider(provider, override) {
     if (override !== undefined)
         return override;
-    return ['codex', 'cursor', 'claude-code'].includes(provider)
+    return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
         ? SLOW_START_READINESS_TIMEOUT_MS
         : DEFAULT_READINESS_TIMEOUT_MS;
 }
 function readinessSemanticInactivityTimeoutForProvider(provider, readinessTimeoutMs) {
-    return ['codex', 'cursor', 'claude-code'].includes(provider)
+    return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
         ? readinessTimeoutMs
         : Math.min(readinessTimeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS);
 }
