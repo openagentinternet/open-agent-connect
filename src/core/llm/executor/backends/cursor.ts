@@ -9,18 +9,23 @@ function buildCursorPrompt(request: LlmExecutionRequest): string {
 }
 
 function buildCursorArgs(request: LlmExecutionRequest): string[] {
-  const args = ['chat', '-p', buildCursorPrompt(request), '--output-format', 'stream-json', '--yolo'];
+  const args = ['agent', '--print', '--output-format', 'json', '--force', '--trust'];
   if (request.cwd) args.push('--workspace', request.cwd);
   if (request.model) args.push('--model', request.model);
   if (request.resumeSessionId) args.push('--resume', request.resumeSessionId);
   args.push(...filterBlockedArgs(request.extraArgs, {
-    '-p': { takesValue: true },
+    '-p': { takesValue: false },
+    '--print': { takesValue: false },
     '--output-format': { takesValue: true },
     '--yolo': { takesValue: false },
+    '--force': { takesValue: false },
+    '-f': { takesValue: false },
+    '--trust': { takesValue: false },
     '--workspace': { takesValue: true },
     '--model': { takesValue: true },
     '--resume': { takesValue: true },
   }));
+  args.push(buildCursorPrompt(request));
   return args;
 }
 

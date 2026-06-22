@@ -215,6 +215,9 @@ test('registry preserves Claude Code and Codex executor metadata', async () => {
   assert.equal(zcode.executor.backendFactoryExport, 'zcodeBackendFactory');
   assert.equal(zcode.executor.launchCommand, 'zcode --prompt <prompt> --json --mode yolo --no-browser');
 
+  const cursor = getPlatformDefinition('cursor');
+  assert.equal(cursor.executor.launchCommand, 'cursor-agent agent --print --output-format json --force --trust <prompt>');
+
   const workbuddy = getPlatformDefinition('workbuddy');
   assert.equal(workbuddy.id, 'workbuddy');
   assert.equal(workbuddy.displayName, 'WorkBuddy');
@@ -1850,7 +1853,7 @@ process.stdout.write(JSON.stringify({ type: 'agent_start', session_id: sessionPa
   assert.equal(result.providerSessionId, resumePath);
 });
 
-test('Cursor backend launches stream-json chat mode and normalizes prefixed events', async () => {
+test('Cursor backend launches headless json agent mode and normalizes prefixed events', async () => {
   const base = await createTempDir();
   const argsPath = path.join(base, 'args.json');
   const cwdPath = path.join(base, 'cwd.txt');
@@ -1888,10 +1891,12 @@ send({ type: 'result', session_id: 'cursor-session-result', result: 'Cursor done
   );
 
   const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.deepEqual(args.slice(0, 3), ['chat', '-p', 'hello cursor']);
+  assert.deepEqual(args.slice(0, 5), ['agent', '--print', '--output-format', 'json', '--force']);
+  assert.ok(args.includes('--trust'));
   assert.ok(args.includes('--output-format'));
-  assert.ok(args.includes('stream-json'));
-  assert.ok(args.includes('--yolo'));
+  assert.ok(args.includes('json'));
+  assert.equal(args.includes('stream-json'), false);
+  assert.equal(args.includes('--yolo'), false);
   assert.ok(args.includes('--workspace'));
   await assertSameRealpath(args[args.indexOf('--workspace') + 1], base);
   assert.ok(args.includes('--model'));
@@ -1899,8 +1904,8 @@ send({ type: 'result', session_id: 'cursor-session-result', result: 'Cursor done
   assert.ok(args.includes('--resume'));
   assert.ok(args.includes('cursor-old'));
   assert.ok(args.includes('--debug'));
-  assert.equal(args.filter((arg) => arg === '--yolo').length, 1);
   assert.equal(args.includes('text'), false);
+  assert.equal(args.at(-1), 'hello cursor');
   await assertSameRealpath(await fs.readFile(cwdPath, 'utf8'), base);
   assert.equal(result.status, 'completed');
   assert.equal(result.output, 'Cursor ');
@@ -1936,10 +1941,9 @@ process.stdout.write(JSON.stringify({ type: 'result', result: 'done' }) + '\\n')
   );
 
   const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
-  assert.equal(args[0], 'chat');
-  assert.equal(args[1], '-p');
-  assert.match(args[2], /Provider-only system contract/);
-  assert.match(args[2], /User task only/);
+  assert.equal(args[0], 'agent');
+  assert.match(args.at(-1), /Provider-only system contract/);
+  assert.match(args.at(-1), /User task only/);
 });
 
 test('CodeBuddy backend launches stream-json print mode and normalizes events', async () => {

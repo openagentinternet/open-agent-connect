@@ -538,6 +538,34 @@ test('runtime discovery gives slow-start providers an extended readiness window'
   });
 });
 
+test('runtime discovery lets slow Cursor version probes complete before readiness', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-version-timeout-'));
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const cursorPath = path.join(binDir, 'cursor-agent');
+    await writeFile(cursorPath, '#!/bin/sh\n/bin/sleep 6\necho "cursor-agent 2026.06.19"\n', 'utf8');
+    await chmod(cursorPath, 0o755);
+
+    let readinessCalled = false;
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      now: () => '2026-05-22T04:05:00.000Z',
+      readinessProbe: async () => {
+        readinessCalled = true;
+        return { ok: true, output: 'OK' };
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].provider, 'cursor');
+    assert.equal(result.runtimes[0].version, '2026.06.19');
+    assert.equal(result.runtimes[0].health, 'healthy');
+    assert.equal(readinessCalled, true);
+  });
+});
+
 test('runtime discovery uses the full readiness window as semantic inactivity for slow-start providers', () => {
   assert.equal(readinessSemanticInactivityTimeoutForProvider('codex', 45_000), 45_000);
   assert.equal(readinessSemanticInactivityTimeoutForProvider('cursor', 45_000), 45_000);

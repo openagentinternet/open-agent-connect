@@ -48,6 +48,8 @@ export type RuntimeReadinessProbe = (input: {
 
 const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
 const SLOW_START_READINESS_TIMEOUT_MS = 45_000;
+const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
+const SLOW_START_VERSION_PROBE_TIMEOUT_MS = 20_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
 const READINESS_PROMPT = 'Reply exactly OK.';
 const LOGIN_SHELL_RESOLVE_TIMEOUT_MS = 3_000;
@@ -364,6 +366,12 @@ function readinessTimeoutForProvider(provider: LlmProvider, override?: number): 
     : DEFAULT_READINESS_TIMEOUT_MS;
 }
 
+function versionProbeTimeoutForProvider(provider: LlmProvider): number {
+  return provider === 'cursor'
+    ? SLOW_START_VERSION_PROBE_TIMEOUT_MS
+    : DEFAULT_VERSION_PROBE_TIMEOUT_MS;
+}
+
 export function readinessSemanticInactivityTimeoutForProvider(
   provider: LlmProvider,
   readinessTimeoutMs: number,
@@ -470,7 +478,7 @@ export async function discoverProvider(
     const versionProbe = await probeExecutableVersion(
       binaryPath,
       platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
-      5_000,
+      versionProbeTimeoutForProvider(provider),
       env,
     );
     if (versionProbe.ok) {
@@ -555,7 +563,7 @@ export async function testLlmRuntimeReadiness(
   const versionProbe = await probeExecutableVersion(
     runtime.binaryPath,
     platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
-    5_000,
+    versionProbeTimeoutForProvider(runtime.provider),
     env,
   );
   const probedRuntime: LlmRuntime = {

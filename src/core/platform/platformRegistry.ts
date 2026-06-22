@@ -290,7 +290,7 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
     executor: {
       kind: 'cursor-stream-json',
       backendFactoryExport: 'cursorBackendFactory',
-      launchCommand: 'cursor-agent chat -p <prompt> --output-format stream-json --yolo',
+      launchCommand: 'cursor-agent agent --print --output-format json --force --trust <prompt>',
       multicaReferencePath: 'agent/cursor.go',
     },
   },
