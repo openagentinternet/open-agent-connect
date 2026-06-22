@@ -487,7 +487,23 @@
       .conversation-guidance-form .input {
         flex: 1 1 auto;
         min-width: 0;
+        height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--border2);
+        border-radius: 9px;
+        background: #fff;
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+        transition: border-color .15s, box-shadow .15s;
       }
+      .conversation-guidance-form .input::placeholder { color: var(--dim); }
+      .conversation-guidance-form .input:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-dim);
+      }
+      .conversation-guidance-form .input:disabled { opacity: .55; }
       .conversation-guidance-status {
         flex-basis: 100%;
       }
