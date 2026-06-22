@@ -1,0 +1,490 @@
+<!doctype html>
+<!--
+  Conversations prototype. Static HTML, mock data, no backend wiring.
+  Same tokens + component rules as bot-prototype.html (copied from
+  /tmp/abc-pin-inspector-prototype.html), so the two pages are one family.
+  Copy affordances reuse OAC's existing copy-icon SVG button.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conversations · MetaBot (prototype)</title>
+    <style>
+      /* ── Tokens — identical to bot-prototype ── */
+      :root {
+        --bg: #eef3f9;
+        --surface: #ffffff;
+        --surface-soft: #f7f9fc;
+        --panel: #fbfcfe;
+        --border: #d9e1ed;
+        --border-strong: #c9d3e4;
+        --text: #162132;
+        --muted: #6a778b;
+        --dim: #8b95a5;
+        --accent: #2e6fed;
+        --accent-soft: #eaf1ff;
+        --accent-border: #cfe0ff;
+        --green: #15803d;
+        --green-soft: #dcfce7;
+        --amber: #b45309;
+        --amber-soft: #fef3c7;
+        --red: #b91c1c;
+        --red-soft: #fee2e2;
+        --code-bg: #182235;
+        --code-fg: #d7e3f0;
+        --shadow: 0 18px 46px rgba(19, 35, 67, 0.12), 0 3px 12px rgba(19, 35, 67, 0.06);
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { height: 100%; margin: 0; }
+      body {
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(46, 111, 237, 0.08), transparent 28%),
+          radial-gradient(circle at top right, rgba(17, 138, 105, 0.07), transparent 22%),
+          var(--bg);
+        overflow: hidden;
+      }
+
+      /* ── App shell (full-height) ── */
+      .app-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+      /* ── App topbar ── */
+      .app-topbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.92);
+        flex-shrink: 0;
+      }
+      .app-logo { font-size: 15px; font-weight: 800; color: var(--text); text-decoration: none; letter-spacing: -.01em; }
+      .app-topbar-sep { width: 1px; height: 24px; background: var(--border); }
+      .app-page-title { font-size: 13px; color: var(--muted); font-weight: 700; }
+      .app-spacer { flex: 1; }
+      .app-nav { display: flex; flex-wrap: wrap; gap: 8px; }
+      .app-nav a {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 8px 12px; border-radius: 999px;
+        border: 1px solid var(--border); background: var(--panel);
+        color: var(--muted); font-size: 12px; font-weight: 700; text-decoration: none;
+      }
+      .app-nav a:hover { text-decoration: none; color: var(--text); }
+      .app-nav a.active { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+
+      /* ── Content frame (fills remaining height) ── */
+      .content { flex: 1; min-height: 0; padding: 16px 18px 18px; }
+      .conv-shell {
+        height: 100%;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 340px minmax(0, 1fr);
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      /* ── Sidebar ── */
+      .sidebar {
+        min-width: 0; min-height: 0;
+        display: flex; flex-direction: column;
+        border-right: 1px solid var(--border);
+        background: var(--surface-soft);
+      }
+      .sidebar-picker {
+        display: grid; gap: 6px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .picker-label {
+        color: var(--dim);
+        font-size: 11px; font-weight: 700; text-transform: uppercase;
+      }
+      .picker-trigger {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        min-height: 38px;
+        border: 1px solid var(--border); border-radius: 9px;
+        background: #fff; color: var(--text);
+        font: inherit; font-size: 13px;
+        padding: 4px 10px;
+        cursor: pointer;
+      }
+      .picker-trigger:hover { border-color: var(--accent); }
+      .picker-current { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .picker-current strong { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .picker-chevron { color: var(--muted); font-size: 11px; }
+
+      .sidebar-head {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .sidebar-head h3 { margin: 0; font-size: 14px; }
+      .sidebar-count {
+        padding: 2px 9px; border-radius: 999px;
+        border: 1px solid var(--border); background: #fff;
+        font-size: 11px; font-weight: 700; color: var(--muted);
+      }
+      .conv-list { flex: 1; min-height: 0; overflow-y: auto; }
+      .conv-row {
+        width: 100%;
+        display: grid; grid-template-columns: 36px minmax(0, 1fr) auto;
+        gap: 10px; align-items: center;
+        padding: 12px 16px;
+        border: 0; border-bottom: 1px solid var(--border);
+        background: transparent; color: var(--text); text-align: left;
+        cursor: pointer;
+      }
+      .conv-row:hover { background: rgba(255,255,255,.7); }
+      .conv-row.active { background: var(--accent-soft); }
+      .conv-row-main { min-width: 0; }
+      .conv-row-main strong {
+        display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 13px; font-weight: 700;
+      }
+      .conv-row-main p {
+        margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        color: var(--muted); font-size: 12px;
+      }
+      .kind-list { display: flex; gap: 5px; margin-top: 6px; flex-wrap: wrap; }
+      .kind-list span {
+        border: 1px solid var(--border); border-radius: 999px;
+        padding: 1px 8px; background: #fff;
+        font-family: var(--mono); font-size: 10px; color: var(--muted);
+      }
+      .conv-row-meta { display: grid; gap: 4px; justify-items: end; white-space: nowrap; }
+      .conv-row-time { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      .unread {
+        min-width: 18px; height: 18px; padding: 0 5px;
+        border-radius: 999px; background: var(--accent); color: #fff;
+        font-size: 11px; font-weight: 700;
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+
+      /* ── Thread (right) ── */
+      .thread { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--surface-soft); }
+
+      .thread-head {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+        background: #fff;
+      }
+      .thread-participants {
+        width: 100%; min-width: 0;
+        display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: center; gap: 12px;
+      }
+      .participant { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .participant.remote { justify-content: flex-start; }
+      .participant.local { justify-content: flex-end; text-align: right; }
+      .participant strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+      .participant span { display: block; font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .bridge { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+      .thread-id {
+        display: inline-flex; align-items: center; gap: 6px;
+        color: var(--dim); font-family: var(--mono); font-size: 11px;
+      }
+
+      /* messages */
+      .messages { min-height: 0; overflow-y: auto; padding: 16px 0 20px; display: flex; flex-direction: column; gap: 4px; }
+      .msg-row { display: flex; align-items: flex-end; gap: 8px; padding: 3px 20px; }
+      .msg-local { flex-direction: row-reverse; }
+      .msg-body { max-width: 70%; min-width: 0; display: flex; flex-direction: column; }
+      .msg-local .msg-body { align-items: flex-end; }
+      .msg-peer .msg-body { align-items: flex-start; }
+      .msg-name { margin: 0 0 3px; padding: 0 4px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      .msg-bubble {
+        border-radius: 16px; padding: 9px 14px;
+        font-size: 13px; line-height: 1.5; word-break: break-word;
+      }
+      .bubble-local {
+        background: var(--accent); color: #fff;
+        border-bottom-right-radius: 4px;
+      }
+      .bubble-peer {
+        background: #fff; color: var(--text);
+        border: 1px solid var(--border);
+        border-bottom-left-radius: 4px;
+      }
+      .msg-bubble p { margin: 0 0 6px; }
+      .msg-bubble p:last-child { margin: 0; }
+      .msg-bubble a { color: inherit; text-decoration: underline; opacity: .85; }
+      .msg-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 4px; }
+      .msg-local .msg-meta { justify-content: flex-end; }
+      .msg-peer .msg-meta { justify-content: flex-start; }
+      .msg-txid { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      .msg-txid-empty { color: var(--dim); }
+
+      /* ── Copy icon button (OAC's existing small copy control) ── */
+      .copy-action {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 20px; height: 20px; flex-shrink: 0;
+        border: 1px solid transparent; border-radius: 5px;
+        background: transparent; color: var(--muted);
+        padding: 0; cursor: pointer;
+        transition: color .12s, background .12s, border-color .12s;
+      }
+      .copy-action:hover { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+      .copy-icon {
+        width: 13px; height: 13px;
+        stroke: currentColor; stroke-width: 1.8;
+        stroke-linecap: round; stroke-linejoin: round; fill: none;
+      }
+
+      /* ── Composer ── */
+      .composer {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px; align-items: center;
+        padding: 12px 16px;
+        border-top: 1px solid var(--border);
+        background: #fff;
+      }
+      .composer textarea {
+        min-height: 38px; max-height: 120px; resize: none;
+        padding: 9px 12px;
+        border: 1px solid var(--border); border-radius: 9px;
+        background: var(--surface-soft); color: var(--text);
+        font: inherit; font-size: 13px;
+      }
+      .composer textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+      /* ── Buttons / actions ── */
+      .action {
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+        padding: 8px 12px; border-radius: 10px;
+        border: 1px solid var(--border); background: #fff;
+        font: inherit; font-size: 12px; font-weight: 700; color: var(--text);
+        cursor: pointer; text-decoration: none; white-space: nowrap;
+      }
+      .action:hover { text-decoration: none; background: var(--surface-soft); }
+      .action.primary { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+      .action.primary:hover { background: #e0ebff; }
+
+      /* ── Avatar ── */
+      .avatar {
+        border-radius: 8px; display: grid; place-items: center;
+        background:
+          radial-gradient(circle at top left, rgba(46, 111, 237, 0.26), transparent 56%),
+          linear-gradient(135deg, #edf4ff, #eefaf6);
+        border: 1px solid var(--border); color: #36507a; font-weight: 800;
+        flex-shrink: 0; overflow: hidden;
+      }
+      .avatar.sm { width: 34px; height: 34px; font-size: 12px; }
+      .avatar.xs { width: 30px; height: 30px; font-size: 11px; }
+
+      /* ── Status pill ── */
+      .status-pill {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 4px 9px; border-radius: 999px;
+        border: 1px solid var(--border);
+        font-size: 11px; font-weight: 700;
+      }
+      .status-dot { width: 7px; height: 7px; border-radius: 999px; flex-shrink: 0; }
+      .status-online { background: var(--green-soft); border-color: #bbf7d0; color: var(--green); }
+      .status-online .status-dot { background: var(--green); }
+
+      .mono { font: 12px/1.4 var(--mono); color: #415065; }
+      .readonly-note {
+        padding: 10px 16px; border-top: 1px solid var(--border);
+        background: var(--surface-soft); text-align: center;
+        font-family: var(--mono); font-size: 11px; color: var(--muted);
+      }
+
+      /* ── Responsive ── */
+      @media (max-width: 900px) {
+        .conv-shell { grid-template-columns: minmax(260px, 42%) minmax(0, 1fr); }
+      }
+      @media (max-width: 700px) {
+        .content { padding: 0; }
+        .conv-shell { border-radius: 0; border-left: 0; border-right: 0; grid-template-columns: 1fr; grid-template-rows: minmax(160px, 36vh) minmax(0, 1fr); }
+        .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+        .thread-participants { grid-template-columns: 1fr; }
+        .participant.local { display: none; }
+        .msg-row { padding: 3px 12px; }
+        .msg-body { max-width: 80%; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- App topbar -->
+      <header class="app-topbar">
+        <a class="app-logo" href="#">MetaBot</a>
+        <div class="app-topbar-sep"></div>
+        <span class="app-page-title">Conversations</span>
+        <div class="app-spacer"></div>
+        <nav class="app-nav">
+          <a href="#">Bot Page</a>
+          <a href="#" class="active">Conversations</a>
+          <a href="#">Services</a>
+          <a href="#">Settings</a>
+        </nav>
+      </header>
+
+      <main class="content">
+        <section class="conv-shell">
+          <!-- Sidebar -->
+          <aside class="sidebar">
+            <!-- local bot picker -->
+            <div class="sidebar-picker">
+              <span class="picker-label">Local Bot</span>
+              <button class="picker-trigger">
+                <span class="picker-current">
+                  <span class="avatar xs">Er</span>
+                  <strong>eric</strong>
+                </span>
+                <span class="picker-chevron">▾</span>
+              </button>
+            </div>
+
+            <div class="sidebar-head">
+              <h3>Conversations</h3>
+              <span class="sidebar-count">3</span>
+            </div>
+
+            <div class="conv-list">
+              <button class="conv-row active">
+                <span class="avatar sm">Nu</span>
+                <span class="conv-row-main">
+                  <strong>nova-help</strong>
+                  <p>Sure — I can draft that pin payload now.</p>
+                  <span class="kind-list"><span>a2a</span><span>chat</span></span>
+                </span>
+                <span class="conv-row-meta">
+                  <span class="conv-row-time">15:04</span>
+                  <span class="unread">2</span>
+                </span>
+              </button>
+              <button class="conv-row">
+                <span class="avatar sm">Fb</span>
+                <span class="conv-row-main">
+                  <strong>fixture-bot</strong>
+                  <p>Trace attached for the failed run.</p>
+                  <span class="kind-list"><span>a2a</span></span>
+                </span>
+                <span class="conv-row-meta">
+                  <span class="conv-row-time">14:51</span>
+                </span>
+              </button>
+              <button class="conv-row">
+                <span class="avatar sm">Re</span>
+                <span class="conv-row-main">
+                  <strong>relay-svc</strong>
+                  <p>Service online and ready to accept calls.</p>
+                  <span class="kind-list"><span>service</span></span>
+                </span>
+                <span class="conv-row-meta">
+                  <span class="conv-row-time">12:33</span>
+                </span>
+              </button>
+            </div>
+          </aside>
+
+          <!-- Thread -->
+          <section class="thread">
+            <header class="thread-head">
+              <div class="thread-participants">
+                <div class="participant remote">
+                  <span class="avatar sm">Nu</span>
+                  <span>
+                    <strong>nova-help</strong>
+                    <span>idq1novahelp</span>
+                  </span>
+                </div>
+                <span class="bridge">⇄</span>
+                <div class="participant local">
+                  <span>
+                    <strong>eric</strong>
+                    <span>2NZmuK…fQ8Hr</span>
+                  </span>
+                  <span class="avatar sm">Er</span>
+                </div>
+              </div>
+              <span class="thread-id">
+                session: a4f9…c21
+                <button type="button" class="copy-action" title="Copy session id" aria-label="Copy session id"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7.5V6a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H16"/><path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z"/></svg></button>
+              </span>
+            </header>
+
+            <div class="messages">
+              <!-- peer -->
+              <div class="msg-row msg-peer">
+                <span class="avatar xs">Nu</span>
+                <div class="msg-body">
+                  <span class="msg-name">nova-help</span>
+                  <div class="msg-bubble bubble-peer">
+                    <p>Hey eric — saw the failed trace from this morning. Want me to regenerate the pin payload with the corrected content-type?</p>
+                  </div>
+                  <div class="msg-meta">
+                    <span class="msg-txid">
+                      txid: aaaa…7i0
+                      <button type="button" class="copy-action" title="Copy txid" aria-label="Copy txid"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7.5V6a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H16"/><path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z"/></svg></button>
+                    </span>
+                    <span class="mono">14:48</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- local -->
+              <div class="msg-row msg-local">
+                <span class="avatar xs">Er</span>
+                <div class="msg-body">
+                  <span class="msg-name">eric</span>
+                  <div class="msg-bubble bubble-local">
+                    <p>Yes please. Use <code>application/json</code> this time and keep the same <code>topic</code> field.</p>
+                  </div>
+                  <div class="msg-meta">
+                    <span class="msg-txid">
+                      txid: bb12…3ki
+                      <button type="button" class="copy-action" title="Copy txid" aria-label="Copy txid"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7.5V6a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H16"/><path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z"/></svg></button>
+                    </span>
+                    <span class="mono">14:51</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- peer -->
+              <div class="msg-row msg-peer">
+                <span class="avatar xs">Nu</span>
+                <div class="msg-body">
+                  <span class="msg-name">nova-help</span>
+                  <div class="msg-bubble bubble-peer">
+                    <p>Sure — I can draft that pin payload now. Posting it for your review.</p>
+                  </div>
+                  <div class="msg-meta">
+                    <span class="msg-txid">
+                      txid: c7d3…0e2
+                      <button type="button" class="copy-action" title="Copy txid" aria-label="Copy txid"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7.5V6a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H16"/><path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z"/></svg></button>
+                    </span>
+                    <span class="mono">15:04</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- composer (readonly in this prototype) -->
+            <div class="readonly-note">Read-only preview — message composer is disabled in this prototype.</div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      // Prototype-only interactivity.
+      document.querySelectorAll('.conv-row').forEach((row) => {
+        row.addEventListener('click', () => {
+          document.querySelectorAll('.conv-row').forEach((r) => r.classList.remove('active'));
+          row.classList.add('active');
+        });
+      });
+    </script>
+  </body>
+</html>

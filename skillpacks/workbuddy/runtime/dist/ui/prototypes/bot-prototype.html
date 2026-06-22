@@ -1,0 +1,675 @@
+<!doctype html>
+<!--
+  Prototype v3. Static HTML, mock data, no backend wiring.
+  Tokens + component rules copied verbatim from the ABC pin-inspector reference
+  (/tmp/abc-pin-inspector-prototype.html), so this page is literally the same family.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bot Page · MetaBot (prototype)</title>
+    <style>
+      /* ── Tokens — copied verbatim from the reference ── */
+      :root {
+        --bg: #eef3f9;
+        --surface: #ffffff;
+        --surface-soft: #f7f9fc;
+        --panel: #fbfcfe;
+        --border: #d9e1ed;
+        --border-strong: #c9d3e4;
+        --text: #162132;
+        --muted: #6a778b;
+        --dim: #8b95a5;
+        --accent: #2e6fed;
+        --accent-soft: #eaf1ff;
+        --accent-border: #cfe0ff;
+        --green: #15803d;
+        --green-soft: #dcfce7;
+        --amber: #b45309;
+        --amber-soft: #fef3c7;
+        --red: #b91c1c;
+        --red-soft: #fee2e2;
+        --code-bg: #182235;
+        --code-fg: #d7e3f0;
+        --shadow: 0 18px 46px rgba(19, 35, 67, 0.12), 0 3px 12px rgba(19, 35, 67, 0.06);
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(46, 111, 237, 0.08), transparent 28%),
+          radial-gradient(circle at top right, rgba(17, 138, 105, 0.07), transparent 22%),
+          var(--bg);
+      }
+
+      /* ── App shell ── */
+      .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+
+      /* ── App topbar (white card header on a gradient body) ── */
+      .app-topbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.92);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .app-logo {
+        font-size: 15px;
+        font-weight: 800;
+        color: var(--text);
+        text-decoration: none;
+        letter-spacing: -.01em;
+      }
+      .app-topbar-sep { width: 1px; height: 24px; background: var(--border); }
+      .app-page-title { font-size: 13px; color: var(--muted); font-weight: 700; }
+      .app-spacer { flex: 1; }
+
+      /* nav = pill chips (meta-pill family from the reference) */
+      .app-nav { display: flex; flex-wrap: wrap; gap: 8px; }
+      .app-nav a {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .app-nav a:hover { text-decoration: none; color: var(--text); }
+      .app-nav a.active {
+        background: var(--accent-soft);
+        border-color: var(--accent-border);
+        color: var(--accent);
+      }
+
+      /* ── Page container (mirrors .page from the reference) ── */
+      .page {
+        width: min(1280px, calc(100vw - 28px));
+        margin: 18px auto 36px;
+        display: grid;
+        gap: 18px;
+      }
+
+      /* ── Generic surfaces (reference .hero / .card / sections) ── */
+      .surface-card {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+      }
+      .card {
+        display: grid;
+        gap: 12px;
+        padding: 16px 18px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: #fff;
+      }
+      .card h2 { margin: 0; font-size: 18px; }
+      .card h3 { margin: 0; font-size: 15px; }
+      .card > p { margin: 0; color: #394659; }
+      .intro { color: var(--muted); font-size: 13px; }
+
+      /* ── Buttons / actions (reference .action) ── */
+      .action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 8px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #fff;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--text);
+        cursor: pointer;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .action:hover { text-decoration: none; background: var(--surface-soft); }
+      .action.primary {
+        background: var(--accent-soft);
+        border-color: var(--accent-border);
+        color: var(--accent);
+      }
+      .action.primary:hover { background: #e0ebff; }
+      .action.danger {
+        border-color: #f3c0c0;
+        background: var(--red-soft);
+        color: var(--red);
+      }
+      .action.danger:hover { background: #fcd9d9; }
+
+      /* ── Chips / pills (reference .chip / .meta-pill / .token / .link-pill) ── */
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .chip strong { color: var(--text); }
+
+      .meta-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        font-size: 12px;
+        color: #3c4a5e;
+        font-weight: 700;
+      }
+
+      .token {
+        display: inline-flex;
+        align-items: center;
+        padding: 7px 10px;
+        margin: 0 8px 8px 0;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface-soft);
+        font-size: 12px;
+        color: #3d4c60;
+      }
+
+      /* ── Status pill (built on .meta-pill family) ── */
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .status-dot { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+      .status-online { background: var(--green-soft); border-color: #bbf7d0; color: var(--green); }
+      .status-online .status-dot { background: var(--green); }
+      .status-recent { background: var(--amber-soft); border-color: #fde68a; color: var(--amber); }
+      .status-recent .status-dot { background: var(--amber); }
+      .status-failed { background: var(--red-soft);   border-color: #f3c0c0; color: var(--red); }
+      .status-failed .status-dot { background: var(--red); }
+
+      /* ── Copy icon button (OAC's existing small copy control) ── */
+      .copy-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--muted);
+        padding: 0;
+        cursor: pointer;
+        transition: color .12s, background .12s, border-color .12s;
+      }
+      .copy-action:hover {
+        color: var(--accent);
+        border-color: var(--accent-border);
+        background: var(--accent-soft);
+      }
+      .copy-icon {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+      }
+
+      /* ── Avatar (reference .creator-avatar radius = 8px) ── */
+      .avatar {
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at top left, rgba(46, 111, 237, 0.26), transparent 56%),
+          linear-gradient(135deg, #edf4ff, #eefaf6);
+        border: 1px solid var(--border);
+        color: #36507a;
+        font-weight: 800;
+        flex-shrink: 0;
+        overflow: hidden;
+      }
+      .avatar.lg { width: 56px; height: 56px; font-size: 18px; }
+      .avatar.sm { width: 36px; height: 36px; font-size: 13px; }
+
+      /* ── Field (reference .field) ── */
+      .field { display: grid; gap: 4px; }
+      .field label {
+        color: var(--dim);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+      .field .tx {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--surface-soft);
+        font: 12px/1.45 var(--mono);
+        color: #223247;
+        word-break: break-all;
+      }
+
+      /* ── Inputs (aligned to reference border/radius language) ── */
+      .input,
+      .select,
+      .textarea {
+        width: 100%;
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: #fff;
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+      }
+      .select { appearance: none; cursor: pointer; }
+      .textarea { min-height: 84px; padding: 8px 12px; resize: vertical; }
+      .input:focus, .select:focus, .textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      .field-hint { color: var(--muted); font-size: 12px; }
+      .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+      .form-full { grid-column: 1 / -1; }
+
+      /* ── Code block (reference pre) ── */
+      pre.code {
+        margin: 0;
+        padding: 16px;
+        overflow: auto;
+        border-radius: 12px;
+        background: var(--code-bg);
+        color: var(--code-fg);
+        font: 12px/1.55 var(--mono);
+      }
+      .mono { font: 12px/1.4 var(--mono); color: #415065; }
+
+      /* ── Data table ── */
+      .table-wrap {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: #fff;
+        overflow: hidden;
+      }
+      .data-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+      .data-table th {
+        text-align: left;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        color: var(--dim);
+        padding: 11px 16px;
+        background: var(--surface-soft);
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .data-table td {
+        padding: 12px 16px;
+        border-top: 1px solid var(--border);
+        vertical-align: top;
+        font-size: 13px;
+        color: #394659;
+      }
+      .data-table tbody tr:hover { background: var(--surface-soft); }
+
+      /* ── Workspace: two columns inside a frame card ── */
+      .workspace {
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+        gap: 0;
+        min-height: 620px;
+        overflow: hidden;
+        padding: 0;
+      }
+      .bot-list {
+        border-right: 1px solid var(--border);
+        background: var(--surface-soft);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .bot-list-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .bot-list-head h3 { margin: 0; font-size: 13px; }
+      .bot-list-count {
+        margin-left: auto;
+        padding: 2px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .bot-list-scroll { flex: 1; overflow-y: auto; padding: 8px; display: grid; gap: 6px; align-content: start; }
+      .bot-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        cursor: pointer;
+      }
+      .bot-item:hover { background: #fff; }
+      .bot-item.active {
+        background: var(--accent-soft);
+        border-color: var(--accent-border);
+      }
+      .bot-item-main { min-width: 0; }
+      .bot-item-name {
+        font-size: 13px; font-weight: 700; color: var(--text);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bot-item-id {
+        margin-top: 1px;
+        font-size: 11px;
+        color: var(--muted);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bot-list-foot { padding: 12px; border-top: 1px solid var(--border); }
+
+      /* ── Detail column ── */
+      .detail { display: grid; gap: 0; min-width: 0; }
+
+      .hero {
+        display: flex;
+        gap: 16px;
+        padding: 20px 22px;
+        border-bottom: 1px solid var(--border);
+        align-items: flex-start;
+      }
+      .hero-main { min-width: 0; flex: 1; display: grid; gap: 10px; }
+      .hero-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .hero-title-row h1 { margin: 0; font-size: 26px; line-height: 1.1; font-weight: 800; letter-spacing: -.01em; }
+      .hero-summary { margin: 0; max-width: 680px; color: var(--muted); font-size: 14px; }
+      .hero-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 4px; }
+      .hero-meta .field .tx { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .hero-meta .tx code { font-family: var(--mono); font-size: 11px; color: #223247; word-break: break-all; min-width: 0; }
+      .hero-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+      /* ── Tabs as pill chips (meta-pill family) ── */
+      .tab-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 14px 22px 0;
+      }
+      .tab {
+        display: inline-flex;
+        align-items: center;
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .tab:hover { color: var(--text); }
+      .tab.active {
+        background: var(--accent-soft);
+        border-color: var(--accent-border);
+        color: var(--accent);
+      }
+      .tab-body { padding: 18px 22px 22px; display: grid; gap: 16px; }
+      .section-label {
+        margin: 0;
+        color: var(--dim);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+      }
+      .danger-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+      .empty {
+        padding: 48px 24px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* ── Responsive ── */
+      @media (max-width: 980px) {
+        .workspace { grid-template-columns: 1fr; min-height: 0; }
+        .bot-list { border-right: 0; border-bottom: 1px solid var(--border); max-height: 240px; }
+        .hero-meta { grid-template-columns: 1fr; }
+        .form-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- App topbar -->
+      <header class="app-topbar">
+        <a class="app-logo" href="#">MetaBot</a>
+        <div class="app-topbar-sep"></div>
+        <span class="app-page-title">Bot Page</span>
+        <div class="app-spacer"></div>
+        <nav class="app-nav">
+          <a href="#" class="active">Bot Page</a>
+          <a href="#">Conversations</a>
+          <a href="#">Services</a>
+          <a href="#">Settings</a>
+        </nav>
+      </header>
+
+      <div class="page">
+        <!-- Workspace as one framed card -->
+        <section class="surface-card workspace">
+          <!-- Left: bot list -->
+          <aside class="bot-list">
+            <div class="bot-list-head">
+              <h3>Local Bots</h3>
+              <span class="bot-list-count">2</span>
+            </div>
+            <div class="bot-list-scroll">
+              <div class="bot-item active">
+                <div class="avatar sm">Er</div>
+                <div class="bot-item-main">
+                  <div class="bot-item-name">eric</div>
+                  <div class="bot-item-id">2NZmuK…fQ8Hr</div>
+                </div>
+              </div>
+              <div class="bot-item">
+                <div class="avatar sm">Av</div>
+                <div class="bot-item-main">
+                  <div class="bot-item-name">ava-research</div>
+                  <div class="bot-item-id">9Lp2xR…7KcYd</div>
+                </div>
+              </div>
+            </div>
+            <div class="bot-list-foot">
+              <button class="action primary" style="width:100%">Create Bot</button>
+            </div>
+          </aside>
+
+          <!-- Right: detail -->
+          <section class="detail">
+            <!-- Hero -->
+            <div class="hero">
+              <div class="avatar lg">Er</div>
+              <div class="hero-main">
+                <div class="hero-title-row">
+                  <h1>eric</h1>
+                  <span class="status-pill status-online"><span class="status-dot"></span>Online</span>
+                </div>
+                <p class="hero-summary">A helpful assistant that drafts and posts on-chain development diaries for the OAC project.</p>
+                <div class="hero-meta">
+                  <div class="field">
+                    <label>GlobalMetaID</label>
+                    <div class="tx">
+                      <code>2NZmuKbQ4yHxnRv7L3mAo1pTcWdqfQ8Hr</code>
+                      <button type="button" class="copy-action" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7.5V6a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H16"/><path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z"/></svg></button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>Homepage URI</label>
+                    <div class="tx">
+                      <code>metaid://bot/eric</code>
+                      <button type="button" class="copy-action" title="Copy Homepage URI" aria-label="Copy Homepage URI"><svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7.5V6a2 2 0 0 1 2-2h7.5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H16"/><path d="M4.5 9.5a2 2 0 0 1 2-2H14a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V9.5Z"/></svg></button>
+                    </div>
+                  </div>
+                </div>
+                <div class="hero-actions">
+                  <button class="action primary">Open Public Bot Page</button>
+                  <button class="action">View Conversations</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tabs (pill chips) -->
+            <div class="tab-row">
+              <button class="tab">Public Identity</button>
+              <button class="tab">Behavior</button>
+              <button class="tab">Chat Skills</button>
+              <button class="tab active">Advanced</button>
+            </div>
+
+            <!-- Tab body -->
+            <div class="tab-body">
+              <section class="card">
+                <h3>LLM Provider</h3>
+                <p class="intro">Which runtime answers this Bot's prompts and which network records the activity.</p>
+                <div class="form-grid">
+                  <div class="field">
+                    <label>Runtime</label>
+                    <select class="select">
+                      <option>Claude Code</option>
+                      <option>Codex</option>
+                      <option>OpenClaw</option>
+                      <option>Cursor</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>Write Network</label>
+                    <select class="select">
+                      <option>MVC</option>
+                      <option>Fractal Bitcoin</option>
+                    </select>
+                  </div>
+                  <div class="field form-full">
+                    <label>System Prompt</label>
+                    <textarea class="textarea">You are eric, a concise engineering diarist. Summarize each change round and post it on-chain.</textarea>
+                    <span class="field-hint">Stored locally, attached to every prompt for this Bot.</span>
+                  </div>
+                </div>
+              </section>
+
+              <div>
+                <p class="section-label">Execution History</p>
+                <div class="table-wrap" style="margin-top:10px">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Provider</th>
+                        <th>Runtime</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Prompt</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="mono">2026-06-21 15:04</td>
+                        <td>Claude Code</td>
+                        <td class="mono">claude-code</td>
+                        <td><span class="status-pill status-online"><span class="status-dot"></span>Completed</span></td>
+                        <td class="mono">4.2s</td>
+                        <td>Post dev diary for restyle round 3</td>
+                      </tr>
+                      <tr>
+                        <td class="mono">2026-06-21 14:51</td>
+                        <td>Codex</td>
+                        <td class="mono">codex</td>
+                        <td><span class="status-pill status-recent"><span class="status-dot"></span>Recent</span></td>
+                        <td class="mono">11.8s</td>
+                        <td>Summarize worktree setup steps</td>
+                      </tr>
+                      <tr>
+                        <td class="mono">2026-06-21 12:33</td>
+                        <td>Claude Code</td>
+                        <td class="mono">claude-code</td>
+                        <td><span class="status-pill status-failed"><span class="status-dot"></span>Failed</span></td>
+                        <td class="mono">—</td>
+                        <td>Draft changelog for v0.9.2</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="danger-row">
+                <button class="action danger">Delete Bot</button>
+              </div>
+            </div>
+          </section>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      // Prototype-only interactivity.
+      document.querySelectorAll('.tab').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+        });
+      });
+      document.querySelectorAll('.bot-item').forEach((item) => {
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.bot-item').forEach((i) => i.classList.remove('active'));
+          item.classList.add('active');
+        });
+      });
+    </script>
+  </body>
+</html>
