@@ -346,8 +346,9 @@
         margin-bottom: 14px;
       }
       .hero-meta-row {
-        display: grid;
-        gap: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
         min-width: 0;
       }
       .hero-meta-row span {
@@ -356,15 +357,28 @@
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .03em;
+        flex-shrink: 0;
+      }
+      .hero-meta-value {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .hero-meta-value code {
+        flex: 1 1 auto;
+        min-width: 0;
       }
       .hero-meta-row code {
         min-width: 0;
-        overflow-wrap: anywhere;
-        word-break: break-all;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         background: var(--surface2);
         border: 1px solid var(--border);
         border-radius: 9px;
-        padding: 8px 12px;
+        padding: 6px 10px;
         font-family: var(--mono);
         font-size: 11px;
         color: #223247;
@@ -517,7 +531,7 @@
       }
       .info-form-grid textarea {
         min-height: 88px;
-        font-family: var(--mono);
+        font-family: var(--sans);
         font-size: 12px;
         line-height: 1.5;
       }
@@ -1528,8 +1542,10 @@
               <div class="hero-meta">
                 <div class="hero-meta-row">
                   <span data-i18n-key="bot.globalMetaId">GlobalMetaID</span>
-                  <code data-hero-global-meta-id>-</code>
-                  <button class="icon-btn hero-copy-btn" type="button" data-copy-global-meta-id aria-label="Copy GlobalMetaID" title="Copy GlobalMetaID">⧉</button>
+                  <div class="hero-meta-value">
+                    <code data-hero-global-meta-id>-</code>
+                    <button class="icon-btn hero-copy-btn" type="button" data-copy-global-meta-id aria-label="Copy GlobalMetaID" title="Copy GlobalMetaID">⧉</button>
+                  </div>
                 </div>
               </div>
               <div class="hero-actions">
