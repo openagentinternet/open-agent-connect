@@ -138,7 +138,6 @@ test('bot page template uses an icon-only online indicator and copy buttons in t
   assert.match(template, /\.tab-bar\s*\{[^}]*overflow-x:\s*auto;/s);
   assert.doesNotMatch(template, /data-live-indicator[^>]*>Live by default<\/span>/);
   assert.doesNotMatch(template, /data-copy-bot-uri[^>]*data-i18n-key="bot\.copy">Copy<\/button>/);
-  assert.match(template, /data-copy-bot-uri[^>]*aria-label="Copy Homepage URI"[^>]*>⧉<\/button>/);
 });
 
 test('bot page hero renders bio copy and keeps online status icon-only', () => {

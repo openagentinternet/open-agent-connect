@@ -31,7 +31,7 @@
       }
 
       .metabot-panel {
-        width: 304px;
+        width: 244px;
         flex-shrink: 0;
         border-right: 1px solid var(--border);
         display: flex;
@@ -341,7 +341,7 @@
       }
       .hero-meta {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1fr);
         gap: 14px;
         margin-bottom: 14px;
       }
@@ -396,7 +396,7 @@
         border-bottom: 1px solid var(--border);
         background: var(--surface);
         flex-shrink: 0;
-        padding: 14px 22px;
+        padding: 10px 16px;
         overflow-x: auto;
         scrollbar-width: none;
       }
@@ -406,12 +406,12 @@
       .tab-btn {
         display: inline-flex;
         align-items: center;
-        padding: 8px 14px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: #fff;
-        font-size: 12px;
-        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background: var(--surface2);
+        font-size: 11px;
+        font-weight: 600;
         color: var(--muted);
         cursor: pointer;
         transition: color .15s, background .15s, border-color .15s;
@@ -422,8 +422,8 @@
       }
       .tab-btn.active {
         color: var(--accent);
-        background: var(--accent-dim);
-        border-color: var(--accent-border);
+        background: #fff;
+        border-color: var(--border2);
       }
       .tab-content {
         flex: 1;
@@ -1530,11 +1530,6 @@
                   <span data-i18n-key="bot.globalMetaId">GlobalMetaID</span>
                   <code data-hero-global-meta-id>-</code>
                   <button class="icon-btn hero-copy-btn" type="button" data-copy-global-meta-id aria-label="Copy GlobalMetaID" title="Copy GlobalMetaID">⧉</button>
-                </div>
-                <div class="hero-meta-row">
-                  <span data-i18n-key="bot.botUri">Homepage URI</span>
-                  <code data-hero-bot-uri>metaid://-</code>
-                  <button class="icon-btn hero-copy-btn" type="button" data-copy-bot-uri disabled aria-label="Copy Homepage URI" title="Copy Homepage URI">⧉</button>
                 </div>
               </div>
               <div class="hero-actions">
