@@ -234,7 +234,7 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
     runtime: {
       binaryNames: ['gemini'],
       versionArgs: ['--version'],
-      authEnv: ['GEMINI_API_KEY'],
+      authEnv: ['GEMINI_API_KEY', 'GOOGLE_GENAI_USE_VERTEXAI', 'GOOGLE_GENAI_USE_GCA'],
       capabilities: DEFAULT_CAPABILITIES,
     },
     skills: {

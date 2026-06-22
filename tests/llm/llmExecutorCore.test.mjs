@@ -2067,6 +2067,180 @@ send({ type: 'result', session_id: 'zcode-session-result', result: 'ZCode done',
   assert.equal(events.some((event) => event.type === 'tool_result' && event.output === 'ok'), true);
 });
 
+test('ZCode backend falls back to the v2 provider protocol when CLI model config is missing', async () => {
+  const base = await createTempDir();
+  const fakeHome = path.join(base, 'home');
+  const zcodeConfigDir = path.join(fakeHome, '.zcode', 'v2');
+  const argsPath = path.join(base, 'args.json');
+  const recordPath = path.join(base, 'protocol.json');
+  await fs.mkdir(zcodeConfigDir, { recursive: true });
+  await fs.writeFile(path.join(zcodeConfigDir, 'config.json'), JSON.stringify({
+    provider: {
+      'builtin:zai-coding-plan': {
+        name: 'Z.ai Coding Plan',
+        kind: 'anthropic',
+        enabled: true,
+        options: {
+          apiKey: 'test-zai-key',
+          apiKeyRequired: true,
+          baseURL: 'https://api.z.ai/api/anthropic',
+        },
+        models: {
+          'GLM-5.2': {
+            name: 'GLM-5.2',
+            limit: {
+              context: 1000000,
+              output: 64000,
+            },
+            modalities: {
+              input: ['text'],
+              output: ['text'],
+            },
+          },
+          'GLM-5-Turbo': {
+            name: 'GLM-5-Turbo',
+            reasoning: {
+              enabled: true,
+              variants: ['low', 'medium', 'high'],
+              defaultVariant: 'medium',
+            },
+            limit: {
+              context: 200000,
+              output: 64000,
+            },
+            modalities: {
+              input: ['text'],
+              output: ['text'],
+            },
+          },
+        },
+      },
+    },
+  }), 'utf8');
+
+  const binaryPath = await writeExecutableScript(base, 'fake-zcode-v2.js', `#!/usr/bin/env node
+const fs = require('node:fs');
+const readline = require('node:readline');
+
+function sanitize(value) {
+  return JSON.parse(JSON.stringify(value, (key, entry) => {
+    if (key === 'apiKey' && entry && typeof entry === 'object') {
+      return { source: entry.source, hasValue: Boolean(entry.value) };
+    }
+    return entry;
+  }));
+}
+
+if (process.argv[2] !== 'app-server') {
+  fs.writeFileSync(process.env.FAKE_ZCODE_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+  process.stderr.write('Error: Model config is missing. Create ~/.zcode/cli/config.json with an explicit model provider before running ZCode.\\n');
+  process.exit(1);
+}
+
+const record = { argv: process.argv.slice(2), requests: [] };
+function save() {
+  fs.writeFileSync(process.env.FAKE_ZCODE_PROTOCOL_PATH, JSON.stringify(record, null, 2));
+}
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+function response(id, result) {
+  send({ id, result });
+}
+
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  const message = JSON.parse(line);
+  record.requests.push({ method: message.method, params: sanitize(message.params) });
+  save();
+  if (message.method === 'session/create') {
+    response(message.id, {
+      session: { sessionId: 'zcode-protocol-session' },
+      runtime: { eventSeq: 0 },
+      messages: [],
+      settings: {},
+      projection: {},
+    });
+    return;
+  }
+  if (message.method === 'session/send') {
+    response(message.id, { sessionId: 'zcode-protocol-session', accepted: true, stateRevision: 1 });
+    return;
+  }
+  if (message.method === 'session/events') {
+    response(message.id, {
+      events: [{
+        seq: 1,
+        type: 'turn.completed',
+        payload: {
+          response: 'OK',
+          usage: { inputTokens: 3, outputTokens: 4 },
+          resultType: 'success',
+        },
+      }],
+      nextAfterSeq: 1,
+    });
+    return;
+  }
+  if (message.method === 'session/close') {
+    response(message.id, {});
+    save();
+    process.exit(0);
+  }
+  response(message.id, {});
+});
+`);
+
+  const backend = createZCodeBackend(binaryPath, {
+    FAKE_ZCODE_ARGS_PATH: argsPath,
+    FAKE_ZCODE_PROTOCOL_PATH: recordPath,
+    HOME: fakeHome,
+  });
+  const events = [];
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_zcode',
+      runtime: { ...runtime, provider: 'zcode', binaryPath },
+      prompt: 'hello zcode',
+      systemPrompt: 'system zcode',
+      cwd: base,
+      timeout: 5000,
+    },
+    { emit: (event) => events.push(event) },
+    new AbortController().signal,
+  );
+
+  const args = JSON.parse(await fs.readFile(argsPath, 'utf8'));
+  assert.deepEqual(args.slice(0, 2), ['--prompt', 'system zcode\n\nhello zcode']);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'OK');
+  assert.equal(result.providerSessionId, 'zcode-protocol-session');
+  assert.equal(result.usage['GLM-5.2'].inputTokens, 3);
+  assert.equal(result.usage['GLM-5.2'].outputTokens, 4);
+  assert.deepEqual(events.filter((event) => event.type === 'text').map((event) => event.content), ['OK']);
+
+  const protocolRaw = await fs.readFile(recordPath, 'utf8');
+  assert.equal(protocolRaw.includes('test-zai-key'), false);
+  const protocol = JSON.parse(protocolRaw);
+  assert.deepEqual(protocol.requests.map((entry) => entry.method), [
+    'session/create',
+    'session/send',
+    'session/events',
+    'session/close',
+  ]);
+  const createRequest = protocol.requests.find((entry) => entry.method === 'session/create');
+  assert.equal(typeof createRequest.params.runtimeModel.generatedAt, 'number');
+  assert.equal(createRequest.params.runtimeModel.provider.providerId, 'builtin:zai-coding-plan');
+  assert.equal(createRequest.params.runtimeModel.provider.kind, 'anthropic');
+  assert.equal(createRequest.params.runtimeModel.provider.apiKey.source, 'inline');
+  assert.equal(createRequest.params.runtimeModel.provider.apiKey.hasValue, true);
+  assert.equal(createRequest.params.runtimeModel.provider.models[0].modelId, 'GLM-5.2');
+  const turboModel = createRequest.params.runtimeModel.provider.models.find((entry) => entry.modelId === 'GLM-5-Turbo');
+  assert.equal('reasoning' in turboModel, false);
+  const sendRequest = protocol.requests.find((entry) => entry.method === 'session/send');
+  assert.equal(sendRequest.params.content, 'system zcode\n\nhello zcode');
+});
+
 test('Cursor backend uses result usage by model without double-counting step usage', async () => {
   const base = await createTempDir();
   const binaryPath = await writeExecutableScript(base, 'fake-cursor-result-usage.js', `#!/usr/bin/env node

@@ -116,6 +116,11 @@ test('platform registry defines managed runtime metadata and install skill roots
   }
 
   assert.deepEqual(getRuntimePlatforms().map((platform) => platform.id), SUPPORTED_LLM_PROVIDERS);
+  assert.deepEqual(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'gemini').runtime.authEnv, [
+    'GEMINI_API_KEY',
+    'GOOGLE_GENAI_USE_VERTEXAI',
+    'GOOGLE_GENAI_USE_GCA',
+  ]);
   assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'codebuddy').executor.backendFactoryExport, 'codeBuddyBackendFactory');
   assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'zcode').executor.backendFactoryExport, 'zcodeBackendFactory');
   const workbuddy = PLATFORM_DEFINITIONS.find((platform) => platform.id === 'workbuddy');
