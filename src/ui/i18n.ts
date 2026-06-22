@@ -10,7 +10,7 @@ const SIMPLIFIED_CHINESE_LOCALES = new Set(['zh-cn', 'zh-hans', 'zh-sg']);
 
 export const DICTIONARIES = {
   en: {
-    'nav.botPage': 'Bot Page',
+    'nav.botPage': 'Bots',
     'nav.conversations': 'Conversations',
     'nav.services': 'Services',
     'nav.settings': 'Settings',
@@ -383,7 +383,7 @@ export const DICTIONARIES = {
     'conversations.profilesLoadFailed': 'Profiles failed to load.',
   },
   'zh-CN': {
-    'nav.botPage': 'Bot Page',
+    'nav.botPage': 'Bots',
     'nav.conversations': '对话',
     'nav.services': '服务',
     'nav.settings': '设置',
