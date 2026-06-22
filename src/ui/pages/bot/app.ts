@@ -1268,6 +1268,32 @@ function renderHistoryTab(){
   focusBotManagementTarget();
 }
 
+function renderRuntimeSummary(){
+  var root=q('[data-runtime-summary]');if(!root)return;
+  var profile=selectedProfile();
+  var rows=[];
+  var roles=[['primary',profile&&(profile.primaryProvider||''),'Primary'],['fallback',profile&&(profile.fallbackProvider||''),'Fallback']];
+  roles.forEach(function(entry){
+    var provider=entry[1];
+    var rt=providerRuntime(provider);
+    var health=rt&&(rt.health)||'';
+    var dotCls=health==='healthy'?'healthy':(health&&health!=='healthy'?'unhealthy':'');
+    var name=rt?(rt.displayName||rt.provider||rt.id||'-'):(provider||uiText('bot.noProvider','No provider'));
+    var metaBits=[];
+    if(rt&&rt.provider)metaBits.push(rt.provider);
+    if(health)metaBits.push(health);
+    if(rt&&rt.version)metaBits.push('v'+rt.version);
+    var meta=metaBits.join(' · ')||uiText('bot.notConfigured','Not configured');
+    rows.push('<div class="runtime-summary-row">'+
+      '<span class="runtime-summary-role">'+esc(entry[2])+'</span>'+
+      '<span class="runtime-summary-dot '+dotCls+'" aria-hidden="true"></span>'+
+      '<span class="runtime-summary-name">'+esc(name)+'</span>'+
+      '<span class="runtime-summary-meta">'+esc(meta)+'</span>'+
+    '</div>');
+  });
+  root.innerHTML=rows.join('');
+}
+
 function renderSettingsTab(){
   var root=q('[data-settings-content]');if(!root)return;
   var profile=selectedProfile();
@@ -1291,6 +1317,7 @@ function renderSettingsTab(){
 
 function renderAdvancedTab(){
   renderSettingsTab();
+  renderRuntimeSummary();
   loadSelectedProfileConfig();
   loadSessions();
 }
@@ -1598,6 +1625,7 @@ function rerenderLocalizedBotPage(){
   renderDetailHeader(selectedProfile());
   if(state.selectedTab==='advanced'){
     renderSettingsTab();
+    renderRuntimeSummary();
     renderHistoryTab();
   }else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
   else if(state.selectedTab==='behavior')renderBehaviorTab();
