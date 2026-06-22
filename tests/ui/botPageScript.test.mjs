@@ -3081,7 +3081,7 @@ test('bot page runtime Test action keeps readiness failures out of provider pick
   assert.doesNotMatch(context.providerPickerMarkup('primaryProvider', 'Primary Provider', 'codex', false), /data-provider-option="codex"/);
 });
 
-test('bot page local bots list stays a selector without runtime diagnostics', () => {
+test('bot page local bots list marks bots with no usable primary or fallback LLM', () => {
   const list = {
     innerHTML: '',
   };
@@ -3114,6 +3114,12 @@ test('bot page local bots list stays a selector without runtime diagnostics', ()
       displayName: 'Claude Code',
       health: 'healthy',
     },
+    {
+      id: 'runtime-openclaw',
+      provider: 'openclaw',
+      displayName: 'OpenClaw',
+      health: 'unavailable',
+    },
   ];
   context.state.profiles = [
     {
@@ -3122,17 +3128,46 @@ test('bot page local bots list stays a selector without runtime diagnostics', ()
       primaryProvider: 'codex',
     },
     {
+      slug: 'empty-bot',
+      name: 'Empty Bot',
+      primaryProvider: null,
+      fallbackProvider: null,
+    },
+    {
+      slug: 'fallback-broken-bot',
+      name: 'Fallback Broken Bot',
+      primaryProvider: 'codex',
+      fallbackProvider: 'openclaw',
+    },
+    {
       slug: 'healthy-bot',
       name: 'Healthy Bot',
       primaryProvider: 'claude-code',
+    },
+    {
+      slug: 'fallback-healthy-bot',
+      name: 'Fallback Healthy Bot',
+      primaryProvider: 'codex',
+      fallbackProvider: 'claude-code',
     },
   ];
 
   context.renderMetabotList();
 
-  assert.match(list.innerHTML, /Broken Bot/);
-  assert.match(list.innerHTML, /Healthy Bot/);
-  assert.doesNotMatch(list.innerHTML, /\[LLM unavailable\]/);
+  const itemHtml = (slug) => {
+    const marker = `data-slug="${slug}"`;
+    const markerIndex = list.innerHTML.indexOf(marker);
+    assert.notEqual(markerIndex, -1, `expected item for ${slug}`);
+    const start = list.innerHTML.lastIndexOf('<div class="metabot-item"', markerIndex);
+    const next = list.innerHTML.indexOf('<div class="metabot-item"', markerIndex + marker.length);
+    return list.innerHTML.slice(start, next === -1 ? undefined : next);
+  };
+  const items = Object.fromEntries(context.state.profiles.map((profile) => [profile.slug, itemHtml(profile.slug)]));
+  assert.match(items['broken-bot'], /NO LLM[\s\S]*Broken Bot/);
+  assert.match(items['empty-bot'], /NO LLM[\s\S]*Empty Bot/);
+  assert.match(items['fallback-broken-bot'], /NO LLM[\s\S]*Fallback Broken Bot/);
+  assert.doesNotMatch(items['healthy-bot'], /NO LLM/);
+  assert.doesNotMatch(items['fallback-healthy-bot'], /NO LLM/);
   assert.doesNotMatch(list.innerHTML, /unavailable/i);
   assert.doesNotMatch(list.innerHTML, /runtime-codex/);
   assert.doesNotMatch(list.innerHTML, /Claude Code/);

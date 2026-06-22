@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -131,6 +131,33 @@ function providerIconMarkup(provider){
   var key=String(provider||'generic');
   var path=providerLogoPath(key);
   return '<span class="provider-logo provider-logo-'+esc(key.replace(/[^a-z0-9_-]+/gi,'-'))+'" data-provider-icon="'+esc(key)+'" aria-hidden="true"><img src="'+esc(path)+'" alt="" loading="lazy" /></span>';
+}
+function profileLlmProviders(profile){
+  var providers=[];
+  function addProvider(value){var provider=String(value||'').trim();if(provider&&providers.indexOf(provider)<0)providers.push(provider)}
+  addProvider(profile&&profile.primaryProvider);
+  addProvider(profile&&profile.fallbackProvider);
+  if(profile&&Array.isArray(profile.fallbackProviders))profile.fallbackProviders.forEach(addProvider);
+  return providers;
+}
+function providerIsHealthy(provider){
+  provider=String(provider||'').trim();
+  if(!provider)return false;
+  return state.runtimes.some(function(r){return r&&r.provider===provider&&r.health==='healthy'});
+}
+function profileHasUsableLlm(profile){
+  return profileLlmProviders(profile).some(providerIsHealthy);
+}
+function shouldShowNoLlmLabel(profile){
+  var providers=profileLlmProviders(profile);
+  if(!providers.length)return true;
+  if(!state._runtimesLoaded&&!state.runtimes.length)return false;
+  return !profileHasUsableLlm(profile);
+}
+function noLlmLabelMarkup(profile){
+  if(!shouldShowNoLlmLabel(profile))return '';
+  var title=uiText('bot.noLlmTitle','No healthy Primary or Fallback LLM configured.');
+  return '<span class="metabot-no-llm-label" title="'+esc(title)+'" aria-label="'+esc(title)+'">'+esc(uiText('bot.noLlmLabel','NO LLM'))+'</span>';
 }
 function runtimeIconMarkup(runtime){
   var key=String((runtime&&runtime.provider)||'generic');
@@ -479,7 +506,7 @@ function renderMetabotList(){
     var selected=p.slug===state.selectedSlug?' selected':'';
     return'<div class="metabot-item'+selected+'" role="button" tabindex="0" data-slug="'+esc(p.slug)+'">'+
       '<div class="metabot-avatar">'+avatarMarkup(p,false)+'</div>'+
-      '<div class="metabot-item-info"><div class="metabot-item-name-row"><div class="metabot-item-name">'+esc(p.name||p.slug)+'</div></div>'+
+      '<div class="metabot-item-info"><div class="metabot-item-name-row">'+noLlmLabelMarkup(p)+'<div class="metabot-item-name">'+esc(p.name||p.slug)+'</div></div>'+
       '<div class="metabot-item-id-row"><span class="metabot-item-id">'+esc(shortId(p.globalMetaId||p.slug))+'</span>'+
       '<button class="icon-btn" data-act="copy-gmid" data-value="'+esc(p.globalMetaId||'')+'" title="Copy GlobalMetaID" aria-label="Copy GlobalMetaID">⧉</button></div></div></div>'
   }).join('');
@@ -1350,7 +1377,7 @@ function switchTab(tab,silent){
 
 function loadStats(){renderStats();return Promise.resolve()}
 function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();if(!state.selectedSlug&&state.profiles.length)setSelectedSlug(state.profiles[0].slug);if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))setSelectedSlug(state.profiles[0]&&state.profiles[0].slug||'');state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
-function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
+function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];state._runtimesLoaded=true;renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];state._runtimesLoaded=true;renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){
   var slug=state.selectedSlug;
