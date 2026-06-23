@@ -6,6 +6,17 @@ const FILE_UPLOAD_ROUTE_PATH = '/api/file/upload';
 const FILE_UPLOAD_LARGE_ROUTE_PATH = '/api/file/upload-large';
 const DEFAULT_P2P_CONTENT_BASE = 'http://localhost:7281';
 const AVATAR_FETCH_TIMEOUT_MS = 4500;
+// Avatars rarely change. Cache the resolved bytes per pin id in-process and
+// tell browsers to cache too, so switching conversations / reloading the page
+// does not re-fetch every avatar from chain (each fetch was ~0.5-1s).
+const AVATAR_CACHE_TTL_MS = 30 * 60 * 1000;
+const AVATAR_BROWSER_CACHE_MAX_AGE = 30 * 60;
+type AvatarCacheEntry = {
+  body: Buffer;
+  contentType: string;
+  expiresAt: number;
+};
+const avatarContentCache = new Map<string, AvatarCacheEntry>();
 const PIN_CONTENT_PATTERNS = [
   /^\/content\/([^/?#]+)/iu,
   /^\/metafile-indexer\/content\/([^/?#]+)/iu,
@@ -119,10 +130,29 @@ async function serveAvatarRoute(context: Parameters<RouteHandler>[0]): Promise<b
     return true;
   }
 
+  const sendAvatar = (body: Buffer, contentType: string) => {
+    context.res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': `public, max-age=${AVATAR_BROWSER_CACHE_MAX_AGE}`,
+    });
+    context.res.end(body);
+  };
+
+  const cached = avatarContentCache.get(pinId);
+  if (cached && cached.expiresAt > Date.now()) {
+    sendAvatar(cached.body, cached.contentType);
+    return true;
+  }
+
   for (const contentUrl of avatarContentUrls(pinId)) {
     const resolved = await fetchAvatarContent(contentUrl);
     if (resolved) {
-      context.sendText(200, resolved.body, resolved.contentType);
+      avatarContentCache.set(pinId, {
+        body: resolved.body,
+        contentType: resolved.contentType,
+        expiresAt: Date.now() + AVATAR_CACHE_TTL_MS,
+      });
+      sendAvatar(resolved.body, resolved.contentType);
       return true;
     }
   }
