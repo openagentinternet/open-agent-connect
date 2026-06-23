@@ -18,7 +18,7 @@ function jsonResponse(data) {
   };
 }
 
-function waitFor(condition, label) {
+function waitFor(condition, label, timeoutMs = 1000) {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const check = () => {
@@ -26,7 +26,7 @@ function waitFor(condition, label) {
         resolve();
         return;
       }
-      if (Date.now() - startedAt > 1000) {
+      if (Date.now() - startedAt > timeoutMs) {
         reject(new Error(`Timed out waiting for ${label}`));
         return;
       }
@@ -288,6 +288,7 @@ test('submits footer guidance for the selected conversation, disables send in fl
   const input = context.__elements.get('[data-guidance-input]');
   const send = context.__elements.get('[data-guidance-send]');
   const form = context.__elements.get('[data-guidance-form]');
+  const status = context.__elements.get('[data-guidance-status]');
 
   await waitFor(() => typeof toggle.listeners.get('click') === 'function', 'guidance toggle click binding');
   toggle.listeners.get('click')();
@@ -296,7 +297,10 @@ test('submits footer guidance for the selected conversation, disables send in fl
   const submitPromise = form.listeners.get('submit')({
     preventDefault() {},
   });
+  assert.equal(form.hidden, true);
+  assert.equal(toggle.disabled, true);
   assert.equal(send.disabled, true);
+  assert.equal(status.textContent, 'Guiding the next local turn...');
 
   const guidanceRequest = requests.find((entry) => entry.url === '/api/conversations/guidance');
   assert.deepEqual(JSON.parse(guidanceRequest.body), {
@@ -314,8 +318,114 @@ test('submits footer guidance for the selected conversation, disables send in fl
 
   assert.equal(input.value, '');
   assert.equal(form.hidden, true);
-  const status = context.__elements.get('[data-guidance-status]');
   assert.equal(status.textContent, 'Guidance sent for the next local turn.');
+});
+
+test('keeps refreshing the active thread during guided reply generation and closes the composer once a new local message appears', async () => {
+  const requestedUrl = `http://127.0.0.1:24885/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`;
+  let guidanceResolve;
+  let messagePollCount = 0;
+  const guidancePromise = new Promise((resolve) => {
+    guidanceResolve = resolve;
+  });
+  const context = createConversationsScriptContext({
+    locationHref: requestedUrl,
+    fetch: async (url, options) => {
+      const textUrl = String(url);
+      if (textUrl === '/api/bot/profiles') {
+        return jsonResponse({
+          ok: true,
+          data: {
+            profiles: [{ name: 'Local Bot', slug: 'local-bot', globalMetaId: LOCAL_GLOBAL_META_ID }],
+          },
+        });
+      }
+      if (textUrl.includes('/api/conversations?')) {
+        return jsonResponse({
+          ok: true,
+          data: {
+            conversations: [{
+              localGlobalMetaId: LOCAL_GLOBAL_META_ID,
+              peerGlobalMetaId: PEER_GLOBAL_META_ID,
+              peerName: 'Peer Bot',
+              latestText: 'ready',
+            }],
+          },
+        });
+      }
+      if (textUrl.includes('/api/conversations/messages?')) {
+        messagePollCount += 1;
+        return jsonResponse({
+          ok: true,
+          data: {
+            messages: messagePollCount >= 2
+              ? [
+                  {
+                    messageId: 'msg-1',
+                    direction: 'incoming',
+                    content: 'hello',
+                    timestamp: 1776836184000,
+                    sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
+                  },
+                  {
+                    messageId: 'msg-2',
+                    direction: 'outgoing',
+                    content: 'guided reply',
+                    timestamp: 1776836185000,
+                    sender: { globalMetaId: LOCAL_GLOBAL_META_ID, name: 'Local Bot' },
+                  },
+                ]
+              : [{
+                  messageId: 'msg-1',
+                  direction: 'incoming',
+                  content: 'hello',
+                  timestamp: 1776836184000,
+                  sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
+                }],
+          },
+        });
+      }
+      if (textUrl === '/api/conversations/guidance') {
+        await guidancePromise;
+        return jsonResponse({
+          ok: true,
+          data: {
+            guidanceApplied: true,
+            guidanceConsumed: true,
+          },
+        });
+      }
+      return jsonResponse({ ok: true, data: {} });
+    },
+  });
+
+  vm.runInNewContext(buildConversationsPageDefinition().script, context);
+
+  const toggle = context.__elements.get('[data-guidance-toggle]');
+  const input = context.__elements.get('[data-guidance-input]');
+  const form = context.__elements.get('[data-guidance-form]');
+  const status = context.__elements.get('[data-guidance-status]');
+
+  await waitFor(() => typeof toggle.listeners.get('click') === 'function', 'guidance toggle click binding');
+  toggle.listeners.get('click')();
+  input.value = 'Stay responsive while the guided reply is running.';
+
+  const submitPromise = form.listeners.get('submit')({
+    preventDefault() {},
+  });
+
+  await waitFor(
+    () => status.textContent === 'Guidance sent for the next local turn.',
+    'guided reply refresh before guidance request resolves',
+    2500,
+  );
+
+  assert.equal(form.hidden, true);
+  assert.equal(toggle.disabled, false);
+  assert.equal(messagePollCount >= 2, true);
+
+  guidanceResolve();
+  await submitPromise;
 });
 
 test('keeps failed guidance visible and shows a local error status', async () => {
