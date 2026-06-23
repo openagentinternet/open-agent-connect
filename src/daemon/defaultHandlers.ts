@@ -4633,7 +4633,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
-  const CHAIN_AVATAR_FETCH_TIMEOUT_MS = 4500;
+
+  // Process-level cache for chain profile projections (name + avatar reference).
+  // Avatars rarely change, so a 30-minute TTL eliminates repeated chain fetches
+  // when switching between UI tabs within a session.
+  const CHAIN_PROFILE_CACHE_TTL_MS = 30 * 60 * 1000;
+  type ChainProfileCacheEntry = {
+    projection: ConversationProfileProjection | null;
+    expiresAt: number;
+  };
+  const chainProfileCache = new Map<string, ChainProfileCacheEntry>();
 
   type ConversationProfileProjection = {
     globalMetaId: string;
@@ -4770,68 +4779,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return message;
   };
 
-  function extractChainAvatarPinId(reference: string): string {
-    const normalized = normalizeText(reference);
-    if (!normalized || /^(data:|blob:)/iu.test(normalized)) return '';
-    if (/^metafile:\/\//iu.test(normalized)) {
-      const pinId = normalized.slice('metafile://'.length).split(/[?#]/u)[0]?.trim() || '';
-      return /^[0-9a-f]{64}(?:i\d+)?$/iu.test(pinId) ? pinId : '';
-    }
-    const pathStr = (() => {
-      if (/^https?:\/\//iu.test(normalized)) {
-        try { return new URL(normalized).pathname; } catch { return ''; }
-      }
-      return normalized;
-    })();
-    const patterns = [
-      /^\/content\/([^/?#]+)/iu,
-      /^\/metafile-indexer\/content\/([^/?#]+)/iu,
-      /^\/metafile-indexer\/api\/v1\/files\/content\/([^/?#]+)/iu,
-      /^\/metafile-indexer\/api\/v1\/users\/avatar\/accelerate\/([^/?#]+)/iu,
-    ];
-    for (const pattern of patterns) {
-      const match = pathStr.match(pattern);
-      if (match?.[1]) {
-        const pinId = decodeURIComponent((match[1].split(/[?#]/u)[0] || '').trim());
-        if (/^[0-9a-f]{64}(?:i\d+)?$/iu.test(pinId)) return pinId;
-      }
-    }
-    const bare = normalized.split(/[?#]/u)[0]?.trim() || '';
-    if (!bare.includes('/') && /^[0-9a-f]{64}(?:i\d+)?$/iu.test(bare)) return bare;
-    return '';
-  }
-
-  async function resolveChainAvatarReferenceDataUrl(rawAvatar: string): Promise<string> {
-    const avatar = normalizeText(rawAvatar);
-    if (!avatar) return '';
-    if (/^data:image\//iu.test(avatar)) return avatar;
-    const pinId = extractChainAvatarPinId(avatar);
-    if (!pinId) return '';
-    const encodedPinId = encodeURIComponent(pinId);
-    const contentUrls = [
-      `http://localhost:7281/content/${encodedPinId}`,
-      `https://file.metaid.io/metafile-indexer/content/${encodedPinId}`,
-      `https://file.metaid.io/metafile-indexer/api/v1/users/avatar/accelerate/${encodedPinId}?process=thumbnail`,
-      `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/${encodedPinId}?process=thumbnail`,
-      `https://file.metaid.io/metafile-indexer/api/v1/files/content/${encodedPinId}`,
-    ];
-    for (const contentUrl of contentUrls) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), CHAIN_AVATAR_FETCH_TIMEOUT_MS);
-      try {
-        const contentResp = await fetch(contentUrl, { signal: controller.signal });
-        if (!contentResp.ok) continue;
-        const contentType = normalizeText(contentResp.headers.get('content-type') || '').split(';')[0]?.trim() || 'application/octet-stream';
-        if (/^text\//iu.test(contentType) || /(?:application\/json|[+/]json)(?:\s*;|$)/iu.test(contentType)) continue;
-        const buffer = Buffer.from(await contentResp.arrayBuffer());
-        if (!buffer.length) continue;
-        return `data:${contentType};base64,${buffer.toString('base64')}`;
-      } catch { /* try next URL */ }
-      finally { clearTimeout(timeout); }
-    }
-    return '';
-  }
-
   function readChainProfileData(value: unknown): Record<string, unknown> {
     const record = readObject(value) ?? {};
     return readObject(record.data) ?? record;
@@ -4857,23 +4804,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
       || normalizeText(data.avatar_uri);
   }
 
+  // Resolves a chain profile projection (name + avatar reference, not the image
+  // bytes). The avatar is returned as a reference (pin id / metafile:// / URL)
+  // so the client can load it lazily via /api/file/avatar without blocking list
+  // rendering. Results are cached per process with a TTL to avoid repeated
+  // chain fetches when switching UI tabs.
   async function resolveChainProfile(globalMetaId: string): Promise<ConversationProfileProjection | null> {
     const gmid = normalizeText(globalMetaId);
     if (!gmid) return null;
+    const cached = chainProfileCache.get(gmid);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.projection;
+    }
+    let projection: ConversationProfileProjection | null = null;
     try {
       const resp = await fetch(`https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(gmid)}`);
-      if (!resp.ok) return null;
-      const data = readChainProfileData(await resp.json());
-      const avatar = await resolveChainAvatarReferenceDataUrl(readChainProfileAvatarReference(data));
-      const name = readChainProfileName(data);
-      return name || avatar ? { globalMetaId: gmid, name, avatar } : null;
+      if (resp.ok) {
+        const data = readChainProfileData(await resp.json());
+        const avatar = readChainProfileAvatarReference(data);
+        const name = readChainProfileName(data);
+        if (name || avatar) {
+          projection = { globalMetaId: gmid, name, avatar };
+        }
+      }
     } catch {
-      return null;
+      projection = null;
     }
-  }
-
-  async function resolveChainAvatarDataUrl(globalMetaId: string): Promise<string> {
-    return (await resolveChainProfile(globalMetaId))?.avatar ?? '';
+    chainProfileCache.set(gmid, { projection, expiresAt: Date.now() + CHAIN_PROFILE_CACHE_TTL_MS });
+    return projection;
   }
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
@@ -14519,14 +14477,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
       listProfiles: async () => {
         const profiles = await listMetabotProfiles(normalizedSystemHomeDir);
         const activeHomeDir = path.resolve(input.homeDir);
-        await Promise.all(profiles.map(async (profile) => {
-          if (!profile.avatarDataUrl && profile.globalMetaId) {
-            const chainAvatar = await resolveChainAvatarDataUrl(profile.globalMetaId);
-            if (chainAvatar) {
-              profile.avatarDataUrl = chainAvatar;
-            }
-          }
-        }));
         return commandSuccess({
           profiles: profiles.map((profile) => ({
             ...profile,
@@ -14538,12 +14488,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
         if (!profile) {
           return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
-        }
-        if (!profile.avatarDataUrl && profile.globalMetaId) {
-          const chainAvatar = await resolveChainAvatarDataUrl(profile.globalMetaId);
-          if (chainAvatar) {
-            profile.avatarDataUrl = chainAvatar;
-          }
         }
         return commandSuccess({ profile });
       },
