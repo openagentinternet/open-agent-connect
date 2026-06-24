@@ -212,7 +212,7 @@ Read https://github.com/openagentinternet/open-agent-connect/blob/main/docs/inst
 ### Manual Install
 
 ```bash
-npm i -g open-agent-connect && oac install
+npm i -g open-agent-connect@latest && oac install
 ```
 
 Supported platforms:

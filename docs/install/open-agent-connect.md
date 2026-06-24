@@ -163,10 +163,11 @@ by `_`, for example `OAC_OPENCODE_PATH`, `METABOT_KIRO_CLI_PATH`,
 
 Skills are installed once under `~/.metabot/skills`. Host roots contain skill
 links pointing to `~/.metabot/skills/metabot-*`: symlinks on POSIX platforms and
-directory junctions on Windows. Bare `oac install` binds
-`~/.agents/skills` and detected platform roots. A platform root is detected when
-its parent home directory already exists or when the platform root is the shared
-standard `~/.agents/skills`.
+directory junctions on Windows. In the `npm i -g open-agent-connect@latest &&
+oac install` sequence, the `oac install` step binds `~/.agents/skills` and
+detected platform roots. A platform root is detected when its parent home
+directory already exists or when the platform root is the shared standard
+`~/.agents/skills`.
 
 Use the full npm + install sequence for normal users:
 
@@ -394,7 +395,7 @@ export PATH="$HOME/.metabot/bin:$PATH"
 
 If one machine should serve multiple local agent hosts, run the remote install
 once, then bind additional hosts. This is advanced force-bind usage for roots
-that were not detected during bare install:
+that were not detected during the initial registry-driven install sequence:
 
 ```bash
 export PATH="$HOME/.metabot/bin:$PATH"
@@ -411,9 +412,9 @@ entries into multiple host-native skill trees.
 
 ## Claude Code-Compatible Fallback
 
-For agent platforms whose homes are not detected during bare install and whose
-skill system reads Claude Code-style `SKILL.md` directories, first run the
-normal bare install:
+For agent platforms whose homes are not detected during the initial
+registry-driven install sequence and whose skill system reads Claude Code-style
+`SKILL.md` directories, first run the normal npm install sequence:
 
 ```bash
 npm i -g open-agent-connect@latest && oac install

@@ -33,8 +33,13 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /does not need to clone this repository/i);
   assert.match(guide, /do not run `npm run build` or `npm run build:skillpacks` for end-user installation/i);
   assert.match(guide, /do not run `npm install` from a source checkout for end-user installation/i);
-  assert.match(guide, /do use `npm i -g open-agent-connect` for the recommended npm package path/i);
-  assert.match(guide, /bare `oac install` binds\s+`~\/\.agents\/skills` and detected platform roots/i);
+  assert.match(guide, /do use `npm i -g open-agent-connect@latest` for the recommended npm package path/i);
+  assert.match(guide, /do not skip the npm step because an older version appears installed/i);
+  assert.match(guide, /`oac install` alone only refreshes assets from the currently installed npm package/i);
+  assert.match(guide, /the `oac install` step binds\s+`~\/\.agents\/skills` and\s+detected platform roots/i);
+  assert.match(guide, /## Already Installed\?/);
+  assert.match(guide, /treat the request as an upgrade,\s+not a skip/i);
+  assert.match(guide, /Do not report install success after running only `oac install`\./i);
   assert.match(guide, /OAC_HOST:=claude-code/);
   assert.match(guide, /github\.com\/\$OAC_REPO\/releases\/latest\/download\/oac-\$\{OAC_HOST_PACK\}\.tar\.gz/);
   assert.match(guide, /OAC_TMP_DIR\/\$OAC_HOST_PACK/);
@@ -69,6 +74,11 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /docs\/install\/uninstall-open-agent-connect\.md/);
   assert.match(guide, /metabot system update/);
   assert.match(guide, /npm i -g open-agent-connect@latest/);
+  assert.match(guide, /oac --version/);
+  assert.match(guide, /npm view open-agent-connect version/);
+  assert.match(guide, /Install incomplete: installed=\$INSTALLED registry_latest=\$LATEST/i);
+  assert.match(guide, /install result: `success`, `failed`, or `upgrade_incomplete`/i);
+  assert.match(guide, /the result must be `failed` or `upgrade_incomplete`, not `success`/i);
   assert.match(guide, /registry-driven platform binding for all supported platforms/i);
   assert.match(guide, /`--host` is legacy release-pack update mode/i);
   assert.match(guide, /preserve Bot identities, mnemonics, private keys, profile names, and\s+wallet-related local data/i);
@@ -101,7 +111,7 @@ test('unified install guide documents registry-driven bare install and force hos
     'utf8'
   );
 
-  assert.match(readme, /npm i -g open-agent-connect && oac install/);
+  assert.match(readme, /npm i -g open-agent-connect@latest && oac install/);
   assert.match(readme, /Supported platforms/i);
   assert.doesNotMatch(readme, /~\/\.metabot\/skills/i);
   assert.doesNotMatch(readme, /host roots contain symlinks/i);
@@ -109,7 +119,7 @@ test('unified install guide documents registry-driven bare install and force hos
   assert.doesNotMatch(readme, /~\/\.agents\/skills/i);
   assert.doesNotMatch(readme, /platformRegistry\.ts/);
 
-  assert.match(guide, /npm i -g open-agent-connect && oac install/);
+  assert.match(guide, /npm i -g open-agent-connect@latest && oac install/);
   assert.match(guide, /supported platforms/i);
   assert.match(guide, /~\/\.metabot\/skills/i);
   assert.match(guide, /Host roots contain skill\s+links/i);
@@ -120,7 +130,7 @@ test('unified install guide documents registry-driven bare install and force hos
   assert.match(guide, /`USERPROFILE`/);
   assert.match(guide, /Developer Mode or an elevated shell/i);
 
-  assert.match(guide, /bare `oac install` binds\s+`~\/\.agents\/skills` and detected platform roots/i);
+  assert.match(guide, /the `oac install` step binds\s+`~\/\.agents\/skills` and\s+detected platform roots/i);
   assert.match(guide, /`--host` is only needed when forcing a platform root before that platform home exists/i);
   assert.match(guide, /oac install --host openclaw/);
   assert.match(guide, /advanced force-bind/i);
