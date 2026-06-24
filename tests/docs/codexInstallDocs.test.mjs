@@ -78,6 +78,22 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.doesNotMatch(guide, /Create a MetaBot named/i);
 });
 
+test('install and update docs keep pinned update examples on the current package version', async () => {
+  const packageJson = JSON.parse(await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+  const currentTarget = `--target-version v${packageJson.version}`;
+  const docs = [
+    path.join(REPO_ROOT, 'docs', 'install', 'open-agent-connect.md'),
+    path.join(REPO_ROOT, 'docs', 'hosts', 'codex-agent-update.md'),
+  ];
+
+  for (const docPath of docs) {
+    const contents = await readFile(docPath, 'utf8');
+    const examples = [...new Set(contents.match(/--target-version v\d+\.\d+\.\d+/g) ?? [])];
+
+    assert.deepEqual(examples, [currentTarget], `${path.relative(REPO_ROOT, docPath)} target-version examples`);
+  }
+});
+
 test('unified install guide documents registry-driven bare install and force host binding', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
   const guide = await readFile(
