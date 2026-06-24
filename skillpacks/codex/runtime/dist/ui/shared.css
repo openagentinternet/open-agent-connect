@@ -109,31 +109,36 @@ a:hover { text-decoration: underline; }
 }
 .topbar-spacer { flex: 1 1 auto; min-width: 0; }
 .topbar-nav {
-  display: flex;
-  gap: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
   min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface2);
   flex-wrap: wrap;
 }
 .topbar-nav a {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
   text-decoration: none;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  transition: color .15s, background .15s, border-color .15s;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: color .15s, background .15s;
   white-space: nowrap;
 }
 .topbar-nav a:hover { color: var(--text); text-decoration: none; }
 .topbar-nav a.active {
   color: var(--accent);
-  background: var(--accent-dim);
-  border-color: var(--accent-border);
+  background: #fff;
+  border-color: var(--border2);
 }
 .topbar-action {
   flex-shrink: 0;

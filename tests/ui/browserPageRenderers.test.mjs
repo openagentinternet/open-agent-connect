@@ -45,8 +45,12 @@ function elements() {
     '[data-browser-reload]': new FakeElement(),
     '[data-browser-drawer-toggle]': new FakeElement(),
     '[data-browser-resource-chip]': new FakeElement(),
+    '[data-browser-owner-panel]': new FakeElement(),
     '[data-browser-using-selector]': new FakeElement(),
+    '[data-browser-menu-trigger]': new FakeElement(),
+    '[data-browser-menu]': new FakeElement(),
     '[data-browser-viewport]': new FakeElement(),
+    '[data-browser-status-strip]': new FakeElement(),
     '[data-browser-status-state]': new FakeElement(),
     '[data-browser-status-proof]': new FakeElement(),
     '[data-browser-status-renderer]': new FakeElement(),
@@ -54,6 +58,8 @@ function elements() {
     '[data-browser-drawer]': new FakeElement(),
     '[data-browser-inspector]': new FakeElement(),
     '[data-browser-modal-root]': new FakeElement(),
+    '[data-browser-bookmark-star]': new FakeElement(),
+    '[data-browser-toast]': new FakeElement(),
   };
 }
 
@@ -126,7 +132,8 @@ test('bot-page renderer shows profile, services, and trusted buttons from homepa
   assert.match(html, /Recent Activity/);
   assert.match(html, /Fixture Review/);
   assert.match(html, /data-browser-action="private-chat"/);
-  assert.match(html, /data-browser-action="service-list"/);
+  assert.match(html, /data-browser-action="service-call"/);
+  assert.doesNotMatch(html, /data-browser-action="service-list"/);
   assert.match(html, /https:\/\/so\.example\.test\/content\/avatar-pin/);
 });
 
@@ -209,8 +216,9 @@ test('pdf, image, and video render with content-specific elements', async () => 
   assert.match(image.nodes['[data-browser-viewport]'].innerHTML, /<img class="browser-image" src="https:\/\/files\.example\/a\.png" alt=""/);
 
   const video = runWithResolve(result({ type: 'video', contentType: 'video/mp4', url: 'https://files.example/a.mp4' }));
-  await waitFor(() => video.nodes['[data-browser-viewport]'].innerHTML.includes('browser-video'), 'video render');
-  assert.match(video.nodes['[data-browser-viewport]'].innerHTML, /<video class="browser-video" src="https:\/\/files\.example\/a\.mp4" controls/);
+  await waitFor(() => video.nodes['[data-browser-viewport]'].innerHTML.includes('data-browser-video-preview'), 'video preview render');
+  assert.match(video.nodes['[data-browser-viewport]'].innerHTML, /class="browser-pin-media-preview browser-pin-media-preview-video"/);
+  assert.match(video.nodes['[data-browser-viewport]'].innerHTML, /Loading video/);
 });
 
 test('unsupported renderer keeps source details available for Inspector', async () => {

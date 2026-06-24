@@ -464,11 +464,48 @@
       .conversation-load-older {
         align-self: center;
       }
-      .conversation-readonly-status {
-        padding: 12px 14px;
+      .conversation-guidance-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 18px;
         border-top: 1px solid var(--border);
         background: var(--surface);
-        text-align: center;
+        flex-wrap: wrap;
+      }
+      .conversation-readonly-status {
+        text-align: left;
+      }
+      .conversation-guidance-form {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+      .conversation-guidance-form .input {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--border2);
+        border-radius: 9px;
+        background: #fff;
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+        transition: border-color .15s, box-shadow .15s;
+      }
+      .conversation-guidance-form .input::placeholder { color: var(--dim); }
+      .conversation-guidance-form .input:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-dim);
+      }
+      .conversation-guidance-form .input:disabled { opacity: .55; }
+      .conversation-guidance-status {
+        flex-basis: 100%;
       }
       .copy-toast {
         position: fixed;

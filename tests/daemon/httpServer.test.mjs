@@ -2208,10 +2208,10 @@ test('GET /ui/bot renders the MetaBot-centered management workspace', async (t) 
   const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
-  assert.match(nav, /href="\/ui\/bot"[^>]*>Bot Page(?: \*)?<\/a>/);
+  assert.match(nav, /href="\/ui\/bot"[^>]*>Bots(?: \*)?<\/a>/);
   assert.match(nav, /href="\/ui\/conversations"[^>]*>Conversations(?: \*)?<\/a>/);
   assert.match(nav, /href="\/ui\/services"[^>]*>Services(?: \*)?<\/a>/);
-  assert.match(nav, /href="\/ui\/settings"[^>]*>Settings(?: \*)?<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/settings"/);
   assert.doesNotMatch(nav, /href="\/ui\/hub"/);
   assert.doesNotMatch(nav, /href="\/ui\/browser"/);
   assert.doesNotMatch(nav, /href="\/ui\/publish"/);
@@ -2300,10 +2300,10 @@ test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async
   const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
-  assert.match(nav, /href="\/ui\/bot"[^>]*>Bot Page<\/a>/);
+  assert.match(nav, /href="\/ui\/bot"[^>]*>Bots<\/a>/);
   assert.match(nav, /href="\/ui\/conversations"[^>]*>对话<\/a>/);
   assert.match(nav, /href="\/ui\/services"[^>]*>服务<\/a>/);
-  assert.match(nav, /href="\/ui\/settings"[^>]*>设置<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/settings"/);
   assert.match(html, /href="\/browser"[^>]*>打开浏览器<\/a>/);
   assert.match(html, /data-i18n-key="bot\.localBots">本地 Bots<\/span>/);
   assert.match(html, /data-i18n-key="bot\.createBot">创建 Bot<\/button>/);
@@ -2329,11 +2329,13 @@ test('GET /browser supports zh-CN launch chrome language selection', async (t) =
   assert.equal(response.status, 200);
   assert.match(html, /<html lang="zh-CN">/);
   assert.match(html, /创建你的第一个 Bot/);
-  assert.match(html, /编辑主页/);
-  assert.match(html, /分享主页/);
+  assert.match(html, /访问主页/);
+  assert.match(html, /发送信息/);
+  assert.match(html, /关注该 Bot/);
+  assert.match(html, /复制 GlobalMetaId/);
 });
 
-test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe', async (t) => {
+test('GET /ui/shared.css keeps active status visible and the topbar narrow-safe', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -2342,8 +2344,9 @@ test('GET /ui/shared.css keeps active status animated and the topbar narrow-safe
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/css/i);
-  assert.match(css, /\.status-active \.status-dot\s*\{[^}]*animation: pulse/s);
-  assert.match(css, /\.topbar-nav\s*\{[^}]*min-width: 0[^}]*overflow-x: auto/s);
+  assert.match(css, /\.status-active \.status-dot\s*\{[^}]*background: var\(--accent\)/s);
+  assert.match(css, /\.topbar-nav\s*\{[^}]*min-width: 0/s);
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.topbar-nav\s*\{[^}]*-webkit-overflow-scrolling: touch/s);
   assert.match(css, /\.topbar-title\s*\{\s*display: none;\s*\}/);
 });
 
@@ -3017,11 +3020,11 @@ test('GET /ui/my-services renders the IDBots-style My Services workspace', async
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /My Services/);
   assert.match(html, /data-my-services-list/);
-  assert.match(html, /\.my-services-shell\s*\{[\s\S]*max-width:\s*980px/);
-  assert.match(html, /\.my-services-shell\s*\{[\s\S]*margin:\s*0 auto/);
-  assert.match(html, /\.my-services-workspace\s*\{[\s\S]*justify-items:\s*center/);
+  assert.match(html, /\.my-services-shell\s*\{[\s\S]*max-width:\s*1280px/);
+  assert.match(html, /\.my-services-shell\s*\{[\s\S]*margin:\s*16px auto 24px/);
+  assert.match(html, /\.my-services-workspace\s*\{[\s\S]*align-items:\s*start/);
   assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*width:\s*100%/);
-  assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*max-width:\s*900px/);
+  assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*min-width:\s*0/);
   assert.match(html, /data-services-page-prev/);
   assert.match(html, /data-services-page-next/);
   assert.match(html, /data-my-service-detail-modal/);
@@ -3080,11 +3083,11 @@ test('GET /ui/services renders the Provider Console services workspace with a pu
   assert.match(html, /Advanced Trace/);
   assert.match(html, /Trace Session/);
   assert.match(html, /data-my-services-list/);
-  assert.match(html, /\.my-services-shell\s*\{[\s\S]*max-width:\s*980px/);
-  assert.match(html, /\.my-services-shell\s*\{[\s\S]*margin:\s*0 auto/);
-  assert.match(html, /\.my-services-workspace\s*\{[\s\S]*justify-items:\s*center/);
+  assert.match(html, /\.my-services-shell\s*\{[\s\S]*max-width:\s*1280px/);
+  assert.match(html, /\.my-services-shell\s*\{[\s\S]*margin:\s*16px auto 24px/);
+  assert.match(html, /\.my-services-workspace\s*\{[\s\S]*align-items:\s*start/);
   assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*width:\s*100%/);
-  assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*max-width:\s*900px/);
+  assert.match(html, /\.my-services-list-panel\s*\{[\s\S]*min-width:\s*0/);
   assert.match(html, /data-my-service-detail-modal/);
   assert.match(html, /data-my-service-detail-modal-body/);
   assert.match(html, /data-orders-page-prev/);
@@ -3143,8 +3146,7 @@ test('GET /ui/conversations renders the local-Bot scoped IM conversations worksp
   assert.match(html, /data-guidance-send/);
   assert.match(html, /data-guidance-cancel/);
   assert.match(html, /data-guidance-status/);
-  assert.match(html, /Agent-to-agent conversation/);
-  assert.match(html, /Human replies are disabled/);
+  assert.match(html, /You can steer the Bot&#39;s conversation/);
   assert.match(html, /Guide/);
   assert.match(html, /Send/);
   assert.match(html, /Cancel/);
@@ -3189,7 +3191,7 @@ test('GET /ui/conversations supports zh-CN page copy beyond the shared nav', asy
   assert.match(html, /data-i18n-key="conversations\.refresh">刷新<\/button>/);
   assert.match(html, /data-i18n-key="conversations\.selectConversation">选择一个对话<\/h2>/);
   assert.match(html, /data-i18n-key="conversations\.chooseRemoteBot">选择远程 Bot<\/span>/);
-  assert.match(html, /data-i18n-key="conversations\.readonlyStatus">Agent-to-agent 对话 · 不支持人工回复<\/div>/);
+  assert.match(html, /data-i18n-key="conversations\.readonlyStatus">你可以引导 Bot 的对话<\/div>/);
   assert.match(html, /data-i18n-key="conversations\.guidanceToggle">引导<\/button>/);
   assert.match(html, /data-i18n-key="conversations\.guidanceSend">发送<\/button>/);
   assert.match(html, /data-i18n-key="conversations\.guidanceCancel">取消<\/button>/);
@@ -3223,7 +3225,7 @@ test('GET /ui/settings renders the Provider Console settings home', async (t) =>
   assert.doesNotMatch(html, /<option value="auto"/);
   assert.match(html, /<option value="en"(?: selected)?>English<\/option>/);
   assert.match(html, /<option value="zh-CN"(?: selected)?>简体中文<\/option>/);
-  assert.match(nav, /href="\/ui\/settings"[^>]*>Settings(?: \*)?<\/a>/);
+  assert.doesNotMatch(nav, /href="\/ui\/settings"/);
 });
 
 test('private chat conversation list and message routes power the Conversations MVP', async (t) => {

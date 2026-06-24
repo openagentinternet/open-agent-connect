@@ -176,7 +176,12 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     guidanceDraft: '',
     guidanceSubmitting: false,
     guidanceStatus: '',
+    pendingGuidance: null,
   };
+
+  let nextGuidanceSubmissionToken = 0;
+  let guidanceRefreshTimer = 0;
+  let guidanceRefreshInFlight = false;
 
   const AVATAR_CONTENT_PATH_PREFIXES = [
     '/content/',
@@ -397,10 +402,98 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     target.innerHTML = '<div class="conversation-empty"><strong>' + escapeHtml(localized.title) + '</strong><p>' + escapeHtml(localized.message) + '</p></div>';
   };
   const resetGuidanceComposer = (status) => {
+    if (guidanceRefreshTimer) {
+      clearTimeout(guidanceRefreshTimer);
+      guidanceRefreshTimer = 0;
+    }
     state.guidanceOpen = false;
     state.guidanceDraft = '';
     state.guidanceSubmitting = false;
     state.guidanceStatus = String(status || '');
+    state.pendingGuidance = null;
+  };
+  const latestThreadMessage = () => Array.isArray(state.messages) && state.messages.length
+    ? state.messages[state.messages.length - 1]
+    : null;
+  const messageFingerprint = (message) => {
+    if (!message || typeof message !== 'object') return '';
+    return [
+      normalizeText(message.messageId),
+      normalizeText(message.messagePinId),
+      normalizeText(message.txid),
+      Number.isFinite(Number(message.timestamp)) ? String(Number(message.timestamp)) : '',
+      normalizeText(message.direction),
+      normalizeText(message.content),
+    ].join('|');
+  };
+  const isLocalThreadMessage = (message) => {
+    const direction = normalizeText(message && message.direction).toLowerCase();
+    const directionLabel = normalizeText(message && message.directionLabel);
+    return directionLabel === 'Bot' || direction === 'outgoing' || direction === 'outbound';
+  };
+  const maybeResolvePendingGuidanceFromMessages = () => {
+    const pending = state.pendingGuidance;
+    if (!pending) return false;
+    if (
+      state.selectedLocalGlobalMetaId !== pending.localGlobalMetaId
+      || state.selectedPeerGlobalMetaId !== pending.peerGlobalMetaId
+    ) {
+      return false;
+    }
+    const latest = latestThreadMessage();
+    if (!isLocalThreadMessage(latest)) return false;
+    const latestFingerprint = messageFingerprint(latest);
+    if (!latestFingerprint || latestFingerprint === pending.baselineMessageFingerprint) return false;
+    resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
+    return true;
+  };
+  const scheduleGuidanceMessageRefresh = (submissionToken) => {
+    if (guidanceRefreshTimer) {
+      clearTimeout(guidanceRefreshTimer);
+      guidanceRefreshTimer = 0;
+    }
+    if (
+      !state.pendingGuidance
+      || state.pendingGuidance.submissionToken !== submissionToken
+      || !state.guidanceSubmitting
+    ) {
+      return;
+    }
+    guidanceRefreshTimer = setTimeout(async () => {
+      guidanceRefreshTimer = 0;
+      const pending = state.pendingGuidance;
+      if (
+        !pending
+        || pending.submissionToken !== submissionToken
+        || !state.guidanceSubmitting
+        || state.selectedLocalGlobalMetaId !== pending.localGlobalMetaId
+        || state.selectedPeerGlobalMetaId !== pending.peerGlobalMetaId
+      ) {
+        return;
+      }
+      if (guidanceRefreshInFlight) {
+        scheduleGuidanceMessageRefresh(submissionToken);
+        return;
+      }
+      const wasNearBottom = isScrollNearBottom(elements.messages);
+      guidanceRefreshInFlight = true;
+      try {
+        await loadMessages({
+          preserveScroll: !wasNearBottom,
+          stickToBottom: wasNearBottom,
+          silent: true,
+        });
+      } finally {
+        guidanceRefreshInFlight = false;
+        if (
+          state.pendingGuidance
+          && state.pendingGuidance.submissionToken === submissionToken
+          && state.guidanceSubmitting
+        ) {
+          scheduleGuidanceMessageRefresh(submissionToken);
+        }
+      }
+    }, 1000);
   };
   const renderList = (model) => {
     if (!elements.list) return;
@@ -696,13 +789,16 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const appendOlder = Boolean(options && options.appendOlder);
     const preserveScroll = Boolean(options && options.preserveScroll);
     const stickToBottom = Boolean(options && options.stickToBottom);
+    const silent = Boolean(options && options.silent);
     if (appendOlder && !state.beforeCursor) return;
     const scrollAnchor = elements.messages
       ? { height: elements.messages.scrollHeight, top: elements.messages.scrollTop }
       : null;
-    if (appendOlder) state.loadingOlder = true; else state.loadingMessages = true;
-    state.error = '';
-    render();
+    if (appendOlder) state.loadingOlder = true; else if (!silent) state.loadingMessages = true;
+    if (!silent) {
+      state.error = '';
+      render();
+    }
     try {
       const payload = await fetchJson(messagesUrl(appendOlder ? { before: state.beforeCursor, limit: 50 } : { limit: 50 }));
       const messages = Array.isArray(payload.messages) ? payload.messages : [];
@@ -710,12 +806,15 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       state.messages = appendOlder ? messages.concat(state.messages) : messages;
       state.beforeCursor = pagination.beforeCursor || readBeforeCursor(state.messages);
       state.hasMoreBefore = pagination.hasMoreBefore === true;
+      maybeResolvePendingGuidanceFromMessages();
     } catch (error) {
-      state.error = error.message || uiText('conversations.messagesLoadFailed', 'Conversation messages failed to load.');
-      if (!appendOlder) state.messages = [];
+      if (!silent) {
+        state.error = error.message || uiText('conversations.messagesLoadFailed', 'Conversation messages failed to load.');
+        if (!appendOlder) state.messages = [];
+      }
     } finally {
-      state.loadingMessages = false;
-      state.loadingOlder = false;
+      if (appendOlder) state.loadingOlder = false;
+      else if (!silent) state.loadingMessages = false;
       render();
       requestAnimationFrame(() => {
         if (!elements.messages) return;
@@ -786,9 +885,18 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     if (!hasGuidanceTarget() || !state.guidanceDraft.trim() || state.guidanceSubmitting) return;
     const targetLocal = state.selectedLocalGlobalMetaId;
     const targetPeer = state.selectedPeerGlobalMetaId;
+    const submissionToken = ++nextGuidanceSubmissionToken;
     state.guidanceSubmitting = true;
-    state.guidanceStatus = '';
+    state.guidanceOpen = false;
+    state.guidanceStatus = uiText('conversations.guidanceSending', 'Guiding the next local turn...');
+    state.pendingGuidance = {
+      submissionToken,
+      localGlobalMetaId: targetLocal,
+      peerGlobalMetaId: targetPeer,
+      baselineMessageFingerprint: messageFingerprint(latestThreadMessage()),
+    };
     render();
+    scheduleGuidanceMessageRefresh(submissionToken);
     try {
       await fetchJson('/api/conversations/guidance', {
         method: 'POST',
@@ -799,15 +907,27 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
           guidance: state.guidanceDraft.trim(),
         }),
       });
-      if (state.selectedLocalGlobalMetaId !== targetLocal || state.selectedPeerGlobalMetaId !== targetPeer) return;
-      resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
-      render();
-      await loadConversations({ stickToBottom: true });
+      if (
+        state.pendingGuidance
+        && state.pendingGuidance.submissionToken === submissionToken
+      ) {
+        resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
+        render();
+      }
+      if (state.selectedLocalGlobalMetaId === targetLocal && state.selectedPeerGlobalMetaId === targetPeer) {
+        await loadConversations({ stickToBottom: true });
+      }
     } catch (error) {
       if (state.selectedLocalGlobalMetaId !== targetLocal || state.selectedPeerGlobalMetaId !== targetPeer) return;
-      state.guidanceStatus = guidanceErrorMessage(error);
-    } finally {
+      if (!state.pendingGuidance || state.pendingGuidance.submissionToken !== submissionToken) return;
+      if (guidanceRefreshTimer) {
+        clearTimeout(guidanceRefreshTimer);
+        guidanceRefreshTimer = 0;
+      }
+      state.pendingGuidance = null;
       state.guidanceSubmitting = false;
+      state.guidanceOpen = true;
+      state.guidanceStatus = guidanceErrorMessage(error);
       render();
     }
   };

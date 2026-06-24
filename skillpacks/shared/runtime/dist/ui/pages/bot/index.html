@@ -31,7 +31,7 @@
       }
 
       .metabot-panel {
-        width: 304px;
+        width: 244px;
         flex-shrink: 0;
         border-right: 1px solid var(--border);
         display: flex;
@@ -150,6 +150,22 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .metabot-no-llm-label {
+        display: inline-flex;
+        align-items: center;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 4px;
+        background: var(--red);
+        color: #fff;
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: 0;
+        white-space: nowrap;
+        flex-shrink: 0;
       }
       .metabot-item-id-row {
         display: flex;
@@ -341,13 +357,14 @@
       }
       .hero-meta {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1fr);
         gap: 14px;
         margin-bottom: 14px;
       }
       .hero-meta-row {
-        display: grid;
-        gap: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
         min-width: 0;
       }
       .hero-meta-row span {
@@ -356,15 +373,28 @@
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .03em;
+        flex-shrink: 0;
+      }
+      .hero-meta-value {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .hero-meta-value code {
+        flex: 1 1 auto;
+        min-width: 0;
       }
       .hero-meta-row code {
         min-width: 0;
-        overflow-wrap: anywhere;
-        word-break: break-all;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         background: var(--surface2);
         border: 1px solid var(--border);
         border-radius: 9px;
-        padding: 8px 12px;
+        padding: 6px 10px;
         font-family: var(--mono);
         font-size: 11px;
         color: #223247;
@@ -390,13 +420,13 @@
         border-top: 1px solid var(--border);
       }
       .tab-bar {
-        display: flex;
+        display: inline-flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: 1px;
         border-bottom: 1px solid var(--border);
         background: var(--surface);
         flex-shrink: 0;
-        padding: 14px 22px;
+        padding: 10px 16px;
         overflow-x: auto;
         scrollbar-width: none;
       }
@@ -406,12 +436,12 @@
       .tab-btn {
         display: inline-flex;
         align-items: center;
-        padding: 8px 14px;
-        border-radius: 999px;
-        border: 1px solid var(--border);
-        background: #fff;
-        font-size: 12px;
-        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background: var(--surface2);
+        font-size: 11px;
+        font-weight: 600;
         color: var(--muted);
         cursor: pointer;
         transition: color .15s, background .15s, border-color .15s;
@@ -422,8 +452,8 @@
       }
       .tab-btn.active {
         color: var(--accent);
-        background: var(--accent-dim);
-        border-color: var(--accent-border);
+        background: #fff;
+        border-color: var(--border2);
       }
       .tab-content {
         flex: 1;
@@ -517,7 +547,7 @@
       }
       .info-form-grid textarea {
         min-height: 88px;
-        font-family: var(--mono);
+        font-family: var(--sans);
         font-size: 12px;
         line-height: 1.5;
       }
@@ -857,8 +887,120 @@
         border-top: 1px solid var(--border);
       }
 
+      /* ── Advanced tab cards ── */
+      .advanced-card {
+        background: rgba(255,255,255,.92);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        padding: 16px 18px;
+        display: grid;
+        gap: 14px;
+      }
+      .advanced-card + .advanced-card { margin-top: 14px; }
+      .advanced-card-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 11px;
+        font-family: var(--mono);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+      }
+      .advanced-card-head svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+        flex-shrink: 0;
+      }
+      .advanced-card-divider {
+        height: 1px;
+        background: var(--border);
+        margin: 2px 0;
+      }
+      .advanced-card-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .danger-card {
+        border-color: #f3c0c0;
+        background: var(--red-dim);
+      }
+      .danger-card .advanced-card-head { color: var(--red); }
+      .danger-card-body {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .danger-card-body p {
+        margin: 0;
+        color: var(--text);
+        font-size: 12px;
+        line-height: 1.5;
+        flex: 1 1 240px;
+        min-width: 0;
+      }
+
+      /* ── LLM runtime summary (Advanced tab) ── */
+      .runtime-summary-list {
+        display: grid;
+        gap: 8px;
+      }
+      .runtime-summary-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        font-size: 12px;
+      }
+      .runtime-summary-role {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--dim);
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        flex-shrink: 0;
+        min-width: 72px;
+      }
+      .runtime-summary-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        flex-shrink: 0;
+        background: var(--dim);
+      }
+      .runtime-summary-dot.healthy { background: var(--green); }
+      .runtime-summary-dot.unhealthy { background: var(--red); }
+      .runtime-summary-name {
+        font-weight: 700;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .runtime-summary-meta {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       .history-scroll {
         overflow: auto;
+        max-height: 320px;
       }
       .advanced-section-title {
         margin: 18px 0 10px;
@@ -1528,13 +1670,10 @@
               <div class="hero-meta">
                 <div class="hero-meta-row">
                   <span data-i18n-key="bot.globalMetaId">GlobalMetaID</span>
-                  <code data-hero-global-meta-id>-</code>
-                  <button class="icon-btn hero-copy-btn" type="button" data-copy-global-meta-id aria-label="Copy GlobalMetaID" title="Copy GlobalMetaID">⧉</button>
-                </div>
-                <div class="hero-meta-row">
-                  <span data-i18n-key="bot.botUri">Homepage URI</span>
-                  <code data-hero-bot-uri>metaid://-</code>
-                  <button class="icon-btn hero-copy-btn" type="button" data-copy-bot-uri disabled aria-label="Copy Homepage URI" title="Copy Homepage URI">⧉</button>
+                  <div class="hero-meta-value">
+                    <code data-hero-global-meta-id>-</code>
+                    <button class="icon-btn hero-copy-btn" type="button" data-copy-global-meta-id aria-label="Copy GlobalMetaID" title="Copy GlobalMetaID">⧉</button>
+                  </div>
                 </div>
               </div>
               <div class="hero-actions">
@@ -1564,38 +1703,67 @@
               </div>
             </div>
             <div class="tab-panel" data-tab-panel="advanced">
-              <div class="advanced-actions">
-                <button class="btn btn-sm" data-act="open-wallet" data-i18n-key="bot.wallet">Wallet</button>
-                <button class="btn btn-sm" data-act="open-backup" data-i18n-key="bot.backup">Backup</button>
-                <button class="btn btn-sm" data-act="open-runtime-modal" type="button" data-i18n-key="bot.llmProviders">LLM Providers</button>
-                <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes" data-i18n-key="bot.refreshRuntimes">Refresh Runtimes</button>
-              </div>
-              <div data-settings-content data-default-write-network="mvc"></div>
-              <div class="advanced-section-title" data-i18n-key="bot.executionHistory">Execution History</div>
-              <div class="history-scroll">
-                <div class="table-wrap">
-                  <table class="data-table exec-table">
-                    <thead>
-                      <tr>
-                        <th data-i18n-key="bot.time">Time</th>
-                        <th data-i18n-key="bot.provider">Provider</th>
-                        <th data-i18n-key="bot.runtime">Runtime</th>
-                        <th data-i18n-key="bot.status">Status</th>
-                        <th data-i18n-key="bot.duration">Duration</th>
-                        <th data-i18n-key="bot.prompt">Prompt</th>
-                        <th data-i18n-key="bot.details">Details</th>
-                      </tr>
-                    </thead>
-                    <tbody data-execution-history-list>
-                      <tr>
-                        <td colspan="7" class="table-empty"><strong data-i18n-key="bot.noExecutionsYet">No executions yet for this Bot</strong></td>
-                      </tr>
-                    </tbody>
-                  </table>
+              <div class="advanced-card">
+                <div class="advanced-card-head">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+                  <span data-i18n-key="bot.sectionChainWallet">Chain &amp; Wallet</span>
+                </div>
+                <div data-settings-content data-default-write-network="mvc"></div>
+                <div class="advanced-card-divider"></div>
+                <div class="advanced-card-actions">
+                  <button class="btn btn-sm" data-act="open-wallet" data-i18n-key="bot.wallet">Wallet</button>
+                  <button class="btn btn-sm" data-act="open-backup" data-i18n-key="bot.backup">Backup</button>
                 </div>
               </div>
-              <div class="advanced-danger-actions">
-                <button class="btn btn-sm btn-danger" data-act="open-delete" data-i18n-key="bot.deleteBot">Delete Bot</button>
+              <div class="advanced-card">
+                <div class="advanced-card-head">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M9 2v3M15 2v3M8 12h.01M16 12h.01"/></svg>
+                  <span data-i18n-key="bot.sectionLlmRuntimes">LLM Runtimes</span>
+                </div>
+                <div class="runtime-summary-list" data-runtime-summary></div>
+                <div class="advanced-card-divider"></div>
+                <div class="advanced-card-actions">
+                  <button class="btn btn-sm" data-act="open-runtime-modal" type="button" data-i18n-key="bot.llmProviders">LLM Providers</button>
+                  <button class="btn btn-sm" data-act="discover-runtimes" title="Refresh detected local runtimes" data-i18n-key="bot.refreshRuntimes">Refresh Runtimes</button>
+                </div>
+              </div>
+              <div class="advanced-card">
+                <div class="advanced-card-head">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+                  <span data-i18n-key="bot.sectionExecutionHistory">Execution History</span>
+                </div>
+                <div class="history-scroll">
+                  <div class="table-wrap">
+                    <table class="data-table exec-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n-key="bot.time">Time</th>
+                          <th data-i18n-key="bot.provider">Provider</th>
+                          <th data-i18n-key="bot.runtime">Runtime</th>
+                          <th data-i18n-key="bot.status">Status</th>
+                          <th data-i18n-key="bot.duration">Duration</th>
+                          <th data-i18n-key="bot.prompt">Prompt</th>
+                          <th data-i18n-key="bot.details">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody data-execution-history-list>
+                        <tr>
+                          <td colspan="7" class="table-empty"><strong data-i18n-key="bot.noExecutionsYet">No executions yet for this Bot</strong></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              <div class="advanced-card danger-card">
+                <div class="advanced-card-head">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5M12 18h.01"/></svg>
+                  <span data-i18n-key="bot.sectionDangerZone">Danger Zone</span>
+                </div>
+                <div class="danger-card-body">
+                  <p data-i18n-key="bot.deleteBotWarning">Deleting a Bot is permanent and removes its on-chain identity reference. This cannot be undone.</p>
+                  <button class="btn btn-sm btn-danger" data-act="open-delete" data-i18n-key="bot.deleteBot">Delete Bot</button>
+                </div>
               </div>
             </div>
           </div>

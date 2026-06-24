@@ -18,6 +18,8 @@ const platformRegistry_1 = require("../platform/platformRegistry");
 const registry_1 = require("./executor/backends/registry");
 const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
 const SLOW_START_READINESS_TIMEOUT_MS = 45_000;
+const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
+const SLOW_START_VERSION_PROBE_TIMEOUT_MS = 20_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
 const READINESS_PROMPT = 'Reply exactly OK.';
 const LOGIN_SHELL_RESOLVE_TIMEOUT_MS = 3_000;
@@ -299,6 +301,11 @@ function readinessTimeoutForProvider(provider, override) {
         ? SLOW_START_READINESS_TIMEOUT_MS
         : DEFAULT_READINESS_TIMEOUT_MS;
 }
+function versionProbeTimeoutForProvider(provider) {
+    return provider === 'cursor'
+        ? SLOW_START_VERSION_PROBE_TIMEOUT_MS
+        : DEFAULT_VERSION_PROBE_TIMEOUT_MS;
+}
 function readinessSemanticInactivityTimeoutForProvider(provider, readinessTimeoutMs) {
     return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
         ? readinessTimeoutMs
@@ -371,7 +378,7 @@ async function discoverProvider(provider, pathDirs, options) {
     const readinessTimeoutMs = readinessTimeoutForProvider(provider, options?.readinessTimeoutMs);
     const binaryPaths = await executableCandidatesForProvider(provider, platform, pathDirs, env, options?.shellResolvedExecutables);
     for (const binaryPath of binaryPaths) {
-        const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], 5_000, env);
+        const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], versionProbeTimeoutForProvider(provider), env);
         if (versionProbe.ok) {
             const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
             const readiness = await readinessProbe({
@@ -433,7 +440,7 @@ async function testLlmRuntimeReadiness(runtime, options) {
         };
     }
     const platform = (0, platformRegistry_1.getRuntimePlatformDefinition)(runtime.provider);
-    const versionProbe = await probeExecutableVersion(runtime.binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], 5_000, env);
+    const versionProbe = await probeExecutableVersion(runtime.binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], versionProbeTimeoutForProvider(runtime.provider), env);
     const probedRuntime = {
         ...buildDiscoveredRuntime(runtime.provider, platform, runtime.binaryPath, versionProbe, {
             env,

@@ -10,7 +10,7 @@ function buildCursorPrompt(request) {
         : request.prompt;
 }
 function buildCursorArgs(request) {
-    const args = ['chat', '-p', buildCursorPrompt(request), '--output-format', 'stream-json', '--yolo'];
+    const args = ['agent', '--print', '--output-format', 'json', '--force', '--trust'];
     if (request.cwd)
         args.push('--workspace', request.cwd);
     if (request.model)
@@ -18,13 +18,18 @@ function buildCursorArgs(request) {
     if (request.resumeSessionId)
         args.push('--resume', request.resumeSessionId);
     args.push(...(0, backend_1.filterBlockedArgs)(request.extraArgs, {
-        '-p': { takesValue: true },
+        '-p': { takesValue: false },
+        '--print': { takesValue: false },
         '--output-format': { takesValue: true },
         '--yolo': { takesValue: false },
+        '--force': { takesValue: false },
+        '-f': { takesValue: false },
+        '--trust': { takesValue: false },
         '--workspace': { takesValue: true },
         '--model': { takesValue: true },
         '--resume': { takesValue: true },
     }));
+    args.push(buildCursorPrompt(request));
     return args;
 }
 function emitAssistantBlock(block, emitter) {

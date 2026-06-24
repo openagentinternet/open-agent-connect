@@ -35,9 +35,12 @@ function elements() {
     '[data-browser-reload]': new FakeElement(),
     '[data-browser-drawer-toggle]': new FakeElement(),
     '[data-browser-resource-chip]': new FakeElement(),
+    '[data-browser-owner-panel]': new FakeElement(),
     '[data-browser-using-selector]': new FakeElement(),
-    '[data-browser-owner-toolbar]': new FakeElement(),
+    '[data-browser-menu-trigger]': new FakeElement(),
+    '[data-browser-menu]': new FakeElement(),
     '[data-browser-viewport]': new FakeElement(),
+    '[data-browser-status-strip]': new FakeElement(),
     '[data-browser-status-state]': new FakeElement(),
     '[data-browser-status-proof]': new FakeElement(),
     '[data-browser-status-renderer]': new FakeElement(),
@@ -45,6 +48,8 @@ function elements() {
     '[data-browser-drawer]': new FakeElement(),
     '[data-browser-inspector]': new FakeElement(),
     '[data-browser-modal-root]': new FakeElement(),
+    '[data-browser-bookmark-star]': new FakeElement(),
+    '[data-browser-toast]': new FakeElement(),
   };
 }
 
@@ -187,27 +192,20 @@ function createContext(options = {}) {
   return { context, nodes, requests, clipboardWrites };
 }
 
-function ownerActionTarget(action) {
+function ownerPanelActionTarget(action) {
   return {
     parentElement: null,
-    getAttribute: (name) => (name === 'data-browser-owner-action' ? action : ''),
-    hasAttribute: (name) => name === 'data-browser-owner-action',
+    disabled: false,
+    getAttribute: (name) => (name === 'data-browser-owner-panel-action' ? action : ''),
+    hasAttribute: (name) => name === 'data-browser-owner-panel-action',
   };
 }
 
-function modalShareCopyTarget(value) {
+function ownerPanelCopyTarget(value) {
   return {
     parentElement: null,
-    getAttribute: (name) => (name === 'data-browser-share-copy' ? value : ''),
-    hasAttribute: (name) => name === 'data-browser-share-copy',
-  };
-}
-
-function modalConfirmTarget(action = '') {
-  return {
-    parentElement: null,
-    getAttribute: (name) => (name === 'data-browser-modal-action' ? action : ''),
-    hasAttribute: (name) => name === 'data-browser-modal-action',
+    getAttribute: (name) => (name === 'data-browser-owner-copy-meta' ? value : ''),
+    hasAttribute: (name) => name === 'data-browser-owner-copy-meta',
   };
 }
 
@@ -246,7 +244,7 @@ test('private-chat sends only after modal confirmation with Browser action contr
   assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.payload, 'message'), false);
 });
 
-test('browser renders the no-Bot and owner toolbar launch chrome in Simplified Chinese', () => {
+test('browser renders the no-Bot state and owner panel launch chrome in Simplified Chinese', () => {
   const empty = createContext({ language: 'zh-CN' });
   empty.context.state.runtime = {
     host: { kind: 'oac', name: 'Open Agent Connect', localMode: true },
@@ -276,16 +274,18 @@ test('browser renders the no-Bot and owner toolbar launch chrome in Simplified C
 
   const owner = createContext({ language: 'zh-CN' });
   owner.context.state.current.owner.globalMetaId = LOCAL_GLOBAL_META_ID;
+  owner.context.state.current.owner.name = 'Worker Bot';
   owner.context.state.current.title = 'Worker Bot';
 
-  owner.context.renderOwnerToolbar();
+  owner.context.renderCurrent();
+  owner.context.toggleOwnerPanel();
 
-  assert.equal(owner.nodes['[data-browser-owner-toolbar]'].hidden, false);
-  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /本地 Bot：Worker Bot/);
-  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /编辑主页/);
-  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /配置聊天/);
-  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /查看消息/);
-  assert.match(owner.nodes['[data-browser-owner-toolbar]'].innerHTML, /分享主页/);
+  assert.equal(owner.nodes['[data-browser-owner-panel]'].hidden, false);
+  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /Worker Bot/);
+  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /访问主页/);
+  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /发送信息/);
+  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /关注该 Bot/);
+  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /复制 GlobalMetaId/);
 });
 
 test('service-call sends only after modal confirmation with Browser action contract', async () => {
@@ -378,144 +378,10 @@ test('open-conversation blocks unsafe returned href', async () => {
   assert.equal(context.state.status, 'error');
 });
 
-test('owner toolbar actions send Browser owner action payloads and follow returned href', async () => {
-  const { context, nodes, requests } = createContext({
-    actionResponse: {
-      ok: true,
-      data: {
-        kind: 'edit-profile',
-        handled: true,
-        data: { href: '/ui/bot?profile=alice&tab=info&focus=profile' },
-      },
-    },
-  });
-
-  await context.initialize();
-  context.state.runtime.actors = [
-    { id: 'worker', label: 'Worker Bot', kind: 'oac-bot', globalMetaId: 'idq1worker', isDefault: true, capabilities: [] },
-    { id: 'alice', label: 'Alice Bot', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: false, capabilities: [] },
-  ];
-  context.state.current = {
-    uri: 'metaid://idq1alice',
-    normalizedUri: 'metaid://idq1alice',
-    resourceType: 'bot',
-    title: 'Alice Bot',
-    owner: { kind: 'bot', globalMetaId: 'idq1alice', name: 'Alice Bot', verificationState: 'verified' },
-    renderer: { type: 'bot-page', contentType: 'application/vnd.oac.bot-homepage+json', data: {} },
-    status: { state: 'resolved', verificationState: 'verified', message: '' },
-    source: { resolver: 'test' },
-    actions: [],
-  };
-
-  nodes['[data-browser-owner-toolbar]'].listeners.get('click')({ target: ownerActionTarget('edit-profile') });
-  await waitFor(() => requests.length === 1, 'owner edit profile action');
-  await waitFor(
-    () => context.window.location.href === '/ui/bot?profile=alice&tab=info&focus=profile',
-    'owner action href navigation',
-  );
-
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, '/api/browser/actions?actorId=worker');
-  assert.deepEqual(requests[0].body, {
-    resourceUri: 'metaid://idq1alice',
-    kind: 'edit-profile',
-    payload: {
-      ownerActorId: 'alice',
-      ownerGlobalMetaId: 'idq1alice',
-      currentUri: 'metaid://idq1alice',
-    },
-  });
-  assert.equal(context.window.location.href, '/ui/bot?profile=alice&tab=info&focus=profile');
-});
-
-test('owner toolbar rejects unsafe javascript action hrefs', async () => {
-  const initialHref = 'http://127.0.0.1:3000/ui/browser';
-  const { context, nodes, requests } = createContext({
-    actionResponse: {
-      ok: true,
-      data: {
-        kind: 'edit-profile',
-        handled: true,
-        data: { href: 'javascript:alert(1)' },
-      },
-    },
-  });
-
-  await context.initialize();
-  context.state.runtime.actors = [
-    { id: 'worker', label: 'Worker Bot', kind: 'oac-bot', globalMetaId: 'idq1worker', isDefault: true, capabilities: [] },
-    { id: 'alice', label: 'Alice Bot', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: false, capabilities: [] },
-  ];
-  context.state.current = {
-    uri: 'metaid://idq1alice',
-    normalizedUri: 'metaid://idq1alice',
-    resourceType: 'bot',
-    title: 'Alice Bot',
-    owner: { kind: 'bot', globalMetaId: 'idq1alice', name: 'Alice Bot', verificationState: 'verified' },
-    renderer: { type: 'bot-page', contentType: 'application/vnd.oac.bot-homepage+json', data: {} },
-    status: { state: 'resolved', verificationState: 'verified', message: '' },
-    source: { resolver: 'test' },
-    actions: [],
-  };
-
-  nodes['[data-browser-owner-toolbar]'].listeners.get('click')({ target: ownerActionTarget('edit-profile') });
-  await waitFor(
-    () => requests.length === 1 && (context.window.location.href !== initialHref || context.state.status === 'error'),
-    'unsafe javascript href handling',
-  );
-
-  assert.equal(context.window.location.href, initialHref);
-  assert.equal(context.state.status, 'error');
-});
-
-test('owner toolbar rejects cross-origin action hrefs', async () => {
-  const initialHref = 'http://127.0.0.1:3000/ui/browser';
-  const { context, nodes, requests } = createContext({
-    actionResponse: {
-      ok: true,
-      data: {
-        kind: 'edit-profile',
-        handled: true,
-        data: { href: 'https://evil.example/ui/bot?profile=alice&tab=info&focus=profile' },
-      },
-    },
-  });
-
-  await context.initialize();
-  context.state.runtime.actors = [
-    { id: 'worker', label: 'Worker Bot', kind: 'oac-bot', globalMetaId: 'idq1worker', isDefault: true, capabilities: [] },
-    { id: 'alice', label: 'Alice Bot', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: false, capabilities: [] },
-  ];
-  context.state.current = {
-    uri: 'metaid://idq1alice',
-    normalizedUri: 'metaid://idq1alice',
-    resourceType: 'bot',
-    title: 'Alice Bot',
-    owner: { kind: 'bot', globalMetaId: 'idq1alice', name: 'Alice Bot', verificationState: 'verified' },
-    renderer: { type: 'bot-page', contentType: 'application/vnd.oac.bot-homepage+json', data: {} },
-    status: { state: 'resolved', verificationState: 'verified', message: '' },
-    source: { resolver: 'test' },
-    actions: [],
-  };
-
-  nodes['[data-browser-owner-toolbar]'].listeners.get('click')({ target: ownerActionTarget('edit-profile') });
-  await waitFor(
-    () => requests.length === 1 && (context.window.location.href !== initialHref || context.state.status === 'error'),
-    'unsafe cross-origin href handling',
-  );
-
-  assert.equal(context.window.location.href, initialHref);
-  assert.equal(context.state.status, 'error');
-});
-
-test('owner toolbar sends configure chat and view messages action kinds', async () => {
+test('owner panel visit-home navigates through Browser resolution without Browser action side effects', async () => {
   const { context, nodes, requests } = createContext();
 
   await context.initialize();
-  context.state.runtime.actors = [
-    { id: 'worker', label: 'Worker Bot', kind: 'oac-bot', globalMetaId: 'idq1worker', isDefault: true, capabilities: [] },
-    { id: 'alice', label: 'Alice Bot', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: false, capabilities: [] },
-  ];
   context.state.current = {
     uri: 'metaid://idq1alice',
     normalizedUri: 'metaid://idq1alice',
@@ -527,35 +393,21 @@ test('owner toolbar sends configure chat and view messages action kinds', async 
     source: { resolver: 'test' },
     actions: [],
   };
+  context.renderCurrent();
+  context.toggleOwnerPanel();
 
-  nodes['[data-browser-owner-toolbar]'].listeners.get('click')({ target: ownerActionTarget('configure-chat') });
-  await waitFor(() => requests.length === 1, 'owner configure chat action');
-  nodes['[data-browser-owner-toolbar]'].listeners.get('click')({ target: ownerActionTarget('view-messages') });
-  await waitFor(() => requests.length === 2, 'owner view messages action');
+  nodes['[data-browser-owner-panel]'].listeners.get('click')({ stopPropagation() {}, target: ownerPanelActionTarget('visit-home') });
+  await waitFor(() => context.state.history.at(-1) === 'metaid://idq1alice', 'owner visit-home navigation');
 
-  assert.deepEqual(requests.map((request) => request.body.kind), ['configure-chat', 'view-messages']);
-  assert.deepEqual(requests.map((request) => request.body.payload), [
-    {
-      ownerActorId: 'alice',
-      ownerGlobalMetaId: 'idq1alice',
-      currentUri: 'metaid://idq1alice',
-    },
-    {
-      ownerActorId: 'alice',
-      ownerGlobalMetaId: 'idq1alice',
-      currentUri: 'metaid://idq1alice',
-    },
-  ]);
+  assert.equal(requests.length, 0);
+  assert.equal(nodes['[data-browser-owner-panel]'].hidden, true);
+  assert.equal(nodes['[data-browser-uri-input]'].value, 'metaid://idq1alice');
 });
 
-test('share bot page opens a local modal without calling Browser actions', async () => {
+test('owner panel copy writes GlobalMetaId locally without calling Browser actions', async () => {
   const { context, nodes, requests, clipboardWrites } = createContext();
 
   await context.initialize();
-  context.state.runtime.host.publicBaseUrl = 'https://browser.example.test';
-  context.state.runtime.actors = [
-    { id: 'alice', label: 'Alice Bot', kind: 'oac-bot', globalMetaId: 'idq1alice', isDefault: true, capabilities: [] },
-  ];
   context.state.current = {
     uri: 'metaid://idq1alice',
     normalizedUri: 'metaid://idq1alice',
@@ -567,28 +419,43 @@ test('share bot page opens a local modal without calling Browser actions', async
     source: { resolver: 'test' },
     actions: [],
   };
+  context.renderCurrent();
+  context.toggleOwnerPanel();
 
-  nodes['[data-browser-owner-toolbar]'].listeners.get('click')({ target: ownerActionTarget('share') });
+  nodes['[data-browser-owner-panel]'].listeners.get('click')({ stopPropagation() {}, target: ownerPanelCopyTarget('idq1alice') });
+  await waitFor(() => clipboardWrites.length === 1, 'owner copy action');
+
+  assert.deepEqual(clipboardWrites, ['idq1alice']);
+  assert.equal(requests.length, 0);
+  assert.match(nodes['[data-browser-toast]'].textContent, /Copied/);
+});
+
+test('owner panel disabled actions do not call Browser action endpoints', async () => {
+  const { context, nodes, requests } = createContext();
+
+  await context.initialize();
+  context.state.current = {
+    uri: 'metaid://idq1alice',
+    normalizedUri: 'metaid://idq1alice',
+    resourceType: 'bot',
+    title: 'Alice Bot',
+    owner: { kind: 'bot', globalMetaId: 'idq1alice', name: 'Alice Bot', verificationState: 'verified' },
+    renderer: { type: 'bot-page', contentType: 'application/vnd.oac.bot-homepage+json', data: {} },
+    status: { state: 'resolved', verificationState: 'verified', message: '' },
+    source: { resolver: 'test' },
+    actions: [],
+  };
+  context.renderCurrent();
+  context.toggleOwnerPanel();
+
+  nodes['[data-browser-owner-panel]'].listeners.get('click')({
+    stopPropagation() {},
+    target: { ...ownerPanelActionTarget('send-message'), disabled: true },
+  });
   await Promise.resolve();
 
   assert.equal(requests.length, 0);
-  assert.equal(nodes['[data-browser-modal-root]'].hidden, false);
-  assert.match(nodes['[data-browser-modal-root]'].innerHTML, /Share Bot Page/);
-  assert.match(nodes['[data-browser-modal-root]'].innerHTML, /metaid:\/\/idq1alice/);
-  assert.match(nodes['[data-browser-modal-root]'].innerHTML, /\/browser\/metaid\/idq1alice/);
-  assert.match(nodes['[data-browser-modal-root]'].innerHTML, /https:\/\/browser\.example\.test\/browser\/metaid\/idq1alice/);
-
-  nodes['[data-browser-modal-root]'].listeners.get('click')({
-    target: modalShareCopyTarget('metaid://idq1alice'),
-  });
-  await waitFor(() => clipboardWrites.length === 1, 'share copy action');
-
-  assert.deepEqual(clipboardWrites, ['metaid://idq1alice']);
-
-  nodes['[data-browser-modal-root]'].listeners.get('click')({
-    target: modalConfirmTarget(),
-  });
-  assert.equal(nodes['[data-browser-modal-root]'].hidden, true);
+  assert.equal(nodes['[data-browser-owner-panel]'].hidden, false);
 });
 
 test('sandboxed iframe renderer does not expose side-effect helpers to content', () => {

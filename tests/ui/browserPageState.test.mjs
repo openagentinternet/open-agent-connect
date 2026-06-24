@@ -56,7 +56,7 @@ class FakeElement {
   }
 
   click() {
-    this.listeners.get('click')?.({ preventDefault() {} });
+    this.listeners.get('click')?.({ preventDefault() {}, stopPropagation() {} });
   }
 
   submit() {
@@ -83,6 +83,8 @@ function waitFor(condition, label) {
 }
 
 function createElements() {
+  const ownerPanel = new FakeElement();
+  ownerPanel.hidden = true;
   return {
     '[data-browser-shell]': new FakeElement(),
     '[data-browser-uri-input]': new FakeElement(),
@@ -92,10 +94,10 @@ function createElements() {
     '[data-browser-reload]': new FakeElement(),
     '[data-browser-drawer-toggle]': new FakeElement(),
     '[data-browser-resource-chip]': new FakeElement(),
+    '[data-browser-owner-panel]': ownerPanel,
     '[data-browser-using-selector]': new FakeElement(),
     '[data-browser-menu-trigger]': new FakeElement(),
     '[data-browser-menu]': new FakeElement(),
-    '[data-browser-owner-toolbar]': new FakeElement(),
     '[data-browser-viewport]': new FakeElement(),
     '[data-browser-status-strip]': new FakeElement(),
     '[data-browser-status-state]': new FakeElement(),
@@ -105,6 +107,8 @@ function createElements() {
     '[data-browser-drawer]': new FakeElement(),
     '[data-browser-inspector]': new FakeElement(),
     '[data-browser-modal-root]': new FakeElement(),
+    '[data-browser-bookmark-star]': new FakeElement(),
+    '[data-browser-toast]': new FakeElement(),
   };
 }
 
@@ -310,12 +314,17 @@ test('Browser renders current resource identity separately from using identity',
 
   await waitFor(() => fetchCalls.length === 2, 'resource render');
 
-  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /Alice Resource/);
-  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /idq1alice/);
+  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /AR/);
+  assert.equal(elements['[data-browser-resource-chip]'].getAttribute('title'), 'Alice Resource');
   assert.match(elements['[data-browser-using-selector]'].innerHTML, /Using: Worker Bot/);
+
+  elements['[data-browser-resource-chip]'].click();
+  assert.equal(elements['[data-browser-owner-panel]'].hidden, false);
+  assert.match(elements['[data-browser-owner-panel]'].innerHTML, /Alice Resource/);
+  assert.match(elements['[data-browser-owner-panel]'].innerHTML, /idq1alice/);
 });
 
-test('Browser shows Owner Mode for local Bot Page owner', async () => {
+test('Browser owner panel renders current Bot owner actions from ABC contract', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
@@ -336,20 +345,18 @@ test('Browser shows Owner Mode for local Bot Page owner', async () => {
   };
   context.renderCurrent();
 
-  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
-  assert.equal(ownerToolbar.hidden, false);
-  assert.match(ownerToolbar.textContent, /Local Bot: Alice/);
-  assert.match(ownerToolbar.textContent, /Edit Profile/);
-  assert.match(ownerToolbar.textContent, /Configure Chat/);
-  assert.match(ownerToolbar.textContent, /View Messages/);
-  assert.match(ownerToolbar.textContent, /Share Bot Page/);
-  assert.match(ownerToolbar.innerHTML, /data-browser-owner-action="edit-profile"/);
-  assert.match(ownerToolbar.innerHTML, /data-browser-owner-action="configure-chat"/);
-  assert.match(ownerToolbar.innerHTML, /data-browser-owner-action="view-messages"/);
-  assert.match(ownerToolbar.innerHTML, /data-browser-owner-action="share"/);
+  context.toggleOwnerPanel();
+
+  const ownerPanel = elements['[data-browser-owner-panel]'];
+  assert.equal(ownerPanel.hidden, false);
+  assert.match(ownerPanel.textContent, /Alice/);
+  assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="visit-home"/);
+  assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="send-message" disabled/);
+  assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="follow" disabled/);
+  assert.match(ownerPanel.innerHTML, /data-browser-owner-copy-meta="idq1alice"/);
 });
 
-test('Browser hides Owner Mode for remote Bot Page owner', async () => {
+test('Browser owner panel is available for remote Bot Page owner', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
@@ -370,12 +377,15 @@ test('Browser hides Owner Mode for remote Bot Page owner', async () => {
   };
   context.renderCurrent();
 
-  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
-  assert.equal(ownerToolbar.hidden, true);
-  assert.equal(ownerToolbar.innerHTML, '');
+  context.toggleOwnerPanel();
+
+  const ownerPanel = elements['[data-browser-owner-panel]'];
+  assert.equal(ownerPanel.hidden, false);
+  assert.match(ownerPanel.textContent, /Remote/);
+  assert.match(ownerPanel.innerHTML, /data-browser-owner-copy-meta="idq1remote"/);
 });
 
-test('Browser shows Owner Mode for local Bot Page owner even when Using actor differs', async () => {
+test('Browser owner panel stays bound to resource owner when Using actor differs', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
@@ -398,12 +408,14 @@ test('Browser shows Owner Mode for local Bot Page owner even when Using actor di
   };
   context.renderCurrent();
 
-  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
-  assert.equal(ownerToolbar.hidden, false);
-  assert.match(ownerToolbar.textContent, /Local Bot: Alice/);
+  context.toggleOwnerPanel();
+
+  assert.match(elements['[data-browser-owner-panel]'].textContent, /Alice/);
+  assert.match(elements['[data-browser-owner-panel]'].innerHTML, /data-browser-owner-copy-meta="idq1alice"/);
+  assert.match(elements['[data-browser-using-selector]'].innerHTML, /Using: Worker Bot/);
 });
 
-test('Browser Owner Mode escapes local owner labels', async () => {
+test('Browser owner panel escapes owner labels', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
@@ -417,20 +429,22 @@ test('Browser Owner Mode escapes local owner labels', async () => {
   context.state.current = {
     resourceType: 'bot',
     normalizedUri: 'metaid://idq1alice',
-    title: 'Alice',
-    owner: { globalMetaId: 'idq1alice', name: 'Alice' },
+    title: 'Alice <script>alert(1)</script>',
+    owner: { globalMetaId: 'idq1alice', name: 'Alice <script>alert(1)</script>' },
     renderer: { type: 'bot-page' },
     status: { verificationState: 'verified' },
   };
   context.renderCurrent();
 
-  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
-  assert.equal(ownerToolbar.hidden, false);
-  assert.match(ownerToolbar.innerHTML, /Alice &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
-  assert.doesNotMatch(ownerToolbar.innerHTML, /<script>/);
+  context.toggleOwnerPanel();
+
+  const ownerPanel = elements['[data-browser-owner-panel]'];
+  assert.equal(ownerPanel.hidden, false);
+  assert.match(ownerPanel.innerHTML, /Alice &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(ownerPanel.innerHTML, /<script>/);
 });
 
-test('Browser Owner Mode uses case-sensitive GlobalMetaId matching', async () => {
+test('Browser owner panel uses exact resource owner id independent of local actor matching', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
@@ -451,12 +465,15 @@ test('Browser Owner Mode uses case-sensitive GlobalMetaId matching', async () =>
   };
   context.renderCurrent();
 
-  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
-  assert.equal(ownerToolbar.hidden, true);
-  assert.equal(ownerToolbar.innerHTML, '');
+  context.toggleOwnerPanel();
+
+  const ownerPanel = elements['[data-browser-owner-panel]'];
+  assert.equal(ownerPanel.hidden, false);
+  assert.match(ownerPanel.innerHTML, /data-browser-owner-copy-meta="idq1alice"/);
+  assert.doesNotMatch(ownerPanel.innerHTML, /IDQ1ALICE/);
 });
 
-test('Browser Owner Mode does not render Switch copy or button', async () => {
+test('Browser owner panel does not render removed local-owner toolbar actions', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
@@ -477,14 +494,19 @@ test('Browser Owner Mode does not render Switch copy or button', async () => {
   };
   context.renderCurrent();
 
-  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
-  assert.equal(ownerToolbar.hidden, false);
-  assert.match(ownerToolbar.textContent, /Local Bot: Alice/);
-  assert.doesNotMatch(ownerToolbar.textContent, /Switch to/i);
-  assert.doesNotMatch(ownerToolbar.innerHTML, /switch/i);
+  context.toggleOwnerPanel();
+
+  const ownerPanel = elements['[data-browser-owner-panel]'];
+  assert.equal(ownerPanel.hidden, false);
+  assert.match(ownerPanel.textContent, /Alice/);
+  assert.doesNotMatch(ownerPanel.textContent, /Edit Profile/i);
+  assert.doesNotMatch(ownerPanel.textContent, /Configure Chat/i);
+  assert.doesNotMatch(ownerPanel.textContent, /View Messages/i);
+  assert.doesNotMatch(ownerPanel.textContent, /Share Bot Page/i);
+  assert.doesNotMatch(ownerPanel.textContent, /Switch to/i);
 });
 
-test('Browser hides Owner Mode for MetaApp resources even when owner is local', async () => {
+test('Browser owner panel renders MetaApp publisher owner', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
@@ -505,12 +527,15 @@ test('Browser hides Owner Mode for MetaApp resources even when owner is local', 
   };
   context.renderCurrent();
 
-  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
-  assert.equal(ownerToolbar.hidden, true);
-  assert.equal(ownerToolbar.innerHTML, '');
+  context.toggleOwnerPanel();
+
+  const ownerPanel = elements['[data-browser-owner-panel]'];
+  assert.equal(ownerPanel.hidden, false);
+  assert.match(ownerPanel.textContent, /Alice/);
+  assert.match(ownerPanel.innerHTML, /data-browser-owner-copy-meta="idq1alice"/);
 });
 
-test('Browser resolve errors clear visible Owner Mode toolbar', async () => {
+test('Browser resolve errors clear the current resource state', async () => {
   const { context, elements, fetchCalls } = createBrowserContext({
     resolveResponse: (uri) => {
       if (uri === 'metaid://missing') {
@@ -538,13 +563,14 @@ test('Browser resolve errors clear visible Owner Mode toolbar', async () => {
   };
   context.renderCurrent();
 
-  const ownerToolbar = elements['[data-browser-owner-toolbar]'];
-  assert.equal(ownerToolbar.hidden, false);
+  const ownerPanel = elements['[data-browser-owner-panel]'];
+  assert.equal(ownerPanel.hidden, true);
 
   await context.resolveUri('metaid://missing', { record: false });
 
-  assert.equal(ownerToolbar.hidden, true);
-  assert.equal(ownerToolbar.innerHTML, '');
+  assert.equal(context.state.current, null);
+  assert.match(elements['[data-browser-viewport]'].innerHTML, /Resolve failed/);
+  assert.equal(ownerPanel.hidden, true);
 });
 
 test('Browser resource chip uses MetaApp publisher identity from ABC UI contract', async () => {
@@ -567,11 +593,14 @@ test('Browser resource chip uses MetaApp publisher identity from ABC UI contract
 
   await waitFor(() => fetchCalls.length === 2, 'MetaApp resource render');
 
-  assert.match(elements['[data-browser-resource-chip]'].innerHTML, /idq1publisher/);
-  assert.doesNotMatch(elements['[data-browser-resource-chip]'].innerHTML, /Fixture MetaApp/);
+  assert.equal(elements['[data-browser-resource-chip]'].getAttribute('title'), 'idq1publisher');
+  assert.doesNotMatch(elements['[data-browser-resource-chip]'].textContent, /Fixture MetaApp/);
+  elements['[data-browser-resource-chip]'].click();
+  assert.equal(elements['[data-browser-owner-panel]'].hidden, false);
+  assert.match(elements['[data-browser-owner-panel]'].innerHTML, /idq1publisher/);
 });
 
-test('Browser using identity selector switches identity and reloads current URI without history entry', async () => {
+test('Browser using identity selector switches identity without reloading current URI', async () => {
   const reviewerActor = {
     id: 'reviewer',
     label: 'Reviewer Bot',
@@ -598,14 +627,14 @@ test('Browser using identity selector switches identity and reloads current URI 
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /Reviewer Bot/);
 
   await context.selectUsingIdentity('reviewer');
-  await waitFor(() => fetchCalls.length === 3, 'selected identity reload');
+  await Promise.resolve();
 
   assert.equal(context.state.runtime.defaultActor.id, 'reviewer');
   assert.equal(context.state.actorId, 'reviewer');
   assert.match(elements['[data-browser-using-selector]'].innerHTML, /Using: Reviewer Bot/);
   assert.equal(elements['[data-browser-modal-root]'].hidden, true);
   assert.equal(elements['[data-browser-using-selector]'].getAttribute('aria-expanded'), 'false');
-  assert.equal(fetchCalls[2], '/api/browser/resolve?uri=metaid%3A%2F%2Fidq1worker&actorId=reviewer');
+  assert.equal(fetchCalls.length, 2);
   assert.deepEqual(Array.from(context.state.history), ['metaid://idq1worker']);
   assert.equal(context.state.historyIndex, 0);
 });
@@ -731,8 +760,5 @@ test('Browser no-local-Bot empty state renders Bot creation activation entry', a
   assert.match(elements['[data-browser-viewport]'].innerHTML, /href="\/ui\/bot\?mode=create"/);
   assert.match(elements['[data-browser-viewport]'].innerHTML, />Create Bot<\/a>/);
 
-  const ownerModeToolbar = elements['[data-browser-owner-toolbar]'];
-  if (ownerModeToolbar) {
-    assert.equal(ownerModeToolbar.hidden, true);
-  }
+  assert.equal(elements['[data-browser-owner-panel]'].hidden, true);
 });

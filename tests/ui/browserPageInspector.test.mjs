@@ -161,11 +161,11 @@ test('Drawer opens from drawer button and shows bookmarks, recents, and visit hi
   assert.match(html, /metaid:\/\/idq1fixturebot/);
 });
 
-test('Inspector opens from resource, proof, and TXID controls with scoped section labels', async () => {
+test('Inspector opens from proof and TXID controls with scoped section labels', async () => {
   const { context, nodes } = createContext();
   await waitFor(() => context.state.current, 'initial resource');
 
-  nodes['[data-browser-resource-chip]'].click();
+  nodes['[data-browser-status-proof]'].click();
   assert.equal(nodes['[data-browser-inspector]'].hidden, false);
   assert.match(nodes['[data-browser-inspector]'].innerHTML, /<h3>Identity<\/h3>/);
   assert.match(nodes['[data-browser-inspector]'].innerHTML, /<h3>Proof<\/h3>/);

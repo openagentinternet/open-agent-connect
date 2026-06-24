@@ -58,43 +58,45 @@ export function buildMyServicesPageDefinition(options: MyServicesPageDefinitionO
     panels: [],
     contentHtml: `
       <section class="my-services-shell" data-my-services-shell>
-        <div class="my-services-toolbar">
-          <div>
-            <h1 data-i18n-key="${toolbarTitleKey}">${toolbarTitle}</h1>
-            <p data-my-services-page-label data-i18n-key="${toolbarLabelKey}">${toolbarLabel}</p>
-          </div>
-          <div class="my-services-toolbar-actions">
-            ${publishAction}
-            ${refundsAction}
-            <button class="btn" type="button" data-my-services-refresh data-i18n-key="services.refresh">${tx('services.refresh')}</button>
-          </div>
-        </div>
-
-        <div class="my-services-notice" data-my-services-notice hidden></div>
-
-        <div class="services-bot-filter">
-          <label id="services-bot-picker-label" data-i18n-key="services.localBot">${tx('services.localBot')}</label>
-          <div class="services-bot-picker" data-services-bot-picker>
-            <button class="services-bot-trigger" type="button" data-services-bot-trigger aria-labelledby="services-bot-picker-label" aria-haspopup="listbox" aria-expanded="false">
-              <span class="services-bot-current" data-services-bot-current></span>
-              <span class="services-bot-chevron" aria-hidden="true">▾</span>
-            </button>
-            <div class="services-bot-menu" data-services-bot-menu role="listbox" hidden></div>
-          </div>
-        </div>
-
-        <div class="my-services-workspace">
-          <section class="my-services-list-panel" aria-label="Published services">
-            <div class="ledger-section-header">
-              <h2 data-i18n-key="services.publishedServices">${tx('services.publishedServices')}</h2>
-              <span data-my-services-list-count>0</span>
+        <div class="my-services-workspace-card">
+          <div class="my-services-toolbar">
+            <div>
+              <h1 data-i18n-key="${toolbarTitleKey}">${toolbarTitle}</h1>
+              <p data-my-services-page-label data-i18n-key="${toolbarLabelKey}">${toolbarLabel}</p>
             </div>
-            <div class="my-services-list" data-my-services-list></div>
-            <div class="ledger-pagination">
-              <button class="btn btn-sm" type="button" data-services-page-prev data-i18n-key="services.previous">${tx('services.previous')}</button>
-              <button class="btn btn-sm" type="button" data-services-page-next data-i18n-key="services.next">${tx('services.next')}</button>
+            <div class="my-services-toolbar-actions">
+              ${publishAction}
+              ${refundsAction}
+              <button class="btn" type="button" data-my-services-refresh data-i18n-key="services.refresh">${tx('services.refresh')}</button>
             </div>
-          </section>
+          </div>
+
+          <div class="my-services-notice" data-my-services-notice hidden></div>
+
+          <div class="services-bot-filter">
+            <label id="services-bot-picker-label" data-i18n-key="services.localBot">${tx('services.localBot')}</label>
+            <div class="services-bot-picker" data-services-bot-picker>
+              <button class="services-bot-trigger" type="button" data-services-bot-trigger aria-labelledby="services-bot-picker-label" aria-haspopup="listbox" aria-expanded="false">
+                <span class="services-bot-current" data-services-bot-current></span>
+                <span class="services-bot-chevron" aria-hidden="true">▾</span>
+              </button>
+              <div class="services-bot-menu" data-services-bot-menu role="listbox" hidden></div>
+            </div>
+          </div>
+
+          <div class="my-services-workspace">
+            <section class="my-services-list-panel" aria-label="Published services">
+              <div class="ledger-section-header">
+                <h2 data-i18n-key="services.publishedServices">${tx('services.publishedServices')}</h2>
+                <span data-my-services-list-count>0</span>
+              </div>
+              <div class="my-services-list" data-my-services-list></div>
+              <div class="ledger-pagination">
+                <button class="btn btn-sm" type="button" data-services-page-prev data-i18n-key="services.previous">${tx('services.previous')}</button>
+                <button class="btn btn-sm" type="button" data-services-page-next data-i18n-key="services.next">${tx('services.next')}</button>
+              </div>
+            </section>
+          </div>
         </div>
 
         <div class="my-services-modal" data-my-service-detail-modal hidden>

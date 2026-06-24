@@ -180,7 +180,7 @@ exports.PLATFORM_DEFINITIONS = [
         runtime: {
             binaryNames: ['gemini'],
             versionArgs: ['--version'],
-            authEnv: ['GEMINI_API_KEY'],
+            authEnv: ['GEMINI_API_KEY', 'GOOGLE_GENAI_USE_VERTEXAI', 'GOOGLE_GENAI_USE_GCA'],
             capabilities: DEFAULT_CAPABILITIES,
         },
         skills: {
@@ -236,7 +236,7 @@ exports.PLATFORM_DEFINITIONS = [
         executor: {
             kind: 'cursor-stream-json',
             backendFactoryExport: 'cursorBackendFactory',
-            launchCommand: 'cursor-agent chat -p <prompt> --output-format stream-json --yolo',
+            launchCommand: 'cursor-agent agent --print --output-format json --force --trust <prompt>',
             multicaReferencePath: 'agent/cursor.go',
         },
     },

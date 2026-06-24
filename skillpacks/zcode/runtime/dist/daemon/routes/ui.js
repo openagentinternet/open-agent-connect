@@ -46,7 +46,6 @@ const NAV_ITEMS = [
     { page: 'bot', labelKey: 'nav.botPage' },
     { page: 'conversations', labelKey: 'nav.conversations' },
     { page: 'services', labelKey: 'nav.services' },
-    { page: 'settings', labelKey: 'nav.settings' },
 ];
 const HIDDEN_UI_PAGES = new Set();
 function escapeHtml(value) {

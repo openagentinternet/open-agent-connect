@@ -6,7 +6,7 @@ export declare const SUPPORTED_CONCRETE_LANGUAGES: readonly ConcreteLanguage[];
 export declare const LANGUAGE_STORAGE_KEY = "oac.localUi.languagePreference";
 export declare const DICTIONARIES: {
     readonly en: {
-        readonly 'nav.botPage': "Bot Page";
+        readonly 'nav.botPage': "Bots";
         readonly 'nav.conversations': "Conversations";
         readonly 'nav.services': "Services";
         readonly 'nav.settings': "Settings";
@@ -72,6 +72,8 @@ export declare const DICTIONARIES: {
         readonly 'bot.goal': "Goal";
         readonly 'bot.primaryLlmProvider': "Primary LLM Provider";
         readonly 'bot.fallbackLlmProvider': "Fallback LLM Provider";
+        readonly 'bot.noLlmLabel': "NO LLM";
+        readonly 'bot.noLlmTitle': "No healthy Primary or Fallback LLM configured.";
         readonly 'bot.chatSkillsNote': "Choose which skills can be used for private conversation replies.";
         readonly 'bot.chatAllowedSkills': "Private Chat Allowed Skills：";
         readonly 'bot.noChatSkillsAllowed': "No chat skills allowed yet.";
@@ -102,9 +104,16 @@ export declare const DICTIONARIES: {
         readonly 'bot.saveSettings': "Save Settings";
         readonly 'bot.deleteBot': "Delete Bot";
         readonly 'bot.llmProviders': "LLM Providers";
+        readonly 'bot.sectionChainWallet': "Chain & Wallet";
+        readonly 'bot.sectionLlmRuntimes': "LLM Runtimes";
+        readonly 'bot.sectionExecutionHistory': "Execution History";
+        readonly 'bot.sectionDangerZone': "Danger Zone";
+        readonly 'bot.deleteBotWarning': "Deleting a Bot is permanent and removes its on-chain identity reference. This cannot be undone.";
         readonly 'bot.runtimeSummaryOne': "{count} detected provider visible. Unavailable providers are hidden from this list.";
         readonly 'bot.runtimeSummaryMany': "{count} detected providers visible. Unavailable providers are hidden from this list.";
         readonly 'bot.noRuntimesFound': "No healthy or detected LLM providers were found.";
+        readonly 'bot.noProvider': "No provider";
+        readonly 'bot.notConfigured': "Not configured";
         readonly 'bot.path': "Path";
         readonly 'bot.version': "Version";
         readonly 'bot.model': "Model";
@@ -332,11 +341,12 @@ export declare const DICTIONARIES: {
         readonly 'conversations.refresh': "Refresh";
         readonly 'conversations.selectConversation': "Select a conversation";
         readonly 'conversations.chooseRemoteBot': "Choose a remote Bot";
-        readonly 'conversations.readonlyStatus': "Agent-to-agent conversation · Human replies are disabled";
-        readonly 'conversations.guidanceToggle': "Guide";
+        readonly 'conversations.readonlyStatus': "You can steer the Bot's conversation";
+        readonly 'conversations.guidanceToggle': "Steer";
         readonly 'conversations.guidancePlaceholder': "Add one-shot guidance for this conversation";
         readonly 'conversations.guidanceSend': "Send";
         readonly 'conversations.guidanceCancel': "Cancel";
+        readonly 'conversations.guidanceSending': "Guiding the next local turn...";
         readonly 'conversations.guidanceSent': "Guidance sent for the next local turn.";
         readonly 'conversations.guidanceFailed': "Guidance failed.";
         readonly 'conversations.guidanceInvalid': "Guidance is invalid.";
@@ -379,7 +389,7 @@ export declare const DICTIONARIES: {
         readonly 'conversations.profilesLoadFailed': "Profiles failed to load.";
     };
     readonly 'zh-CN': {
-        readonly 'nav.botPage': "Bot Page";
+        readonly 'nav.botPage': "Bots";
         readonly 'nav.conversations': "对话";
         readonly 'nav.services': "服务";
         readonly 'nav.settings': "设置";
@@ -445,6 +455,8 @@ export declare const DICTIONARIES: {
         readonly 'bot.goal': "目标";
         readonly 'bot.primaryLlmProvider': "主 LLM 提供方";
         readonly 'bot.fallbackLlmProvider': "备用 LLM 提供方";
+        readonly 'bot.noLlmLabel': "NO LLM";
+        readonly 'bot.noLlmTitle': "没有配置可用的主 LLM 或备用 LLM。";
         readonly 'bot.chatSkillsNote': "选择可用于私聊回复的技能。";
         readonly 'bot.chatAllowedSkills': "私聊允许技能：";
         readonly 'bot.noChatSkillsAllowed': "还没有允许的聊天技能。";
@@ -475,9 +487,16 @@ export declare const DICTIONARIES: {
         readonly 'bot.saveSettings': "保存设置";
         readonly 'bot.deleteBot': "删除 Bot";
         readonly 'bot.llmProviders': "LLM 提供方";
+        readonly 'bot.sectionChainWallet': "链与钱包";
+        readonly 'bot.sectionLlmRuntimes': "LLM 运行时";
+        readonly 'bot.sectionExecutionHistory': "执行历史";
+        readonly 'bot.sectionDangerZone': "危险操作";
+        readonly 'bot.deleteBotWarning': "删除 Bot 是永久性操作，会移除其链上身份引用，无法撤销。";
         readonly 'bot.runtimeSummaryOne': "检测到 {count} 个可见提供方。不可用提供方已隐藏。";
         readonly 'bot.runtimeSummaryMany': "检测到 {count} 个可见提供方。不可用提供方已隐藏。";
         readonly 'bot.noRuntimesFound': "未发现健康或已检测到的 LLM 提供方。";
+        readonly 'bot.noProvider': "无提供方";
+        readonly 'bot.notConfigured': "未配置";
         readonly 'bot.path': "路径";
         readonly 'bot.version': "版本";
         readonly 'bot.model': "模型";
@@ -705,11 +724,12 @@ export declare const DICTIONARIES: {
         readonly 'conversations.refresh': "刷新";
         readonly 'conversations.selectConversation': "选择一个对话";
         readonly 'conversations.chooseRemoteBot': "选择远程 Bot";
-        readonly 'conversations.readonlyStatus': "Agent-to-agent 对话 · 不支持人工回复";
+        readonly 'conversations.readonlyStatus': "你可以引导 Bot 的对话";
         readonly 'conversations.guidanceToggle': "引导";
         readonly 'conversations.guidancePlaceholder': "为当前对话添加一次性引导";
         readonly 'conversations.guidanceSend': "发送";
         readonly 'conversations.guidanceCancel': "取消";
+        readonly 'conversations.guidanceSending': "正在引导下一轮本地回复...";
         readonly 'conversations.guidanceSent': "已为下一轮本地回复发送引导。";
         readonly 'conversations.guidanceFailed': "引导发送失败。";
         readonly 'conversations.guidanceInvalid': "引导内容无效。";
