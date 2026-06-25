@@ -75,7 +75,7 @@ test('createConfigStore defaults to the active runtime config and persists updat
       },
       browser: {
         metasoP2PBaseUrl: 'https://so.metaid.io',
-        metafileContentBaseUrl: 'https://so.metaid.io/content',
+        metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
         manApiBaseUrl: 'https://manapi.metaid.io',
         blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
         botHomepageTemplateId: 'document',
@@ -125,7 +125,7 @@ test('read merges defaults when active config fields are missing', async () => {
       },
       browser: {
         metasoP2PBaseUrl: 'https://so.metaid.io',
-        metafileContentBaseUrl: 'https://so.metaid.io/content',
+        metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
         manApiBaseUrl: 'https://manapi.metaid.io',
         blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
         botHomepageTemplateId: 'document',
@@ -168,7 +168,7 @@ test('read ignores retired askMaster and evolution_network config fields', async
       },
       browser: {
         metasoP2PBaseUrl: 'https://so.metaid.io',
-        metafileContentBaseUrl: 'https://so.metaid.io/content',
+        metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
         manApiBaseUrl: 'https://manapi.metaid.io',
         blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
         botHomepageTemplateId: 'document',
@@ -208,7 +208,7 @@ test('set drops retired askMaster and evolution_network fields from persisted co
       },
       browser: {
         metasoP2PBaseUrl: 'https://so.metaid.io',
-        metafileContentBaseUrl: 'https://so.metaid.io/content',
+        metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
         manApiBaseUrl: 'https://manapi.metaid.io',
         blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
         botHomepageTemplateId: 'document',

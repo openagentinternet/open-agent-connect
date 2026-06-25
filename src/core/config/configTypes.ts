@@ -1,4 +1,5 @@
 import {
+  createDefaultBrowserConfig,
   DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
   type BotHomepageTemplateId,
 } from '@openagentinternet/agent-browser-core';
@@ -37,6 +38,11 @@ export function isDefaultWriteNetwork(value: unknown): value is DefaultWriteNetw
 }
 
 export function createDefaultConfig(): MetabotConfig {
+  // Source Browser URL defaults from core so it remains the single source of
+  // truth. Pick fields explicitly rather than spreading: core's
+  // BrowserBaseConfig is wider than OAC's BrowserConfig (it carries
+  // renderCustomBotPages/nameResolution) and defaults localMode to false.
+  const browserDefaults = createDefaultBrowserConfig();
   return {
     chain: {
       defaultWriteNetwork: 'mvc',
@@ -45,10 +51,10 @@ export function createDefaultConfig(): MetabotConfig {
       simplemsgListenerEnabled: true,
     },
     browser: {
-      metasoP2PBaseUrl: 'https://so.metaid.io',
-      metafileContentBaseUrl: 'https://so.metaid.io/content',
-      manApiBaseUrl: 'https://manapi.metaid.io',
-      blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+      metasoP2PBaseUrl: browserDefaults.metasoP2PBaseUrl,
+      metafileContentBaseUrl: browserDefaults.metafileContentBaseUrl,
+      manApiBaseUrl: browserDefaults.manApiBaseUrl,
+      blockExplorerBaseUrl: browserDefaults.blockExplorerBaseUrl,
       botHomepageTemplateId: DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
       defaultChainName: 'mvc',
       localMode: true,
