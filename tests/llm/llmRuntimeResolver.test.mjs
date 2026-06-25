@@ -188,6 +188,29 @@ test('resolveRuntime falls back from unavailable primary binding to fallback bin
   assert.equal(resolved.bindingRole, 'fallback');
 });
 
+test('resolveRuntime uses a healthy same-provider runtime when a binding points at a stale runtime id', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.upsertRuntime(makeRuntime('r_codex_old', 'codex', 'unavailable'));
+  await runtimeStore.upsertRuntime(makeRuntime('r_codex_current', 'codex', 'healthy'));
+  await runtimeStore.upsertRuntime(makeRuntime('r_claude', 'claude-code', 'healthy'));
+  await bindingStore.upsertBinding(makeBinding('b_primary', 'test-slug', 'r_codex_old', 'primary', 0, true));
+  await bindingStore.upsertBinding(makeBinding('b_fallback', 'test-slug', 'r_claude', 'fallback', 0, true));
+  const resolver = createLlmRuntimeResolver({
+    runtimeStore,
+    bindingStore,
+    getPreferredRuntimeId: async () => null,
+  });
+
+  const resolved = await resolver.resolveRuntime({ metaBotSlug: 'test-slug' });
+
+  assert.equal(resolved.runtime.id, 'r_codex_current');
+  assert.equal(resolved.bindingId, 'b_primary');
+  assert.equal(resolved.bindingRole, 'primary');
+});
+
 test('resolveRuntime skips degraded runtimes for execution selection', async () => {
   const profileRoot = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
@@ -274,6 +297,22 @@ test('selectMetaBot finds best match by provider and lastUsedAt', async () => {
   const resolver = createLlmRuntimeResolver({ runtimeStore, bindingStore, getPreferredRuntimeId: async () => null });
   const result = await resolver.selectMetaBot({ targetProvider: 'codex' });
   assert.equal(result.metaBotSlug, 'alice');
+});
+
+test('selectMetaBot uses a healthy same-provider runtime when bindings point at stale runtime ids', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.upsertRuntime(makeRuntime('r_codex_old', 'codex', 'unavailable'));
+  await runtimeStore.upsertRuntime(makeRuntime('r_codex_current', 'codex', 'healthy'));
+  await bindingStore.upsertBinding(makeBinding('b1', 'alice', 'r_codex_old', 'primary', 0, true, '2026-05-02T00:00:00Z'));
+  const resolver = createLlmRuntimeResolver({ runtimeStore, bindingStore, getPreferredRuntimeId: async () => null });
+
+  const result = await resolver.selectMetaBot({ targetProvider: 'codex' });
+
+  assert.equal(result.metaBotSlug, 'alice');
+  assert.equal(result.runtime.id, 'r_codex_current');
 });
 
 test('selectMetaBot returns null for unmatched provider', async () => {

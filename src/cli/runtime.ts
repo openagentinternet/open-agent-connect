@@ -904,7 +904,7 @@ async function refreshLlmRuntimeStoreFromDiscovery(
   ]);
   const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
   for (const runtime of result.runtimes) {
-    await runtimeStore.upsertRuntime(runtime);
+    await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
   }
   for (const runtime of previous.runtimes) {
     if (runtime.provider === 'custom') continue;
@@ -3359,7 +3359,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const metaBotSlug = path.basename(paths.profileRoot);
   void discoverLlmRuntimes({ env: context.env }).then(async (result) => {
     for (const runtime of result.runtimes) {
-      await llmRuntimeStore.upsertRuntime(runtime).catch(() => { /* best effort */ });
+      await llmRuntimeStore
+        .upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true })
+        .catch(() => { /* best effort */ });
     }
   });
 

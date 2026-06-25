@@ -10342,7 +10342,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const discoveryResult = await discoverLlmRuntimes({ env: process.env });
     const discoveredRuntimeIds = new Set(discoveryResult.runtimes.map((runtime) => runtime.id));
     for (const runtime of discoveryResult.runtimes) {
-      await runtimeStore.upsertRuntime(runtime);
+      await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
     }
     for (const runtime of previous.runtimes) {
       if (runtime.provider === 'custom') continue;
@@ -11209,7 +11209,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             if (preferredProvider) {
               const discoveryResult = await discoverLlmRuntimes({ env: process.env });
               for (const runtime of discoveryResult.runtimes) {
-                await runtimeStore.upsertRuntime(runtime);
+                await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
               }
             }
             const runtimeState = await runtimeStore.read();
@@ -14856,7 +14856,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const previous = await runtimeStore.read();
         const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
         for (const runtime of result.runtimes) {
-          await runtimeStore.upsertRuntime(runtime);
+          await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
         }
         for (const runtime of previous.runtimes) {
           if (runtime.provider === 'custom') continue;
@@ -14969,7 +14969,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const previous = await runtimeStore.read();
         const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
         for (const runtime of result.runtimes) {
-          await runtimeStore.upsertRuntime(runtime);
+          await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
         }
         for (const runtime of previous.runtimes) {
           if (runtime.provider === 'custom') continue;

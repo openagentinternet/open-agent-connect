@@ -171,6 +171,62 @@ test('upsertRuntime lets successful readiness clear a quarantined unavailable st
   assert.equal(state.runtimes[0].healthCheckedAt, '2026-05-22T01:00:00.000Z');
 });
 
+test('upsertRuntime can preserve recently healthy state during soft discovery failures', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const store = createLlmRuntimeStore(paths);
+  await store.upsertRuntime({
+    ...sampleRuntime,
+    health: 'healthy',
+    version: '1.0.0',
+    healthCheckedAt: '2026-05-22T06:00:00.000Z',
+    lastSeenAt: '2026-05-22T06:00:00.000Z',
+    updatedAt: '2026-05-22T06:00:00.000Z',
+  });
+  await store.upsertRuntime({
+    ...sampleRuntime,
+    health: 'detected',
+    version: '2.0.0',
+    healthReason: 'Readiness probe timed out after 45000ms.',
+    healthCheckedAt: '2026-05-22T06:05:00.000Z',
+    lastSeenAt: '2026-05-22T06:05:00.000Z',
+    updatedAt: '2026-05-22T06:05:00.000Z',
+  }, { preserveRecentHealthyOnDetected: true });
+
+  const state = await store.read();
+  assert.equal(state.runtimes.length, 1);
+  assert.equal(state.runtimes[0].health, 'healthy');
+  assert.equal(state.runtimes[0].version, '2.0.0');
+  assert.equal(state.runtimes[0].healthReason, undefined);
+  assert.equal(state.runtimes[0].unavailableUntil, undefined);
+  assert.equal(state.runtimes[0].healthCheckedAt, '2026-05-22T06:05:00.000Z');
+  assert.equal(state.runtimes[0].lastSeenAt, '2026-05-22T06:05:00.000Z');
+});
+
+test('upsertRuntime does not preserve stale healthy state during discovery failures', async () => {
+  const profileRoot = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const store = createLlmRuntimeStore(paths);
+  await store.upsertRuntime({
+    ...sampleRuntime,
+    health: 'healthy',
+    healthCheckedAt: '2026-05-22T06:00:00.000Z',
+    updatedAt: '2026-05-22T06:00:00.000Z',
+  });
+  await store.upsertRuntime({
+    ...sampleRuntime,
+    health: 'detected',
+    healthReason: 'Readiness probe timed out after 45000ms.',
+    healthCheckedAt: '2026-05-22T07:00:01.000Z',
+    updatedAt: '2026-05-22T07:00:01.000Z',
+  }, { preserveRecentHealthyOnDetected: true });
+
+  const state = await store.read();
+  assert.equal(state.runtimes.length, 1);
+  assert.equal(state.runtimes[0].health, 'detected');
+  assert.equal(state.runtimes[0].healthReason, 'Readiness probe timed out after 45000ms.');
+});
+
 test('malformed JSON is overwritten with clean state', async () => {
   const profileRoot = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);

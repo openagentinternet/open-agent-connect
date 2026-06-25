@@ -71,3 +71,47 @@ test('LLM runtime discovery marks previously known missing runtimes unavailable'
   assert.equal(byId.get(discoveredRuntimeId).health, 'detected');
   assert.equal(byId.get('llm_codex_missing').health, 'unavailable');
 });
+
+test('LLM runtime discovery preserves recently healthy runtime on transient readiness failure', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-llm-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+
+  const systemHome = deriveSystemHome(homeDir);
+  const binDir = path.join(systemHome, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const fakeCodexPath = path.join(binDir, 'codex');
+  await writeFile(fakeCodexPath, [
+    '#!/bin/sh',
+    'echo "codex 1.2.3"',
+  ].join('\n'), 'utf8');
+  await chmod(fakeCodexPath, 0o755);
+
+  const discoveredRuntimeId = `llm_codex_${fakeCodexPath}`;
+  const runtimeStore = createLlmRuntimeStore(resolveMetabotPaths(homeDir));
+  await runtimeStore.upsertRuntime(makeRuntime({
+    id: discoveredRuntimeId,
+    binaryPath: fakeCodexPath,
+    health: 'healthy',
+    healthCheckedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+  }));
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = binDir;
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.llm.discoverRuntimes();
+
+  assert.equal(result.ok, true);
+  const byId = new Map(result.data.runtimes.map((runtime) => [runtime.id, runtime]));
+  assert.equal(byId.get(discoveredRuntimeId).health, 'healthy');
+  assert.equal(byId.get(discoveredRuntimeId).healthReason, undefined);
+});

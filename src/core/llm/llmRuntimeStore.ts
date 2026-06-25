@@ -49,7 +49,7 @@ async function writeJsonFile(filePath: string, state: LlmRuntimesState): Promise
 export interface LlmRuntimeStore {
   read(): Promise<LlmRuntimesState>;
   write(state: LlmRuntimesState): Promise<LlmRuntimesState>;
-  upsertRuntime(runtime: LlmRuntime): Promise<LlmRuntimesState>;
+  upsertRuntime(runtime: LlmRuntime, options?: UpsertRuntimeOptions): Promise<LlmRuntimesState>;
   removeRuntime(runtimeId: string): Promise<LlmRuntimesState>;
   markSeen(runtimeId: string, now: string): Promise<LlmRuntimesState>;
   updateHealth(runtimeId: string, health: string, options?: {
@@ -59,13 +59,43 @@ export interface LlmRuntimeStore {
   }): Promise<LlmRuntimesState>;
 }
 
+export interface UpsertRuntimeOptions {
+  preserveRecentHealthyOnDetected?: boolean;
+  preserveRecentHealthyWindowMs?: number;
+}
+
+const DEFAULT_RECENT_HEALTHY_WINDOW_MS = 30 * 60 * 1000;
+
 function isFutureIso(value: string | undefined, nowMs = Date.now()): boolean {
   if (!value) return false;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && parsed > nowMs;
 }
 
-function mergeRuntimeForUpsert(existing: LlmRuntime | undefined, incoming: LlmRuntime): LlmRuntime {
+function parseIsoMs(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function shouldPreserveRecentHealthyRuntime(
+  existing: LlmRuntime,
+  incoming: LlmRuntime,
+  windowMs: number,
+): boolean {
+  if (existing.health !== 'healthy' || incoming.health !== 'detected') return false;
+  const existingCheckedAt = parseIsoMs(existing.healthCheckedAt ?? existing.updatedAt);
+  const incomingCheckedAt = parseIsoMs(incoming.healthCheckedAt ?? incoming.updatedAt);
+  if (existingCheckedAt === null || incomingCheckedAt === null) return false;
+  if (incomingCheckedAt < existingCheckedAt) return false;
+  return incomingCheckedAt - existingCheckedAt <= windowMs;
+}
+
+function mergeRuntimeForUpsert(
+  existing: LlmRuntime | undefined,
+  incoming: LlmRuntime,
+  options?: UpsertRuntimeOptions,
+): LlmRuntime {
   if (!existing) return incoming;
   if (
     existing.health === 'unavailable'
@@ -78,6 +108,24 @@ function mergeRuntimeForUpsert(existing: LlmRuntime | undefined, incoming: LlmRu
       healthReason: existing.healthReason,
       unavailableUntil: existing.unavailableUntil,
       healthCheckedAt: incoming.healthCheckedAt ?? existing.healthCheckedAt,
+    };
+  }
+  if (
+    options?.preserveRecentHealthyOnDetected
+    && shouldPreserveRecentHealthyRuntime(
+      existing,
+      incoming,
+      options.preserveRecentHealthyWindowMs ?? DEFAULT_RECENT_HEALTHY_WINDOW_MS,
+    )
+  ) {
+    return {
+      ...incoming,
+      health: 'healthy',
+      healthReason: undefined,
+      unavailableUntil: undefined,
+      healthCheckedAt: incoming.healthCheckedAt ?? existing.healthCheckedAt,
+      updatedAt: incoming.updatedAt ?? existing.updatedAt,
+      lastSeenAt: incoming.lastSeenAt ?? existing.lastSeenAt,
     };
   }
   if (incoming.health === 'healthy') {
@@ -101,7 +149,7 @@ export function createLlmRuntimeStore(homeDirOrPaths: string | { llmRuntimesPath
       return normalized;
     },
 
-    async upsertRuntime(runtime) {
+    async upsertRuntime(runtime, options) {
       const normalized = normalizeLlmRuntime(runtime);
       if (!normalized) {
         throw new Error('Invalid LlmRuntime: missing id or provider.');
@@ -111,7 +159,7 @@ export function createLlmRuntimeStore(homeDirOrPaths: string | { llmRuntimesPath
       const existingIndex = state.runtimes.findIndex((r) => r.id === normalized.id);
 
       if (existingIndex >= 0) {
-        state.runtimes[existingIndex] = mergeRuntimeForUpsert(state.runtimes[existingIndex], normalized);
+        state.runtimes[existingIndex] = mergeRuntimeForUpsert(state.runtimes[existingIndex], normalized, options);
       } else {
         state.runtimes.push(normalized);
       }
