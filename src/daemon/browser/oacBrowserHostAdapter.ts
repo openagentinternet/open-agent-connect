@@ -416,7 +416,11 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       },
       actors,
       defaultActor,
-      defaultUri: defaultActor?.globalMetaId ? `metaid://${defaultActor.globalMetaId}` : null,
+      // Do not preset a defaultUri: opening /browser should land on the welcome
+      // page (matching the ABC standalone host), not auto-navigate into the
+      // selected identity's own homepage. defaultActor is still returned so the
+      // UI can highlight the active "Using" chip.
+      defaultUri: null,
       features: {
         privateChat: true,
         serviceCall: true,

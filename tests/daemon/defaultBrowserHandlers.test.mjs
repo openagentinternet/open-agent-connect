@@ -35,12 +35,14 @@ test('Browser context defaults to the active local Bot and can switch using iden
   const defaultContext = await handlers.browser.getContext({});
   assert.equal(defaultContext.ok, true);
   assert.equal(defaultContext.data.defaultUsingIdentity.slug, active.slug);
-  assert.equal(defaultContext.data.defaultUri, `metaid://${active.globalMetaId}`);
+  // OAC does not preset defaultUri: /browser shows the welcome page, not the
+  // selected identity's own homepage (matches the ABC standalone host).
+  assert.equal(defaultContext.data.defaultUri, null);
 
   const selectedContext = await handlers.browser.getContext({ from: other.slug });
   assert.equal(selectedContext.ok, true);
   assert.equal(selectedContext.data.defaultUsingIdentity.slug, other.slug);
-  assert.equal(selectedContext.data.defaultUri, `metaid://${other.globalMetaId}`);
+  assert.equal(selectedContext.data.defaultUri, null);
 });
 
 test('Browser handlers return profile_not_found for an unknown using identity', async (t) => {

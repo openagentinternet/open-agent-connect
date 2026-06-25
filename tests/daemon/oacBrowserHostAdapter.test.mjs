@@ -104,7 +104,9 @@ test('OAC browser host adapter exposes MetaBot profiles as Browser actors', asyn
   assert.equal(runtime.data.host.name, 'Open Agent Connect');
   assert.equal(runtime.data.host.localMode, true);
   assert.equal(runtime.data.defaultActor.id, other.slug);
-  assert.equal(runtime.data.defaultUri, `metaid://${other.globalMetaId}`);
+  // OAC does not preset defaultUri: /browser lands on the welcome page, not the
+  // selected identity's own homepage (matches the ABC standalone host).
+  assert.equal(runtime.data.defaultUri, null);
   assert.deepEqual(runtime.data.features, {
     privateChat: true,
     serviceCall: true,
@@ -251,7 +253,7 @@ test('OAC browser host adapter gives actorId precedence over legacy from', async
   const runtime = await adapter.getRuntime({ actorId: other.slug, from: active.slug });
   assert.equal(runtime.ok, true);
   assert.equal(runtime.data.defaultActor.id, other.slug);
-  assert.equal(runtime.data.defaultUri, `metaid://${other.globalMetaId}`);
+  assert.equal(runtime.data.defaultUri, null);
 });
 
 test('OAC browser host adapter returns profile_not_found for unknown runtime actor', async (t) => {
