@@ -898,10 +898,8 @@ async function refreshLlmRuntimeStoreFromDiscovery(
   runtimeStore: ReturnType<typeof createLlmRuntimeStore>,
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const [previous, result] = await Promise.all([
-    runtimeStore.read(),
-    discoverLlmRuntimes({ env }),
-  ]);
+  const previous = await runtimeStore.read();
+  const result = await discoverLlmRuntimes({ env, knownRuntimes: previous.runtimes });
   const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
   for (const runtime of result.runtimes) {
     await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
@@ -3357,13 +3355,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
 
   // Discover LLM runtimes in background (non-blocking).
   const metaBotSlug = path.basename(paths.profileRoot);
-  void discoverLlmRuntimes({ env: context.env }).then(async (result) => {
+  void (async () => {
+    const previous = await llmRuntimeStore.read();
+    const result = await discoverLlmRuntimes({ env: context.env, knownRuntimes: previous.runtimes });
     for (const runtime of result.runtimes) {
       await llmRuntimeStore
         .upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true })
         .catch(() => { /* best effort */ });
     }
-  });
+  })().catch(() => { /* best effort */ });
 
   const chatStateStore = createPrivateChatStateStore(paths);
   const chatStrategyStore = createChatStrategyStore(paths);

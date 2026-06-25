@@ -538,6 +538,84 @@ test('runtime discovery gives slow-start providers an extended readiness window'
   });
 });
 
+test('runtime discovery probes different providers concurrently', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-concurrent-'));
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const codexPath = path.join(binDir, 'codex');
+    const opencodePath = path.join(binDir, 'opencode');
+    await writeFile(codexPath, '#!/bin/sh\necho "codex-cli 0.133.0"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await chmod(codexPath, 0o755);
+    await chmod(opencodePath, 0o755);
+
+    let readinessProbeStarts = 0;
+    let firstProbeObservedOverlap = false;
+    let notifySecondProbeStarted;
+    const secondProbeStarted = new Promise((resolve) => {
+      notifySecondProbeStarted = resolve;
+    });
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      now: () => '2026-05-22T04:02:00.000Z',
+      readinessProbe: async () => {
+        readinessProbeStarts += 1;
+        if (readinessProbeStarts === 1) {
+          firstProbeObservedOverlap = await Promise.race([
+            secondProbeStarted.then(() => true),
+            new Promise((resolve) => setTimeout(() => resolve(false), 1_000)),
+          ]);
+        } else {
+          notifySecondProbeStarted();
+        }
+        return { ok: true, output: 'OK' };
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['codex', 'opencode']);
+    assert.equal(firstProbeObservedOverlap, true);
+  });
+});
+
+test('runtime discovery skips readiness for recently healthy known runtimes', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-known-healthy-'));
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const codexPath = path.join(binDir, 'codex');
+    await writeFile(codexPath, '#!/bin/sh\necho "codex-cli 0.133.0"\n', 'utf8');
+    await chmod(codexPath, 0o755);
+
+    let readinessCalled = false;
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      now: () => '2026-05-22T04:20:00.000Z',
+      knownRuntimes: [
+        testRuntimeFixture({
+          id: `llm_codex_${codexPath}`,
+          binaryPath: codexPath,
+          health: 'healthy',
+          healthCheckedAt: '2026-05-22T04:10:00.000Z',
+          updatedAt: '2026-05-22T04:10:00.000Z',
+        }),
+      ],
+      readinessProbe: async () => {
+        readinessCalled = true;
+        return { ok: true, output: 'OK' };
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].provider, 'codex');
+    assert.equal(result.runtimes[0].health, 'healthy');
+    assert.equal(result.runtimes[0].healthCheckedAt, '2026-05-22T04:10:00.000Z');
+    assert.equal(readinessCalled, false);
+  });
+});
+
 test('runtime discovery lets slow Cursor version probes complete before readiness', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-version-timeout-'));

@@ -17,6 +17,9 @@ export interface DiscoveryInput {
   now?: () => string;
   readinessProbe?: RuntimeReadinessProbe;
   readinessTimeoutMs?: number;
+  providerConcurrency?: number;
+  knownRuntimes?: LlmRuntime[];
+  recentHealthyReadinessSkipMs?: number;
   cwd?: string;
   shellResolvedExecutables?: Record<string, string>;
 }
@@ -51,6 +54,8 @@ const SLOW_START_READINESS_TIMEOUT_MS = 45_000;
 const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
 const SLOW_START_VERSION_PROBE_TIMEOUT_MS = 20_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
+const DEFAULT_PROVIDER_DISCOVERY_CONCURRENCY = 8;
+const DEFAULT_RECENT_HEALTHY_READINESS_SKIP_MS = 30 * 60 * 1000;
 const READINESS_PROMPT = 'Reply exactly OK.';
 const LOGIN_SHELL_RESOLVE_TIMEOUT_MS = 3_000;
 const LOGIN_SHELL_RESOLVE_KILL_GRACE_MS = 2_000;
@@ -62,6 +67,56 @@ function getPathEnv(env?: NodeJS.ProcessEnv): string {
 function splitPath(pathEnv: string): string[] {
   const separator = process.platform === 'win32' ? ';' : ':';
   return pathEnv.split(separator).filter(Boolean);
+}
+
+function normalizeProviderDiscoveryConcurrency(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_PROVIDER_DISCOVERY_CONCURRENCY;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+function normalizeRecentHealthyReadinessSkipMs(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_RECENT_HEALTHY_READINESS_SKIP_MS;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function parseIsoMs(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function canSkipReadinessForKnownRuntime(
+  knownRuntime: LlmRuntime | undefined,
+  nowIso: string,
+  windowMs: number,
+): knownRuntime is LlmRuntime {
+  if (!knownRuntime || knownRuntime.health !== 'healthy') return false;
+  const checkedAt = parseIsoMs(knownRuntime.healthCheckedAt ?? knownRuntime.updatedAt);
+  const nowMs = parseIsoMs(nowIso);
+  if (checkedAt === null || nowMs === null || checkedAt > nowMs) return false;
+  return nowMs - checkedAt <= windowMs;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  task: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(items.length, concurrency);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await task(items[index], index);
+    }
+  }));
+  return results;
 }
 
 export async function findExecutableInPath(name: string, pathDirs?: string[]): Promise<string | null> {
@@ -454,6 +509,8 @@ export async function discoverProvider(
     env?: NodeJS.ProcessEnv;
     readinessProbe?: RuntimeReadinessProbe;
     readinessTimeoutMs?: number;
+    knownRuntimesById?: ReadonlyMap<string, LlmRuntime>;
+    recentHealthyReadinessSkipMs?: number;
     cwd?: string;
     shellResolvedExecutables?: Record<string, string>;
   },
@@ -483,6 +540,20 @@ export async function discoverProvider(
     );
     if (versionProbe.ok) {
       const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
+      const knownRuntime = options?.knownRuntimesById?.get(runtime.id);
+      if (canSkipReadinessForKnownRuntime(
+        knownRuntime,
+        runtime.updatedAt,
+        normalizeRecentHealthyReadinessSkipMs(options?.recentHealthyReadinessSkipMs),
+      )) {
+        return {
+          ...runtime,
+          health: 'healthy',
+          healthReason: undefined,
+          unavailableUntil: undefined,
+          healthCheckedAt: knownRuntime.healthCheckedAt ?? knownRuntime.updatedAt,
+        };
+      }
       const readiness = await readinessProbe({
         runtime,
         env,
@@ -629,28 +700,43 @@ export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<Disco
     getRuntimePlatforms().flatMap((platform) => platform.runtime.binaryNames),
     env,
   );
+  const knownRuntimesById = new Map((input?.knownRuntimes ?? []).map((runtime) => [runtime.id, runtime]));
 
-  // Discover each supported provider. Run in sequence to keep it simple;
-  // the binary spawns are the slow part, and they're already async.
-  for (const platform of getRuntimePlatforms()) {
-    try {
-      const runtime = await discoverProvider(platform.id, pathDirs, {
-        createId: input?.createId,
-        now: input?.now,
-        env,
-        readinessProbe: input?.readinessProbe,
-        readinessTimeoutMs: input?.readinessTimeoutMs,
-        cwd: input?.cwd,
-        shellResolvedExecutables,
-      });
-      if (runtime) {
-        runtimes.push(runtime);
+  const discoveryResults = await mapWithConcurrency(
+    getRuntimePlatforms(),
+    normalizeProviderDiscoveryConcurrency(input?.providerConcurrency),
+    async (platform) => {
+      try {
+        const runtime = await discoverProvider(platform.id, pathDirs, {
+          createId: input?.createId,
+          now: input?.now,
+          env,
+          readinessProbe: input?.readinessProbe,
+          readinessTimeoutMs: input?.readinessTimeoutMs,
+          knownRuntimesById,
+          recentHealthyReadinessSkipMs: input?.recentHealthyReadinessSkipMs,
+          cwd: input?.cwd,
+          shellResolvedExecutables,
+        });
+        return { runtime, error: null };
+      } catch (err) {
+        return {
+          runtime: null,
+          error: {
+            provider: platform.id,
+            message: err instanceof Error ? err.message : String(err),
+          },
+        };
       }
-    } catch (err) {
-      errors.push({
-        provider: platform.id,
-        message: err instanceof Error ? err.message : String(err),
-      });
+    },
+  );
+
+  for (const result of discoveryResults) {
+    if (result.runtime) {
+      runtimes.push(result.runtime);
+    }
+    if (result.error) {
+      errors.push(result.error);
     }
   }
 

@@ -10339,7 +10339,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   > {
     const runtimeStore = createLlmRuntimeStore(actor.paths);
     const previous = await runtimeStore.read();
-    const discoveryResult = await discoverLlmRuntimes({ env: process.env });
+    const discoveryResult = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
     const discoveredRuntimeIds = new Set(discoveryResult.runtimes.map((runtime) => runtime.id));
     for (const runtime of discoveryResult.runtimes) {
       await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
@@ -11207,7 +11207,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
             const runtimeStore = createLlmRuntimeStore(input.homeDir);
             if (preferredProvider) {
-              const discoveryResult = await discoverLlmRuntimes({ env: process.env });
+              const previous = await runtimeStore.read();
+              const discoveryResult = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
               for (const runtime of discoveryResult.runtimes) {
                 await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
               }
@@ -14851,9 +14852,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
         }
         const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
-        const result = await discoverLlmRuntimes({ env: process.env });
         const runtimeStore = createLlmRuntimeStore(profileHomeDir);
         const previous = await runtimeStore.read();
+        const result = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
         const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
         for (const runtime of result.runtimes) {
           await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
@@ -14964,9 +14965,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
         return commandSuccess(state);
       },
       discoverRuntimes: async () => {
-        const result = await discoverLlmRuntimes({ env: process.env });
         const runtimeStore = createLlmRuntimeStore(input.homeDir);
         const previous = await runtimeStore.read();
+        const result = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
         const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
         for (const runtime of result.runtimes) {
           await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
