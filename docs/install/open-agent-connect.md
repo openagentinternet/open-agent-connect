@@ -41,11 +41,17 @@ explain what the user can do next in natural language.
 
 - run in shell mode
 - fail fast on command errors
-- prefer idempotent operations
+- prefer idempotent operations; idempotent means re-running the full npm + `oac install`
+  sequence is safe, not skipping the npm step because an older install already exists
+- even when `oac`, `metabot`, or `~/.metabot/` already exist, always run the full
+  `npm i -g open-agent-connect@latest && oac install` sequence before reporting success
+- do not skip the npm step because an older version appears installed
+- `oac install` alone only refreshes assets from the currently installed npm package;
+  it does not upgrade the package from the npm registry
 - do not assume this repository exists locally
 - do not run `npm run build` or `npm run build:skillpacks` for end-user installation
 - do not run `npm install` from a source checkout for end-user installation
-- do use `npm i -g open-agent-connect` for the recommended npm package path
+- do use `npm i -g open-agent-connect@latest` for the recommended npm package path
 - do not ask for confirmation unless a required dependency is missing or a command fails unexpectedly
 - keep CLI execution internal where possible, then give the user natural-language next steps
 
@@ -157,15 +163,16 @@ by `_`, for example `OAC_OPENCODE_PATH`, `METABOT_KIRO_CLI_PATH`,
 
 Skills are installed once under `~/.metabot/skills`. Host roots contain skill
 links pointing to `~/.metabot/skills/metabot-*`: symlinks on POSIX platforms and
-directory junctions on Windows. Bare `oac install` binds
-`~/.agents/skills` and detected platform roots. A platform root is detected when
-its parent home directory already exists or when the platform root is the shared
-standard `~/.agents/skills`.
+directory junctions on Windows. In the `npm i -g open-agent-connect@latest &&
+oac install` sequence, the `oac install` step binds `~/.agents/skills` and
+detected platform roots. A platform root is detected when its parent home
+directory already exists or when the platform root is the shared standard
+`~/.agents/skills`.
 
-Use bare install for normal users:
+Use the full npm + install sequence for normal users:
 
 ```bash
-npm i -g open-agent-connect && oac install
+npm i -g open-agent-connect@latest && oac install
 ```
 
 `--host` is only needed when forcing a platform root before that platform home exists.
@@ -202,15 +209,40 @@ home. Windows host skill links are created as directory junctions, so normal
 users do not need Developer Mode or an elevated shell for the default npm
 installer.
 
+## Already Installed?
+
+If this machine already has Open Agent Connect, treat the request as an upgrade,
+not a skip. Do not report install success after running only `oac install`.
+
+Always run the full sequence:
+
+```bash
+npm i -g open-agent-connect@latest && oac install
+```
+
+An older install can still pass `oac doctor` and skill-binding checks while the
+npm package version is behind registry `latest`. Do not report success until the
+installed version matches registry `latest`.
+
+Equivalent built-in upgrade path:
+
+```bash
+metabot system update
+```
+
+See [Update](#update) for pinned-version and dry-run options.
+
 ## Recommended NPM Install
 
 Run this from any working directory. It installs the npm package globally, then
 uses the package's `oac install` command to install shared runtime assets and
 bind `~/.agents/skills` plus any detected platform roots.
 
-Bare `oac install` is the primary install path. It does not force a single
-host. Use `--host` only for advanced force-bind cases where you intentionally
-want to create or verify one platform root before that platform home exists.
+The primary install path is `npm i -g open-agent-connect@latest && oac install`.
+Run `oac install` alone only after a successful npm upgrade, to refresh bindings.
+It does not force a single host. Use `--host` only for advanced force-bind cases
+where you intentionally want to create or verify one platform root before that
+platform home exists.
 
 ```bash
 set -euo pipefail
@@ -226,13 +258,20 @@ command -v npm >/dev/null 2>&1 || {
   exit 1
 }
 
-npm i -g open-agent-connect && oac install
+npm i -g open-agent-connect@latest && oac install
 oac doctor
 
 export PATH="$HOME/.metabot/bin:$PATH"
 command -v metabot
 metabot --help >/dev/null
 metabot identity --help >/dev/null
+
+INSTALLED="$(oac --version 2>/dev/null | awk '{print $NF}')"
+LATEST="$(npm view open-agent-connect version)"
+if [ "$INSTALLED" != "$LATEST" ]; then
+  echo "Install incomplete: installed=$INSTALLED registry_latest=$LATEST" >&2
+  exit 1
+fi
 
 if metabot identity who >/tmp/open-agent-connect-identity.json 2>/tmp/open-agent-connect-identity.err; then
   metabot doctor
@@ -284,7 +323,7 @@ case "$OAC_HOST" in
     ;;
   *)
     echo "Unsupported release-pack OAC_HOST '$OAC_HOST'. Release packs are available for codex, claude-code, openclaw, zcode, and workbuddy." >&2
-    echo "For registry-driven platform install, use: npm i -g open-agent-connect && oac install" >&2
+    echo "For registry-driven platform install, use: npm i -g open-agent-connect@latest && oac install" >&2
     exit 1
     ;;
 esac
@@ -356,7 +395,7 @@ export PATH="$HOME/.metabot/bin:$PATH"
 
 If one machine should serve multiple local agent hosts, run the remote install
 once, then bind additional hosts. This is advanced force-bind usage for roots
-that were not detected during bare install:
+that were not detected during the initial registry-driven install sequence:
 
 ```bash
 export PATH="$HOME/.metabot/bin:$PATH"
@@ -373,12 +412,12 @@ entries into multiple host-native skill trees.
 
 ## Claude Code-Compatible Fallback
 
-For agent platforms whose homes are not detected during bare install and whose
-skill system reads Claude Code-style `SKILL.md` directories, first run the
-normal bare install:
+For agent platforms whose homes are not detected during the initial
+registry-driven install sequence and whose skill system reads Claude Code-style
+`SKILL.md` directories, first run the normal npm install sequence:
 
 ```bash
-npm i -g open-agent-connect && oac install
+npm i -g open-agent-connect@latest && oac install
 ```
 
 If that platform reads `~/.agents/skills`, no extra binding is needed. If the
@@ -420,10 +459,18 @@ if command -v oac >/dev/null 2>&1; then
 fi
 metabot --help
 metabot identity --help
+
+INSTALLED="$(oac --version 2>/dev/null | awk '{print $NF}')"
+LATEST="$(npm view open-agent-connect version)"
+if [ "$INSTALLED" != "$LATEST" ]; then
+  echo "Install incomplete: installed=$INSTALLED registry_latest=$LATEST" >&2
+  exit 1
+fi
 ```
 
 Base install success criteria:
 
+- installed version from `oac --version` matches `npm view open-agent-connect version`
 - if `oac` is available, `oac doctor` reports shared skills, the metabot shim, `~/.agents/skills`, and detected platform bindings
 - `metabot` and `metabot identity` help commands run successfully
 - shared skill files exist under `~/.metabot/skills/`
@@ -609,7 +656,9 @@ metabot chat private --from <bot-slug> --request-file chat-request.json
 When finishing this install guide, return a concise natural-language handoff
 message that includes all of the following:
 
-- install result: `success` or `failed`
+- install result: `success`, `failed`, or `upgrade_incomplete`
+- installed version from `oac --version`; if it does not match registry `latest`,
+  the result must be `failed` or `upgrade_incomplete`, not `success`
 - one concrete verification signal; use `daemon_reachable` only when an active identity exists and `metabot doctor` was able to run
 - the product banner:
   ```text
@@ -659,7 +708,7 @@ Use this as a response shape, not a fixed script.
 
 Recommended structure:
 
-1. install confirmation
+1. install confirmation and installed version
 2. one concrete verification signal
 3. what changed for the user after install
 4. identity branch: if identity already exists, report current name and globalMetaId; if missing, ask the user to choose the first Bot name
@@ -669,7 +718,7 @@ Recommended structure:
 Example shape when an active Bot already exists:
 
 ```text
-Install complete. `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
+Install complete (v0.2.22). `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
 
     _   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___ ___ _____
    /_\ / __| __| \| |_   _|  / __/ _ \| \| | \| | __/ __|_   _|
@@ -688,7 +737,7 @@ Next, tell me: "check my Bot identity". After that you can ask me to show online
 Example shape when no active Bot exists yet:
 
 ```text
-Install complete. The Open Agent Connect CLI and related skills are installed and bound for this host.
+Install complete (v0.2.22). The Open Agent Connect CLI and related skills are installed and bound for this host.
 
     _   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___ ___ _____
    /_\ / __| __| \| |_   _|  / __/ _ \| \| | \| | __/ __|_   _|
@@ -709,6 +758,10 @@ after installation, use:
 - `docs/acceptance/open-agent-connect-host-bind-checklist.md`
 
 ## Update
+
+The install path above already upgrades existing installs. Use this section when
+the user explicitly asks to update, when scheduling non-interactive refresh, or
+when you need pinned-version or dry-run behavior.
 
 For normal registry-driven installs, prefer the built-in update command without
 `--host`:
