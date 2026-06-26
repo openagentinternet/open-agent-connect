@@ -78,11 +78,35 @@ export function serializeMetaAppRuntime(value: unknown): string {
     ? value.map((item) => normalizeText(item))
     : normalizeText(value).split('/').map((item) => item.trim());
   const allowed = new Set<string>(METAAPP_RUNTIME_OPTIONS);
-  const selected = values.filter((item) => allowed.has(item));
+  const nonEmpty = values.filter(Boolean);
+  const unsupported = nonEmpty.filter((item) => !allowed.has(item));
+  if (unsupported.length > 0) {
+    const uniqueUnsupported = [...new Set(unsupported)];
+    throw new Error(
+      uniqueUnsupported.length === 1
+        ? `runtime contains unsupported value: ${uniqueUnsupported[0]}.`
+        : `runtime contains unsupported values: ${uniqueUnsupported.join(', ')}.`,
+    );
+  }
+  const selected = nonEmpty.filter((item) => allowed.has(item));
   if (selected.length === 0) {
     throw new Error('runtime requires at least one supported runtime.');
   }
   return [...new Set(selected)].join('/');
+}
+
+function normalizeOption(
+  value: unknown,
+  fieldName: string,
+  allowedValues: readonly string[],
+  fallback: string | undefined,
+): string | undefined {
+  const text = normalizeText(value);
+  if (!text) return fallback;
+  if (!allowedValues.includes(text)) {
+    throw new Error(`${fieldName} must be one of: ${allowedValues.join(', ')}.`);
+  }
+  return text;
 }
 
 function normalizeTags(value: unknown): string[] {
@@ -126,7 +150,7 @@ export function buildMetaAppProtocolPayload(input: Record<string, unknown>): Met
     intro: normalizeText(input.intro) || undefined,
     runtime: serializeMetaAppRuntime(input.runtime),
     version: normalizeText(input.version) || undefined,
-    contentType: normalizeText(input.contentType) || 'application/zip',
+    contentType: normalizeOption(input.contentType, 'contentType', METAAPP_CONTENT_TYPE_OPTIONS, 'application/zip'),
     content: normalizeOptionalMetafile(input.content, 'content'),
     indexFile: normalizeText(input.indexFile) || undefined,
     code: normalizeOptionalMetafile(input.code, 'code'),
@@ -134,7 +158,7 @@ export function buildMetaAppProtocolPayload(input: Record<string, unknown>): Met
     metadata: normalizeMetadata(input.metadata),
     tags: normalizeTags(input.tags),
     disabled: input.disabled === true,
-    codeType: normalizeText(input.codeType) || undefined,
+    codeType: normalizeOption(input.codeType, 'codeType', METAAPP_CODE_TYPE_OPTIONS, undefined),
   };
 }
 

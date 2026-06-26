@@ -12,6 +12,8 @@ const {
   buildMetaAppCreateWrite,
   buildMetaAppModifyWrite,
   buildMetaAppRevokeWrite,
+  metaAppFormFailure,
+  metaAppFormSuccess,
 } = require('../../dist/core/metaapp/appsProtocol.js');
 
 const PIN = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
@@ -38,6 +40,24 @@ test('normalizeMetafileReferenceList parses comma and newline separated pin ids'
 
 test('serializeMetaAppRuntime serializes selected runtimes with slash separators', () => {
   assert.equal(serializeMetaAppRuntime(['browser', 'ios', 'linux']), 'browser/ios/linux');
+});
+
+test('serializeMetaAppRuntime rejects mixed valid and invalid runtimes', () => {
+  assert.throws(
+    () => serializeMetaAppRuntime(['browser', 'web']),
+    /runtime contains unsupported value: web/i,
+  );
+});
+
+test('serializeMetaAppRuntime rejects all-invalid runtimes', () => {
+  assert.throws(
+    () => serializeMetaAppRuntime(['web', 'desktop']),
+    /runtime contains unsupported values: web, desktop/i,
+  );
+});
+
+test('serializeMetaAppRuntime preserves first-seen order while deduping valid runtimes', () => {
+  assert.equal(serializeMetaAppRuntime(['browser', 'linux', 'browser', 'ios', 'linux']), 'browser/linux/ios');
 });
 
 function validInput(overrides = {}) {
@@ -78,6 +98,46 @@ test('buildMetaAppProtocolPayload normalizes MetaAPP protocol fields', () => {
   assert.deepEqual(payload.metadata, { homepage: false });
 });
 
+test('buildMetaAppProtocolPayload defaults empty contentType to application/zip', () => {
+  const payload = buildMetaAppProtocolPayload(validInput({ contentType: ' ' }));
+
+  assert.equal(payload.contentType, 'application/zip');
+});
+
+test('buildMetaAppProtocolPayload leaves empty codeType undefined', () => {
+  const payload = buildMetaAppProtocolPayload(validInput({ codeType: ' ' }));
+
+  assert.equal(payload.codeType, undefined);
+});
+
+test('buildMetaAppProtocolPayload rejects unsupported contentType', () => {
+  assert.throws(
+    () => buildMetaAppProtocolPayload(validInput({ contentType: 'application/x-msdownload' })),
+    /contentType must be one of:/i,
+  );
+});
+
+test('buildMetaAppProtocolPayload rejects unsupported codeType', () => {
+  assert.throws(
+    () => buildMetaAppProtocolPayload(validInput({ codeType: 'application/octet-stream' })),
+    /codeType must be one of:/i,
+  );
+});
+
+test('buildMetaAppProtocolPayload rejects invalid metadata JSON', () => {
+  assert.throws(
+    () => buildMetaAppProtocolPayload(validInput({ metadata: '{bad-json' })),
+    /expected property name or/i,
+  );
+});
+
+test('buildMetaAppProtocolPayload rejects metadata arrays', () => {
+  assert.throws(
+    () => buildMetaAppProtocolPayload(validInput({ metadata: '[]' })),
+    /metadata must be a JSON object/i,
+  );
+});
+
 test('buildMetaAppCreateWrite writes create under /protocols/metaapp', () => {
   const payload = buildMetaAppProtocolPayload(validInput());
   const write = buildMetaAppCreateWrite(payload);
@@ -95,9 +155,44 @@ test('buildMetaAppModifyWrite targets the latest pin id', () => {
   assert.equal(JSON.parse(write.payload).disabled, false);
 });
 
+test('buildMetaAppModifyWrite rejects invalid target pin ids', () => {
+  const payload = buildMetaAppProtocolPayload(validInput());
+
+  assert.throws(
+    () => buildMetaAppModifyWrite('not-a-pin', payload),
+    /targetPinId must be a MetaID pin id/i,
+  );
+});
+
 test('buildMetaAppRevokeWrite creates a PIN-level revoke request', () => {
   assert.deepEqual(buildMetaAppRevokeWrite(PIN), {
     operation: 'revoke',
     path: `@${PIN}`,
+  });
+});
+
+test('buildMetaAppRevokeWrite rejects invalid target pin ids', () => {
+  assert.throws(
+    () => buildMetaAppRevokeWrite('not-a-pin'),
+    /targetPinId must be a MetaID pin id/i,
+  );
+});
+
+test('metaAppFormFailure wraps errors as command failures', () => {
+  assert.deepEqual(metaAppFormFailure(new Error('bad form')), {
+    ok: false,
+    state: 'failed',
+    code: 'metaapp_apps_form_invalid',
+    message: 'bad form',
+  });
+});
+
+test('metaAppFormSuccess wraps form data as command success', () => {
+  const data = { pinId: PIN };
+
+  assert.deepEqual(metaAppFormSuccess(data), {
+    ok: true,
+    state: 'success',
+    data,
   });
 });
