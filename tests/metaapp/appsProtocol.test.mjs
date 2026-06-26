@@ -1,0 +1,103 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import test from 'node:test';
+
+const require = createRequire(import.meta.url);
+
+const {
+  normalizeMetafileReference,
+  normalizeMetafileReferenceList,
+  serializeMetaAppRuntime,
+  buildMetaAppProtocolPayload,
+  buildMetaAppCreateWrite,
+  buildMetaAppModifyWrite,
+  buildMetaAppRevokeWrite,
+} = require('../../dist/core/metaapp/appsProtocol.js');
+
+const PIN = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
+const SECOND_PIN = `${'a'.repeat(64)}i0`;
+
+test('normalizeMetafileReference accepts raw pin id and metafile uri', () => {
+  assert.equal(normalizeMetafileReference(PIN, 'icon'), `metafile://${PIN}`);
+  assert.equal(normalizeMetafileReference(` metafile://${PIN} `, 'icon'), `metafile://${PIN}`);
+});
+
+test('normalizeMetafileReference rejects invalid pin ids', () => {
+  assert.throws(
+    () => normalizeMetafileReference('not-a-pin', 'icon'),
+    /icon must be a MetaID pin id or metafile:\/\/ pin id/i,
+  );
+});
+
+test('normalizeMetafileReferenceList parses comma and newline separated pin ids', () => {
+  assert.deepEqual(
+    normalizeMetafileReferenceList(`${PIN},\nmetafile://${SECOND_PIN}`, 'introImgs'),
+    [`metafile://${PIN}`, `metafile://${SECOND_PIN}`],
+  );
+});
+
+test('serializeMetaAppRuntime serializes selected runtimes with slash separators', () => {
+  assert.equal(serializeMetaAppRuntime(['browser', 'ios', 'linux']), 'browser/ios/linux');
+});
+
+function validInput(overrides = {}) {
+  return {
+    title: 'Agent Wiki Builder',
+    appName: 'Agent Wiki Builder',
+    prompt: 'Open the app.',
+    icon: PIN,
+    coverImg: `metafile://${PIN}`,
+    introImgs: [PIN],
+    intro: 'Builds a browsable project wiki.',
+    runtime: ['browser', 'linux'],
+    version: 'v1.0.0',
+    contentType: 'application/zip',
+    content: PIN,
+    indexFile: 'index.html',
+    code: PIN,
+    contentHash: 'sha256:abc',
+    metadata: '{"homepage":false}',
+    tags: 'tool, knowledge',
+    disabled: true,
+    codeType: 'application/zip',
+    ...overrides,
+  };
+}
+
+test('buildMetaAppProtocolPayload normalizes MetaAPP protocol fields', () => {
+  const payload = buildMetaAppProtocolPayload(validInput());
+  assert.equal(payload.title, 'Agent Wiki Builder');
+  assert.equal(payload.icon, `metafile://${PIN}`);
+  assert.equal(payload.coverImg, `metafile://${PIN}`);
+  assert.deepEqual(payload.introImgs, [`metafile://${PIN}`]);
+  assert.equal(payload.content, `metafile://${PIN}`);
+  assert.equal(payload.code, `metafile://${PIN}`);
+  assert.equal(payload.runtime, 'browser/linux');
+  assert.equal(payload.disabled, true);
+  assert.deepEqual(payload.tags, ['tool', 'knowledge']);
+  assert.deepEqual(payload.metadata, { homepage: false });
+});
+
+test('buildMetaAppCreateWrite writes create under /protocols/metaapp', () => {
+  const payload = buildMetaAppProtocolPayload(validInput());
+  const write = buildMetaAppCreateWrite(payload);
+  assert.equal(write.operation, 'create');
+  assert.equal(write.path, '/protocols/metaapp');
+  assert.equal(write.contentType, 'application/json');
+  assert.deepEqual(JSON.parse(write.payload), payload);
+});
+
+test('buildMetaAppModifyWrite targets the latest pin id', () => {
+  const payload = buildMetaAppProtocolPayload(validInput({ disabled: false }));
+  const write = buildMetaAppModifyWrite(PIN, payload);
+  assert.equal(write.operation, 'modify');
+  assert.equal(write.path, `@${PIN}`);
+  assert.equal(JSON.parse(write.payload).disabled, false);
+});
+
+test('buildMetaAppRevokeWrite creates a PIN-level revoke request', () => {
+  assert.deepEqual(buildMetaAppRevokeWrite(PIN), {
+    operation: 'revoke',
+    path: `@${PIN}`,
+  });
+});
