@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import type { MetabotPaths } from '../state/paths';
 import type { ChatPersona } from './privateChatTypes';
+import { withRuntimeMetabotPersonaFallback } from '../bot/metabotPersona';
 
 async function readMdFile(filePath: string): Promise<string> {
   try {
@@ -21,5 +22,5 @@ export async function loadChatPersona(paths: MetabotPaths): Promise<ChatPersona>
     readMdFile(paths.goalMdPath),
     readMdFile(paths.roleMdPath),
   ]);
-  return { soul, goal, role };
+  return withRuntimeMetabotPersonaFallback({ soul, goal, role });
 }

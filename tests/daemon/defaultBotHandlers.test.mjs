@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { access, chmod, mkdir, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
@@ -656,8 +656,8 @@ test('default bot createProfile bootstraps a chained identity before indexing th
   assert.equal(writeCalls[3].contentType, 'application/json');
   assert.deepEqual(JSON.parse(writeCalls[3].payload), {
     role: 'Role after chain.',
-    soul: 'You are friendly and professional.',
-    goal: 'Your goal is to help users accomplish their tasks effectively.',
+    soul: '',
+    goal: '',
   });
   assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['tx-1', 'tx-2', 'tx-3', 'tx-4']);
   assert.equal(stored.role, 'Role after chain.');
@@ -990,8 +990,11 @@ test('default bot createProfile prefers the requested host provider and falls ba
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.primaryProvider, 'codex');
   assert.equal(result.data.profile.fallbackProvider, 'claude-code');
-  assert.deepEqual(writePaths, ['/info/name', '/info/chatpubkey']);
-  assert.deepEqual(llmPayloads, []);
+  assert.deepEqual(writePaths, ['/info/name', '/info/chatpubkey', '/info/llm']);
+  assert.deepEqual(llmPayloads, [{
+    primaryProvider: 'codex',
+    fallbackProvider: 'claude-code',
+  }]);
 });
 
 test('default bot createProfile from UI defaults providers by recent runtime activity', async (t) => {
@@ -1031,6 +1034,32 @@ test('default bot createProfile from UI defaults providers by recent runtime act
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.primaryProvider, 'claude-code');
   assert.equal(result.data.profile.fallbackProvider, 'codex');
+});
+
+test('default bot createProfile does not write fallback persona defaults to chain', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(writeCalls),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'No Default Persona Bot',
+    creationSource: 'ui',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.role, '');
+  assert.equal(result.data.profile.soul, '');
+  assert.equal(result.data.profile.goal, '');
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey']);
 });
 
 test('default bot createProfile from UI applies METABOT_HOST provider defaults', async (t) => {
@@ -1121,6 +1150,47 @@ test('default identity create notifies the daemon after registering the profile'
 
   assert.equal(result.ok, true);
   assert.equal(registrationCallbackCalls, 1);
+});
+
+test('default identity create leaves local persona user values empty', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-identity-create-', 'empty-persona-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    identitySyncStepDelayMs: 0,
+    getDaemonRecord: () => null,
+    requestMvcGasSubsidy: async (input) => ({
+      success: true,
+      step1: { address: input.mvcAddress },
+      step2: { txid: 'subsidy-tx-1' },
+    }),
+    signer: makeSigner(async (input) => ({
+      txids: [`identity-empty-persona-${input.path}`],
+      pinId: `identity-empty-persona-${input.path}`,
+      totalCost: 1,
+      network: 'mvc',
+      operation: input.operation,
+      path: input.path,
+      contentType: input.contentType,
+      encoding: input.encoding ?? 'utf-8',
+      globalMetaId: 'gm-empty-persona',
+      mvcAddress: 'mvc-empty-persona',
+    })),
+  });
+
+  const result = await handlers.identity.create({
+    name: 'Empty Persona Bot',
+  });
+  const paths = resolveMetabotPaths(homeDir);
+
+  assert.equal(result.ok, true);
+  assert.equal((await readFile(paths.roleMdPath, 'utf8')).trim(), '');
+  assert.equal((await readFile(paths.soulMdPath, 'utf8')).trim(), '');
+  assert.equal((await readFile(paths.goalMdPath, 'utf8')).trim(), '');
 });
 
 test('default bot createProfile notifies the daemon after registering the profile', async (t) => {
@@ -1314,7 +1384,7 @@ test('default bot updateProfile rejects local-only profiles before saving local 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'chain_identity_missing');
   assert.equal(afterFailure.name, 'Local Bot');
-  assert.equal(afterFailure.role, 'You are a helpful AI assistant.');
+  assert.equal(afterFailure.role, '');
   assert.deepEqual(signerCalls, []);
 });
 
@@ -1536,10 +1606,69 @@ test('default bot updateProfile returns chain write txids after saving a chained
   assert.equal(writeCalls[3].contentType, 'application/json');
   assert.deepEqual(JSON.parse(writeCalls[3].payload), {
     role: 'Updated on chain first.',
-    soul: 'You are friendly and professional.',
-    goal: 'Your goal is to help users accomplish their tasks effectively.',
+    soul: '',
+    goal: '',
   });
   assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2', 'save-tx-3', 'save-tx-4']);
+});
+
+test('default bot updateProfile backfills missing LLM info when saving only bio', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'bio-llm-backfill-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'healthy'),
+    ],
+  });
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Bio LLM Backfill Bot',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-bio-llm-backfill',
+    mvcAddress: 'addr-bio-llm-backfill',
+  });
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      return {
+        txids: [`bio-llm-backfill-tx-${writeCalls.length}`],
+        pinId: `bio-llm-backfill-pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-bio-llm-backfill',
+        mvcAddress: 'addr-bio-llm-backfill',
+      };
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    bio: 'Only the public bio changed.',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.bio, 'Only the public bio changed.');
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/bio', '/info/llm']);
+  assert.deepEqual(JSON.parse(writeCalls[1].payload), {
+    primaryProvider: 'codex',
+    fallbackProvider: null,
+  });
 });
 
 test('default bot updateProfile validates allowChatSkills and writes chain chatSkills before local state', async (t) => {

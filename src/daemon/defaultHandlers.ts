@@ -49,6 +49,7 @@ import type {
 import type { LlmExecutor, LlmExecutionRequest } from '../core/llm/executor';
 import {
   buildMetabotProfileDraftFromIdentity,
+  buildMetabotInfoPublishTargets,
   createMetabotProfileFromIdentity,
   deleteMetabotProfile,
   getMetabotProfile,
@@ -57,6 +58,7 @@ import {
   listMetabotProfiles,
   selectDefaultMetabotProviders,
   selectRuntimeForProvider,
+  recordMetabotInfoPublishResults,
   syncMetabotInfoToChain,
   updateMetabotProfile,
   validateAvatarDataUrl,
@@ -67,6 +69,7 @@ import {
 } from '../core/bot/metabotHomepage';
 import type {
   CreateMetabotInput,
+  MetabotInfoPublishTarget,
   MetabotProfileFull,
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
@@ -1192,10 +1195,35 @@ function calculateMetabotCreateInfoFields(input: CreateMetabotInput): string[] {
   if (input.soul !== undefined) fields.push('soul');
   if (input.goal !== undefined) fields.push('goal');
   if (input.avatarDataUrl !== undefined) fields.push('avatar');
-  if (input.primaryProvider !== undefined) fields.push('primaryProvider');
-  if (input.fallbackProvider !== undefined) fields.push('fallbackProvider');
+  if (input.primaryProvider !== undefined || input.fallbackProvider !== undefined) fields.push('primaryProvider');
   if (input.allowChatSkills !== undefined) fields.push('allowChatSkills');
   return fields;
+}
+
+function buildBootstrapInfoPublishTargets(input: {
+  name: string;
+  chatPublicKey?: string | null;
+}): MetabotInfoPublishTarget[] {
+  const targets: MetabotInfoPublishTarget[] = [
+    {
+      path: '/info/name',
+      contentType: 'text/plain',
+      payload: normalizeText(input.name),
+      encoding: 'utf-8',
+      operation: 'create',
+    },
+  ];
+  const chatPublicKey = normalizeText(input.chatPublicKey);
+  if (chatPublicKey) {
+    targets.push({
+      path: '/info/chatpubkey',
+      contentType: 'text/plain',
+      payload: chatPublicKey,
+      encoding: 'utf-8',
+      operation: 'create',
+    });
+  }
+  return targets;
 }
 
 function normalizePreferredCreateProvider(value: unknown): LlmProvider | null {
@@ -1382,6 +1410,41 @@ function calculateMetabotChangedFields(
   return changedFields;
 }
 
+function calculateMetabotSubmittedInfoFields(update: UpdateMetabotInfoInput): string[] {
+  const fields: string[] = [];
+  if (update.name !== undefined) fields.push('name');
+  if (update.bio !== undefined) fields.push('bio');
+  if (update.role !== undefined) fields.push('role');
+  if (update.soul !== undefined) fields.push('soul');
+  if (update.goal !== undefined) fields.push('goal');
+  if (update.avatarDataUrl !== undefined) fields.push('avatar');
+  if (update.primaryProvider !== undefined || update.fallbackProvider !== undefined) fields.push('primaryProvider');
+  if (update.allowChatSkills !== undefined) fields.push('allowChatSkills');
+  if (update.homepage !== undefined) fields.push('homepage');
+  return fields;
+}
+
+function isPublicIdentityUpdate(update: UpdateMetabotInfoInput): boolean {
+  return update.name !== undefined
+    || update.bio !== undefined
+    || update.avatarDataUrl !== undefined
+    || update.primaryProvider !== undefined
+    || update.fallbackProvider !== undefined
+    || update.homepage !== undefined;
+}
+
+function calculateMetabotUpdateInfoFields(
+  current: MetabotProfileFull,
+  update: UpdateMetabotInfoInput,
+): string[] {
+  const fields = calculateMetabotSubmittedInfoFields(update);
+  const profile = buildMetabotChainProfile(current, update);
+  if (isPublicIdentityUpdate(update) && (profile.primaryProvider || profile.fallbackProvider)) {
+    fields.push('primaryProvider');
+  }
+  return [...new Set(fields)];
+}
+
 function buildMetabotChainProfile(
   current: MetabotProfileFull,
   update: UpdateMetabotInfoInput,
@@ -1463,46 +1526,51 @@ async function writePinRetryingMempoolConflict(input: {
   }
 }
 
-async function ensureDefaultPersonaFiles(paths: MetabotPaths, metabotName: string): Promise<void> {
-  const files: Array<{ filePath: string; content: string }> = [
-    {
-      filePath: paths.roleMdPath,
-      content: [
-        `I am ${metabotName}, a MetaBot on the Open Agent Connect network.`,
-        '',
-        '<!-- Edit this file to define your MetaBot\'s role. Example: -->',
-        '<!-- I am a coding assistant who specializes in TypeScript and Node.js. -->',
-      ].join('\n'),
-    },
-    {
-      filePath: paths.soulMdPath,
-      content: [
-        'I am friendly, curious, and concise.',
-        '',
-        '<!-- Edit this file to define your MetaBot\'s personality and communication style. Example: -->',
-        '<!-- I prefer short, direct messages. I like to ask good questions and share useful insights. -->',
-      ].join('\n'),
-    },
-    {
-      filePath: paths.goalMdPath,
-      content: [
-        'Get to know other MetaBots and explore collaboration opportunities.',
-        '',
-        '<!-- Edit this file to define your MetaBot\'s conversation goals. Example: -->',
-        '<!-- Understand what the other MetaBot can do and find ways to work together on coding tasks. -->',
-      ].join('\n'),
-    },
+async function ensureEmptyPersonaFiles(paths: MetabotPaths, metabotName: string): Promise<void> {
+  const workspaceSoulStarter = [
+    `# ${metabotName}`,
+    '',
+    'Describe the persona, tone, boundaries, and communication style for this MetaBot here.',
+  ].join('\n').trim();
+  const oldRoleStarter = [
+    `I am ${metabotName}, a MetaBot on the Open Agent Connect network.`,
+    '',
+    '<!-- Edit this file to define your MetaBot\'s role. Example: -->',
+    '<!-- I am a coding assistant who specializes in TypeScript and Node.js. -->',
+  ].join('\n').trim();
+  const oldSoulStarter = [
+    'I am friendly, curious, and concise.',
+    '',
+    '<!-- Edit this file to define your MetaBot\'s personality and communication style. Example: -->',
+    '<!-- I prefer short, direct messages. I like to ask good questions and share useful insights. -->',
+  ].join('\n').trim();
+  const oldGoalStarter = [
+    'Get to know other MetaBots and explore collaboration opportunities.',
+    '',
+    '<!-- Edit this file to define your MetaBot\'s conversation goals. Example: -->',
+    '<!-- Understand what the other MetaBot can do and find ways to work together on coding tasks. -->',
+  ].join('\n').trim();
+  const files: Array<{ filePath: string; starterValues: string[] }> = [
+    { filePath: paths.roleMdPath, starterValues: [oldRoleStarter] },
+    { filePath: paths.soulMdPath, starterValues: [workspaceSoulStarter, oldSoulStarter] },
+    { filePath: paths.goalMdPath, starterValues: [oldGoalStarter] },
   ];
 
   for (const file of files) {
     try {
-      await fs.access(file.filePath);
-    } catch {
-      try {
-        await fs.writeFile(file.filePath, `${file.content}\n`, 'utf8');
-      } catch {
-        // Best effort: do not fail identity creation if persona files cannot be written.
+      const current = (await fs.readFile(file.filePath, 'utf8')).trim();
+      if (current && !file.starterValues.includes(current)) {
+        continue;
       }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        continue;
+      }
+    }
+    try {
+      await fs.writeFile(file.filePath, '\n', 'utf8');
+    } catch {
+      // Best effort: do not fail identity creation if persona files cannot be written.
     }
   }
 }
@@ -11199,23 +11267,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
           await registerActiveIdentityProfile(nextState.identity);
           await notifyIdentityProfileRegistered();
-          await ensureDefaultPersonaFiles(runtimeStateStore.paths, normalizedName);
+          await ensureEmptyPersonaFiles(runtimeStateStore.paths, normalizedName);
 
           try {
             const preferredProvider = normalizePreferredCreateProvider(host)
               ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
               ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
             const runtimeStore = createLlmRuntimeStore(input.homeDir);
+            const previous = await runtimeStore.read();
             if (preferredProvider) {
-              const previous = await runtimeStore.read();
               const discoveryResult = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
               for (const runtime of discoveryResult.runtimes) {
                 await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
               }
             }
             const runtimeState = await runtimeStore.read();
+            const previousRuntimeIds = new Set(previous.runtimes.map((runtime) => runtime.id));
+            const defaultCandidateRuntimes = preferredProvider
+              ? runtimeState.runtimes.filter((runtime) => (
+                previousRuntimeIds.has(runtime.id) || runtime.provider === preferredProvider
+              ))
+              : runtimeState.runtimes;
             const defaults = selectDefaultMetabotProviders({
-              runtimes: runtimeState.runtimes,
+              runtimes: defaultCandidateRuntimes,
               preferredProvider,
             });
             const resolvedSlug = path.basename(input.homeDir);
@@ -14529,7 +14603,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const profileHomeDir = resolvedHome.homeDir;
-        const createInfoFields = calculateMetabotCreateInfoFields(createInput);
         createInput = await applyDefaultMetabotCreateProviders({
           createInput,
           homeDir: profileHomeDir,
@@ -14580,21 +14653,35 @@ export function createDefaultMetabotDaemonHandlers(input: {
             return commandFailed(
               'identity_bootstrap_failed',
               bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.'
-              );
+            );
           }
+          const bootstrapInfoTargets = buildBootstrapInfoPublishTargets({
+            name,
+            chatPublicKey: identity.chatPublicKey,
+          });
+          await recordMetabotInfoPublishResults(
+            { homeDir: profileHomeDir },
+            bootstrapInfoTargets,
+            bootstrap.sync?.chainWrites ?? [],
+          );
           const chainProfile = buildMetabotProfileDraftFromIdentity({
             ...createInput,
             homeDir: profileHomeDir,
             globalMetaId: identity.globalMetaId,
             mvcAddress: identity.mvcAddress,
           });
+          const profileInfoTargets = buildMetabotInfoPublishTargets(
+            chainProfile,
+            calculateMetabotCreateInfoFields(createInput),
+          );
           const profileChainWrites = await syncMetabotInfoToChain(
             profileSigner,
             chainProfile,
-            createInfoFields,
+            profileInfoTargets,
             {
               delayMs: input.identitySyncStepDelayMs,
               operation: 'create',
+              deferPublishStateWrite: true,
             },
           );
           const profile = await createMetabotProfileFromIdentity(normalizedSystemHomeDir, {
@@ -14603,6 +14690,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             globalMetaId: identity.globalMetaId,
             mvcAddress: identity.mvcAddress,
           });
+          await recordMetabotInfoPublishResults(profile, profileInfoTargets, profileChainWrites);
           await notifyIdentityProfileRegistered();
           return commandSuccess({
             profile,
@@ -14683,17 +14771,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const changedFields = calculateMetabotChangedFields(current, update);
+        const chainProfile = buildMetabotChainProfile(current, update);
+        const updateInfoTargets = buildMetabotInfoPublishTargets(
+          chainProfile,
+          calculateMetabotUpdateInfoFields(current, update),
+        );
         let chainWrites: ChainWriteResult[] = [];
-        if (changedFields.length > 0 && !current.globalMetaId) {
+        if ((changedFields.length > 0 || updateInfoTargets.length > 0) && !current.globalMetaId) {
           return commandFailed(
             'chain_identity_missing',
             'This MetaBot has no chained identity yet, so profile changes cannot be saved safely.'
           );
         }
-        if (changedFields.length > 0) {
+        if (updateInfoTargets.length > 0) {
           try {
             const profileSigner = createSignerForProfileHome(current.homeDir);
-            chainWrites = await syncMetabotInfoToChain(profileSigner, buildMetabotChainProfile(current, update), changedFields);
+            chainWrites = await syncMetabotInfoToChain(profileSigner, chainProfile, updateInfoTargets, {
+              deferPublishStateWrite: true,
+            });
           } catch (error) {
             return commandFailed('chain_sync_failed', `Chain sync failed: ${error instanceof Error ? error.message : String(error)}`);
           }
@@ -14701,6 +14796,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const profile = await updateMetabotProfile(normalizedSystemHomeDir, slug, update);
+          await recordMetabotInfoPublishResults(profile, updateInfoTargets, chainWrites);
           return commandSuccess({ profile, chainWrites });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

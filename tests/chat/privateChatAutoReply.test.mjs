@@ -182,13 +182,13 @@ async function createAutoReplyHarness(options = {}) {
   };
 }
 
-test('chatPersonaLoader returns empty strings when files do not exist', async () => {
+test('chatPersonaLoader returns runtime fallback persona when files do not exist', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
   const persona = await loadChatPersona(paths);
-  assert.equal(persona.soul, '');
-  assert.equal(persona.goal, '');
-  assert.equal(persona.role, '');
+  assert.equal(persona.soul, 'You are friendly and professional.');
+  assert.equal(persona.goal, 'Your goal is to help users accomplish their tasks effectively.');
+  assert.equal(persona.role, 'You are a helpful AI assistant.');
 });
 
 test('chatPersonaLoader reads SOUL.md, GOAL.md, ROLE.md', async () => {

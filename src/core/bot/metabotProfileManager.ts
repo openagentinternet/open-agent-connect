@@ -34,6 +34,10 @@ import {
   validateAvatarDataUrl,
 } from '../identity/avatarChainWrite';
 import type {
+  ChainWriteEncoding,
+  ChainWritePayload,
+} from '../chain/writePin';
+import type {
   LlmBinding,
   LlmBindingRole,
   LlmProvider,
@@ -41,10 +45,14 @@ import type {
 } from '../llm/llmTypes';
 import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
+import {
+  buildProfilePublishRecord,
+  createProfilePublishStateStore,
+  hashProfilePublishPayload,
+  type ProfilePublishPayloadInput,
+} from './profilePublishState';
+import { normalizePublicMetabotPersona } from './metabotPersona';
 
-const DEFAULT_ROLE = 'You are a helpful AI assistant.';
-const DEFAULT_SOUL = 'You are friendly and professional.';
-const DEFAULT_GOAL = 'Your goal is to help users accomplish their tasks effectively.';
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
 
@@ -96,6 +104,13 @@ export interface UpdateMetabotInfoInput {
 export interface SyncMetabotInfoToChainOptions {
   delayMs?: number;
   operation?: 'create' | 'modify';
+  deferPublishStateWrite?: boolean;
+}
+
+export interface MetabotInfoPublishTarget extends ProfilePublishPayloadInput {
+  encoding: ChainWriteEncoding;
+  operation?: 'create' | 'modify' | 'revoke';
+  skipIfUnpublished?: boolean;
 }
 
 export interface MetabotWalletInfo {
@@ -367,13 +382,14 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     readChatSkillPolicy(paths.chatSkillPolicyPath),
     readMetabotHomepage(paths.homepageStatePath),
   ]);
+  const persona = normalizePublicMetabotPersona({ role, soul, goal });
 
   return {
     ...profile,
     bio,
-    role,
-    soul,
-    goal,
+    role: persona.role,
+    soul: persona.soul,
+    goal: persona.goal,
     ...(avatarDataUrl ? { avatarDataUrl } : {}),
     primaryProvider: providerBindings.primaryProvider,
     fallbackProvider: providerBindings.fallbackProvider,
@@ -438,11 +454,16 @@ export async function createMetabotProfile(
     name,
   });
   const paths = resolveMetabotPaths(resolvedHome.homeDir);
+  const persona = normalizePublicMetabotPersona({
+    role: input.role,
+    soul: input.soul,
+    goal: input.goal,
+  });
   await Promise.all([
     writeTextFile(paths.bioMdPath, normalizeText(input.bio)),
-    writeTextFile(paths.roleMdPath, normalizeText(input.role) || DEFAULT_ROLE),
-    writeTextFile(paths.soulMdPath, normalizeText(input.soul) || DEFAULT_SOUL),
-    writeTextFile(paths.goalMdPath, normalizeText(input.goal) || DEFAULT_GOAL),
+    writeTextFile(paths.roleMdPath, persona.role),
+    writeTextFile(paths.soulMdPath, persona.soul),
+    writeTextFile(paths.goalMdPath, persona.goal),
   ]);
   if (avatar) {
     await writeTextFile(resolveAvatarPath(resolvedHome.homeDir), avatar);
@@ -494,9 +515,11 @@ export function buildMetabotProfileDraftFromIdentity(input: CreateMetabotFromIde
     createdAt: Date.now(),
     updatedAt: Date.now(),
     bio: normalizeText(input.bio),
-    role: normalizeText(input.role) || DEFAULT_ROLE,
-    soul: normalizeText(input.soul) || DEFAULT_SOUL,
-    goal: normalizeText(input.goal) || DEFAULT_GOAL,
+    ...normalizePublicMetabotPersona({
+      role: input.role,
+      soul: input.soul,
+      goal: input.goal,
+    }),
     ...(avatar ? { avatarDataUrl: avatar } : {}),
     primaryProvider: input.primaryProvider === undefined ? null : validateProvider(input.primaryProvider),
     fallbackProvider: input.fallbackProvider === undefined ? null : validateProvider(input.fallbackProvider),
@@ -819,117 +842,264 @@ export async function updateMetabotProfile(
   return updated;
 }
 
+function textInfoTarget(input: {
+  path: string;
+  contentType: string;
+  payload: string;
+  skipIfUnpublished?: boolean;
+}): MetabotInfoPublishTarget {
+  return {
+    path: input.path,
+    contentType: input.contentType,
+    payload: input.payload,
+    encoding: 'utf-8',
+    operation: 'create',
+    skipIfUnpublished: input.skipIfUnpublished,
+  };
+}
+
+function jsonInfoTarget(input: {
+  path: string;
+  payload: unknown;
+  skipIfUnpublished?: boolean;
+}): MetabotInfoPublishTarget {
+  return textInfoTarget({
+    path: input.path,
+    contentType: 'application/json',
+    payload: typeof input.payload === 'string' ? input.payload : JSON.stringify(input.payload),
+    skipIfUnpublished: input.skipIfUnpublished,
+  });
+}
+
+function hasAnyProvider(profile: MetabotProfileFull): boolean {
+  return Boolean(profile.primaryProvider || profile.fallbackProvider);
+}
+
+function hasAnyPersonaValue(profile: MetabotProfileFull): boolean {
+  const persona = normalizePublicMetabotPersona(profile);
+  return Boolean(persona.role || persona.soul || persona.goal);
+}
+
+function normalizePublishTarget(input: MetabotInfoPublishTarget): MetabotInfoPublishTarget {
+  const pathValue = normalizeText(input.path);
+  const contentType = normalizeText(input.contentType);
+  if (!pathValue || !contentType) {
+    throw new Error('Profile info publish targets require path and contentType.');
+  }
+  const encoding = input.encoding === 'binary' || input.encoding === 'base64' ? input.encoding : 'utf-8';
+  const payload: ChainWritePayload = Buffer.isBuffer(input.payload)
+    ? Buffer.from(input.payload)
+    : String(input.payload ?? '');
+  return {
+    path: pathValue,
+    contentType,
+    encoding,
+    payload,
+    operation: input.operation ?? 'create',
+    skipIfUnpublished: input.skipIfUnpublished === true,
+  };
+}
+
+function normalizePublishTargets(targets: MetabotInfoPublishTarget[]): MetabotInfoPublishTarget[] {
+  const normalizedTargets = targets.map((target) => normalizePublishTarget(target));
+  const targetByPath = new Map<string, MetabotInfoPublishTarget>();
+  for (const target of normalizedTargets) {
+    targetByPath.set(target.path, target);
+  }
+  return [...targetByPath.values()];
+}
+
+export function buildMetabotInfoPublishTargets(
+  profile: MetabotProfileFull,
+  fields: Iterable<string>,
+): MetabotInfoPublishTarget[] {
+  const changed = new Set([...fields].map((field) => normalizeText(field)).filter(Boolean));
+  const targets: MetabotInfoPublishTarget[] = [];
+
+  if (changed.has('name')) {
+    targets.push(textInfoTarget({
+      path: '/info/name',
+      contentType: 'text/plain',
+      payload: profile.name,
+    }));
+  }
+
+  if (changed.has('avatar')) {
+    const request = buildAvatarChainWriteRequest({
+      operation: 'create',
+      avatarDataUrl: profile.avatarDataUrl ?? '',
+      network: 'mvc',
+    });
+    targets.push(normalizePublishTarget({
+      path: request.path ?? '/info/avatar',
+      contentType: request.contentType ?? 'text/plain',
+      payload: request.payload ?? '',
+      encoding: request.encoding === 'binary' || request.encoding === 'base64' ? request.encoding : 'utf-8',
+      operation: 'create',
+    }));
+  }
+
+  if (changedFieldsHaveProfileInfo(changed)) {
+    const personaChanged = changed.has('persona') || changed.has('role') || changed.has('soul') || changed.has('goal');
+    if (changed.has('bio')) {
+      targets.push(textInfoTarget({
+        path: '/info/bio',
+        contentType: 'text/plain',
+        payload: profile.bio,
+        skipIfUnpublished: !normalizeText(profile.bio),
+      }));
+    }
+    if (personaChanged) {
+      const persona = normalizePublicMetabotPersona(profile);
+      if (hasAnyPersonaValue(profile)) {
+        targets.push(jsonInfoTarget({
+          path: '/info/persona',
+          payload: persona,
+        }));
+      } else {
+        targets.push(jsonInfoTarget({
+          path: '/info/persona',
+          payload: '',
+          skipIfUnpublished: true,
+        }));
+      }
+    }
+    if (changed.has('allowChatSkills')) {
+      targets.push(jsonInfoTarget({
+        path: '/info/chatSkills',
+        payload: {
+          allowPrivateChatSkills: normalizeAllowChatSkills(profile.allowChatSkills),
+          allowGroupChatSkills: [],
+        },
+      }));
+    }
+    if (changed.has('llm') || changed.has('primaryProvider') || changed.has('fallbackProvider')) {
+      targets.push(jsonInfoTarget({
+        path: '/info/llm',
+        payload: {
+          primaryProvider: profile.primaryProvider ?? null,
+          fallbackProvider: profile.fallbackProvider ?? null,
+        },
+        skipIfUnpublished: !hasAnyProvider(profile),
+      }));
+    }
+    if (changed.has('homepage')) {
+      if (profile.homepage) {
+        targets.push(jsonInfoTarget({
+          path: '/info/homepage',
+          payload: serializeMetabotHomepagePayload(profile.homepage),
+        }));
+      } else {
+        targets.push(jsonInfoTarget({
+          path: '/info/homepage',
+          payload: '',
+        }));
+      }
+    }
+  }
+
+  return normalizePublishTargets(targets);
+}
+
+function changedFieldsHaveProfileInfo(changed: Set<string>): boolean {
+  return [...changed].some((field) => PROFILE_INFO_FIELDS.has(field) || field === 'persona' || field === 'llm');
+}
+
+function isPublishTargetList(
+  fieldsOrTargets: string[] | MetabotInfoPublishTarget[],
+): fieldsOrTargets is MetabotInfoPublishTarget[] {
+  return fieldsOrTargets.length > 0 && typeof fieldsOrTargets[0] !== 'string';
+}
+
+function resolvePublishTargets(
+  profile: MetabotProfileFull,
+  fieldsOrTargets: string[] | MetabotInfoPublishTarget[],
+): MetabotInfoPublishTarget[] {
+  return isPublishTargetList(fieldsOrTargets)
+    ? normalizePublishTargets(fieldsOrTargets)
+    : buildMetabotInfoPublishTargets(profile, fieldsOrTargets);
+}
+
+export async function recordMetabotInfoPublishResults(
+  profile: MetabotProfileFull | { homeDir: string },
+  targets: MetabotInfoPublishTarget[],
+  results: ChainWriteResult[],
+): Promise<void> {
+  if (targets.length === 0 || results.length === 0) {
+    return;
+  }
+  const targetByPath = new Map(normalizePublishTargets(targets).map((target) => [target.path, target]));
+  const publishResults = results
+    .map((result) => {
+      const target = targetByPath.get(result.path);
+      return target ? { target, result } : null;
+    })
+    .filter((entry): entry is { target: MetabotInfoPublishTarget; result: ChainWriteResult } => entry !== null);
+  if (publishResults.length === 0) {
+    return;
+  }
+  await createProfilePublishStateStore(profile.homeDir).update((currentState) => {
+    const nextRecords = { ...currentState.records };
+    for (const entry of publishResults) {
+      nextRecords[entry.target.path] = buildProfilePublishRecord(entry);
+    }
+    return {
+      version: 1,
+      records: nextRecords,
+    };
+  });
+}
+
 export async function syncMetabotInfoToChain(
   signer: Signer,
   profile: MetabotProfileFull,
-  changedFields: string[],
+  fieldsOrTargets: string[] | MetabotInfoPublishTarget[],
   options: SyncMetabotInfoToChainOptions = {},
 ): Promise<ChainWriteResult[]> {
-  if (!normalizeText(profile.globalMetaId) || changedFields.length === 0) {
+  const targets = resolvePublishTargets(profile, fieldsOrTargets);
+  if (!normalizeText(profile.globalMetaId) || targets.length === 0) {
     return [];
   }
 
   const delayMs = options.delayMs ?? CHAIN_SYNC_DELAY_MS;
   const infoOperation = 'create';
-  const changed = new Set(changedFields);
   const results: ChainWriteResult[] = [];
+  const writtenTargets: MetabotInfoPublishTarget[] = [];
+  const publishStateStore = createProfilePublishStateStore(profile.homeDir);
+  const publishState = await publishStateStore.read();
 
-  async function writeProfileInfo(input: {
-    path: string;
-    contentType: string;
-    payload: string;
-    encoding?: 'utf-8' | 'base64';
-    operation?: 'create' | 'modify' | 'revoke';
-  }): Promise<void> {
+  async function writeProfileInfo(target: MetabotInfoPublishTarget): Promise<void> {
     if (results.length > 0) {
       await sleep(delayMs);
     }
-    results.push(await signer.writePin({
-      operation: input.operation ?? infoOperation,
-      path: input.path,
+    const result = await signer.writePin({
+      operation: target.operation ?? infoOperation,
+      path: target.path,
       encryption: '0',
       version: '1.0',
-      contentType: input.contentType,
-      payload: input.payload,
-      encoding: input.encoding ?? 'utf-8',
+      contentType: target.contentType,
+      payload: target.payload,
+      encoding: target.encoding,
       network: 'mvc',
-    }));
-  }
-
-  if (changed.has('name')) {
-    await writeProfileInfo({
-      path: '/info/name',
-      contentType: 'text/plain',
-      payload: profile.name,
     });
+    results.push(result);
+    writtenTargets.push(target);
   }
 
-  if (changed.has('avatar')) {
-    if (results.length > 0) {
-      await sleep(delayMs);
+  for (const target of targets) {
+    const previous = publishState.records[target.path];
+    if (target.skipIfUnpublished && !previous) {
+      continue;
     }
-    results.push(await signer.writePin(buildAvatarChainWriteRequest({
-      operation: infoOperation,
-      avatarDataUrl: profile.avatarDataUrl ?? '',
-      network: 'mvc',
-    })));
+    const payloadHash = hashProfilePublishPayload(target);
+    if (previous?.payloadHash === payloadHash) {
+      continue;
+    }
+    await writeProfileInfo(target);
   }
 
-  if (changedFields.some((field) => PROFILE_INFO_FIELDS.has(field))) {
-    const personaChanged = changed.has('role') || changed.has('soul') || changed.has('goal');
-    if (changed.has('bio')) {
-      await writeProfileInfo({
-        path: '/info/bio',
-        contentType: 'text/plain',
-        payload: profile.bio,
-      });
-    }
-    if (personaChanged) {
-      await writeProfileInfo({
-        path: '/info/persona',
-        contentType: 'application/json',
-        payload: JSON.stringify({
-          role: profile.role,
-          soul: profile.soul,
-          goal: profile.goal,
-        }),
-      });
-    }
-    if (changed.has('allowChatSkills')) {
-      await writeProfileInfo({
-        path: '/info/chatSkills',
-        contentType: 'application/json',
-        payload: JSON.stringify({
-          allowPrivateChatSkills: normalizeAllowChatSkills(profile.allowChatSkills),
-          allowGroupChatSkills: [],
-        }),
-      });
-    }
-    if (changed.has('primaryProvider') || changed.has('fallbackProvider')) {
-      await writeProfileInfo({
-        path: '/info/llm',
-        contentType: 'application/json',
-        payload: JSON.stringify({
-          primaryProvider: profile.primaryProvider ?? null,
-          fallbackProvider: profile.fallbackProvider ?? null,
-        }),
-      });
-    }
-    if (changed.has('homepage')) {
-      if (profile.homepage) {
-        await writeProfileInfo({
-          path: '/info/homepage',
-          contentType: 'application/json',
-          payload: serializeMetabotHomepagePayload(profile.homepage),
-        });
-      } else {
-        await writeProfileInfo({
-          path: '/info/homepage',
-          contentType: 'application/json',
-          payload: '',
-        });
-      }
-    }
+  if (!options.deferPublishStateWrite) {
+    await recordMetabotInfoPublishResults(profile, writtenTargets, results);
   }
 
   return results;
