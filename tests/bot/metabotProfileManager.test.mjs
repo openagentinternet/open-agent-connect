@@ -8,6 +8,10 @@ import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../help
 
 const require = createRequire(import.meta.url);
 const {
+  createProfilePublishStateStore,
+  hashProfilePublishPayload,
+} = require('../../dist/core/bot/profilePublishState.js');
+const {
   createMetabotProfile,
   createMetabotProfileFromIdentity,
   deleteMetabotProfile,
@@ -52,15 +56,15 @@ function runtime(provider, id, health = 'healthy') {
   };
 }
 
-test('createMetabotProfile creates a profile workspace with editable persona defaults', async () => {
+test('createMetabotProfile creates a profile workspace with empty editable persona values', async () => {
   const systemHomeDir = await createSystemHome();
   const created = await createMetabotProfile(systemHomeDir, { name: 'Alice Bot' });
 
   assert.equal(created.name, 'Alice Bot');
   assert.equal(created.slug, 'alice-bot');
-  assert.equal(created.role, 'You are a helpful AI assistant.');
-  assert.equal(created.soul, 'You are friendly and professional.');
-  assert.equal(created.goal, 'Your goal is to help users accomplish their tasks effectively.');
+  assert.equal(created.role, '');
+  assert.equal(created.soul, '');
+  assert.equal(created.goal, '');
   assert.equal(created.primaryProvider, null);
   assert.equal(created.fallbackProvider, null);
   assert.deepEqual(created.allowChatSkills, []);
@@ -70,6 +74,9 @@ test('createMetabotProfile creates a profile workspace with editable persona def
     const targetStat = await stat(target);
     assert.equal(targetStat.isFile(), true, `${relativePath} should be created`);
   }
+  assert.equal(await readFile(resolveMetabotPaths(created.homeDir).roleMdPath, 'utf8'), '\n');
+  assert.equal(await readFile(resolveMetabotPaths(created.homeDir).soulMdPath, 'utf8'), '\n');
+  assert.equal(await readFile(resolveMetabotPaths(created.homeDir).goalMdPath, 'utf8'), '\n');
 
   const profiles = await listMetabotProfiles(systemHomeDir);
   assert.deepEqual(profiles.map((profile) => profile.slug), ['alice-bot']);
@@ -367,7 +374,7 @@ test('updateMetabotProfile validates allowChatSkills before writing local profil
   );
 
   const afterFailure = await getMetabotProfile(systemHomeDir, created.slug);
-  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'You are a helpful AI assistant.\n');
+  assert.equal(await readFile(paths.roleMdPath, 'utf8'), '\n');
   assert.deepEqual(afterFailure.allowChatSkills, []);
   await assert.rejects(
     () => readFile(paths.chatSkillPolicyPath, 'utf8'),
@@ -391,7 +398,7 @@ test('updateMetabotProfile validates provider changes before writing local profi
 
   const afterFailure = await getMetabotProfile(systemHomeDir, created.slug);
   assert.equal(afterFailure.name, 'Atomic Bot');
-  assert.equal(await readFile(paths.roleMdPath, 'utf8'), 'You are a helpful AI assistant.\n');
+  assert.equal(await readFile(paths.roleMdPath, 'utf8'), '\n');
   assert.equal(afterFailure.primaryProvider, null);
 });
 
@@ -500,6 +507,7 @@ test('validateAvatarDataUrl rejects non-images and oversized payloads', () => {
 });
 
 test('syncMetabotInfoToChain writes persona fields to one JSON path', async () => {
+  const homeDir = await createProfileHome('metabot-sync-info-', 'alice');
   const calls = [];
   const signer = {
     getIdentity: async () => ({}),
@@ -525,7 +533,7 @@ test('syncMetabotInfoToChain writes persona fields to one JSON path', async () =
     name: 'Alice',
     slug: 'alice',
     aliases: [],
-    homeDir: '/tmp/alice',
+    homeDir,
     globalMetaId: 'gid',
     mvcAddress: 'addr',
     createdAt: 1,
@@ -570,7 +578,192 @@ test('syncMetabotInfoToChain writes persona fields to one JSON path', async () =
   assert.equal(results.length, 4);
 });
 
+test('syncMetabotInfoToChain skips duplicate LLM info when publish-state hash matches', async () => {
+  const homeDir = await createProfileHome('metabot-publish-state-', 'ledger-bot');
+  const calls = [];
+  const signer = {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({}),
+    writePin: async (input) => {
+      calls.push(input);
+      return {
+        txids: [`ledger-tx-${calls.length}`],
+        pinId: `ledger-pin-${calls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gid',
+        mvcAddress: 'addr',
+      };
+    },
+  };
+  const profile = {
+    name: 'Ledger Bot',
+    slug: 'ledger-bot',
+    aliases: [],
+    homeDir,
+    globalMetaId: 'gid',
+    mvcAddress: 'addr',
+    createdAt: 1,
+    updatedAt: 2,
+    bio: '',
+    role: '',
+    soul: '',
+    goal: '',
+    primaryProvider: 'codex',
+    fallbackProvider: 'claude-code',
+    allowChatSkills: [],
+  };
+
+  const first = await syncMetabotInfoToChain(signer, profile, ['primaryProvider', 'fallbackProvider'], { delayMs: 0 });
+  const second = await syncMetabotInfoToChain(signer, profile, ['primaryProvider', 'fallbackProvider'], { delayMs: 0 });
+  const state = await createProfilePublishStateStore(homeDir).read();
+  const expectedHash = hashProfilePublishPayload({
+    path: '/info/llm',
+    contentType: 'application/json',
+    encoding: 'utf-8',
+    payload: JSON.stringify({
+      primaryProvider: 'codex',
+      fallbackProvider: 'claude-code',
+    }),
+  });
+
+  assert.equal(first.length, 1);
+  assert.equal(second.length, 0);
+  assert.deepEqual(calls.map((call) => call.path), ['/info/llm']);
+  assert.equal(state.records['/info/llm'].payloadHash, expectedHash);
+  assert.equal(state.records['/info/llm'].pinId, 'ledger-pin-1');
+});
+
+test('syncMetabotInfoToChain writes LLM info when publish-state is missing even if providers are baseline targets', async () => {
+  const homeDir = await createProfileHome('metabot-publish-state-', 'missing-ledger-bot');
+  const calls = [];
+  const signer = {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({}),
+    writePin: async (input) => {
+      calls.push(input);
+      return {
+        txids: [`missing-ledger-tx-${calls.length}`],
+        pinId: `missing-ledger-pin-${calls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gid',
+        mvcAddress: 'addr',
+      };
+    },
+  };
+
+  const results = await syncMetabotInfoToChain(signer, {
+    name: 'Missing Ledger Bot',
+    slug: 'missing-ledger-bot',
+    aliases: [],
+    homeDir,
+    globalMetaId: 'gid',
+    mvcAddress: 'addr',
+    createdAt: 1,
+    updatedAt: 2,
+    bio: 'A changed public bio.',
+    role: '',
+    soul: '',
+    goal: '',
+    primaryProvider: 'codex',
+    fallbackProvider: null,
+    allowChatSkills: [],
+  }, ['bio', 'primaryProvider'], { delayMs: 0 });
+
+  assert.deepEqual(calls.map((call) => call.path), ['/info/bio', '/info/llm']);
+  assert.equal(results.length, 2);
+  assert.deepEqual(JSON.parse(calls[1].payload), {
+    primaryProvider: 'codex',
+    fallbackProvider: null,
+  });
+});
+
+test('syncMetabotInfoToChain only writes empty bio and persona clearing payloads when publish-state has prior records', async () => {
+  const homeDir = await createProfileHome('metabot-publish-state-', 'clear-ledger-bot');
+  const calls = [];
+  const signer = {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({}),
+    writePin: async (input) => {
+      calls.push(input);
+      return {
+        txids: [`clear-ledger-tx-${calls.length}`],
+        pinId: `clear-ledger-pin-${calls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gid',
+        mvcAddress: 'addr',
+      };
+    },
+  };
+  const profile = {
+    name: 'Clear Ledger Bot',
+    slug: 'clear-ledger-bot',
+    aliases: [],
+    homeDir,
+    globalMetaId: 'gid',
+    mvcAddress: 'addr',
+    createdAt: 1,
+    updatedAt: 2,
+    bio: '',
+    role: '',
+    soul: '',
+    goal: '',
+    primaryProvider: null,
+    fallbackProvider: null,
+    allowChatSkills: [],
+  };
+
+  const skipped = await syncMetabotInfoToChain(signer, profile, ['bio', 'role', 'soul', 'goal'], { delayMs: 0 });
+  assert.deepEqual(skipped, []);
+  assert.deepEqual(calls, []);
+
+  await createProfilePublishStateStore(homeDir).write({
+    version: 1,
+    records: {
+      '/info/bio': {
+        payloadHash: 'old-bio-hash',
+        contentType: 'text/plain',
+        encoding: 'utf-8',
+        network: 'mvc',
+        pinId: 'old-bio-pin',
+        txids: ['old-bio-tx'],
+        publishedAt: '2026-05-06T00:00:00.000Z',
+      },
+      '/info/persona': {
+        payloadHash: 'old-persona-hash',
+        contentType: 'application/json',
+        encoding: 'utf-8',
+        network: 'mvc',
+        pinId: 'old-persona-pin',
+        txids: ['old-persona-tx'],
+        publishedAt: '2026-05-06T00:00:00.000Z',
+      },
+    },
+  });
+
+  const cleared = await syncMetabotInfoToChain(signer, profile, ['bio', 'role', 'soul', 'goal'], { delayMs: 0 });
+
+  assert.equal(cleared.length, 2);
+  assert.deepEqual(calls.map((call) => call.path), ['/info/bio', '/info/persona']);
+  assert.deepEqual(calls.map((call) => call.payload), ['', '']);
+});
+
 test('syncMetabotInfoToChain writes homepage JSON to /info/homepage on MVC', async () => {
+  const homeDir = await createProfileHome('metabot-sync-info-', 'alice-homepage');
   const calls = [];
   const signer = {
     getIdentity: async () => ({}),
@@ -601,7 +794,7 @@ test('syncMetabotInfoToChain writes homepage JSON to /info/homepage on MVC', asy
     name: 'Alice',
     slug: 'alice',
     aliases: [],
-    homeDir: '/tmp/alice',
+    homeDir,
     globalMetaId: 'gid',
     mvcAddress: 'addr',
     createdAt: 1,
@@ -626,6 +819,7 @@ test('syncMetabotInfoToChain writes homepage JSON to /info/homepage on MVC', asy
 });
 
 test('syncMetabotInfoToChain writes empty create to /info/homepage when homepage is cleared', async () => {
+  const homeDir = await createProfileHome('metabot-sync-info-', 'alice-homepage-clear');
   const calls = [];
   const signer = {
     getIdentity: async () => ({}),
@@ -651,7 +845,7 @@ test('syncMetabotInfoToChain writes empty create to /info/homepage when homepage
     name: 'Alice',
     slug: 'alice',
     aliases: [],
-    homeDir: '/tmp/alice',
+    homeDir,
     globalMetaId: 'gid',
     mvcAddress: 'addr',
     createdAt: 1,
@@ -674,6 +868,7 @@ test('syncMetabotInfoToChain writes empty create to /info/homepage when homepage
 });
 
 test('syncMetabotInfoToChain keeps /info writes as create even when caller requests modify', async () => {
+  const homeDir = await createProfileHome('metabot-sync-info-', 'alice-create-operation');
   const calls = [];
   const signer = {
     getIdentity: async () => ({}),
@@ -699,7 +894,7 @@ test('syncMetabotInfoToChain keeps /info writes as create even when caller reque
     name: 'Alice',
     slug: 'alice',
     aliases: [],
-    homeDir: '/tmp/alice',
+    homeDir,
     globalMetaId: 'gid',
     mvcAddress: 'addr',
     createdAt: 1,

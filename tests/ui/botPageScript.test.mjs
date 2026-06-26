@@ -213,6 +213,34 @@ test('bot page Basic tab owns LLM providers and Persona tab owns role fields', (
   assert.match(personaRoot.innerHTML, /data-field="goal"/);
 });
 
+test('bot page Behavior tab renders empty persona fields for unset legacy defaults', () => {
+  const root = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-behavior-content]': root,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'legacy-default-bot';
+  context.state.profiles = [{
+    slug: 'legacy-default-bot',
+    name: 'Legacy Default Bot',
+    role: 'You are a helpful AI assistant.',
+    soul: 'You are friendly and professional.',
+    goal: 'Your goal is to help users accomplish their tasks effectively.',
+  }];
+
+  context.renderBehaviorTab();
+
+  assert.match(root.innerHTML, /data-field="role"[^>]*placeholder="[^"]+"[^>]*><\/textarea>/);
+  assert.match(root.innerHTML, /data-field="soul"[^>]*placeholder="[^"]+"[^>]*><\/textarea>/);
+  assert.match(root.innerHTML, /data-field="goal"[^>]*placeholder="[^"]+"[^>]*><\/textarea>/);
+  assert.doesNotMatch(root.innerHTML, /You are a helpful AI assistant/);
+  assert.doesNotMatch(root.innerHTML, /You are friendly and professional/);
+  assert.doesNotMatch(root.innerHTML, /Your goal is to help users accomplish their tasks effectively/);
+});
+
 test('bot page Basic tab renders Homepage source select from existing MetaApp chain data', () => {
   const root = { innerHTML: '' };
   const context = createBotScriptContext({
@@ -715,6 +743,47 @@ test('bot page saveBehavior sends only persona field changes', () => {
   assert.deepEqual(requestBody, { role: 'New role' });
 });
 
+test('bot page saveBehavior does not submit placeholders as persona content', () => {
+  const status = field();
+  const behaviorFields = {
+    '[data-save-status]': status,
+    '[data-act="save-behavior"]': field(),
+    '[data-field="role"]': field(''),
+    '[data-field="soul"]': field(''),
+    '[data-field="goal"]': field(''),
+  };
+  const behaviorPanel = panelElement('data-behavior-profile-slug', 'empty-persona-bot', behaviorFields);
+  let requestBody = null;
+  const context = createBotScriptContext({
+    elements: {
+      '[data-behavior-profile-slug]': behaviorPanel,
+    },
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: {} }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'empty-persona-bot';
+  context.state.profiles = [{ slug: 'empty-persona-bot', name: 'Empty Persona Bot' }];
+  context.state.originalProfile = {
+    slug: 'empty-persona-bot',
+    name: 'Empty Persona Bot',
+    role: '',
+    soul: '',
+    goal: '',
+  };
+
+  context.saveBehavior();
+
+  assert.equal(requestBody, null);
+  assert.equal(status.textContent, 'No changes');
+});
+
 test('bot page savePublicIdentity sends provider changes only after the provider picker is touched', () => {
   const primary = field('codex');
   primary.setAttribute('data-provider-touched', '1');
@@ -777,6 +846,60 @@ test('bot page savePublicIdentity sends provider changes only after the provider
   assert.deepEqual(requestBody, {
     primaryProvider: 'codex',
     fallbackProvider: null,
+  });
+});
+
+test('bot page savePublicIdentity sends only user edits and leaves LLM backfill to the backend', () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Updated public bio.'),
+    '[data-field="primaryProvider"]': field('codex'),
+    '[data-field="fallbackProvider"]': field('openclaw'),
+  };
+  let requestBody = null;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: {
+              slug: 'alice-bot',
+              name: 'Alice',
+              bio: 'Updated public bio.',
+              primaryProvider: 'codex',
+              fallbackProvider: 'openclaw',
+            },
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice' }];
+  context.state.originalProfile = {
+    slug: 'alice-bot',
+    name: 'Alice',
+    bio: 'Original public bio.',
+    primaryProvider: 'codex',
+    fallbackProvider: 'openclaw',
+  };
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderPublicIdentityTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  context.savePublicIdentity();
+
+  assert.deepEqual(requestBody, {
+    bio: 'Updated public bio.',
   });
 });
 
