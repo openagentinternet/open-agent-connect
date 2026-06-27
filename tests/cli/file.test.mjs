@@ -305,6 +305,42 @@ test('runCli dispatches upload-large positional path to uploadLarge', async () =
   assert.deepEqual(calls, [{ filePath: '/tmp/archive.zip' }]);
 });
 
+test('runCli dispatches upload-large positional path with direct flags to uploadLarge', async () => {
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '/tmp/archive.zip',
+    '--from',
+    'alice',
+    '--content-type',
+    'application/zip',
+    '--chain',
+    'opcat',
+    '--verify',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'large-file-positional-flags-1' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    filePath: '/tmp/archive.zip',
+    contentType: 'application/zip',
+    network: 'opcat',
+    from: 'alice',
+    verify: true,
+  }]);
+});
+
 test('runCli rejects conflicting upload-large path inputs', async () => {
   const stdout = [];
   const calls = [];
