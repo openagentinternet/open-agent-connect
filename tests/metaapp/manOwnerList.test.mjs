@@ -239,6 +239,48 @@ test('parseManMetaAppListResponse preserves original fields for partial modify c
   assert.deepEqual(parsed.records[0].tags, ['tool', 'original']);
 });
 
+test('parseManMetaAppListResponse preserves original fields for embedded partial modify history', () => {
+  const modifyPin = `${'f'.repeat(64)}i0`;
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(PIN_A, {
+          title: 'Embedded Original',
+          appName: 'Embedded Original',
+          runtime: 'browser/linux',
+          icon: `metafile://${PIN_B}`,
+          coverImg: `metafile://${PIN_C}`,
+          tags: ['tool', 'embedded'],
+        }, {
+          modify_history: [
+            {
+              id: modifyPin,
+              operation: 'modify',
+              path: `@${PIN_A}`,
+              timestamp: 1782490001,
+              contentSummary: JSON.stringify({
+                title: 'Embedded Modified',
+              }),
+            },
+          ],
+        }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 1);
+  assert.equal(parsed.records[0].pinId, modifyPin);
+  assert.equal(parsed.records[0].firstPinId, PIN_A);
+  assert.equal(parsed.records[0].operation, 'modify');
+  assert.equal(parsed.records[0].title, 'Embedded Modified');
+  assert.equal(parsed.records[0].appName, 'Embedded Original');
+  assert.equal(parsed.records[0].runtime, 'browser/linux');
+  assert.equal(parsed.records[0].icon, `metafile://${PIN_B}`);
+  assert.equal(parsed.records[0].coverImg, `metafile://${PIN_C}`);
+  assert.deepEqual(parsed.records[0].tags, ['tool', 'embedded']);
+});
+
 test('parseManMetaAppListResponse groups revoke target paths under the original pin', () => {
   const revokePin = `${'c'.repeat(64)}i0`;
   const parsed = parseManMetaAppListResponse({

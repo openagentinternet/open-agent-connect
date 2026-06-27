@@ -18,6 +18,7 @@ type MetaAppOwnerListCandidate = {
   latest: Record<string, unknown>;
   groupKey: string;
   listIndex: number;
+  historyIndex: number;
   timestamp: number | null;
   pinId: string;
   operation: string;
@@ -250,14 +251,6 @@ function readHistory(raw: Record<string, unknown>): Record<string, unknown>[] {
   return history.map((item) => readObject(item)).filter((item): item is Record<string, unknown> => item !== null);
 }
 
-function latestEffectiveRecord(raw: Record<string, unknown>): Record<string, unknown> {
-  return [raw, ...readHistory(raw)].reduce((latest, current) => {
-    const latestTimestamp = normalizeTimestamp(latest.timestamp) ?? 0;
-    const currentTimestamp = normalizeTimestamp(current.timestamp) ?? 0;
-    return currentTimestamp > latestTimestamp ? current : latest;
-  }, raw);
-}
-
 function normalizeMetadata(value: unknown): Record<string, unknown> | undefined {
   const object = parseObject(value);
   return Object.keys(object).length > 0 ? object : undefined;
@@ -308,7 +301,10 @@ function shouldReplaceCandidate(
       return nextTimestamp > currentTimestamp;
     }
   }
-  return next.listIndex > current.listIndex;
+  if (next.listIndex !== current.listIndex) {
+    return next.listIndex > current.listIndex;
+  }
+  return next.historyIndex > current.historyIndex;
 }
 
 function compareCandidates(a: MetaAppOwnerListCandidate, b: MetaAppOwnerListCandidate): number {
@@ -317,7 +313,10 @@ function compareCandidates(a: MetaAppOwnerListCandidate, b: MetaAppOwnerListCand
   if (aTimestamp !== bTimestamp) {
     return aTimestamp - bTimestamp;
   }
-  return a.listIndex - b.listIndex;
+  if (a.listIndex !== b.listIndex) {
+    return a.listIndex - b.listIndex;
+  }
+  return a.historyIndex - b.historyIndex;
 }
 
 function mergeContent(candidates: MetaAppOwnerListCandidate[]): Record<string, unknown> {
@@ -350,30 +349,33 @@ export function parseManMetaAppListResponse(
       continue;
     }
 
-    const latest = latestEffectiveRecord(raw);
-    const pinId = pickPinId(raw, latest);
-    if (!pinId) {
-      continue;
-    }
+    const events = [raw, ...readHistory(raw)];
+    for (const [historyIndex, latest] of events.entries()) {
+      const pinId = pickPinId(raw, latest);
+      if (!pinId) {
+        continue;
+      }
 
-    const operation = normalizeOperation(latest.operation ?? raw.operation);
-    const groupKey = pickEffectiveFirstPinId(raw, latest, pinId);
-    const candidate: MetaAppOwnerListCandidate = {
-      raw,
-      latest,
-      groupKey,
-      listIndex,
-      timestamp: normalizeTimestamp(latest.timestamp ?? raw.timestamp),
-      pinId,
-      operation,
-      content: parseContent(raw, latest),
-    };
-    const group = grouped.get(groupKey) ?? [];
-    group.push(candidate);
-    grouped.set(groupKey, group);
-    const current = latestByGroup.get(groupKey);
-    if (!current || shouldReplaceCandidate(current, candidate)) {
-      latestByGroup.set(groupKey, candidate);
+      const operation = normalizeOperation(latest.operation ?? raw.operation);
+      const groupKey = pickEffectiveFirstPinId(raw, latest, pinId);
+      const candidate: MetaAppOwnerListCandidate = {
+        raw,
+        latest,
+        groupKey,
+        listIndex,
+        historyIndex,
+        timestamp: normalizeTimestamp(latest.timestamp ?? raw.timestamp),
+        pinId,
+        operation,
+        content: parseContent(raw, latest),
+      };
+      const group = grouped.get(groupKey) ?? [];
+      group.push(candidate);
+      grouped.set(groupKey, group);
+      const current = latestByGroup.get(groupKey);
+      if (!current || shouldReplaceCandidate(current, candidate)) {
+        latestByGroup.set(groupKey, candidate);
+      }
     }
   }
 
