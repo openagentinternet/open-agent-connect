@@ -2,11 +2,11 @@ import { commandFailed } from '../../core/contracts/commandResult';
 import type { RouteHandler } from './types';
 
 function readPositiveInteger(value: string | null, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  const normalized = value?.trim();
+  if (!normalized || !/^[1-9]\d*$/.test(normalized)) {
     return fallback;
   }
-  return Math.floor(parsed);
+  return Number(normalized);
 }
 
 function readBoolean(value: string | null): boolean {

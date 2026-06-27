@@ -137,6 +137,29 @@ test('GET /api/apps normalizes query values', async (t) => {
   ]);
 });
 
+test('GET /api/apps falls back to default size for fractional values', async (t) => {
+  const calls = [];
+  const server = await startServer({
+    apps: {
+      list: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          state: 'success',
+          data: [],
+        };
+      },
+    },
+  });
+  t.after(async () => server.close());
+
+  await fetchJson(server.baseUrl, '/api/apps?size=1.5');
+
+  assert.deepEqual(calls, [
+    { size: 12, refresh: false },
+  ]);
+});
+
 test('unsupported methods for apps routes return method_not_allowed', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
