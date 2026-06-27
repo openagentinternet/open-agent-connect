@@ -576,7 +576,9 @@ test('runCli prints file upload-large help with request shape and MVC large-uplo
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot file upload-large \[--from <bot-slug>\] --request-file <path> \[--chain <mvc\|btc\|opcat>\] \[--verify\]/m);
+  assert.match(output, /^Usage:\s+metabot file upload-large --file <path> \[--from <bot-slug>\] \[--content-type <mime>\] \[--chain <mvc\|btc\|opcat>\] \[--verify\]/m);
+  assert.match(output, /^metabot file upload-large <path> \[--from <bot-slug>\] \[--content-type <mime>\] \[--chain <mvc\|btc\|opcat>\] \[--verify\]/m);
+  assert.match(output, /^metabot file upload-large --request-file <path> \[--from <bot-slug>\] \[--chain <mvc\|btc\|opcat>\] \[--verify\]/m);
   assert.match(output, /"filePath": "\/absolute\/or\/relative\/path\/to\/file"/);
   assert.match(output, /"verify": "optional availability verification boolean"/);
   assert.match(output, /metafileUri/);
@@ -584,6 +586,8 @@ test('runCli prints file upload-large help with request shape and MVC large-uplo
   assert.match(output, /DOGE is not supported for file upload/i);
   assert.match(output, /Large uploads above the direct threshold currently require MVC/i);
   assert.match(output, /large_file_upload_unavailable/);
+  assert.match(output, /metabot file upload-large --from alice --file \.\/dist\/metaapp\.zip --content-type application\/zip --verify/);
+  assert.match(output, /metabot file upload-large \.\/dist\/metaapp\.zip --from alice --verify/);
   assert.match(output, /metabot file upload-large --from alice --request-file large-file-request\.json --verify/);
 });
 
@@ -600,7 +604,12 @@ test('runCli prints machine-readable file upload-large help', async () => {
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['file', 'upload-large']);
   assert.equal(output.command, 'metabot file upload-large');
-  assert.ok(output.requiredFlags.some((flag) => flag.flag === '--request-file'));
+  assert.match(output.usage, /metabot file upload-large --file <path>/);
+  assert.match(output.usage, /metabot file upload-large <path>/);
+  assert.match(output.usage, /metabot file upload-large --request-file <path>/);
+  assert.ok(output.optionalFlags.some((flag) => flag.flag === '--file'));
+  assert.ok(output.optionalFlags.some((flag) => flag.flag === '--request-file'));
+  assert.ok(output.optionalFlags.some((flag) => flag.flag === '--content-type'));
   assert.ok(output.optionalFlags.some((flag) => flag.flag === '--verify'));
 });
 
