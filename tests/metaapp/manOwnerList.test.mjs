@@ -134,6 +134,100 @@ test('parseManMetaAppListResponse uses later modify row for the same root pin', 
   assert.equal(parsed.records[0].version, 'v1.1.0');
 });
 
+test('parseManMetaAppListResponse groups modify target paths under the original pin', () => {
+  const modifyPin = `${'f'.repeat(64)}i0`;
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(PIN_A, {
+          title: 'Original Path App',
+          appName: 'Original Path App',
+          runtime: 'browser',
+        }, {
+          timestamp: 1782490000,
+        }),
+        manRecord(modifyPin, {
+          title: 'Modified Path App',
+          appName: 'Modified Path App',
+          runtime: 'browser/linux',
+        }, {
+          operation: 'modify',
+          path: `@${PIN_A}`,
+          timestamp: 1782490001,
+        }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 1);
+  assert.equal(parsed.records[0].pinId, modifyPin);
+  assert.equal(parsed.records[0].firstPinId, PIN_A);
+  assert.equal(parsed.records[0].operation, 'modify');
+  assert.equal(parsed.records[0].title, 'Modified Path App');
+});
+
+test('parseManMetaAppListResponse groups revoke target paths under the original pin', () => {
+  const revokePin = `${'c'.repeat(64)}i0`;
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(PIN_A, { title: 'Path App Before Revoke', appName: 'Path App Before Revoke', runtime: 'browser' }, {
+          timestamp: 1782490000,
+        }),
+        manRecord(revokePin, {}, {
+          operation: 'revoke',
+          path: `@${PIN_A}`,
+          timestamp: 1782490001,
+        }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 0);
+});
+
+test('parseManMetaAppListResponse skips malformed pin ids without aborting valid rows', () => {
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord('not-a-pin', { title: 'Malformed', appName: 'Malformed', runtime: 'browser' }),
+        manRecord(PIN_A, { title: 'Valid App', appName: 'Valid App', runtime: 'browser' }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 1);
+  assert.equal(parsed.records[0].pinId, PIN_A);
+  assert.equal(parsed.records[0].title, 'Valid App');
+});
+
+test('parseManMetaAppListResponse groups original id fields under the original pin', () => {
+  const modifyPin = `${'f'.repeat(64)}i0`;
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(PIN_A, { title: 'Original Id App', appName: 'Original Id App', runtime: 'browser' }, {
+          timestamp: 1782490000,
+        }),
+        manRecord(modifyPin, { title: 'Original Id Modified', appName: 'Original Id Modified', runtime: 'browser/linux' }, {
+          operation: 'modify',
+          original_id: PIN_A,
+          timestamp: 1782490001,
+        }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 1);
+  assert.equal(parsed.records[0].pinId, modifyPin);
+  assert.equal(parsed.records[0].firstPinId, PIN_A);
+  assert.equal(parsed.records[0].title, 'Original Id Modified');
+});
+
 test('parseManMetaAppListResponse prefers explicit owner address fields over address', () => {
   const ownerAddressPin = `${'e'.repeat(64)}i0`;
   const ownerAddressParsed = parseManMetaAppListResponse({

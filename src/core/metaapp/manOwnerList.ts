@@ -1,4 +1,5 @@
 import { buildMetaAppCanonicalUrl } from './share';
+import { normalizeMetaAppPinId } from './pinId';
 
 const DEFAULT_MAN_METAAPP_BASE_URL = 'https://manapi.metaid.io';
 const MAN_METAAPP_BASE_URL_ENV = 'METABOT_METAAPP_MAN_BASE_URL';
@@ -157,8 +158,39 @@ function pickFirstPinId(raw: Record<string, unknown>, pinId: string): string {
       ?? raw.originPinId
       ?? raw.origin_pin_id
       ?? raw.rootPinId
-      ?? raw.root_pin_id,
+      ?? raw.root_pin_id
+      ?? raw.originalId
+      ?? raw.original_id,
   ) || pinId;
+}
+
+function pickExplicitRootPinId(raw: Record<string, unknown>, latest: Record<string, unknown>): string {
+  return normalizeText(
+    latest.firstPinId
+      ?? latest.first_pin_id
+      ?? latest.originPinId
+      ?? latest.origin_pin_id
+      ?? latest.rootPinId
+      ?? latest.root_pin_id
+      ?? latest.originalId
+      ?? latest.original_id
+      ?? raw.firstPinId
+      ?? raw.first_pin_id
+      ?? raw.originPinId
+      ?? raw.origin_pin_id
+      ?? raw.rootPinId
+      ?? raw.root_pin_id
+      ?? raw.originalId
+      ?? raw.original_id,
+  );
+}
+
+function parseTargetPathPinId(raw: Record<string, unknown>, latest: Record<string, unknown>): string {
+  const path = normalizeText(latest.path ?? raw.path);
+  if (!path.startsWith('@')) {
+    return '';
+  }
+  return normalizeMetaAppPinId(path.slice(1)) ?? '';
 }
 
 function pickEffectiveFirstPinId(
@@ -166,18 +198,13 @@ function pickEffectiveFirstPinId(
   latest: Record<string, unknown>,
   pinId: string,
 ): string {
-  return normalizeText(
-    latest.firstPinId
-      ?? latest.first_pin_id
-      ?? latest.originPinId
-      ?? latest.origin_pin_id
-      ?? latest.rootPinId
-      ?? latest.root_pin_id,
-  ) || pickFirstPinId(raw, pinId);
+  return pickExplicitRootPinId(raw, latest)
+    || parseTargetPathPinId(raw, latest)
+    || pickFirstPinId(raw, pinId);
 }
 
 function pickPinId(raw: Record<string, unknown>, latest: Record<string, unknown>): string {
-  return normalizeText(latest.id ?? latest.pinId ?? latest.pin_id ?? raw.id ?? raw.pinId ?? raw.pin_id);
+  return normalizeMetaAppPinId(normalizeText(latest.id ?? latest.pinId ?? latest.pin_id ?? raw.id ?? raw.pinId ?? raw.pin_id)) ?? '';
 }
 
 function pickOwnerAddress(raw: Record<string, unknown>, latest: Record<string, unknown>): string {
