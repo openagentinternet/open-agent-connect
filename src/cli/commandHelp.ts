@@ -1097,25 +1097,60 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['metaapp'],
-    summary: 'MetaApp commands for previewing, publishing, updating, sharing, viewing, and commenting on browser-runnable apps.',
+    summary: 'MetaApp commands for owner management, publishing, project packaging, sharing, viewing, and commenting.',
     usage: 'metabot metaapp <subcommand>',
     subcommands: [
+      { name: 'list', summary: 'List MetaApps owned by one local MetaBot actor.' },
+      { name: 'publish', summary: 'Publish a new MetaApp from a prepared protocol payload file.' },
+      { name: 'update', summary: 'Publish a new version of an existing MetaApp from a payload file.' },
+      { name: 'delete', summary: 'Revoke an owned MetaApp record.' },
       { name: 'preview', summary: 'Inspect a project directory and prepare a local MetaApp preview.' },
-      { name: 'publish', summary: 'Publish a new MetaApp from a project directory.' },
-      { name: 'update', summary: 'Publish a new version of an existing MetaApp.' },
+      { name: 'publish-project', summary: 'Package and publish a project directory as a MetaApp.' },
+      { name: 'update-project', summary: 'Package and publish a new version of an existing MetaApp.' },
       { name: 'share', summary: 'Build a share bundle and optionally announce the MetaApp with simplebuzz.' },
       { name: 'view', summary: 'Open the local MetaApp gallery.' },
       { name: 'comment', summary: 'Post an on-chain comment for a MetaApp.' },
     ],
     examples: [
-      'metabot metaapp publish --project-dir ./dist-site --from alice --chain mvc --confirm',
-      'metabot metaapp update --target-pin-id <pinid> --project-dir ./dist-site --from alice --confirm',
+      'metabot metaapp list --from alice',
+      'metabot metaapp publish --from alice --payload-file metaapp.json --chain mvc --confirm',
+      'metabot metaapp update --from alice --target-pin-id <pinid> --payload-file metaapp.json --confirm',
+      'metabot metaapp delete --from alice --target-pin-id <pinid> --confirm',
+      'metabot metaapp publish-project --project-dir ./dist-site --from alice --chain mvc --confirm',
+      'metabot metaapp update-project --target-pin-id <pinid> --project-dir ./dist-site --from alice --confirm',
       'metabot metaapp share --pin-id <pinid>',
       'metabot metaapp share --pin-id <pinid> --announce --from alice',
       'metabot metaapp view --mine --from alice',
       'metabot metaapp comment --pin-id <pinid> --comment "Great demo" --from alice',
     ],
     optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['metaapp', 'list'],
+    summary: 'List MetaApps owned by one local MetaBot actor with cursor pagination.',
+    usage: 'metabot metaapp list [--from <bot-slug>] [--size <number>] [--cursor <cursor>]',
+    requestShape: {
+      from: 'optional local MetaBot actor',
+      size: 'positive page size, default 12',
+      cursor: 'optional pagination cursor',
+    },
+    successFields: [
+      'records',
+      'nextCursor',
+    ],
+    failureSemantics: [
+      'Fails with not_implemented until a MetaApp list handler is configured.',
+    ],
+    examples: [
+      'metabot metaapp list --from alice',
+      'metabot metaapp list --from alice --size 12 --cursor <cursor>',
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--size', value: '<number>', description: 'Positive page size. Defaults to 12.' },
+      { flag: '--cursor', value: '<cursor>', description: 'Cursor returned by the previous list response.' },
+      HELP_JSON_FLAG,
+    ],
   },
   {
     commandPath: ['metaapp', 'preview'],
@@ -1152,8 +1187,109 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['metaapp', 'publish'],
-    summary: 'Publish a new MetaApp from a project directory through the file-upload-backed MetaApp protocol.',
-    usage: 'metabot metaapp publish --project-dir <path> [--from <bot-slug>] [--manifest-file <path>] [--chain <mvc|btc|opcat>] [--confirm]',
+    summary: 'Publish a new MetaApp from a prepared MetaApp protocol payload file.',
+    usage: 'metabot metaapp publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>] --confirm',
+    requiredFlags: [
+      { flag: '--payload-file', value: '<path>', description: 'JSON MetaApp protocol payload file.' },
+      { flag: '--confirm', description: 'Confirm the on-chain publish write.' },
+    ],
+    requestShape: {
+      payload: 'fields parsed from --payload-file',
+      from: 'optional local MetaBot actor',
+      network: 'optional write-chain override: mvc, btc, doge, or opcat',
+      confirm: 'always true when dispatched',
+    },
+    successFields: [
+      'pinId',
+      'firstPinId',
+      'metawebUrl',
+      'localUiUrl',
+    ],
+    failureSemantics: [
+      'Requires --confirm before dispatching the publish handler.',
+      'Rejects --project-dir and directs callers to metabot metaapp publish-project.',
+      'Fails with not_implemented until a MetaApp publish handler is configured.',
+    ],
+    examples: [
+      'metabot metaapp publish --from alice --payload-file metaapp.json --confirm',
+      'metabot metaapp publish --from alice --payload-file metaapp.json --chain mvc --confirm',
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      CHAIN_WRITE_FLAG,
+      HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['metaapp', 'update'],
+    summary: 'Publish a new version of an existing MetaApp from a prepared protocol payload file.',
+    usage: 'metabot metaapp update [--from <bot-slug>] --target-pin-id <pinid> --payload-file <path> [--chain <mvc|btc|doge|opcat>] --confirm',
+    requiredFlags: [
+      { flag: '--target-pin-id', value: '<pinid>', description: 'Existing MetaApp pin to modify.' },
+      { flag: '--payload-file', value: '<path>', description: 'JSON MetaApp protocol payload file.' },
+      { flag: '--confirm', description: 'Confirm the on-chain update write.' },
+    ],
+    requestShape: {
+      targetPinId: 'existing MetaApp pin id',
+      payload: 'fields parsed from --payload-file',
+      from: 'optional local MetaBot actor',
+      network: 'optional write-chain override: mvc, btc, doge, or opcat',
+      confirm: 'always true when dispatched',
+    },
+    successFields: [
+      'pinId',
+      'firstPinId',
+      'metawebUrl',
+      'localUiUrl',
+    ],
+    failureSemantics: [
+      'Requires --confirm before dispatching the update handler.',
+      'Rejects --project-dir and directs callers to metabot metaapp update-project.',
+      'Fails with not_implemented until a MetaApp update handler is configured.',
+    ],
+    examples: [
+      'metabot metaapp update --from alice --target-pin-id <pinid> --payload-file metaapp.json --confirm',
+      'metabot metaapp update --from alice --target-pin-id <pinid> --payload-file metaapp.json --chain opcat --confirm',
+    ],
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      CHAIN_WRITE_FLAG,
+      HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['metaapp', 'delete'],
+    summary: 'Revoke an owned MetaApp record.',
+    usage: 'metabot metaapp delete [--from <bot-slug>] --target-pin-id <pinid> --confirm [--chain <mvc|btc|doge|opcat>]',
+    requiredFlags: [
+      { flag: '--target-pin-id', value: '<pinid>', description: 'Existing MetaApp pin to revoke.' },
+      { flag: '--confirm', description: 'Confirm the on-chain delete write.' },
+    ],
+    requestShape: {
+      targetPinId: 'existing MetaApp pin id',
+      from: 'optional local MetaBot actor',
+      network: 'optional write-chain override: mvc, btc, doge, or opcat',
+      confirm: 'always true when dispatched',
+    },
+    successFields: [
+      'revokedPinId',
+      'pinId',
+      'txids',
+    ],
+    failureSemantics: [
+      'Requires --confirm before dispatching the delete handler.',
+      'Fails with not_implemented until a MetaApp delete handler is configured.',
+    ],
+    examples: [
+      'metabot metaapp delete --from alice --target-pin-id <pinid> --confirm',
+      'metabot metaapp delete --from alice --target-pin-id <pinid> --chain mvc --confirm',
+    ],
+    optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['metaapp', 'publish-project'],
+    summary: 'Package and publish a project directory through the file-upload-backed MetaApp protocol.',
+    usage: 'metabot metaapp publish-project --project-dir <path> [--from <bot-slug>] [--manifest-file <path>] [--chain <mvc|btc|opcat>] [--confirm]',
     requiredFlags: [
       { flag: '--project-dir', value: '<path>', description: 'Project directory to package and publish.' },
     ],
@@ -1175,12 +1311,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     failureSemantics: [
       'Without --confirm, returns the rendered preview data plus payloadPreview JSON and does not write chain data.',
       'Uses the file upload chain set; DOGE is not supported for file upload.',
-      'Fails with not_implemented until a MetaApp publish handler is configured.',
+      'Fails with not_implemented until a MetaApp publish-project handler is configured.',
     ],
     examples: [
-      'metabot metaapp publish --project-dir ./dist-site --from alice --json',
-      'metabot metaapp publish --project-dir ./dist-site --from alice --chain mvc --confirm',
-      'metabot metaapp publish --project-dir ./dist-site --from alice --manifest-file metaapp.json --confirm',
+      'metabot metaapp publish-project --project-dir ./dist-site --from alice --json',
+      'metabot metaapp publish-project --project-dir ./dist-site --from alice --chain mvc --confirm',
+      'metabot metaapp publish-project --project-dir ./dist-site --from alice --manifest-file metaapp.json --confirm',
     ],
     optionalFlags: [
       FROM_BOT_FLAG,
@@ -1191,9 +1327,9 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
   },
   {
-    commandPath: ['metaapp', 'update'],
-    summary: 'Publish a new version of an existing MetaApp through the file-upload-backed MetaApp protocol.',
-    usage: 'metabot metaapp update --target-pin-id <pinid> --project-dir <path> [--from <bot-slug>] [--manifest-file <path>] [--chain <mvc|btc|opcat>] [--confirm]',
+    commandPath: ['metaapp', 'update-project'],
+    summary: 'Package and publish a new project-directory version of an existing MetaApp.',
+    usage: 'metabot metaapp update-project --target-pin-id <pinid> --project-dir <path> [--from <bot-slug>] [--manifest-file <path>] [--chain <mvc|btc|opcat>] [--confirm]',
     requiredFlags: [
       { flag: '--target-pin-id', value: '<pinid>', description: 'Existing MetaApp pin to modify.' },
       { flag: '--project-dir', value: '<path>', description: 'Project directory to package and publish as the next version.' },
@@ -1217,12 +1353,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     failureSemantics: [
       'Without --confirm, returns the rendered preview data plus payloadPreview JSON and does not write chain data.',
       'Uses the file upload chain set; DOGE is not supported for file upload.',
-      'Fails with not_implemented until a MetaApp update handler is configured.',
+      'Fails with not_implemented until a MetaApp update-project handler is configured.',
     ],
     examples: [
-      'metabot metaapp update --target-pin-id <pinid> --project-dir ./dist-site --from alice --json',
-      'metabot metaapp update --target-pin-id <pinid> --project-dir ./dist-site --from alice --confirm',
-      'metabot metaapp update --target-pin-id <pinid> --project-dir ./dist-site --from alice --chain opcat --confirm',
+      'metabot metaapp update-project --target-pin-id <pinid> --project-dir ./dist-site --from alice --json',
+      'metabot metaapp update-project --target-pin-id <pinid> --project-dir ./dist-site --from alice --confirm',
+      'metabot metaapp update-project --target-pin-id <pinid> --project-dir ./dist-site --from alice --chain opcat --confirm',
     ],
     optionalFlags: [
       FROM_BOT_FLAG,

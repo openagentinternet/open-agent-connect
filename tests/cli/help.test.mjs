@@ -87,13 +87,13 @@ test('runCli prints metaapp group help with all leaf commands', async () => {
   assert.equal(exitCode, 0);
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot metaapp <subcommand>/m);
-  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+  for (const command of ['list', 'publish', 'update', 'delete', 'preview', 'publish-project', 'update-project', 'share', 'view', 'comment']) {
     assert.match(output, new RegExp(`\\s+${command}\\s+`));
   }
 });
 
 test('runCli prints metaapp leaf command text help', async () => {
-  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+  for (const command of ['list', 'publish', 'update', 'delete', 'preview', 'publish-project', 'update-project', 'share', 'view', 'comment']) {
     const stdout = [];
 
     const exitCode = await runCli(['metaapp', command, '--help'], {
@@ -124,7 +124,7 @@ test('runCli prints machine-readable metaapp publish help', async () => {
 });
 
 test('runCli prints machine-readable help for every metaapp leaf command', async () => {
-  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+  for (const command of ['list', 'publish', 'update', 'delete', 'preview', 'publish-project', 'update-project', 'share', 'view', 'comment']) {
     const stdout = [];
 
     const exitCode = await runCli(['metaapp', command, '--help', '--json'], {
@@ -140,22 +140,22 @@ test('runCli prints machine-readable help for every metaapp leaf command', async
   }
 });
 
-test('runCli prints metaapp publish and update help with actor, file-upload chain, and confirmation flags', async () => {
-  for (const command of ['publish', 'update']) {
-    const stdout = [];
+test('runCli prints metaapp owner-management and project packaging help usages', async () => {
+  const stdout = [];
 
+  for (const command of ['publish', 'publish-project', 'delete']) {
     const exitCode = await runCli(['metaapp', command, '--help'], {
       stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
       stderr: { write: () => true },
     });
 
     assert.equal(exitCode, 0);
-    const output = stdout.join('');
-    assert.match(output, /--from <bot-slug>/);
-    assert.match(output, /--chain <mvc\|btc\|opcat>/);
-    assert.match(output, /--confirm/);
-    assert.match(output, /DOGE is not supported for file upload/i);
   }
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot metaapp publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\] --confirm/m);
+  assert.match(output, /^Usage:\s+metabot metaapp publish-project --project-dir <path>/m);
+  assert.match(output, /^Usage:\s+metabot metaapp delete \[--from <bot-slug>\] --target-pin-id <pinid> --confirm/m);
 });
 
 test('runCli prints metaapp share and comment help with write-chain behavior', async () => {
