@@ -3095,6 +3095,55 @@ test('bot page runtime modal renders healthy and detected runtimes only', () => 
   assert.match(html, /runtime-health-dot runtime-health-healthy/);
 });
 
+test('bot page runtime summary prefers a healthy runtime for the selected provider', () => {
+  const summary = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-runtime-summary]': summary,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'bot-60';
+  context.state.profiles = [{
+    slug: 'bot-60',
+    name: 'bot-60',
+    primaryProvider: 'codex',
+    fallbackProvider: 'cursor',
+  }];
+  context.state.runtimes = [
+    {
+      id: 'llm_codex_/Applications/Codex.app/Contents/Resources/codex',
+      provider: 'codex',
+      displayName: 'Codex (OpenAI)',
+      binaryPath: '/Applications/Codex.app/Contents/Resources/codex',
+      version: '0.142.2',
+      health: 'unavailable',
+    },
+    {
+      id: 'llm_codex_/opt/homebrew/bin/codex',
+      provider: 'codex',
+      displayName: 'Codex (OpenAI)',
+      binaryPath: '/opt/homebrew/bin/codex',
+      version: '0.135.0',
+      health: 'healthy',
+    },
+    {
+      id: 'llm_cursor_/Users/tusm/.local/bin/cursor-agent',
+      provider: 'cursor',
+      displayName: 'Cursor Agent',
+      binaryPath: '/Users/tusm/.local/bin/cursor-agent',
+      health: 'healthy',
+    },
+  ];
+
+  context.renderRuntimeSummary();
+
+  assert.match(summary.innerHTML, /Codex \(OpenAI\)/);
+  assert.match(summary.innerHTML, /codex · healthy · v0\.135\.0/);
+  assert.doesNotMatch(summary.innerHTML, /codex · unavailable · v0\.142\.2/);
+});
+
 test('bot page runtime Test action updates healthy state and refreshes related views', async () => {
   const response = deferred();
   const requests = [];

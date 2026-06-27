@@ -137,7 +137,23 @@ function readFileAsDataUrl(file){
 }
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
-function providerRuntime(provider){return state.runtimes.find(function(r){return r.provider===provider})||null}
+function runtimeHealthRank(runtime){var health=runtime&&runtime.health;return health==='healthy'?3:(health==='detected'?2:(health==='unavailable'?0:1))}
+function runtimeActivityMs(runtime){
+  var values=[runtime&&runtime.healthCheckedAt,runtime&&runtime.lastSeenAt,runtime&&runtime.updatedAt,runtime&&runtime.createdAt];
+  return values.reduce(function(max,value){var parsed=Date.parse(value||'');return Number.isFinite(parsed)?Math.max(max,parsed):max},0);
+}
+function compareProviderRuntime(left,right){
+  var healthDelta=runtimeHealthRank(right)-runtimeHealthRank(left);
+  if(healthDelta)return healthDelta;
+  var activityDelta=runtimeActivityMs(right)-runtimeActivityMs(left);
+  if(activityDelta)return activityDelta;
+  return String(left&&left.id||'').localeCompare(String(right&&right.id||''));
+}
+function providerRuntime(provider){
+  var rows=state.runtimes.filter(function(r){return r.provider===provider});
+  rows.sort(compareProviderRuntime);
+  return rows[0]||null;
+}
 function providerLogoPath(provider){var rt=providerRuntime(provider);return rt&&rt.logoPath?rt.logoPath:'/ui/assets/platforms/generic.svg'}
 function providerIconMarkup(provider){
   var key=String(provider||'generic');
