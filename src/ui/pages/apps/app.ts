@@ -112,6 +112,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     cursor: '',
     nextCursor: '',
     loadingToken: 0,
+    loading: false,
     botMenuOpen: false,
   };
   const elements = {
@@ -143,6 +144,22 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+  const uiText = (key, fallback, replacements) => {
+    let text = String(fallback == null ? '' : fallback);
+    try {
+      if (typeof window !== 'undefined' && window.__oacLocalUiI18n && typeof window.__oacLocalUiI18n.t === 'function') {
+        const translated = window.__oacLocalUiI18n.t(key, replacements || {});
+        if (typeof translated === 'string' && translated && translated !== key) {
+          return translated;
+        }
+      }
+    } catch {}
+    for (const [name, value] of Object.entries(replacements || {})) {
+      text = text.replace(new RegExp('\\\\{' + name + '\\\\}', 'g'), String(value));
+    }
+    return text;
+  };
+
   const showNotice = (kind, title, body) => {
     if (!elements.notice) return;
     elements.notice.hidden = false;
@@ -158,7 +175,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     const response = await fetch(url, options);
     const payload = await response.json();
     if (!response.ok || !payload || payload.ok === false || payload.state === 'failed') {
-      throw new Error(payload && payload.message ? payload.message : UI_TEXT.requestFailed);
+      throw new Error(payload && payload.message ? payload.message : uiText('apps.requestFailed', UI_TEXT.requestFailed));
     }
     return payload.data || payload;
   };
@@ -185,7 +202,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
   const profileLabel = (profile) => normalizeText(profile && profile.name)
     || profileSlug(profile)
     || normalizeText(profile && profile.globalMetaId)
-    || UI_TEXT.botFallback;
+    || uiText('apps.botFallback', UI_TEXT.botFallback);
 
   const profileAvatar = (profile) => {
     const avatar = profile && profile.avatar;
@@ -200,7 +217,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     const current = selected
       ? '<span class="apps-bot-avatar">' + escapeHtml(profileAvatar(selected)) + '</span>'
         + '<span class="apps-bot-main"><strong>' + escapeHtml(profileLabel(selected)) + '</strong><span>' + escapeHtml(normalizeText(selected.globalMetaId) || state.selectedSlug) + '</span></span>'
-      : '<span class="apps-bot-main"><strong>' + escapeHtml(UI_TEXT.noLocalBotAvailable) + '</strong></span>';
+      : '<span class="apps-bot-main"><strong>' + escapeHtml(uiText('apps.noLocalBotAvailable', UI_TEXT.noLocalBotAvailable)) + '</strong></span>';
     elements.botPicker.innerHTML =
       '<button class="apps-bot-trigger" type="button" data-apps-bot-trigger aria-expanded="' + (state.botMenuOpen ? 'true' : 'false') + '"' + (state.profiles.length ? '' : ' disabled') + '>' +
         current +
@@ -219,13 +236,13 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
 
   const renderEmpty = () => {
     if (!elements.grid) return;
-    elements.grid.innerHTML = '<div class="apps-empty"><strong>' + escapeHtml(UI_TEXT.emptyTitle) + '</strong><p>' + escapeHtml(UI_TEXT.emptyMessage) + '</p></div>';
+    elements.grid.innerHTML = '<div class="apps-empty"><strong>' + escapeHtml(uiText('apps.emptyTitle', UI_TEXT.emptyTitle)) + '</strong><p>' + escapeHtml(uiText('apps.emptyMessage', UI_TEXT.emptyMessage)) + '</p></div>';
   };
 
   const renderRecordCard = (record) => {
     const pinId = recordPinId(record);
     const disabled = record && record.disabled === true;
-    const title = normalizeText(record && (record.title || record.appName)) || UI_TEXT.untitledMetaApp;
+    const title = normalizeText(record && (record.title || record.appName)) || uiText('apps.untitledMetaApp', UI_TEXT.untitledMetaApp);
     const subtitle = [normalizeText(record && record.version), normalizeText(record && record.runtime)].filter(Boolean).join(' / ');
     const intro = normalizeText(record && record.intro);
     const tags = Array.isArray(record && record.tags) ? record.tags.map(normalizeText).filter(Boolean).slice(0, 4) : [];
@@ -233,23 +250,38 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     return '<article class="apps-card" data-apps-card="' + escapeHtml(pinId) + '" tabindex="0">' +
       '<div class="apps-card-cover">' +
         '<span class="apps-card-icon">' + escapeHtml(initials) + '</span>' +
-        '<span class="apps-state-pill' + (disabled ? ' disabled' : '') + '">' + escapeHtml(disabled ? UI_TEXT.disabled : UI_TEXT.runnable) + '</span>' +
+        '<span class="apps-state-pill' + (disabled ? ' disabled' : '') + '">' + escapeHtml(disabled ? uiText('apps.disabled', UI_TEXT.disabled) : uiText('apps.runnable', UI_TEXT.runnable)) + '</span>' +
       '</div>' +
       '<div class="apps-card-body">' +
         '<div class="apps-card-title">' +
           '<h3>' + escapeHtml(title) + '</h3>' +
           '<p>' + escapeHtml(subtitle) + '</p>' +
         '</div>' +
-        '<div class="apps-pin-line"><code>' + escapeHtml(pinId) + '</code><button class="apps-copy-btn" type="button" data-apps-copy-pin="' + escapeHtml(pinId) + '" aria-label="' + escapeHtml(UI_TEXT.copyPinId) + '">' + escapeHtml(UI_TEXT.copyPinId) + '</button></div>' +
+        '<div class="apps-pin-line"><code>' + escapeHtml(pinId) + '</code><button class="apps-copy-btn" type="button" data-apps-copy-pin="' + escapeHtml(pinId) + '" aria-label="' + escapeHtml(uiText('apps.copyPinId', UI_TEXT.copyPinId)) + '">' + escapeHtml(uiText('apps.copyPinId', UI_TEXT.copyPinId)) + '</button></div>' +
         '<p class="apps-card-intro">' + escapeHtml(intro) + '</p>' +
         '<div class="apps-tags">' + tags.map((tag) => '<span>' + escapeHtml(tag) + '</span>').join('') + '</div>' +
         '<div class="apps-card-actions">' +
-          '<button class="btn btn-primary" type="button" data-apps-run="' + escapeHtml(pinId) + '"' + (disabled ? ' disabled' : '') + '>' + escapeHtml(UI_TEXT.run) + '</button>' +
-          '<button class="btn" type="button" data-apps-share="' + escapeHtml(pinId) + '">' + escapeHtml(UI_TEXT.share) + '</button>' +
-          '<button class="btn" type="button" data-apps-detail="' + escapeHtml(pinId) + '">' + escapeHtml(UI_TEXT.details) + '</button>' +
+          '<button class="btn btn-primary" type="button" data-apps-run="' + escapeHtml(pinId) + '"' + (disabled ? ' disabled' : '') + '>' + escapeHtml(uiText('apps.run', UI_TEXT.run)) + '</button>' +
+          '<button class="btn" type="button" data-apps-share="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.share', UI_TEXT.share)) + '</button>' +
+          '<button class="btn" type="button" data-apps-detail="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.details', UI_TEXT.details)) + '</button>' +
         '</div>' +
       '</div>' +
     '</article>';
+  };
+
+  const renderPaginationControls = () => {
+    const hasPrevious = state.cursorStack.length > 1;
+    const hasNext = Boolean(state.nextCursor);
+    if (elements.refresh) elements.refresh.disabled = state.loading;
+    if (elements.prev) {
+      elements.prev.hidden = !hasPrevious;
+      elements.prev.disabled = state.loading || !hasPrevious;
+    }
+    if (elements.next) {
+      elements.next.hidden = !hasNext;
+      elements.next.disabled = state.loading || !hasNext;
+    }
+    if (elements.pageLabel) elements.pageLabel.textContent = uiText('apps.pageSizeLabel', UI_TEXT.pageSizeLabel);
   };
 
   const renderGrid = () => {
@@ -260,15 +292,12 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
       elements.grid.innerHTML = state.records.map(renderRecordCard).join('');
     }
     if (elements.gridCount) elements.gridCount.textContent = String(state.records.length);
-    if (elements.prev) {
-      elements.prev.hidden = state.cursorStack.length <= 1;
-      elements.prev.disabled = state.cursorStack.length <= 1;
-    }
-    if (elements.next) {
-      elements.next.hidden = !state.nextCursor;
-      elements.next.disabled = !state.nextCursor;
-    }
-    if (elements.pageLabel) elements.pageLabel.textContent = UI_TEXT.pageSizeLabel;
+    renderPaginationControls();
+  };
+
+  const setLoading = (loading) => {
+    state.loading = loading;
+    renderPaginationControls();
   };
 
   const loadProfiles = async () => {
@@ -285,27 +314,36 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
       state.records = [];
       state.nextCursor = '';
       renderGrid();
-      throw new Error(UI_TEXT.noLocalBotAvailable);
+      throw new Error(uiText('apps.noLocalBotAvailable', UI_TEXT.noLocalBotAvailable));
     }
     const token = ++state.loadingToken;
     const params = new URLSearchParams();
     params.set('from', state.selectedSlug);
     params.set('size', String(PAGE_SIZE));
     if (cursor) params.set('cursor', cursor);
-    const data = await fetchJson(APPS_API_BASE + '?' + params.toString());
-    if (token !== state.loadingToken) return;
-    state.records = Array.isArray(data && data.records) ? data.records : [];
-    state.cursor = cursor || '';
-    state.nextCursor = normalizeText(data && data.nextCursor);
-    hideNotice();
-    renderGrid();
+    setLoading(true);
+    try {
+      const data = await fetchJson(APPS_API_BASE + '?' + params.toString());
+      if (token !== state.loadingToken) return false;
+      state.records = Array.isArray(data && data.records) ? data.records : [];
+      state.cursor = cursor || '';
+      state.nextCursor = normalizeText(data && data.nextCursor);
+      hideNotice();
+      renderGrid();
+      return true;
+    } finally {
+      if (token === state.loadingToken) {
+        setLoading(false);
+      }
+    }
   };
 
   const refreshApps = async () => {
+    if (state.loading) return;
     try {
       await loadApps(state.cursor);
     } catch (error) {
-      showNotice('error', UI_TEXT.loadErrorTitle, error && error.message ? error.message : String(error));
+      showNotice('error', uiText('apps.loadErrorTitle', UI_TEXT.loadErrorTitle), error && error.message ? error.message : String(error));
     }
   };
 
@@ -334,7 +372,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
       await loadProfiles();
       await loadApps('');
     } catch (error) {
-      showNotice('error', UI_TEXT.loadErrorTitle, error && error.message ? error.message : String(error));
+      showNotice('error', uiText('apps.loadErrorTitle', UI_TEXT.loadErrorTitle), error && error.message ? error.message : String(error));
     }
   };
 
@@ -358,15 +396,15 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
       try {
         await selectBot(target.getAttribute('data-apps-bot-option') || '');
       } catch (error) {
-        showNotice('error', UI_TEXT.loadErrorTitle, error && error.message ? error.message : String(error));
+        showNotice('error', uiText('apps.loadErrorTitle', UI_TEXT.loadErrorTitle), error && error.message ? error.message : String(error));
       }
       return;
     }
     if (target.matches('[data-apps-copy-pin]')) {
       const pinId = target.getAttribute('data-apps-copy-pin') || '';
       await navigator.clipboard?.writeText(pinId);
-      target.textContent = UI_TEXT.copied;
-      setTimeout(() => { target.textContent = UI_TEXT.copyPinId; }, 1000);
+      target.textContent = uiText('apps.copied', UI_TEXT.copied);
+      setTimeout(() => { target.textContent = uiText('apps.copyPinId', UI_TEXT.copyPinId); }, 1000);
       return;
     }
     if (target.matches('[data-apps-run]') && !target.disabled) {
@@ -377,25 +415,38 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
 
   if (elements.refresh) elements.refresh.addEventListener('click', refreshApps);
   if (elements.next) elements.next.addEventListener('click', async () => {
-    if (!state.nextCursor) return;
+    if (state.loading || !state.nextCursor) return;
     const nextCursor = state.nextCursor;
-    state.cursorStack.push(nextCursor);
     try {
-      await loadApps(nextCursor);
+      const loaded = await loadApps(nextCursor);
+      if (loaded) {
+        state.cursorStack.push(nextCursor);
+        renderPaginationControls();
+      }
     } catch (error) {
-      state.cursorStack.pop();
-      showNotice('error', UI_TEXT.loadErrorTitle, error && error.message ? error.message : String(error));
+      showNotice('error', uiText('apps.loadErrorTitle', UI_TEXT.loadErrorTitle), error && error.message ? error.message : String(error));
     }
   });
   if (elements.prev) elements.prev.addEventListener('click', async () => {
-    if (state.cursorStack.length <= 1) return;
-    state.cursorStack.pop();
+    if (state.loading || state.cursorStack.length <= 1) return;
+    const previousCursor = state.cursorStack[state.cursorStack.length - 2] || '';
     try {
-      await loadApps(state.cursorStack[state.cursorStack.length - 1] || '');
+      const loaded = await loadApps(previousCursor);
+      if (loaded) {
+        state.cursorStack.pop();
+        renderPaginationControls();
+      }
     } catch (error) {
-      showNotice('error', UI_TEXT.loadErrorTitle, error && error.message ? error.message : String(error));
+      showNotice('error', uiText('apps.loadErrorTitle', UI_TEXT.loadErrorTitle), error && error.message ? error.message : String(error));
     }
   });
+
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('oac:i18n-changed', () => {
+      renderBotPicker();
+      renderGrid();
+    });
+  }
 
   initialize();
   if (typeof window !== 'undefined') {

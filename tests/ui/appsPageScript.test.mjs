@@ -8,6 +8,16 @@ const { buildAppsPageDefinition } = require('../../dist/ui/pages/apps/app.js');
 
 const PIN = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function waitFor(condition, label) {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -137,6 +147,7 @@ function profilesPayload(profiles = [
 
 function createAppsPageContext(options = {}) {
   const documentListeners = new Map();
+  const windowListeners = new Map();
   const locationUrl = new URL(options.url ?? 'http://localhost/ui/apps');
   const body = new FakeElement();
   const elements = {
@@ -199,6 +210,16 @@ function createAppsPageContext(options = {}) {
         },
       },
     },
+    addEventListener: (eventName, handler) => {
+      const listeners = windowListeners.get(eventName) ?? [];
+      listeners.push(handler);
+      windowListeners.set(eventName, listeners);
+    },
+    dispatchEvent: (event) => {
+      for (const handler of windowListeners.get(event.type) ?? []) {
+        handler(event);
+      }
+    },
     setTimeout,
     clearTimeout,
   };
@@ -218,6 +239,9 @@ function createAppsPageContext(options = {}) {
     locationUrl,
     waitFor: (condition, label) => waitFor(condition, label),
     run: () => vm.runInNewContext(buildAppsPageDefinition().script, context),
+    dispatchWindowEvent: (eventName) => {
+      context.dispatchEvent({ type: eventName });
+    },
     clickElement: async (selector) => {
       const element = elements[selector];
       await element.dispatchEvent('click', { target: element });
@@ -339,4 +363,105 @@ test('apps page changing Bot reloads first Apps page for the new Bot', async () 
   assert.equal(params.get('from'), 'bob');
   assert.equal(params.get('size'), '12');
   assert.equal(params.get('cursor'), null);
+});
+
+test('apps page ignores rapid duplicate Next clicks and Previous returns to the first page', async () => {
+  const pageTwo = deferred();
+  const context = createAppsPageContext({
+    fetchApps: (url) => {
+      const cursor = new URL(url, 'http://localhost').searchParams.get('cursor');
+      if (cursor === 'cursor-2') {
+        return pageTwo.promise;
+      }
+      return appsPayload({
+        records: [{
+          pinId: PIN,
+          title: 'Page One',
+          appName: 'Page One',
+          disabled: false,
+        }],
+        nextCursor: 'cursor-2',
+        total: 24,
+      });
+    },
+  });
+
+  context.run();
+
+  await context.waitFor(() => context.elements['[data-apps-page-next]'].hidden === false, 'next button visible');
+  const firstNext = context.clickElement('[data-apps-page-next]');
+  const secondNext = context.clickElement('[data-apps-page-next]');
+
+  await context.waitFor(
+    () => context.fetchUrls.filter((url) => new URL(url, 'http://localhost').searchParams.get('cursor') === 'cursor-2').length >= 1,
+    'first next-cursor request',
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    context.fetchUrls.filter((url) => new URL(url, 'http://localhost').searchParams.get('cursor') === 'cursor-2').length,
+    1,
+  );
+
+  pageTwo.resolve(appsPayload({
+    records: [{
+      pinId: PIN,
+      title: 'Page Two',
+      appName: 'Page Two',
+      disabled: false,
+    }],
+    nextCursor: '',
+    total: 24,
+  }));
+  await Promise.all([firstNext, secondNext]);
+  await context.waitFor(() => context.elements['[data-apps-page-prev]'].hidden === false, 'previous button visible');
+
+  const requestCountBeforePrevious = context.fetchUrls.filter((url) => url.startsWith('/api/apps?')).length;
+  await context.clickElement('[data-apps-page-prev]');
+
+  await context.waitFor(
+    () => context.fetchUrls.filter((url) => url.startsWith('/api/apps?')).length > requestCountBeforePrevious,
+    'previous page request',
+  );
+  const previousUrl = context.fetchUrls.findLast((url) => url.startsWith('/api/apps?'));
+  assert.equal(new URL(previousUrl, 'http://localhost').searchParams.get('cursor'), null);
+});
+
+test('apps page re-renders dynamic labels after local UI language changes', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Dynamic Labels',
+        appName: 'Dynamic Labels',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Dynamic Labels'), 'render app card');
+  assert.match(context.elements['[data-apps-grid]'].innerHTML, /Runnable/);
+  assert.match(context.elements['[data-apps-grid]'].innerHTML, />Run</);
+
+  context.context.__oacLocalUiI18n = {
+    t: (key) => ({
+      'apps.runnable': 'Runnable translated',
+      'apps.run': 'Run translated',
+      'apps.share': 'Share translated',
+      'apps.details': 'Details translated',
+      'apps.copyPinId': 'Copy translated',
+      'apps.pageSizeLabel': 'Size translated',
+    })[key] || key,
+  };
+  context.dispatchWindowEvent('oac:i18n-changed');
+
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Run translated'), 'rerender translated run label');
+  assert.match(context.elements['[data-apps-grid]'].innerHTML, /Runnable translated/);
+  assert.match(context.elements['[data-apps-grid]'].innerHTML, /Copy translated/);
+  assert.match(context.elements['[data-apps-grid]'].innerHTML, /Share translated/);
+  assert.match(context.elements['[data-apps-grid]'].innerHTML, /Details translated/);
+  assert.equal(context.elements['[data-apps-page-label]'].textContent, 'Size translated');
 });
