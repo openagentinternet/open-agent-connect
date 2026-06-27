@@ -57,13 +57,21 @@ function migrationError(message: string): MetabotCommandResult<never> {
   return commandFailed('invalid_flag', message);
 }
 
-function readPositiveIntegerFlag(args: string[], flag: string, fallback: number): number {
-  const raw = readFlagValue(args, flag);
-  if (!raw) {
-    return fallback;
+function readPositiveIntegerFlag(args: string[], flag: string, fallback: number): {
+  ok: true;
+  value: number;
+} | { ok: false; result: MetabotCommandResult<never> } {
+  const index = args.indexOf(flag);
+  if (index === -1) {
+    return { ok: true, value: fallback };
   }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+
+  const raw = args[index + 1];
+  if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) {
+    return { ok: false, result: commandInvalidFlag(`${flag} must be a positive integer.`) };
+  }
+
+  return { ok: true, value: Number.parseInt(raw, 10) };
 }
 
 export async function runMetaAppCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
@@ -89,6 +97,11 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
   }
 
   if (subcommand === 'list') {
+    const size = readPositiveIntegerFlag(args, '--size', 12);
+    if (!size.ok) {
+      return size.result;
+    }
+
     const handler = context.dependencies.metaapp?.list;
     if (!handler) {
       return commandNotImplemented('list');
@@ -98,7 +111,7 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
     const cursor = readOptionalFlag(args, '--cursor');
     return handler({
       ...(from ? { from } : {}),
-      size: readPositiveIntegerFlag(args, '--size', 12),
+      size: size.value,
       ...(cursor ? { cursor } : {}),
     });
   }

@@ -211,7 +211,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'daemon', summary: 'Start or stop the local MetaBot daemon process.' },
     { name: 'file', summary: 'Upload local files to MetaWeb.' },
     { name: 'buzz', summary: 'Publish simplebuzz posts to MetaWeb.' },
-    { name: 'metaapp', summary: 'Preview, publish, update, share, view, and comment on MetaApps.' },
+    { name: 'metaapp', summary: 'Manage MetaApp owner list/delete, payload publishing, project packaging, sharing, viewing, and commenting.' },
     { name: 'chain', summary: 'Write arbitrary MetaID tuples and protocol payloads on-chain.' },
     { name: 'wallet', summary: 'Inspect local wallet balances across supported chains.' },
     { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },

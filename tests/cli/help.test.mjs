@@ -30,6 +30,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+system\s+/m);
   assert.match(output, /^\s+loom\s+/m);
   assert.match(output, /^\s+metaapp\s+/m);
+  assert.match(output, /^\s+metaapp\s+.*owner list\/delete.*project packaging/m);
   assert.doesNotMatch(output, /^\s+master\s+/m);
   assert.doesNotMatch(output, /^\s+evolution\s+/m);
   assert.equal(output.includes('"ok"'), false);
@@ -55,6 +56,11 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'browser'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'metaapp'));
+  assert.ok(output.subcommands.some((entry) => (
+    entry.name === 'metaapp'
+    && /owner list\/delete/.test(entry.summary)
+    && /project packaging/.test(entry.summary)
+  )));
   assert.equal(output.subcommands.some((entry) => entry.name === 'master'), false);
   assert.equal(output.subcommands.some((entry) => entry.name === 'evolution'), false);
 });

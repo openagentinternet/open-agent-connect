@@ -84,6 +84,29 @@ test('runCli dispatches `metabot metaapp list` with owner pagination input', asy
   assert.deepEqual(calls, [{ from: 'alice', size: 12, cursor: 'cursor-1' }]);
 });
 
+test('runCli rejects invalid `metabot metaapp list --size` values before handler lookup', async () => {
+  for (const size of ['0', 'abc', '12abc']) {
+    let listCalled = false;
+    const { exitCode, envelope } = await runMetaAppCli([
+      'metaapp',
+      'list',
+      '--size',
+      size,
+    ], {
+      metaapp: {
+        list: async () => {
+          listCalled = true;
+          return commandSuccess({ shouldNotRun: true });
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(envelope.code, 'invalid_flag');
+    assert.equal(listCalled, false);
+  }
+});
+
 test('runCli dispatches `metabot metaapp delete` only with confirmation', async () => {
   const pinId = 'b'.repeat(64) + 'i0';
   const calls = [];
