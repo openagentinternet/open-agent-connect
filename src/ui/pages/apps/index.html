@@ -16,8 +16,7 @@
       .apps-workspace-card {
         background: rgba(255, 255, 255, 0.94);
         border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow);
+        border-radius: 8px;
         overflow: hidden;
       }
       .apps-toolbar {
@@ -90,7 +89,11 @@
         color: var(--muted);
         font: 13px var(--sans);
         padding: 4px 8px 4px 10px;
+        cursor: pointer;
+      }
+      .apps-bot-trigger:disabled {
         cursor: not-allowed;
+        opacity: 0.65;
       }
       .apps-bot-trigger span:first-child {
         min-width: 0;
@@ -98,9 +101,90 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .apps-bot-main {
+        min-width: 0;
+        display: grid;
+        gap: 1px;
+        text-align: left;
+      }
+      .apps-bot-main strong,
+      .apps-bot-main span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .apps-bot-main strong {
+        color: var(--text);
+        font-size: 13px;
+      }
+      .apps-bot-main span {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+      .apps-bot-avatar {
+        width: 24px;
+        height: 24px;
+        display: inline-grid;
+        place-items: center;
+        flex: 0 0 auto;
+        border: 1px solid var(--border2);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--green);
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+      }
       .apps-bot-chevron {
         color: var(--dim);
         font-size: 11px;
+      }
+      .apps-bot-menu {
+        position: absolute;
+        z-index: 20;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        display: grid;
+        gap: 4px;
+        max-height: min(320px, 52vh);
+        overflow: auto;
+        padding: 6px;
+        border: 1px solid var(--border2);
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+      .apps-bot-menu[hidden] {
+        display: none;
+      }
+      .apps-bot-option {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text);
+        font: 13px var(--sans);
+        padding: 7px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .apps-bot-option:hover,
+      .apps-bot-option:focus-visible,
+      .apps-bot-option[data-selected="true"] {
+        background: var(--green-dim);
+        outline: 0;
+      }
+      .apps-bot-option span:last-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .apps-notice {
         display: grid;
@@ -131,9 +215,173 @@
       }
       .apps-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
         gap: 12px;
         min-height: 300px;
+      }
+      .apps-card {
+        min-width: 0;
+        display: grid;
+        grid-template-rows: 126px 1fr;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+        overflow: hidden;
+      }
+      .apps-card:hover,
+      .apps-card:focus-visible {
+        border-color: var(--border2);
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+        outline: 0;
+      }
+      .apps-card-cover {
+        position: relative;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 12px;
+        background: linear-gradient(135deg, #215f4a, #0e4157);
+        background-size: cover;
+        background-position: center;
+      }
+      .apps-card-cover .apps-card-icon {
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.38);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.9);
+        color: #14532d;
+        font-family: var(--mono);
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .apps-state-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        border: 1px solid #bbf7d0;
+        border-radius: 999px;
+        background: var(--green-dim);
+        color: var(--green);
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 8px;
+        white-space: nowrap;
+      }
+      .apps-state-pill.disabled {
+        color: var(--amber);
+        background: var(--amber-dim);
+        border-color: #fde68a;
+      }
+      .apps-card-body {
+        min-width: 0;
+        display: grid;
+        grid-template-rows: auto auto minmax(38px, auto) auto 1fr;
+        gap: 10px;
+        padding: 12px;
+      }
+      .apps-card-title {
+        min-width: 0;
+        display: grid;
+        gap: 3px;
+      }
+      .apps-card-title h3 {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .apps-card-title p,
+      .apps-card-intro {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .apps-card-title p {
+        min-height: 15px;
+        font-family: var(--mono);
+      }
+      .apps-pin-line {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+      .apps-pin-line code {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1 1 auto;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--muted);
+        font-size: 11px;
+        padding: 5px 6px;
+      }
+      .apps-copy-btn {
+        flex: 0 0 auto;
+        min-height: 26px;
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--text);
+        font: 11px var(--mono);
+        padding: 3px 7px;
+        cursor: pointer;
+      }
+      .apps-copy-btn:hover,
+      .apps-copy-btn:focus-visible {
+        border-color: #bbf7d0;
+        background: var(--green-dim);
+        color: var(--green);
+        outline: 0;
+      }
+      .apps-card-intro {
+        min-height: 38px;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+      .apps-tags {
+        min-height: 24px;
+        display: flex;
+        align-items: flex-start;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .apps-tags span {
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--surface2);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+        padding: 2px 7px;
+      }
+      .apps-card-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-self: end;
+      }
+      .apps-card-actions .btn {
+        min-height: 30px;
+        padding: 5px 10px;
       }
       .apps-empty {
         grid-column: 1 / -1;
@@ -198,6 +446,9 @@
         }
         .apps-grid {
           grid-template-columns: minmax(0, 1fr);
+        }
+        .apps-card {
+          grid-template-rows: 112px 1fr;
         }
         .apps-pagination {
           justify-content: stretch;
