@@ -25,6 +25,23 @@ var WALLET_CHAINS=[
   {chain:'doge',label:'DOGE',displayUnit:'Doge',inputUnit:'DOGE'},
   {chain:'opcat',label:'OPCAT',displayUnit:'OPCAT-BTC',inputUnit:'OPCAT'}
 ];
+var PROVIDER_LOGO_PATHS={
+  'claude-code':'/ui/assets/platforms/claude-code.svg',
+  codex:'/ui/assets/platforms/codex.svg',
+  copilot:'/ui/assets/platforms/copilot.svg',
+  opencode:'/ui/assets/platforms/opencode.svg',
+  openclaw:'/ui/assets/platforms/openclaw.svg',
+  hermes:'/ui/assets/platforms/hermes.svg',
+  gemini:'/ui/assets/platforms/gemini.svg',
+  pi:'/ui/assets/platforms/pi.svg',
+  cursor:'/ui/assets/platforms/cursor.svg',
+  kimi:'/ui/assets/platforms/kimi.svg',
+  kiro:'/ui/assets/platforms/kiro.svg',
+  codebuddy:'/ui/assets/platforms/codebuddy.svg',
+  zcode:'/ui/assets/platforms/zcode.svg',
+  workbuddy:'/ui/assets/platforms/codebuddy.svg',
+  generic:'/ui/assets/platforms/generic.svg'
+};
 
 function api(url,opts){return fetch(url,opts).then(function(r){return r.json().catch(function(){return{ok:false,message:String(r.status)}}).then(function(body){if(!r.ok||body.ok===false){throw new Error(body.message||body.code||String(r.status))}return body})})}
 function fmtTime(t){if(!t)return'-';var d=new Date(t);if(Number.isNaN(d.getTime()))return'-';return d.toLocaleString()}
@@ -154,7 +171,17 @@ function providerRuntime(provider){
   rows.sort(compareProviderRuntime);
   return rows[0]||null;
 }
-function providerLogoPath(provider){var rt=providerRuntime(provider);return rt&&rt.logoPath?rt.logoPath:'/ui/assets/platforms/generic.svg'}
+function providerLogoPath(provider){
+  var key=String(provider||'generic');
+  if(PROVIDER_LOGO_PATHS[key])return PROVIDER_LOGO_PATHS[key];
+  var rt=providerRuntime(key);
+  return rt&&rt.logoPath&&rt.logoPath!==PROVIDER_LOGO_PATHS.generic?rt.logoPath:PROVIDER_LOGO_PATHS.generic;
+}
+function runtimeLogoPath(runtime){
+  var key=String((runtime&&runtime.provider)||'generic');
+  if(PROVIDER_LOGO_PATHS[key])return PROVIDER_LOGO_PATHS[key];
+  return runtime&&runtime.logoPath&&runtime.logoPath!==PROVIDER_LOGO_PATHS.generic?runtime.logoPath:PROVIDER_LOGO_PATHS.generic;
+}
 function providerIconMarkup(provider){
   var key=String(provider||'generic');
   var path=providerLogoPath(key);
@@ -189,7 +216,7 @@ function noLlmLabelMarkup(profile){
 }
 function runtimeIconMarkup(runtime){
   var key=String((runtime&&runtime.provider)||'generic');
-  var path=(runtime&&runtime.logoPath)||providerLogoPath(key);
+  var path=runtimeLogoPath(runtime);
   return '<span class="provider-logo provider-logo-'+esc(key.replace(/[^a-z0-9_-]+/gi,'-'))+'" data-provider-icon="'+esc(key)+'" aria-hidden="true"><img src="'+esc(path)+'" alt="" loading="lazy" /></span>';
 }
 function visibleRuntimeRows(){
@@ -1337,6 +1364,7 @@ function renderRuntimeSummary(){
     var health=rt&&(rt.health)||'';
     var dotCls=health==='healthy'?'healthy':(health&&health!=='healthy'?'unhealthy':'');
     var name=rt?(rt.displayName||rt.provider||rt.id||'-'):(provider||uiText('bot.noProvider','No provider'));
+    var iconRuntime=rt||(provider?{provider:provider}:null);
     var metaBits=[];
     if(rt&&rt.provider)metaBits.push(rt.provider);
     if(health)metaBits.push(health);
@@ -1345,6 +1373,7 @@ function renderRuntimeSummary(){
     rows.push('<div class="runtime-summary-row">'+
       '<span class="runtime-summary-role">'+esc(entry[2])+'</span>'+
       '<span class="runtime-summary-dot '+dotCls+'" aria-hidden="true"></span>'+
+      runtimeIconMarkup(iconRuntime)+
       '<span class="runtime-summary-name">'+esc(name)+'</span>'+
       '<span class="runtime-summary-meta">'+esc(meta)+'</span>'+
     '</div>');

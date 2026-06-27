@@ -1026,6 +1026,66 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
 });
 
+test('bot page renders provider-specific LLM icons even when runtime state has stale generic logos', () => {
+  const summary = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-runtime-summary]': summary,
+    },
+  });
+  const providerIcons = {
+    'claude-code': '/ui/assets/platforms/claude-code.svg',
+    codex: '/ui/assets/platforms/codex.svg',
+    copilot: '/ui/assets/platforms/copilot.svg',
+    opencode: '/ui/assets/platforms/opencode.svg',
+    openclaw: '/ui/assets/platforms/openclaw.svg',
+    hermes: '/ui/assets/platforms/hermes.svg',
+    gemini: '/ui/assets/platforms/gemini.svg',
+    pi: '/ui/assets/platforms/pi.svg',
+    cursor: '/ui/assets/platforms/cursor.svg',
+    kimi: '/ui/assets/platforms/kimi.svg',
+    kiro: '/ui/assets/platforms/kiro.svg',
+    codebuddy: '/ui/assets/platforms/codebuddy.svg',
+    zcode: '/ui/assets/platforms/zcode.svg',
+    workbuddy: '/ui/assets/platforms/codebuddy.svg',
+  };
+  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'icon-bot';
+  context.state.profiles = [{
+    slug: 'icon-bot',
+    name: 'Icon Bot',
+    primaryProvider: 'zcode',
+    fallbackProvider: 'workbuddy',
+  }];
+  context.state.runtimes = Object.keys(providerIcons).map((provider) => ({
+    id: `runtime-${provider}`,
+    provider,
+    displayName: provider,
+    logoPath: '/ui/assets/platforms/generic.svg',
+    health: 'healthy',
+  }));
+
+  for (const [provider, iconPath] of Object.entries(providerIcons)) {
+    const picker = context.providerPickerMarkup('primaryProvider', 'Primary Provider', provider, false);
+    const runtimeIcon = context.runtimeIconMarkup({ provider, logoPath: '/ui/assets/platforms/generic.svg' });
+    const iconPattern = new RegExp(`<img src="${escapeRegExp(iconPath)}" alt="" loading="lazy" />`);
+
+    assert.match(picker, new RegExp(`data-provider-icon="${provider}"`), provider);
+    assert.match(picker, iconPattern, provider);
+    assert.match(runtimeIcon, iconPattern, provider);
+    assert.doesNotMatch(runtimeIcon, /\/ui\/assets\/platforms\/generic\.svg/, provider);
+  }
+
+  context.renderRuntimeSummary();
+
+  assert.match(summary.innerHTML, /data-provider-icon="zcode"/);
+  assert.match(summary.innerHTML, /\/ui\/assets\/platforms\/zcode\.svg/);
+  assert.match(summary.innerHTML, /data-provider-icon="workbuddy"/);
+  assert.match(summary.innerHTML, /\/ui\/assets\/platforms\/codebuddy\.svg/);
+});
+
 test('bot page renders the launch create flow and empty state in Simplified Chinese', () => {
   const list = { innerHTML: '' };
   const context = createBotScriptContext({
