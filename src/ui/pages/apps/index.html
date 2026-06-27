@@ -417,6 +417,240 @@
         min-width: 64px;
         text-align: center;
       }
+      .apps-modal-root[hidden] {
+        display: none;
+      }
+      .apps-modal-root {
+        position: fixed;
+        inset: 0;
+        z-index: 80;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .apps-modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.38);
+      }
+      .apps-modal-dialog {
+        position: relative;
+        z-index: 1;
+        width: min(940px, calc(100vw - 32px));
+        max-height: min(88vh, 960px);
+        overflow: auto;
+        border: 1px solid var(--border2);
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+      .apps-modal-header,
+      .apps-modal-actions {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+      }
+      .apps-modal-header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .apps-modal-header h2 {
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .apps-modal-header p,
+      .apps-field-help,
+      .apps-field-error,
+      .apps-form-error {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .apps-modal-header p {
+        margin-top: 4px;
+      }
+      .apps-modal-close {
+        width: 30px;
+        height: 30px;
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .apps-modal-close:hover,
+      .apps-modal-close:focus-visible {
+        background: var(--green-dim);
+        color: var(--green);
+        outline: 0;
+      }
+      .apps-form-section {
+        display: grid;
+        gap: 12px;
+        padding: 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .apps-form-section h3 {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .apps-field-grid,
+      .apps-asset-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .apps-form-field,
+      .apps-asset-field {
+        min-width: 0;
+        display: grid;
+        gap: 6px;
+      }
+      .apps-form-field.wide {
+        grid-column: 1 / -1;
+      }
+      .apps-form-field span,
+      .apps-asset-heading label,
+      .apps-runtime-field legend,
+      .apps-disabled-row span {
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .apps-form-field input,
+      .apps-form-field textarea,
+      .apps-form-field select,
+      .apps-metafile-input input,
+      .apps-metafile-input textarea {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--text);
+        font: 13px var(--sans);
+        padding: 8px 9px;
+      }
+      .apps-form-field textarea,
+      .apps-metafile-input textarea {
+        min-height: 74px;
+        resize: vertical;
+      }
+      .apps-form-field input:focus,
+      .apps-form-field textarea:focus,
+      .apps-form-field select:focus,
+      .apps-metafile-input input:focus,
+      .apps-metafile-input textarea:focus {
+        border-color: #86efac;
+        outline: 2px solid rgba(34, 197, 94, 0.16);
+      }
+      .apps-asset-field {
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .apps-asset-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .apps-upload-button {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 28px;
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--text);
+        font: 11px var(--mono);
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      .apps-upload-button input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .apps-metafile-input {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: stretch;
+      }
+      .apps-metafile-input > span {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--border2);
+        border-right: 0;
+        border-radius: 6px 0 0 6px;
+        background: var(--surface3);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 0 8px;
+      }
+      .apps-metafile-input input,
+      .apps-metafile-input textarea {
+        border-radius: 0 6px 6px 0;
+      }
+      .apps-field-error[data-tone="error"],
+      .apps-form-error {
+        color: #b91c1c;
+      }
+      .apps-field-error[data-tone="success"] {
+        color: var(--green);
+      }
+      .apps-runtime-field {
+        min-width: 0;
+        display: grid;
+        gap: 8px;
+        border: 0;
+        padding: 0;
+      }
+      .apps-runtime-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .apps-runtime-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 32px;
+        border: 1px solid var(--border2);
+        border-radius: 999px;
+        background: var(--surface2);
+        color: var(--text);
+        font-size: 12px;
+        padding: 4px 10px;
+      }
+      .apps-runtime-option input,
+      .apps-disabled-row input {
+        accent-color: var(--green);
+      }
+      .apps-disabled-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .apps-form-error {
+        margin: 12px 18px 0;
+      }
+      .apps-modal-actions {
+        position: sticky;
+        bottom: 0;
+        justify-content: flex-end;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+      }
       @media (max-width: 720px) {
         .apps-shell {
           width: 100%;
@@ -452,6 +686,27 @@
         }
         .apps-pagination {
           justify-content: stretch;
+        }
+        .apps-modal-root {
+          padding: 0;
+          align-items: stretch;
+        }
+        .apps-modal-dialog {
+          width: 100%;
+          max-height: 100vh;
+          border-radius: 0;
+          border-left: 0;
+          border-right: 0;
+        }
+        .apps-field-grid,
+        .apps-asset-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .apps-modal-header,
+        .apps-modal-actions,
+        .apps-form-section {
+          padding-left: 16px;
+          padding-right: 16px;
         }
       }
     </style>

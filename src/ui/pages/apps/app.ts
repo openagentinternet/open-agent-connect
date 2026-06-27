@@ -3,41 +3,137 @@ import type { LocalUiI18nContext } from '../../i18n';
 import type { LocalUiPageDefinition } from '../types';
 
 interface AppsPageRuntimeText {
+  appNameLabel: string;
+  assets: string;
+  basicInformation: string;
   botFallback: string;
+  cancel: string;
+  close: string;
   copied: string;
+  codeLabel: string;
+  codeTypeLabel: string;
+  contentHashLabel: string;
+  contentLabel: string;
+  contentTypeLabel: string;
   copyPinId: string;
+  coverImgLabel: string;
   details: string;
   disabled: string;
+  disabledFieldHelp: string;
+  disabledFieldLabel: string;
+  editModalDescription: string;
+  editModalTitle: string;
   emptyMessage: string;
   emptyTitle: string;
+  formErrorTitle: string;
+  iconLabel: string;
+  indexFileLabel: string;
+  introImgsLabel: string;
+  introLabel: string;
   loadErrorTitle: string;
+  manualPinHelp: string;
+  metadataInvalid: string;
+  metadataLabel: string;
+  metadataPlaceholder: string;
+  multiPinPlaceholder: string;
   noLocalBotAvailable: string;
+  noUploadResult: string;
   pageSizeLabel: string;
+  promptLabel: string;
+  publishModalDescription: string;
+  publishModalTitle: string;
+  publishOnChain: string;
   requestFailed: string;
   run: string;
+  runtimeAndroid: string;
+  runtimeBrowser: string;
+  runtimeIos: string;
+  runtimeLabel: string;
+  runtimeLinux: string;
+  runtimeMacOS: string;
+  runtimeWindows: string;
+  saveChanges: string;
   runnable: string;
   share: string;
+  singlePinPlaceholder: string;
+  tagsHelp: string;
+  tagsLabel: string;
+  technicalInformation: string;
+  titleLabel: string;
   untitledMetaApp: string;
+  upload: string;
+  uploadFailed: string;
+  uploadMissingPath: string;
+  uploadStored: string;
+  versionLabel: string;
 }
 
 export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nContext()): LocalUiPageDefinition {
   const tx = i18n.t;
   const runtimeText: AppsPageRuntimeText = {
+    appNameLabel: tx('apps.form.appName'),
+    assets: tx('apps.form.assets'),
+    basicInformation: tx('apps.form.basicInformation'),
     botFallback: tx('apps.botFallback'),
+    cancel: tx('apps.form.cancel'),
+    close: tx('apps.form.close'),
     copied: tx('apps.copied'),
+    codeLabel: tx('apps.form.code'),
+    codeTypeLabel: tx('apps.form.codeType'),
+    contentHashLabel: tx('apps.form.contentHash'),
+    contentLabel: tx('apps.form.content'),
+    contentTypeLabel: tx('apps.form.contentType'),
     copyPinId: tx('apps.copyPinId'),
+    coverImgLabel: tx('apps.form.coverImg'),
     details: tx('apps.details'),
     disabled: tx('apps.disabled'),
+    disabledFieldHelp: tx('apps.form.disabledHelp'),
+    disabledFieldLabel: tx('apps.form.disabled'),
+    editModalDescription: tx('apps.form.editDescription'),
+    editModalTitle: tx('apps.form.editTitle'),
     emptyMessage: tx('apps.emptyMessage'),
     emptyTitle: tx('apps.emptyTitle'),
+    formErrorTitle: tx('apps.form.errorTitle'),
+    iconLabel: tx('apps.form.icon'),
+    indexFileLabel: tx('apps.form.indexFile'),
+    introImgsLabel: tx('apps.form.introImgs'),
+    introLabel: tx('apps.form.intro'),
     loadErrorTitle: tx('apps.loadErrorTitle'),
+    manualPinHelp: tx('apps.form.manualPinHelp'),
+    metadataInvalid: tx('apps.form.metadataInvalid'),
+    metadataLabel: tx('apps.form.metadata'),
+    metadataPlaceholder: tx('apps.form.metadataPlaceholder'),
+    multiPinPlaceholder: tx('apps.form.multiPinPlaceholder'),
     noLocalBotAvailable: tx('apps.noLocalBotAvailable'),
+    noUploadResult: tx('apps.form.noUploadResult'),
     pageSizeLabel: tx('apps.pageSizeLabel'),
+    promptLabel: tx('apps.form.prompt'),
+    publishModalDescription: tx('apps.form.publishDescription'),
+    publishModalTitle: tx('apps.form.publishTitle'),
+    publishOnChain: tx('apps.form.publishOnChain'),
     requestFailed: tx('apps.requestFailed'),
     run: tx('apps.run'),
+    runtimeAndroid: tx('apps.form.runtimeAndroid'),
+    runtimeBrowser: tx('apps.form.runtimeBrowser'),
+    runtimeIos: tx('apps.form.runtimeIos'),
+    runtimeLabel: tx('apps.form.runtime'),
+    runtimeLinux: tx('apps.form.runtimeLinux'),
+    runtimeMacOS: tx('apps.form.runtimeMacOS'),
+    runtimeWindows: tx('apps.form.runtimeWindows'),
+    saveChanges: tx('apps.form.saveChanges'),
     runnable: tx('apps.runnable'),
     share: tx('apps.share'),
+    singlePinPlaceholder: tx('apps.form.singlePinPlaceholder'),
+    tagsHelp: tx('apps.form.tagsHelp'),
+    tagsLabel: tx('apps.form.tags'),
+    technicalInformation: tx('apps.form.technicalInformation'),
+    titleLabel: tx('apps.form.title'),
     untitledMetaApp: tx('apps.untitledMetaApp'),
+    upload: tx('apps.form.upload'),
+    uploadFailed: tx('apps.form.uploadFailed'),
+    uploadMissingPath: tx('apps.form.uploadMissingPath'),
+    uploadStored: tx('apps.form.uploadStored'),
+    versionLabel: tx('apps.form.version'),
   };
   return {
     page: 'apps',
@@ -93,6 +189,7 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
             </div>
           </section>
         </div>
+        <div class="apps-modal-root" data-apps-modal-root hidden></div>
       </section>
     `,
     script: buildAppsPageRuntimeSource(runtimeText),
@@ -114,6 +211,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     loadingToken: 0,
     loading: false,
     botMenuOpen: false,
+    modal: null,
   };
   const elements = {
     shell: document.querySelector('[data-apps-shell]'),
@@ -126,6 +224,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     next: document.querySelector('[data-apps-page-next]'),
     pageLabel: document.querySelector('[data-apps-page-label]'),
     botPicker: document.querySelector('[data-apps-bot-picker]'),
+    modalRoot: document.querySelector('[data-apps-modal-root]'),
   };
   if (elements.shell) {
     elements.shell.dataset.appsApi = APPS_API_BASE;
@@ -160,6 +259,196 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     return text;
   };
 
+  const RUNTIME_OPTIONS = [
+    ['browser', 'apps.form.runtimeBrowser', UI_TEXT.runtimeBrowser],
+    ['android', 'apps.form.runtimeAndroid', UI_TEXT.runtimeAndroid],
+    ['ios', 'apps.form.runtimeIos', UI_TEXT.runtimeIos],
+    ['windows', 'apps.form.runtimeWindows', UI_TEXT.runtimeWindows],
+    ['macOS', 'apps.form.runtimeMacOS', UI_TEXT.runtimeMacOS],
+    ['linux', 'apps.form.runtimeLinux', UI_TEXT.runtimeLinux],
+  ];
+  const CONTENT_TYPE_OPTIONS = [
+    'application/zip',
+    'text/html',
+    'application/json',
+    'text/plain;utf-8',
+    'text/plain',
+    'application/javascript',
+    'application/octet-stream',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+  ];
+  const CODE_TYPE_OPTIONS = [
+    'application/zip',
+    'text/html',
+    'application/json',
+    'text/plain;utf-8',
+    'text/plain',
+    'application/javascript',
+    'application/octet-stream',
+  ];
+  const ASSET_FIELDS = [
+    ['icon', 'apps.form.icon', UI_TEXT.iconLabel, false],
+    ['coverImg', 'apps.form.coverImg', UI_TEXT.coverImgLabel, false],
+    ['introImgs', 'apps.form.introImgs', UI_TEXT.introImgsLabel, true],
+    ['content', 'apps.form.content', UI_TEXT.contentLabel, false],
+    ['code', 'apps.form.code', UI_TEXT.codeLabel, false],
+  ];
+  const UPLOAD_LARGE_THRESHOLD_BYTES = 4 * 1024 * 1024;
+
+  const stripMetafileUri = (value) => {
+    const text = normalizeText(value);
+    return text.toLowerCase().startsWith('metafile://') ? text.slice('metafile://'.length).trim() : text;
+  };
+
+  const normalizeMetafileInput = (value) => {
+    const pinId = stripMetafileUri(value);
+    return pinId ? 'metafile://' + pinId : '';
+  };
+
+  const normalizeMetafileListInput = (value) => {
+    const values = Array.isArray(value) ? value : normalizeText(value).split(/[\\n,]/u);
+    return values.map(normalizeMetafileInput).filter(Boolean);
+  };
+
+  const splitListInput = (value) => normalizeText(value).split(/[\\n,]/u).map(normalizeText).filter(Boolean);
+
+  const normalizeRuntimeSelection = (value) => {
+    const rawValues = Array.isArray(value) ? value : normalizeText(value).split(/[\\/,\\n]/u);
+    const values = rawValues.map(normalizeText).filter(Boolean);
+    return values.length ? [...new Set(values)] : ['browser'];
+  };
+
+  const fieldValue = (record, name, fallback) => {
+    if (!record || record[name] == null) return fallback || '';
+    return record[name];
+  };
+
+  const assetInputValue = (value) => {
+    if (Array.isArray(value)) {
+      return value.map(stripMetafileUri).filter(Boolean).join('\\n');
+    }
+    return stripMetafileUri(value);
+  };
+
+  const metadataInputValue = (record) => {
+    const metadata = record && record.metadata;
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return '';
+    return JSON.stringify(metadata, null, 2);
+  };
+
+  const renderTextField = (name, label, value, wide) => {
+    return '<label class="apps-form-field' + (wide ? ' wide' : '') + '">' +
+      '<span>' + escapeHtml(label) + '</span>' +
+      '<input name="' + escapeHtml(name) + '" value="' + escapeHtml(value || '') + '">' +
+    '</label>';
+  };
+
+  const renderTextareaField = (name, label, value, wide, placeholder) => {
+    return '<label class="apps-form-field' + (wide ? ' wide' : '') + '">' +
+      '<span>' + escapeHtml(label) + '</span>' +
+      '<textarea name="' + escapeHtml(name) + '"' + (placeholder ? ' placeholder="' + escapeHtml(placeholder) + '"' : '') + '>' + escapeHtml(value || '') + '</textarea>' +
+    '</label>';
+  };
+
+  const renderSelectField = (name, label, value, options) => {
+    const selectedValue = normalizeText(value) || options[0] || '';
+    return '<label class="apps-form-field">' +
+      '<span>' + escapeHtml(label) + '</span>' +
+      '<select name="' + escapeHtml(name) + '">' +
+        options.map((option) => '<option value="' + escapeHtml(option) + '"' + (option === selectedValue ? ' selected' : '') + '>' + escapeHtml(option) + '</option>').join('') +
+      '</select>' +
+    '</label>';
+  };
+
+  const renderAssetField = (record, fieldName, labelKey, fallbackLabel, multiple) => {
+    const value = assetInputValue(fieldValue(record, fieldName, ''));
+    const manualControl = multiple
+      ? '<textarea name="' + escapeHtml(fieldName) + '" placeholder="' + escapeHtml(uiText('apps.form.multiPinPlaceholder', UI_TEXT.multiPinPlaceholder)) + '">' + escapeHtml(value) + '</textarea>'
+      : '<input name="' + escapeHtml(fieldName) + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(uiText('apps.form.singlePinPlaceholder', UI_TEXT.singlePinPlaceholder)) + '">';
+    return '<div class="apps-asset-field" data-apps-asset-field="' + escapeHtml(fieldName) + '">' +
+      '<div class="apps-asset-heading">' +
+        '<label>' + escapeHtml(uiText(labelKey, fallbackLabel)) + '</label>' +
+        '<label class="apps-upload-button">' +
+          '<input type="file" data-apps-asset-file="' + escapeHtml(fieldName) + '"' + (multiple ? ' multiple' : '') + '>' +
+          '<span>' + escapeHtml(uiText('apps.form.upload', UI_TEXT.upload)) + '</span>' +
+        '</label>' +
+      '</div>' +
+      '<div class="apps-metafile-input">' +
+        '<span aria-hidden="true">metafile://</span>' +
+        manualControl +
+      '</div>' +
+      '<p class="apps-field-help">' + escapeHtml(uiText('apps.form.manualPinHelp', UI_TEXT.manualPinHelp)) + '</p>' +
+      '<p class="apps-field-error" data-apps-field-error="' + escapeHtml(fieldName) + '" hidden></p>' +
+    '</div>';
+  };
+
+  const renderRuntimeOptions = (record) => {
+    const selected = new Set(normalizeRuntimeSelection(record && record.runtime));
+    return '<fieldset class="apps-runtime-field">' +
+      '<legend>' + escapeHtml(uiText('apps.form.runtime', UI_TEXT.runtimeLabel)) + '</legend>' +
+      '<div class="apps-runtime-options">' +
+        RUNTIME_OPTIONS.map(([value, key, fallback]) => (
+          '<label class="apps-runtime-option">' +
+            '<input type="checkbox" name="runtime" value="' + escapeHtml(value) + '"' + (selected.has(value) ? ' checked' : '') + '>' +
+            '<span>' + escapeHtml(uiText(key, fallback)) + '</span>' +
+          '</label>'
+        )).join('') +
+      '</div>' +
+    '</fieldset>';
+  };
+
+  const renderMetaAppForm = (mode, record) => {
+    const isEdit = mode === 'edit';
+    const targetPinId = isEdit ? recordPinId(record) : '';
+    const title = isEdit ? uiText('apps.form.editTitle', UI_TEXT.editModalTitle) : uiText('apps.form.publishTitle', UI_TEXT.publishModalTitle);
+    const description = isEdit ? uiText('apps.form.editDescription', UI_TEXT.editModalDescription) : uiText('apps.form.publishDescription', UI_TEXT.publishModalDescription);
+    return '<div class="apps-modal-backdrop" data-apps-modal-close></div>' +
+      '<section class="apps-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="apps-modal-title" tabindex="-1">' +
+        '<header class="apps-modal-header">' +
+          '<div><h2 id="apps-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(description) + '</p></div>' +
+          '<button class="apps-modal-close" type="button" data-apps-modal-close aria-label="' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '">x</button>' +
+        '</header>' +
+        '<form data-apps-form data-apps-form-mode="' + escapeHtml(mode) + '" data-apps-target-pin-id="' + escapeHtml(targetPinId) + '">' +
+          '<section class="apps-form-section" data-apps-form-section="basic">' +
+            '<h3>' + escapeHtml(uiText('apps.form.basicInformation', UI_TEXT.basicInformation)) + '</h3>' +
+            '<div class="apps-field-grid">' +
+              renderTextField('appName', uiText('apps.form.appName', UI_TEXT.appNameLabel), fieldValue(record, 'appName', '')) +
+              renderTextField('title', uiText('apps.form.title', UI_TEXT.titleLabel), fieldValue(record, 'title', '')) +
+              renderTextareaField('prompt', uiText('apps.form.prompt', UI_TEXT.promptLabel), fieldValue(record, 'prompt', ''), true) +
+              renderTextareaField('intro', uiText('apps.form.intro', UI_TEXT.introLabel), fieldValue(record, 'intro', ''), true) +
+              renderTextField('tags', uiText('apps.form.tags', UI_TEXT.tagsLabel), Array.isArray(record && record.tags) ? record.tags.join(', ') : fieldValue(record, 'tags', ''), true) +
+            '</div>' +
+            '<p class="apps-field-help">' + escapeHtml(uiText('apps.form.tagsHelp', UI_TEXT.tagsHelp)) + '</p>' +
+          '</section>' +
+          '<section class="apps-form-section" data-apps-form-section="assets">' +
+            '<h3>' + escapeHtml(uiText('apps.form.assets', UI_TEXT.assets)) + '</h3>' +
+            '<div class="apps-asset-grid">' + ASSET_FIELDS.map(([name, key, fallback, multiple]) => renderAssetField(record, name, key, fallback, multiple)).join('') + '</div>' +
+          '</section>' +
+          '<section class="apps-form-section" data-apps-form-section="technical">' +
+            '<h3>' + escapeHtml(uiText('apps.form.technicalInformation', UI_TEXT.technicalInformation)) + '</h3>' +
+            renderRuntimeOptions(record) +
+            '<div class="apps-field-grid">' +
+              renderTextField('indexFile', uiText('apps.form.indexFile', UI_TEXT.indexFileLabel), fieldValue(record, 'indexFile', 'index.html')) +
+              renderTextField('version', uiText('apps.form.version', UI_TEXT.versionLabel), fieldValue(record, 'version', 'v1.0.0')) +
+              renderSelectField('contentType', uiText('apps.form.contentType', UI_TEXT.contentTypeLabel), fieldValue(record, 'contentType', 'application/zip'), CONTENT_TYPE_OPTIONS) +
+              renderSelectField('codeType', uiText('apps.form.codeType', UI_TEXT.codeTypeLabel), fieldValue(record, 'codeType', 'application/zip'), CODE_TYPE_OPTIONS) +
+              renderTextField('contentHash', uiText('apps.form.contentHash', UI_TEXT.contentHashLabel), fieldValue(record, 'contentHash', ''), true) +
+              renderTextareaField('metadata', uiText('apps.form.metadata', UI_TEXT.metadataLabel), metadataInputValue(record), true, uiText('apps.form.metadataPlaceholder', UI_TEXT.metadataPlaceholder)) +
+            '</div>' +
+            '<label class="apps-disabled-row"><input type="checkbox" name="disabled" value="true"' + (record && record.disabled === true ? ' checked' : '') + '><span>' + escapeHtml(uiText('apps.form.disabled', UI_TEXT.disabledFieldLabel)) + '</span></label>' +
+            '<p class="apps-field-help">' + escapeHtml(uiText('apps.form.disabledHelp', UI_TEXT.disabledFieldHelp)) + '</p>' +
+          '</section>' +
+          '<p class="apps-form-error" data-apps-form-error hidden></p>' +
+          '<footer class="apps-modal-actions">' +
+            '<button class="btn" type="button" data-apps-modal-close>' + escapeHtml(uiText('apps.form.cancel', UI_TEXT.cancel)) + '</button>' +
+            '<button class="btn btn-primary" type="submit">' + escapeHtml(isEdit ? uiText('apps.form.saveChanges', UI_TEXT.saveChanges) : uiText('apps.form.publishOnChain', UI_TEXT.publishOnChain)) + '</button>' +
+          '</footer>' +
+        '</form>' +
+      '</section>';
+  };
+
   const showNotice = (kind, title, body) => {
     if (!elements.notice) return;
     elements.notice.hidden = false;
@@ -171,6 +460,87 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     if (elements.notice) elements.notice.hidden = true;
   };
 
+  const setModalFieldStatus = (fieldName, message, tone) => {
+    if (!elements.modalRoot) return;
+    const status = elements.modalRoot.querySelector('[data-apps-field-error="' + fieldName + '"]');
+    if (!status) return;
+    status.hidden = !message;
+    status.dataset.tone = tone || '';
+    status.textContent = message || '';
+  };
+
+  const setModalFormError = (message) => {
+    if (!elements.modalRoot) return;
+    const status = elements.modalRoot.querySelector('[data-apps-form-error]');
+    if (!status) return;
+    status.hidden = !message;
+    status.textContent = message || '';
+  };
+
+  const findModalField = (fieldName) => elements.modalRoot
+    ? elements.modalRoot.querySelector('[name="' + fieldName + '"]')
+    : null;
+
+  const findRecordByPinId = (pinId) => state.records.find((record) => recordPinId(record) === normalizeText(pinId)) || null;
+
+  const closeAppsModal = () => {
+    state.modal = null;
+    if (!elements.modalRoot) return;
+    elements.modalRoot.hidden = true;
+    elements.modalRoot.innerHTML = '';
+  };
+
+  const openAppsModal = (mode, record) => {
+    if (!elements.modalRoot) return;
+    const resolvedRecord = mode === 'edit' ? record : null;
+    state.modal = {
+      mode,
+      targetPinId: mode === 'edit' ? recordPinId(resolvedRecord) : '',
+    };
+    elements.modalRoot.hidden = false;
+    elements.modalRoot.innerHTML = renderMetaAppForm(mode, resolvedRecord);
+    const dialog = elements.modalRoot.querySelector('.apps-modal-dialog');
+    if (dialog && typeof dialog.focus === 'function') dialog.focus();
+  };
+
+  const readMetadataInput = (value) => {
+    const raw = normalizeText(value);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(uiText('apps.form.metadataInvalid', UI_TEXT.metadataInvalid));
+    }
+    return parsed;
+  };
+
+  const readMetaAppFormPayload = (form) => {
+    const data = new FormData(form);
+    const runtime = Array.from(form.querySelectorAll('input[name="runtime"]:checked'))
+      .map((input) => normalizeText(input.value))
+      .filter(Boolean);
+    return {
+      from: state.selectedSlug,
+      appName: normalizeText(data.get('appName')),
+      title: normalizeText(data.get('title')),
+      prompt: normalizeText(data.get('prompt')),
+      intro: normalizeText(data.get('intro')),
+      tags: splitListInput(data.get('tags')),
+      icon: normalizeMetafileInput(data.get('icon')),
+      coverImg: normalizeMetafileInput(data.get('coverImg')),
+      introImgs: normalizeMetafileListInput(data.get('introImgs')),
+      content: normalizeMetafileInput(data.get('content')),
+      code: normalizeMetafileInput(data.get('code')),
+      runtime: runtime.length ? runtime : ['browser'],
+      indexFile: normalizeText(data.get('indexFile')),
+      version: normalizeText(data.get('version')),
+      contentType: normalizeText(data.get('contentType')),
+      codeType: normalizeText(data.get('codeType')),
+      contentHash: normalizeText(data.get('contentHash')),
+      metadata: readMetadataInput(data.get('metadata')),
+      disabled: data.get('disabled') !== null,
+    };
+  };
+
   const fetchJson = async (url, options) => {
     const response = await fetch(url, options);
     const payload = await response.json();
@@ -178,6 +548,82 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
       throw new Error(payload && payload.message ? payload.message : uiText('apps.requestFailed', UI_TEXT.requestFailed));
     }
     return payload.data || payload;
+  };
+
+  const postJson = (url, payload) => fetchJson(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const reloadFirstAppsPage = async () => {
+    state.cursorStack = [''];
+    state.cursor = '';
+    state.nextCursor = '';
+    await loadApps('');
+  };
+
+  const submitMetaAppForm = async (form) => {
+    setModalFormError('');
+    setModalFieldStatus('metadata', '', '');
+    let payload;
+    try {
+      payload = readMetaAppFormPayload(form);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      setModalFieldStatus('metadata', message, 'error');
+      return;
+    }
+    const mode = form.getAttribute('data-apps-form-mode') || 'publish';
+    const targetPinId = normalizeText(form.getAttribute('data-apps-target-pin-id'));
+    if (mode === 'edit') payload.targetPinId = targetPinId;
+    try {
+      await postJson(mode === 'edit' ? '/api/apps/update' : '/api/apps/publish', payload);
+      closeAppsModal();
+      await reloadFirstAppsPage();
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      setModalFormError(uiText('apps.form.errorTitle', UI_TEXT.formErrorTitle) + ' ' + message);
+    }
+  };
+
+  const storeAssetUri = (fieldName, uri) => {
+    const field = findModalField(fieldName);
+    if (!field) return;
+    if (fieldName === 'introImgs' && normalizeText(field.value)) {
+      field.value = normalizeText(field.value) + '\\n' + uri;
+      return;
+    }
+    field.value = uri;
+  };
+
+  const handleAssetFileUpload = async (target) => {
+    const fieldName = normalizeText(target.getAttribute('data-apps-asset-file'));
+    if (!fieldName) return;
+    setModalFieldStatus(fieldName, '', '');
+    const file = target.files && target.files[0] ? target.files[0] : null;
+    if (!file) return;
+    const filePath = normalizeText(file.path);
+    if (!filePath) {
+      setModalFieldStatus(fieldName, uiText('apps.form.uploadMissingPath', UI_TEXT.uploadMissingPath), 'error');
+      return;
+    }
+    try {
+      const result = await postJson(Number(file.size || 0) > UPLOAD_LARGE_THRESHOLD_BYTES ? '/api/file/upload-large' : '/api/file/upload', {
+        from: state.selectedSlug,
+        filePath,
+        contentType: normalizeText(file.type) || 'application/octet-stream',
+      });
+      const uri = normalizeText(result && result.metafileUri) || (normalizeText(result && result.pinId) ? 'metafile://' + normalizeText(result && result.pinId) : '');
+      if (!uri) {
+        throw new Error(uiText('apps.form.noUploadResult', UI_TEXT.noUploadResult));
+      }
+      storeAssetUri(fieldName, uri);
+      setModalFieldStatus(fieldName, uiText('apps.form.uploadStored', UI_TEXT.uploadStored), 'success');
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      setModalFieldStatus(fieldName, uiText('apps.form.uploadFailed', UI_TEXT.uploadFailed) + ' ' + message, 'error');
+    }
   };
 
   const setUrlState = () => {
@@ -379,7 +825,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
   document.addEventListener('click', async (event) => {
     const eventTarget = event.target instanceof Element ? event.target : null;
     if (!eventTarget) return;
-    const target = eventTarget.closest('[data-apps-bot-trigger], [data-apps-bot-option], [data-apps-copy-pin], [data-apps-run], [data-apps-share], [data-apps-detail]');
+    const target = eventTarget.closest('[data-apps-bot-trigger], [data-apps-bot-option], [data-apps-copy-pin], [data-apps-run], [data-apps-share], [data-apps-detail], [data-apps-edit]');
     if (!target) {
       if (state.botMenuOpen && !eventTarget.closest('[data-apps-bot-picker]')) {
         state.botMenuOpen = false;
@@ -410,10 +856,34 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     if (target.matches('[data-apps-run]') && !target.disabled) {
       const pinId = target.getAttribute('data-apps-run') || '';
       if (pinId) window.location.href = '/browser/metaapp/' + encodeURIComponent(pinId);
+      return;
+    }
+    if (target.matches('[data-apps-edit]')) {
+      const record = findRecordByPinId(target.getAttribute('data-apps-edit') || '');
+      if (record) openAppsModal('edit', record);
     }
   });
 
   if (elements.refresh) elements.refresh.addEventListener('click', refreshApps);
+  if (elements.publish) elements.publish.addEventListener('click', () => openAppsModal('publish', null));
+  if (elements.modalRoot) {
+    elements.modalRoot.addEventListener('click', (event) => {
+      const eventTarget = event.target instanceof Element ? event.target : null;
+      if (eventTarget && eventTarget.closest('[data-apps-modal-close]')) closeAppsModal();
+    });
+    elements.modalRoot.addEventListener('submit', async (event) => {
+      const form = event.target instanceof Element ? event.target.closest('[data-apps-form]') : null;
+      if (!form) return;
+      event.preventDefault();
+      await submitMetaAppForm(form);
+    });
+    elements.modalRoot.addEventListener('change', async (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && target.matches('[data-apps-asset-file]')) {
+        await handleAssetFileUpload(target);
+      }
+    });
+  }
   if (elements.next) elements.next.addEventListener('click', async () => {
     if (state.loading || !state.nextCursor) return;
     const nextCursor = state.nextCursor;
@@ -445,6 +915,9 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     window.addEventListener('oac:i18n-changed', () => {
       renderBotPicker();
       renderGrid();
+      if (state.modal && elements.modalRoot && !elements.modalRoot.hidden) {
+        openAppsModal(state.modal.mode, state.modal.mode === 'edit' ? findRecordByPinId(state.modal.targetPinId) : null);
+      }
     });
   }
 
