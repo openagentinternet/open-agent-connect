@@ -25,6 +25,12 @@ var WALLET_CHAINS=[
   {chain:'doge',label:'DOGE',displayUnit:'Doge',inputUnit:'DOGE'},
   {chain:'opcat',label:'OPCAT',displayUnit:'OPCAT-BTC',inputUnit:'OPCAT'}
 ];
+var WRITE_NETWORKS=[
+  {network:'mvc',label:'MVC',iconPath:'/ui/assets/chains/mvc.png'},
+  {network:'btc',label:'BTC',iconPath:'/ui/assets/chains/btc.svg'},
+  {network:'doge',label:'DOGE',iconPath:'/ui/assets/chains/doge.svg'},
+  {network:'opcat',label:'OPCAT',iconPath:'/ui/assets/chains/opcat.png'}
+];
 var PROVIDER_LOGO_PATHS={
   'claude-code':'/ui/assets/platforms/claude-code.svg',
   codex:'/ui/assets/platforms/codex.svg',
@@ -291,6 +297,26 @@ function defaultWriteNetwork(){
   var value=config&&config.chain&&config.chain.defaultWriteNetwork;
   return ['mvc','btc','doge','opcat'].indexOf(value)>=0?value:'mvc';
 }
+function writeNetworkEntry(network){
+  return WRITE_NETWORKS.find(function(entry){return entry.network===network})||WRITE_NETWORKS[0];
+}
+function chainIconMarkup(network){
+  var entry=writeNetworkEntry(network);
+  return '<span class="chain-logo" data-chain-icon="'+esc(entry.network)+'" aria-hidden="true"><img src="'+esc(entry.iconPath)+'" alt="" loading="lazy" /></span>';
+}
+function writeNetworkPickerMarkup(field,label,current){
+  var active=writeNetworkEntry(current);
+  var html='<div class="field chain-field"><label for="default-write-network">'+esc(label)+'</label>'+
+    '<div class="chain-picker" data-chain-picker="'+esc(field)+'">'+
+      '<input type="hidden" id="default-write-network" data-field="'+esc(field)+'" value="'+esc(active.network)+'" />'+
+      '<button type="button" class="chain-trigger" data-chain-trigger="'+esc(field)+'" aria-haspopup="listbox" aria-expanded="false">'+chainIconMarkup(active.network)+'<span>'+esc(active.label)+'</span><span class="provider-caret">v</span></button>'+
+      '<div class="chain-menu" data-chain-menu="'+esc(field)+'" role="listbox" hidden>';
+  WRITE_NETWORKS.forEach(function(entry){
+    html+='<button type="button" class="chain-option" data-chain-option="'+esc(entry.network)+'" data-chain-value="'+esc(entry.network)+'" role="option"'+(entry.network===active.network?' selected aria-selected="true"':' aria-selected="false"')+'>'+chainIconMarkup(entry.network)+'<span>'+esc(entry.label)+'</span></button>';
+  });
+  html+='</div></div></div>';
+  return html;
+}
 function uniqueProviderRuntimes(){
   var seen={};var rows=[];
   availableRuntimes().forEach(function(r){if(!r.provider||seen[r.provider])return;seen[r.provider]=true;rows.push(r)});
@@ -369,6 +395,32 @@ function wireProviderPickers(){
       picker.querySelectorAll('[data-provider-value]').forEach(function(row){row.removeAttribute('selected')});
       this.setAttribute('selected','');
       var menu=q('[data-provider-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
+    });
+  });
+}
+function wireChainPickers(){
+  qq('[data-chain-trigger]').forEach(function(btn){
+    btn.addEventListener('click',function(event){
+      event.preventDefault();
+      var field=this.getAttribute('data-chain-trigger');var menu=q('[data-chain-menu="'+field+'"]');
+      if(!menu)return;
+      qq('.chain-menu').forEach(function(other){if(other!==menu)other.setAttribute('hidden','')});
+      qq('.provider-menu').forEach(function(other){other.setAttribute('hidden','')});
+      var open=menu.hasAttribute('hidden');
+      if(open){menu.removeAttribute('hidden');this.setAttribute('aria-expanded','true')}else{menu.setAttribute('hidden','');this.setAttribute('aria-expanded','false')}
+    });
+  });
+  qq('[data-chain-value]').forEach(function(option){
+    option.addEventListener('click',function(event){
+      event.preventDefault();
+      var picker=this.closest('[data-chain-picker]');if(!picker)return;
+      var field=picker.getAttribute('data-chain-picker');var input=picker.querySelector('[data-field="'+field+'"]');var trigger=picker.querySelector('[data-chain-trigger="'+field+'"]');
+      var value=this.getAttribute('data-chain-value')||'mvc';var entry=writeNetworkEntry(value);
+      if(input)input.value=entry.network;
+      if(trigger){trigger.innerHTML=chainIconMarkup(entry.network)+'<span>'+esc(entry.label)+'</span><span class="provider-caret">v</span>';trigger.setAttribute('aria-expanded','false')}
+      picker.querySelectorAll('[data-chain-value]').forEach(function(row){row.removeAttribute('selected');row.setAttribute('aria-selected','false')});
+      this.setAttribute('selected','');this.setAttribute('aria-selected','true');
+      var menu=q('[data-chain-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
     });
   });
 }
@@ -1391,14 +1443,12 @@ function renderSettingsTab(){
   }
   var current=defaultWriteNetwork();
   root.setAttribute('data-default-write-network',current);
-  var options=['mvc','btc','doge','opcat'].map(function(network){
-    return '<option value="'+network+'"'+(network===current?' selected':'')+'>'+network.toUpperCase()+'</option>';
-  }).join('');
   root.innerHTML='<div class="settings-form">'+
-    '<div class="field"><label for="default-write-network">'+esc(uiText('bot.defaultWriteNetwork','Default Write Network'))+'</label><select id="default-write-network" data-field="defaultWriteNetwork">'+options+'</select></div>'+
+    writeNetworkPickerMarkup('defaultWriteNetwork',uiText('bot.defaultWriteNetwork','Default Write Network'),current)+
     '<div class="settings-note">'+esc(uiText('bot.defaultWriteNetworkNote','Used by write commands when no explicit chain is supplied. Wallet balance and transfer keep their own chain selection rules.'))+'</div>'+
     '<div class="settings-save-row"><button class="btn btn-primary" data-act="save-settings">'+esc(uiText('bot.saveSettings','Save Settings'))+'</button><span class="save-status" data-settings-status></span></div>'+
   '</div>';
+  wireChainPickers();
   var save=q('[data-act="save-settings"]');if(save)save.addEventListener('click',saveSettings);
 }
 

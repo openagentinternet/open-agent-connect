@@ -576,6 +576,10 @@
       .provider-field {
         position: relative;
       }
+      .chain-field {
+        position: relative;
+        z-index: 30;
+      }
       .homepage-panel {
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
@@ -713,11 +717,14 @@
         cursor: not-allowed;
         text-decoration: none;
       }
-      .provider-picker {
+      .provider-picker,
+      .chain-picker {
         position: relative;
       }
       .provider-trigger,
-      .provider-option {
+      .provider-option,
+      .chain-trigger,
+      .chain-option {
         width: 100%;
         min-height: 36px;
         display: flex;
@@ -733,12 +740,16 @@
         text-align: left;
       }
       .provider-trigger:hover,
-      .provider-option:hover {
+      .provider-option:hover,
+      .chain-trigger:hover,
+      .chain-option:hover {
         background: var(--surface2);
         border-color: var(--border2);
       }
       .provider-trigger span:nth-child(2),
-      .provider-option span:nth-child(2) {
+      .provider-option span:nth-child(2),
+      .chain-trigger span:nth-child(2),
+      .chain-option span:nth-child(2) {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -774,7 +785,26 @@
         display: block;
         object-fit: contain;
       }
-      .provider-menu {
+      .chain-logo {
+        width: 20px;
+        height: 20px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        background: #fff;
+        border: 1px solid rgba(15, 23, 42, .12);
+        overflow: hidden;
+      }
+      .chain-logo img {
+        width: 16px;
+        height: 16px;
+        display: block;
+        object-fit: contain;
+      }
+      .provider-menu,
+      .chain-menu {
         position: absolute;
         z-index: 20;
         top: calc(100% + 4px);
@@ -790,7 +820,17 @@
         background: var(--surface);
         box-shadow: 0 14px 32px rgba(15,23,42,.16);
       }
-      .provider-option[selected] {
+      .chain-menu {
+        position: static;
+        z-index: auto;
+        top: auto;
+        left: auto;
+        right: auto;
+        margin-top: 4px;
+        max-height: none;
+      }
+      .provider-option[selected],
+      .chain-option[selected] {
         border-color: var(--accent);
         background: var(--surface3);
       }
@@ -860,11 +900,15 @@
         padding: 7px 9px;
       }
       .settings-note {
+        position: relative;
+        z-index: 0;
         color: var(--muted);
         font-size: 12px;
         line-height: 1.5;
       }
       .settings-save-row {
+        position: relative;
+        z-index: 0;
         display: flex;
         align-items: center;
         gap: 12px;
