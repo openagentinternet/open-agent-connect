@@ -3301,53 +3301,23 @@ test('GET /ui/loom remains directly available without appearing in console navig
   assert.doesNotMatch(html, /\/api\/services\/rate/);
 });
 
-test('GET /ui/metaapps serves the built-in MetaApps gallery shell', async (t) => {
+test('GET /ui/apps serves the Apps owner console and appears after Services', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/metaapps?pinId=pin-1i0&from=alice`);
+  const response = await fetch(`${server.baseUrl}/ui/apps?pinId=pin-1i0&from=alice`);
   const html = await response.text();
   const nav = extractTopbarNav(html);
 
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
   assert.match(html, /\/ui\/shared\.css/);
-  assert.match(html, /MetaApps/);
-  assert.match(html, /data-metaapps-shell/);
-  assert.match(html, /data-metaapps-list/);
-  assert.match(html, /data-metaapps-refresh/);
-  assert.match(html, /data-metaapps-detail/);
-  assert.match(html, /\/api\/metaapps/);
-  assert.match(html, /new URLSearchParams\(window\.location\.search\)/);
-  assert.match(html, /for \(const \[key, value\] of new URLSearchParams\(window\.location\.search\)\.entries\(\)\)/);
-  assert.match(html, /if \(value\) apiParams\.append\(key, value\)/);
-  assert.match(html, /apiParams\.append\(key, value\)/);
-  assert.match(html, /apiParams\.set\('refresh', 'true'\)/);
-  assert.doesNotMatch(html, /for \(const key of \['pinId', 'firstPinId', 'mine', 'from'\]\)/);
-  assert.match(html, /function safeUrl/);
-  assert.match(html, /allowed\.protocol === 'http:' \|\| allowed\.protocol === 'https:'/);
-  assert.match(html, /value\.startsWith\('\/'\) && !value\.startsWith\('\/\/'\)/);
-  assert.match(html, /function isMetaAppsGalleryUrl/);
-  assert.match(html, /function nonGalleryUrl/);
-  assert.match(html, /function openUrl/);
-  assert.match(html, /safeUrl\(record\.runUrl\) \|\| safeUrl\(record\.metawebUrl\) \|\| nonGalleryUrl\(record\.localUiUrl\)/);
-  assert.match(html, /safeUrl\(record\.metawebUrl\) \|\| safeUrl\(record\.runUrl\) \|\| nonGalleryUrl\(record\.localUiUrl\)/);
-  assert.doesNotMatch(html, /safeUrl\(record\.runUrl\) \|\| safeUrl\(record\.localUiUrl\) \|\| safeUrl\(record\.metawebUrl\)/);
-  assert.match(html, /const safeHref = safeUrl\(href\)/);
-  assert.doesNotMatch(html, /href="' \+ escapeHtml\(href\)/);
-  assert.doesNotMatch(html, /data-metaapps-share="' \+ escapeHtml\(shareTarget\)/);
-  assert.match(html, /function isMetaAppPinId/);
-  assert.match(html, /\/\^\[0-9a-f\]\{64\}i0\$\/i/);
-  assert.match(html, /isMetaAppPinId\(record\.pinId\)/);
-  assert.match(html, /const commentCommand = validPinId \?/);
-  assert.match(html, /Copy comment command/);
-  assert.match(html, /function statusLabel/);
-  assert.match(html, /function latestLabel/);
-  assert.match(html, /function versionHistory/);
-  assert.match(html, /record\.raw\?\.indexer\?\.history/);
-  assert.match(html, /record\.indexer\?\.history/);
-  assert.match(html, /data-metaapps-history/);
-  assert.match(html, /metaapps-row-state/);
+  assert.match(html, /Apps/);
+  assert.match(html, /data-apps-shell/);
+  assert.match(html, /data-apps-grid/);
+  assert.match(html, /data-apps-publish-open/);
+  assert.match(html, /\/api\/apps/);
+  assert.match(nav, /href="\/ui\/services"[\s\S]*href="\/ui\/apps"/);
   assert.doesNotMatch(nav, /href="\/ui\/metaapps"/);
   assert.doesNotMatch(html, /\/api\/wallet/);
   assert.doesNotMatch(html, /\/api\/chain/);
@@ -3355,76 +3325,17 @@ test('GET /ui/metaapps serves the built-in MetaApps gallery shell', async (t) =>
   assert.doesNotMatch(html, /\/api\/metaapp\/comment/);
 });
 
-test('GET /ui/metaapps gallery script filters gallery-loop links and unsafe comment commands', async (t) => {
+test('GET /ui/metaapps redirects to /ui/apps preserving query string', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/metaapps`);
-  assert.equal(response.status, 200);
-  const html = await response.text();
-  const validPinId = `${'a'.repeat(64)}i0`;
-  const galleryUrl = `/ui/metaapps?pinId=${validPinId}`;
-  const metawebUrl = 'https://metaweb.example/metaapps/valid';
-
-  const validRender = await renderMetaAppsGalleryScript(html, {
-    search: `?pinId=${validPinId}&from=alice&unknown=kept&empty=`,
-    records: [
-      {
-        pinId: validPinId,
-        title: 'Valid MetaApp',
-        localUiUrl: galleryUrl,
-        metawebUrl,
-        version: '1.0.0',
-      },
-    ],
+  const response = await fetch(`${server.baseUrl}/ui/metaapps?pinId=pin-1i0&from=alice`, {
+    redirect: 'manual',
   });
 
-  assert.deepEqual(validRender.fetchCalls, [
-    `/api/metaapps?pinId=${validPinId}&from=alice&unknown=kept`,
-  ]);
-  const actionLinks = readMetaAppsActionLinks(validRender.detailHtml);
-  assert.equal(actionLinks.find((link) => link.label === 'Open')?.href, metawebUrl);
-  assert.equal(actionLinks.find((link) => link.label === 'Run')?.href, metawebUrl);
-  assert.equal(actionLinks.find((link) => link.label === 'Open in Browser')?.href, `/browser/metaapp/${validPinId}`);
-  assert.match(
-    validRender.detailHtml,
-    new RegExp(`<a class="metaapps-action" href="/browser/metaapp/${validPinId}" target="_blank" rel="noreferrer">Open in Browser</a>`),
-  );
-  assert.ok(actionLinks.every((link) => link.href !== galleryUrl));
-  assert.doesNotMatch(validRender.detailHtml, /href="\/ui\/metaapps\?pinId=/);
-  assert.match(validRender.detailHtml, /Copy comment command/);
-  assert.match(
-    validRender.detailHtml,
-    new RegExp(`metabot metaapp comment --pin-id ${validPinId} --comment &quot;&quot;`),
-  );
-
-  const invalidRender = await renderMetaAppsGalleryScript(html, {
-    records: [
-      {
-        pinId: 'bad-pin; touch /tmp/metaapps-owned',
-        title: 'Untrusted MetaApp',
-        localUiUrl: '/ui/metaapps?pinId=bad-pin',
-        metawebUrl: 'https://metaweb.example/metaapps/untrusted',
-      },
-    ],
-  });
-
-  assert.doesNotMatch(invalidRender.detailHtml, /Copy comment command/);
-  assert.doesNotMatch(invalidRender.detailHtml, /metabot metaapp comment --pin-id/);
-  assert.doesNotMatch(invalidRender.detailHtml, /Open in Browser/);
-  assert.doesNotMatch(invalidRender.detailHtml, /href="\/browser\/metaapp\//);
-});
-
-test('GET /ui/metaapps supports zh-CN Browser action copy in the built page script', async (t) => {
-  const server = await startServer({ useBuiltInUiPages: true });
-  t.after(async () => server.close());
-
-  const response = await fetch(`${server.baseUrl}/ui/metaapps?lang=zh-CN`);
-  const html = await response.text();
-
-  assert.equal(response.status, 200);
-  assert.match(html, /<html lang="zh-CN">/);
-  assert.match(html, /actionLink\(browserMetaApp, "在浏览器中打开"\)/);
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('location'), '/ui/apps?pinId=pin-1i0&from=alice');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
 });
 
 test('GET /ui/buzz serves the bundled Buzz MetaApp entry from the daemon server', async (t) => {

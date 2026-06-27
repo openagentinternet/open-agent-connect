@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__PAGE_TITLE__</title>
+    <link rel="stylesheet" href="/ui/shared.css" />
+    <style>
+      .apps-shell {
+        display: grid;
+        gap: 16px;
+        width: min(1280px, calc(100vw - 48px));
+        max-width: 1280px;
+        margin: 16px auto 24px;
+      }
+      .apps-workspace-card {
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .apps-toolbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 22px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-wrap: wrap;
+      }
+      .apps-toolbar h1 {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .apps-toolbar p,
+      .apps-section-header p,
+      .apps-section-header span,
+      .apps-pagination span {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .apps-toolbar-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .apps-toolbar-actions .btn-primary {
+        border-color: #bbf7d0;
+        background: var(--green-dim);
+        color: var(--green);
+      }
+      .apps-toolbar-actions .btn-primary:hover {
+        border-color: #86efac;
+        background: #bbf7d0;
+        color: var(--green);
+      }
+      .apps-bot-filter {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 22px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface2);
+      }
+      .apps-bot-filter label {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .apps-bot-picker {
+        position: relative;
+        width: min(280px, 100%);
+      }
+      .apps-bot-trigger {
+        width: 100%;
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border: 1px solid var(--border2);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--muted);
+        font: 13px var(--sans);
+        padding: 4px 8px 4px 10px;
+        cursor: not-allowed;
+      }
+      .apps-bot-trigger span:first-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .apps-bot-chevron {
+        color: var(--dim);
+        font-size: 11px;
+      }
+      .apps-notice {
+        display: grid;
+        gap: 8px;
+        margin: 12px 22px 0;
+        border: 1px solid var(--border2);
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .apps-gallery {
+        display: grid;
+        gap: 14px;
+        padding: 18px 22px 22px;
+      }
+      .apps-section-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .apps-section-header h2 {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .apps-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 12px;
+        min-height: 300px;
+      }
+      .apps-empty {
+        grid-column: 1 / -1;
+        min-height: 220px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border: 1px dashed var(--border2);
+        border-radius: 8px;
+        background: var(--surface3);
+        text-align: center;
+        padding: 24px;
+      }
+      .apps-empty strong {
+        font-size: 14px;
+      }
+      .apps-empty p {
+        max-width: 420px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .apps-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .apps-pagination span {
+        margin: 0;
+        min-width: 64px;
+        text-align: center;
+      }
+      @media (max-width: 720px) {
+        .apps-shell {
+          width: 100%;
+          margin: 0;
+        }
+        .apps-workspace-card {
+          border-left: 0;
+          border-right: 0;
+          border-radius: 0;
+        }
+        .apps-toolbar,
+        .apps-bot-filter,
+        .apps-gallery {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+        .apps-bot-filter {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .apps-bot-picker,
+        .apps-toolbar-actions {
+          width: 100%;
+        }
+        .apps-toolbar-actions .btn {
+          flex: 1 1 140px;
+        }
+        .apps-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .apps-pagination {
+          justify-content: stretch;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="topbar-logo" href="/ui/hub">MetaBot</a>
+        <div class="topbar-sep"></div>
+        <span class="topbar-title">__PAGE_EYEBROW__</span>
+        <div class="topbar-spacer"></div>
+        <nav class="topbar-nav">__PAGE_NAV__</nav>
+      </header>
+      <main class="content">
+        __PAGE_CONTENT__
+      </main>
+    </div>
+    <script>__PAGE_SCRIPT__</script>
+  </body>
+</html>

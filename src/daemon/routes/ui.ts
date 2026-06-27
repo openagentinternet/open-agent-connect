@@ -7,6 +7,7 @@ import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
 import { buildConversationsPageDefinition } from '../../ui/pages/conversations/app';
+import { buildAppsPageDefinition } from '../../ui/pages/apps/app';
 import { buildLoomPageDefinition } from '../../ui/pages/loom/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
@@ -39,6 +40,7 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'bot': () => buildBotPageDefinition(),
   'conversations': buildConversationsPageDefinition,
   'services': buildServicesPageDefinition,
+  'apps': buildAppsPageDefinition,
   'settings': buildSettingsPageDefinition,
   'loom': () => buildLoomPageDefinition(),
   'metaapps': buildMetaAppsPageDefinition,
@@ -48,6 +50,7 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'bot', labelKey: 'nav.botPage' },
   { page: 'conversations', labelKey: 'nav.conversations' },
   { page: 'services', labelKey: 'nav.services' },
+  { page: 'apps', labelKey: 'nav.apps' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();
@@ -248,6 +251,15 @@ export const handleUiRoutes: RouteHandler = async (context) => {
   }
 
   if (await handleBundledMetaAppRoutes(context)) {
+    return true;
+  }
+
+  if (url.pathname === '/ui/metaapps') {
+    context.res.writeHead(302, {
+      'Location': `/ui/apps${url.search}`,
+      'Cache-Control': 'no-store',
+    });
+    context.res.end();
     return true;
   }
 
