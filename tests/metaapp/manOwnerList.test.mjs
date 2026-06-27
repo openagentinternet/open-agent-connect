@@ -167,6 +167,61 @@ test('parseManMetaAppListResponse groups modify target paths under the original 
   assert.equal(parsed.records[0].title, 'Modified Path App');
 });
 
+test('parseManMetaAppListResponse treats timestamp-less MAN rows as newest-first', () => {
+  const modifyPin = `${'f'.repeat(64)}i0`;
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(modifyPin, {
+          title: 'Newest First Modified',
+          runtime: 'browser/linux',
+        }, {
+          operation: 'Modify',
+          path: `@${PIN_A}`,
+          timestamp: undefined,
+        }),
+        manRecord(PIN_A, {
+          title: 'Newest First Original',
+          appName: 'Newest First Original',
+          runtime: 'browser',
+          icon: `metafile://${PIN_B}`,
+        }, {
+          timestamp: undefined,
+        }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 1);
+  assert.equal(parsed.records[0].pinId, modifyPin);
+  assert.equal(parsed.records[0].operation, 'modify');
+  assert.equal(parsed.records[0].title, 'Newest First Modified');
+  assert.equal(parsed.records[0].appName, 'Newest First Original');
+  assert.equal(parsed.records[0].icon, `metafile://${PIN_B}`);
+});
+
+test('parseManMetaAppListResponse lets timestamp-less newest-first revoke hide older create', () => {
+  const revokePin = `${'c'.repeat(64)}i0`;
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(revokePin, {}, {
+          operation: 'REVOKE',
+          path: `@${PIN_A}`,
+          timestamp: undefined,
+        }),
+        manRecord(PIN_A, { title: 'Older Create', appName: 'Older Create', runtime: 'browser' }, {
+          timestamp: undefined,
+        }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 0);
+});
+
 test('parseManMetaAppListResponse lets modify target path override self first pin fields', () => {
   const modifyPin = `${'f'.repeat(64)}i0`;
   const parsed = parseManMetaAppListResponse({
@@ -482,6 +537,13 @@ test('parseManMetaAppListResponse maps summary and transaction fields', () => {
   assert.deepEqual(parsed.records[0].txids, ['tx-one', 'tx-two']);
 });
 
+test('parseManMetaAppListResponse throws when MAN envelope code is not success', () => {
+  assert.throws(
+    () => parseManMetaAppListResponse({ code: 0, message: 'bad request' }),
+    /MAN MetaAPP list failed: bad request/,
+  );
+});
+
 test('createMetaAppManOwnerClient lists by encoded address and cursor', async () => {
   const urls = [];
   const fetchFn = async (url) => {
@@ -505,5 +567,21 @@ test('createMetaAppManOwnerClient lists by encoded address and cursor', async ()
   assert.equal(
     urls[0],
     'https://manapi.metaid.io/address/pin/list/16UjcYNBG9GTK4uq2f7yYEbuifqCzoLMGS?cursor=abc&size=12&path=%2Fprotocols%2Fmetaapp',
+  );
+});
+
+test('createMetaAppManOwnerClient throws on non-OK HTTP response', async () => {
+  const client = createMetaAppManOwnerClient({
+    baseUrl: 'https://manapi.metaid.io',
+    fetchFn: async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({ code: 0, message: 'unavailable' }),
+    }),
+  });
+
+  await assert.rejects(
+    () => client.listByAddress({ address: '16UjcYNBG9GTK4uq2f7yYEbuifqCzoLMGS' }),
+    /MAN MetaAPP list HTTP 503/,
   );
 });

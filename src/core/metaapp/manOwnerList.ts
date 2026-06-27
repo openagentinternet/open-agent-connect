@@ -279,7 +279,7 @@ function normalizeTotal(value: unknown, fallback: number): number {
 }
 
 function normalizeOperation(value: unknown): string {
-  return normalizeText(value) || 'create';
+  return normalizeText(value).toLowerCase() || 'create';
 }
 
 function isHiddenOperation(value: string): boolean {
@@ -302,7 +302,7 @@ function shouldReplaceCandidate(
     }
   }
   if (next.listIndex !== current.listIndex) {
-    return next.listIndex > current.listIndex;
+    return next.listIndex < current.listIndex;
   }
   return next.historyIndex > current.historyIndex;
 }
@@ -314,7 +314,7 @@ function compareCandidates(a: MetaAppOwnerListCandidate, b: MetaAppOwnerListCand
     return aTimestamp - bTimestamp;
   }
   if (a.listIndex !== b.listIndex) {
-    return a.listIndex - b.listIndex;
+    return b.listIndex - a.listIndex;
   }
   return a.historyIndex - b.historyIndex;
 }
