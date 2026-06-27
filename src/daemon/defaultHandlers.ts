@@ -11920,7 +11920,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
         const result = await catalog.listPrimaryRuntimeSkills({
           metaBotSlug,
-          allowFallbackRuntime: false,
+          allowFallbackRuntime: request.allowFallbackRuntime === true,
         });
         if (!result.ok) {
           return commandFailed(result.code, result.message);

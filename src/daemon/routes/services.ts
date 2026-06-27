@@ -38,8 +38,14 @@ export const handleServicesRoutes: RouteHandler = async (context) => {
     }
 
     const from = url.searchParams.get('from')?.trim();
+    const request = {
+      ...(from ? { from } : {}),
+      ...(url.searchParams.has('allowFallbackRuntime')
+        ? { allowFallbackRuntime: readBoolean(url.searchParams.get('allowFallbackRuntime')) }
+        : {}),
+    };
     const result = handlers.services?.listPublishSkills
-      ? await handlers.services.listPublishSkills(from ? { from } : {})
+      ? await handlers.services.listPublishSkills(request)
       : commandFailed('not_implemented', 'Services publish skills handler is not configured.');
     context.sendJson(200, result);
     return true;

@@ -2597,11 +2597,11 @@ test('GET /api/services/skills forwards actor selection to services.listPublishS
   const server = await startServer();
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/services/skills?from=alice-weather-bot`);
+  const response = await fetch(`${server.baseUrl}/api/services/skills?from=alice-weather-bot&allowFallbackRuntime=true`);
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.publishSkills, [{ from: 'alice-weather-bot' }]);
+  assert.deepEqual(server.calls.publishSkills, [{ from: 'alice-weather-bot', allowFallbackRuntime: true }]);
   assert.equal(payload.ok, true);
   assert.equal(payload.data.metaBotSlug, 'alice-weather-bot');
   assert.equal(payload.data.runtime.provider, 'codex');

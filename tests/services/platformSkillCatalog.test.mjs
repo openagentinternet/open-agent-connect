@@ -212,6 +212,44 @@ test('primary runtime catalog falls back to a healthy fallback runtime when prim
   assert.deepEqual(result.skills.map((skill) => skill.skillName), ['metabot-help']);
 });
 
+test('primary runtime catalog repairs stale primary runtime path with a healthy same-provider runtime', async () => {
+  const { systemHome, profileRoot, slug } = await createProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const runtimeStore = createLlmRuntimeStore(paths);
+  const bindingStore = createLlmBindingStore(paths);
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime('runtime-codex-app', 'codex', 'unavailable', { binaryPath: '/Applications/Codex.app/Contents/Resources/codex' }),
+      runtime('runtime-codex-homebrew', 'codex', 'healthy', { binaryPath: '/opt/homebrew/bin/codex' }),
+      runtime('runtime-cursor', 'cursor', 'healthy', { binaryPath: '/Users/example/.local/bin/cursor-agent' }),
+    ],
+  });
+  await bindingStore.write({
+    version: 1,
+    bindings: [
+      binding('binding-codex-primary', slug, 'runtime-codex-app', 'primary'),
+      binding('binding-cursor-fallback', slug, 'runtime-cursor', 'fallback'),
+    ],
+  });
+  await writeSkill(path.join(systemHome, '.codex', 'skills'), 'metabot-codex-help');
+  await writeSkill(path.join(systemHome, '.cursor', 'skills'), 'metabot-cursor-only');
+
+  const catalog = createPlatformSkillCatalog({
+    runtimeStore,
+    bindingStore,
+    systemHomeDir: systemHome,
+    projectRoot: profileRoot,
+    env: {},
+  });
+  const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug: slug });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.runtime.id, 'runtime-codex-homebrew');
+  assert.equal(result.binding.role, 'primary');
+  assert.deepEqual(result.skills.map((skill) => skill.skillName), ['metabot-codex-help']);
+});
+
 test('catalog deduplicates skills by deterministic root precedence', async () => {
   const { systemHome, profileRoot, slug } = await createProfileHome();
   const paths = resolveMetabotPaths(profileRoot);

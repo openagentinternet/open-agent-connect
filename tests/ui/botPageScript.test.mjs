@@ -1095,7 +1095,7 @@ test('bot page renders chat skills tab for private conversation replies only', a
       '[data-chat-skills-profile-slug]': activeChatSkillsPanel,
     },
     fetch: (url) => {
-      assert.equal(url, '/api/services/skills?from=alice-bot');
+      assert.equal(url, '/api/services/skills?from=alice-bot&allowFallbackRuntime=true');
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
@@ -1442,7 +1442,7 @@ test('bot page public identity tab is not replaced when chat skill options load'
       '[data-info-content]': root,
     },
     fetch: (url) => {
-      assert.equal(url, '/api/services/skills?from=alice');
+      assert.equal(url, '/api/services/skills?from=alice&allowFallbackRuntime=true');
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
@@ -2471,7 +2471,7 @@ test('bot page defaults to the public identity tab after profiles load', async (
   assert.equal(advancedTab.active, false);
   assert.match(infoRoot.innerHTML, /data-public-identity-profile-slug="bob"/);
   assert.doesNotMatch(infoRoot.innerHTML, /data-field="chatSkillSelect"/);
-  assert.equal(calls.includes('/api/services/skills?from=bob'), false);
+  assert.equal(calls.includes('/api/services/skills?from=bob&allowFallbackRuntime=true'), false);
   assert.equal(calls.includes('/api/bot/sessions?slug=alice&limit=50'), false);
 });
 
@@ -2867,7 +2867,7 @@ test('bot page deep link maps legacy info profile links to public identity', asy
   assert.equal(nameField.focused, true);
   assert.equal(nameField.scrolled, true);
   assert.doesNotMatch(infoRoot.innerHTML, /data-field="chatSkillSelect"/);
-  assert.equal(calls.includes('/api/services/skills?from=alice'), false);
+  assert.equal(calls.includes('/api/services/skills?from=alice&allowFallbackRuntime=true'), false);
 });
 
 test('bot page deep link maps legacy info chat links to chat skills', async () => {
@@ -2921,7 +2921,7 @@ test('bot page deep link maps legacy info chat links to chat skills', async () =
           }),
         });
       }
-      if (url === '/api/services/skills?from=alice') {
+      if (url === '/api/services/skills?from=alice&allowFallbackRuntime=true') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
@@ -3036,7 +3036,7 @@ test('bot page deep link focus is consumed after the first successful activation
   assert.equal(context.state.selectedTab, 'publicIdentity');
   assert.equal(focusCount, 1);
   assert.equal(scrollCount, 1);
-  assert.equal(calls.includes('/api/services/skills?from=alice'), false);
+  assert.equal(calls.includes('/api/services/skills?from=alice&allowFallbackRuntime=true'), false);
 });
 
 test('bot page runtime modal renders healthy and detected runtimes only', () => {

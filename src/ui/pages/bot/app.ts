@@ -386,7 +386,7 @@ function loadChatSkillOptions(slug){
   state.chatSkillOptionsStatusBySlug[slug]='loading';
   state.chatSkillOptionsErrorBySlug[slug]='';
   rerenderChatSkillsTabForLoad(slug);
-  return api('/api/services/skills?from='+encodeURIComponent(slug)).then(function(r){
+  return api('/api/services/skills?from='+encodeURIComponent(slug)+'&allowFallbackRuntime=true').then(function(r){
     var data=r&&r.data?r.data:r;
     var skills=Array.isArray(data&&data.skills)?data.skills:[];
     var rows=[];var seen={};

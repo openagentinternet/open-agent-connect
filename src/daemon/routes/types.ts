@@ -97,7 +97,7 @@ export interface MetabotDaemonHttpHandlers {
   };
   services?: {
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    listPublishSkills?: (input?: { slug?: string; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    listPublishSkills?: (input?: { slug?: string; from?: string; allowFallbackRuntime?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listMyServices?: (input: {
       from?: string;
       all?: boolean;

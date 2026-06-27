@@ -2411,6 +2411,59 @@ test('default services listPublishSkills does not list fallback runtime skills w
   assert.equal(result.code, 'primary_runtime_unavailable');
 });
 
+test('default services listPublishSkills lists fallback runtime skills when explicitly allowed', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-services-', 'chat-skills-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'Chat Skills Bot');
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'unavailable'),
+      runtime('claude-code', 'runtime-claude', 'healthy'),
+    ],
+  });
+  await createLlmBindingStore(homeDir).write({
+    version: 1,
+    bindings: [
+      {
+        id: 'binding-chat-codex-primary',
+        metaBotSlug: 'chat-skills-bot',
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+      {
+        id: 'binding-chat-claude-fallback',
+        metaBotSlug: 'chat-skills-bot',
+        llmRuntimeId: 'runtime-claude',
+        role: 'fallback',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+    ],
+  });
+  await writeProjectSkill(homeDir, '.claude', 'metabot-claude-only');
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.services.listPublishSkills({ allowFallbackRuntime: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.runtime.id, 'runtime-claude');
+  assert.deepEqual(result.data.skills.map((skill) => skill.skillName), ['metabot-claude-only']);
+});
+
 test('default bot stats and sessions aggregate executor history by MetaBot slug', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
