@@ -12,6 +12,14 @@ type FetchResponse = {
 
 type FetchFn = (url: string) => Promise<FetchResponse>;
 
+type MetaAppOwnerListCandidate = {
+  raw: Record<string, unknown>;
+  latest: Record<string, unknown>;
+  groupKey: string;
+  listIndex: number;
+  timestamp: number | null;
+};
+
 export interface MetaAppOwnerListRecord {
   pinId: string;
   firstPinId: string;
@@ -153,6 +161,40 @@ function pickFirstPinId(raw: Record<string, unknown>, pinId: string): string {
   ) || pinId;
 }
 
+function pickEffectiveFirstPinId(
+  raw: Record<string, unknown>,
+  latest: Record<string, unknown>,
+  pinId: string,
+): string {
+  return normalizeText(
+    latest.firstPinId
+      ?? latest.first_pin_id
+      ?? latest.originPinId
+      ?? latest.origin_pin_id
+      ?? latest.rootPinId
+      ?? latest.root_pin_id,
+  ) || pickFirstPinId(raw, pinId);
+}
+
+function pickPinId(raw: Record<string, unknown>, latest: Record<string, unknown>): string {
+  return normalizeText(latest.id ?? latest.pinId ?? latest.pin_id ?? raw.id ?? raw.pinId ?? raw.pin_id);
+}
+
+function pickOwnerAddress(raw: Record<string, unknown>, latest: Record<string, unknown>): string {
+  return normalizeText(
+    latest.ownerAddress
+      ?? latest.owner_address
+      ?? latest.creatorAddress
+      ?? latest.creator_address
+      ?? raw.ownerAddress
+      ?? raw.owner_address
+      ?? raw.creatorAddress
+      ?? raw.creator_address
+      ?? latest.address
+      ?? raw.address,
+  );
+}
+
 function readHistory(raw: Record<string, unknown>): Record<string, unknown>[] {
   const history = raw.modify_history ?? raw.modifyHistory ?? raw.history;
   if (!Array.isArray(history)) {
@@ -196,6 +238,20 @@ function normalizeTotal(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function shouldReplaceCandidate(
+  current: MetaAppOwnerListCandidate,
+  next: MetaAppOwnerListCandidate,
+): boolean {
+  if (current.timestamp !== null || next.timestamp !== null) {
+    const currentTimestamp = current.timestamp ?? Number.NEGATIVE_INFINITY;
+    const nextTimestamp = next.timestamp ?? Number.NEGATIVE_INFINITY;
+    if (nextTimestamp !== currentTimestamp) {
+      return nextTimestamp > currentTimestamp;
+    }
+  }
+  return next.listIndex > current.listIndex;
+}
+
 export function parseManMetaAppListResponse(response: unknown): MetaAppOwnerListResult {
   const root = parseObject(response);
   if (root.code !== 1) {
@@ -204,32 +260,50 @@ export function parseManMetaAppListResponse(response: unknown): MetaAppOwnerList
 
   const data = parseObject(root.data);
   const list = Array.isArray(data.list) ? data.list : [];
+  const grouped = new Map<string, MetaAppOwnerListCandidate>();
   const records: MetaAppOwnerListRecord[] = [];
 
-  for (const item of list) {
+  for (const [listIndex, item] of list.entries()) {
     const raw = readObject(item);
     if (!raw) {
       continue;
     }
 
     const latest = latestEffectiveRecord(raw);
+    const pinId = pickPinId(raw, latest);
+    if (!pinId) {
+      continue;
+    }
+
+    const groupKey = pickEffectiveFirstPinId(raw, latest, pinId);
+    const candidate: MetaAppOwnerListCandidate = {
+      raw,
+      latest,
+      groupKey,
+      listIndex,
+      timestamp: normalizeTimestamp(latest.timestamp ?? raw.timestamp),
+    };
+    const current = grouped.get(groupKey);
+    if (!current || shouldReplaceCandidate(current, candidate)) {
+      grouped.set(groupKey, candidate);
+    }
+  }
+
+  for (const candidate of grouped.values()) {
+    const { raw, latest } = candidate;
     const operation = normalizeText(latest.operation ?? raw.operation) || 'create';
     if (operation === 'revoke') {
       continue;
     }
 
-    const pinId = normalizeText(latest.id ?? latest.pinId ?? latest.pin_id ?? raw.id ?? raw.pinId ?? raw.pin_id);
-    if (!pinId) {
-      continue;
-    }
-
+    const pinId = pickPinId(raw, latest);
     const content = parseContent(raw, latest);
     const title = normalizeText(content.title ?? content.appName) || 'MetaAPP';
     const appName = normalizeText(content.appName ?? content.title) || 'MetaAPP';
 
     records.push({
       pinId,
-      firstPinId: pickFirstPinId(raw, pinId),
+      firstPinId: pickEffectiveFirstPinId(raw, latest, pinId),
       operation,
       title,
       appName,
@@ -249,7 +323,7 @@ export function parseManMetaAppListResponse(response: unknown): MetaAppOwnerList
       tags: normalizeTags(content.tags),
       disabled: normalizeBoolean(content.disabled),
       codeType: normalizeOptionalText(content.codeType ?? content.code_type),
-      ownerAddress: normalizeText(latest.address ?? raw.address),
+      ownerAddress: pickOwnerAddress(raw, latest),
       timestamp: normalizeTimestamp(latest.timestamp ?? raw.timestamp),
       metaappUri: `metaapp://${pinId}`,
       metawebUrl: buildMetaAppCanonicalUrl(pinId),

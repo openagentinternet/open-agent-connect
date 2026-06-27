@@ -74,6 +74,95 @@ test('parseManMetaAppListResponse hides revoke records and keeps disabled record
   assert.equal(parsed.records[0].disabled, true);
 });
 
+test('parseManMetaAppListResponse hides older create row when later revoke has same first pin', () => {
+  const revokePin = `${'c'.repeat(64)}i0`;
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(PIN_A, { title: 'Visible Before Revoke', appName: 'Visible Before Revoke', runtime: 'browser' }, {
+          firstPinId: PIN_A,
+          timestamp: 1782490000,
+        }),
+        manRecord(revokePin, {}, {
+          firstPinId: PIN_A,
+          operation: 'revoke',
+          timestamp: 1782490001,
+        }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 0);
+});
+
+test('parseManMetaAppListResponse uses later modify row for the same root pin', () => {
+  const modifyPin = `${'d'.repeat(64)}i0`;
+  const parsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(PIN_A, {
+          title: 'Original App',
+          appName: 'Original App',
+          runtime: 'browser',
+          version: 'v1.0.0',
+        }, {
+          root_pin_id: PIN_A,
+          timestamp: 1782490000,
+        }),
+        manRecord(modifyPin, {
+          title: 'Modified App',
+          appName: 'Modified App',
+          runtime: 'browser/linux',
+          version: 'v1.1.0',
+        }, {
+          root_pin_id: PIN_A,
+          operation: 'modify',
+          timestamp: 1782490001,
+        }),
+      ],
+    },
+  });
+
+  assert.equal(parsed.records.length, 1);
+  assert.equal(parsed.records[0].pinId, modifyPin);
+  assert.equal(parsed.records[0].firstPinId, PIN_A);
+  assert.equal(parsed.records[0].operation, 'modify');
+  assert.equal(parsed.records[0].title, 'Modified App');
+  assert.equal(parsed.records[0].runtime, 'browser/linux');
+  assert.equal(parsed.records[0].version, 'v1.1.0');
+});
+
+test('parseManMetaAppListResponse prefers explicit owner address fields over address', () => {
+  const ownerAddressPin = `${'e'.repeat(64)}i0`;
+  const ownerAddressParsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(PIN_A, { title: 'Owner Address', appName: 'Owner Address', runtime: 'browser' }, {
+          ownerAddress: 'explicit-owner',
+          address: 'fallback-address',
+        }),
+      ],
+    },
+  });
+  const snakeOwnerAddressParsed = parseManMetaAppListResponse({
+    code: 1,
+    data: {
+      list: [
+        manRecord(ownerAddressPin, { title: 'Snake Owner Address', appName: 'Snake Owner Address', runtime: 'browser' }, {
+          owner_address: 'snake-owner',
+          address: 'fallback-address',
+        }),
+      ],
+    },
+  });
+
+  assert.equal(ownerAddressParsed.records[0].ownerAddress, 'explicit-owner');
+  assert.equal(snakeOwnerAddressParsed.records[0].ownerAddress, 'snake-owner');
+});
+
 test('createMetaAppManOwnerClient lists by encoded address and cursor', async () => {
   const urls = [];
   const fetchFn = async (url) => {
