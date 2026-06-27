@@ -192,6 +192,14 @@ import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSess
 import { createMetaAppIndexerClient } from '../core/metaapp/indexerClient';
 import { createMetaAppLocalCacheStore } from '../core/metaapp/localCache';
 import {
+  buildMetaAppCreateWrite,
+  buildMetaAppModifyWrite,
+  buildMetaAppProtocolPayload,
+  buildMetaAppRevokeWrite,
+} from '../core/metaapp/appsProtocol';
+import { createMetaAppManOwnerClient } from '../core/metaapp/manOwnerList';
+import { buildMetaAppCanonicalUrl as buildAppsMetaAppCanonicalUrl } from '../core/metaapp/share';
+import {
   commentMetaApp,
   previewMetaAppProject,
   publishMetaApp,
@@ -4501,6 +4509,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
   testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
   conversationGuidanceReplyRunner?: ChatReplyRunner;
+  metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
 }): MetabotDaemonHttpHandlers {
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   // Create default adapter registry if none provided (backward compat)
@@ -4633,6 +4642,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
+  const metaAppManClient = createMetaAppManOwnerClient({
+    fetchFn: input.metaAppManFetch ?? fetch,
+  });
 
   // Process-level cache for chain profile projections (name + avatar reference).
   // Avatars rarely change, so a 30-minute TTL eliminates repeated chain fetches
@@ -5527,6 +5539,30 @@ export function createDefaultMetabotDaemonHandlers(input: {
         : createRuntimeStateStore(normalizedProfileHomeDir),
       signer: createSignerForProfileHome(normalizedProfileHomeDir),
     };
+  }
+
+  async function resolveAppsActor(rawActor: unknown): Promise<
+    | {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      signer: Signer;
+      mvcAddress: string;
+    }
+    | { failure: MetabotCommandResult<never> }
+  > {
+    const actor = await resolveActorWriteContext(rawActor);
+    if ('failure' in actor) {
+      return actor;
+    }
+    const state = await actor.runtimeStateStore.readState();
+    if (!state.identity) {
+      return { failure: commandFailed('identity_missing', 'Create a local MetaBot identity before managing Apps.') };
+    }
+    const mvcAddress = normalizeText(state.identity.addresses?.mvc) || normalizeText(state.identity.mvcAddress);
+    if (!mvcAddress) {
+      return { failure: commandFailed('mvc_address_missing', 'Selected Bot does not have an MVC address.') };
+    }
+    return { ...actor, mvcAddress };
   }
 
   function resolveAutoReplyConfigForHome(homeDir: string): PrivateChatAutoReplyConfig {
@@ -10865,7 +10901,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const data = result.data as Record<string, unknown>;
             const pinId = typeof data.pinId === 'string' ? data.pinId : '';
             if (pinId) {
-              const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/metaapps', { pinId }) ?? '/ui/metaapps';
+              const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? '/ui/apps';
               return commandSuccess({
                 ...data,
                 localUiUrl,
@@ -10941,7 +10977,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const data = result.data as Record<string, unknown>;
             const pinId = typeof data.pinId === 'string' ? data.pinId : '';
             if (pinId) {
-              const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/metaapps', { pinId }) ?? '/ui/metaapps';
+              const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? '/ui/apps';
               return commandSuccess({
                 ...data,
                 localUiUrl,
@@ -11040,6 +11076,113 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return actor.failure;
         }
         return listMetaAppsForActor(actor, rawInput);
+      },
+    },
+    apps: {
+      list: async (rawInput) => {
+        const actor = await resolveAppsActor(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+
+        try {
+          const cursor = typeof rawInput.cursor === 'string' ? rawInput.cursor : '';
+          const size = typeof rawInput.size === 'number' && Number.isFinite(rawInput.size) && rawInput.size > 0
+            ? Math.trunc(rawInput.size)
+            : 12;
+          const result = await metaAppManClient.listByAddress({
+            address: actor.mvcAddress,
+            cursor,
+            size,
+          });
+          return commandSuccess(result);
+        } catch (error) {
+          return commandFailed(
+            'apps_list_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      publish: async (rawInput) => {
+        const actor = await resolveAppsActor(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+
+        try {
+          const payload = buildMetaAppProtocolPayload(rawInput);
+          const write = buildMetaAppCreateWrite(payload);
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const written = await actor.signer.writePin({ ...write, network });
+          const pinId = String(written.pinId);
+          const metawebUrl = buildAppsMetaAppCanonicalUrl(pinId);
+          return commandSuccess({
+            pinId,
+            chainWrite: written,
+            metaappUri: `metaapp://${pinId}`,
+            metawebUrl,
+            localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? '/ui/apps',
+          });
+        } catch (error) {
+          return commandFailed(
+            'apps_publish_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      update: async (rawInput) => {
+        const actor = await resolveAppsActor(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+
+        try {
+          const targetPinId = normalizeText(rawInput.targetPinId);
+          const payload = buildMetaAppProtocolPayload(rawInput);
+          const write = buildMetaAppModifyWrite(targetPinId, payload);
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const written = await actor.signer.writePin({ ...write, network });
+          const pinId = String(written.pinId);
+          const metawebUrl = buildAppsMetaAppCanonicalUrl(pinId);
+          return commandSuccess({
+            pinId,
+            targetPinId,
+            chainWrite: written,
+            metaappUri: `metaapp://${pinId}`,
+            metawebUrl,
+            localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? '/ui/apps',
+          });
+        } catch (error) {
+          return commandFailed(
+            'apps_update_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      delete: async (rawInput) => {
+        const actor = await resolveAppsActor(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+
+        try {
+          const targetPinId = normalizeText(rawInput.targetPinId);
+          const write = buildMetaAppRevokeWrite(targetPinId);
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const written = await actor.signer.writePin({ ...write, network });
+          const pinId = String(written.pinId);
+          buildAppsMetaAppCanonicalUrl(pinId);
+          return commandSuccess({
+            revokedPinId: targetPinId,
+            pinId,
+            chainWrite: written,
+          });
+        } catch (error) {
+          return commandFailed(
+            'apps_delete_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       },
     },
     buzz: {
