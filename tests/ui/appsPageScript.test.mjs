@@ -5,6 +5,10 @@ import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
 const { buildAppsPageDefinition } = require('../../dist/ui/pages/apps/app.js');
+const {
+  METAAPP_CODE_TYPE_OPTIONS,
+  METAAPP_CONTENT_TYPE_OPTIONS,
+} = require('../../dist/core/metaapp/appsProtocol.js');
 
 const PIN = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
 
@@ -234,6 +238,37 @@ function buildFakeModalTree(html, ownerDocument) {
   return [form];
 }
 
+function buildFakeElementsFromHtml(html, ownerDocument) {
+  const elements = [];
+  const stack = [];
+  for (const match of html.matchAll(/<([a-z][a-z0-9-]*)\b([^>]*)>|<\/([a-z][a-z0-9-]*)>/giu)) {
+    if (match[3]) {
+      stack.pop();
+      continue;
+    }
+    const tagName = match[1].toUpperCase();
+    const attributes = parseAttributes(match[2] || '');
+    const element = new FakeElement(attributes, tagName);
+    element.ownerDocument = ownerDocument;
+    if (tagName === 'INPUT') {
+      element.type = attributes.type ?? '';
+      element.name = attributes.name ?? '';
+      element.value = attributes.value ?? '';
+      element.checked = Object.prototype.hasOwnProperty.call(attributes, 'checked');
+    }
+    const parent = stack[stack.length - 1] ?? null;
+    if (parent) {
+      parent.appendChild(element);
+    } else {
+      elements.push(element);
+    }
+    if (!/\/\s*>$/u.test(match[0]) && !['INPUT', 'BR', 'HR', 'IMG', 'META', 'LINK'].includes(tagName)) {
+      stack.push(element);
+    }
+  }
+  return elements;
+}
+
 class FakeFormData {
   constructor(form) {
     this.entriesList = [];
@@ -329,6 +364,9 @@ function createAppsPageContext(options = {}) {
   elements['[data-apps-modal-root]'].onInnerHTML = (html) => {
     elements['[data-apps-modal-root]'].children = buildFakeModalTree(html, document);
   };
+  elements['[data-apps-grid]'].onInnerHTML = (html) => {
+    elements['[data-apps-grid]'].children = buildFakeElementsFromHtml(html, document);
+  };
 
   const fetchUrls = [];
   const fetchBodies = [];
@@ -352,7 +390,10 @@ function createAppsPageContext(options = {}) {
           }));
         }
         if (String(url) === '/api/file/upload' || String(url) === '/api/file/upload-large') {
-          return Promise.resolve(response(options.uploadResponse ?? {
+          const uploadPayload = typeof options.uploadResponse === 'function'
+            ? options.uploadResponse(String(url), bodyPayload, fetchBodies.filter((entry) => entry.url === '/api/file/upload' || entry.url === '/api/file/upload-large').length)
+            : options.uploadResponse;
+          return Promise.resolve(response(uploadPayload ?? {
             ok: true,
             state: 'success',
             data: { metafileUri: 'metafile://uploaded-file-pin' },
@@ -442,8 +483,13 @@ function createAppsPageContext(options = {}) {
     uploadAssetFile: async (fieldName, file) => {
       const input = new FakeElement({ 'data-apps-asset-file': fieldName }, 'INPUT');
       input.type = 'file';
-      input.files = [file];
+      input.files = Array.isArray(file) ? file : [file];
       await elements['[data-apps-modal-root]'].dispatchEvent('change', { target: input });
+    },
+    clickGridAction: async (selector) => {
+      const element = elements['[data-apps-grid]'].querySelector(selector);
+      assert.ok(element, `${selector} rendered action missing`);
+      await dispatchDocumentEvent('click', { target: element });
     },
   };
 }
@@ -704,7 +750,7 @@ test('publish and edit modals expose matching MetaAPP form groups and edit save 
   assert.match(publishHtml, /Technical information/);
   assert.match(publishHtml, /metafile:\/\//);
 
-  await context.clickFake({ 'data-apps-edit': PIN });
+  await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
   const editHtml = context.elements['[data-apps-modal-root]'].innerHTML;
   const editGroups = [...editHtml.matchAll(/data-apps-form-section="([^"]+)"/gu)].map((match) => match[1]);
   assert.deepEqual(editGroups, publishGroups);
@@ -784,7 +830,7 @@ test('edit submits to /api/apps/update with target pin and changed values', asyn
 
   context.run();
   await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Original Title'), 'render original app');
-  await context.clickFake({ 'data-apps-edit': PIN });
+  await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
 
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="title"]').value, 'Original Title');
   context.setField('title', 'Updated Title');
@@ -823,11 +869,12 @@ test('manual multi asset field normalizes comma and newline PINs into metafile a
 });
 
 test('upload with a file path calls large upload route and stores returned metafile URI', async () => {
+  const uploadedPin = `${'e'.repeat(64)}i0`;
   const context = createAppsPageContext({
     uploadResponse: {
       ok: true,
       state: 'success',
-      data: { metafileUri: 'metafile://uploaded-content-pin' },
+      data: { metafileUri: `metafile://${uploadedPin}` },
     },
   });
 
@@ -848,7 +895,7 @@ test('upload with a file path calls large upload route and stores returned metaf
     filePath: '/tmp/bundle.zip',
     contentType: 'application/zip',
   });
-  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, 'metafile://uploaded-content-pin');
+  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, `metafile://${uploadedPin}`);
 
   context.setField('appName', 'Uploaded App');
   context.setField('title', 'Uploaded App');
@@ -858,7 +905,7 @@ test('upload with a file path calls large upload route and stores returned metaf
 
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), 'publish request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/publish').body;
-  assert.equal(request.content, 'metafile://uploaded-content-pin');
+  assert.equal(request.content, `metafile://${uploadedPin}`);
 });
 
 test('upload without a file path shows a field-level error and does not fake a URI', async () => {
@@ -879,4 +926,165 @@ test('upload without a file path shows a field-level error and does not fake a U
   const error = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-field-error="content"]');
   assert.ok(error);
   assert.match(error.textContent, /path/i);
+});
+
+test('invalid manual asset PIN blocks publish and marks the field error', async () => {
+  const context = createAppsPageContext();
+
+  context.run();
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.clickElement('[data-apps-publish-open]');
+  context.setField('appName', 'Invalid Asset App');
+  context.setField('title', 'Invalid Asset App');
+  context.setField('icon', 'not-a-pin');
+  context.setField('coverImg', PIN);
+
+  await context.submitModalForm();
+
+  assert.equal(context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), false);
+  const error = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-field-error="icon"]');
+  assert.ok(error);
+  assert.equal(error.hidden, false);
+  assert.match(error.textContent, /PIN/i);
+});
+
+test('invalid intro image PIN blocks edit update and marks introImgs', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Invalid Intro App',
+        appName: 'Invalid Intro App',
+        icon: `metafile://${PIN}`,
+        coverImg: `metafile://${PIN}`,
+        introImgs: [`metafile://${PIN}`],
+        runtime: 'browser',
+        contentType: 'application/zip',
+        codeType: 'application/zip',
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Invalid Intro App'), 'render invalid intro app');
+  await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
+  context.setField('introImgs', `${PIN}\ninvalid-pin`);
+
+  await context.submitModalForm();
+
+  assert.equal(context.fetchBodies.some((entry) => entry.url === '/api/apps/update'), false);
+  const error = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-field-error="introImgs"]');
+  assert.ok(error);
+  assert.equal(error.hidden, false);
+  assert.match(error.textContent, /PIN/i);
+});
+
+test('content and code type selects mirror server options and preserve legacy values', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Legacy Types App',
+        appName: 'Legacy Types App',
+        icon: `metafile://${PIN}`,
+        coverImg: `metafile://${PIN}`,
+        introImgs: [`metafile://${PIN}`],
+        runtime: 'browser',
+        contentType: 'application/vnd.legacy-content',
+        codeType: 'application/vnd.legacy-code',
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Legacy Types App'), 'render legacy types app');
+  await context.clickElement('[data-apps-publish-open]');
+  let html = context.elements['[data-apps-modal-root]'].innerHTML;
+  for (const value of METAAPP_CONTENT_TYPE_OPTIONS) {
+    assert.match(html, new RegExp(`<option value="${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'u'), `${value} missing from contentType options`);
+  }
+  for (const value of METAAPP_CODE_TYPE_OPTIONS) {
+    assert.match(html, new RegExp(`<option value="${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'u'), `${value} missing from codeType options`);
+  }
+  const codeSelect = html.match(/<select name="codeType">([\s\S]*?)<\/select>/u)?.[1] ?? '';
+  assert.doesNotMatch(html, /<option value="text\/plain;utf-8"/);
+  assert.doesNotMatch(codeSelect, /text\/plain;utf-8/);
+  assert.doesNotMatch(codeSelect, /application\/octet-stream/);
+
+  await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
+  html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, /<option value="application\/vnd\.legacy-content" selected>application\/vnd\.legacy-content \(current\)<\/option>/);
+  assert.match(html, /<option value="application\/vnd\.legacy-code" selected>application\/vnd\.legacy-code \(current\)<\/option>/);
+});
+
+test('card renders a real Edit action that opens the edit modal', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Real Edit App',
+        appName: 'Real Edit App',
+        icon: `metafile://${PIN}`,
+        coverImg: `metafile://${PIN}`,
+        introImgs: [`metafile://${PIN}`],
+        runtime: 'browser',
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Real Edit App'), 'render real edit app');
+  assert.match(context.elements['[data-apps-grid]'].innerHTML, new RegExp(`data-apps-edit="${PIN}"`, 'u'));
+
+  await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
+
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.equal(context.modalForm().dataset.mode, 'edit');
+  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="title"]').value, 'Real Edit App');
+});
+
+test('multiple intro image uploads store returned URIs in order and submit an array payload', async () => {
+  const firstUploadedPin = `${'e'.repeat(64)}i0`;
+  const secondUploadedPin = `${'f'.repeat(64)}i0`;
+  const context = createAppsPageContext({
+    uploadResponse: (url, body, count) => ({
+      ok: true,
+      state: 'success',
+      data: { metafileUri: count === 1 ? `metafile://${firstUploadedPin}` : `metafile://${secondUploadedPin}` },
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.clickElement('[data-apps-publish-open]');
+  await context.uploadAssetFile('introImgs', [
+    { name: 'one.png', path: '/tmp/one.png', size: 512, type: 'image/png' },
+    { name: 'two.png', path: '/tmp/two.png', size: 1024, type: 'image/png' },
+  ]);
+
+  await context.waitFor(
+    () => context.fetchBodies.filter((entry) => entry.url === '/api/file/upload').length === 2,
+    'two upload requests',
+  );
+  assert.deepEqual(
+    context.fetchBodies.filter((entry) => entry.url === '/api/file/upload').map((entry) => entry.body.filePath),
+    ['/tmp/one.png', '/tmp/two.png'],
+  );
+  assert.equal(
+    context.elements['[data-apps-modal-root]'].querySelector('[name="introImgs"]').value,
+    `metafile://${firstUploadedPin}\nmetafile://${secondUploadedPin}`,
+  );
+
+  context.setField('appName', 'Uploaded Intro App');
+  context.setField('title', 'Uploaded Intro App');
+  context.setField('icon', PIN);
+  context.setField('coverImg', PIN);
+  await context.submitModalForm();
+
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/publish').body;
+  assert.deepEqual(request.introImgs, [`metafile://${firstUploadedPin}`, `metafile://${secondUploadedPin}`]);
 });

@@ -1,6 +1,11 @@
 import { createI18nContext } from '../../i18n';
 import type { LocalUiI18nContext } from '../../i18n';
 import type { LocalUiPageDefinition } from '../types';
+import {
+  METAAPP_CODE_TYPE_OPTIONS,
+  METAAPP_CONTENT_TYPE_OPTIONS,
+  METAAPP_PIN_ID_PATTERN,
+} from '../../../core/metaapp/appsProtocol';
 
 interface AppsPageRuntimeText {
   appNameLabel: string;
@@ -17,10 +22,12 @@ interface AppsPageRuntimeText {
   contentTypeLabel: string;
   copyPinId: string;
   coverImgLabel: string;
+  currentOption: string;
   details: string;
   disabled: string;
   disabledFieldHelp: string;
   disabledFieldLabel: string;
+  edit: string;
   editModalDescription: string;
   editModalTitle: string;
   emptyMessage: string;
@@ -28,6 +35,7 @@ interface AppsPageRuntimeText {
   formErrorTitle: string;
   iconLabel: string;
   indexFileLabel: string;
+  invalidPin: string;
   introImgsLabel: string;
   introLabel: string;
   loadErrorTitle: string;
@@ -85,19 +93,22 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     contentTypeLabel: tx('apps.form.contentType'),
     copyPinId: tx('apps.copyPinId'),
     coverImgLabel: tx('apps.form.coverImg'),
+    currentOption: tx('apps.form.currentOption'),
     details: tx('apps.details'),
-    disabled: tx('apps.disabled'),
-    disabledFieldHelp: tx('apps.form.disabledHelp'),
-    disabledFieldLabel: tx('apps.form.disabled'),
-    editModalDescription: tx('apps.form.editDescription'),
-    editModalTitle: tx('apps.form.editTitle'),
-    emptyMessage: tx('apps.emptyMessage'),
-    emptyTitle: tx('apps.emptyTitle'),
-    formErrorTitle: tx('apps.form.errorTitle'),
-    iconLabel: tx('apps.form.icon'),
-    indexFileLabel: tx('apps.form.indexFile'),
-    introImgsLabel: tx('apps.form.introImgs'),
-    introLabel: tx('apps.form.intro'),
+  disabled: tx('apps.disabled'),
+  disabledFieldHelp: tx('apps.form.disabledHelp'),
+  disabledFieldLabel: tx('apps.form.disabled'),
+  edit: tx('apps.edit'),
+  editModalDescription: tx('apps.form.editDescription'),
+  editModalTitle: tx('apps.form.editTitle'),
+  emptyMessage: tx('apps.emptyMessage'),
+  emptyTitle: tx('apps.emptyTitle'),
+  formErrorTitle: tx('apps.form.errorTitle'),
+  iconLabel: tx('apps.form.icon'),
+  indexFileLabel: tx('apps.form.indexFile'),
+  invalidPin: tx('apps.form.invalidPin'),
+  introImgsLabel: tx('apps.form.introImgs'),
+  introLabel: tx('apps.form.intro'),
     loadErrorTitle: tx('apps.loadErrorTitle'),
     manualPinHelp: tx('apps.form.manualPinHelp'),
     metadataInvalid: tx('apps.form.metadataInvalid'),
@@ -192,15 +203,29 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
         <div class="apps-modal-root" data-apps-modal-root hidden></div>
       </section>
     `,
-    script: buildAppsPageRuntimeSource(runtimeText),
+    script: buildAppsPageRuntimeSource(runtimeText, {
+      codeTypeOptions: [...METAAPP_CODE_TYPE_OPTIONS],
+      contentTypeOptions: [...METAAPP_CONTENT_TYPE_OPTIONS],
+      pinPatternSource: METAAPP_PIN_ID_PATTERN.source,
+    }),
   };
 }
 
-function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
+function buildAppsPageRuntimeSource(
+  text: AppsPageRuntimeText,
+  options: {
+    codeTypeOptions: string[];
+    contentTypeOptions: string[];
+    pinPatternSource: string;
+  },
+): string {
   return `(() => {
   const APPS_API_BASE = '/api/apps';
   const PAGE_SIZE = 12;
   const UI_TEXT = ${JSON.stringify(text)};
+  const CONTENT_TYPE_OPTIONS = ${JSON.stringify(options.contentTypeOptions)};
+  const CODE_TYPE_OPTIONS = ${JSON.stringify(options.codeTypeOptions)};
+  const METAAPP_PIN_ID_PATTERN = new RegExp(${JSON.stringify(options.pinPatternSource)}, 'i');
   const state = {
     profiles: [],
     selectedSlug: '',
@@ -267,27 +292,6 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     ['macOS', 'apps.form.runtimeMacOS', UI_TEXT.runtimeMacOS],
     ['linux', 'apps.form.runtimeLinux', UI_TEXT.runtimeLinux],
   ];
-  const CONTENT_TYPE_OPTIONS = [
-    'application/zip',
-    'text/html',
-    'application/json',
-    'text/plain;utf-8',
-    'text/plain',
-    'application/javascript',
-    'application/octet-stream',
-    'image/png',
-    'image/jpeg',
-    'image/webp',
-  ];
-  const CODE_TYPE_OPTIONS = [
-    'application/zip',
-    'text/html',
-    'application/json',
-    'text/plain;utf-8',
-    'text/plain',
-    'application/javascript',
-    'application/octet-stream',
-  ];
   const ASSET_FIELDS = [
     ['icon', 'apps.form.icon', UI_TEXT.iconLabel, false],
     ['coverImg', 'apps.form.coverImg', UI_TEXT.coverImgLabel, false],
@@ -302,14 +306,27 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     return text.toLowerCase().startsWith('metafile://') ? text.slice('metafile://'.length).trim() : text;
   };
 
-  const normalizeMetafileInput = (value) => {
+  const fieldValidationError = (fieldName, message) => {
+    const error = new Error(message);
+    error.fieldName = fieldName;
+    return error;
+  };
+
+  const assertMetafilePinId = (pinId, fieldName) => {
+    if (!METAAPP_PIN_ID_PATTERN.test(pinId)) {
+      throw fieldValidationError(fieldName, uiText('apps.form.invalidPin', UI_TEXT.invalidPin));
+    }
+  };
+
+  const normalizeMetafileInput = (value, fieldName) => {
     const pinId = stripMetafileUri(value);
+    if (pinId) assertMetafilePinId(pinId, fieldName);
     return pinId ? 'metafile://' + pinId : '';
   };
 
-  const normalizeMetafileListInput = (value) => {
+  const normalizeMetafileListInput = (value, fieldName) => {
     const values = Array.isArray(value) ? value : normalizeText(value).split(/[\\n,]/u);
-    return values.map(normalizeMetafileInput).filter(Boolean);
+    return values.map((item) => normalizeMetafileInput(item, fieldName)).filter(Boolean);
   };
 
   const splitListInput = (value) => normalizeText(value).split(/[\\n,]/u).map(normalizeText).filter(Boolean);
@@ -354,10 +371,16 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
 
   const renderSelectField = (name, label, value, options) => {
     const selectedValue = normalizeText(value) || options[0] || '';
+    const hasSelectedOption = options.includes(selectedValue);
+    const selectOptions = hasSelectedOption || !selectedValue ? options : [selectedValue, ...options];
     return '<label class="apps-form-field">' +
       '<span>' + escapeHtml(label) + '</span>' +
       '<select name="' + escapeHtml(name) + '">' +
-        options.map((option) => '<option value="' + escapeHtml(option) + '"' + (option === selectedValue ? ' selected' : '') + '>' + escapeHtml(option) + '</option>').join('') +
+        selectOptions.map((option) => {
+          const isCurrent = !hasSelectedOption && option === selectedValue;
+          const optionLabel = isCurrent ? option + ' (' + uiText('apps.form.currentOption', UI_TEXT.currentOption) + ')' : option;
+          return '<option value="' + escapeHtml(option) + '"' + (option === selectedValue ? ' selected' : '') + '>' + escapeHtml(optionLabel) + '</option>';
+        }).join('') +
       '</select>' +
     '</label>';
   };
@@ -477,6 +500,14 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     status.textContent = message || '';
   };
 
+  const clearModalValidation = () => {
+    setModalFormError('');
+    for (const [fieldName] of ASSET_FIELDS) {
+      setModalFieldStatus(fieldName, '', '');
+    }
+    setModalFieldStatus('metadata', '', '');
+  };
+
   const findModalField = (fieldName) => elements.modalRoot
     ? elements.modalRoot.querySelector('[name="' + fieldName + '"]')
     : null;
@@ -525,11 +556,11 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
       prompt: normalizeText(data.get('prompt')),
       intro: normalizeText(data.get('intro')),
       tags: splitListInput(data.get('tags')),
-      icon: normalizeMetafileInput(data.get('icon')),
-      coverImg: normalizeMetafileInput(data.get('coverImg')),
-      introImgs: normalizeMetafileListInput(data.get('introImgs')),
-      content: normalizeMetafileInput(data.get('content')),
-      code: normalizeMetafileInput(data.get('code')),
+      icon: normalizeMetafileInput(data.get('icon'), 'icon'),
+      coverImg: normalizeMetafileInput(data.get('coverImg'), 'coverImg'),
+      introImgs: normalizeMetafileListInput(data.get('introImgs'), 'introImgs'),
+      content: normalizeMetafileInput(data.get('content'), 'content'),
+      code: normalizeMetafileInput(data.get('code'), 'code'),
       runtime: runtime.length ? runtime : ['browser'],
       indexFile: normalizeText(data.get('indexFile')),
       version: normalizeText(data.get('version')),
@@ -564,14 +595,13 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
   };
 
   const submitMetaAppForm = async (form) => {
-    setModalFormError('');
-    setModalFieldStatus('metadata', '', '');
+    clearModalValidation();
     let payload;
     try {
       payload = readMetaAppFormPayload(form);
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
-      setModalFieldStatus('metadata', message, 'error');
+      setModalFieldStatus(error && error.fieldName ? error.fieldName : 'metadata', message, 'error');
       return;
     }
     const mode = form.getAttribute('data-apps-form-mode') || 'publish';
@@ -601,28 +631,33 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
     const fieldName = normalizeText(target.getAttribute('data-apps-asset-file'));
     if (!fieldName) return;
     setModalFieldStatus(fieldName, '', '');
-    const file = target.files && target.files[0] ? target.files[0] : null;
-    if (!file) return;
-    const filePath = normalizeText(file.path);
-    if (!filePath) {
-      setModalFieldStatus(fieldName, uiText('apps.form.uploadMissingPath', UI_TEXT.uploadMissingPath), 'error');
-      return;
+    const files = Array.from(target.files || []);
+    if (!files.length) return;
+    for (const file of files) {
+      if (!normalizeText(file && file.path)) {
+        setModalFieldStatus(fieldName, uiText('apps.form.uploadMissingPath', UI_TEXT.uploadMissingPath), 'error');
+        return;
+      }
     }
     try {
-      const result = await postJson(Number(file.size || 0) > UPLOAD_LARGE_THRESHOLD_BYTES ? '/api/file/upload-large' : '/api/file/upload', {
-        from: state.selectedSlug,
-        filePath,
-        contentType: normalizeText(file.type) || 'application/octet-stream',
-      });
-      const uri = normalizeText(result && result.metafileUri) || (normalizeText(result && result.pinId) ? 'metafile://' + normalizeText(result && result.pinId) : '');
-      if (!uri) {
-        throw new Error(uiText('apps.form.noUploadResult', UI_TEXT.noUploadResult));
+      for (const file of files) {
+        const filePath = normalizeText(file.path);
+        const result = await postJson(Number(file.size || 0) > UPLOAD_LARGE_THRESHOLD_BYTES ? '/api/file/upload-large' : '/api/file/upload', {
+          from: state.selectedSlug,
+          filePath,
+          contentType: normalizeText(file.type) || 'application/octet-stream',
+        });
+        const uri = normalizeText(result && result.metafileUri) || (normalizeText(result && result.pinId) ? 'metafile://' + normalizeText(result && result.pinId) : '');
+        if (!uri) {
+          throw new Error(uiText('apps.form.noUploadResult', UI_TEXT.noUploadResult));
+        }
+        storeAssetUri(fieldName, uri);
       }
-      storeAssetUri(fieldName, uri);
       setModalFieldStatus(fieldName, uiText('apps.form.uploadStored', UI_TEXT.uploadStored), 'success');
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       setModalFieldStatus(fieldName, uiText('apps.form.uploadFailed', UI_TEXT.uploadFailed) + ' ' + message, 'error');
+      return;
     }
   };
 
@@ -708,6 +743,7 @@ function buildAppsPageRuntimeSource(text: AppsPageRuntimeText): string {
         '<div class="apps-tags">' + tags.map((tag) => '<span>' + escapeHtml(tag) + '</span>').join('') + '</div>' +
         '<div class="apps-card-actions">' +
           '<button class="btn btn-primary" type="button" data-apps-run="' + escapeHtml(pinId) + '"' + (disabled ? ' disabled' : '') + '>' + escapeHtml(uiText('apps.run', UI_TEXT.run)) + '</button>' +
+          '<button class="btn" type="button" data-apps-edit="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.edit', UI_TEXT.edit)) + '</button>' +
           '<button class="btn" type="button" data-apps-share="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.share', UI_TEXT.share)) + '</button>' +
           '<button class="btn" type="button" data-apps-detail="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.details', UI_TEXT.details)) + '</button>' +
         '</div>' +
