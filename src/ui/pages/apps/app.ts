@@ -27,6 +27,22 @@ interface AppsPageRuntimeText {
   disabled: string;
   disabledFieldHelp: string;
   disabledFieldLabel: string;
+  deleteErrorTitle: string;
+  deleteLabel: string;
+  detailCreatedAt: string;
+  detailChainData: string;
+  detailFirstPinId: string;
+  detailGlobalMetaId: string;
+  detailModalDescription: string;
+  detailModalTitle: string;
+  detailOperation: string;
+  detailOwnerAddress: string;
+  detailPinId: string;
+  detailProtocolFields: string;
+  detailRawData: string;
+  detailTxid: string;
+  detailTxids: string;
+  detailUpdatedAt: string;
   edit: string;
   editModalDescription: string;
   editModalTitle: string;
@@ -51,6 +67,11 @@ interface AppsPageRuntimeText {
   publishModalDescription: string;
   publishModalTitle: string;
   publishOnChain: string;
+  shareCopyLink: string;
+  shareMetaAppUri: string;
+  shareModalDescription: string;
+  shareModalTitle: string;
+  shareWebUrl: string;
   requestFailed: string;
   run: string;
   runtimeAndroid: string;
@@ -61,6 +82,9 @@ interface AppsPageRuntimeText {
   runtimeMacOS: string;
   runtimeWindows: string;
   saveChanges: string;
+  deleteConfirm: string;
+  deleteModalDescription: string;
+  deleteModalTitle: string;
   runnable: string;
   share: string;
   singlePinPlaceholder: string;
@@ -98,6 +122,22 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     disabled: tx('apps.disabled'),
     disabledFieldHelp: tx('apps.form.disabledHelp'),
     disabledFieldLabel: tx('apps.form.disabled'),
+    deleteErrorTitle: tx('apps.delete.errorTitle'),
+    deleteLabel: tx('apps.delete'),
+    detailCreatedAt: tx('apps.detail.createdAt'),
+    detailChainData: tx('apps.detail.chainData'),
+    detailFirstPinId: tx('apps.detail.firstPinId'),
+    detailGlobalMetaId: tx('apps.detail.globalMetaId'),
+    detailModalDescription: tx('apps.detail.description'),
+    detailModalTitle: tx('apps.detail.title'),
+    detailOperation: tx('apps.detail.operation'),
+    detailOwnerAddress: tx('apps.detail.ownerAddress'),
+    detailPinId: tx('apps.detail.pinId'),
+    detailProtocolFields: tx('apps.detail.protocolFields'),
+    detailRawData: tx('apps.detail.rawData'),
+    detailTxid: tx('apps.detail.txid'),
+    detailTxids: tx('apps.detail.txids'),
+    detailUpdatedAt: tx('apps.detail.updatedAt'),
     edit: tx('apps.edit'),
     editModalDescription: tx('apps.form.editDescription'),
     editModalTitle: tx('apps.form.editTitle'),
@@ -122,6 +162,11 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     publishModalDescription: tx('apps.form.publishDescription'),
     publishModalTitle: tx('apps.form.publishTitle'),
     publishOnChain: tx('apps.form.publishOnChain'),
+    shareCopyLink: tx('apps.share.copyLink'),
+    shareMetaAppUri: tx('apps.share.metaappUri'),
+    shareModalDescription: tx('apps.share.description'),
+    shareModalTitle: tx('apps.share.title'),
+    shareWebUrl: tx('apps.share.webUrl'),
     requestFailed: tx('apps.requestFailed'),
     run: tx('apps.run'),
     runtimeAndroid: tx('apps.form.runtimeAndroid'),
@@ -132,6 +177,9 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     runtimeMacOS: tx('apps.form.runtimeMacOS'),
     runtimeWindows: tx('apps.form.runtimeWindows'),
     saveChanges: tx('apps.form.saveChanges'),
+    deleteConfirm: tx('apps.delete.confirm'),
+    deleteModalDescription: tx('apps.delete.description'),
+    deleteModalTitle: tx('apps.delete.title'),
     runnable: tx('apps.runnable'),
     share: tx('apps.share'),
     singlePinPlaceholder: tx('apps.form.singlePinPlaceholder'),
@@ -472,6 +520,158 @@ function buildAppsPageRuntimeSource(
       '</section>';
   };
 
+  const renderModalShell = (title, description, bodyHtml, actionsHtml) => {
+    return '<div class="apps-modal-backdrop" data-apps-modal-close></div>' +
+      '<section class="apps-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="apps-modal-title" tabindex="-1">' +
+        '<header class="apps-modal-header">' +
+          '<div><h2 id="apps-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(description) + '</p></div>' +
+          '<button class="apps-modal-close" type="button" data-apps-modal-close aria-label="' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '">x</button>' +
+        '</header>' +
+        bodyHtml +
+        (actionsHtml ? '<footer class="apps-modal-actions">' + actionsHtml + '</footer>' : '') +
+      '</section>';
+  };
+
+  const displayValue = (value) => {
+    if (Array.isArray(value)) return value.map(normalizeText).filter(Boolean).join('\\n') || '-';
+    if (value && typeof value === 'object') return JSON.stringify(value, null, 2);
+    return normalizeText(value) || '-';
+  };
+
+  const renderDetailRow = (label, value) => {
+    return '<div class="apps-detail-row"><dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(displayValue(value)) + '</dd></div>';
+  };
+
+  const formatRecordTimestamp = (value) => {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) return '-';
+    const milliseconds = number < 1000000000000 ? number * 1000 : number;
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime()) ? '-' : date.toISOString();
+  };
+
+  const metaAppUriForRecord = (record) => normalizeText(record && record.metaappUri) || 'metaapp://' + recordPinId(record);
+  const metaWebUrlForRecord = (record) => normalizeText(record && record.metawebUrl) || 'https://metaweb.world/metaapp/' + recordPinId(record);
+
+  const renderProtocolFieldRows = (record) => {
+    const rows = [
+      [uiText('apps.form.title', UI_TEXT.titleLabel), record && record.title],
+      [uiText('apps.form.appName', UI_TEXT.appNameLabel), record && record.appName],
+      [uiText('apps.form.prompt', UI_TEXT.promptLabel), record && record.prompt],
+      [uiText('apps.form.intro', UI_TEXT.introLabel), record && record.intro],
+      [uiText('apps.form.tags', UI_TEXT.tagsLabel), record && record.tags],
+      [uiText('apps.form.icon', UI_TEXT.iconLabel), record && record.icon],
+      [uiText('apps.form.coverImg', UI_TEXT.coverImgLabel), record && record.coverImg],
+      [uiText('apps.form.introImgs', UI_TEXT.introImgsLabel), record && record.introImgs],
+      [uiText('apps.form.runtime', UI_TEXT.runtimeLabel), record && record.runtime],
+      [uiText('apps.form.version', UI_TEXT.versionLabel), record && record.version],
+      [uiText('apps.form.contentType', UI_TEXT.contentTypeLabel), record && record.contentType],
+      [uiText('apps.form.content', UI_TEXT.contentLabel), record && record.content],
+      [uiText('apps.form.indexFile', UI_TEXT.indexFileLabel), record && record.indexFile],
+      [uiText('apps.form.code', UI_TEXT.codeLabel), record && record.code],
+      [uiText('apps.form.codeType', UI_TEXT.codeTypeLabel), record && record.codeType],
+      [uiText('apps.form.contentHash', UI_TEXT.contentHashLabel), record && record.contentHash],
+      [uiText('apps.form.metadata', UI_TEXT.metadataLabel), record && record.metadata],
+      [uiText('apps.form.disabled', UI_TEXT.disabledFieldLabel), record && record.disabled === true ? uiText('apps.disabled', UI_TEXT.disabled) : 'false'],
+    ];
+    return rows.map(([label, value]) => renderDetailRow(label, value)).join('');
+  };
+
+  const renderDetailModal = (record) => {
+    const pinId = recordPinId(record);
+    const rawJson = JSON.stringify(record && record.raw ? record.raw : record || {}, null, 2);
+    const chainRows = [
+      [uiText('apps.detail.pinId', UI_TEXT.detailPinId), pinId],
+      [uiText('apps.detail.firstPinId', UI_TEXT.detailFirstPinId), record && record.firstPinId],
+      [uiText('apps.detail.operation', UI_TEXT.detailOperation), record && record.operation],
+      [uiText('apps.detail.ownerAddress', UI_TEXT.detailOwnerAddress), record && record.ownerAddress],
+      [uiText('apps.detail.globalMetaId', UI_TEXT.detailGlobalMetaId), record && (record.globalMetaId || record.globalMetaID || (record.raw && (record.raw.globalMetaId || record.raw.globalMetaID)))],
+      [uiText('apps.detail.txid', UI_TEXT.detailTxid), record && record.txid],
+      [uiText('apps.detail.txids', UI_TEXT.detailTxids), record && record.txids],
+      [uiText('apps.detail.updatedAt', UI_TEXT.detailUpdatedAt), formatRecordTimestamp(record && record.timestamp)],
+      [uiText('apps.detail.createdAt', UI_TEXT.detailCreatedAt), formatRecordTimestamp(record && (record.createdAt || record.raw && (record.raw.createdAt || record.raw.timestamp)))],
+    ].map(([label, value]) => renderDetailRow(label, value)).join('');
+    const body = '<div class="apps-detail-body">' +
+      '<section class="apps-detail-section">' +
+        '<h3>' + escapeHtml(uiText('apps.detail.protocolFields', UI_TEXT.detailProtocolFields)) + '</h3>' +
+        '<dl class="apps-detail-grid">' + renderProtocolFieldRows(record) + '</dl>' +
+      '</section>' +
+      '<section class="apps-detail-section">' +
+        '<h3>' + escapeHtml(uiText('apps.detail.chainData', UI_TEXT.detailChainData)) + '</h3>' +
+        '<dl class="apps-detail-grid">' + chainRows + '</dl>' +
+      '</section>' +
+      '<section class="apps-detail-section">' +
+        '<h3>' + escapeHtml(uiText('apps.detail.rawData', UI_TEXT.detailRawData)) + '</h3>' +
+        '<pre class="apps-detail-raw">' + escapeHtml(rawJson) + '</pre>' +
+      '</section>' +
+    '</div>';
+    const actions = '<button class="btn" type="button" data-apps-modal-close>' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '</button>' +
+      '<button class="btn" type="button" data-apps-share="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.share', UI_TEXT.share)) + '</button>' +
+      '<button class="btn" type="button" data-apps-edit="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.edit', UI_TEXT.edit)) + '</button>' +
+      '<button class="btn btn-danger" type="button" data-apps-delete-open="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.delete', UI_TEXT.deleteLabel)) + '</button>';
+    return renderModalShell(
+      uiText('apps.detail.title', UI_TEXT.detailModalTitle),
+      uiText('apps.detail.description', UI_TEXT.detailModalDescription),
+      body,
+      actions,
+    );
+  };
+
+  const renderShareLinkRow = (label, value) => {
+    return '<div class="apps-share-row">' +
+      '<span>' + escapeHtml(label) + '</span>' +
+      '<code>' + escapeHtml(value) + '</code>' +
+      '<button class="apps-copy-btn" type="button" data-apps-copy-value="' + escapeHtml(value) + '">' + escapeHtml(uiText('apps.share.copyLink', UI_TEXT.shareCopyLink)) + '</button>' +
+    '</div>';
+  };
+
+  const renderShareModal = (record) => {
+    const body = '<div class="apps-detail-body">' +
+      '<section class="apps-detail-section">' +
+        '<div class="apps-share-list">' +
+          renderShareLinkRow(uiText('apps.share.metaappUri', UI_TEXT.shareMetaAppUri), metaAppUriForRecord(record)) +
+          renderShareLinkRow(uiText('apps.share.webUrl', UI_TEXT.shareWebUrl), metaWebUrlForRecord(record)) +
+        '</div>' +
+      '</section>' +
+    '</div>';
+    const actions = '<button class="btn" type="button" data-apps-modal-close>' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '</button>';
+    return renderModalShell(
+      uiText('apps.share.title', UI_TEXT.shareModalTitle),
+      uiText('apps.share.description', UI_TEXT.shareModalDescription),
+      body,
+      actions,
+    );
+  };
+
+  const renderDeleteModal = (record) => {
+    const pinId = recordPinId(record);
+    const title = normalizeText(record && (record.title || record.appName)) || pinId;
+    const body = '<form data-apps-delete-form data-apps-target-pin-id="' + escapeHtml(pinId) + '">' +
+      '<section class="apps-detail-body apps-delete-body">' +
+        '<p>' + escapeHtml(uiText('apps.delete.description', UI_TEXT.deleteModalDescription)) + '</p>' +
+        '<code>' + escapeHtml(title) + '</code>' +
+        '<p class="apps-form-error" data-apps-delete-error hidden></p>' +
+      '</section>' +
+      '<footer class="apps-modal-actions">' +
+        '<button class="btn" type="button" data-apps-modal-close>' + escapeHtml(uiText('apps.form.cancel', UI_TEXT.cancel)) + '</button>' +
+        '<button class="btn btn-danger" type="submit">' + escapeHtml(uiText('apps.delete.confirm', UI_TEXT.deleteConfirm)) + '</button>' +
+      '</footer>' +
+    '</form>';
+    return renderModalShell(
+      uiText('apps.delete.title', UI_TEXT.deleteModalTitle),
+      uiText('apps.delete.description', UI_TEXT.deleteModalDescription),
+      body,
+      '',
+    );
+  };
+
+  const renderAppsModalContent = (mode, record) => {
+    if (mode === 'detail') return renderDetailModal(record);
+    if (mode === 'share') return renderShareModal(record);
+    if (mode === 'delete') return renderDeleteModal(record);
+    return renderMetaAppForm(mode, record);
+  };
+
   const showNotice = (kind, title, body) => {
     if (!elements.notice) return;
     elements.notice.hidden = false;
@@ -523,13 +723,18 @@ function buildAppsPageRuntimeSource(
 
   const openAppsModal = (mode, record) => {
     if (!elements.modalRoot) return;
-    const resolvedRecord = mode === 'edit' ? record : null;
+    const needsRecord = mode === 'edit' || mode === 'detail' || mode === 'share' || mode === 'delete';
+    const resolvedRecord = needsRecord ? record : null;
+    if (needsRecord && !resolvedRecord) {
+      closeAppsModal();
+      return;
+    }
     state.modal = {
       mode,
-      targetPinId: mode === 'edit' ? recordPinId(resolvedRecord) : '',
+      targetPinId: resolvedRecord ? recordPinId(resolvedRecord) : '',
     };
     elements.modalRoot.hidden = false;
-    elements.modalRoot.innerHTML = renderMetaAppForm(mode, resolvedRecord);
+    elements.modalRoot.innerHTML = renderAppsModalContent(mode, resolvedRecord);
     const dialog = elements.modalRoot.querySelector('.apps-modal-dialog');
     if (dialog && typeof dialog.focus === 'function') dialog.focus();
   };
@@ -614,6 +819,32 @@ function buildAppsPageRuntimeSource(
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       setModalFormError(uiText('apps.form.errorTitle', UI_TEXT.formErrorTitle) + ' ' + message);
+    }
+  };
+
+  const setDeleteFormError = (message) => {
+    if (!elements.modalRoot) return;
+    const status = elements.modalRoot.querySelector('[data-apps-delete-error]');
+    if (!status) return;
+    status.hidden = !message;
+    status.textContent = message || '';
+  };
+
+  const submitDeleteForm = async (form) => {
+    const targetPinId = normalizeText(form.getAttribute('data-apps-target-pin-id'));
+    if (!targetPinId) return;
+    setDeleteFormError('');
+    try {
+      await postJson('/api/apps/delete', {
+        from: state.selectedSlug,
+        targetPinId,
+      });
+      state.records = state.records.filter((record) => recordPinId(record) !== targetPinId);
+      closeAppsModal();
+      renderGrid();
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      setDeleteFormError(uiText('apps.delete.errorTitle', UI_TEXT.deleteErrorTitle) + ' ' + message);
     }
   };
 
@@ -861,7 +1092,7 @@ function buildAppsPageRuntimeSource(
   document.addEventListener('click', async (event) => {
     const eventTarget = event.target instanceof Element ? event.target : null;
     if (!eventTarget) return;
-    const target = eventTarget.closest('[data-apps-bot-trigger], [data-apps-bot-option], [data-apps-copy-pin], [data-apps-run], [data-apps-share], [data-apps-detail], [data-apps-edit]');
+    const target = eventTarget.closest('[data-apps-bot-trigger], [data-apps-bot-option], [data-apps-copy-pin], [data-apps-copy-value], [data-apps-run], [data-apps-share], [data-apps-detail], [data-apps-edit], [data-apps-delete-open], [data-apps-card]');
     if (!target) {
       if (state.botMenuOpen && !eventTarget.closest('[data-apps-bot-picker]')) {
         state.botMenuOpen = false;
@@ -889,14 +1120,45 @@ function buildAppsPageRuntimeSource(
       setTimeout(() => { target.textContent = uiText('apps.copyPinId', UI_TEXT.copyPinId); }, 1000);
       return;
     }
-    if (target.matches('[data-apps-run]') && !target.disabled) {
+    if (target.matches('[data-apps-copy-value]')) {
+      const value = target.getAttribute('data-apps-copy-value') || '';
+      await navigator.clipboard?.writeText(value);
+      target.textContent = uiText('apps.copied', UI_TEXT.copied);
+      setTimeout(() => { target.textContent = uiText('apps.share.copyLink', UI_TEXT.shareCopyLink); }, 1000);
+      return;
+    }
+    if (target.matches('[data-apps-run]')) {
       const pinId = target.getAttribute('data-apps-run') || '';
-      if (pinId) window.location.href = '/browser/metaapp/' + encodeURIComponent(pinId);
+      const record = findRecordByPinId(pinId);
+      if (pinId && record && record.disabled !== true && !target.disabled) {
+        const runPath = '/browser/metaapp/' + encodeURIComponent(pinId);
+        window.location.href = (window.location && window.location.origin ? window.location.origin : '') + runPath;
+      }
+      return;
+    }
+    if (target.matches('[data-apps-share]')) {
+      const record = findRecordByPinId(target.getAttribute('data-apps-share') || '');
+      if (record) openAppsModal('share', record);
+      return;
+    }
+    if (target.matches('[data-apps-detail]')) {
+      const record = findRecordByPinId(target.getAttribute('data-apps-detail') || '');
+      if (record) openAppsModal('detail', record);
       return;
     }
     if (target.matches('[data-apps-edit]')) {
       const record = findRecordByPinId(target.getAttribute('data-apps-edit') || '');
       if (record) openAppsModal('edit', record);
+      return;
+    }
+    if (target.matches('[data-apps-delete-open]')) {
+      const record = findRecordByPinId(target.getAttribute('data-apps-delete-open') || '');
+      if (record) openAppsModal('delete', record);
+      return;
+    }
+    if (target.matches('[data-apps-card]')) {
+      const record = findRecordByPinId(target.getAttribute('data-apps-card') || '');
+      if (record) openAppsModal('detail', record);
     }
   });
 
@@ -909,9 +1171,14 @@ function buildAppsPageRuntimeSource(
     });
     elements.modalRoot.addEventListener('submit', async (event) => {
       const form = event.target instanceof Element ? event.target.closest('[data-apps-form]') : null;
-      if (!form) return;
+      const deleteForm = event.target instanceof Element ? event.target.closest('[data-apps-delete-form]') : null;
+      if (!form && !deleteForm) return;
       event.preventDefault();
-      await submitMetaAppForm(form);
+      if (deleteForm) {
+        await submitDeleteForm(deleteForm);
+      } else if (form) {
+        await submitMetaAppForm(form);
+      }
     });
     elements.modalRoot.addEventListener('change', async (event) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -952,7 +1219,7 @@ function buildAppsPageRuntimeSource(
       renderBotPicker();
       renderGrid();
       if (state.modal && elements.modalRoot && !elements.modalRoot.hidden) {
-        openAppsModal(state.modal.mode, state.modal.mode === 'edit' ? findRecordByPinId(state.modal.targetPinId) : null);
+        openAppsModal(state.modal.mode, state.modal.targetPinId ? findRecordByPinId(state.modal.targetPinId) : null);
       }
     });
   }

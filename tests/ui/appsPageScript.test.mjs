@@ -46,8 +46,8 @@ class FakeElement {
     this.listeners = new Map();
     this._innerHTML = '';
     this.textContent = '';
-    this.disabled = false;
-    this.hidden = false;
+    this.disabled = this.attributes.has('disabled');
+    this.hidden = this.attributes.has('hidden');
     this.dataset = {};
     this.children = [];
     this.files = [];
@@ -135,6 +135,8 @@ class FakeElement {
     if (name === 'name') this.name = String(value);
     if (name === 'type') this.type = String(value);
     if (name === 'checked') this.checked = true;
+    if (name === 'disabled') this.disabled = true;
+    if (name === 'hidden') this.hidden = true;
     if (name.startsWith('data-')) this.dataset[dataAttributeName(name)] = String(value);
   }
 
@@ -198,7 +200,7 @@ function makeFormField(attributes, tagName = 'INPUT') {
 
 function buildFakeModalTree(html, ownerDocument) {
   const formMatch = html.match(/<form\b([^>]*)>([\s\S]*?)<\/form>/iu);
-  if (!formMatch) return [];
+  if (!formMatch) return buildFakeElementsFromHtml(html, ownerDocument);
   const formAttributes = parseAttributes(formMatch[1]);
   const form = new FakeElement(formAttributes, 'FORM');
   form.ownerDocument = ownerDocument;
@@ -233,6 +235,11 @@ function buildFakeModalTree(html, ownerDocument) {
     const formError = new FakeElement({ 'data-apps-form-error': '' });
     formError.ownerDocument = ownerDocument;
     form.appendChild(formError);
+  }
+  if (/\bdata-apps-delete-error\b/iu.test(body)) {
+    const deleteError = new FakeElement({ 'data-apps-delete-error': '' });
+    deleteError.ownerDocument = ownerDocument;
+    form.appendChild(deleteError);
   }
 
   return [form];
@@ -382,7 +389,7 @@ function createAppsPageContext(options = {}) {
       if ((fetchOptions.method || '').toUpperCase() === 'POST') {
         const bodyPayload = fetchOptions.body ? JSON.parse(fetchOptions.body) : null;
         fetchBodies.push({ url: String(url), body: bodyPayload });
-        if (String(url) === '/api/apps/publish' || String(url) === '/api/apps/update') {
+        if (String(url) === '/api/apps/publish' || String(url) === '/api/apps/update' || String(url) === '/api/apps/delete') {
           return Promise.resolve(response(options.mutationResponse ?? {
             ok: true,
             state: 'success',
@@ -480,6 +487,11 @@ function createAppsPageContext(options = {}) {
       assert.ok(form, 'apps form missing');
       await elements['[data-apps-modal-root]'].dispatchEvent('submit', { target: form });
     },
+    submitDeleteForm: async () => {
+      const form = elements['[data-apps-modal-root]'].querySelector('[data-apps-delete-form]');
+      assert.ok(form, 'apps delete form missing');
+      await elements['[data-apps-modal-root]'].dispatchEvent('submit', { target: form });
+    },
     uploadAssetFile: async (fieldName, file) => {
       const input = new FakeElement({ 'data-apps-asset-file': fieldName }, 'INPUT');
       input.type = 'file';
@@ -559,6 +571,146 @@ test('apps page copy pin action writes the pin id to clipboard', async () => {
   await context.clickFake({ 'data-apps-copy-pin': PIN });
 
   assert.deepEqual(context.clipboardWrites, [PIN]);
+});
+
+test('apps page Run opens enabled MetaAPP and ignores disabled records', async () => {
+  const enabled = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Runnable App',
+        appName: 'Runnable App',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  enabled.run();
+  await enabled.waitFor(() => enabled.elements['[data-apps-grid]'].innerHTML.includes('Runnable App'), 'render runnable app');
+  await enabled.clickGridAction(`[data-apps-run="${PIN}"]`);
+  assert.equal(enabled.locationUrl.pathname, `/browser/metaapp/${PIN}`);
+
+  const disabled = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Stopped App',
+        appName: 'Stopped App',
+        disabled: true,
+      }],
+      total: 1,
+    }),
+  });
+
+  disabled.run();
+  await disabled.waitFor(() => disabled.elements['[data-apps-grid]'].innerHTML.includes('Stopped App'), 'render stopped app');
+  await disabled.clickGridAction(`[data-apps-run="${PIN}"]`);
+  assert.equal(disabled.locationUrl.pathname, '/ui/apps');
+});
+
+test('apps page detail modal displays MetaAPP protocol and MAN data', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        firstPinId: PIN,
+        operation: 'modify',
+        title: 'Protocol Detail App',
+        appName: 'Protocol Detail App',
+        prompt: 'Show protocol fields.',
+        intro: 'A chain detail view.',
+        tags: ['detail', 'metaapp'],
+        runtime: 'browser/android',
+        version: 'v2.0.0',
+        contentType: 'application/zip',
+        content: `metafile://${PIN}`,
+        codeType: 'application/javascript',
+        ownerAddress: '12ghVWG1yAgNjzXj4mr3qK9DgyornMUikZ',
+        timestamp: 1710000000,
+        txid: 'tx-detail',
+        txids: ['tx-detail', 'tx-create'],
+        metadata: { scope: 'detail' },
+        raw: {
+          path: '/protocols/metaapp',
+          content: { title: 'Protocol Detail App' },
+          txid: 'tx-detail',
+        },
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Protocol Detail App'), 'render detail app');
+  await context.clickGridAction(`[data-apps-detail="${PIN}"]`);
+
+  const html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, /MetaAPP details/);
+  assert.match(html, /Protocol fields/);
+  assert.match(html, /Raw MAN record/);
+  assert.match(html, /Protocol Detail App/);
+  assert.match(html, /12ghVWG1yAgNjzXj4mr3qK9DgyornMUikZ/);
+  assert.match(html, /\/protocols\/metaapp/);
+});
+
+test('apps page share modal exposes and copies MetaAPP protocol links', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Shareable App',
+        appName: 'Shareable App',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Shareable App'), 'render shareable app');
+  await context.clickGridAction(`[data-apps-share="${PIN}"]`);
+
+  const metaappUri = `metaapp://${PIN}`;
+  const metawebUrl = `https://metaweb.world/metaapp/${PIN}`;
+  const html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, new RegExp(metaappUri.replace(/\//gu, '\\/')));
+  assert.match(html, new RegExp(metawebUrl.replace(/\//gu, '\\/')));
+
+  await context.clickFake({ 'data-apps-copy-value': metaappUri });
+  await context.clickFake({ 'data-apps-copy-value': metawebUrl });
+  assert.deepEqual(context.clipboardWrites, [metaappUri, metawebUrl]);
+});
+
+test('apps page delete flow posts revoke request and hides the record', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Delete Me',
+        appName: 'Delete Me',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Delete Me'), 'render deletable app');
+  await context.clickGridAction(`[data-apps-detail="${PIN}"]`);
+  await context.clickFake({ 'data-apps-delete-open': PIN });
+
+  assert.match(context.elements['[data-apps-modal-root]'].innerHTML, /Delete revokes this MetaAPP PIN/);
+  await context.submitDeleteForm();
+
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/delete'), 'delete request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/delete').body;
+  assert.deepEqual(request, {
+    from: 'alice',
+    targetPinId: PIN,
+  });
+  assert.doesNotMatch(context.elements['[data-apps-grid]'].innerHTML, /Delete Me/);
+  assert.match(context.elements['[data-apps-grid]'].innerHTML, /No apps yet/);
 });
 
 test('apps page next pagination requests the next cursor', async () => {
