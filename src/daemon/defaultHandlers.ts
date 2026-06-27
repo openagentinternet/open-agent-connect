@@ -11171,7 +11171,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
           const written = await actor.signer.writePin({ ...write, network });
           const pinId = String(written.pinId);
-          buildAppsMetaAppCanonicalUrl(pinId);
           return commandSuccess({
             revokedPinId: targetPinId,
             pinId,
