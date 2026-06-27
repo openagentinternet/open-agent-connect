@@ -563,6 +563,49 @@ test('apps page renders records and disables Run for disabled apps', async () =>
   assert.match(context.elements['[data-apps-grid]'].innerHTML, /disabled/);
 });
 
+test('apps page renders http cover and icon images on record cards', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Image App',
+        appName: 'Image App',
+        iconImg: 'https://cdn.example.test/icon.png',
+        coverImg: 'http://cdn.example.test/cover.png',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Image App'), 'render image app');
+  const html = context.elements['[data-apps-grid]'].innerHTML;
+  assert.match(html, /class="apps-card-cover-img" src="http:\/\/cdn\.example\.test\/cover\.png"/);
+  assert.match(html, /class="apps-card-icon" src="https:\/\/cdn\.example\.test\/icon\.png"/);
+});
+
+test('apps page Bot picker renders profile avatars when available', async () => {
+  const avatarDataUrl = 'data:image/png;base64,aW1hZ2U=';
+  const context = createAppsPageContext({
+    profiles: profilesPayload([{
+      slug: 'alice',
+      name: 'Alice',
+      globalMetaId: 'idq1alice',
+      avatarDataUrl,
+      homeDir: '/tmp/alice',
+      isActive: true,
+    }]),
+    apps: appsPayload(),
+  });
+
+  context.run();
+
+  await context.waitFor(() => context.elements['[data-apps-bot-picker]'].innerHTML.includes(avatarDataUrl), 'render bot avatar');
+  assert.match(context.elements['[data-apps-bot-picker]'].innerHTML, /class="apps-bot-avatar" src="data:image\/png;base64,aW1hZ2U="/);
+});
+
 test('apps page copy pin action writes the pin id to clipboard', async () => {
   const context = createAppsPageContext({
     apps: appsPayload({
@@ -631,6 +674,9 @@ test('apps page detail modal displays MetaAPP protocol and MAN data', async () =
         appName: 'Protocol Detail App',
         prompt: 'Show protocol fields.',
         intro: 'A chain detail view.',
+        iconImg: 'https://cdn.example.test/icon.png',
+        coverImg: 'https://cdn.example.test/cover.png',
+        introImgs: ['https://cdn.example.test/intro.png'],
         tags: ['detail', 'metaapp'],
         runtime: 'browser/android',
         version: 'v2.0.0',
@@ -658,8 +704,16 @@ test('apps page detail modal displays MetaAPP protocol and MAN data', async () =
 
   const html = context.elements['[data-apps-modal-root]'].innerHTML;
   assert.match(html, /MetaAPP details/);
-  assert.match(html, /Protocol fields/);
+  assert.match(html, /apps-protocol-detail/);
+  assert.match(html, /apps-detail-top/);
+  assert.match(html, /apps-detail-shots/);
+  assert.match(html, /apps-detail-fields/);
+  assert.match(html, /Details/);
+  assert.match(html, /AI/);
+  assert.match(html, /Raw/);
   assert.match(html, /Raw MAN record/);
+  assert.match(html, /src="https:\/\/cdn\.example\.test\/icon\.png"/);
+  assert.match(html, /src="https:\/\/cdn\.example\.test\/cover\.png"/);
   assert.match(html, /Protocol Detail App/);
   assert.match(html, /12ghVWG1yAgNjzXj4mr3qK9DgyornMUikZ/);
   assert.match(html, /\/protocols\/metaapp/);
@@ -984,6 +1038,33 @@ test('publish submits normalized form payload to /api/apps/publish', async () =>
   assert.deepEqual(request.metadata, { scope: 'publish' });
   const reload = context.fetchUrls.findLast((url) => url.startsWith('/api/apps?'));
   assert.equal(new URL(reload, 'http://localhost').searchParams.get('cursor'), null);
+});
+
+test('publish preserves http image refs while keeping packages as metafile refs', async () => {
+  const secondPin = `${'a'.repeat(64)}i0`;
+  const context = createAppsPageContext();
+
+  context.run();
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.clickElement('[data-apps-publish-open]');
+
+  context.setField('appName', 'HTTP Image App');
+  context.setField('title', 'HTTP Image App');
+  context.setField('icon', 'https://cdn.example.test/icon.png');
+  context.setField('coverImg', 'http://cdn.example.test/cover.png');
+  context.setField('introImgs', `https://cdn.example.test/intro.png\n${secondPin}`);
+  context.setField('content', PIN);
+  context.setField('code', secondPin);
+
+  await context.submitModalForm();
+
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/publish').body;
+  assert.equal(request.icon, 'https://cdn.example.test/icon.png');
+  assert.equal(request.coverImg, 'http://cdn.example.test/cover.png');
+  assert.deepEqual(request.introImgs, ['https://cdn.example.test/intro.png', `metafile://${secondPin}`]);
+  assert.equal(request.content, `metafile://${PIN}`);
+  assert.equal(request.code, `metafile://${secondPin}`);
 });
 
 test('edit submits to /api/apps/update with target pin and changed values', async () => {

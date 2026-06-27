@@ -40,6 +40,9 @@ interface AppsPageRuntimeText {
   detailPinId: string;
   detailProtocolFields: string;
   detailRawData: string;
+  detailTabAI: string;
+  detailTabDetails: string;
+  detailTabRaw: string;
   detailTxid: string;
   detailTxids: string;
   detailUpdatedAt: string;
@@ -50,6 +53,9 @@ interface AppsPageRuntimeText {
   emptyTitle: string;
   formErrorTitle: string;
   iconLabel: string;
+  imageManualPinHelp: string;
+  imageMultiPinPlaceholder: string;
+  imageSinglePinPlaceholder: string;
   indexFileLabel: string;
   invalidPin: string;
   introImgsLabel: string;
@@ -135,6 +141,9 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     detailPinId: tx('apps.detail.pinId'),
     detailProtocolFields: tx('apps.detail.protocolFields'),
     detailRawData: tx('apps.detail.rawData'),
+    detailTabAI: tx('apps.detail.tabAI'),
+    detailTabDetails: tx('apps.detail.tabDetails'),
+    detailTabRaw: tx('apps.detail.tabRaw'),
     detailTxid: tx('apps.detail.txid'),
     detailTxids: tx('apps.detail.txids'),
     detailUpdatedAt: tx('apps.detail.updatedAt'),
@@ -145,6 +154,9 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     emptyTitle: tx('apps.emptyTitle'),
     formErrorTitle: tx('apps.form.errorTitle'),
     iconLabel: tx('apps.form.icon'),
+    imageManualPinHelp: tx('apps.form.imageManualPinHelp'),
+    imageMultiPinPlaceholder: tx('apps.form.imageMultiPinPlaceholder'),
+    imageSinglePinPlaceholder: tx('apps.form.imageSinglePinPlaceholder'),
     indexFileLabel: tx('apps.form.indexFile'),
     invalidPin: tx('apps.form.invalidPin'),
     introImgsLabel: tx('apps.form.introImgs'),
@@ -332,6 +344,91 @@ function buildAppsPageRuntimeSource(
     return text;
   };
 
+  const FILE_CONTENT_PATH_PREFIXES = [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ];
+  const isHttpUrl = (value) => {
+    const normalized = normalizeText(value).toLowerCase();
+    return normalized.indexOf('http://') === 0 || normalized.indexOf('https://') === 0;
+  };
+  const isDirectImageUrl = (value) => /^(data:|blob:)/iu.test(normalizeText(value)) || isHttpUrl(value) || normalizeText(value).indexOf('/') === 0;
+  const pathFromUrlLike = (value) => {
+    const raw = normalizeText(value);
+    if (!raw) return '';
+    if (!isHttpUrl(raw)) return raw;
+    try {
+      const url = new URL(raw);
+      return url.pathname;
+    } catch {
+      return '';
+    }
+  };
+  const extractMetafilePinReference = (value) => {
+    const raw = normalizeText(value);
+    if (!raw) return '';
+    if (raw.toLowerCase().indexOf('metafile://') === 0) {
+      const suffix = raw.slice('metafile://'.length).trim().split(/[?#]/)[0] || '';
+      return suffix ? 'metafile://' + suffix : '';
+    }
+    const path = pathFromUrlLike(raw);
+    for (const prefix of FILE_CONTENT_PATH_PREFIXES) {
+      if (path.toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
+        return decodeURIComponent((path.slice(prefix.length).split(/[?#]/)[0] || '').trim());
+      }
+    }
+    if (/^[0-9a-f]{64}(?:i[0-9]+)?$/iu.test(raw)) return raw;
+    return '';
+  };
+  const imageUrlForReference = (value) => {
+    const raw = normalizeText(value);
+    if (!raw) return '';
+    if (/^(data:|blob:)/iu.test(raw)) return raw;
+    const pinRef = extractMetafilePinReference(raw);
+    if (pinRef) return '/api/file/avatar?ref=' + encodeURIComponent(pinRef);
+    if (isDirectImageUrl(raw)) return raw;
+    return '';
+  };
+  const getInitialsAvatar = (name, seed) => {
+    const text = normalizeText(name) || normalizeText(seed) || '?';
+    const chars = Array.from(text).filter((char) => char.trim()).slice(0, 2);
+    const label = (chars.join('') || '?').toUpperCase();
+    const palette = [
+      ['#2f6f7e', '#ffffff'],
+      ['#4b6f9f', '#ffffff'],
+      ['#7a4f9a', '#ffffff'],
+      ['#2f7d4f', '#ffffff'],
+      ['#8b3f5f', '#ffffff'],
+      ['#9a5d2f', '#ffffff'],
+    ];
+    const hash = Array.from(text).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const pair = palette[Math.abs(hash) % palette.length];
+    return 'data:image/svg+xml,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">' +
+      '<rect width="80" height="80" rx="16" fill="' + pair[0] + '"/>' +
+      '<text x="40" y="49" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="25" font-weight="700" fill="' + pair[1] + '">' + escapeHtml(label) + '</text>' +
+      '</svg>'
+    );
+  };
+  const imageMarkup = (className, rawValue, label, attrs) => {
+    const fallback = getInitialsAvatar(label, rawValue);
+    const src = imageUrlForReference(rawValue) || fallback;
+    return '<img class="' + escapeHtml(className) + '" src="' + escapeHtml(src) + '" alt="" loading="lazy" data-apps-image-fallback="' + escapeHtml(fallback) + '"' + (attrs || '') + '>';
+  };
+  const hydrateImageFallbacks = (root) => {
+    (root || document).querySelectorAll('img[data-apps-image-fallback]:not([data-apps-image-bound])').forEach((img) => {
+      img.setAttribute('data-apps-image-bound', 'true');
+      img.addEventListener('error', () => {
+        const fallback = img.getAttribute('data-apps-image-fallback') || '';
+        if (fallback && img.getAttribute('src') !== fallback) img.setAttribute('src', fallback);
+      });
+    });
+  };
+
   const RUNTIME_OPTIONS = [
     ['browser', 'apps.form.runtimeBrowser', UI_TEXT.runtimeBrowser],
     ['android', 'apps.form.runtimeAndroid', UI_TEXT.runtimeAndroid],
@@ -341,11 +438,11 @@ function buildAppsPageRuntimeSource(
     ['linux', 'apps.form.runtimeLinux', UI_TEXT.runtimeLinux],
   ];
   const ASSET_FIELDS = [
-    ['icon', 'apps.form.icon', UI_TEXT.iconLabel, false],
-    ['coverImg', 'apps.form.coverImg', UI_TEXT.coverImgLabel, false],
-    ['introImgs', 'apps.form.introImgs', UI_TEXT.introImgsLabel, true],
-    ['content', 'apps.form.content', UI_TEXT.contentLabel, false],
-    ['code', 'apps.form.code', UI_TEXT.codeLabel, false],
+    ['icon', 'apps.form.icon', UI_TEXT.iconLabel, false, true],
+    ['coverImg', 'apps.form.coverImg', UI_TEXT.coverImgLabel, false, true],
+    ['introImgs', 'apps.form.introImgs', UI_TEXT.introImgsLabel, true, true],
+    ['content', 'apps.form.content', UI_TEXT.contentLabel, false, false],
+    ['code', 'apps.form.code', UI_TEXT.codeLabel, false, false],
   ];
   const UPLOAD_LARGE_THRESHOLD_BYTES = 4 * 1024 * 1024;
 
@@ -375,6 +472,18 @@ function buildAppsPageRuntimeSource(
   const normalizeMetafileListInput = (value, fieldName) => {
     const values = Array.isArray(value) ? value : normalizeText(value).split(/[\\n,]/u);
     return values.map((item) => normalizeMetafileInput(item, fieldName)).filter(Boolean);
+  };
+
+  const normalizeImageAssetInput = (value, fieldName) => {
+    const raw = normalizeText(value);
+    if (!raw) return '';
+    if (isHttpUrl(raw)) return raw;
+    return normalizeMetafileInput(raw, fieldName);
+  };
+
+  const normalizeImageAssetListInput = (value, fieldName) => {
+    const values = Array.isArray(value) ? value : normalizeText(value).split(/[\\n,]/u);
+    return values.map((item) => normalizeImageAssetInput(item, fieldName)).filter(Boolean);
   };
 
   const splitListInput = (value) => normalizeText(value).split(/[\\n,]/u).map(normalizeText).filter(Boolean);
@@ -433,11 +542,14 @@ function buildAppsPageRuntimeSource(
     '</label>';
   };
 
-  const renderAssetField = (record, fieldName, labelKey, fallbackLabel, multiple) => {
+  const renderAssetField = (record, fieldName, labelKey, fallbackLabel, multiple, imageAsset) => {
     const value = assetInputValue(fieldValue(record, fieldName, ''));
+    const placeholder = imageAsset
+      ? (multiple ? uiText('apps.form.imageMultiPinPlaceholder', UI_TEXT.imageMultiPinPlaceholder) : uiText('apps.form.imageSinglePinPlaceholder', UI_TEXT.imageSinglePinPlaceholder))
+      : (multiple ? uiText('apps.form.multiPinPlaceholder', UI_TEXT.multiPinPlaceholder) : uiText('apps.form.singlePinPlaceholder', UI_TEXT.singlePinPlaceholder));
     const manualControl = multiple
-      ? '<textarea name="' + escapeHtml(fieldName) + '" placeholder="' + escapeHtml(uiText('apps.form.multiPinPlaceholder', UI_TEXT.multiPinPlaceholder)) + '">' + escapeHtml(value) + '</textarea>'
-      : '<input name="' + escapeHtml(fieldName) + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(uiText('apps.form.singlePinPlaceholder', UI_TEXT.singlePinPlaceholder)) + '">';
+      ? '<textarea name="' + escapeHtml(fieldName) + '" placeholder="' + escapeHtml(placeholder) + '">' + escapeHtml(value) + '</textarea>'
+      : '<input name="' + escapeHtml(fieldName) + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '">';
     return '<div class="apps-asset-field" data-apps-asset-field="' + escapeHtml(fieldName) + '">' +
       '<div class="apps-asset-heading">' +
         '<label>' + escapeHtml(uiText(labelKey, fallbackLabel)) + '</label>' +
@@ -447,10 +559,10 @@ function buildAppsPageRuntimeSource(
         '</label>' +
       '</div>' +
       '<div class="apps-metafile-input">' +
-        '<span aria-hidden="true">metafile://</span>' +
+        '<span aria-hidden="true">' + escapeHtml(imageAsset ? 'ref' : 'metafile://') + '</span>' +
         manualControl +
       '</div>' +
-      '<p class="apps-field-help">' + escapeHtml(uiText('apps.form.manualPinHelp', UI_TEXT.manualPinHelp)) + '</p>' +
+      '<p class="apps-field-help">' + escapeHtml(imageAsset ? uiText('apps.form.imageManualPinHelp', UI_TEXT.imageManualPinHelp) : uiText('apps.form.manualPinHelp', UI_TEXT.manualPinHelp)) + '</p>' +
       '<p class="apps-field-error" data-apps-field-error="' + escapeHtml(fieldName) + '" hidden></p>' +
     '</div>';
   };
@@ -495,7 +607,7 @@ function buildAppsPageRuntimeSource(
           '</section>' +
           '<section class="apps-form-section" data-apps-form-section="assets">' +
             '<h3>' + escapeHtml(uiText('apps.form.assets', UI_TEXT.assets)) + '</h3>' +
-            '<div class="apps-asset-grid">' + ASSET_FIELDS.map(([name, key, fallback, multiple]) => renderAssetField(record, name, key, fallback, multiple)).join('') + '</div>' +
+            '<div class="apps-asset-grid">' + ASSET_FIELDS.map(([name, key, fallback, multiple, imageAsset]) => renderAssetField(record, name, key, fallback, multiple, imageAsset)).join('') + '</div>' +
           '</section>' +
           '<section class="apps-form-section" data-apps-form-section="technical">' +
             '<h3>' + escapeHtml(uiText('apps.form.technicalInformation', UI_TEXT.technicalInformation)) + '</h3>' +
@@ -538,10 +650,6 @@ function buildAppsPageRuntimeSource(
     return normalizeText(value) || '-';
   };
 
-  const renderDetailRow = (label, value) => {
-    return '<div class="apps-detail-row"><dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(displayValue(value)) + '</dd></div>';
-  };
-
   const formatRecordTimestamp = (value) => {
     const number = Number(value);
     if (!Number.isFinite(number) || number <= 0) return '-';
@@ -553,67 +661,105 @@ function buildAppsPageRuntimeSource(
   const metaAppUriForRecord = (record) => normalizeText(record && record.metaappUri) || 'metaapp://' + recordPinId(record);
   const metaWebUrlForRecord = (record) => normalizeText(record && record.metawebUrl) || 'https://metaweb.world/metaapp/' + recordPinId(record);
 
-  const renderProtocolFieldRows = (record) => {
+  const recordImageValue = (record, fieldNames) => {
+    for (const fieldName of fieldNames) {
+      const value = normalizeText(record && record[fieldName]);
+      if (value) return value;
+    }
+    return '';
+  };
+
+  const recordIntroImageValues = (record) => {
+    const value = record && record.introImgs;
+    if (Array.isArray(value)) return value.map(normalizeText).filter(Boolean);
+    return splitListInput(value);
+  };
+
+  const renderDetailField = (label, value, wide) => {
+    const text = displayValue(value);
+    return '<div class="apps-detail-field' + (wide ? ' wide' : '') + '">' +
+      '<span>' + escapeHtml(label) + '</span>' +
+      '<code>' + escapeHtml(text) + '</code>' +
+    '</div>';
+  };
+
+  const renderDetailShot = (value) => {
+    const src = imageUrlForReference(value);
+    return '<div class="apps-detail-shot">' + (src ? '<img src="' + escapeHtml(src) + '" alt="" loading="lazy" data-apps-image-fallback="">' : '') + '</div>';
+  };
+
+  const renderProtocolFieldRows = (record, rawJson) => {
     const rows = [
-      [uiText('apps.form.title', UI_TEXT.titleLabel), record && record.title],
-      [uiText('apps.form.appName', UI_TEXT.appNameLabel), record && record.appName],
-      [uiText('apps.form.prompt', UI_TEXT.promptLabel), record && record.prompt],
-      [uiText('apps.form.intro', UI_TEXT.introLabel), record && record.intro],
-      [uiText('apps.form.tags', UI_TEXT.tagsLabel), record && record.tags],
-      [uiText('apps.form.icon', UI_TEXT.iconLabel), record && record.icon],
-      [uiText('apps.form.coverImg', UI_TEXT.coverImgLabel), record && record.coverImg],
-      [uiText('apps.form.introImgs', UI_TEXT.introImgsLabel), record && record.introImgs],
-      [uiText('apps.form.runtime', UI_TEXT.runtimeLabel), record && record.runtime],
-      [uiText('apps.form.version', UI_TEXT.versionLabel), record && record.version],
-      [uiText('apps.form.contentType', UI_TEXT.contentTypeLabel), record && record.contentType],
-      [uiText('apps.form.content', UI_TEXT.contentLabel), record && record.content],
-      [uiText('apps.form.indexFile', UI_TEXT.indexFileLabel), record && record.indexFile],
-      [uiText('apps.form.code', UI_TEXT.codeLabel), record && record.code],
-      [uiText('apps.form.codeType', UI_TEXT.codeTypeLabel), record && record.codeType],
-      [uiText('apps.form.contentHash', UI_TEXT.contentHashLabel), record && record.contentHash],
-      [uiText('apps.form.metadata', UI_TEXT.metadataLabel), record && record.metadata],
-      [uiText('apps.form.disabled', UI_TEXT.disabledFieldLabel), record && record.disabled === true ? uiText('apps.disabled', UI_TEXT.disabled) : 'false'],
+      [uiText('apps.form.title', UI_TEXT.titleLabel), record && record.title, false],
+      [uiText('apps.form.appName', UI_TEXT.appNameLabel), record && record.appName, false],
+      [uiText('apps.form.prompt', UI_TEXT.promptLabel), record && record.prompt, true],
+      [uiText('apps.form.intro', UI_TEXT.introLabel), record && record.intro, true],
+      [uiText('apps.form.icon', UI_TEXT.iconLabel), recordImageValue(record, ['icon', 'iconImg', 'iconImage']), false],
+      [uiText('apps.form.coverImg', UI_TEXT.coverImgLabel), recordImageValue(record, ['coverImg', 'coverImage', 'cover']), false],
+      [uiText('apps.form.introImgs', UI_TEXT.introImgsLabel), recordIntroImageValues(record), true],
+      [uiText('apps.form.runtime', UI_TEXT.runtimeLabel), record && record.runtime, false],
+      [uiText('apps.form.version', UI_TEXT.versionLabel), record && record.version, false],
+      [uiText('apps.form.contentType', UI_TEXT.contentTypeLabel), record && record.contentType, false],
+      [uiText('apps.form.indexFile', UI_TEXT.indexFileLabel), record && record.indexFile, false],
+      [uiText('apps.form.content', UI_TEXT.contentLabel), record && record.content, true],
+      [uiText('apps.form.code', UI_TEXT.codeLabel), record && record.code, true],
+      [uiText('apps.form.contentHash', UI_TEXT.contentHashLabel), record && record.contentHash, false],
+      [uiText('apps.form.codeType', UI_TEXT.codeTypeLabel), record && record.codeType, false],
+      [uiText('apps.form.disabled', UI_TEXT.disabledFieldLabel), record && record.disabled === true ? uiText('apps.disabled', UI_TEXT.disabled) : 'false', false],
+      [uiText('apps.form.tags', UI_TEXT.tagsLabel), record && record.tags, true],
+      [uiText('apps.form.metadata', UI_TEXT.metadataLabel), record && record.metadata, true],
+      [uiText('apps.detail.pinId', UI_TEXT.detailPinId), recordPinId(record), false],
+      [uiText('apps.detail.firstPinId', UI_TEXT.detailFirstPinId), record && record.firstPinId, false],
+      [uiText('apps.detail.operation', UI_TEXT.detailOperation), record && record.operation, false],
+      [uiText('apps.detail.ownerAddress', UI_TEXT.detailOwnerAddress), record && record.ownerAddress, false],
+      [uiText('apps.detail.globalMetaId', UI_TEXT.detailGlobalMetaId), record && (record.globalMetaId || record.globalMetaID || (record.raw && (record.raw.globalMetaId || record.raw.globalMetaID))), false],
+      [uiText('apps.detail.txid', UI_TEXT.detailTxid), record && record.txid, false],
+      [uiText('apps.detail.txids', UI_TEXT.detailTxids), record && record.txids, true],
+      [uiText('apps.detail.updatedAt', UI_TEXT.detailUpdatedAt), formatRecordTimestamp(record && record.timestamp), false],
+      [uiText('apps.detail.createdAt', UI_TEXT.detailCreatedAt), formatRecordTimestamp(record && (record.createdAt || record.raw && (record.raw.createdAt || record.raw.timestamp))), false],
+      [uiText('apps.detail.rawData', UI_TEXT.detailRawData), rawJson, true],
     ];
-    return rows.map(([label, value]) => renderDetailRow(label, value)).join('');
+    return rows.map(([label, value, wide]) => renderDetailField(label, value, wide)).join('');
   };
 
   const renderDetailModal = (record) => {
     const pinId = recordPinId(record);
     const rawJson = JSON.stringify(record && record.raw ? record.raw : record || {}, null, 2);
-    const chainRows = [
-      [uiText('apps.detail.pinId', UI_TEXT.detailPinId), pinId],
-      [uiText('apps.detail.firstPinId', UI_TEXT.detailFirstPinId), record && record.firstPinId],
-      [uiText('apps.detail.operation', UI_TEXT.detailOperation), record && record.operation],
-      [uiText('apps.detail.ownerAddress', UI_TEXT.detailOwnerAddress), record && record.ownerAddress],
-      [uiText('apps.detail.globalMetaId', UI_TEXT.detailGlobalMetaId), record && (record.globalMetaId || record.globalMetaID || (record.raw && (record.raw.globalMetaId || record.raw.globalMetaID)))],
-      [uiText('apps.detail.txid', UI_TEXT.detailTxid), record && record.txid],
-      [uiText('apps.detail.txids', UI_TEXT.detailTxids), record && record.txids],
-      [uiText('apps.detail.updatedAt', UI_TEXT.detailUpdatedAt), formatRecordTimestamp(record && record.timestamp)],
-      [uiText('apps.detail.createdAt', UI_TEXT.detailCreatedAt), formatRecordTimestamp(record && (record.createdAt || record.raw && (record.raw.createdAt || record.raw.timestamp)))],
-    ].map(([label, value]) => renderDetailRow(label, value)).join('');
-    const body = '<div class="apps-detail-body">' +
-      '<section class="apps-detail-section">' +
-        '<h3>' + escapeHtml(uiText('apps.detail.protocolFields', UI_TEXT.detailProtocolFields)) + '</h3>' +
-        '<dl class="apps-detail-grid">' + renderProtocolFieldRows(record) + '</dl>' +
+    const title = normalizeText(record && (record.title || record.appName)) || uiText('apps.untitledMetaApp', UI_TEXT.untitledMetaApp);
+    const description = normalizeText(record && (record.prompt || record.intro));
+    const tags = Array.isArray(record && record.tags) ? record.tags.map(normalizeText).filter(Boolean).slice(0, 8) : [];
+    const iconValue = recordImageValue(record, ['icon', 'iconImg', 'iconImage']);
+    const coverValue = recordImageValue(record, ['coverImg', 'coverImage', 'cover']);
+    const previewValues = [coverValue, ...recordIntroImageValues(record)].filter(Boolean).slice(0, 3);
+    while (previewValues.length < 3) previewValues.push('');
+    const body = '<div class="apps-protocol-detail">' +
+      '<section class="apps-detail-top">' +
+        imageMarkup('apps-detail-icon', iconValue, title, '') +
+        '<div class="apps-detail-title">' +
+          '<h3>' + escapeHtml(title) + '</h3>' +
+          '<p>' + escapeHtml(description) + '</p>' +
+          '<div class="apps-tags">' + tags.map((tag) => '<span>' + escapeHtml(tag) + '</span>').join('') + '</div>' +
+        '</div>' +
+        '<div class="apps-detail-actions">' +
+          '<button class="btn btn-primary" type="button" data-apps-run="' + escapeHtml(pinId) + '"' + (record && record.disabled === true ? ' disabled' : '') + '>' + escapeHtml(uiText('apps.run', UI_TEXT.run)) + '</button>' +
+          '<button class="btn" type="button" data-apps-share="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.share', UI_TEXT.share)) + '</button>' +
+          '<button class="btn" type="button" data-apps-edit="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.edit', UI_TEXT.edit)) + '</button>' +
+          '<button class="btn btn-danger" type="button" data-apps-delete-open="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.delete', UI_TEXT.deleteLabel)) + '</button>' +
+        '</div>' +
       '</section>' +
-      '<section class="apps-detail-section">' +
-        '<h3>' + escapeHtml(uiText('apps.detail.chainData', UI_TEXT.detailChainData)) + '</h3>' +
-        '<dl class="apps-detail-grid">' + chainRows + '</dl>' +
-      '</section>' +
-      '<section class="apps-detail-section">' +
-        '<h3>' + escapeHtml(uiText('apps.detail.rawData', UI_TEXT.detailRawData)) + '</h3>' +
-        '<pre class="apps-detail-raw">' + escapeHtml(rawJson) + '</pre>' +
-      '</section>' +
+      '<section class="apps-detail-shots">' + previewValues.map(renderDetailShot).join('') + '</section>' +
+      '<div class="apps-detail-tabs" aria-hidden="true">' +
+        '<span class="apps-detail-tab active">' + escapeHtml(uiText('apps.detail.tabDetails', UI_TEXT.detailTabDetails)) + '</span>' +
+        '<span class="apps-detail-tab">' + escapeHtml(uiText('apps.detail.tabAI', UI_TEXT.detailTabAI)) + '</span>' +
+        '<span class="apps-detail-tab">' + escapeHtml(uiText('apps.detail.tabRaw', UI_TEXT.detailTabRaw)) + '</span>' +
+      '</div>' +
+      '<section class="apps-detail-fields">' + renderProtocolFieldRows(record, rawJson) + '</section>' +
     '</div>';
-    const actions = '<button class="btn" type="button" data-apps-modal-close>' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '</button>' +
-      '<button class="btn" type="button" data-apps-share="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.share', UI_TEXT.share)) + '</button>' +
-      '<button class="btn" type="button" data-apps-edit="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.edit', UI_TEXT.edit)) + '</button>' +
-      '<button class="btn btn-danger" type="button" data-apps-delete-open="' + escapeHtml(pinId) + '">' + escapeHtml(uiText('apps.delete', UI_TEXT.deleteLabel)) + '</button>';
     return renderModalShell(
       uiText('apps.detail.title', UI_TEXT.detailModalTitle),
       uiText('apps.detail.description', UI_TEXT.detailModalDescription),
       body,
-      actions,
+      '',
     );
   };
 
@@ -735,6 +881,7 @@ function buildAppsPageRuntimeSource(
     };
     elements.modalRoot.hidden = false;
     elements.modalRoot.innerHTML = renderAppsModalContent(mode, resolvedRecord);
+    hydrateImageFallbacks(elements.modalRoot);
     const dialog = elements.modalRoot.querySelector('.apps-modal-dialog');
     if (dialog && typeof dialog.focus === 'function') dialog.focus();
   };
@@ -761,9 +908,9 @@ function buildAppsPageRuntimeSource(
       prompt: normalizeText(data.get('prompt')),
       intro: normalizeText(data.get('intro')),
       tags: splitListInput(data.get('tags')),
-      icon: normalizeMetafileInput(data.get('icon'), 'icon'),
-      coverImg: normalizeMetafileInput(data.get('coverImg'), 'coverImg'),
-      introImgs: normalizeMetafileListInput(data.get('introImgs'), 'introImgs'),
+      icon: normalizeImageAssetInput(data.get('icon'), 'icon'),
+      coverImg: normalizeImageAssetInput(data.get('coverImg'), 'coverImg'),
+      introImgs: normalizeImageAssetListInput(data.get('introImgs'), 'introImgs'),
       content: normalizeMetafileInput(data.get('content'), 'content'),
       code: normalizeMetafileInput(data.get('code'), 'code'),
       runtime: runtime.length ? runtime : ['browser'],
@@ -916,18 +1063,24 @@ function buildAppsPageRuntimeSource(
     || normalizeText(profile && profile.globalMetaId)
     || uiText('apps.botFallback', UI_TEXT.botFallback);
 
-  const profileAvatar = (profile) => {
+  const profileAvatarSource = (profile) => {
     const avatar = profile && profile.avatar;
-    return normalizeText(avatar && typeof avatar === 'object' && avatar.label)
-      || profileLabel(profile).slice(0, 2).toUpperCase()
-      || 'BT';
+    if (typeof avatar === 'string') return normalizeText(avatar);
+    return normalizeText(profile && (profile.avatarDataUrl || profile.avatarUri || profile.avatarUrl || profile.avatarImage))
+      || normalizeText(avatar && typeof avatar === 'object' && (avatar.dataUrl || avatar.uri || avatar.url || avatar.src || avatar.image))
+      || '';
+  };
+
+  const profileAvatarMarkup = (profile) => {
+    const label = profileLabel(profile);
+    return imageMarkup('apps-bot-avatar', profileAvatarSource(profile), label, '');
   };
 
   const renderBotPicker = () => {
     if (!elements.botPicker) return;
     const selected = selectedProfile();
     const current = selected
-      ? '<span class="apps-bot-avatar">' + escapeHtml(profileAvatar(selected)) + '</span>'
+      ? profileAvatarMarkup(selected)
         + '<span class="apps-bot-main"><strong>' + escapeHtml(profileLabel(selected)) + '</strong><span>' + escapeHtml(normalizeText(selected.globalMetaId) || state.selectedSlug) + '</span></span>'
       : '<span class="apps-bot-main"><strong>' + escapeHtml(uiText('apps.noLocalBotAvailable', UI_TEXT.noLocalBotAvailable)) + '</strong></span>';
     elements.botPicker.innerHTML =
@@ -939,11 +1092,12 @@ function buildAppsPageRuntimeSource(
         state.profiles.map((profile) => {
           const slug = profileSlug(profile);
           return '<button class="apps-bot-option" type="button" role="option" data-apps-bot-option="' + escapeHtml(slug) + '" data-selected="' + (slug === state.selectedSlug ? 'true' : 'false') + '" aria-selected="' + (slug === state.selectedSlug ? 'true' : 'false') + '">' +
-            '<span class="apps-bot-avatar">' + escapeHtml(profileAvatar(profile)) + '</span>' +
+            profileAvatarMarkup(profile) +
             '<span>' + escapeHtml(profileLabel(profile)) + '</span>' +
           '</button>';
         }).join('') +
       '</div>';
+    hydrateImageFallbacks(elements.botPicker);
   };
 
   const renderEmpty = () => {
@@ -958,10 +1112,13 @@ function buildAppsPageRuntimeSource(
     const subtitle = [normalizeText(record && record.version), normalizeText(record && record.runtime)].filter(Boolean).join(' / ');
     const intro = normalizeText(record && record.intro);
     const tags = Array.isArray(record && record.tags) ? record.tags.map(normalizeText).filter(Boolean).slice(0, 4) : [];
-    const initials = (normalizeText(record && (record.appName || record.title)) || 'MA').slice(0, 2).toUpperCase();
+    const iconValue = recordImageValue(record, ['icon', 'iconImg', 'iconImage']);
+    const coverValue = recordImageValue(record, ['coverImg', 'coverImage', 'cover']);
+    const coverSrc = imageUrlForReference(coverValue);
     return '<article class="apps-card" data-apps-card="' + escapeHtml(pinId) + '" tabindex="0">' +
       '<div class="apps-card-cover">' +
-        '<span class="apps-card-icon">' + escapeHtml(initials) + '</span>' +
+        (coverSrc ? '<img class="apps-card-cover-img" src="' + escapeHtml(coverSrc) + '" alt="" loading="lazy" data-apps-image-fallback="">' : '') +
+        imageMarkup('apps-card-icon', iconValue, title, '') +
         '<span class="apps-state-pill' + (disabled ? ' disabled' : '') + '">' + escapeHtml(disabled ? uiText('apps.disabled', UI_TEXT.disabled) : uiText('apps.runnable', UI_TEXT.runnable)) + '</span>' +
       '</div>' +
       '<div class="apps-card-body">' +
@@ -1006,6 +1163,7 @@ function buildAppsPageRuntimeSource(
     }
     if (elements.gridCount) elements.gridCount.textContent = String(state.records.length);
     renderPaginationControls();
+    hydrateImageFallbacks(elements.grid);
   };
 
   const setLoading = (loading) => {

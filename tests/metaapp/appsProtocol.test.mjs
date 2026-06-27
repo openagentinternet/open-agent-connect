@@ -5,6 +5,8 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 
 const {
+  normalizeMetaAppImageReference,
+  normalizeMetaAppImageReferenceList,
   normalizeMetafileReference,
   normalizeMetafileReferenceList,
   serializeMetaAppRuntime,
@@ -35,6 +37,21 @@ test('normalizeMetafileReferenceList parses comma and newline separated pin ids'
   assert.deepEqual(
     normalizeMetafileReferenceList(`${PIN},\nmetafile://${SECOND_PIN}`, 'introImgs'),
     [`metafile://${PIN}`, `metafile://${SECOND_PIN}`],
+  );
+});
+
+test('normalizeMetaAppImageReference accepts http image URLs and metafile refs', () => {
+  assert.equal(
+    normalizeMetaAppImageReference('https://cdn.example.test/icon.png', 'icon'),
+    'https://cdn.example.test/icon.png',
+  );
+  assert.equal(normalizeMetaAppImageReference(PIN, 'icon'), `metafile://${PIN}`);
+});
+
+test('normalizeMetaAppImageReferenceList preserves mixed http and metafile refs', () => {
+  assert.deepEqual(
+    normalizeMetaAppImageReferenceList(`https://cdn.example.test/one.png,\nmetafile://${SECOND_PIN}`, 'introImgs'),
+    ['https://cdn.example.test/one.png', `metafile://${SECOND_PIN}`],
   );
 });
 
@@ -96,6 +113,20 @@ test('buildMetaAppProtocolPayload normalizes MetaAPP protocol fields', () => {
   assert.equal(payload.disabled, true);
   assert.deepEqual(payload.tags, ['tool', 'knowledge']);
   assert.deepEqual(payload.metadata, { homepage: false });
+});
+
+test('buildMetaAppProtocolPayload preserves http image fields', () => {
+  const payload = buildMetaAppProtocolPayload(validInput({
+    icon: 'https://cdn.example.test/icon.png',
+    coverImg: 'http://cdn.example.test/cover.png',
+    introImgs: ['https://cdn.example.test/one.png', PIN],
+  }));
+
+  assert.equal(payload.icon, 'https://cdn.example.test/icon.png');
+  assert.equal(payload.coverImg, 'http://cdn.example.test/cover.png');
+  assert.deepEqual(payload.introImgs, ['https://cdn.example.test/one.png', `metafile://${PIN}`]);
+  assert.equal(payload.content, `metafile://${PIN}`);
+  assert.equal(payload.code, `metafile://${PIN}`);
 });
 
 test('buildMetaAppProtocolPayload defaults empty contentType to application/zip', () => {

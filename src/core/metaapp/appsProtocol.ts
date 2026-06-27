@@ -54,6 +54,15 @@ function stripMetafilePrefix(value: string): string {
     : value;
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeMetafileReference(value: unknown, fieldName: string): string {
   const raw = normalizeText(value);
   const pinId = stripMetafilePrefix(raw).trim();
@@ -71,6 +80,22 @@ export function normalizeMetafileReferenceList(value: unknown, fieldName: string
     .map((item) => normalizeText(item))
     .filter(Boolean)
     .map((item) => normalizeMetafileReference(item, fieldName));
+}
+
+export function normalizeMetaAppImageReference(value: unknown, fieldName: string): string {
+  const raw = normalizeText(value);
+  if (isHttpUrl(raw)) return raw;
+  return normalizeMetafileReference(raw, fieldName);
+}
+
+export function normalizeMetaAppImageReferenceList(value: unknown, fieldName: string): string[] {
+  const values = Array.isArray(value)
+    ? value
+    : normalizeText(value).split(/[\n,]/u);
+  return values
+    .map((item) => normalizeText(item))
+    .filter(Boolean)
+    .map((item) => normalizeMetaAppImageReference(item, fieldName));
 }
 
 export function serializeMetaAppRuntime(value: unknown): string {
@@ -144,9 +169,9 @@ export function buildMetaAppProtocolPayload(input: Record<string, unknown>): Met
     title,
     appName,
     prompt: normalizeText(input.prompt) || undefined,
-    icon: normalizeMetafileReference(input.icon, 'icon'),
-    coverImg: normalizeMetafileReference(input.coverImg, 'coverImg'),
-    introImgs: normalizeMetafileReferenceList(input.introImgs, 'introImgs'),
+    icon: normalizeMetaAppImageReference(input.icon, 'icon'),
+    coverImg: normalizeMetaAppImageReference(input.coverImg, 'coverImg'),
+    introImgs: normalizeMetaAppImageReferenceList(input.introImgs, 'introImgs'),
     intro: normalizeText(input.intro) || undefined,
     runtime: serializeMetaAppRuntime(input.runtime),
     version: normalizeText(input.version) || undefined,
