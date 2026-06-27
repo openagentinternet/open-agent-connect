@@ -129,6 +129,13 @@ test('buildMetaAppProtocolPayload preserves http image fields', () => {
   assert.equal(payload.code, `metafile://${PIN}`);
 });
 
+test('buildMetaAppProtocolPayload rejects unsupported runtime values', () => {
+  assert.throws(
+    () => buildMetaAppProtocolPayload(validInput({ runtime: ['browser', 'beos'] })),
+    /runtime contains unsupported value: beos/i,
+  );
+});
+
 test('buildMetaAppProtocolPayload defaults empty contentType to application/zip', () => {
   const payload = buildMetaAppProtocolPayload(validInput({ contentType: ' ' }));
 
