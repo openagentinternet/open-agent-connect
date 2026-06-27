@@ -150,6 +150,12 @@ test('Simplified Chinese UI keeps Bot as a proper noun', () => {
   assert.equal(translate('zh-CN', 'nav.apps'), '应用');
   assert.equal(translate('en', 'apps.publishMetaApp'), 'Publish MetaApp');
   assert.equal(translate('zh-CN', 'apps.publishMetaApp'), '发布 MetaApp');
+  assert.equal(translate('en', 'apps.eyebrow'), 'Apps');
+  assert.equal(translate('zh-CN', 'apps.eyebrow'), '应用');
+  assert.equal(translate('en', 'apps.description'), 'Manage published MetaAPPs for the selected Bot.');
+  assert.equal(translate('zh-CN', 'apps.description'), '管理所选 Bot 已上链发布的 MetaAPP。');
+  assert.equal(translate('en', 'apps.publishedMetaApps'), 'Published MetaAPPs');
+  assert.equal(translate('zh-CN', 'apps.publishedMetaApps'), '已发布 MetaAPP');
   assert.equal(translate('zh-CN', 'action.openBotPage'), '打开 Bot Page');
   assert.equal(translate('en', 'action.openInBrowser'), 'Open in Browser');
   assert.equal(translate('zh-CN', 'action.openInBrowser'), '在浏览器中打开');

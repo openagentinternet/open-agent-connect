@@ -40,7 +40,7 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
           <section class="apps-gallery" aria-label="${tx('apps.galleryAria')}">
             <div class="apps-section-header">
               <div>
-                <h2 data-i18n-key="apps.galleryTitle">${tx('apps.galleryTitle')}</h2>
+                <h2 data-i18n-key="apps.publishedMetaApps">${tx('apps.publishedMetaApps')}</h2>
                 <p data-i18n-key="apps.galleryDescription">${tx('apps.galleryDescription')}</p>
               </div>
               <span data-apps-grid-count>0</span>
