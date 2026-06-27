@@ -46,10 +46,10 @@ test('uploadLocalFileToChain reads the local file, writes /file to chain, and re
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].path, '/file');
-  assert.equal(calls[0].encoding, 'base64');
+  assert.equal(calls[0].encoding, 'binary');
   assert.equal(calls[0].contentType, 'image/png');
-  assert.equal(typeof calls[0].payload, 'string');
-  assert.equal(Buffer.from(calls[0].payload, 'base64').toString('utf8'), 'hello metabot file');
+  assert.equal(Buffer.isBuffer(calls[0].payload), true);
+  assert.equal(calls[0].payload.toString('utf8'), 'hello metabot file');
 
   assert.deepEqual(result, {
     pinId: 'file-pin-1',

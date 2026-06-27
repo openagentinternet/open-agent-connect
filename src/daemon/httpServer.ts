@@ -106,6 +106,23 @@ async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, u
   return parsed as Record<string, unknown>;
 }
 
+async function readRawBody(req: http.IncomingMessage, maxBytes: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  const normalizedMaxBytes = Math.max(0, Math.floor(maxBytes));
+
+  for await (const chunk of req) {
+    const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    totalBytes += bufferChunk.byteLength;
+    if (totalBytes > normalizedMaxBytes) {
+      throw new Error(`Request body is too large. Maximum size is ${normalizedMaxBytes} bytes.`);
+    }
+    chunks.push(bufferChunk);
+  }
+
+  return chunks.length ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0);
+}
+
 export function createHttpServer(handlers: MetabotDaemonHttpHandlers = {}): http.Server {
   return http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -116,6 +133,7 @@ export function createHttpServer(handlers: MetabotDaemonHttpHandlers = {}): http
       url: requestUrl,
       handlers,
       readJsonBody: () => readJsonBody(req),
+      readRawBody: (maxBytes) => readRawBody(req, maxBytes),
       sendJson: (status, payload) => sendJson(res, status, payload),
       sendHtml: (status, html) => sendHtml(res, status, html),
       sendText: (status, body, contentType) => sendText(res, status, body, contentType),

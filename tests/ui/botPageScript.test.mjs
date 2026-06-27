@@ -1859,9 +1859,12 @@ test('bot page homepage upload success stores Metafile draft and save payload', 
   const context = createBotScriptContext({
     elements: fields,
     fetch: (url, options) => {
-      const body = JSON.parse(options.body);
-      if (url === '/api/bot/profiles/alice/homepage/upload') {
-        uploadRequest = body;
+      if (url === '/api/bot/profiles/alice/homepage/upload?fileName=cover.png') {
+        uploadRequest = {
+          url,
+          body: options.body,
+          headers: options.headers,
+        };
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
@@ -1876,7 +1879,7 @@ test('bot page homepage upload success stores Metafile draft and save payload', 
           }),
         });
       }
-      saveRequest = body;
+      saveRequest = JSON.parse(options.body);
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({
@@ -1897,14 +1900,6 @@ test('bot page homepage upload success stores Metafile draft and save payload', 
         }),
       });
     },
-    globals: {
-      FileReader: class {
-        readAsDataURL() {
-          this.result = `data:image/png;base64,${Buffer.from('pngdata').toString('base64')}`;
-          this.onload();
-        }
-      },
-    },
   });
 
   vm.runInNewContext(buildBotPageDefinition().script, context);
@@ -1920,14 +1915,13 @@ test('bot page homepage upload success stores Metafile draft and save payload', 
   context.renderPublicIdentityTab = () => {};
   context.showChainSuccessModal = () => {};
 
-  await context.handleHomepageUploadFile({ name: 'cover.png', type: 'image/png' });
+  const selectedFile = { name: 'cover.png', type: 'image/png', size: 7 };
+  await context.handleHomepageUploadFile(selectedFile);
   await context.savePublicIdentity();
 
-  assert.deepEqual(uploadRequest, {
-    fileName: 'cover.png',
-    contentType: 'image/png',
-    base64: Buffer.from('pngdata').toString('base64'),
-  });
+  assert.equal(uploadRequest.url, '/api/bot/profiles/alice/homepage/upload?fileName=cover.png');
+  assert.equal(uploadRequest.body, selectedFile);
+  assert.equal(uploadRequest.headers['content-type'], 'image/png');
   assert.deepEqual(saveRequest, {
     homepage: {
       uri: 'metafile://file-pin-123.png',
@@ -1948,19 +1942,11 @@ test('bot page homepage upload ignores stale completion after selection changes'
   const context = createBotScriptContext({
     elements: fields,
     fetch: (url, options) => {
-      uploadRequest = { url, body: JSON.parse(options.body) };
+      uploadRequest = { url, body: options.body, headers: options.headers };
       return Promise.resolve({
         ok: true,
         json: () => uploadJson.promise,
       });
-    },
-    globals: {
-      FileReader: class {
-        readAsDataURL() {
-          this.result = `data:image/png;base64,${Buffer.from('pngdata').toString('base64')}`;
-          this.onload();
-        }
-      },
     },
   });
 
@@ -1973,7 +1959,8 @@ test('bot page homepage upload ignores stale completion after selection changes'
   context.state.originalProfile = context.state.profiles[0];
   context.renderPublicIdentityTab = () => { renderCount += 1; };
 
-  const upload = context.handleHomepageUploadFile({ name: 'cover.png', type: 'image/png' });
+  const selectedFile = { name: 'cover.png', type: 'image/png', size: 7 };
+  const upload = context.handleHomepageUploadFile(selectedFile);
   await waitFor(() => uploadRequest !== null, 'homepage upload request');
   context.state.selectedSlug = 'bob';
   context.state.originalProfile = context.state.profiles[1];
@@ -1988,10 +1975,42 @@ test('bot page homepage upload ignores stale completion after selection changes'
 
   await upload;
 
-  assert.equal(uploadRequest.url, '/api/bot/profiles/alice/homepage/upload');
+  assert.equal(uploadRequest.url, '/api/bot/profiles/alice/homepage/upload?fileName=cover.png');
+  assert.equal(uploadRequest.body, selectedFile);
   assert.equal(context.state.selectedSlug, 'bob');
   assert.equal(context.state._pendingHomepage, undefined);
   assert.equal(renderCount, 0);
+});
+
+test('bot page homepage upload rejects files above 2 MiB before fetch', async () => {
+  const fields = {
+    '[data-homepage-status]': field(),
+    '[data-act="upload-homepage"]': field(),
+  };
+  let fetchCalls = 0;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: () => {
+      fetchCalls += 1;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: {} }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice' }];
+
+  await context.handleHomepageUploadFile({
+    name: 'too-large.html',
+    type: 'text/html',
+    size: (2 * 1024 * 1024) + 1,
+  });
+
+  assert.equal(fetchCalls, 0);
+  assert.match(fields['[data-homepage-status]'].textContent, /2 MiB/);
 });
 
 test('bot page loadProfiles clears pending homepage when selected Bot changes', async () => {

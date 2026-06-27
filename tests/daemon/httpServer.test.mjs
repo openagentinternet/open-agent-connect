@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { access, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
@@ -700,6 +702,9 @@ async function startServer(options = {}) {
       },
       uploadHomepageFile: async (input) => {
         calls.botHomepageUpload.push(input);
+        if (options.uploadHomepageFile) {
+          return options.uploadHomepageFile(input);
+        }
         return commandSuccess({
           pinId: 'homepage-file-pin-1',
           metafileUri: 'metafile://homepage-file-pin-1.png',
@@ -1002,6 +1007,21 @@ async function startServer(options = {}) {
       });
     },
   };
+}
+
+async function waitForFileRemoved(filePath) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await access(filePath);
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
+    await delay(5);
+  }
+  assert.fail(`Expected temporary upload file to be removed: ${filePath}`);
 }
 
 function createFakeMetaAppsElement() {
@@ -1908,26 +1928,65 @@ test('PUT /api/bot/profiles/:slug does not let the JSON body override the path s
   assert.equal(payload.data.profile.slug, 'alice-bot');
 });
 
-test('POST /api/bot/profiles/:slug/homepage/upload forwards selected file bytes', async (t) => {
-  const server = await startServer();
+test('POST /api/bot/profiles/:slug/homepage/upload forwards raw selected file bytes', async (t) => {
+  let observedFilePath = '';
+  let observedBytes = Buffer.alloc(0);
+  const server = await startServer({
+    uploadHomepageFile: async (input) => {
+      observedFilePath = input.filePath;
+      observedBytes = await readFile(input.filePath);
+      return commandSuccess({
+        pinId: 'homepage-file-pin-1',
+        metafileUri: 'metafile://homepage-file-pin-1.png',
+        contentType: input.contentType,
+        network: 'mvc',
+        txids: ['tx-homepage-file-1'],
+        bytes: observedBytes.byteLength,
+      });
+    },
+  });
   t.after(async () => server.close());
 
-  const request = {
-    fileName: 'cover.png',
-    contentType: 'image/png',
-    base64: Buffer.from('pngdata').toString('base64'),
-  };
-  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/homepage/upload`, {
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/homepage/upload?fileName=${encodeURIComponent('cover.png')}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request),
+    headers: { 'content-type': 'image/png' },
+    body: Buffer.from('pngdata'),
   });
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.botHomepageUpload, [{ slug: 'alice-bot', ...request }]);
+  assert.equal(server.calls.botHomepageUpload.length, 1);
+  assert.equal(server.calls.botHomepageUpload[0].slug, 'alice-bot');
+  assert.equal(server.calls.botHomepageUpload[0].fileName, 'cover.png');
+  assert.equal(server.calls.botHomepageUpload[0].contentType, 'image/png');
+  assert.equal(server.calls.botHomepageUpload[0].base64, undefined);
+  assert.equal(Buffer.compare(observedBytes, Buffer.from('pngdata')), 0);
+  await waitForFileRemoved(observedFilePath);
   assert.equal(payload.data.pinId, 'homepage-file-pin-1');
   assert.equal(payload.data.metafileUri, 'metafile://homepage-file-pin-1.png');
+});
+
+test('POST /api/bot/profiles/:slug/homepage/upload rejects files above the direct limit', async (t) => {
+  let handlerCalls = 0;
+  const server = await startServer({
+    uploadHomepageFile: async () => {
+      handlerCalls += 1;
+      return commandSuccess({});
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/homepage/upload?fileName=${encodeURIComponent('too-large.html')}`, {
+    method: 'POST',
+    headers: { 'content-type': 'text/html' },
+    body: Buffer.alloc((2 * 1024 * 1024) + 1),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 413);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'homepage_upload_too_large');
+  assert.equal(handlerCalls, 0);
 });
 
 test('GET /api/bot/profiles/:slug/wallet forwards to the MetaBot wallet handler', async (t) => {

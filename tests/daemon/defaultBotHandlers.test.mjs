@@ -414,6 +414,80 @@ test('default file.uploadLarge preserves unavailable uploader failure code', asy
   assert.match(result.message, /Large file upload requires an injected largeUploader/);
 });
 
+test('default file.uploadLarge passes the injected production large uploader', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-large-upload-injected-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const filePath = path.join(homeDir, 'large-video.mp4');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await createRuntimeStateStore(homeDir).writeState({
+    identity: {
+      metabotId: 1,
+      name: 'Large Upload Bot',
+      createdAt: 1776836000000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: {
+        btc: 'btc-address',
+        mvc: 'mvc-address',
+        doge: 'doge-address',
+        opcat: 'opcat-address',
+      },
+      mvcAddress: 'mvc-address',
+      metaId: 'metaid-large-upload-bot',
+      globalMetaId: 'gm-large-upload-bot',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+  const largeUploadCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async () => {
+      throw new Error('direct signer should not be used for injected large uploads');
+    }),
+    providerLargeFileUploader: {
+      upload: async (input) => {
+        largeUploadCalls.push(input);
+        return {
+          pinId: 'large-file-pin-1',
+          txids: ['large-file-tx-1'],
+          totalCost: 11,
+          network: input.network,
+          fileName: input.fileName,
+          contentType: input.contentType,
+          bytes: input.bytes,
+          extension: input.extension,
+          metafileUri: `metafile://large-file-pin-1${input.extension}`,
+          globalMetaId: 'gm-large-upload-bot',
+          uploadMode: 'chunked',
+          previewUrl: 'https://example.invalid/preview',
+          downloadUrl: 'https://example.invalid/download',
+        };
+      },
+    },
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.file.uploadLarge({
+    filePath,
+    contentType: 'video/mp4',
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.pinId, 'large-file-pin-1');
+  assert.equal(result.data.uploadMode, 'chunked');
+  assert.equal(largeUploadCalls.length, 1);
+  assert.equal(largeUploadCalls[0].filePath, filePath);
+  assert.equal(largeUploadCalls[0].contentType, 'video/mp4');
+});
+
 test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {
   const homeDir = await createProfileHome('metabot-default-llm-handlers-', 'active-bot');
   t.after(async () => {
@@ -1921,12 +1995,13 @@ test('default bot uploadHomepageFile writes selected browser file bytes through 
       };
     }),
   });
+  const filePath = path.join(profile.homeDir, 'cover.png');
+  await writeFile(filePath, Buffer.from('pngdata'));
 
   const result = await handlers.bot.uploadHomepageFile({
     slug: profile.slug,
-    fileName: 'cover.png',
+    filePath,
     contentType: 'image/png',
-    base64: Buffer.from('pngdata').toString('base64'),
   });
 
   assert.equal(result.ok, true);
@@ -1934,9 +2009,10 @@ test('default bot uploadHomepageFile writes selected browser file bytes through 
   assert.equal(result.data.metafileUri, 'metafile://homepage-upload-pin-1.png');
   assert.equal(result.data.bytes, 7);
   assert.deepEqual(writeCalls.map((call) => call.path), ['/file']);
-  assert.equal(writeCalls[0].payload, Buffer.from('pngdata').toString('base64'));
+  assert.equal(Buffer.isBuffer(writeCalls[0].payload), true);
+  assert.equal(writeCalls[0].payload.toString('utf8'), 'pngdata');
   assert.equal(writeCalls[0].contentType, 'image/png');
-  assert.equal(writeCalls[0].encoding, 'base64');
+  assert.equal(writeCalls[0].encoding, 'binary');
 });
 
 test('default bot uploadHomepageFile uses the selected profile signer for non-active chained profiles', async (t) => {
@@ -1988,20 +2064,89 @@ test('default bot uploadHomepageFile uses the selected profile signer for non-ac
       });
     },
   });
+  const filePath = path.join(targetProfile.homeDir, 'cover.png');
+  await writeFile(filePath, Buffer.from('pngdata'));
 
   const result = await handlers.bot.uploadHomepageFile({
     slug: targetProfile.slug,
-    fileName: 'cover.png',
+    filePath,
     contentType: 'image/png',
-    base64: Buffer.from('pngdata').toString('base64'),
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.data.pinId, 'target-homepage-upload-pin-1');
   assert.equal(result.data.metafileUri, 'metafile://target-homepage-upload-pin-1.png');
   assert.deepEqual(writeCalls.map((call) => call.path), ['/file']);
-  assert.equal(writeCalls[0].payload, Buffer.from('pngdata').toString('base64'));
+  assert.equal(Buffer.isBuffer(writeCalls[0].payload), true);
+  assert.equal(writeCalls[0].payload.toString('utf8'), 'pngdata');
   assert.deepEqual(createSignerHomes, [targetProfile.homeDir]);
+});
+
+test('default bot uploadHomepageFile uses the injected large uploader above the direct threshold', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-homepage-large-upload-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage Large Upload Bot',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-homepage-large-upload-bot',
+    mvcAddress: 'addr-homepage-large-upload-bot',
+  });
+  const filePath = path.join(profile.homeDir, 'homepage-video.mp4');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  const writeCalls = [];
+  const largeUploadCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      throw new Error('direct signer should not be used for chunked homepage uploads');
+    }),
+    providerLargeFileUploader: {
+      upload: async (input) => {
+        largeUploadCalls.push(input);
+        return {
+          pinId: 'homepage-large-pin-1',
+          txids: ['homepage-large-tx-1'],
+          totalCost: 42,
+          network: input.network,
+          fileName: input.fileName,
+          contentType: input.contentType,
+          bytes: input.bytes,
+          extension: input.extension,
+          metafileUri: `metafile://homepage-large-pin-1${input.extension}`,
+          globalMetaId: 'gm-homepage-large-upload-bot',
+          uploadMode: 'chunked',
+          previewUrl: 'https://example.invalid/preview',
+          downloadUrl: 'https://example.invalid/download',
+        };
+      },
+    },
+  });
+
+  const result = await handlers.bot.uploadHomepageFile({
+    slug: profile.slug,
+    filePath,
+    contentType: 'video/mp4',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.pinId, 'homepage-large-pin-1');
+  assert.equal(result.data.uploadMode, 'chunked');
+  assert.equal(result.data.bytes, (2 * 1024 * 1024) + 1);
+  assert.equal(result.data.metafileUri, 'metafile://homepage-large-pin-1.mp4');
+  assert.deepEqual(writeCalls, []);
+  assert.equal(largeUploadCalls.length, 1);
+  assert.equal(largeUploadCalls[0].filePath, filePath);
+  assert.equal(largeUploadCalls[0].contentType, 'video/mp4');
 });
 
 test('default bot updateProfile rejects invalid homepage input without calling signer', async (t) => {

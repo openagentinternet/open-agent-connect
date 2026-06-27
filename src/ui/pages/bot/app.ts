@@ -15,6 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
+var HOMEPAGE_UPLOAD_MAX_BYTES=2*1024*1024;
 var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
@@ -120,20 +121,6 @@ function metaAppPinFromHomepage(homepage){
   homepage=normalizeHomepage(homepage);
   if(!homepage||!/^metaapp:\/\//i.test(homepage.uri))return '';
   return homepage.uri.slice('metaapp://'.length);
-}
-function dataUrlBase64(value){
-  var text=String(value||'');
-  var marker=';base64,';
-  var index=text.indexOf(marker);
-  return index>=0?text.slice(index+marker.length):'';
-}
-function readFileAsDataUrl(file){
-  return new Promise(function(resolve,reject){
-    var reader=new FileReader();
-    reader.onload=function(){resolve(String(reader.result||''))};
-    reader.onerror=function(){reject(new Error(uiText('bot.uploadFailed','Upload failed')))};
-    reader.readAsDataURL(file);
-  });
 }
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
@@ -799,19 +786,16 @@ function handleHomepageUploadFile(file){
   var profile=selectedProfile();if(!profile||!profile.slug||!file)return Promise.resolve();
   var profileSlug=profile.slug;
   var uploadToken=++state._homepageUploadToken;
+  if(Number(file.size||0)>HOMEPAGE_UPLOAD_MAX_BYTES){
+    renderHomepageDraftStatus(uiText('bot.homepageUploadTooLarge','Homepage file must be 2 MiB or smaller.'),'error');
+    return Promise.resolve();
+  }
   state._homepageUploadWorking=true;
   renderHomepageDraftStatus(uiText('bot.homepageUploading','Uploading homepage file...'),'saving');
-  return readFileAsDataUrl(file).then(function(dataUrl){
-    var base64=dataUrlBase64(dataUrl);
-    return api('/api/bot/profiles/'+encodeURIComponent(profileSlug)+'/homepage/upload',{
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      body:JSON.stringify({
-        fileName:file.name||'homepage-upload',
-        contentType:file.type||'application/octet-stream',
-        base64:base64,
-      }),
-    });
+  return api('/api/bot/profiles/'+encodeURIComponent(profileSlug)+'/homepage/upload?fileName='+encodeURIComponent(file.name||'homepage-upload.bin'),{
+    method:'POST',
+    headers:{'content-type':file.type||'application/octet-stream'},
+    body:file,
   }).then(function(r){
     if(state.selectedSlug!==profileSlug||state._homepageUploadToken!==uploadToken)return;
     var data=r.data||{};

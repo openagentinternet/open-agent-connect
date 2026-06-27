@@ -189,7 +189,7 @@ import {
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
 import { uploadLargeFileToChain, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
-import { uploadFileBufferToChain, uploadLocalFileToChain } from '../core/files/uploadFile';
+import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
 import { createMetaAppIndexerClient } from '../core/metaapp/indexerClient';
@@ -358,18 +358,6 @@ const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function decodeRequiredBase64(value: unknown): Buffer {
-  const base64 = normalizeText(value);
-  if (!base64) {
-    throw new Error('Homepage upload requires base64 file data.');
-  }
-  const buffer = Buffer.from(base64, 'base64');
-  if (!buffer.length || buffer.toString('base64').replace(/=+$/u, '') !== base64.replace(/=+$/u, '')) {
-    throw new Error('Homepage upload base64 file data is invalid.');
-  }
-  return buffer;
 }
 
 function readErrorCode(error: unknown, fallback: string): string {
@@ -14033,6 +14021,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
             network,
             signer: actor.signer,
+            largeUploader: providerLargeFileUploader,
             verify: rawInput.verify === true,
           });
           return commandSuccess(result);
@@ -14821,20 +14810,25 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const network = await resolveFileUploadNetworkForHome(body.network, current.homeDir);
-          const data = decodeRequiredBase64(body.base64);
           const profileSigner = createSignerForProfileHome(current.homeDir);
-          const result = await uploadFileBufferToChain({
-            fileName: normalizeText(body.fileName) || 'homepage-upload.bin',
+          const result = await uploadLargeFileToChain({
+            filePath: normalizeText(body.filePath),
             contentType: typeof body.contentType === 'string' ? body.contentType : undefined,
             network,
-            data,
             signer: profileSigner,
+            largeUploader: providerLargeFileUploader,
+            verify: body.verify === true,
           });
           return commandSuccess(result);
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined;
+          if (code === 'large_file_upload_unavailable') {
+            return commandFailed('large_file_upload_unavailable', message);
+          }
           return commandFailed(
             'homepage_upload_failed',
-            error instanceof Error ? error.message : String(error)
+            message
           );
         }
       },

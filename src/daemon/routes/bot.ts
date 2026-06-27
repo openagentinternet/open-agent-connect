@@ -1,5 +1,12 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { commandFailed } from '../../core/contracts/commandResult';
+import { DIRECT_UPLOAD_MAX_BYTES } from '../../core/files/uploadLargeFile';
 import type { RouteHandler } from './types';
+
+const HOMEPAGE_UPLOAD_TEMP_PREFIX = 'oac-homepage-upload-';
+const HOMEPAGE_UPLOAD_DEFAULT_FILE_NAME = 'homepage-upload.bin';
 
 function normalizeLimit(value: string | null): number {
   const parsed = value ? Number.parseInt(value, 10) : 50;
@@ -17,6 +24,21 @@ function normalizeSlug(value: string): string {
 
 function normalizeName(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeHeaderValue(value: string | string[] | undefined): string {
+  return normalizeName(Array.isArray(value) ? value[0] : value);
+}
+
+function normalizeUploadFileName(value: string | null): string {
+  const decoded = normalizeName(value);
+  const baseName = path.basename(decoded).replace(/\0/gu, '').trim();
+  return baseName || HOMEPAGE_UPLOAD_DEFAULT_FILE_NAME;
+}
+
+function normalizeUploadContentType(value: string | string[] | undefined): string {
+  const contentType = normalizeHeaderValue(value).split(';')[0]?.trim();
+  return contentType || 'application/octet-stream';
 }
 
 export const handleBotRoutes: RouteHandler = async (context) => {
@@ -129,12 +151,52 @@ export const handleBotRoutes: RouteHandler = async (context) => {
   const homepageUploadMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/homepage\/upload$/);
   if (homepageUploadMatch && req.method === 'POST') {
     const slug = normalizeSlug(homepageUploadMatch[1]);
-    const body = await context.readJsonBody();
-    const result = handlers.bot?.uploadHomepageFile
-      ? await handlers.bot.uploadHomepageFile({ ...body, slug })
-      : commandFailed('not_implemented', 'MetaBot homepage upload handler not configured.');
-    const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
-    context.sendJson(status, result);
+    const handler = handlers.bot?.uploadHomepageFile;
+    if (!handler) {
+      context.sendJson(400, commandFailed('not_implemented', 'MetaBot homepage upload handler not configured.'));
+      return true;
+    }
+
+    let body: Buffer;
+    try {
+      body = await context.readRawBody(DIRECT_UPLOAD_MAX_BYTES);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/too large/iu.test(message)) {
+        context.sendJson(
+          413,
+          commandFailed('homepage_upload_too_large', `Homepage file must be ${DIRECT_UPLOAD_MAX_BYTES} bytes or smaller.`),
+        );
+        return true;
+      }
+      throw error;
+    }
+
+    if (!body.length) {
+      context.sendJson(400, commandFailed('homepage_upload_empty', 'Homepage upload requires non-empty file data.'));
+      return true;
+    }
+
+    const fileName = normalizeUploadFileName(url.searchParams.get('fileName'));
+    const contentType = normalizeUploadContentType(req.headers['content-type']);
+    let tempDir = '';
+    try {
+      tempDir = await mkdtemp(path.join(os.tmpdir(), HOMEPAGE_UPLOAD_TEMP_PREFIX));
+      const filePath = path.join(tempDir, fileName);
+      await writeFile(filePath, body);
+      const result = await handler({
+        slug,
+        filePath,
+        fileName,
+        contentType,
+      });
+      const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
+      context.sendJson(status, result);
+    } finally {
+      if (tempDir) {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    }
     return true;
   }
 
