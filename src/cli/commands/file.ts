@@ -25,6 +25,18 @@ function readNonEmptyFlagValue(args: string[], flag: string): string | undefined
   return value;
 }
 
+function validateDirectInputFlagValue(args: string[], flag: string): MetabotCommandResult<never> | null {
+  const index = args.indexOf(flag);
+  if (index === -1) {
+    return null;
+  }
+  const value = args[index + 1];
+  if (typeof value !== 'string' || value.startsWith('--') || value.trim() === '') {
+    return commandFailed('invalid_flag', `Missing value for ${flag}.`);
+  }
+  return null;
+}
+
 function collectUploadLargePositionalPaths(args: string[]): string[] {
   const positionalPaths: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -84,6 +96,14 @@ export async function runFileCommand(args: string[], context: CliRuntimeContext)
   }
 
   const requestFile = readFlagValue(commandArgs, '--request-file');
+  const fileFlagError = validateDirectInputFlagValue(commandArgs, '--file');
+  if (fileFlagError) {
+    return fileFlagError;
+  }
+  const contentTypeFlagError = validateDirectInputFlagValue(commandArgs, '--content-type');
+  if (contentTypeFlagError) {
+    return contentTypeFlagError;
+  }
   const fileFlag = readNonEmptyFlagValue(commandArgs, '--file');
   const positionalPaths = collectUploadLargePositionalPaths(commandArgs);
   if (positionalPaths.length > 1) {

@@ -400,6 +400,65 @@ test('runCli rejects upload-large --file plus --request-file', async () => {
   assert.match(envelope.message, /Choose exactly one/i);
 });
 
+test('runCli rejects upload-large --file when the file value is missing before dependency call', async () => {
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '--file',
+    '--content-type',
+    'application/zip',
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Missing value for --file/i);
+});
+
+test('runCli rejects upload-large --content-type when the MIME value is missing before dependency call', async () => {
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '--file',
+    '/tmp/archive.zip',
+    '--content-type',
+    '--verify',
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Missing value for --content-type/i);
+});
+
 test('runCli rejects multiple upload-large positional paths before dependency call', async () => {
   const stdout = [];
   const calls = [];
