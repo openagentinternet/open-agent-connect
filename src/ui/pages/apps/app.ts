@@ -1162,6 +1162,16 @@ function buildAppsPageRuntimeSource(
     }
   });
 
+  document.addEventListener('keydown', (event) => {
+    const eventTarget = event.target instanceof Element ? event.target : null;
+    if (!eventTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+    const card = eventTarget.matches('[data-apps-card]') ? eventTarget : null;
+    if (!card) return;
+    event.preventDefault();
+    const record = findRecordByPinId(card.getAttribute('data-apps-card') || '');
+    if (record) openAppsModal('detail', record);
+  });
+
   if (elements.refresh) elements.refresh.addEventListener('click', refreshApps);
   if (elements.publish) elements.publish.addEventListener('click', () => openAppsModal('publish', null));
   if (elements.modalRoot) {

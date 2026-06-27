@@ -471,6 +471,17 @@ function createAppsPageContext(options = {}) {
       await dispatchDocumentEvent('click', { target: element });
     },
     clickFake: (attributes) => dispatchDocumentEvent('click', { target: new FakeElement(attributes) }),
+    clickModalAction: async (selector) => {
+      const element = elements['[data-apps-modal-root]'].querySelector(selector);
+      assert.ok(element, `${selector} rendered modal action missing`);
+      await elements['[data-apps-modal-root]'].dispatchEvent('click', { target: element });
+      await dispatchDocumentEvent('click', { target: element });
+    },
+    keydownGridAction: async (selector, key) => {
+      const element = elements['[data-apps-grid]'].querySelector(selector);
+      assert.ok(element, `${selector} rendered grid element missing`);
+      await dispatchDocumentEvent('keydown', { target: element, key, preventDefault() {} });
+    },
     modalForm: () => elements['[data-apps-modal-root]'].querySelector('[data-apps-form]'),
     setField: (name, value) => {
       const field = elements['[data-apps-modal-root]'].querySelector(`[name="${name}"]`);
@@ -677,8 +688,8 @@ test('apps page share modal exposes and copies MetaAPP protocol links', async ()
   assert.match(html, new RegExp(metaappUri.replace(/\//gu, '\\/')));
   assert.match(html, new RegExp(metawebUrl.replace(/\//gu, '\\/')));
 
-  await context.clickFake({ 'data-apps-copy-value': metaappUri });
-  await context.clickFake({ 'data-apps-copy-value': metawebUrl });
+  await context.clickModalAction(`[data-apps-copy-value="${metaappUri}"]`);
+  await context.clickModalAction(`[data-apps-copy-value="${metawebUrl}"]`);
   assert.deepEqual(context.clipboardWrites, [metaappUri, metawebUrl]);
 });
 
@@ -698,7 +709,7 @@ test('apps page delete flow posts revoke request and hides the record', async ()
   context.run();
   await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Delete Me'), 'render deletable app');
   await context.clickGridAction(`[data-apps-detail="${PIN}"]`);
-  await context.clickFake({ 'data-apps-delete-open': PIN });
+  await context.clickModalAction(`[data-apps-delete-open="${PIN}"]`);
 
   assert.match(context.elements['[data-apps-modal-root]'].innerHTML, /Delete revokes this MetaAPP PIN/);
   await context.submitDeleteForm();
@@ -711,6 +722,27 @@ test('apps page delete flow posts revoke request and hides the record', async ()
   });
   assert.doesNotMatch(context.elements['[data-apps-grid]'].innerHTML, /Delete Me/);
   assert.match(context.elements['[data-apps-grid]'].innerHTML, /No apps yet/);
+});
+
+test('apps page focusable card opens details with keyboard activation', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Keyboard App',
+        appName: 'Keyboard App',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Keyboard App'), 'render keyboard app');
+  await context.keydownGridAction(`[data-apps-card="${PIN}"]`, 'Enter');
+
+  assert.match(context.elements['[data-apps-modal-root]'].innerHTML, /MetaAPP details/);
+  assert.match(context.elements['[data-apps-modal-root]'].innerHTML, /Keyboard App/);
 });
 
 test('apps page next pagination requests the next cursor', async () => {
