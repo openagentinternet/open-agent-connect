@@ -14,6 +14,7 @@ export type MetabotUiPageName =
   | 'bot'
   | 'conversations'
   | 'services'
+  | 'apps'
   | 'settings'
   | 'loom'
   | 'metaapps'
@@ -61,6 +62,12 @@ export interface MetabotDaemonHttpHandlers {
       body: Buffer | string;
       contentType: string;
     } | MetabotCommandResult<unknown>>;
+  };
+  apps?: {
+    list?: (input: { from?: string; cursor?: string; size: number; refresh: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    delete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
