@@ -19,6 +19,7 @@ const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const { createMetaAppLocalCacheStore } = require('../../dist/core/metaapp/localCache.js');
 
 function runtime(provider, id, health = 'healthy') {
   const now = '2026-05-06T00:00:00.000Z';
@@ -140,6 +141,48 @@ async function writeRuntimeIdentity(homeDir, name = 'Runtime Bot') {
     traces: [],
     sellerOrders: [],
   });
+}
+
+async function writeLargeMetaAppProject(rootDir, slug, manifest = {}) {
+  const projectDir = path.join(rootDir, slug);
+  await mkdir(path.join(projectDir, 'dist', 'assets'), { recursive: true });
+  await writeFile(path.join(projectDir, 'dist', 'index.html'), '<h1>Large MetaApp</h1>', 'utf8');
+  await writeFile(path.join(projectDir, 'dist', 'assets', 'large.bin'), Buffer.alloc((2 * 1024 * 1024) + 128, 7));
+  await writeFile(path.join(projectDir, '.metaapp.json'), JSON.stringify({
+    title: 'Large MetaApp',
+    appName: slug,
+    ...manifest,
+  }), 'utf8');
+  return projectDir;
+}
+
+async function writePreviousMetaAppRecord(homeDir, record = {}) {
+  const pinId = record.pinId ?? `${'b'.repeat(64)}i0`;
+  await createMetaAppLocalCacheStore(homeDir).upsertLocal({
+    pinId,
+    firstPinId: record.firstPinId ?? pinId,
+    operation: record.operation ?? 'create',
+    title: record.title ?? 'Previous MetaApp',
+    appName: record.appName ?? 'previous-metaapp',
+    intro: record.intro ?? '',
+    icon: record.icon ?? '',
+    coverImg: record.coverImg ?? '',
+    tags: record.tags ?? [],
+    runtime: record.runtime ?? 'browser',
+    indexFile: record.indexFile ?? 'index.html',
+    version: record.version ?? '1.0.0',
+    code: record.code ?? 'metafile://previous-code',
+    content: record.content ?? 'metafile://previous-content',
+    contentType: record.contentType ?? 'application/zip',
+    codeType: record.codeType ?? 'application/zip',
+    ownerGlobalMetaId: record.ownerGlobalMetaId ?? 'gm-previous-metaapp-owner',
+    ownerAddress: record.ownerAddress ?? 'mvc-previous-metaapp-owner',
+    network: record.network ?? 'mvc',
+    metawebUrl: record.metawebUrl ?? `https://metaweb.world/metaapp/${pinId}`,
+    updatedAt: record.updatedAt ?? 1_700_000_000_000,
+    source: 'local',
+  });
+  return pinId;
 }
 
 function fakeBalanceAdapter(chain, calls) {
@@ -649,6 +692,167 @@ test('default file.uploadLarge preserves known large uploader failure codes', as
     assert.equal(result.code, code);
     assert.match(result.message, new RegExp(`${code} mapped message`));
   }
+});
+
+test('default metaapp.publish uploads large runtime archive through the large upload boundary', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-metaapp-large-publish-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'MetaApp Large Publish Bot');
+  const projectDir = await writeLargeMetaAppProject(homeDir, 'large-publish-app', {
+    title: 'Large Publish App',
+  });
+  const publishPinId = `${'a'.repeat(64)}i0`;
+  const writeCalls = [];
+  const largeUploadCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      if (input.path === '/file') {
+        return {
+          pinId: 'direct-metaapp-file-pin',
+          txids: ['direct-metaapp-file-tx'],
+          totalCost: 1,
+          network: input.network,
+          globalMetaId: 'gm-runtime-bot',
+        };
+      }
+      return {
+        pinId: publishPinId,
+        firstPinId: publishPinId,
+        txids: ['metaapp-publish-tx'],
+        totalCost: 2,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        globalMetaId: 'gm-runtime-bot',
+        mvcAddress: 'mvc-runtime-address',
+      };
+    }),
+    providerLargeFileUploader: {
+      upload: async (input) => {
+        largeUploadCalls.push(input);
+        return makeLargeUploadResult(input, {
+          pinId: 'chunked-metaapp-publish-pin',
+          txids: ['chunked-metaapp-publish-tx'],
+          metafileUri: 'metafile://chunked-metaapp-publish-pin.zip',
+          globalMetaId: 'gm-runtime-bot',
+        });
+      },
+    },
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.metaapp.publish({
+    projectDir,
+    confirm: true,
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.upload.uploadMode, 'chunked');
+  assert.equal(largeUploadCalls.length, 1);
+  assert.equal(largeUploadCalls[0].contentType, 'application/zip');
+  assert.equal(largeUploadCalls[0].network, 'mvc');
+  assert.equal(largeUploadCalls[0].fileName, 'metaapp.zip');
+  assert.equal(largeUploadCalls[0].extension, '.zip');
+  assert.ok(largeUploadCalls[0].bytes > (2 * 1024 * 1024));
+  assert.equal(writeCalls.length, 1);
+  assert.equal(writeCalls[0].path, '/protocols/metaapp');
+  assert.equal(writeCalls[0].operation, 'create');
+  assert.equal(writeCalls[0].network, 'mvc');
+  const payload = JSON.parse(writeCalls[0].payload);
+  assert.equal(payload.content, 'metafile://chunked-metaapp-publish-pin');
+});
+
+test('default metaapp.update uploads large runtime archive through the large upload boundary', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404,
+    json: async () => ({ code: 404, message: 'not found' }),
+  });
+  const homeDir = await createProfileHome('metabot-default-metaapp-large-update-');
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'MetaApp Large Update Bot');
+  const targetPinId = await writePreviousMetaAppRecord(homeDir);
+  const projectDir = await writeLargeMetaAppProject(homeDir, 'large-update-app', {
+    title: 'Large Update App',
+  });
+  const updatePinId = `${'c'.repeat(64)}i0`;
+  const writeCalls = [];
+  const largeUploadCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      if (input.path === '/file') {
+        return {
+          pinId: 'direct-metaapp-update-file-pin',
+          txids: ['direct-metaapp-update-file-tx'],
+          totalCost: 1,
+          network: input.network,
+          globalMetaId: 'gm-runtime-bot',
+        };
+      }
+      return {
+        pinId: updatePinId,
+        firstPinId: targetPinId,
+        txids: ['metaapp-update-tx'],
+        totalCost: 2,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        globalMetaId: 'gm-runtime-bot',
+        mvcAddress: 'mvc-runtime-address',
+      };
+    }),
+    providerLargeFileUploader: {
+      upload: async (input) => {
+        largeUploadCalls.push(input);
+        return makeLargeUploadResult(input, {
+          pinId: 'chunked-metaapp-update-pin',
+          txids: ['chunked-metaapp-update-tx'],
+          metafileUri: 'metafile://chunked-metaapp-update-pin.zip',
+          globalMetaId: 'gm-runtime-bot',
+        });
+      },
+    },
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.metaapp.update({
+    projectDir,
+    targetPinId,
+    confirm: true,
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.upload.uploadMode, 'chunked');
+  assert.equal(largeUploadCalls.length, 1);
+  assert.equal(largeUploadCalls[0].contentType, 'application/zip');
+  assert.equal(largeUploadCalls[0].network, 'mvc');
+  assert.equal(largeUploadCalls[0].fileName, 'metaapp.zip');
+  assert.equal(largeUploadCalls[0].extension, '.zip');
+  assert.ok(largeUploadCalls[0].bytes > (2 * 1024 * 1024));
+  assert.equal(writeCalls.length, 1);
+  assert.equal(writeCalls[0].path, `@${targetPinId}`);
+  assert.equal(writeCalls[0].operation, 'modify');
+  assert.equal(writeCalls[0].network, 'mvc');
+  const payload = JSON.parse(writeCalls[0].payload);
+  assert.equal(payload.content, 'metafile://chunked-metaapp-update-pin');
 });
 
 test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {

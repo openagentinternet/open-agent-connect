@@ -10899,11 +10899,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
             {
               uploadFile: async (uploadInput) => {
                 const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
-                const uploaded = await uploadLocalFileToChain({
+                const uploaded = await uploadLargeFileToChain({
                   filePath: uploadInput.filePath,
                   contentType: uploadInput.contentType,
                   network,
                   signer: actor.signer,
+                  largeUploader: providerLargeFileUploader,
                 });
                 return uploaded as unknown as UploadLikeResult;
               },
@@ -10975,11 +10976,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
             {
               uploadFile: async (uploadInput) => {
                 const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
-                const uploaded = await uploadLocalFileToChain({
+                const uploaded = await uploadLargeFileToChain({
                   filePath: uploadInput.filePath,
                   contentType: uploadInput.contentType,
                   network,
                   signer: actor.signer,
+                  largeUploader: providerLargeFileUploader,
                 });
                 return uploaded as unknown as UploadLikeResult;
               },
