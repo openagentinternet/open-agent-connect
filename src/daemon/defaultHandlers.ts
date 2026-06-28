@@ -5600,9 +5600,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ...result,
       data: {
         ...data,
-        localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? '/ui/apps',
+        localUiUrl: buildMetaAppAppsLocalUiUrl(pinId),
       },
     };
+  }
+
+  function buildMetaAppAppsLocalUiUrl(pinId: string): string {
+    return buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? `/ui/apps?pinId=${encodeURIComponent(pinId)}`;
   }
 
   function resolveAutoReplyConfigForHome(homeDir: string): PrivateChatAutoReplyConfig {
@@ -10941,7 +10945,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const data = result.data as Record<string, unknown>;
             const pinId = typeof data.pinId === 'string' ? data.pinId : '';
             if (pinId) {
-              const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? '/ui/apps';
+              const localUiUrl = buildMetaAppAppsLocalUiUrl(pinId);
               return commandSuccess({
                 ...data,
                 localUiUrl,
@@ -11017,7 +11021,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             const data = result.data as Record<string, unknown>;
             const pinId = typeof data.pinId === 'string' ? data.pinId : '';
             if (pinId) {
-              const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? '/ui/apps';
+              const localUiUrl = buildMetaAppAppsLocalUiUrl(pinId);
               return commandSuccess({
                 ...data,
                 localUiUrl,
@@ -11167,7 +11171,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       list: async (rawInput) => {
-        if (typeof rawInput.size === 'number') {
+        if (rawInput.scope === 'owner') {
+          const size = typeof rawInput.size === 'number' ? rawInput.size : undefined;
           const actor = await resolveMetaAppOwnerActor(rawInput.from);
           if ('failure' in actor) {
             return actor.failure;
@@ -11178,7 +11183,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               createMetaAppOwnerServiceActor(rawInput, actor),
               {
                 cursor: typeof rawInput.cursor === 'string' ? rawInput.cursor : '',
-                size: rawInput.size,
+                size,
                 manClient: {
                   listByAddress: async (listInput) => metaAppManClient.listByAddress(listInput) as unknown as Record<string, unknown>,
                 },

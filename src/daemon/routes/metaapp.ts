@@ -182,10 +182,13 @@ export const handleMetaAppRoutes = async (context: RouteContext): Promise<boolea
       context.sendMethodNotAllowed(['GET']);
       return true;
     }
+    const from = readTrimmedQueryValue(url.searchParams.get('from'));
+    const cursor = readTrimmedQueryValue(url.searchParams.get('cursor'));
     const result = handlers.metaapp?.list
       ? await handlers.metaapp.list({
-        ...(readTrimmedQueryValue(url.searchParams.get('from')) ? { from: readTrimmedQueryValue(url.searchParams.get('from')) } : {}),
-        ...(readTrimmedQueryValue(url.searchParams.get('cursor')) ? { cursor: readTrimmedQueryValue(url.searchParams.get('cursor')) } : {}),
+        scope: 'owner',
+        ...(from ? { from } : {}),
+        ...(cursor ? { cursor } : {}),
         size: readPositiveInteger(url.searchParams.get('size'), 12),
         refresh: readBoolean(url.searchParams.get('refresh')),
       })
@@ -243,13 +246,17 @@ export const handleMetaAppRoutes = async (context: RouteContext): Promise<boolea
     }
 
     const handler = handlers.metaapp?.list;
+    const from = readTrimmedQueryValue(url.searchParams.get('from'));
+    const pinId = readTrimmedQueryValue(url.searchParams.get('pinId'));
+    const firstPinId = readTrimmedQueryValue(url.searchParams.get('firstPinId'));
     const result = handler
       ? await handler({
-        ...(url.searchParams.get('from') ? { from: url.searchParams.get('from') as string } : {}),
+        scope: 'compatibility',
+        ...(from ? { from } : {}),
         ...(readBoolean(url.searchParams.get('mine')) ? { mine: true } : {}),
         ...(readBoolean(url.searchParams.get('refresh')) ? { refresh: true } : {}),
-        ...(url.searchParams.get('pinId') ? { pinId: url.searchParams.get('pinId') as string } : {}),
-        ...(url.searchParams.get('firstPinId') ? { firstPinId: url.searchParams.get('firstPinId') as string } : {}),
+        ...(pinId ? { pinId } : {}),
+        ...(firstPinId ? { firstPinId } : {}),
       })
       : commandFailed('not_implemented', 'MetaApp list handler is not configured.');
     context.sendJson(200, result);

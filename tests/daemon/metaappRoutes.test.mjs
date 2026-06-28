@@ -256,7 +256,7 @@ test('GET /api/metaapp/list forwards owner list query params to metaapp.list', a
 
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
-  assert.deepEqual(calls, [{ from: 'alice', cursor: 'cursor-1', size: 12, refresh: true }]);
+  assert.deepEqual(calls, [{ scope: 'owner', from: 'alice', cursor: 'cursor-1', size: 12, refresh: true }]);
 });
 
 test('POST /api/metaapp/delete forwards JSON body to metaapp.delete', async (t) => {
@@ -350,6 +350,7 @@ test('GET /api/metaapps forwards from/mine and refresh query params to metaapp.l
   assert.equal(response.status, 200);
   assert.deepEqual(calls, [
     {
+      scope: 'compatibility',
       from: 'alice',
       mine: true,
       refresh: true,
@@ -436,6 +437,35 @@ test('default metaapp owner publish update and delete write expected chain opera
   assert.equal(writes[2].path, `@${TARGET_PIN_ID}`);
   assert.match(publish.payload.data.localUiUrl, /^http:\/\/127\.0\.0\.1:24885\/ui\/apps\?/);
   assert.match(update.payload.data.localUiUrl, /^http:\/\/127\.0\.0\.1:24885\/ui\/apps\?/);
+});
+
+test('default metaapp owner publish keeps pin id in relative localUiUrl without daemon record', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(),
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const publish = await fetchJson(server.baseUrl, '/api/metaapp/publish', {
+    method: 'POST',
+    body: {
+      from: 'alice',
+      title: 'Agent Wiki Builder',
+      appName: 'Agent Wiki Builder',
+      icon: TARGET_PIN_ID,
+      coverImg: TARGET_PIN_ID,
+      runtime: ['browser'],
+      content: TARGET_PIN_ID,
+      code: TARGET_PIN_ID,
+      confirm: true,
+    },
+  });
+
+  assert.equal(publish.payload.data.localUiUrl, '/ui/apps?pinId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0');
 });
 
 test('default metaapp owner list returns identity_missing when selected Bot has no runtime identity', async (t) => {
