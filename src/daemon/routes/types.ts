@@ -14,6 +14,7 @@ export type MetabotUiPageName =
   | 'bot'
   | 'conversations'
   | 'services'
+  | 'apps'
   | 'settings'
   | 'loom'
   | 'metaapps'
@@ -54,9 +55,12 @@ export interface MetabotDaemonHttpHandlers {
     preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    delete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    publishProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    updateProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     comment?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     previewAsset?: (input: { previewId: string; assetPath?: string }) => Awaitable<{
       body: Buffer | string;
       contentType: string;

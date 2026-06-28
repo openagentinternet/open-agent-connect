@@ -30,6 +30,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+system\s+/m);
   assert.match(output, /^\s+loom\s+/m);
   assert.match(output, /^\s+metaapp\s+/m);
+  assert.match(output, /^\s+metaapp\s+.*owner list\/delete.*project packaging/m);
   assert.doesNotMatch(output, /^\s+master\s+/m);
   assert.doesNotMatch(output, /^\s+evolution\s+/m);
   assert.equal(output.includes('"ok"'), false);
@@ -55,6 +56,11 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'browser'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'metaapp'));
+  assert.ok(output.subcommands.some((entry) => (
+    entry.name === 'metaapp'
+    && /owner list\/delete/.test(entry.summary)
+    && /project packaging/.test(entry.summary)
+  )));
   assert.equal(output.subcommands.some((entry) => entry.name === 'master'), false);
   assert.equal(output.subcommands.some((entry) => entry.name === 'evolution'), false);
 });
@@ -87,13 +93,13 @@ test('runCli prints metaapp group help with all leaf commands', async () => {
   assert.equal(exitCode, 0);
   const output = stdout.join('');
   assert.match(output, /^Usage:\s+metabot metaapp <subcommand>/m);
-  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+  for (const command of ['list', 'publish', 'update', 'delete', 'preview', 'publish-project', 'update-project', 'share', 'view', 'comment']) {
     assert.match(output, new RegExp(`\\s+${command}\\s+`));
   }
 });
 
 test('runCli prints metaapp leaf command text help', async () => {
-  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+  for (const command of ['list', 'publish', 'update', 'delete', 'preview', 'publish-project', 'update-project', 'share', 'view', 'comment']) {
     const stdout = [];
 
     const exitCode = await runCli(['metaapp', command, '--help'], {
@@ -124,7 +130,7 @@ test('runCli prints machine-readable metaapp publish help', async () => {
 });
 
 test('runCli prints machine-readable help for every metaapp leaf command', async () => {
-  for (const command of ['preview', 'publish', 'update', 'share', 'view', 'comment']) {
+  for (const command of ['list', 'publish', 'update', 'delete', 'preview', 'publish-project', 'update-project', 'share', 'view', 'comment']) {
     const stdout = [];
 
     const exitCode = await runCli(['metaapp', command, '--help', '--json'], {
@@ -140,22 +146,22 @@ test('runCli prints machine-readable help for every metaapp leaf command', async
   }
 });
 
-test('runCli prints metaapp publish and update help with actor, file-upload chain, and confirmation flags', async () => {
-  for (const command of ['publish', 'update']) {
-    const stdout = [];
+test('runCli prints metaapp owner-management and project packaging help usages', async () => {
+  const stdout = [];
 
+  for (const command of ['publish', 'publish-project', 'delete']) {
     const exitCode = await runCli(['metaapp', command, '--help'], {
       stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
       stderr: { write: () => true },
     });
 
     assert.equal(exitCode, 0);
-    const output = stdout.join('');
-    assert.match(output, /--from <bot-slug>/);
-    assert.match(output, /--chain <mvc\|btc\|opcat>/);
-    assert.match(output, /--confirm/);
-    assert.match(output, /DOGE is not supported for file upload/i);
   }
+
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot metaapp publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\] --confirm/m);
+  assert.match(output, /^Usage:\s+metabot metaapp publish-project --project-dir <path>/m);
+  assert.match(output, /^Usage:\s+metabot metaapp delete \[--from <bot-slug>\] --target-pin-id <pinid> --confirm/m);
 });
 
 test('runCli prints metaapp share and comment help with write-chain behavior', async () => {
@@ -943,18 +949,20 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
 
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['ui', 'open']);
-  assert.match(output.summary, /metaapps/);
+  assert.match(output.summary, /apps/);
   assert.match(output.summary, /conversations/);
   assert.match(output.summary, /services/);
   assert.match(output.summary, /settings/);
   assert.match(output.usage, /\[--from <bot-slug>\]/);
   assert.match(output.usage, /\[--session-id <session-id>\]/);
   assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
-  assert.match(output.requiredFlags[0].description, /metaapps/);
+  assert.match(output.requiredFlags[0].description, /apps/);
   assert.match(output.requiredFlags[0].description, /conversations/);
   assert.match(output.requiredFlags[0].description, /services/);
   assert.match(output.requiredFlags[0].description, /settings/);
   assert.doesNotMatch(output.requiredFlags[0].description, /chat-viewer/);
+  assert.doesNotMatch(output.summary, /metaapps/);
+  assert.doesNotMatch(output.requiredFlags[0].description, /metaapps/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
   const traceFlag = output.optionalFlags.find((entry) => entry.flag === '--trace-id');
   assert.ok(traceFlag);
@@ -968,7 +976,8 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.ok(output.examples.includes('metabot ui open --page services'));
   assert.ok(output.examples.includes('metabot ui open --page conversations --from alice'));
   assert.ok(output.examples.includes('metabot ui open --page settings'));
-  assert.ok(output.examples.includes('metabot ui open --page metaapps'));
+  assert.ok(output.examples.includes('metabot ui open --page apps'));
+  assert.ok(!output.examples.includes('metabot ui open --page metaapps'));
 });
 
 test('runCli prints browser group help with the open subcommand', async () => {

@@ -675,13 +675,11 @@ async function readPreferredLlmRuntimeId(paths) {
     }
 }
 async function refreshLlmRuntimeStoreFromDiscovery(runtimeStore, env) {
-    const [previous, result] = await Promise.all([
-        runtimeStore.read(),
-        (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env }),
-    ]);
+    const previous = await runtimeStore.read();
+    const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env, knownRuntimes: previous.runtimes });
     const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
     for (const runtime of result.runtimes) {
-        await runtimeStore.upsertRuntime(runtime);
+        await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
     }
     for (const runtime of previous.runtimes) {
         if (runtime.provider === 'custom')
@@ -1570,19 +1568,39 @@ function createDefaultCliDependencies(context) {
                 projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
                 manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
             }),
-            publish: async (input) => requestJson(context, 'POST', '/api/metaapp/publish', {
+            publish: async (input) => requestJson(context, 'POST', '/api/metaapp/publish', input),
+            update: async (input) => requestJson(context, 'POST', '/api/metaapp/update', input),
+            delete: async (input) => requestJson(context, 'POST', '/api/metaapp/delete', input),
+            list: async (input) => {
+                const query = new URLSearchParams();
+                if (typeof input.from === 'string') {
+                    query.set('from', input.from);
+                }
+                if (typeof input.cursor === 'string') {
+                    query.set('cursor', input.cursor);
+                }
+                if (typeof input.size === 'number') {
+                    query.set('size', String(input.size));
+                }
+                if (input.refresh === true) {
+                    query.set('refresh', 'true');
+                }
+                const suffix = query.size ? `?${query.toString()}` : '';
+                return requestJson(context, 'GET', `/api/metaapp/list${suffix}`);
+            },
+            publishProject: async (input) => requestJson(context, 'POST', '/api/metaapp/publish-project', {
                 ...input,
                 projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
                 manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
             }),
-            update: async (input) => requestJson(context, 'POST', '/api/metaapp/update', {
+            updateProject: async (input) => requestJson(context, 'POST', '/api/metaapp/update-project', {
                 ...input,
                 projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
                 manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
             }),
             share: async (input) => requestJson(context, 'POST', '/api/metaapp/share', input),
             view: async (input) => openLocalUiPage({
-                page: 'metaapps',
+                page: 'apps',
                 ...(typeof input.from === 'string' ? { from: input.from } : {}),
                 ...(typeof input.pinId === 'string' ? { pinId: input.pinId } : {}),
                 ...(typeof input.firstPinId === 'string' ? { firstPinId: input.firstPinId } : {}),
@@ -2844,11 +2862,15 @@ async function serveCliDaemonProcess(context) {
     });
     // Discover LLM runtimes in background (non-blocking).
     const metaBotSlug = node_path_1.default.basename(paths.profileRoot);
-    void (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: context.env }).then(async (result) => {
+    void (async () => {
+        const previous = await llmRuntimeStore.read();
+        const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: context.env, knownRuntimes: previous.runtimes });
         for (const runtime of result.runtimes) {
-            await llmRuntimeStore.upsertRuntime(runtime).catch(() => { });
+            await llmRuntimeStore
+                .upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true })
+                .catch(() => { });
         }
-    });
+    })().catch(() => { });
     const chatStateStore = (0, privateChatStateStore_1.createPrivateChatStateStore)(paths);
     const chatStrategyStore = (0, chatStrategyStore_1.createChatStrategyStore)(paths);
     const chatAutoReplyOrchestrator = (0, privateChatAutoReply_1.createPrivateChatAutoReplyOrchestrator)({

@@ -20,6 +20,10 @@ export interface CliDependencies {
     preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    delete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    publishProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    updateProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     view?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     comment?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

@@ -64,6 +64,8 @@ const postBuzz_1 = require("../core/buzz/postBuzz");
 const previewSessions_1 = require("../core/metaapp/previewSessions");
 const indexerClient_1 = require("../core/metaapp/indexerClient");
 const localCache_1 = require("../core/metaapp/localCache");
+const ownerService_1 = require("../core/metaapp/ownerService");
+const manOwnerList_1 = require("../core/metaapp/manOwnerList");
 const publish_1 = require("../core/metaapp/publish");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
 const chainDirectoryReader_1 = require("../core/discovery/chainDirectoryReader");
@@ -3519,6 +3521,9 @@ function createDefaultMetabotDaemonHandlers(input) {
     const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
     const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
     const getDaemonRecord = input.getDaemonRecord;
+    const metaAppManClient = (0, manOwnerList_1.createMetaAppManOwnerClient)({
+        fetchFn: input.metaAppManFetch ?? fetch,
+    });
     // Process-level cache for chain profile projections (name + avatar reference).
     // Avatars rarely change, so a 30-minute TTL eliminates repeated chain fetches
     // when switching between UI tabs within a session.
@@ -4258,6 +4263,55 @@ function createDefaultMetabotDaemonHandlers(input) {
                 : (0, runtimeStateStore_1.createRuntimeStateStore)(normalizedProfileHomeDir),
             signer: createSignerForProfileHome(normalizedProfileHomeDir),
         };
+    }
+    async function resolveMetaAppOwnerActor(rawActor) {
+        const actor = await resolveActorWriteContext(rawActor);
+        if ('failure' in actor) {
+            return actor;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+            return { failure: (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before managing MetaAPPs.') };
+        }
+        const mvcAddress = normalizeText(state.identity.addresses?.mvc) || normalizeText(state.identity.mvcAddress);
+        if (!mvcAddress) {
+            return { failure: (0, commandResult_1.commandFailed)('mvc_address_missing', 'Selected Bot does not have an MVC address.') };
+        }
+        return { ...actor, mvcAddress };
+    }
+    function createMetaAppOwnerServiceActor(rawInput, actor) {
+        return {
+            from: typeof rawInput.from === 'string' ? rawInput.from : undefined,
+            homeDir: actor.homeDir,
+            mvcAddress: actor.mvcAddress,
+            writePin: async (writeInput) => actor.signer.writePin({
+                operation: typeof writeInput.operation === 'string' ? writeInput.operation : undefined,
+                path: typeof writeInput.path === 'string' ? writeInput.path : undefined,
+                contentType: typeof writeInput.contentType === 'string' ? writeInput.contentType : undefined,
+                payload: typeof writeInput.payload === 'string' ? writeInput.payload : undefined,
+                network: await resolveWriteNetworkForHome(writeInput.network, actor.homeDir),
+            }),
+        };
+    }
+    function addMetaAppOwnerLocalUiUrl(result) {
+        if (!result.ok || result.state !== 'success' || !result.data || typeof result.data !== 'object') {
+            return result;
+        }
+        const data = result.data;
+        const pinId = typeof data.pinId === 'string' ? data.pinId : '';
+        if (!pinId) {
+            return result;
+        }
+        return {
+            ...result,
+            data: {
+                ...data,
+                localUiUrl: buildMetaAppAppsLocalUiUrl(pinId),
+            },
+        };
+    }
+    function buildMetaAppAppsLocalUiUrl(pinId) {
+        return buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? `/ui/apps?pinId=${encodeURIComponent(pinId)}`;
     }
     function resolveAutoReplyConfigForHome(homeDir) {
         const normalizedProfileHomeDir = node_path_1.default.resolve(homeDir);
@@ -8501,10 +8555,10 @@ function createDefaultMetabotDaemonHandlers(input) {
     async function resolveLoomRuntime(actor) {
         const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(actor.paths);
         const previous = await runtimeStore.read();
-        const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env });
+        const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env, knownRuntimes: previous.runtimes });
         const discoveredRuntimeIds = new Set(discoveryResult.runtimes.map((runtime) => runtime.id));
         for (const runtime of discoveryResult.runtimes) {
-            await runtimeStore.upsertRuntime(runtime);
+            await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
         }
         for (const runtime of previous.runtimes) {
             if (runtime.provider === 'custom')
@@ -8935,7 +8989,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)(metaAppPreviewAssetErrorCode(error), error instanceof Error ? error.message : String(error));
                 }
             },
-            publish: async (rawInput) => {
+            publishProject: async (rawInput) => {
                 const actor = await resolveActorWriteContext(rawInput.from);
                 if ('failure' in actor) {
                     return actor.failure;
@@ -8990,7 +9044,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         const data = result.data;
                         const pinId = typeof data.pinId === 'string' ? data.pinId : '';
                         if (pinId) {
-                            const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/metaapps', { pinId }) ?? '/ui/metaapps';
+                            const localUiUrl = buildMetaAppAppsLocalUiUrl(pinId);
                             return (0, commandResult_1.commandSuccess)({
                                 ...data,
                                 localUiUrl,
@@ -9003,7 +9057,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('metaapp_publish_failed', error instanceof Error ? error.message : String(error));
                 }
             },
-            update: async (rawInput) => {
+            updateProject: async (rawInput) => {
                 const actor = await resolveActorWriteContext(rawInput.from);
                 if ('failure' in actor) {
                     return actor.failure;
@@ -9059,7 +9113,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         const data = result.data;
                         const pinId = typeof data.pinId === 'string' ? data.pinId : '';
                         if (pinId) {
-                            const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/metaapps', { pinId }) ?? '/ui/metaapps';
+                            const localUiUrl = buildMetaAppAppsLocalUiUrl(pinId);
                             return (0, commandResult_1.commandSuccess)({
                                 ...data,
                                 localUiUrl,
@@ -9070,6 +9124,44 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 catch (error) {
                     return (0, commandResult_1.commandFailed)('metaapp_update_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+            publish: async (rawInput) => {
+                const actor = await resolveMetaAppOwnerActor(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                try {
+                    const result = await (0, ownerService_1.publishMetaAppPayload)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput);
+                    return addMetaAppOwnerLocalUiUrl(result);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('metaapp_publish_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+            update: async (rawInput) => {
+                const actor = await resolveMetaAppOwnerActor(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                try {
+                    const result = await (0, ownerService_1.updateMetaAppPayload)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput);
+                    return addMetaAppOwnerLocalUiUrl(result);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('metaapp_update_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+            delete: async (rawInput) => {
+                const actor = await resolveMetaAppOwnerActor(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                try {
+                    return await (0, ownerService_1.deleteMetaAppPin)(createMetaAppOwnerServiceActor(rawInput, actor), rawInput);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('metaapp_delete_failed', error instanceof Error ? error.message : String(error));
                 }
             },
             share: async (rawInput) => {
@@ -9141,6 +9233,25 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
             },
             list: async (rawInput) => {
+                if (rawInput.scope === 'owner') {
+                    const size = typeof rawInput.size === 'number' ? rawInput.size : undefined;
+                    const actor = await resolveMetaAppOwnerActor(rawInput.from);
+                    if ('failure' in actor) {
+                        return actor.failure;
+                    }
+                    try {
+                        return await (0, ownerService_1.listOwnerMetaApps)(createMetaAppOwnerServiceActor(rawInput, actor), {
+                            cursor: typeof rawInput.cursor === 'string' ? rawInput.cursor : '',
+                            size,
+                            manClient: {
+                                listByAddress: async (listInput) => metaAppManClient.listByAddress(listInput),
+                            },
+                        });
+                    }
+                    catch (error) {
+                        return (0, commandResult_1.commandFailed)('metaapp_list_failed', error instanceof Error ? error.message : String(error));
+                    }
+                }
                 const actor = await resolveActorWriteContext(rawInput.from);
                 if ('failure' in actor) {
                     return actor.failure;
@@ -9284,9 +9395,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                             ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
                         const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
                         if (preferredProvider) {
-                            const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env });
+                            const previous = await runtimeStore.read();
+                            const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env, knownRuntimes: previous.runtimes });
                             for (const runtime of discoveryResult.runtimes) {
-                                await runtimeStore.upsertRuntime(runtime);
+                                await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
                             }
                         }
                         const runtimeState = await runtimeStore.read();
@@ -12682,12 +12794,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
                 }
                 const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
-                const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env });
                 const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(profileHomeDir);
                 const previous = await runtimeStore.read();
+                const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env, knownRuntimes: previous.runtimes });
                 const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
                 for (const runtime of result.runtimes) {
-                    await runtimeStore.upsertRuntime(runtime);
+                    await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
                 }
                 for (const runtime of previous.runtimes) {
                     if (runtime.provider === 'custom')
@@ -12797,12 +12909,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                 return (0, commandResult_1.commandSuccess)(state);
             },
             discoverRuntimes: async () => {
-                const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env });
                 const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
                 const previous = await runtimeStore.read();
+                const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env, knownRuntimes: previous.runtimes });
                 const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
                 for (const runtime of result.runtimes) {
-                    await runtimeStore.upsertRuntime(runtime);
+                    await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
                 }
                 for (const runtime of previous.runtimes) {
                     if (runtime.provider === 'custom')
