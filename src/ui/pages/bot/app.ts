@@ -26,6 +26,29 @@ var WALLET_CHAINS=[
   {chain:'doge',label:'DOGE',displayUnit:'Doge',inputUnit:'DOGE'},
   {chain:'opcat',label:'OPCAT',displayUnit:'OPCAT-BTC',inputUnit:'OPCAT'}
 ];
+var WRITE_NETWORKS=[
+  {network:'mvc',label:'MVC',iconPath:'/ui/assets/chains/mvc.png'},
+  {network:'btc',label:'BTC',iconPath:'/ui/assets/chains/btc.svg'},
+  {network:'doge',label:'DOGE',iconPath:'/ui/assets/chains/doge.svg'},
+  {network:'opcat',label:'OPCAT',iconPath:'/ui/assets/chains/opcat.png'}
+];
+var PROVIDER_LOGO_PATHS={
+  'claude-code':'/ui/assets/platforms/claude-code.svg',
+  codex:'/ui/assets/platforms/codex.svg',
+  copilot:'/ui/assets/platforms/copilot.svg',
+  opencode:'/ui/assets/platforms/opencode.svg',
+  openclaw:'/ui/assets/platforms/openclaw.svg',
+  hermes:'/ui/assets/platforms/hermes.svg',
+  gemini:'/ui/assets/platforms/gemini.svg',
+  pi:'/ui/assets/platforms/pi.svg',
+  cursor:'/ui/assets/platforms/cursor.svg',
+  kimi:'/ui/assets/platforms/kimi.svg',
+  kiro:'/ui/assets/platforms/kiro.svg',
+  codebuddy:'/ui/assets/platforms/codebuddy.svg',
+  zcode:'/ui/assets/platforms/zcode.svg',
+  workbuddy:'/ui/assets/platforms/codebuddy.svg',
+  generic:'/ui/assets/platforms/generic.svg'
+};
 
 function api(url,opts){return fetch(url,opts).then(function(r){return r.json().catch(function(){return{ok:false,message:String(r.status)}}).then(function(body){if(!r.ok||body.ok===false){throw new Error(body.message||body.code||String(r.status))}return body})})}
 function fmtTime(t){if(!t)return'-';var d=new Date(t);if(Number.isNaN(d.getTime()))return'-';return d.toLocaleString()}
@@ -164,7 +187,17 @@ function providerRuntime(provider){
   rows.sort(compareProviderRuntime);
   return rows[0]||null;
 }
-function providerLogoPath(provider){var rt=providerRuntime(provider);return rt&&rt.logoPath?rt.logoPath:'/ui/assets/platforms/generic.svg'}
+function providerLogoPath(provider){
+  var key=String(provider||'generic');
+  if(PROVIDER_LOGO_PATHS[key])return PROVIDER_LOGO_PATHS[key];
+  var rt=providerRuntime(key);
+  return rt&&rt.logoPath&&rt.logoPath!==PROVIDER_LOGO_PATHS.generic?rt.logoPath:PROVIDER_LOGO_PATHS.generic;
+}
+function runtimeLogoPath(runtime){
+  var key=String((runtime&&runtime.provider)||'generic');
+  if(PROVIDER_LOGO_PATHS[key])return PROVIDER_LOGO_PATHS[key];
+  return runtime&&runtime.logoPath&&runtime.logoPath!==PROVIDER_LOGO_PATHS.generic?runtime.logoPath:PROVIDER_LOGO_PATHS.generic;
+}
 function providerIconMarkup(provider){
   var key=String(provider||'generic');
   var path=providerLogoPath(key);
@@ -199,7 +232,7 @@ function noLlmLabelMarkup(profile){
 }
 function runtimeIconMarkup(runtime){
   var key=String((runtime&&runtime.provider)||'generic');
-  var path=(runtime&&runtime.logoPath)||providerLogoPath(key);
+  var path=runtimeLogoPath(runtime);
   return '<span class="provider-logo provider-logo-'+esc(key.replace(/[^a-z0-9_-]+/gi,'-'))+'" data-provider-icon="'+esc(key)+'" aria-hidden="true"><img src="'+esc(path)+'" alt="" loading="lazy" /></span>';
 }
 function visibleRuntimeRows(){
@@ -273,6 +306,26 @@ function defaultWriteNetwork(){
   var config=state.profileConfigs[state.selectedSlug]||{};
   var value=config&&config.chain&&config.chain.defaultWriteNetwork;
   return ['mvc','btc','doge','opcat'].indexOf(value)>=0?value:'mvc';
+}
+function writeNetworkEntry(network){
+  return WRITE_NETWORKS.find(function(entry){return entry.network===network})||WRITE_NETWORKS[0];
+}
+function chainIconMarkup(network){
+  var entry=writeNetworkEntry(network);
+  return '<span class="chain-logo" data-chain-icon="'+esc(entry.network)+'" aria-hidden="true"><img src="'+esc(entry.iconPath)+'" alt="" loading="lazy" /></span>';
+}
+function writeNetworkPickerMarkup(field,label,current){
+  var active=writeNetworkEntry(current);
+  var html='<div class="field chain-field"><label for="default-write-network">'+esc(label)+'</label>'+
+    '<div class="chain-picker" data-chain-picker="'+esc(field)+'">'+
+      '<input type="hidden" id="default-write-network" data-field="'+esc(field)+'" value="'+esc(active.network)+'" />'+
+      '<button type="button" class="chain-trigger" data-chain-trigger="'+esc(field)+'" aria-haspopup="listbox" aria-expanded="false">'+chainIconMarkup(active.network)+'<span>'+esc(active.label)+'</span><span class="provider-caret">v</span></button>'+
+      '<div class="chain-menu" data-chain-menu="'+esc(field)+'" role="listbox" hidden>';
+  WRITE_NETWORKS.forEach(function(entry){
+    html+='<button type="button" class="chain-option" data-chain-option="'+esc(entry.network)+'" data-chain-value="'+esc(entry.network)+'" role="option"'+(entry.network===active.network?' selected aria-selected="true"':' aria-selected="false"')+'>'+chainIconMarkup(entry.network)+'<span>'+esc(entry.label)+'</span></button>';
+  });
+  html+='</div></div></div>';
+  return html;
 }
 function uniqueProviderRuntimes(){
   var seen={};var rows=[];
@@ -352,6 +405,32 @@ function wireProviderPickers(){
       picker.querySelectorAll('[data-provider-value]').forEach(function(row){row.removeAttribute('selected')});
       this.setAttribute('selected','');
       var menu=q('[data-provider-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
+    });
+  });
+}
+function wireChainPickers(){
+  qq('[data-chain-trigger]').forEach(function(btn){
+    btn.addEventListener('click',function(event){
+      event.preventDefault();
+      var field=this.getAttribute('data-chain-trigger');var menu=q('[data-chain-menu="'+field+'"]');
+      if(!menu)return;
+      qq('.chain-menu').forEach(function(other){if(other!==menu)other.setAttribute('hidden','')});
+      qq('.provider-menu').forEach(function(other){other.setAttribute('hidden','')});
+      var open=menu.hasAttribute('hidden');
+      if(open){menu.removeAttribute('hidden');this.setAttribute('aria-expanded','true')}else{menu.setAttribute('hidden','');this.setAttribute('aria-expanded','false')}
+    });
+  });
+  qq('[data-chain-value]').forEach(function(option){
+    option.addEventListener('click',function(event){
+      event.preventDefault();
+      var picker=this.closest('[data-chain-picker]');if(!picker)return;
+      var field=picker.getAttribute('data-chain-picker');var input=picker.querySelector('[data-field="'+field+'"]');var trigger=picker.querySelector('[data-chain-trigger="'+field+'"]');
+      var value=this.getAttribute('data-chain-value')||'mvc';var entry=writeNetworkEntry(value);
+      if(input)input.value=entry.network;
+      if(trigger){trigger.innerHTML=chainIconMarkup(entry.network)+'<span>'+esc(entry.label)+'</span><span class="provider-caret">v</span>';trigger.setAttribute('aria-expanded','false')}
+      picker.querySelectorAll('[data-chain-value]').forEach(function(row){row.removeAttribute('selected');row.setAttribute('aria-selected','false')});
+      this.setAttribute('selected','');this.setAttribute('aria-selected','true');
+      var menu=q('[data-chain-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
     });
   });
 }
@@ -1346,6 +1425,7 @@ function renderRuntimeSummary(){
     var health=rt&&(rt.health)||'';
     var dotCls=health==='healthy'?'healthy':(health&&health!=='healthy'?'unhealthy':'');
     var name=rt?(rt.displayName||rt.provider||rt.id||'-'):(provider||uiText('bot.noProvider','No provider'));
+    var iconRuntime=rt||(provider?{provider:provider}:null);
     var metaBits=[];
     if(rt&&rt.provider)metaBits.push(rt.provider);
     if(health)metaBits.push(health);
@@ -1354,6 +1434,7 @@ function renderRuntimeSummary(){
     rows.push('<div class="runtime-summary-row">'+
       '<span class="runtime-summary-role">'+esc(entry[2])+'</span>'+
       '<span class="runtime-summary-dot '+dotCls+'" aria-hidden="true"></span>'+
+      runtimeIconMarkup(iconRuntime)+
       '<span class="runtime-summary-name">'+esc(name)+'</span>'+
       '<span class="runtime-summary-meta">'+esc(meta)+'</span>'+
     '</div>');
@@ -1371,14 +1452,12 @@ function renderSettingsTab(){
   }
   var current=defaultWriteNetwork();
   root.setAttribute('data-default-write-network',current);
-  var options=['mvc','btc','doge','opcat'].map(function(network){
-    return '<option value="'+network+'"'+(network===current?' selected':'')+'>'+network.toUpperCase()+'</option>';
-  }).join('');
   root.innerHTML='<div class="settings-form">'+
-    '<div class="field"><label for="default-write-network">'+esc(uiText('bot.defaultWriteNetwork','Default Write Network'))+'</label><select id="default-write-network" data-field="defaultWriteNetwork">'+options+'</select></div>'+
+    writeNetworkPickerMarkup('defaultWriteNetwork',uiText('bot.defaultWriteNetwork','Default Write Network'),current)+
     '<div class="settings-note">'+esc(uiText('bot.defaultWriteNetworkNote','Used by write commands when no explicit chain is supplied. Wallet balance and transfer keep their own chain selection rules.'))+'</div>'+
     '<div class="settings-save-row"><button class="btn btn-primary" data-act="save-settings">'+esc(uiText('bot.saveSettings','Save Settings'))+'</button><span class="save-status" data-settings-status></span></div>'+
   '</div>';
+  wireChainPickers();
   var save=q('[data-act="save-settings"]');if(save)save.addEventListener('click',saveSettings);
 }
 

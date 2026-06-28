@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -72,6 +72,30 @@ function waitFor(condition, label) {
     };
     check();
   });
+}
+
+function assertDefaultWriteNetworkPicker(html, selectedNetwork) {
+  const iconPaths = {
+    mvc: '/ui/assets/chains/mvc.png',
+    btc: '/ui/assets/chains/btc.svg',
+    doge: '/ui/assets/chains/doge.svg',
+    opcat: '/ui/assets/chains/opcat.png',
+  };
+
+  assert.match(html, /data-chain-picker="defaultWriteNetwork"/);
+  assert.match(html, new RegExp(`data-chain-trigger="defaultWriteNetwork"[\\s\\S]*data-chain-icon="${selectedNetwork}"`));
+  assert.doesNotMatch(html, /<select[^>]+data-field="defaultWriteNetwork"/);
+
+  for (const [network, iconPath] of Object.entries(iconPaths)) {
+    assert.match(html, new RegExp(`data-chain-option="${network}"`), network);
+    assert.match(html, new RegExp(`data-chain-icon="${network}"`), network);
+    assert.match(html, new RegExp(`<img src="${iconPath}" alt="" loading="lazy" />`), network);
+    assert.equal(
+      existsSync(new URL(`../../src${iconPath.replace(/^\/ui\//, '/ui/')}`, import.meta.url)),
+      true,
+      network,
+    );
+  }
 }
 
 function createBotScriptContext(overrides = {}) {
@@ -1024,6 +1048,66 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.match(fallbackPicker, /<img src="\/ui\/assets\/platforms\/generic\.svg" alt="" loading="lazy" \/>/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="claude-code"/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
+});
+
+test('bot page renders provider-specific LLM icons even when runtime state has stale generic logos', () => {
+  const summary = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-runtime-summary]': summary,
+    },
+  });
+  const providerIcons = {
+    'claude-code': '/ui/assets/platforms/claude-code.svg',
+    codex: '/ui/assets/platforms/codex.svg',
+    copilot: '/ui/assets/platforms/copilot.svg',
+    opencode: '/ui/assets/platforms/opencode.svg',
+    openclaw: '/ui/assets/platforms/openclaw.svg',
+    hermes: '/ui/assets/platforms/hermes.svg',
+    gemini: '/ui/assets/platforms/gemini.svg',
+    pi: '/ui/assets/platforms/pi.svg',
+    cursor: '/ui/assets/platforms/cursor.svg',
+    kimi: '/ui/assets/platforms/kimi.svg',
+    kiro: '/ui/assets/platforms/kiro.svg',
+    codebuddy: '/ui/assets/platforms/codebuddy.svg',
+    zcode: '/ui/assets/platforms/zcode.svg',
+    workbuddy: '/ui/assets/platforms/codebuddy.svg',
+  };
+  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'icon-bot';
+  context.state.profiles = [{
+    slug: 'icon-bot',
+    name: 'Icon Bot',
+    primaryProvider: 'zcode',
+    fallbackProvider: 'workbuddy',
+  }];
+  context.state.runtimes = Object.keys(providerIcons).map((provider) => ({
+    id: `runtime-${provider}`,
+    provider,
+    displayName: provider,
+    logoPath: '/ui/assets/platforms/generic.svg',
+    health: 'healthy',
+  }));
+
+  for (const [provider, iconPath] of Object.entries(providerIcons)) {
+    const picker = context.providerPickerMarkup('primaryProvider', 'Primary Provider', provider, false);
+    const runtimeIcon = context.runtimeIconMarkup({ provider, logoPath: '/ui/assets/platforms/generic.svg' });
+    const iconPattern = new RegExp(`<img src="${escapeRegExp(iconPath)}" alt="" loading="lazy" />`);
+
+    assert.match(picker, new RegExp(`data-provider-icon="${provider}"`), provider);
+    assert.match(picker, iconPattern, provider);
+    assert.match(runtimeIcon, iconPattern, provider);
+    assert.doesNotMatch(runtimeIcon, /\/ui\/assets\/platforms\/generic\.svg/, provider);
+  }
+
+  context.renderRuntimeSummary();
+
+  assert.match(summary.innerHTML, /data-provider-icon="zcode"/);
+  assert.match(summary.innerHTML, /\/ui\/assets\/platforms\/zcode\.svg/);
+  assert.match(summary.innerHTML, /data-provider-icon="workbuddy"/);
+  assert.match(summary.innerHTML, /\/ui\/assets\/platforms\/codebuddy\.svg/);
 });
 
 test('bot page renders the launch create flow and empty state in Simplified Chinese', () => {
@@ -2739,7 +2823,7 @@ test('bot page advanced tab loads sessions and selected profile config', async (
   assert.equal(advancedTab.active, true);
   assert.match(historyRoot.innerHTML, /session-alice/);
   assert.match(settingsRoot.innerHTML, /Default Write Network/);
-  assert.match(settingsRoot.innerHTML, /<option value="opcat" selected>OPCAT<\/option>/);
+  assertDefaultWriteNetworkPicker(settingsRoot.innerHTML, 'opcat');
 });
 
 test('bot page renderAdvancedTab renders advanced controls and lazily loads local data', async () => {
@@ -2793,8 +2877,44 @@ test('bot page renderAdvancedTab renders advanced controls and lazily loads loca
   await waitFor(() => context.state.sessions.length === 1, 'advanced session state update');
 
   assert.match(settingsRoot.innerHTML, /Default Write Network/);
-  assert.match(settingsRoot.innerHTML, /<option value="btc" selected>BTC<\/option>/);
+  assertDefaultWriteNetworkPicker(settingsRoot.innerHTML, 'btc');
   assert.match(historyRoot.innerHTML, /session-alice/);
+});
+
+test('bot page default write network picker keeps save payload compatible', async () => {
+  const selectedNetwork = field('doge');
+  const status = field();
+  const button = field();
+  const calls = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-field="defaultWriteNetwork"]': selectedNetwork,
+      '[data-settings-status]': status,
+      '[data-act="save-settings"]': button,
+    },
+    fetch: (url, options = {}) => {
+      calls.push({ url: String(url), body: options.body });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: { chain: { defaultWriteNetwork: 'doge' } },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice', globalMetaId: 'gm-alice' }];
+  context.state.profileConfigs.alice = { chain: { defaultWriteNetwork: 'btc' } };
+
+  await context.saveSettings();
+
+  assert.deepEqual(calls, [{
+    url: '/api/bot/profiles/alice/config',
+    body: JSON.stringify({ chain: { defaultWriteNetwork: 'doge' } }),
+  }]);
 });
 
 test('bot page maps legacy settings deep links to advanced and loads selected profile config', async () => {
@@ -2887,7 +3007,7 @@ test('bot page maps legacy settings deep links to advanced and loads selected pr
   assert.equal(context.state.selectedTab, 'advanced');
   assert.equal(advancedTab.active, true);
   assert.match(settingsRoot.innerHTML, /Default Write Network/);
-  assert.match(settingsRoot.innerHTML, /<option value="doge" selected>DOGE<\/option>/);
+  assertDefaultWriteNetworkPicker(settingsRoot.innerHTML, 'doge');
 });
 
 test('bot page deep link maps legacy info profile links to public identity', async () => {

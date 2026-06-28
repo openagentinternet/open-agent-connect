@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -134,6 +135,37 @@ test('platform registry defines managed runtime metadata and install skill roots
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'workbuddy' && root.path === '~/.workbuddy/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'workbuddy' && root.path === '~/.codebuddy/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'shared-agents'));
+});
+
+test('platform registry assigns provider-specific LLM icons for every managed runtime', () => {
+  assert.deepEqual(
+    Object.fromEntries(PLATFORM_DEFINITIONS.map((platform) => [platform.id, platform.logoPath])),
+    {
+      'claude-code': '/ui/assets/platforms/claude-code.svg',
+      codex: '/ui/assets/platforms/codex.svg',
+      copilot: '/ui/assets/platforms/copilot.svg',
+      opencode: '/ui/assets/platforms/opencode.svg',
+      openclaw: '/ui/assets/platforms/openclaw.svg',
+      hermes: '/ui/assets/platforms/hermes.svg',
+      gemini: '/ui/assets/platforms/gemini.svg',
+      pi: '/ui/assets/platforms/pi.svg',
+      cursor: '/ui/assets/platforms/cursor.svg',
+      kimi: '/ui/assets/platforms/kimi.svg',
+      kiro: '/ui/assets/platforms/kiro.svg',
+      codebuddy: '/ui/assets/platforms/codebuddy.svg',
+      zcode: '/ui/assets/platforms/zcode.svg',
+      workbuddy: '/ui/assets/platforms/codebuddy.svg',
+    },
+  );
+
+  for (const platform of PLATFORM_DEFINITIONS) {
+    assert.notEqual(platform.logoPath, '/ui/assets/platforms/generic.svg', platform.id);
+    assert.equal(
+      existsSync(path.resolve(process.cwd(), 'src', platform.logoPath.replace(/^\/ui\//, 'ui/'))),
+      true,
+      platform.id,
+    );
+  }
 });
 
 test('runtime discovery uses expanded provider metadata and environment auth checks', async () => {
