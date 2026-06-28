@@ -346,6 +346,10 @@
         padding: 3px 7px;
         cursor: pointer;
       }
+      .apps-pin-line .apps-copy-btn {
+        width: 26px;
+        padding: 0;
+      }
       .apps-copy-btn:hover,
       .apps-copy-btn:focus-visible {
         border-color: var(--accent-border);
@@ -581,7 +585,7 @@
         width: 84px;
         height: 84px;
         border: 1px solid var(--border2);
-        border-radius: 8px;
+        border-radius: 18px;
         background: var(--accent-dim);
         object-fit: cover;
       }
@@ -631,23 +635,23 @@
       .apps-detail-tabs {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
         border-bottom: 1px solid var(--border);
       }
       .apps-detail-tab {
         display: inline-flex;
         align-items: center;
-        min-height: 30px;
-        border: 1px solid transparent;
-        border-bottom: 0;
-        border-radius: 6px 6px 0 0;
+        min-height: 34px;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: transparent;
         color: var(--muted);
-        font-size: 12px;
-        padding: 5px 10px;
+        font-size: 13px;
+        padding: 9px 11px;
       }
       .apps-detail-tab.active {
-        border-color: var(--border);
-        background: var(--surface);
+        border-bottom-color: var(--accent);
         color: var(--text);
         font-weight: 700;
       }

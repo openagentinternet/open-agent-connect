@@ -280,12 +280,13 @@ function buildAppsPageRuntimeSource(
   },
 ): string {
   return `(() => {
-  const APPS_API_BASE = '/api/apps';
+  const APPS_API_BASE = '/api/metaapp/list';
   const PAGE_SIZE = 12;
   const UI_TEXT = ${JSON.stringify(text)};
   const CONTENT_TYPE_OPTIONS = ${JSON.stringify(options.contentTypeOptions)};
   const CODE_TYPE_OPTIONS = ${JSON.stringify(options.codeTypeOptions)};
   const METAAPP_PIN_ID_PATTERN = new RegExp(${JSON.stringify(options.pinPatternSource)}, 'i');
+  const COPY_ICON_HTML = '<span aria-hidden="true">&#x29C9;</span>';
   const state = {
     profiles: [],
     selectedSlug: '',
@@ -960,7 +961,7 @@ function buildAppsPageRuntimeSource(
     const targetPinId = normalizeText(form.getAttribute('data-apps-target-pin-id'));
     if (mode === 'edit') payload.targetPinId = targetPinId;
     try {
-      await postJson(mode === 'edit' ? '/api/apps/update' : '/api/apps/publish', payload);
+      await postJson(mode === 'edit' ? '/api/metaapp/update' : '/api/metaapp/publish', payload);
       closeAppsModal();
       await reloadFirstAppsPage();
     } catch (error) {
@@ -982,9 +983,10 @@ function buildAppsPageRuntimeSource(
     if (!targetPinId) return;
     setDeleteFormError('');
     try {
-      await postJson('/api/apps/delete', {
+      await postJson('/api/metaapp/delete', {
         from: state.selectedSlug,
         targetPinId,
+        confirm: true,
       });
       state.records = state.records.filter((record) => recordPinId(record) !== targetPinId);
       closeAppsModal();
@@ -1066,8 +1068,8 @@ function buildAppsPageRuntimeSource(
   const profileAvatarSource = (profile) => {
     const avatar = profile && profile.avatar;
     if (typeof avatar === 'string') return normalizeText(avatar);
-    return normalizeText(profile && (profile.avatarDataUrl || profile.avatarUri || profile.avatarUrl || profile.avatarImage))
-      || normalizeText(avatar && typeof avatar === 'object' && (avatar.dataUrl || avatar.uri || avatar.url || avatar.src || avatar.image))
+    return normalizeText(profile && (profile.avatarDataUrl || profile.avatarDataURL || profile.avatarUri || profile.avatarUrl || profile.avatarId || profile.avatarPinId || profile.avatarImage))
+      || normalizeText(avatar && typeof avatar === 'object' && (avatar.dataUrl || avatar.dataURL || avatar.uri || avatar.url || avatar.id || avatar.pinId || avatar.ref || avatar.src || avatar.image))
       || '';
   };
 
@@ -1126,7 +1128,7 @@ function buildAppsPageRuntimeSource(
           '<h3>' + escapeHtml(title) + '</h3>' +
           '<p>' + escapeHtml(subtitle) + '</p>' +
         '</div>' +
-        '<div class="apps-pin-line"><code>' + escapeHtml(pinId) + '</code><button class="apps-copy-btn" type="button" data-apps-copy-pin="' + escapeHtml(pinId) + '" aria-label="' + escapeHtml(uiText('apps.copyPinId', UI_TEXT.copyPinId)) + '">' + escapeHtml(uiText('apps.copyPinId', UI_TEXT.copyPinId)) + '</button></div>' +
+        '<div class="apps-pin-line"><code>' + escapeHtml(pinId) + '</code><button class="apps-copy-btn" type="button" data-apps-copy-pin="' + escapeHtml(pinId) + '" aria-label="' + escapeHtml(uiText('apps.copyPinId', UI_TEXT.copyPinId)) + '" title="' + escapeHtml(uiText('apps.copyPinId', UI_TEXT.copyPinId)) + '">' + COPY_ICON_HTML + '</button></div>' +
         '<p class="apps-card-intro">' + escapeHtml(intro) + '</p>' +
         '<div class="apps-tags">' + tags.map((tag) => '<span>' + escapeHtml(tag) + '</span>').join('') + '</div>' +
         '<div class="apps-card-actions">' +
@@ -1275,7 +1277,11 @@ function buildAppsPageRuntimeSource(
       const pinId = target.getAttribute('data-apps-copy-pin') || '';
       await navigator.clipboard?.writeText(pinId);
       target.textContent = uiText('apps.copied', UI_TEXT.copied);
-      setTimeout(() => { target.textContent = uiText('apps.copyPinId', UI_TEXT.copyPinId); }, 1000);
+      setTimeout(() => {
+        target.innerHTML = COPY_ICON_HTML;
+        target.setAttribute('aria-label', uiText('apps.copyPinId', UI_TEXT.copyPinId));
+        target.setAttribute('title', uiText('apps.copyPinId', UI_TEXT.copyPinId));
+      }, 1000);
       return;
     }
     if (target.matches('[data-apps-copy-value]')) {

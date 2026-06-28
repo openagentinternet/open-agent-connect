@@ -389,7 +389,7 @@ function createAppsPageContext(options = {}) {
       if ((fetchOptions.method || '').toUpperCase() === 'POST') {
         const bodyPayload = fetchOptions.body ? JSON.parse(fetchOptions.body) : null;
         fetchBodies.push({ url: String(url), body: bodyPayload });
-        if (String(url) === '/api/apps/publish' || String(url) === '/api/apps/update' || String(url) === '/api/apps/delete') {
+        if (String(url) === '/api/metaapp/publish' || String(url) === '/api/metaapp/update' || String(url) === '/api/metaapp/delete') {
           return Promise.resolve(response(options.mutationResponse ?? {
             ok: true,
             state: 'success',
@@ -410,7 +410,7 @@ function createAppsPageContext(options = {}) {
       if (String(url) === '/api/bot/profiles') {
         return Promise.resolve(response(options.profiles ?? profilesPayload()));
       }
-      if (String(url).startsWith('/api/apps?')) {
+      if (String(url).startsWith('/api/metaapp/list?')) {
         if (typeof options.fetchApps === 'function') {
           return Promise.resolve(options.fetchApps(String(url))).then((payload) => response(payload));
         }
@@ -532,8 +532,8 @@ test('apps page loads active Bot and requests first Apps page with page size 12'
 
   context.run();
 
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
-  const url = new URL(context.fetchUrls.find((item) => item.startsWith('/api/apps?')), 'http://localhost');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
+  const url = new URL(context.fetchUrls.find((item) => item.startsWith('/api/metaapp/list?')), 'http://localhost');
   assert.equal(url.searchParams.get('from'), 'alice');
   assert.equal(url.searchParams.get('size'), '12');
 });
@@ -604,6 +604,25 @@ test('apps page Bot picker renders profile avatars when available', async () => 
 
   await context.waitFor(() => context.elements['[data-apps-bot-picker]'].innerHTML.includes(avatarDataUrl), 'render bot avatar');
   assert.match(context.elements['[data-apps-bot-picker]'].innerHTML, /class="apps-bot-avatar" src="data:image\/png;base64,aW1hZ2U="/);
+});
+
+test('apps page Bot picker resolves metafile avatar pin fields', async () => {
+  const context = createAppsPageContext({
+    profiles: profilesPayload([{
+      slug: 'alice',
+      name: 'Alice',
+      globalMetaId: 'idq1alice',
+      avatarPinId: PIN,
+      homeDir: '/tmp/alice',
+      isActive: true,
+    }]),
+    apps: appsPayload(),
+  });
+
+  context.run();
+
+  await context.waitFor(() => context.elements['[data-apps-bot-picker]'].innerHTML.includes('/api/file/avatar?ref='), 'render bot metafile avatar');
+  assert.match(context.elements['[data-apps-bot-picker]'].innerHTML, new RegExp(`/api/file/avatar\\?ref=${PIN}`, 'u'));
 });
 
 test('apps page copy pin action writes the pin id to clipboard', async () => {
@@ -768,11 +787,12 @@ test('apps page delete flow posts revoke request and hides the record', async ()
   assert.match(context.elements['[data-apps-modal-root]'].innerHTML, /Delete revokes this MetaAPP PIN/);
   await context.submitDeleteForm();
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/delete'), 'delete request');
-  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/delete').body;
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/delete'), 'delete request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/delete').body;
   assert.deepEqual(request, {
     from: 'alice',
     targetPinId: PIN,
+    confirm: true,
   });
   assert.doesNotMatch(context.elements['[data-apps-grid]'].innerHTML, /Delete Me/);
   assert.match(context.elements['[data-apps-grid]'].innerHTML, /No apps yet/);
@@ -815,7 +835,7 @@ test('apps page next pagination requests the next cursor', async () => {
   await context.clickElement('[data-apps-page-next]');
 
   await context.waitFor(
-    () => context.fetchUrls.some((url) => url.startsWith('/api/apps?') && new URL(url, 'http://localhost').searchParams.get('cursor') === 'cursor-2'),
+    () => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?') && new URL(url, 'http://localhost').searchParams.get('cursor') === 'cursor-2'),
     'next cursor request',
   );
 });
@@ -831,15 +851,15 @@ test('apps page changing Bot reloads first Apps page for the new Bot', async () 
 
   context.run();
 
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'initial apps request');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'initial apps request');
   await context.clickFake({ 'data-apps-bot-option': 'bob' });
 
   await context.waitFor(
-    () => context.fetchUrls.filter((url) => url.startsWith('/api/apps?') && new URL(url, 'http://localhost').searchParams.get('from') === 'bob').length === 1,
+    () => context.fetchUrls.filter((url) => url.startsWith('/api/metaapp/list?') && new URL(url, 'http://localhost').searchParams.get('from') === 'bob').length === 1,
     'bob apps reload',
   );
 
-  const bobUrl = context.fetchUrls.findLast((url) => url.startsWith('/api/apps?'));
+  const bobUrl = context.fetchUrls.findLast((url) => url.startsWith('/api/metaapp/list?'));
   const params = new URL(bobUrl, 'http://localhost').searchParams;
   assert.equal(params.get('from'), 'bob');
   assert.equal(params.get('size'), '12');
@@ -897,14 +917,14 @@ test('apps page ignores rapid duplicate Next clicks and Previous returns to the 
   await Promise.all([firstNext, secondNext]);
   await context.waitFor(() => context.elements['[data-apps-page-prev]'].hidden === false, 'previous button visible');
 
-  const requestCountBeforePrevious = context.fetchUrls.filter((url) => url.startsWith('/api/apps?')).length;
+  const requestCountBeforePrevious = context.fetchUrls.filter((url) => url.startsWith('/api/metaapp/list?')).length;
   await context.clickElement('[data-apps-page-prev]');
 
   await context.waitFor(
-    () => context.fetchUrls.filter((url) => url.startsWith('/api/apps?')).length > requestCountBeforePrevious,
+    () => context.fetchUrls.filter((url) => url.startsWith('/api/metaapp/list?')).length > requestCountBeforePrevious,
     'previous page request',
   );
-  const previousUrl = context.fetchUrls.findLast((url) => url.startsWith('/api/apps?'));
+  const previousUrl = context.fetchUrls.findLast((url) => url.startsWith('/api/metaapp/list?'));
   assert.equal(new URL(previousUrl, 'http://localhost').searchParams.get('cursor'), null);
 });
 
@@ -997,12 +1017,12 @@ test('publish and edit modals expose matching MetaAPP form groups and edit save 
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="title"]').value, 'Editable App');
 });
 
-test('publish submits normalized form payload to /api/apps/publish', async () => {
+test('publish submits normalized form payload to /api/metaapp/publish', async () => {
   const secondPin = `${'a'.repeat(64)}i0`;
   const context = createAppsPageContext();
 
   context.run();
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
 
   context.setField('appName', 'Agent Wiki Builder');
@@ -1022,8 +1042,8 @@ test('publish submits normalized form payload to /api/apps/publish', async () =>
 
   await context.submitModalForm();
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), 'publish request');
-  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/publish').body;
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
   assert.equal(request.from, 'alice');
   assert.equal(request.title, 'Agent Wiki Builder');
   assert.equal(request.appName, 'Agent Wiki Builder');
@@ -1036,7 +1056,7 @@ test('publish submits normalized form payload to /api/apps/publish', async () =>
   assert.equal(request.contentType, 'text/html');
   assert.equal(request.codeType, 'application/javascript');
   assert.deepEqual(request.metadata, { scope: 'publish' });
-  const reload = context.fetchUrls.findLast((url) => url.startsWith('/api/apps?'));
+  const reload = context.fetchUrls.findLast((url) => url.startsWith('/api/metaapp/list?'));
   assert.equal(new URL(reload, 'http://localhost').searchParams.get('cursor'), null);
 });
 
@@ -1045,7 +1065,7 @@ test('publish preserves http image refs while keeping packages as metafile refs'
   const context = createAppsPageContext();
 
   context.run();
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
 
   context.setField('appName', 'HTTP Image App');
@@ -1058,8 +1078,8 @@ test('publish preserves http image refs while keeping packages as metafile refs'
 
   await context.submitModalForm();
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), 'publish request');
-  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/publish').body;
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
   assert.equal(request.icon, 'https://cdn.example.test/icon.png');
   assert.equal(request.coverImg, 'http://cdn.example.test/cover.png');
   assert.deepEqual(request.introImgs, ['https://cdn.example.test/intro.png', `metafile://${secondPin}`]);
@@ -1067,7 +1087,7 @@ test('publish preserves http image refs while keeping packages as metafile refs'
   assert.equal(request.code, `metafile://${secondPin}`);
 });
 
-test('edit submits to /api/apps/update with target pin and changed values', async () => {
+test('edit submits to /api/metaapp/update with target pin and changed values', async () => {
   const context = createAppsPageContext({
     apps: appsPayload({
       records: [{
@@ -1103,8 +1123,8 @@ test('edit submits to /api/apps/update with target pin and changed values', asyn
   context.setChecked('runtime', 'ios', true);
   await context.submitModalForm();
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/update'), 'update request');
-  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/update').body;
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/update'), 'update request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/update').body;
   assert.equal(request.from, 'alice');
   assert.equal(request.targetPinId, PIN);
   assert.equal(request.title, 'Updated Title');
@@ -1118,7 +1138,7 @@ test('manual multi asset field normalizes comma and newline PINs into metafile a
   const context = createAppsPageContext();
 
   context.run();
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
   context.setField('appName', 'Gallery App');
   context.setField('title', 'Gallery App');
@@ -1128,8 +1148,8 @@ test('manual multi asset field normalizes comma and newline PINs into metafile a
 
   await context.submitModalForm();
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), 'publish request');
-  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/publish').body;
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
   assert.deepEqual(request.introImgs, [`metafile://${PIN}`, `metafile://${secondPin}`, `metafile://${thirdPin}`]);
 });
 
@@ -1144,7 +1164,7 @@ test('upload with a file path calls large upload route and stores returned metaf
   });
 
   context.run();
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
   await context.uploadAssetFile('content', {
     name: 'bundle.zip',
@@ -1168,8 +1188,8 @@ test('upload with a file path calls large upload route and stores returned metaf
   context.setField('coverImg', PIN);
   await context.submitModalForm();
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), 'publish request');
-  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/publish').body;
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
   assert.equal(request.content, `metafile://${uploadedPin}`);
 });
 
@@ -1177,7 +1197,7 @@ test('upload without a file path shows a field-level error and does not fake a U
   const context = createAppsPageContext();
 
   context.run();
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
   await context.uploadAssetFile('content', {
     name: 'bundle.zip',
@@ -1197,7 +1217,7 @@ test('invalid manual asset PIN blocks publish and marks the field error', async 
   const context = createAppsPageContext();
 
   context.run();
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
   context.setField('appName', 'Invalid Asset App');
   context.setField('title', 'Invalid Asset App');
@@ -1206,7 +1226,7 @@ test('invalid manual asset PIN blocks publish and marks the field error', async 
 
   await context.submitModalForm();
 
-  assert.equal(context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), false);
+  assert.equal(context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), false);
   const error = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-field-error="icon"]');
   assert.ok(error);
   assert.equal(error.hidden, false);
@@ -1238,7 +1258,7 @@ test('invalid intro image PIN blocks edit update and marks introImgs', async () 
 
   await context.submitModalForm();
 
-  assert.equal(context.fetchBodies.some((entry) => entry.url === '/api/apps/update'), false);
+  assert.equal(context.fetchBodies.some((entry) => entry.url === '/api/metaapp/update'), false);
   const error = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-field-error="introImgs"]');
   assert.ok(error);
   assert.equal(error.hidden, false);
@@ -1323,7 +1343,7 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
   });
 
   context.run();
-  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/apps?')), 'apps request');
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
   await context.uploadAssetFile('introImgs', [
     { name: 'one.png', path: '/tmp/one.png', size: 512, type: 'image/png' },
@@ -1349,7 +1369,7 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
   context.setField('coverImg', PIN);
   await context.submitModalForm();
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/apps/publish'), 'publish request');
-  const request = context.fetchBodies.find((entry) => entry.url === '/api/apps/publish').body;
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
   assert.deepEqual(request.introImgs, [`metafile://${firstUploadedPin}`, `metafile://${secondUploadedPin}`]);
 });
