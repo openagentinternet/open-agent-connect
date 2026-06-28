@@ -116,3 +116,19 @@ test('publishMetaAppPayload rejects chain writes without pinId after attempting 
   );
   assert.equal(writes.length, 1);
 });
+
+test('deleteMetaAppPin rejects chain writes without pinId after attempting one write', async () => {
+  const writes = [];
+  const { ctx } = actor({
+    writePin: async (input) => {
+      writes.push(input);
+      return { txids: ['tx'], network: input.network ?? 'mvc' };
+    },
+  });
+
+  await assert.rejects(
+    () => deleteMetaAppPin(ctx, { targetPinId: PIN, confirm: true }),
+    /MetaAPP chain write did not return pinId\./,
+  );
+  assert.equal(writes.length, 1);
+});

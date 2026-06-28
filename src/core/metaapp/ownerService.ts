@@ -27,10 +27,6 @@ function requireConfirm(input: Record<string, unknown>, action: string): Metabot
     : commandFailed('confirmation_required', `MetaAPP ${action} requires --confirm.`);
 }
 
-function pinIdFromWrite(write: Record<string, unknown>): string {
-  return typeof write.pinId === 'string' ? write.pinId : '';
-}
-
 function requirePinIdFromWrite(write: Record<string, unknown>): string {
   const pinId = normalizeMetaAppPinId(write.pinId);
   if (!pinId) {
@@ -99,9 +95,10 @@ export async function deleteMetaAppPin(
   const targetPinId = typeof input.targetPinId === 'string' ? input.targetPinId.trim() : '';
   const write = buildMetaAppRevokeWrite(targetPinId);
   const chainWrite = await actor.writePin({ ...write, network: input.network });
+  const pinId = requirePinIdFromWrite(chainWrite);
   return commandSuccess({
     revokedPinId: targetPinId,
-    pinId: pinIdFromWrite(chainWrite),
+    pinId,
     chainWrite,
   });
 }
