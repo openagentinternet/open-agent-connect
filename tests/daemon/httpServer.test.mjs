@@ -2474,6 +2474,19 @@ test('retired /api/master routes are not mounted on the main HTTP server', async
   }
 });
 
+test('/api/apps owner-management routes are not registered as canonical routes', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/apps`);
+  const payload = await response.json();
+
+  assert.equal(response.status, 404);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'not_found');
+  assert.equal(payload.message, 'No route matched /api/apps.');
+});
+
 test('POST /api/services/execute forwards remote execution payloads to services.execute', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
