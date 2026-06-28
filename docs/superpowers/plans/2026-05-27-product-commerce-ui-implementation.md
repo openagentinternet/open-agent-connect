@@ -405,7 +405,7 @@ Expected: FAIL because the page is not registered.
 Update `MetabotUiPageName`:
 
 ```ts
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'chat-viewer' | 'bot' | 'loom' | 'products';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'products' | 'trace' | 'refund' | 'bot' | 'conversations' | 'services' | 'apps' | 'settings' | 'loom' | 'metaapps' | 'browser';
 ```
 
 Register `buildProductsPageDefinition` in `PAGE_BUILDERS` and add `{ page: 'products', label: 'Products' }` to navigation.
