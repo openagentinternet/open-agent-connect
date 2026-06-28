@@ -13,10 +13,11 @@ const app_4 = require("../../ui/pages/refund/app");
 const app_5 = require("../../ui/pages/trace/app");
 const app_6 = require("../../ui/pages/bot/app");
 const app_7 = require("../../ui/pages/conversations/app");
-const app_8 = require("../../ui/pages/loom/app");
-const app_9 = require("../../ui/pages/metaapps/app");
-const app_10 = require("../../ui/pages/services/app");
-const app_11 = require("../../ui/pages/settings/app");
+const app_8 = require("../../ui/pages/apps/app");
+const app_9 = require("../../ui/pages/loom/app");
+const app_10 = require("../../ui/pages/metaapps/app");
+const app_11 = require("../../ui/pages/services/app");
+const app_12 = require("../../ui/pages/settings/app");
 const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
 const uiMetaApps_1 = require("./uiMetaApps");
@@ -37,15 +38,17 @@ const PAGE_BUILDERS = {
     'refund': () => (0, app_4.buildRefundPageDefinition)(),
     'bot': () => (0, app_6.buildBotPageDefinition)(),
     'conversations': app_7.buildConversationsPageDefinition,
-    'services': app_10.buildServicesPageDefinition,
-    'settings': app_11.buildSettingsPageDefinition,
-    'loom': () => (0, app_8.buildLoomPageDefinition)(),
-    'metaapps': app_9.buildMetaAppsPageDefinition,
+    'services': app_11.buildServicesPageDefinition,
+    'apps': app_8.buildAppsPageDefinition,
+    'settings': app_12.buildSettingsPageDefinition,
+    'loom': () => (0, app_9.buildLoomPageDefinition)(),
+    'metaapps': app_10.buildMetaAppsPageDefinition,
 };
 const NAV_ITEMS = [
     { page: 'bot', labelKey: 'nav.botPage' },
     { page: 'conversations', labelKey: 'nav.conversations' },
     { page: 'services', labelKey: 'nav.services' },
+    { page: 'apps', labelKey: 'nav.apps' },
 ];
 const HIDDEN_UI_PAGES = new Set();
 function escapeHtml(value) {
@@ -218,6 +221,14 @@ const handleUiRoutes = async (context) => {
         return true;
     }
     if (await (0, uiMetaApps_1.handleBundledMetaAppRoutes)(context)) {
+        return true;
+    }
+    if (url.pathname === '/ui/metaapps') {
+        context.res.writeHead(302, {
+            'Location': `/ui/apps${url.search}`,
+            'Cache-Control': 'no-store',
+        });
+        context.res.end();
         return true;
     }
     if (req.method !== 'GET') {

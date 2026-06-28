@@ -8,6 +8,7 @@ const SUPPORTED_UI_PAGES = new Set([
     'bot',
     'conversations',
     'services',
+    'apps',
     'settings',
     'buzz',
     'chat',

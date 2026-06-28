@@ -3,7 +3,7 @@ import type { Buffer } from 'node:buffer';
 import type { BrowserHttpHandlers } from '../../browser/http';
 import type { MetabotCommandResult } from '../../core/contracts/commandResult';
 export type Awaitable<T> = T | Promise<T>;
-export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'conversations' | 'services' | 'settings' | 'loom' | 'metaapps' | 'browser';
+export type MetabotUiPageName = 'hub' | 'publish' | 'my-services' | 'trace' | 'refund' | 'bot' | 'conversations' | 'services' | 'apps' | 'settings' | 'loom' | 'metaapps' | 'browser';
 export interface ServiceRefundSyncResponse {
     scanned: {
         requestPins: number;
@@ -37,9 +37,12 @@ export interface MetabotDaemonHttpHandlers {
         preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         update?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        delete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        publishProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        updateProject?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         comment?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-        list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         previewAsset?: (input: {
             previewId: string;
             assetPath?: string;

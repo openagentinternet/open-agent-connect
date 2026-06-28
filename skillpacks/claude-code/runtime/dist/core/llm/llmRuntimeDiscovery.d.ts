@@ -5,6 +5,9 @@ export interface DiscoveryInput {
     now?: () => string;
     readinessProbe?: RuntimeReadinessProbe;
     readinessTimeoutMs?: number;
+    providerConcurrency?: number;
+    knownRuntimes?: LlmRuntime[];
+    recentHealthyReadinessSkipMs?: number;
     cwd?: string;
     shellResolvedExecutables?: Record<string, string>;
 }
@@ -43,6 +46,8 @@ export declare function discoverProvider(provider: LlmProvider, pathDirs: string
     env?: NodeJS.ProcessEnv;
     readinessProbe?: RuntimeReadinessProbe;
     readinessTimeoutMs?: number;
+    knownRuntimesById?: ReadonlyMap<string, LlmRuntime>;
+    recentHealthyReadinessSkipMs?: number;
     cwd?: string;
     shellResolvedExecutables?: Record<string, string>;
 }): Promise<LlmRuntime | null>;

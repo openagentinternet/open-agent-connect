@@ -27,6 +27,15 @@ function compareBindingSelection(left, right) {
         return right.updatedAt.localeCompare(left.updatedAt);
     return left.id.localeCompare(right.id);
 }
+function runtimeActivityMs(runtime) {
+    return Math.max(Date.parse(runtime.healthCheckedAt ?? '') || 0, Date.parse(runtime.lastSeenAt) || 0, Date.parse(runtime.updatedAt) || 0, Date.parse(runtime.createdAt) || 0);
+}
+function compareRuntimeSelection(left, right) {
+    const activityDelta = runtimeActivityMs(right) - runtimeActivityMs(left);
+    if (activityDelta !== 0)
+        return activityDelta;
+    return left.id.localeCompare(right.id);
+}
 function summarizeResolvedLlmRuntime(resolved) {
     if (!resolved.runtime)
         return undefined;
@@ -54,6 +63,15 @@ function createLlmRuntimeResolver(options) {
             const excludedRuntimeIds = new Set(input.excludeRuntimeIds ?? []);
             const isExcluded = (runtime) => excludedRuntimeIds.has(runtime.id);
             const isSelectable = (runtime) => !isExcluded(runtime) && runtime.health === 'healthy';
+            const healthyByProvider = new Map();
+            for (const runtime of runtimes) {
+                if (!isSelectable(runtime))
+                    continue;
+                const current = healthyByProvider.get(runtime.provider);
+                if (!current || compareRuntimeSelection(runtime, current) < 0) {
+                    healthyByProvider.set(runtime.provider, runtime);
+                }
+            }
             // 1. Explicit runtimeId — use it directly.
             if (input.explicitRuntimeId) {
                 const rt = runtimeById.get(input.explicitRuntimeId);
@@ -68,6 +86,10 @@ function createLlmRuntimeResolver(options) {
                     const rt = runtimeById.get(binding.llmRuntimeId);
                     if (rt && isSelectable(rt)) {
                         return { runtime: rt, bindingId: binding.id, bindingRole: binding.role };
+                    }
+                    const providerRuntime = rt ? healthyByProvider.get(rt.provider) : undefined;
+                    if (providerRuntime) {
+                        return { runtime: providerRuntime, bindingId: binding.id, bindingRole: binding.role };
                     }
                 }
                 // 3. Preferred runtime remains a legacy fallback when no configured binding is usable.
@@ -87,6 +109,15 @@ function createLlmRuntimeResolver(options) {
         async selectMetaBot(input) {
             const runtimes = await loadRuntimes();
             const runtimeById = new Map(runtimes.map((r) => [r.id, r]));
+            const healthyByProvider = new Map();
+            for (const runtime of runtimes) {
+                if (runtime.health !== 'healthy')
+                    continue;
+                const current = healthyByProvider.get(runtime.provider);
+                if (!current || compareRuntimeSelection(runtime, current) < 0) {
+                    healthyByProvider.set(runtime.provider, runtime);
+                }
+            }
             const state = await bindingStore.read();
             const allBindings = state.bindings;
             const matching = [];
@@ -96,6 +127,11 @@ function createLlmRuntimeResolver(options) {
                 const rt = runtimeById.get(binding.llmRuntimeId);
                 if (rt && rt.provider === input.targetProvider && rt.health === 'healthy') {
                     matching.push({ binding, runtime: rt });
+                    continue;
+                }
+                const providerRuntime = rt ? healthyByProvider.get(rt.provider) : undefined;
+                if (rt && rt.provider === input.targetProvider && providerRuntime) {
+                    matching.push({ binding, runtime: providerRuntime });
                 }
             }
             if (matching.length === 0)

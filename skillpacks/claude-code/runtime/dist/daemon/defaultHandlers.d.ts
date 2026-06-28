@@ -12,6 +12,7 @@ import { type FetchPrivateHistory } from '../core/chat/privateConversation';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { uploadLargeFileToChain, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
+import { createMetaAppManOwnerClient } from '../core/metaapp/manOwnerList';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { type A2AConversationMessagePersister } from '../core/a2a/conversationPersistence';
@@ -130,5 +131,6 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
     testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
     conversationGuidanceReplyRunner?: ChatReplyRunner;
+    metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
 }): MetabotDaemonHttpHandlers;
 export {};

@@ -21,6 +21,8 @@ const SLOW_START_READINESS_TIMEOUT_MS = 45_000;
 const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
 const SLOW_START_VERSION_PROBE_TIMEOUT_MS = 20_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
+const DEFAULT_PROVIDER_DISCOVERY_CONCURRENCY = 8;
+const DEFAULT_RECENT_HEALTHY_READINESS_SKIP_MS = 30 * 60 * 1000;
 const READINESS_PROMPT = 'Reply exactly OK.';
 const LOGIN_SHELL_RESOLVE_TIMEOUT_MS = 3_000;
 const LOGIN_SHELL_RESOLVE_KILL_GRACE_MS = 2_000;
@@ -30,6 +32,46 @@ function getPathEnv(env) {
 function splitPath(pathEnv) {
     const separator = process.platform === 'win32' ? ';' : ':';
     return pathEnv.split(separator).filter(Boolean);
+}
+function normalizeProviderDiscoveryConcurrency(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return DEFAULT_PROVIDER_DISCOVERY_CONCURRENCY;
+    }
+    return Math.max(1, Math.floor(value));
+}
+function normalizeRecentHealthyReadinessSkipMs(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return DEFAULT_RECENT_HEALTHY_READINESS_SKIP_MS;
+    }
+    return Math.max(0, Math.floor(value));
+}
+function parseIsoMs(value) {
+    if (!value)
+        return null;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+function canSkipReadinessForKnownRuntime(knownRuntime, nowIso, windowMs) {
+    if (!knownRuntime || knownRuntime.health !== 'healthy')
+        return false;
+    const checkedAt = parseIsoMs(knownRuntime.healthCheckedAt ?? knownRuntime.updatedAt);
+    const nowMs = parseIsoMs(nowIso);
+    if (checkedAt === null || nowMs === null || checkedAt > nowMs)
+        return false;
+    return nowMs - checkedAt <= windowMs;
+}
+async function mapWithConcurrency(items, concurrency, task) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(items.length, concurrency);
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (nextIndex < items.length) {
+            const index = nextIndex;
+            nextIndex += 1;
+            results[index] = await task(items[index], index);
+        }
+    }));
+    return results;
 }
 async function findExecutableInPath(name, pathDirs) {
     const matches = await findExecutablesInPath(name, pathDirs);
@@ -381,6 +423,16 @@ async function discoverProvider(provider, pathDirs, options) {
         const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], versionProbeTimeoutForProvider(provider), env);
         if (versionProbe.ok) {
             const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
+            const knownRuntime = options?.knownRuntimesById?.get(runtime.id);
+            if (canSkipReadinessForKnownRuntime(knownRuntime, runtime.updatedAt, normalizeRecentHealthyReadinessSkipMs(options?.recentHealthyReadinessSkipMs))) {
+                return {
+                    ...runtime,
+                    health: 'healthy',
+                    healthReason: undefined,
+                    unavailableUntil: undefined,
+                    healthCheckedAt: knownRuntime.healthCheckedAt ?? knownRuntime.updatedAt,
+                };
+            }
             const readiness = await readinessProbe({
                 runtime,
                 env,
@@ -496,9 +548,8 @@ async function discoverLlmRuntimes(input) {
     const runtimes = [];
     const errors = [];
     const shellResolvedExecutables = input?.shellResolvedExecutables ?? await resolveExecutablesViaLoginShell((0, platformRegistry_1.getRuntimePlatforms)().flatMap((platform) => platform.runtime.binaryNames), env);
-    // Discover each supported provider. Run in sequence to keep it simple;
-    // the binary spawns are the slow part, and they're already async.
-    for (const platform of (0, platformRegistry_1.getRuntimePlatforms)()) {
+    const knownRuntimesById = new Map((input?.knownRuntimes ?? []).map((runtime) => [runtime.id, runtime]));
+    const discoveryResults = await mapWithConcurrency((0, platformRegistry_1.getRuntimePlatforms)(), normalizeProviderDiscoveryConcurrency(input?.providerConcurrency), async (platform) => {
         try {
             const runtime = await discoverProvider(platform.id, pathDirs, {
                 createId: input?.createId,
@@ -506,18 +557,29 @@ async function discoverLlmRuntimes(input) {
                 env,
                 readinessProbe: input?.readinessProbe,
                 readinessTimeoutMs: input?.readinessTimeoutMs,
+                knownRuntimesById,
+                recentHealthyReadinessSkipMs: input?.recentHealthyReadinessSkipMs,
                 cwd: input?.cwd,
                 shellResolvedExecutables,
             });
-            if (runtime) {
-                runtimes.push(runtime);
-            }
+            return { runtime, error: null };
         }
         catch (err) {
-            errors.push({
-                provider: platform.id,
-                message: err instanceof Error ? err.message : String(err),
-            });
+            return {
+                runtime: null,
+                error: {
+                    provider: platform.id,
+                    message: err instanceof Error ? err.message : String(err),
+                },
+            };
+        }
+    });
+    for (const result of discoveryResults) {
+        if (result.runtime) {
+            runtimes.push(result.runtime);
+        }
+        if (result.error) {
+            errors.push(result.error);
         }
     }
     return { runtimes, errors };

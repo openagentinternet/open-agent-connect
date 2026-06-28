@@ -4,8 +4,20 @@ exports.handleMetaAppRoutes = void 0;
 const node_buffer_1 = require("node:buffer");
 const commandResult_1 = require("../../core/contracts/commandResult");
 const PREVIEW_ASSET_PREFIX = '/api/metaapp/preview-assets/';
-function readBooleanQueryValue(value) {
-    return value === 'true' || value === '1';
+function readPositiveInteger(value, fallback) {
+    const normalized = value?.trim();
+    if (!normalized || !/^[1-9]\d*$/.test(normalized)) {
+        return fallback;
+    }
+    return Number(normalized);
+}
+function readBoolean(value) {
+    const normalized = (value ?? '').trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+function readTrimmedQueryValue(value) {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : undefined;
 }
 function isCommandResult(value) {
     return Boolean(value && typeof value === 'object' && 'ok' in value && 'state' in value);
@@ -104,6 +116,18 @@ const handleMetaAppRoutes = async (context) => {
         context.sendJson(200, result);
         return true;
     }
+    if (url.pathname === '/api/metaapp/publish-project') {
+        if (req.method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const input = await context.readJsonBody();
+        const result = handlers.metaapp?.publishProject
+            ? await handlers.metaapp.publishProject(input)
+            : (0, commandResult_1.commandFailed)('not_implemented', 'MetaApp project publish handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
     if (url.pathname === '/api/metaapp/update') {
         if (req.method !== 'POST') {
             context.sendMethodNotAllowed(['POST']);
@@ -113,6 +137,49 @@ const handleMetaAppRoutes = async (context) => {
         const result = handlers.metaapp?.update
             ? await handlers.metaapp.update(input)
             : (0, commandResult_1.commandFailed)('not_implemented', 'MetaApp update handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/metaapp/update-project') {
+        if (req.method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const input = await context.readJsonBody();
+        const result = handlers.metaapp?.updateProject
+            ? await handlers.metaapp.updateProject(input)
+            : (0, commandResult_1.commandFailed)('not_implemented', 'MetaApp project update handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/metaapp/list') {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        const from = readTrimmedQueryValue(url.searchParams.get('from'));
+        const cursor = readTrimmedQueryValue(url.searchParams.get('cursor'));
+        const result = handlers.metaapp?.list
+            ? await handlers.metaapp.list({
+                scope: 'owner',
+                ...(from ? { from } : {}),
+                ...(cursor ? { cursor } : {}),
+                size: readPositiveInteger(url.searchParams.get('size'), 12),
+                refresh: readBoolean(url.searchParams.get('refresh')),
+            })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'MetaApp list handler is not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    if (url.pathname === '/api/metaapp/delete') {
+        if (req.method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const input = await context.readJsonBody();
+        const result = handlers.metaapp?.delete
+            ? await handlers.metaapp.delete(input)
+            : (0, commandResult_1.commandFailed)('not_implemented', 'MetaApp delete handler is not configured.');
         context.sendJson(200, result);
         return true;
     }
@@ -146,13 +213,17 @@ const handleMetaAppRoutes = async (context) => {
             return true;
         }
         const handler = handlers.metaapp?.list;
+        const from = readTrimmedQueryValue(url.searchParams.get('from'));
+        const pinId = readTrimmedQueryValue(url.searchParams.get('pinId'));
+        const firstPinId = readTrimmedQueryValue(url.searchParams.get('firstPinId'));
         const result = handler
             ? await handler({
-                ...(url.searchParams.get('from') ? { from: url.searchParams.get('from') } : {}),
-                ...(readBooleanQueryValue(url.searchParams.get('mine')) ? { mine: true } : {}),
-                ...(readBooleanQueryValue(url.searchParams.get('refresh')) ? { refresh: true } : {}),
-                ...(url.searchParams.get('pinId') ? { pinId: url.searchParams.get('pinId') } : {}),
-                ...(url.searchParams.get('firstPinId') ? { firstPinId: url.searchParams.get('firstPinId') } : {}),
+                scope: 'compatibility',
+                ...(from ? { from } : {}),
+                ...(readBoolean(url.searchParams.get('mine')) ? { mine: true } : {}),
+                ...(readBoolean(url.searchParams.get('refresh')) ? { refresh: true } : {}),
+                ...(pinId ? { pinId } : {}),
+                ...(firstPinId ? { firstPinId } : {}),
             })
             : (0, commandResult_1.commandFailed)('not_implemented', 'MetaApp list handler is not configured.');
         context.sendJson(200, result);

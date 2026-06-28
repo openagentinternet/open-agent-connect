@@ -274,21 +274,28 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.match(content, /^name:\s*metabot-metaapp-publish$/m);
   assert.match(content, /Bot, bot, and MetaBot wording as equivalent/i);
   assert.match(content, /metaapp preview/);
-  assert.match(content, /metaapp publish --from <bot-slug>/);
-  assert.match(content, /metaapp update --target-pin-id/);
+  assert.match(content, /metabot metaapp list --from <bot-slug>/);
+  assert.match(content, /metabot metaapp publish --from <bot-slug> --payload-file <path> --confirm/);
+  assert.match(content, /metabot metaapp update --from <bot-slug> --target-pin-id <pinid> --payload-file <path> --confirm/);
+  assert.match(content, /metabot metaapp delete --from <bot-slug> --target-pin-id <pinid> --confirm/);
+  assert.match(content, /metabot metaapp publish-project --project-dir <path>/);
+  assert.match(content, /metabot metaapp update-project --target-pin-id <pinid> --project-dir <path>/);
   assert.match(content, /metaapp share --pin-id/);
   assert.match(content, /metaapp view/);
   assert.match(content, /metaapp comment/);
-  assert.match(content, /publish\/update.*explicit confirmation.*--confirm/i);
-  assert.match(content, /payloadPreview/);
+  assert.match(content, /Direct MetaAPP Protocol Publish/i);
+  assert.match(content, /Project Packaging Publish/i);
+  assert.match(content, /publish.*update.*delete.*explicit confirmation.*--confirm/is);
   assert.match(content, /coverImg/);
-  assert.match(content, /content.*browser runtime artifact/i);
+  assert.match(content, /HTTP\(S\) image URLs/i);
+  assert.match(content, /content.*code.*metafile:\/\/ references only/is);
   assert.match(content, /Publish Wizard/i);
   assert.match(content, /confirm the MetaBot actor before every on-chain write/i);
-  assert.match(content, /metabot file upload --from <bot-slug> --request-file/i);
-  assert.match(content, /metabot chain write --from <bot-slug> --request-file/i);
-  assert.match(content, /No Web2 URLs or local filesystem paths/i);
+  assert.match(content, /\/ui\/apps/);
   assert.match(content, /open the published MetaApp in Browser/i);
+  assert.doesNotMatch(content, /metabot metaapp publish --from <bot-slug> --project-dir/);
+  assert.doesNotMatch(content, /metabot metaapp update --target-pin-id <pinid> --from <bot-slug> --project-dir/);
+  assert.doesNotMatch(content, /ui open --page metaapps/);
 });
 
 test('buildAgentConnectSkillpacks includes the Wiki creator as a self-contained scripted skill', async () => {
