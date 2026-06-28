@@ -949,18 +949,20 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
 
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['ui', 'open']);
-  assert.match(output.summary, /metaapps/);
+  assert.match(output.summary, /apps/);
   assert.match(output.summary, /conversations/);
   assert.match(output.summary, /services/);
   assert.match(output.summary, /settings/);
   assert.match(output.usage, /\[--from <bot-slug>\]/);
   assert.match(output.usage, /\[--session-id <session-id>\]/);
   assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
-  assert.match(output.requiredFlags[0].description, /metaapps/);
+  assert.match(output.requiredFlags[0].description, /apps/);
   assert.match(output.requiredFlags[0].description, /conversations/);
   assert.match(output.requiredFlags[0].description, /services/);
   assert.match(output.requiredFlags[0].description, /settings/);
   assert.doesNotMatch(output.requiredFlags[0].description, /chat-viewer/);
+  assert.doesNotMatch(output.summary, /metaapps/);
+  assert.doesNotMatch(output.requiredFlags[0].description, /metaapps/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
   const traceFlag = output.optionalFlags.find((entry) => entry.flag === '--trace-id');
   assert.ok(traceFlag);
@@ -974,7 +976,8 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.ok(output.examples.includes('metabot ui open --page services'));
   assert.ok(output.examples.includes('metabot ui open --page conversations --from alice'));
   assert.ok(output.examples.includes('metabot ui open --page settings'));
-  assert.ok(output.examples.includes('metabot ui open --page metaapps'));
+  assert.ok(output.examples.includes('metabot ui open --page apps'));
+  assert.ok(!output.examples.includes('metabot ui open --page metaapps'));
 });
 
 test('runCli prints browser group help with the open subcommand', async () => {

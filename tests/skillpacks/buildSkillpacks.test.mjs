@@ -298,6 +298,15 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.doesNotMatch(content, /ui open --page metaapps/);
 });
 
+test('buildAgentConnectSkillpacks updates generated ui-open help to recommend apps instead of metaapps', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(path.join(sharedPackRoot(outputRoot), 'runtime', 'dist', 'cli', 'commandHelp.js'), 'utf8');
+  assert.match(content, /ui open --page apps/);
+  assert.doesNotMatch(content, /ui open --page metaapps/);
+  assert.match(content, /Built-in page name: bot, conversations, services, apps,/);
+});
+
 test('buildAgentConnectSkillpacks includes the Wiki creator as a self-contained scripted skill', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
