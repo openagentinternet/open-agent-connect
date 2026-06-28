@@ -125,6 +125,7 @@ export interface MetabotDaemonHttpHandlers {
         listPublishSkills?: (input?: {
             slug?: string;
             from?: string;
+            allowFallbackRuntime?: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         listMyServices?: (input: {
             from?: string;
@@ -348,6 +349,7 @@ export interface RouteContext {
     url: URL;
     handlers: MetabotDaemonHttpHandlers;
     readJsonBody: () => Promise<Record<string, unknown>>;
+    readRawBody: (maxBytes: number) => Promise<Buffer>;
     sendJson: (status: number, payload: unknown) => void;
     sendHtml: (status: number, html: string) => void;
     sendText: (status: number, body: string | Buffer, contentType?: string) => void;

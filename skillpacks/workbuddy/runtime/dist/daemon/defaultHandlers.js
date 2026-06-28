@@ -118,17 +118,6 @@ const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
-function decodeRequiredBase64(value) {
-    const base64 = normalizeText(value);
-    if (!base64) {
-        throw new Error('Homepage upload requires base64 file data.');
-    }
-    const buffer = Buffer.from(base64, 'base64');
-    if (!buffer.length || buffer.toString('base64').replace(/=+$/u, '') !== base64.replace(/=+$/u, '')) {
-        throw new Error('Homepage upload base64 file data is invalid.');
-    }
-    return buffer;
-}
 function readErrorCode(error, fallback) {
     const code = error instanceof Error ? error.code : undefined;
     return normalizeText(code) || fallback;
@@ -825,13 +814,33 @@ function calculateMetabotCreateInfoFields(input) {
         fields.push('goal');
     if (input.avatarDataUrl !== undefined)
         fields.push('avatar');
-    if (input.primaryProvider !== undefined)
+    if (input.primaryProvider !== undefined || input.fallbackProvider !== undefined)
         fields.push('primaryProvider');
-    if (input.fallbackProvider !== undefined)
-        fields.push('fallbackProvider');
     if (input.allowChatSkills !== undefined)
         fields.push('allowChatSkills');
     return fields;
+}
+function buildBootstrapInfoPublishTargets(input) {
+    const targets = [
+        {
+            path: '/info/name',
+            contentType: 'text/plain',
+            payload: normalizeText(input.name),
+            encoding: 'utf-8',
+            operation: 'create',
+        },
+    ];
+    const chatPublicKey = normalizeText(input.chatPublicKey);
+    if (chatPublicKey) {
+        targets.push({
+            path: '/info/chatpubkey',
+            contentType: 'text/plain',
+            payload: chatPublicKey,
+            encoding: 'utf-8',
+            operation: 'create',
+        });
+    }
+    return targets;
 }
 function normalizePreferredCreateProvider(value) {
     const provider = normalizeText(value);
@@ -981,6 +990,44 @@ function calculateMetabotChangedFields(current, update) {
     }
     return changedFields;
 }
+function calculateMetabotSubmittedInfoFields(update) {
+    const fields = [];
+    if (update.name !== undefined)
+        fields.push('name');
+    if (update.bio !== undefined)
+        fields.push('bio');
+    if (update.role !== undefined)
+        fields.push('role');
+    if (update.soul !== undefined)
+        fields.push('soul');
+    if (update.goal !== undefined)
+        fields.push('goal');
+    if (update.avatarDataUrl !== undefined)
+        fields.push('avatar');
+    if (update.primaryProvider !== undefined || update.fallbackProvider !== undefined)
+        fields.push('primaryProvider');
+    if (update.allowChatSkills !== undefined)
+        fields.push('allowChatSkills');
+    if (update.homepage !== undefined)
+        fields.push('homepage');
+    return fields;
+}
+function isPublicIdentityUpdate(update) {
+    return update.name !== undefined
+        || update.bio !== undefined
+        || update.avatarDataUrl !== undefined
+        || update.primaryProvider !== undefined
+        || update.fallbackProvider !== undefined
+        || update.homepage !== undefined;
+}
+function calculateMetabotUpdateInfoFields(current, update) {
+    const fields = calculateMetabotSubmittedInfoFields(update);
+    const profile = buildMetabotChainProfile(current, update);
+    if (isPublicIdentityUpdate(update) && (profile.primaryProvider || profile.fallbackProvider)) {
+        fields.push('primaryProvider');
+    }
+    return [...new Set(fields)];
+}
 function buildMetabotChainProfile(current, update) {
     const profile = {
         ...current,
@@ -1045,47 +1092,52 @@ async function writePinRetryingMempoolConflict(input) {
         }
     }
 }
-async function ensureDefaultPersonaFiles(paths, metabotName) {
+async function ensureEmptyPersonaFiles(paths, metabotName) {
+    const workspaceSoulStarter = [
+        `# ${metabotName}`,
+        '',
+        'Describe the persona, tone, boundaries, and communication style for this MetaBot here.',
+    ].join('\n').trim();
+    const oldRoleStarter = [
+        `I am ${metabotName}, a MetaBot on the Open Agent Connect network.`,
+        '',
+        '<!-- Edit this file to define your MetaBot\'s role. Example: -->',
+        '<!-- I am a coding assistant who specializes in TypeScript and Node.js. -->',
+    ].join('\n').trim();
+    const oldSoulStarter = [
+        'I am friendly, curious, and concise.',
+        '',
+        '<!-- Edit this file to define your MetaBot\'s personality and communication style. Example: -->',
+        '<!-- I prefer short, direct messages. I like to ask good questions and share useful insights. -->',
+    ].join('\n').trim();
+    const oldGoalStarter = [
+        'Get to know other MetaBots and explore collaboration opportunities.',
+        '',
+        '<!-- Edit this file to define your MetaBot\'s conversation goals. Example: -->',
+        '<!-- Understand what the other MetaBot can do and find ways to work together on coding tasks. -->',
+    ].join('\n').trim();
     const files = [
-        {
-            filePath: paths.roleMdPath,
-            content: [
-                `I am ${metabotName}, a MetaBot on the Open Agent Connect network.`,
-                '',
-                '<!-- Edit this file to define your MetaBot\'s role. Example: -->',
-                '<!-- I am a coding assistant who specializes in TypeScript and Node.js. -->',
-            ].join('\n'),
-        },
-        {
-            filePath: paths.soulMdPath,
-            content: [
-                'I am friendly, curious, and concise.',
-                '',
-                '<!-- Edit this file to define your MetaBot\'s personality and communication style. Example: -->',
-                '<!-- I prefer short, direct messages. I like to ask good questions and share useful insights. -->',
-            ].join('\n'),
-        },
-        {
-            filePath: paths.goalMdPath,
-            content: [
-                'Get to know other MetaBots and explore collaboration opportunities.',
-                '',
-                '<!-- Edit this file to define your MetaBot\'s conversation goals. Example: -->',
-                '<!-- Understand what the other MetaBot can do and find ways to work together on coding tasks. -->',
-            ].join('\n'),
-        },
+        { filePath: paths.roleMdPath, starterValues: [oldRoleStarter] },
+        { filePath: paths.soulMdPath, starterValues: [workspaceSoulStarter, oldSoulStarter] },
+        { filePath: paths.goalMdPath, starterValues: [oldGoalStarter] },
     ];
     for (const file of files) {
         try {
-            await node_fs_1.promises.access(file.filePath);
+            const current = (await node_fs_1.promises.readFile(file.filePath, 'utf8')).trim();
+            if (current && !file.starterValues.includes(current)) {
+                continue;
+            }
+        }
+        catch (error) {
+            if (error.code !== 'ENOENT') {
+                continue;
+            }
+        }
+        try {
+            await node_fs_1.promises.writeFile(file.filePath, '\n', 'utf8');
         }
         catch {
-            try {
-                await node_fs_1.promises.writeFile(file.filePath, `${file.content}\n`, 'utf8');
-            }
-            catch {
-                // Best effort: do not fail identity creation if persona files cannot be written.
-            }
+            // Best effort: do not fail identity creation if persona files cannot be written.
         }
     }
 }
@@ -9388,22 +9440,26 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
                     await registerActiveIdentityProfile(nextState.identity);
                     await notifyIdentityProfileRegistered();
-                    await ensureDefaultPersonaFiles(runtimeStateStore.paths, normalizedName);
+                    await ensureEmptyPersonaFiles(runtimeStateStore.paths, normalizedName);
                     try {
                         const preferredProvider = normalizePreferredCreateProvider(host)
                             ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
                             ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
                         const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
+                        const previous = await runtimeStore.read();
                         if (preferredProvider) {
-                            const previous = await runtimeStore.read();
                             const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env, knownRuntimes: previous.runtimes });
                             for (const runtime of discoveryResult.runtimes) {
                                 await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
                             }
                         }
                         const runtimeState = await runtimeStore.read();
+                        const previousRuntimeIds = new Set(previous.runtimes.map((runtime) => runtime.id));
+                        const defaultCandidateRuntimes = preferredProvider
+                            ? runtimeState.runtimes.filter((runtime) => (previousRuntimeIds.has(runtime.id) || runtime.provider === preferredProvider))
+                            : runtimeState.runtimes;
                         const defaults = (0, metabotProfileManager_1.selectDefaultMetabotProviders)({
-                            runtimes: runtimeState.runtimes,
+                            runtimes: defaultCandidateRuntimes,
                             preferredProvider,
                         });
                         const resolvedSlug = node_path_1.default.basename(input.homeDir);
@@ -9992,7 +10048,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 });
                 const result = await catalog.listPrimaryRuntimeSkills({
                     metaBotSlug,
-                    allowFallbackRuntime: false,
+                    allowFallbackRuntime: request.allowFallbackRuntime === true,
                 });
                 if (!result.ok) {
                     return (0, commandResult_1.commandFailed)(result.code, result.message);
@@ -11951,6 +12007,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
                         network,
                         signer: actor.signer,
+                        largeUploader: providerLargeFileUploader,
                         verify: rawInput.verify === true,
                     });
                     return (0, commandResult_1.commandSuccess)(result);
@@ -12487,7 +12544,6 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('name_taken', resolvedHome.message);
                 }
                 const profileHomeDir = resolvedHome.homeDir;
-                const createInfoFields = calculateMetabotCreateInfoFields(createInput);
                 createInput = await applyDefaultMetabotCreateProviders({
                     createInput,
                     homeDir: profileHomeDir,
@@ -12538,15 +12594,22 @@ function createDefaultMetabotDaemonHandlers(input) {
                         await node_fs_1.promises.rm(profileHomeDir, { recursive: true, force: true });
                         return (0, commandResult_1.commandFailed)('identity_bootstrap_failed', bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.');
                     }
+                    const bootstrapInfoTargets = buildBootstrapInfoPublishTargets({
+                        name,
+                        chatPublicKey: identity.chatPublicKey,
+                    });
+                    await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)({ homeDir: profileHomeDir }, bootstrapInfoTargets, bootstrap.sync?.chainWrites ?? []);
                     const chainProfile = (0, metabotProfileManager_1.buildMetabotProfileDraftFromIdentity)({
                         ...createInput,
                         homeDir: profileHomeDir,
                         globalMetaId: identity.globalMetaId,
                         mvcAddress: identity.mvcAddress,
                     });
-                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, createInfoFields, {
+                    const profileInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(chainProfile, calculateMetabotCreateInfoFields(createInput));
+                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, profileInfoTargets, {
                         delayMs: input.identitySyncStepDelayMs,
                         operation: 'create',
+                        deferPublishStateWrite: true,
                     });
                     const profile = await (0, metabotProfileManager_1.createMetabotProfileFromIdentity)(normalizedSystemHomeDir, {
                         ...createInput,
@@ -12554,6 +12617,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         globalMetaId: identity.globalMetaId,
                         mvcAddress: identity.mvcAddress,
                     });
+                    await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, profileInfoTargets, profileChainWrites);
                     await notifyIdentityProfileRegistered();
                     return (0, commandResult_1.commandSuccess)({
                         profile,
@@ -12630,14 +12694,18 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('invalid_metabot_profile_update', error instanceof Error ? error.message : String(error));
                 }
                 const changedFields = calculateMetabotChangedFields(current, update);
+                const chainProfile = buildMetabotChainProfile(current, update);
+                const updateInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(chainProfile, calculateMetabotUpdateInfoFields(current, update));
                 let chainWrites = [];
-                if (changedFields.length > 0 && !current.globalMetaId) {
+                if ((changedFields.length > 0 || updateInfoTargets.length > 0) && !current.globalMetaId) {
                     return (0, commandResult_1.commandFailed)('chain_identity_missing', 'This MetaBot has no chained identity yet, so profile changes cannot be saved safely.');
                 }
-                if (changedFields.length > 0) {
+                if (updateInfoTargets.length > 0) {
                     try {
                         const profileSigner = createSignerForProfileHome(current.homeDir);
-                        chainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, buildMetabotChainProfile(current, update), changedFields);
+                        chainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, updateInfoTargets, {
+                            deferPublishStateWrite: true,
+                        });
                     }
                     catch (error) {
                         return (0, commandResult_1.commandFailed)('chain_sync_failed', `Chain sync failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -12645,6 +12713,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 try {
                     const profile = await (0, metabotProfileManager_1.updateMetabotProfile)(normalizedSystemHomeDir, slug, update);
+                    await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, updateInfoTargets, chainWrites);
                     return (0, commandResult_1.commandSuccess)({ profile, chainWrites });
                 }
                 catch (error) {
@@ -12666,19 +12735,24 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 try {
                     const network = await resolveFileUploadNetworkForHome(body.network, current.homeDir);
-                    const data = decodeRequiredBase64(body.base64);
                     const profileSigner = createSignerForProfileHome(current.homeDir);
-                    const result = await (0, uploadFile_1.uploadFileBufferToChain)({
-                        fileName: normalizeText(body.fileName) || 'homepage-upload.bin',
+                    const result = await (0, uploadLargeFile_1.uploadLargeFileToChain)({
+                        filePath: normalizeText(body.filePath),
                         contentType: typeof body.contentType === 'string' ? body.contentType : undefined,
                         network,
-                        data,
                         signer: profileSigner,
+                        largeUploader: providerLargeFileUploader,
+                        verify: body.verify === true,
                     });
                     return (0, commandResult_1.commandSuccess)(result);
                 }
                 catch (error) {
-                    return (0, commandResult_1.commandFailed)('homepage_upload_failed', error instanceof Error ? error.message : String(error));
+                    const message = error instanceof Error ? error.message : String(error);
+                    const code = error instanceof Error ? error.code : undefined;
+                    if (code === 'large_file_upload_unavailable') {
+                        return (0, commandResult_1.commandFailed)('large_file_upload_unavailable', message);
+                    }
+                    return (0, commandResult_1.commandFailed)('homepage_upload_failed', message);
                 }
             },
             getWallet: async ({ slug }) => {

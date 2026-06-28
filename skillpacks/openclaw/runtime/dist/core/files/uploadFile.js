@@ -55,9 +55,9 @@ async function uploadFileBufferToChain(input) {
     }
     const chainWrite = await input.signer.writePin({
         path: '/file',
-        payload: input.data.toString('base64'),
+        payload: input.data,
         contentType,
-        encoding: 'base64',
+        encoding: 'binary',
         network,
     });
     return {
@@ -89,9 +89,9 @@ async function uploadLocalFileToChain(input) {
     }
     const chainWrite = await input.signer.writePin({
         path: '/file',
-        payload: buffer.toString('base64'),
+        payload: buffer,
         contentType,
-        encoding: 'base64',
+        encoding: 'binary',
         network,
     });
     return {

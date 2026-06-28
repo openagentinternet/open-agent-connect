@@ -95,6 +95,20 @@ async function readJsonBody(req) {
     }
     return parsed;
 }
+async function readRawBody(req, maxBytes) {
+    const chunks = [];
+    let totalBytes = 0;
+    const normalizedMaxBytes = Math.max(0, Math.floor(maxBytes));
+    for await (const chunk of req) {
+        const bufferChunk = node_buffer_1.Buffer.isBuffer(chunk) ? chunk : node_buffer_1.Buffer.from(String(chunk));
+        totalBytes += bufferChunk.byteLength;
+        if (totalBytes > normalizedMaxBytes) {
+            throw new Error(`Request body is too large. Maximum size is ${normalizedMaxBytes} bytes.`);
+        }
+        chunks.push(bufferChunk);
+    }
+    return chunks.length ? node_buffer_1.Buffer.concat(chunks, totalBytes) : node_buffer_1.Buffer.alloc(0);
+}
 function createHttpServer(handlers = {}) {
     return node_http_1.default.createServer(async (req, res) => {
         const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -104,6 +118,7 @@ function createHttpServer(handlers = {}) {
             url: requestUrl,
             handlers,
             readJsonBody: () => readJsonBody(req),
+            readRawBody: (maxBytes) => readRawBody(req, maxBytes),
             sendJson: (status, payload) => sendJson(res, status, payload),
             sendHtml: (status, html) => sendHtml(res, status, html),
             sendText: (status, body, contentType) => sendText(res, status, body, contentType),

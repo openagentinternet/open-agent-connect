@@ -15,7 +15,11 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
+var HOMEPAGE_UPLOAD_MAX_BYTES=2*1024*1024;
 var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
+var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
+var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
 var WALLET_CHAINS=[
   {chain:'btc',label:'BTC',displayUnit:'BTC',inputUnit:'BTC'},
   {chain:'mvc',label:'MVC',displayUnit:'SPACE',inputUnit:'SPACE'},
@@ -40,6 +44,15 @@ function viewSelectedBotPage(){var profile=selectedProfile();if(!profile||!profi
 function viewSelectedConversations(){var profile=selectedProfile();if(!profile||!profile.globalMetaId){showToast(uiText('bot.selectBotBeforeConversations','Select a Bot before opening conversations'));return}window.location.href='/ui/conversations?local='+encodeURIComponent(profile.globalMetaId)}
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
+function publicPersonaValues(profile){
+  var role=String(profile&&profile.role||'').trim();
+  var soul=String(profile&&profile.soul||'').trim();
+  var goal=String(profile&&profile.goal||'').trim();
+  if(role===LEGACY_DEFAULT_ROLE&&soul===LEGACY_DEFAULT_SOUL&&goal===LEGACY_DEFAULT_GOAL){
+    return {role:'',soul:'',goal:''};
+  }
+  return {role:role,soul:soul,goal:goal};
+}
 function clearSelectedProfileDrafts(){
   state._pendingAvatar=undefined;
   state._pendingHomepage=undefined;
@@ -109,23 +122,25 @@ function metaAppPinFromHomepage(homepage){
   if(!homepage||!/^metaapp:\/\//i.test(homepage.uri))return '';
   return homepage.uri.slice('metaapp://'.length);
 }
-function dataUrlBase64(value){
-  var text=String(value||'');
-  var marker=';base64,';
-  var index=text.indexOf(marker);
-  return index>=0?text.slice(index+marker.length):'';
-}
-function readFileAsDataUrl(file){
-  return new Promise(function(resolve,reject){
-    var reader=new FileReader();
-    reader.onload=function(){resolve(String(reader.result||''))};
-    reader.onerror=function(){reject(new Error(uiText('bot.uploadFailed','Upload failed')))};
-    reader.readAsDataURL(file);
-  });
-}
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
-function providerRuntime(provider){return state.runtimes.find(function(r){return r.provider===provider})||null}
+function runtimeHealthRank(runtime){var health=runtime&&runtime.health;return health==='healthy'?3:(health==='detected'?2:(health==='unavailable'?0:1))}
+function runtimeActivityMs(runtime){
+  var values=[runtime&&runtime.healthCheckedAt,runtime&&runtime.lastSeenAt,runtime&&runtime.updatedAt,runtime&&runtime.createdAt];
+  return values.reduce(function(max,value){var parsed=Date.parse(value||'');return Number.isFinite(parsed)?Math.max(max,parsed):max},0);
+}
+function compareProviderRuntime(left,right){
+  var healthDelta=runtimeHealthRank(right)-runtimeHealthRank(left);
+  if(healthDelta)return healthDelta;
+  var activityDelta=runtimeActivityMs(right)-runtimeActivityMs(left);
+  if(activityDelta)return activityDelta;
+  return String(left&&left.id||'').localeCompare(String(right&&right.id||''));
+}
+function providerRuntime(provider){
+  var rows=state.runtimes.filter(function(r){return r.provider===provider});
+  rows.sort(compareProviderRuntime);
+  return rows[0]||null;
+}
 function providerLogoPath(provider){var rt=providerRuntime(provider);return rt&&rt.logoPath?rt.logoPath:'/ui/assets/platforms/generic.svg'}
 function providerIconMarkup(provider){
   var key=String(provider||'generic');
@@ -358,7 +373,7 @@ function loadChatSkillOptions(slug){
   state.chatSkillOptionsStatusBySlug[slug]='loading';
   state.chatSkillOptionsErrorBySlug[slug]='';
   rerenderChatSkillsTabForLoad(slug);
-  return api('/api/services/skills?from='+encodeURIComponent(slug)).then(function(r){
+  return api('/api/services/skills?from='+encodeURIComponent(slug)+'&allowFallbackRuntime=true').then(function(r){
     var data=r&&r.data?r.data:r;
     var skills=Array.isArray(data&&data.skills)?data.skills:[];
     var rows=[];var seen={};
@@ -487,10 +502,11 @@ function currentPublicIdentityDraft(profile){
 function currentBehaviorDraft(profile){
   var panel=behaviorPanelForProfile(profile);
   if(!panel)return null;
+  var persona=publicPersonaValues(profile);
   return {
-    role:fieldValueWithin(panel,'role',profile.role||''),
-    soul:fieldValueWithin(panel,'soul',profile.soul||''),
-    goal:fieldValueWithin(panel,'goal',profile.goal||''),
+    role:fieldValueWithin(panel,'role',persona.role),
+    soul:fieldValueWithin(panel,'soul',persona.soul),
+    goal:fieldValueWithin(panel,'goal',persona.goal),
   };
 }
 
@@ -648,14 +664,15 @@ function renderBehaviorTab(options){
   if(!profile){root.innerHTML='';return}
   state.originalProfile=profile;
   var draft=options.preserveDraft===false?null:currentBehaviorDraft(profile);
-  var roleValue=draft?draft.role:(profile.role||'');
-  var soulValue=draft?draft.soul:(profile.soul||'');
-  var goalValue=draft?draft.goal:(profile.goal||'');
+  var persona=publicPersonaValues(profile);
+  var roleValue=draft?draft.role:persona.role;
+  var soulValue=draft?draft.soul:persona.soul;
+  var goalValue=draft?draft.goal:persona.goal;
   root.innerHTML='<div class="info-edit-panel" data-behavior-profile-slug="'+esc(profile.slug)+'">'+
     '<div class="info-form-grid">'+
-      '<div class="field field-full"><label for="bot-role">'+esc(uiText('bot.role','Role'))+'</label><textarea id="bot-role" data-field="role">'+esc(roleValue)+'</textarea></div>'+
-      '<div class="field field-full"><label for="bot-soul">'+esc(uiText('bot.soul','Soul'))+'</label><textarea id="bot-soul" data-field="soul">'+esc(soulValue)+'</textarea></div>'+
-      '<div class="field field-full"><label for="bot-goal">'+esc(uiText('bot.goal','Goal'))+'</label><textarea id="bot-goal" data-field="goal">'+esc(goalValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-role">'+esc(uiText('bot.role','Role'))+'</label><textarea id="bot-role" data-field="role" placeholder="'+esc(uiText('bot.rolePlaceholder','Describe what this Bot should be or specialize in.'))+'">'+esc(roleValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-soul">'+esc(uiText('bot.soul','Soul'))+'</label><textarea id="bot-soul" data-field="soul" placeholder="'+esc(uiText('bot.soulPlaceholder','Describe the tone, style, and boundaries.'))+'">'+esc(soulValue)+'</textarea></div>'+
+      '<div class="field field-full"><label for="bot-goal">'+esc(uiText('bot.goal','Goal'))+'</label><textarea id="bot-goal" data-field="goal" placeholder="'+esc(uiText('bot.goalPlaceholder','Describe what this Bot should help users accomplish.'))+'">'+esc(goalValue)+'</textarea></div>'+
     '</div>'+
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-behavior">'+esc(uiText('bot.saveBehavior','Save Behavior'))+'</button><span class="save-status" data-save-status></span></div></div>';
   var panel=behaviorPanelForProfile(profile);
@@ -769,19 +786,16 @@ function handleHomepageUploadFile(file){
   var profile=selectedProfile();if(!profile||!profile.slug||!file)return Promise.resolve();
   var profileSlug=profile.slug;
   var uploadToken=++state._homepageUploadToken;
+  if(Number(file.size||0)>HOMEPAGE_UPLOAD_MAX_BYTES){
+    renderHomepageDraftStatus(uiText('bot.homepageUploadTooLarge','Homepage file must be 2 MiB or smaller.'),'error');
+    return Promise.resolve();
+  }
   state._homepageUploadWorking=true;
   renderHomepageDraftStatus(uiText('bot.homepageUploading','Uploading homepage file...'),'saving');
-  return readFileAsDataUrl(file).then(function(dataUrl){
-    var base64=dataUrlBase64(dataUrl);
-    return api('/api/bot/profiles/'+encodeURIComponent(profileSlug)+'/homepage/upload',{
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      body:JSON.stringify({
-        fileName:file.name||'homepage-upload',
-        contentType:file.type||'application/octet-stream',
-        base64:base64,
-      }),
-    });
+  return api('/api/bot/profiles/'+encodeURIComponent(profileSlug)+'/homepage/upload?fileName='+encodeURIComponent(file.name||'homepage-upload.bin'),{
+    method:'POST',
+    headers:{'content-type':file.type||'application/octet-stream'},
+    body:file,
   }).then(function(r){
     if(state.selectedSlug!==profileSlug||state._homepageUploadToken!==uploadToken)return;
     var data=r.data||{};
@@ -1200,9 +1214,10 @@ function saveBehavior(){
   var panel=behaviorPanelForProfile(profile);if(!panel)return;
   var status=queryWithin(panel,'[data-save-status]');var btn=queryWithin(panel,'[data-act="save-behavior"]');
   var payload={};
-  changedValue(payload,'role',fieldValueWithin(panel,'role',''),profile.role||'');
-  changedValue(payload,'soul',fieldValueWithin(panel,'soul',''),profile.soul||'');
-  changedValue(payload,'goal',fieldValueWithin(panel,'goal',''),profile.goal||'');
+  var persona=publicPersonaValues(profile);
+  changedValue(payload,'role',fieldValueWithin(panel,'role',''),persona.role);
+  changedValue(payload,'soul',fieldValueWithin(panel,'soul',''),persona.soul);
+  changedValue(payload,'goal',fieldValueWithin(panel,'goal',''),persona.goal);
   if(!Object.keys(payload).length){if(status){status.textContent=uiText('bot.noChanges','No changes');status.className='save-status'}return}
   if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
   if(btn)btn.disabled=true;
