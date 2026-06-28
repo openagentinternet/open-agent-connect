@@ -123,7 +123,7 @@ Build one JSON object for `/protocols/loom-task`:
   },
   "deadline": 1778896800000,
   "tags": ["frontend", "bugfix"],
-  "attachments": ["metafile://pinid"]
+  "attachments": ["metafile://requirements-pin.md"]
 }
 ```
 

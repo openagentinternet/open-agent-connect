@@ -55,7 +55,7 @@ Open a MetaApp when the pinId is already known:
 Open a MetaFile when the pinId is already known:
 
 ```bash
-{{METABOT_CLI}} browser open --uri metafile://<pinId>
+{{METABOT_CLI}} browser open --uri metafile://<pinId>.png
 ```
 
 ## Expectations
@@ -72,7 +72,7 @@ Open a MetaFile when the pinId is already known:
 - `browser open`
 - `browser open --uri metaid://<globalMetaId>`
 - `browser open --uri metaapp://<pinId>`
-- `browser open --uri metafile://<pinId>`
+- `browser open --uri metafile://<pinId>.png`
 
 ## Out of Scope
 

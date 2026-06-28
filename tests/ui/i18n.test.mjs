@@ -115,8 +115,8 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
   assert.equal(translate('zh-CN', 'bot.homepageMetafile'), 'MetaFile');
   assert.equal(translate('en', 'bot.homepageMetaApp'), 'MetaApp');
   assert.equal(translate('zh-CN', 'bot.homepageMetaApp'), 'MetaApp');
-  assert.equal(translate('en', 'bot.homepageMetafileNote'), 'Upload a local file up to 50 MiB and save it as metafile://<pinId>.');
-  assert.equal(translate('zh-CN', 'bot.homepageMetafileNote'), '上传不超过 50 MiB 的本地文件，并保存为 metafile://<pinId>。');
+  assert.equal(translate('en', 'bot.homepageMetafileNote'), 'Upload a local file up to 50 MiB and save it as metafile://<pinId>.<ext>.');
+  assert.equal(translate('zh-CN', 'bot.homepageMetafileNote'), '上传不超过 50 MiB 的本地文件，并保存为 metafile://<pinId>.<ext>。');
   assert.equal(translate('en', 'bot.homepageMetaAppHelp'), 'Use the metabot-homepage-guide skill and metabot-metaapp-publish skill to create a unique Bot Page, package and publish it on-chain through the MetaApp protocol, then paste the MetaApp pin ID here.');
   assert.equal(translate('zh-CN', 'bot.homepageMetaAppHelp'), '请先使用 metabot-homepage-guide 技能和 metabot-metaapp-publish 技能制作一个独一无二的 Bot Page，并以 MetaApp 协议封装上链，然后将 MetaApp pin ID 复制到这里。');
   assert.equal(translate('en', 'bot.homepageMetaAppHelpLabel'), 'How to get a MetaApp pin ID');

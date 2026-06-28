@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Signer } from '../signing/signer';
+import { extensionFromContentType, safeMetafileExtension } from './metafileUri';
 
 const MIME_MAP: Record<string, string> = {
   '.png': 'image/png',
@@ -39,6 +40,10 @@ export function inferUploadContentType(filePath: string): string {
   return MIME_MAP[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
 }
 
+function inferMetafileExtension(fileExtension: string, contentType: string): string {
+  return extensionFromContentType(contentType) ?? safeMetafileExtension(fileExtension) ?? '';
+}
+
 export interface UploadLocalFileToChainResult {
   pinId: string;
   txids: string[];
@@ -63,8 +68,8 @@ export async function uploadFileBufferToChain(input: {
   signer: Signer;
 }): Promise<UploadFileBufferToChainResult> {
   const fileName = path.basename(normalizeText(input.fileName) || 'upload.bin');
-  const extension = path.extname(fileName).toLowerCase();
   const contentType = normalizeText(input.contentType) || inferUploadContentType(fileName);
+  const extension = inferMetafileExtension(path.extname(fileName).toLowerCase(), contentType);
   const network = normalizeText(input.network) || 'mvc';
   if (network.toLowerCase() === 'doge') {
     throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');
@@ -109,8 +114,8 @@ export async function uploadLocalFileToChain(input: {
 
   const resolvedPath = path.resolve(filePath);
   const buffer = await fs.readFile(resolvedPath);
-  const extension = path.extname(resolvedPath).toLowerCase();
   const contentType = normalizeText(input.contentType) || inferUploadContentType(resolvedPath);
+  const extension = inferMetafileExtension(path.extname(resolvedPath).toLowerCase(), contentType);
   const network = normalizeText(input.network) || 'mvc';
   if (network.toLowerCase() === 'doge') {
     throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');

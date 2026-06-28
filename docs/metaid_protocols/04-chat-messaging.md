@@ -39,7 +39,7 @@
 ```json5
 {
   "groupId": "{Group_ID}",
-  "attachment": "metafile://{pinId.jpg}",
+  "attachment": "metafile://{pinId}.jpg",
   "fileType": "png/jpg/gif",
   "nickName": "User nickname",
   "timestamp": 1234567890000,

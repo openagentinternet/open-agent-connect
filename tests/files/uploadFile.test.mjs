@@ -7,6 +7,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const {
+  uploadFileBufferToChain,
   uploadLocalFileToChain,
   inferUploadContentType,
 } = require('../../dist/core/files/uploadFile.js');
@@ -64,6 +65,61 @@ test('uploadLocalFileToChain reads the local file, writes /file to chain, and re
     metafileUri: 'metafile://file-pin-1.png',
     globalMetaId: 'gm-local-alice',
   });
+});
+
+test('uploadLocalFileToChain appends a content type extension when the file name has none', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-file-upload-mime-'));
+  const filePath = path.join(tempDir, 'homepage');
+  await writeFile(filePath, Buffer.from('<!doctype html>'));
+
+  const result = await uploadLocalFileToChain({
+    filePath,
+    contentType: 'text/html',
+    signer: {
+      writePin: async (input) => ({
+        pinId: 'html-pin-1',
+        txids: ['html-tx-1'],
+        totalCost: 99,
+        network: 'mvc',
+        operation: 'create',
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: 'gm-local-alice',
+        mvcAddress: '1alice',
+      }),
+    },
+  });
+
+  assert.equal(result.extension, '.html');
+  assert.equal(result.contentType, 'text/html');
+  assert.equal(result.metafileUri, 'metafile://html-pin-1.html');
+});
+
+test('uploadFileBufferToChain appends a content type extension when the file name has none', async () => {
+  const result = await uploadFileBufferToChain({
+    fileName: 'avatar',
+    data: Buffer.from('png bytes'),
+    contentType: 'image/png',
+    signer: {
+      writePin: async (input) => ({
+        pinId: 'buffer-pin-1',
+        txids: ['buffer-tx-1'],
+        totalCost: 100,
+        network: 'mvc',
+        operation: 'create',
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: 'gm-local-alice',
+        mvcAddress: '1alice',
+      }),
+    },
+  });
+
+  assert.equal(result.extension, '.png');
+  assert.equal(result.contentType, 'image/png');
+  assert.equal(result.metafileUri, 'metafile://buffer-pin-1.png');
 });
 
 test('uploadLocalFileToChain rejects DOGE file uploads before writing to chain', async () => {

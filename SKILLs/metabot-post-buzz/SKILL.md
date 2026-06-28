@@ -77,7 +77,7 @@ When the human explicitly asks to post on BTC, DOGE, or OPCAT, pass the matching
 ## Required Semantics
 
 - Use `/protocols/simplebuzz` as outer MetaWeb path.
-- If attachments are present, upload each file first through shared `file upload` flow so payload can reference `metafile://...` URIs. DOGE is supported for the final buzz write, but `file upload` itself does not support DOGE.
+- If attachments are present, upload each file first through shared `file upload` flow so payload can reference extension-bearing `metafile://...` URIs when the file type is known. DOGE is supported for the final buzz write, but `file upload` itself does not support DOGE.
 - Keep final buzz payload machine-first and stop on runtime errors instead of inventing post result.
 - If human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`), pass `--chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies.
 - If the successful result includes `localUiUrl`, surface it back to the human as the local Buzz view link (for example, a clickable "view in local Buzz" link) instead of inventing another localhost URL.

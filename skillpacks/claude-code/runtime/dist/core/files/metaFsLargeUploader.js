@@ -8,6 +8,7 @@ const mvcPendingUtxos_1 = require("../chain/mvcPendingUtxos");
 const utxoBroadcastErrors_1 = require("../chain/utxoBroadcastErrors");
 const spendQueue_1 = require("../wallet/spendQueue");
 const metafileUrls_1 = require("./metafileUrls");
+const metafileUri_1 = require("./metafileUri");
 const uploadLargeFile_1 = require("./uploadLargeFile");
 exports.DEFAULT_METAFS_UPLOADER_BASE_URL = 'https://file.metaid.io/metafile-uploader';
 const METALET_HOST = 'https://www.metalet.space';
@@ -219,9 +220,13 @@ function calculateTotalCost(funding) {
     const change = funding.changeUtxo?.satoshis ?? 0;
     return Math.max(0, spent - change);
 }
+function inferMetafileExtension(input) {
+    return (0, metafileUri_1.extensionFromContentType)(input.contentType) ?? (0, metafileUri_1.safeMetafileExtension)(input.extension) ?? '';
+}
 function buildResult(input) {
     const pinId = `${input.indexTxId}i0`;
     const urls = (0, metafileUrls_1.buildMetafileContentUrls)(pinId);
+    const extension = inferMetafileExtension(input.uploadInput);
     return {
         pinId,
         txids: [input.indexTxId],
@@ -231,8 +236,8 @@ function buildResult(input) {
         fileName: input.uploadInput.fileName,
         contentType: input.uploadInput.contentType,
         bytes: input.uploadInput.bytes,
-        extension: input.uploadInput.extension,
-        metafileUri: `metafile://${pinId}${normalizeText(input.uploadInput.extension)}`,
+        extension,
+        metafileUri: `metafile://${pinId}${extension}`,
         previewUrl: urls.previewUrl,
         downloadUrl: urls.downloadUrl,
         globalMetaId: input.globalMetaId,

@@ -58,7 +58,7 @@ const BASE_SKILL_REGISTRY = {
                 'metabot browser open',
                 'metabot browser open --uri metaid://idq1example',
                 'metabot browser open --uri metaapp://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
-                'metabot browser open --uri metafile://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
+                'metabot browser open --uri metafile://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0.png',
             ],
             chainRead: false,
             chainWrite: false,

@@ -10,7 +10,7 @@ There are exactly **three selection modes**:
 | Mode | What it means | On-chain `/info/homepage` payload |
 |---|---|---|
 | **Default** | Use the platform's built-in template (no custom homepage). | empty (cleared) |
-| **Metafile** | Render a single published file (HTML/PNG/…) referenced by `metafile://`. | `{ uri: "metafile://…", renderer: "auto", contentType: "…" }` |
+| **Metafile** | Render a single published file (HTML/PNG/…) referenced by `metafile://`. | `{ uri: "metafile://….html", renderer: "auto", contentType: "text/html" }` |
 | **MetaApp** | Render a published MetaApp (interactive app bundle) referenced by `metaapp://`. | `{ uri: "metaapp://…", renderer: "metaapp", contentType: "application/vnd.metaapp" }` |
 
 ---
@@ -30,7 +30,7 @@ The homepage is a small JSON object persisted locally and mirrored on-chain:
 Fields:
 
 - **`uri`** *(required, string)* — Homepage resource URI. Must start with one of:
-  - `metafile://<pinId>` or `metafile://<pinId>.<ext>` — a file published on-chain (the Metafile protocol). The pin ID is returned by the file-publish step.
+  - `metafile://<pinId>.<ext>` — a file published on-chain (the Metafile protocol). `metafile://<pinId>` is also protocol-valid when the extension is unknown, but official integrations should preserve or add the extension when the content type is known.
   - `metaapp://<metaAppPinId>` — a published MetaApp bundle (the MetaApp protocol).
   - Must not contain whitespace.
 - **`renderer`** *(string)* — Rendering hint.
@@ -68,7 +68,7 @@ metaid create /info/homepage 0 1.0 application/json <payload>
 Write the homepage object JSON as the payload:
 
 ```
-payload = {"uri":"metafile://abc123…","renderer":"auto","contentType":"text/html"}
+payload = {"uri":"metafile://abc123….html","renderer":"auto","contentType":"text/html"}
 ```
 
 Example MetaApp:
@@ -112,13 +112,13 @@ The owner uploads a local file (e.g. an `index.html`), it is published on-chain 
 
 ```json
 {
-  "uri": "metafile://3a9f…pinId",
+  "uri": "metafile://3a9f…pinId.html",
   "renderer": "auto",
   "contentType": "text/html"
 }
 ```
 
-- The `metafile://` URI is `metafile://<pinId>` optionally followed by `.<ext>`.
+- The `metafile://` URI is preferably `metafile://<pinId>.<ext>` when `contentType` is known. The bare `metafile://<pinId>` form remains valid for unknown types.
 - `renderer` is `auto` — the reader renders the file according to its content type (render HTML, display an image, etc.).
 - `contentType` should match the uploaded file's MIME type.
 
@@ -165,7 +165,7 @@ Mirror the selected homepage locally so the platform can show the current select
 ## 6. Minimal checklist for the integrating platform
 
 - [ ] Expose a homepage source selector with three options: **Default / Metafile / MetaApp**.
-- [ ] For **Metafile**: upload the file, publish it on-chain, capture the returned `pinId`, build `metafile://<pinId>` and store/publish the homepage object with `renderer: "auto"`.
+- [ ] For **Metafile**: upload the file, publish it on-chain, capture the returned `pinId`, build `metafile://<pinId>.<ext>` when the content type or file name is known, and store/publish the homepage object with `renderer: "auto"`.
 - [ ] For **MetaApp**: accept a MetaApp pin ID input, build `metaapp://<pinId>`, store/publish with `renderer: "metaapp"`, `contentType: "application/vnd.metaapp"`.
 - [ ] For **Default**: clear the local homepage object and publish an **empty** `/info/homepage` payload.
 - [ ] Always publish `/info/homepage` as `metaid create /info/homepage 0 1.0 application/json <payload>`.

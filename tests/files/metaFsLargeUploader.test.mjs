@@ -309,6 +309,32 @@ test('createMetaFsLargeUploader performs successful chunked MVC upload in reques
   __clearPendingMvcUtxosForTests();
 });
 
+test('createMetaFsLargeUploader appends a content type extension when upload input has no extension', async () => {
+  __clearPendingMvcUtxosForTests();
+  const { filePath, buffer } = await tempFile('homepage', '<!doctype html>');
+  const { fetchFn } = createFetchHarness();
+  const { buildFunding } = createFundingHarness();
+  const uploader = createMetaFsLargeUploader({
+    fetchFn,
+    buildFunding,
+    sleep: async () => {},
+  });
+
+  const result = await uploader.upload({
+    filePath,
+    fileName: 'homepage',
+    contentType: 'text/html',
+    bytes: buffer.length,
+    extension: '',
+    network: 'mvc',
+    signer: fakeSigner(),
+  });
+
+  assert.equal(result.extension, '.html');
+  assert.equal(result.metafileUri, 'metafile://index-tx-1i0.html');
+  __clearPendingMvcUtxosForTests();
+});
+
 test('createMetaFsLargeUploader uses the smaller local or server size cap', async () => {
   const { filePath, buffer } = await tempFile('too-large.bin', '123456');
 

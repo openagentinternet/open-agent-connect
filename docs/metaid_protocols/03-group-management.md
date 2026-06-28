@@ -17,7 +17,7 @@
   "communityId": "{Community_ID}",
   "groupName": "MetaID developer group",
   "groupNote": "Group announcement text...",
-  "groupIcon": "metafile://{pinid}",
+  "groupIcon": "metafile://{pinid}.png",
   /** Message type: 0 for plaintext, 1 for encrypted AES. */
   "groupType": "0",
   "status": "1",
@@ -69,4 +69,4 @@ These protocols share similar structures and manage member permissions. Their co
 - **SimpleGroupRemoveUser** (`/protocols/simplegroupremoveuser`) - Remove a user from a group:
   `{"removeMetaid": "{MetaID}", "groupId": "{ID}", "reason": "Policy violation", "timestamp": "0"}`
 - **SimpleGroupChannel** (`/protocols/simplegroupchannel`) - Create a group channel:
-  `{"groupId": "{ID}", "channelId": "{ID}", "channelName": "News channel", "channelIcon": "metafile://pinid", "channelNote": "Announcement", "channelType": 1}`
+  `{"groupId": "{ID}", "channelId": "{ID}", "channelName": "News channel", "channelIcon": "metafile://pinid.png", "channelNote": "Announcement", "channelType": 1}`

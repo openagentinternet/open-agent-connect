@@ -5,6 +5,7 @@ import { isRetryableUtxoFundingError } from '../chain/utxoBroadcastErrors';
 import type { ChainUtxo } from '../chain/adapters/types';
 import { withWalletSpendQueue, resolveWalletSpendQueueKey } from '../wallet/spendQueue';
 import { buildMetafileContentUrls } from './metafileUrls';
+import { extensionFromContentType, safeMetafileExtension } from './metafileUri';
 import { LARGE_UPLOAD_MAX_BYTES, type ProductionLargeFileUploader, type UploadLargeFileResult } from './uploadLargeFile';
 
 export const DEFAULT_METAFS_UPLOADER_BASE_URL = 'https://file.metaid.io/metafile-uploader';
@@ -346,6 +347,10 @@ function calculateTotalCost(funding: Awaited<ReturnType<typeof buildMvcLargeUplo
   return Math.max(0, spent - change);
 }
 
+function inferMetafileExtension(input: LargeUploaderInput): string {
+  return extensionFromContentType(input.contentType) ?? safeMetafileExtension(input.extension) ?? '';
+}
+
 function buildResult(input: {
   uploadInput: LargeUploaderInput;
   indexTxId: string;
@@ -354,6 +359,7 @@ function buildResult(input: {
 }): Omit<UploadLargeFileResult, 'verification'> {
   const pinId = `${input.indexTxId}i0`;
   const urls = buildMetafileContentUrls(pinId);
+  const extension = inferMetafileExtension(input.uploadInput);
   return {
     pinId,
     txids: [input.indexTxId],
@@ -363,8 +369,8 @@ function buildResult(input: {
     fileName: input.uploadInput.fileName,
     contentType: input.uploadInput.contentType,
     bytes: input.uploadInput.bytes,
-    extension: input.uploadInput.extension,
-    metafileUri: `metafile://${pinId}${normalizeText(input.uploadInput.extension)}`,
+    extension,
+    metafileUri: `metafile://${pinId}${extension}`,
     previewUrl: urls.previewUrl,
     downloadUrl: urls.downloadUrl,
     globalMetaId: input.globalMetaId,

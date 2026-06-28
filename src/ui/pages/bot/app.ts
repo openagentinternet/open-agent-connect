@@ -73,8 +73,9 @@ function normalizeHomepage(value){
   var uri=String(value.uri||'').trim();
   if(!uri)return null;
   var renderer=String(value.renderer||'').trim()||(/^metaapp:\/\//i.test(uri)?'metaapp':'auto');
-  var contentType=String(value.contentType||'').trim()||(renderer==='metaapp'?'application/vnd.metaapp':'application/octet-stream');
-  return {uri:uri,renderer:renderer,contentType:contentType};
+	  var contentType=String(value.contentType||'').trim()||(renderer==='metaapp'?'application/vnd.metaapp':'application/octet-stream');
+	  uri=appendMetafileUriExtension(uri,contentTypeExtensionSuffix(contentType));
+	  return {uri:uri,renderer:renderer,contentType:contentType};
 }
 function sameHomepage(left,right){
   left=normalizeHomepage(left);right=normalizeHomepage(right);
@@ -96,8 +97,23 @@ function fileExtensionSuffix(fileName){
   var index=base.lastIndexOf('.');
   if(index<=0||index>=base.length-1)return'';
   var suffix=base.slice(index).toLowerCase();
-  return /^\.[a-z0-9]{1,16}$/.test(suffix)?suffix:'';
-}
+	  return /^\.[a-z0-9][a-z0-9+-]{0,31}$/.test(suffix)?suffix:'';
+	}
+	function contentTypeExtensionSuffix(contentType){
+	  var type=String(contentType||'').trim().toLowerCase().split(';')[0];
+	  var map={'application/json':'.json','application/zip':'.zip','image/gif':'.gif','image/jpeg':'.jpg','image/jpg':'.jpg','image/png':'.png','image/svg+xml':'.svg','image/webp':'.webp','text/html':'.html','text/markdown':'.md','text/plain':'.txt'};
+	  return map[type]||'';
+	}
+	function appendMetafileUriExtension(uri,extension){
+	  uri=String(uri||'').trim();
+	  extension=String(extension||'').trim().toLowerCase();
+	  if(!uri||!extension||!/^metafile:\/\//i.test(uri))return uri;
+	  var match=uri.match(/^metafile:\/\/([^?#]+)([?#].*)?$/i);
+	  if(!match)return uri;
+	  var pinPath=match[1]||'';
+	  if(!pinPath||pinPath.indexOf('/')>=0||pinPath.indexOf('\\')>=0||/\.[^.?/#\\]+$/.test(pinPath))return uri;
+	  return 'metafile://'+pinPath+extension+(match[2]||'');
+	}
 function homepageSourceValue(profile){
   if(state._homepageSource)return state._homepageSource;
   return homepageSourceFromHomepage(homepageDraft(profile));
@@ -299,7 +315,7 @@ function homepagePanelMarkup(profile){
   if(source==='default'){
     control='<div class="homepage-final-uri">'+esc(uiText('bot.homepageDefaultActive','Default Bot Page renderer is active.'))+viewLink+'</div>';
   }else if(source==='metafile'){
-    control='<div class="homepage-source-note">'+esc(uiText('bot.homepageMetafileNote','Upload a local file and save it as metafile://<pinId>.'))+'</div>'+
+	    control='<div class="homepage-source-note">'+esc(uiText('bot.homepageMetafileNote','Upload a local file and save it as metafile://<pinId>.<ext>.'))+'</div>'+
       '<div class="homepage-control-row"><button type="button" class="btn btn-sm" data-act="upload-homepage"'+(state._homepageUploadWorking?' disabled':'')+'>'+esc(uiText('bot.upload','Upload'))+'</button><input type="file" data-homepage-file-input hidden /></div>';
   }else{
     control='<div class="homepage-source-note">'+esc(uiText('bot.homepageMetaAppNote','Paste a MetaApp pin ID and save it as metaapp://<pinId>.'))+'</div>'+
@@ -806,8 +822,10 @@ function handleHomepageUploadFile(file){
   }).then(function(r){
     if(state.selectedSlug!==profileSlug||state._homepageUploadToken!==uploadToken)return;
     var data=r.data||{};
-    var uri=String(data.metafileUri||data.uri||'').trim();
-    if(!uri&&data.pinId)uri='metafile://'+data.pinId+fileExtensionSuffix(file.name);
+	    var uri=String(data.metafileUri||data.uri||'').trim();
+	    var ext=fileExtensionSuffix(file.name)||contentTypeExtensionSuffix(data.contentType||file.type);
+	    if(!uri&&data.pinId)uri='metafile://'+data.pinId;
+	    uri=appendMetafileUriExtension(uri,ext);
     if(!uri)throw new Error(uiText('bot.uploadFailed','Upload failed'));
     state._pendingHomepage={
       uri:uri,

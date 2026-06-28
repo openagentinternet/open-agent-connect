@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runLoomClaimAndStartWorkflow = runLoomClaimAndStartWorkflow;
 const commandResult_1 = require("../contracts/commandResult");
+const metafileUri_1 = require("../files/metafileUri");
 const chainRequest_1 = require("./chainRequest");
 const githubWorkflow_1 = require("./githubWorkflow");
 const protocols_1 = require("./protocols");
@@ -567,9 +568,12 @@ async function runLoomClaimAndStartWorkflow(input) {
             network: processLogFileChain,
             contentType: 'text/markdown',
         });
-        const processLogUri = nonEmptyString(uploadedLog.metafileUri)
+        const rawProcessLogUri = nonEmptyString(uploadedLog.metafileUri)
             ?? nonEmptyString(uploadedLog.uri)
-            ?? (nonEmptyString(uploadedLog.pinId) ? `metafile://${uploadedLog.pinId}` : undefined);
+            ?? (nonEmptyString(uploadedLog.pinId) ? (0, metafileUri_1.metafileUriFromPinId)(uploadedLog.pinId, '.md') : undefined);
+        const processLogUri = rawProcessLogUri
+            ? (0, metafileUri_1.appendMetafileUriExtension)(rawProcessLogUri, '.md')
+            : undefined;
         if (!processLogUri) {
             throw new Error('Loom process log upload did not return a metafile URI.');
         }

@@ -767,7 +767,7 @@ test('default metaapp.publish uploads large runtime archive through the large up
   assert.equal(writeCalls[0].operation, 'create');
   assert.equal(writeCalls[0].network, 'mvc');
   const payload = JSON.parse(writeCalls[0].payload);
-  assert.equal(payload.content, 'metafile://chunked-metaapp-publish-pin');
+  assert.equal(payload.content, 'metafile://chunked-metaapp-publish-pin.zip');
 });
 
 test('default metaapp.update uploads large runtime archive through the large upload boundary', async (t) => {
@@ -852,7 +852,7 @@ test('default metaapp.update uploads large runtime archive through the large upl
   assert.equal(writeCalls[0].operation, 'modify');
   assert.equal(writeCalls[0].network, 'mvc');
   const payload = JSON.parse(writeCalls[0].payload);
-  assert.equal(payload.content, 'metafile://chunked-metaapp-update-pin');
+  assert.equal(payload.content, 'metafile://chunked-metaapp-update-pin.zip');
 });
 
 test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {

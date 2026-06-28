@@ -106,7 +106,7 @@ The example above shows the tuple fields and an empty payload position; it is no
 }
 ```
 
-- **`uri`**: Homepage resource URI. Supported values include `metaapp://<pin-id>` for a MetaApp homepage and `metafile://<pin-id>[.<ext>]` for a published file resource.
+- **`uri`**: Homepage resource URI. Supported values include `metaapp://<pin-id>` for a MetaApp homepage and `metafile://<pin-id>.<ext>` for a published file resource when the type is known. Bare `metafile://<pin-id>` remains valid when the extension is unknown.
 - **`renderer`**: Rendering hint. Use `metaapp` for MetaApp homepages and `auto` when the reader should infer the renderer from the URI or content type.
 - **`contentType`**: MIME type for the target resource, such as `application/vnd.metaapp`, `text/html`, or `image/png`.
 - **Semantics**: Readers should resolve the latest URI and render it as the Bot homepage. If the latest payload is empty, readers should fall back to their default Bot homepage.

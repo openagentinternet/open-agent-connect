@@ -90,18 +90,18 @@ When image asset size is unknown, use `file upload-large --from <bot-slug> --fil
 If the human explicitly chooses BTC or OPCAT for file uploads, pass `--chain btc` or `--chain opcat`. DOGE is not supported for file upload. If the human provides an `http://` or `https://` image URL, do not put that URL in the MetaApp JSON; ask to fetch and upload it as a file or leave the field empty.
 
 5. Assemble the final MetaApp JSON.
-   Use `metafile://...` references returned by upload commands. `content` is the browser runtime artifact ZIP and must be non-empty. `code` is optional source-code material and may be empty, an explicit source archive `metafile://...`, or the runtime ZIP only when compatibility requires mirroring.
+   Use `metafile://...` references returned by upload commands and preserve their file extensions when present. `content` is the browser runtime artifact ZIP and must be non-empty. `code` is optional source-code material and may be empty, an explicit source archive `metafile://...`, or the runtime ZIP only when compatibility requires mirroring. Bare `metafile://<pinId>` remains protocol-valid when the extension is unknown, but official MetaApp writes should use `metafile://<pinId>.<ext>` whenever the file type is known.
 
 ```json
 {
   "title": "My MetaApp",
   "appName": "my-metaapp",
-  "coverImg": "metafile://cover-pin",
+  "coverImg": "metafile://cover-pin.png",
   "intro": "Short human-facing description.",
   "runtime": "browser",
   "version": "1.0.0",
   "indexFile": "index.html",
-  "content": "metafile://zip-pin",
+  "content": "metafile://zip-pin.zip",
   "contentType": "application/zip",
   "code": "",
   "codeType": "application/zip",

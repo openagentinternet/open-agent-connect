@@ -640,14 +640,14 @@ function main() {
       payload: {
         zipPath: staleZipPath,
         uploadZip: false,
-        pinUri: 'metafile://old-upload',
+        pinUri: 'metafile://old-upload.zip',
       },
     },
     { SKILLS_ROOT: skillsRoot }
   );
   assert.equal(seedOldZipUriRes.code, 0, seedOldZipUriRes.stderr || seedOldZipUriRes.stdout);
   assert.equal(seedOldZipUriRes.json?.success, true);
-  assert.equal(seedOldZipUriRes.json?.data?.zipUri, 'metafile://old-upload');
+  assert.equal(seedOldZipUriRes.json?.data?.zipUri, 'metafile://old-upload.zip');
   assert.ok(seedOldZipUriRes.json?.data?.zipSha256);
 
   const localZipPath = path.join(generatedConfig.workspaceRoot, 'manifests', 'local-test-wiki.zip');
@@ -671,7 +671,7 @@ function main() {
   assert.equal(snapshotRes.json?.data?.publishMode?.zipUriSource, 'payload');
   assert.match(snapshotRes.json?.data?.snapshot?.zipUri || '', /^file:\/\//);
   assert.equal(snapshotRes.json?.data?.snapshot?.zipUri, `file://${localZipPath.replace(/\\/g, '/')}`);
-  assert.notEqual(snapshotRes.json?.data?.snapshot?.zipUri, 'metafile://old-upload');
+  assert.notEqual(snapshotRes.json?.data?.snapshot?.zipUri, 'metafile://old-upload.zip');
 
   const publishRes = runNode(
     runtimeScript,
@@ -694,14 +694,14 @@ function main() {
     publishRes.json?.data?.steps?.publish_snapshot?.snapshot?.zipUri,
     `file://${localZipPath.replace(/\\/g, '/')}`
   );
-  assert.notEqual(publishRes.json?.data?.steps?.publish_snapshot?.snapshot?.zipUri, 'metafile://old-upload');
+  assert.notEqual(publishRes.json?.data?.steps?.publish_snapshot?.snapshot?.zipUri, 'metafile://old-upload.zip');
 
   const directExternalSnapshotRes = runNode(
     runtimeScript,
     {
       action: 'publish_snapshot',
       payload: {
-        pinUri: 'metafile://direct-new-upload',
+        pinUri: 'metafile://direct-new-upload.zip',
         snapshotOnChain: false,
       },
     },
@@ -709,7 +709,7 @@ function main() {
   );
   assert.equal(directExternalSnapshotRes.code, 0, directExternalSnapshotRes.stderr || directExternalSnapshotRes.stdout);
   assert.equal(directExternalSnapshotRes.json?.success, true);
-  assert.equal(directExternalSnapshotRes.json?.data?.snapshot?.zipUri, 'metafile://direct-new-upload');
+  assert.equal(directExternalSnapshotRes.json?.data?.snapshot?.zipUri, 'metafile://direct-new-upload.zip');
   assert.equal(directExternalSnapshotRes.json?.data?.snapshot?.zipSha256, '');
 
   const missingZipSnapshotRes = runNode(
@@ -732,7 +732,7 @@ function main() {
       action: 'publish_all',
       payload: {
         uploadZip: false,
-        pinUri: 'metafile://new-upload',
+        pinUri: 'metafile://new-upload.zip',
         snapshotOnChain: false,
       },
     },
@@ -741,9 +741,9 @@ function main() {
   assert.equal(externalPublishRes.code, 0, externalPublishRes.stderr || externalPublishRes.stdout);
   assert.equal(externalPublishRes.json?.success, true);
   assert.equal(externalPublishRes.json?.data?.steps?.bundle_zip, undefined);
-  assert.equal(externalPublishRes.json?.data?.steps?.publish_zip?.zipUri, 'metafile://new-upload');
+  assert.equal(externalPublishRes.json?.data?.steps?.publish_zip?.zipUri, 'metafile://new-upload.zip');
   assert.equal(externalPublishRes.json?.data?.steps?.publish_zip?.zipSha256, '');
-  assert.equal(externalPublishRes.json?.data?.steps?.publish_snapshot?.snapshot?.zipUri, 'metafile://new-upload');
+  assert.equal(externalPublishRes.json?.data?.steps?.publish_snapshot?.snapshot?.zipUri, 'metafile://new-upload.zip');
   assert.equal(externalPublishRes.json?.data?.steps?.publish_snapshot?.snapshot?.zipSha256, '');
 
   process.stdout.write('metabot-create-wiki self-test passed\n');

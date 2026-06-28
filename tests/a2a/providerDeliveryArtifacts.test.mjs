@@ -1727,6 +1727,29 @@ test('upload result does not trust unsafe extension metadata without a URI exten
   assert.equal(result.responseText.includes('../secret'), false);
 });
 
+test('upload result appends safe extension metadata when returned URI has no extension', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png');
+
+  const result = await resolveProviderDeliveryArtifacts({
+    responseText: 'Chart ready.\noutputFile: ./out/chart.png',
+    outputType: 'image',
+    executionCwd: workspace,
+    signer: fakeSigner(),
+    uploadLargeFile: async (input) => ({
+      ...fakeUploadResult(input),
+      metafileUri: 'metafile://uploaded-chart',
+      extension: '.png',
+    }),
+    verifyAvailability: okVerifier(),
+  });
+
+  assert.equal(result.artifacts.length, 1);
+  assert.equal(result.artifacts[0].uri, 'metafile://uploaded-chart.png');
+  assert.equal(result.artifacts[0].kind, 'image');
+  assert.equal(result.artifacts[0].extension, '.png');
+});
+
 test('upload result fails closed when returned pinId and metafile URI disagree', async () => {
   const workspace = await tempWorkspace();
   await writeWorkspaceFile(workspace, 'out/chart.png');

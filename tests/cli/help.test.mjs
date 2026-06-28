@@ -1015,7 +1015,7 @@ test('runCli documents browser open json help with uri examples and browser url 
   assert.match(uriFlag.description, /optional Browser resource URI/i);
   assert.ok(output.examples.includes('metabot browser open --uri metaid://<globalMetaId>'));
   assert.ok(output.examples.includes('metabot browser open --uri metaapp://<pinId>'));
-  assert.ok(output.examples.includes('metabot browser open --uri metafile://<pinId>'));
+  assert.ok(output.examples.includes('metabot browser open --uri metafile://<pinId>.png'));
   assert.ok(output.successFields.includes('localUiUrl'));
 });
 

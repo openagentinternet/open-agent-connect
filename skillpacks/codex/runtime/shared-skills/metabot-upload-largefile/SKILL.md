@@ -123,7 +123,7 @@ If verification was requested and the runtime reports verification unavailable, 
 - Forward `--from <bot-slug>` when the workflow already has a selected actor.
 - Pass `--chain mvc`, `--chain btc`, or `--chain opcat` only when explicitly requested by the human.
 - Stop on CLI or runtime errors and report the structured error details.
-- Return the resulting `metafile://...` URI and URLs for later references.
+- Return the resulting `metafile://...` URI and URLs for later references. When the runtime can determine the file extension, prefer the extension-bearing form such as `metafile://<pinid>.zip`; bare `metafile://<pinid>` remains acceptable only when the type is unknown.
 
 ## In Scope
 

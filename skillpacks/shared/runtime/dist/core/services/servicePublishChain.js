@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildServicePublishChainWrite = buildServicePublishChainWrite;
 exports.uploadServiceIconDataUrl = uploadServiceIconDataUrl;
 exports.publishServiceToChain = publishServiceToChain;
+const metafileUri_1 = require("../files/metafileUri");
 const publishService_1 = require("./publishService");
 const SKILL_SERVICE_PROTOCOL_PATH = '/protocols/skill-service';
 const PENDING_SERVICE_PIN_ID = 'pending-skill-service-pin';
@@ -64,7 +65,7 @@ async function uploadServiceIconDataUrl(input) {
         network,
     });
     return {
-        serviceIconUri: `metafile://${normalizeText(upload.pinId)}`,
+        serviceIconUri: (0, metafileUri_1.metafileUriFromPinId)(upload.pinId, (0, metafileUri_1.extensionFromContentType)(parsed.mimeType)),
         upload,
     };
 }

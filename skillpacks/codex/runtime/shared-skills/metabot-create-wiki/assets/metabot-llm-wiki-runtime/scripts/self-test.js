@@ -107,13 +107,13 @@ function main() {
     payload: {
       ...base.payload,
       uploadZip: false,
-      zipUri: 'metafile://selftest-zip-pin',
+      zipUri: 'metafile://selftest-zip-pin.zip',
       snapshotOnChain: false,
     },
   });
   assert.equal(publishAllReuseUriRes.code, 0, publishAllReuseUriRes.stdout || publishAllReuseUriRes.stderr);
   assert.equal(publishAllReuseUriRes.json?.success, true);
-  assert.equal(publishAllReuseUriRes.json?.data?.steps?.publish_zip?.zipUri, 'metafile://selftest-zip-pin');
+  assert.equal(publishAllReuseUriRes.json?.data?.steps?.publish_zip?.zipUri, 'metafile://selftest-zip-pin.zip');
   assert.ok(publishAllReuseUriRes.json?.data?.steps?.publish_snapshot?.snapshotPath);
 
   const publishZipInvalidRes = runSkill({

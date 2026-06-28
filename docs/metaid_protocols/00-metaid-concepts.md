@@ -64,9 +64,9 @@ A typical file PIN has this structure:
 
 **How to reference files**
 
-When another protocol payload needs to reference an on-chain file, such as a profile image, a buzz attachment, or a MetaApp icon, it must use the URI format `metafile://<pinId>`.
+When another protocol payload needs to reference an on-chain file, such as a profile image, a buzz attachment, or a MetaApp icon, it should use the URI format `metafile://<pinId>.<ext>` when the file type is known. The protocol also accepts the bare form `metafile://<pinId>` when the extension cannot be determined.
 
-Some interfaces may return values like `metafile://<pinId>+<.ext>`. The `<.ext>` suffix represents the file type, such as `.jpg` for `image/jpg`, and helps frontends render the file quickly.
+The `<.ext>` suffix represents the file type, such as `.jpg` for `image/jpeg`, and helps frontends render the file quickly without fetching the `/file` PIN first to inspect `contentType`.
 
 - Incorrect assumption: `metafile://` is not a path in the 7-tuple.
-- Correct usage: it is a string value inside a JSON payload. For example: `"coverImg": "metafile://9f995b4f978b...i0"`.
+- Correct usage: it is a string value inside a JSON payload. For example: `"coverImg": "metafile://9f995b4f978b...i0.jpg"`.

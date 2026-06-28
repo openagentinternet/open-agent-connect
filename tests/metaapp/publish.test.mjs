@@ -20,7 +20,7 @@ const UPDATE_TARGET_PIN = `${'b'.repeat(64)}i0`;
 const UPDATE_PIN = `${'c'.repeat(64)}i0`;
 const BUZZ_PIN = `${'d'.repeat(64)}i0`;
 const COMMENT_PIN = `${'e'.repeat(64)}i0`;
-const PREVIEW_ARTIFACT_URI = 'metafile://<uploaded-metaapp-zip-pin>';
+const PREVIEW_ARTIFACT_URI = 'metafile://<uploaded-metaapp-zip-pin>.zip';
 
 async function makeProject(prefix, manifest = {}) {
   const projectDir = await mkdtemp(path.join(os.tmpdir(), `metabot-metaapp-publish-${prefix}-`));
@@ -201,7 +201,7 @@ test('publishMetaApp uploads the ZIP before writing create payload and upserting
   assert.equal(payload.title, 'Publish App');
   assert.equal(payload.appName, 'publish-app');
   assert.equal(payload.code, '');
-  assert.equal(payload.content, 'metafile://upload-pin');
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
   assert.equal(payload.contentType, 'application/zip');
   assert.equal(payload.codeType, 'application/zip');
   assert.match(payload.contentHash, /^[a-f0-9]{64}$/);
@@ -209,10 +209,10 @@ test('publishMetaApp uploads the ZIP before writing create payload and upserting
   assert.equal(JSON.stringify(payload).includes(projectDir), false);
   assert.equal(deps.upserts[0].pinId, CREATE_PIN);
   assert.equal(deps.upserts[0].code, '');
-  assert.equal(deps.upserts[0].content, 'metafile://upload-pin');
+  assert.equal(deps.upserts[0].content, 'metafile://upload-pin.zip');
 });
 
-test('publishMetaApp derives a suffixless metafile URI when upload returns only pinId', async () => {
+test('publishMetaApp derives a zip metafile URI when upload returns only pinId', async () => {
   const projectDir = await makeProject('publish-pinid-only');
   const deps = createDeps({
     async uploadFile(input) {
@@ -232,7 +232,7 @@ test('publishMetaApp derives a suffixless metafile URI when upload returns only 
   await publishMetaApp({ projectDir, confirm: true }, deps);
 
   const payload = writePayload(deps.calls);
-  assert.equal(payload.content, 'metafile://upload-pin');
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
 });
 
 test('publishMetaApp defaults static project code to the runtime artifact', async () => {
@@ -242,8 +242,8 @@ test('publishMetaApp defaults static project code to the runtime artifact', asyn
   await publishMetaApp({ projectDir, confirm: true }, deps);
 
   const payload = writePayload(deps.calls);
-  assert.equal(payload.content, 'metafile://upload-pin');
-  assert.equal(payload.code, 'metafile://upload-pin');
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
+  assert.equal(payload.code, 'metafile://upload-pin.zip');
 });
 
 test('publishMetaApp preserves explicit source code while content points at runtime', async () => {
@@ -255,8 +255,8 @@ test('publishMetaApp preserves explicit source code while content points at runt
   await publishMetaApp({ projectDir, confirm: true }, deps);
 
   const payload = writePayload(deps.calls);
-  assert.equal(payload.content, 'metafile://upload-pin');
-  assert.equal(payload.code, 'metafile://source-code');
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
+  assert.equal(payload.code, 'metafile://source-code.zip');
 });
 
 test('publishMetaApp can mirror runtime into code when compatibility mirror is requested', async () => {
@@ -266,8 +266,8 @@ test('publishMetaApp can mirror runtime into code when compatibility mirror is r
   await publishMetaApp({ projectDir, confirm: true, compatibilityMirrorContent: true }, deps);
 
   const payload = writePayload(deps.calls);
-  assert.equal(payload.code, 'metafile://upload-pin');
-  assert.equal(payload.content, 'metafile://upload-pin');
+  assert.equal(payload.code, 'metafile://upload-pin.zip');
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
 });
 
 test('updateMetaApp writes modify path and inherits previous fields before local overrides', async () => {
@@ -328,7 +328,7 @@ test('updateMetaApp writes modify path and inherits previous fields before local
   assert.deepEqual(payload.tags, ['local']);
   assert.equal(payload.runtime, 'browser');
   assert.equal(payload.indexFile, 'previous.html');
-  assert.equal(payload.content, 'metafile://upload-pin');
+  assert.equal(payload.content, 'metafile://upload-pin.zip');
   assert.equal(payload.code, '');
 });
 
