@@ -99,6 +99,19 @@ test('buildMvcLargeUploadFunding skips excluded outpoints and returns normalized
   assert.deepEqual(result.spentUtxos, [utxo({ txId: SECOND_TXID, outputIndex: 2, satoshis: 100_000 })]);
 });
 
+test('buildMvcLargeUploadFunding honors uppercase excluded outpoints', async () => {
+  const result = await buildFixtureFunding({
+    utxos: [
+      utxo({ txId: FIRST_TXID, outputIndex: 0, satoshis: 100_000 }),
+      utxo({ txId: SECOND_TXID, outputIndex: 1, satoshis: 100_000 }),
+    ],
+    excludedOutpoints: new Set([`${FIRST_TXID.toUpperCase()}:0`]),
+  });
+
+  assert.deepEqual(result.spentOutpoints, [`${SECOND_TXID}:1`]);
+  assert.deepEqual(result.spentUtxos, [utxo({ txId: SECOND_TXID, outputIndex: 1, satoshis: 100_000 })]);
+});
+
 test('buildMvcLargeUploadFunding ignores UTXOs that do not belong to the funding address', async () => {
   const result = await buildFixtureFunding({
     utxos: [

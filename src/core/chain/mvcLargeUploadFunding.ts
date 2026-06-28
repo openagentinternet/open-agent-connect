@@ -69,6 +69,20 @@ function isUsableFundingUtxo(utxo: ChainUtxo, fundingAddress: string): boolean {
   );
 }
 
+function normalizeExcludedOutpoints(excludedOutpoints?: ReadonlySet<string>): Set<string> {
+  const normalized = new Set<string>();
+  for (const outpoint of excludedOutpoints ?? []) {
+    const value = normalizeText(outpoint);
+    const separatorIndex = value.lastIndexOf(':');
+    if (separatorIndex <= 0) continue;
+    const txId = value.slice(0, separatorIndex);
+    const outputIndex = Number(value.slice(separatorIndex + 1));
+    if (!Number.isInteger(outputIndex) || outputIndex < 0) continue;
+    normalized.add(getMvcUtxoOutpointKey({ txId, outputIndex }));
+  }
+  return normalized;
+}
+
 function selectFundingUtxos(input: {
   utxos: ChainUtxo[];
   outputAmount: number;
@@ -155,7 +169,7 @@ export async function buildMvcLargeUploadFunding(input: {
     outputAmount,
     feeRate,
     fundingAddress: address,
-    excludedOutpoints: input.excludedOutpoints ?? new Set(),
+    excludedOutpoints: normalizeExcludedOutpoints(input.excludedOutpoints),
   });
 
   const privateKey = signingIdentity.privateKey;
