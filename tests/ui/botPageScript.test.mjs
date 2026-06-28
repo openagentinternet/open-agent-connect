@@ -1982,7 +1982,51 @@ test('bot page homepage upload ignores stale completion after selection changes'
   assert.equal(renderCount, 0);
 });
 
-test('bot page homepage upload rejects files above 2 MiB before fetch', async () => {
+test('bot page homepage upload allows files above the direct upload boundary', async () => {
+  const fields = {
+    '[data-homepage-status]': field(),
+    '[data-act="upload-homepage"]': field(),
+  };
+  let uploadRequest = null;
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: (url, options) => {
+      uploadRequest = { url, body: options.body, headers: options.headers };
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            pinId: 'large-file-pin-123',
+            metafileUri: 'metafile://large-file-pin-123.html',
+            contentType: 'text/html',
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice' }];
+  context.renderPublicIdentityTab = () => {};
+
+  const selectedFile = {
+    name: 'large.html',
+    type: 'text/html',
+    size: (2 * 1024 * 1024) + 1,
+  };
+  await context.handleHomepageUploadFile(selectedFile);
+
+  assert.equal(uploadRequest.url, '/api/bot/profiles/alice/homepage/upload?fileName=large.html');
+  assert.equal(uploadRequest.body, selectedFile);
+  assert.equal(uploadRequest.headers['content-type'], 'text/html');
+  assert.equal(context.state._pendingHomepage.uri, 'metafile://large-file-pin-123.html');
+  assert.equal(context.state._pendingHomepage.renderer, 'auto');
+  assert.equal(context.state._pendingHomepage.contentType, 'text/html');
+});
+
+test('bot page homepage upload rejects files above 50 MiB before fetch', async () => {
   const fields = {
     '[data-homepage-status]': field(),
     '[data-act="upload-homepage"]': field(),
@@ -2006,11 +2050,11 @@ test('bot page homepage upload rejects files above 2 MiB before fetch', async ()
   await context.handleHomepageUploadFile({
     name: 'too-large.html',
     type: 'text/html',
-    size: (2 * 1024 * 1024) + 1,
+    size: (50 * 1024 * 1024) + 1,
   });
 
   assert.equal(fetchCalls, 0);
-  assert.match(fields['[data-homepage-status]'].textContent, /2 MiB/);
+  assert.match(fields['[data-homepage-status]'].textContent, /50 MiB/);
 });
 
 test('bot page loadProfiles clears pending homepage when selected Bot changes', async () => {

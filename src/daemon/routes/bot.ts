@@ -1,12 +1,13 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { commandFailed } from '../../core/contracts/commandResult';
-import { DIRECT_UPLOAD_MAX_BYTES } from '../../core/files/uploadLargeFile';
+import { LARGE_UPLOAD_MAX_BYTES } from '../../core/files/uploadLargeFile';
 import type { RouteHandler } from './types';
 
 const HOMEPAGE_UPLOAD_TEMP_PREFIX = 'oac-homepage-upload-';
 const HOMEPAGE_UPLOAD_DEFAULT_FILE_NAME = 'homepage-upload.bin';
+const HOMEPAGE_UPLOAD_MAX_LABEL = '50 MiB';
 
 function normalizeLimit(value: string | null): number {
   const parsed = value ? Number.parseInt(value, 10) : 50;
@@ -157,33 +158,18 @@ export const handleBotRoutes: RouteHandler = async (context) => {
       return true;
     }
 
-    let body: Buffer;
-    try {
-      body = await context.readRawBody(DIRECT_UPLOAD_MAX_BYTES);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/too large/iu.test(message)) {
-        context.sendJson(
-          413,
-          commandFailed('homepage_upload_too_large', `Homepage file must be ${DIRECT_UPLOAD_MAX_BYTES} bytes or smaller.`),
-        );
-        return true;
-      }
-      throw error;
-    }
-
-    if (!body.length) {
-      context.sendJson(400, commandFailed('homepage_upload_empty', 'Homepage upload requires non-empty file data.'));
-      return true;
-    }
-
     const fileName = normalizeUploadFileName(url.searchParams.get('fileName'));
     const contentType = normalizeUploadContentType(req.headers['content-type']);
     let tempDir = '';
     try {
       tempDir = await mkdtemp(path.join(os.tmpdir(), HOMEPAGE_UPLOAD_TEMP_PREFIX));
       const filePath = path.join(tempDir, fileName);
-      await writeFile(filePath, body);
+      const { bytes } = await context.streamRawBodyToFile(filePath, LARGE_UPLOAD_MAX_BYTES);
+      if (bytes === 0) {
+        context.sendJson(400, commandFailed('homepage_upload_empty', 'Homepage upload requires non-empty file data.'));
+        return true;
+      }
+
       const result = await handler({
         slug,
         filePath,
@@ -192,6 +178,16 @@ export const handleBotRoutes: RouteHandler = async (context) => {
       });
       const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
       context.sendJson(status, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/too large/iu.test(message)) {
+        context.sendJson(
+          413,
+          commandFailed('homepage_upload_too_large', `Homepage file must be ${HOMEPAGE_UPLOAD_MAX_LABEL} or smaller.`),
+        );
+        return true;
+      }
+      throw error;
     } finally {
       if (tempDir) {
         await rm(tempDir, { recursive: true, force: true });

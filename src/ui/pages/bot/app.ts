@@ -15,7 +15,7 @@ export function buildBotPageDefinition(): LocalUiPageDefinition {
 function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
-var HOMEPAGE_UPLOAD_MAX_BYTES=2*1024*1024;
+var HOMEPAGE_UPLOAD_MAX_BYTES=50*1024*1024;
 var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
@@ -787,7 +787,7 @@ function handleHomepageUploadFile(file){
   var profileSlug=profile.slug;
   var uploadToken=++state._homepageUploadToken;
   if(Number(file.size||0)>HOMEPAGE_UPLOAD_MAX_BYTES){
-    renderHomepageDraftStatus(uiText('bot.homepageUploadTooLarge','Homepage file must be 2 MiB or smaller.'),'error');
+    renderHomepageDraftStatus(uiText('bot.homepageUploadTooLarge','Homepage file must be 50 MiB or smaller.'),'error');
     return Promise.resolve();
   }
   state._homepageUploadWorking=true;
