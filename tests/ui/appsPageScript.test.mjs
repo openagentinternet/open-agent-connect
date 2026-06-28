@@ -390,6 +390,13 @@ function createAppsPageContext(options = {}) {
         const bodyPayload = fetchOptions.body ? JSON.parse(fetchOptions.body) : null;
         fetchBodies.push({ url: String(url), body: bodyPayload });
         if (String(url) === '/api/metaapp/publish' || String(url) === '/api/metaapp/update' || String(url) === '/api/metaapp/delete') {
+          if (!bodyPayload || bodyPayload.confirm !== true) {
+            return Promise.resolve(response({
+              ok: false,
+              state: 'failed',
+              message: 'confirmation required',
+            }));
+          }
           return Promise.resolve(response(options.mutationResponse ?? {
             ok: true,
             state: 'success',
@@ -584,6 +591,29 @@ test('apps page renders http cover and icon images on record cards', async () =>
   const html = context.elements['[data-apps-grid]'].innerHTML;
   assert.match(html, /class="apps-card-cover-img" src="http:\/\/cdn\.example\.test\/cover\.png"/);
   assert.match(html, /class="apps-card-icon" src="https:\/\/cdn\.example\.test\/icon\.png"/);
+});
+
+test('apps page resolves metafile card cover and icon images', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Metafile Image App',
+        appName: 'Metafile Image App',
+        iconImg: `metafile://${PIN}`,
+        coverImg: PIN,
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Metafile Image App'), 'render metafile image app');
+  const html = context.elements['[data-apps-grid]'].innerHTML;
+  assert.match(html, new RegExp(`class="apps-card-cover-img" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
+  assert.match(html, new RegExp(`class="apps-card-icon" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
 });
 
 test('apps page Bot picker renders profile avatars when available', async () => {
@@ -1045,6 +1075,7 @@ test('publish submits normalized form payload to /api/metaapp/publish', async ()
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
   assert.equal(request.from, 'alice');
+  assert.equal(request.confirm, true);
   assert.equal(request.title, 'Agent Wiki Builder');
   assert.equal(request.appName, 'Agent Wiki Builder');
   assert.equal(request.icon, `metafile://${PIN}`);
@@ -1126,6 +1157,7 @@ test('edit submits to /api/metaapp/update with target pin and changed values', a
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/update'), 'update request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/update').body;
   assert.equal(request.from, 'alice');
+  assert.equal(request.confirm, true);
   assert.equal(request.targetPinId, PIN);
   assert.equal(request.title, 'Updated Title');
   assert.equal(request.appName, 'Updated App');

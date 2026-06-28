@@ -374,7 +374,7 @@ function buildAppsPageRuntimeSource(
     if (!raw) return '';
     if (raw.toLowerCase().indexOf('metafile://') === 0) {
       const suffix = raw.slice('metafile://'.length).trim().split(/[?#]/)[0] || '';
-      return suffix ? 'metafile://' + suffix : '';
+      return suffix;
     }
     const path = pathFromUrlLike(raw);
     for (const prefix of FILE_CONTENT_PATH_PREFIXES) {
@@ -904,6 +904,7 @@ function buildAppsPageRuntimeSource(
       .filter(Boolean);
     return {
       from: state.selectedSlug,
+      confirm: true,
       appName: normalizeText(data.get('appName')),
       title: normalizeText(data.get('title')),
       prompt: normalizeText(data.get('prompt')),
