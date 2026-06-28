@@ -40,17 +40,24 @@ function readPositiveInteger(name: string, value: unknown): number {
   return numeric;
 }
 
-function buildMvcPrivateKey(mnemonic: string, path: string): unknown {
+function buildMvcSigningIdentity(mnemonic: string, path: string): {
+  privateKey: unknown;
+  address: string;
+} {
   const network = mvc.Networks.livenet;
   const addressIndex = parseAddressIndexFromPath(path);
   const mnemonicObject = mvc.Mnemonic.fromString(mnemonic);
   const hdPrivateKey = mnemonicObject.toHDPrivateKey('', network as never);
   const childPrivateKey = hdPrivateKey.deriveChild(`m/44'/10001'/0'/0/${addressIndex}`);
-  return childPrivateKey.privateKey;
+  return {
+    privateKey: childPrivateKey.privateKey,
+    address: childPrivateKey.publicKey.toAddress(network as never).toString(),
+  };
 }
 
-function isUsableFundingUtxo(utxo: ChainUtxo): boolean {
+function isUsableFundingUtxo(utxo: ChainUtxo, fundingAddress: string): boolean {
   return (
+    normalizeText(utxo.address) === fundingAddress &&
     /^[0-9a-f]{64}:\d+$/u.test(getMvcUtxoOutpointKey({
       txId: utxo.txId,
       outputIndex: utxo.outputIndex,
@@ -66,10 +73,11 @@ function selectFundingUtxos(input: {
   utxos: ChainUtxo[];
   outputAmount: number;
   feeRate: number;
+  fundingAddress: string;
   excludedOutpoints: ReadonlySet<string>;
 }): ChainUtxo[] {
   const candidates = input.utxos.filter((utxo) => {
-    if (!isUsableFundingUtxo(utxo)) return false;
+    if (!isUsableFundingUtxo(utxo, input.fundingAddress)) return false;
     const outpoint = getMvcUtxoOutpointKey({
       txId: utxo.txId,
       outputIndex: utxo.outputIndex,
@@ -126,12 +134,18 @@ export async function buildMvcLargeUploadFunding(input: {
   const feeRate = readPositiveNumber('feeRate', input.feeRate);
   const chunkPreTxFee = readPositiveInteger('chunkPreTxFee', input.chunkPreTxFee);
   const indexPreTxFee = readPositiveInteger('indexPreTxFee', input.indexPreTxFee);
-  const address = normalizeText(input.address)
-    || normalizeText(input.identity.addresses?.mvc)
-    || normalizeText(input.identity.mvcAddress);
-  if (!address) {
+  const signingIdentity = buildMvcSigningIdentity(input.identity.mnemonic, input.identity.path);
+  const derivedAddress = normalizeText(signingIdentity.address);
+  if (!derivedAddress) {
     throw new Error('MVC funding address is required for large upload funding.');
   }
+  const requestedAddress = normalizeText(input.address)
+    || normalizeText(input.identity.addresses?.mvc)
+    || normalizeText(input.identity.mvcAddress);
+  if (requestedAddress && requestedAddress !== derivedAddress) {
+    throw new Error('MVC funding address does not match derived MVC address.');
+  }
+  const address = derivedAddress;
 
   const chunkPreTxOutputAmount = chunkPreTxFee + Math.ceil((200 + 150) * feeRate);
   const indexPreTxOutputAmount = indexPreTxFee + Math.ceil((200 + 150) * feeRate);
@@ -140,10 +154,11 @@ export async function buildMvcLargeUploadFunding(input: {
     utxos: input.utxos,
     outputAmount,
     feeRate,
+    fundingAddress: address,
     excludedOutpoints: input.excludedOutpoints ?? new Set(),
   });
 
-  const privateKey = buildMvcPrivateKey(input.identity.mnemonic, input.identity.path);
+  const privateKey = signingIdentity.privateKey;
   const addressObject = new mvc.Address(address, mvc.Networks.livenet as never);
   const mergeComposer = new TxComposer();
   mergeComposer.appendP2PKHOutput({

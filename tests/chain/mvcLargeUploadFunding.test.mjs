@@ -11,6 +11,7 @@ const {
 const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const FIXTURE_PATH = "m/44'/10001'/0'/0/0";
 const FIXTURE_ADDRESS = '15Lofqw6Kpa6P8WnTYXKvmPyw3UZvvQWrB';
+const OTHER_ADDRESS = '1ARLA5cQjYsc4qUd5QgZht2apiepHmKeDi';
 const FIRST_TXID = 'a'.repeat(64);
 const SECOND_TXID = 'b'.repeat(64);
 
@@ -77,6 +78,13 @@ test('buildMvcLargeUploadFunding output amounts include MetaFS estimate fees and
   assert.equal(result.indexPreTxOutputAmount, 200 + Math.ceil((200 + 150) * 3));
 });
 
+test('buildMvcLargeUploadFunding rejects explicit address that differs from derived identity address', async () => {
+  await assert.rejects(
+    () => buildFixtureFunding({ address: OTHER_ADDRESS }),
+    /funding address.*derived MVC address/i,
+  );
+});
+
 test('buildMvcLargeUploadFunding skips excluded outpoints and returns normalized spent outpoints', async () => {
   const result = await buildFixtureFunding({
     utxos: [
@@ -89,6 +97,18 @@ test('buildMvcLargeUploadFunding skips excluded outpoints and returns normalized
 
   assert.deepEqual(result.spentOutpoints, [`${SECOND_TXID}:2`]);
   assert.deepEqual(result.spentUtxos, [utxo({ txId: SECOND_TXID, outputIndex: 2, satoshis: 100_000 })]);
+});
+
+test('buildMvcLargeUploadFunding ignores UTXOs that do not belong to the funding address', async () => {
+  const result = await buildFixtureFunding({
+    utxos: [
+      utxo({ txId: FIRST_TXID, outputIndex: 0, satoshis: 100_000, address: OTHER_ADDRESS }),
+      utxo({ txId: SECOND_TXID, outputIndex: 1, satoshis: 100_000, address: FIXTURE_ADDRESS }),
+    ],
+  });
+
+  assert.deepEqual(result.spentOutpoints, [`${SECOND_TXID}:1`]);
+  assert.deepEqual(result.spentUtxos, [utxo({ txId: SECOND_TXID, outputIndex: 1, satoshis: 100_000 })]);
 });
 
 test('buildMvcLargeUploadFunding throws a clear error for insufficient balance', async () => {
