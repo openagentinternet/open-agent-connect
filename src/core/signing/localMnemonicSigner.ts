@@ -8,51 +8,13 @@ import {
 import type { ChainAdapter } from '../chain/adapters/types';
 import type { ChainAdapterRegistry } from '../chain/adapters/types';
 import type { SecretStore } from '../secrets/secretStore';
+import { resolveWalletSpendQueueKey, withWalletSpendQueue } from '../wallet/spendQueue';
 import type { PrivateChatSignerIdentity, Signer } from './signer';
 
 const DEFAULT_BTC_WRITE_FEE_RATE = 2;
-const walletSpendQueues = new Map<string, Promise<void>>();
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-async function withWalletSpendQueue<T>(key: string, run: () => Promise<T>): Promise<T> {
-  const previous = walletSpendQueues.get(key) ?? Promise.resolve();
-  let releaseCurrent!: () => void;
-  const current = new Promise<void>((resolve) => {
-    releaseCurrent = resolve;
-  });
-  const currentChain = previous.catch(() => undefined).then(() => current);
-  walletSpendQueues.set(key, currentChain);
-
-  await previous.catch(() => undefined);
-  try {
-    return await run();
-  } finally {
-    releaseCurrent();
-    if (walletSpendQueues.get(key) === currentChain) {
-      walletSpendQueues.delete(key);
-    }
-  }
-}
-
-async function resolveWalletSpendQueueKey(input: {
-  adapter: ChainAdapter;
-  mnemonic: string;
-  path: string;
-  fallbackAddress?: string | null;
-}): Promise<string> {
-  let address = normalizeText(input.fallbackAddress);
-  try {
-    address = normalizeText(await input.adapter.deriveAddress(input.mnemonic, input.path)) || address;
-  } catch {
-    // Fall back to the derivation path so failed address derivation does not remove spend serialization.
-  }
-  return [
-    input.adapter.network,
-    address || normalizeText(input.path) || 'default',
-  ].join(':');
 }
 
 async function loadSignerIdentity(secretStore: SecretStore): Promise<DerivedIdentity> {
