@@ -85,7 +85,7 @@ For small known image assets, direct file upload remains acceptable:
 {{METABOT_CLI}} file upload --from <bot-slug> --request-file <image-upload.json>
 ```
 
-When image asset size is unknown, use `file upload-large --file <absolute-path> --content-type <mime>` instead.
+When image asset size is unknown, use `file upload-large --from <bot-slug> --file <absolute-path> --content-type <mime>` instead.
 
 If the human explicitly chooses BTC or OPCAT for file uploads, pass `--chain btc` or `--chain opcat`. DOGE is not supported for file upload. If the human provides an `http://` or `https://` image URL, do not put that URL in the MetaApp JSON; ask to fetch and upload it as a file or leave the field empty.
 
