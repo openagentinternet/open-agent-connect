@@ -127,6 +127,9 @@ function createFetchHarness(options = {}) {
     }
     if (parsed.host === 'www.metalet.space' && routePath === '/wallet-api/v4/mvc/address/utxo-list') {
       const page = utxoPages.shift() ?? [];
+      if (options.metaletEnvelopeWithCode) {
+        return jsonResponse({ code: 0, data: { list: page } });
+      }
       return jsonResponse({ data: { list: page } });
     }
     if (routePath === '/api/v1/files/chunked-upload') {
@@ -343,6 +346,36 @@ test('createMetaFsLargeUploader uses the smaller local or server size cap', asyn
     );
     assert.deepEqual(calls.map((call) => call.path), ['/api/v1/config']);
   }
+});
+
+test('createMetaFsLargeUploader parses Metalet code/data UTXO envelopes', async () => {
+  const { filePath, buffer } = await tempFile('coded-utxo.zip', 'coded-utxo-data');
+  const { fetchFn } = createFetchHarness({
+    metaletEnvelopeWithCode: true,
+    utxoPages: [[
+      { txid: FIRST_TXID, outIndex: 0, value: 10000, height: 8 },
+    ]],
+  });
+  const { buildFunding, calls: fundingCalls } = createFundingHarness();
+  const uploader = createMetaFsLargeUploader({ fetchFn, buildFunding });
+
+  await uploader.upload({
+    filePath,
+    fileName: 'coded-utxo.zip',
+    contentType: 'application/zip',
+    bytes: buffer.length,
+    extension: '.zip',
+    network: 'mvc',
+    signer: fakeSigner(),
+  });
+
+  assert.deepEqual(fundingCalls[0].utxos, [{
+    txId: FIRST_TXID,
+    outputIndex: 0,
+    satoshis: 10000,
+    address: DEFAULT_ADDRESS,
+    height: 8,
+  }]);
 });
 
 test('createMetaFsLargeUploader defaults chunk size to one MiB', async () => {

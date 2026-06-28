@@ -277,6 +277,13 @@ async function fetchMvcFundingUtxos(input: {
     const params = new URLSearchParams({ address: input.address, net: MVC_NET });
     if (flag) params.set('flag', flag);
     const json = await readJson<{
+      list?: Array<{
+        txid?: string;
+        outIndex?: number;
+        value?: number;
+        height?: number;
+        flag?: string;
+      }>;
       data?: {
         list?: Array<{
           txid?: string;
@@ -293,7 +300,7 @@ async function fetchMvcFundingUtxos(input: {
       fallbackMessage: 'Failed to fetch MVC UTXOs for large upload funding',
     });
 
-    const list = json?.data?.list ?? [];
+    const list = json?.list ?? json?.data?.list ?? [];
     if (!list.length) break;
 
     for (const utxo of list) {
