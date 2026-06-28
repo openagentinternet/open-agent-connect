@@ -100,3 +100,19 @@ test('owner write helpers reject missing confirmation before chain writes', asyn
   assert.equal(result.code, 'confirmation_required');
   assert.deepEqual(writes, []);
 });
+
+test('publishMetaAppPayload rejects chain writes without pinId after attempting one write', async () => {
+  const writes = [];
+  const { ctx } = actor({
+    writePin: async (input) => {
+      writes.push(input);
+      return { txids: ['tx'], network: input.network ?? 'mvc' };
+    },
+  });
+
+  await assert.rejects(
+    () => publishMetaAppPayload(ctx, { ...payload(), confirm: true }),
+    /MetaAPP chain write did not return pinId\./,
+  );
+  assert.equal(writes.length, 1);
+});

@@ -5,6 +5,7 @@ import {
   buildMetaAppProtocolPayload,
   buildMetaAppRevokeWrite,
 } from './appsProtocol';
+import { normalizeMetaAppPinId } from './pinId';
 import { buildMetaAppCanonicalUrl } from './share';
 
 export interface MetaAppOwnerActor {
@@ -30,6 +31,14 @@ function pinIdFromWrite(write: Record<string, unknown>): string {
   return typeof write.pinId === 'string' ? write.pinId : '';
 }
 
+function requirePinIdFromWrite(write: Record<string, unknown>): string {
+  const pinId = normalizeMetaAppPinId(write.pinId);
+  if (!pinId) {
+    throw new Error('MetaAPP chain write did not return pinId.');
+  }
+  return pinId;
+}
+
 export async function listOwnerMetaApps(
   actor: MetaAppOwnerActor,
   input: { cursor?: string; size?: number } & MetaAppOwnerListDeps,
@@ -52,7 +61,7 @@ export async function publishMetaAppPayload(
   const payload = buildMetaAppProtocolPayload(input);
   const write = buildMetaAppCreateWrite(payload);
   const chainWrite = await actor.writePin({ ...write, network: input.network });
-  const pinId = pinIdFromWrite(chainWrite);
+  const pinId = requirePinIdFromWrite(chainWrite);
   return commandSuccess({
     pinId,
     chainWrite,
@@ -71,7 +80,7 @@ export async function updateMetaAppPayload(
   const payload = buildMetaAppProtocolPayload(input);
   const write = buildMetaAppModifyWrite(targetPinId, payload);
   const chainWrite = await actor.writePin({ ...write, network: input.network });
-  const pinId = pinIdFromWrite(chainWrite);
+  const pinId = requirePinIdFromWrite(chainWrite);
   return commandSuccess({
     pinId,
     targetPinId,
