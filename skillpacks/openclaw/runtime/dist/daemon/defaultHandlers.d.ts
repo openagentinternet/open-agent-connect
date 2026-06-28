@@ -5,6 +5,7 @@ import { testLlmRuntimeReadiness } from '../core/llm/llmRuntimeDiscovery';
 import type { LlmRuntime } from '../core/llm/llmTypes';
 import type { LlmExecutor } from '../core/llm/executor';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
+import { type ProductPaymentExecutor, type ProductOrderPublisher, type ProductSimplemsgSender } from '../core/products/productPublishChain';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
@@ -113,6 +114,9 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     fetchPrivateChatHistory?: FetchPrivateHistory;
     callerReplyWaiter?: MetaWebServiceReplyWaiter;
     servicePaymentExecutor?: ServicePaymentExecutor;
+    productPaymentExecutor?: ProductPaymentExecutor;
+    productOrderPublisher?: ProductOrderPublisher;
+    productSimplemsgSender?: ProductSimplemsgSender;
     ratingFollowupRetryDelaysMs?: number[];
     a2aConversationPersister?: A2AConversationMessagePersister;
     buyerRatingReplyRunner?: ChatReplyRunner;

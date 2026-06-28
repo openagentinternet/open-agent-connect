@@ -537,6 +537,38 @@ test('runCli dispatches `metabot ui open --page loom --from` and forwards the ac
   });
 });
 
+test('runCli dispatches `metabot ui open --page products` and returns the products URL', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['ui', 'open', '--page', 'products'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.ui, [{ page: 'products' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      page: 'products',
+      localUiUrl: '/ui/products',
+    },
+  });
+});
+
+test('runCli dispatches `metabot ui open --page products --from` and returns the actor products URL', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli(['ui', 'open', '--page', 'products', '--from', 'alice'], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.ui, [{ page: 'products', from: 'alice' }]);
+  assert.deepEqual(parseLastJson(harness.stdout), {
+    ok: true,
+    state: 'success',
+    data: {
+      page: 'products',
+      localUiUrl: '/ui/products?from=alice',
+    },
+  });
+});
+
 test('runCli dispatches `metabot ui open` with actor, session, and service selectors', async () => {
   const harness = createHarness();
   const exitCode = await runCli([

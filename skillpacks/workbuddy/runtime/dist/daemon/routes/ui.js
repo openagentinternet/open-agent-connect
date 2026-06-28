@@ -9,15 +9,16 @@ const node_path_1 = __importDefault(require("node:path"));
 const app_1 = require("../../ui/pages/hub/app");
 const app_2 = require("../../ui/pages/my-services/app");
 const app_3 = require("../../ui/pages/publish/app");
-const app_4 = require("../../ui/pages/refund/app");
-const app_5 = require("../../ui/pages/trace/app");
-const app_6 = require("../../ui/pages/bot/app");
-const app_7 = require("../../ui/pages/conversations/app");
-const app_8 = require("../../ui/pages/apps/app");
-const app_9 = require("../../ui/pages/loom/app");
-const app_10 = require("../../ui/pages/metaapps/app");
-const app_11 = require("../../ui/pages/services/app");
-const app_12 = require("../../ui/pages/settings/app");
+const app_4 = require("../../ui/pages/products/app");
+const app_5 = require("../../ui/pages/refund/app");
+const app_6 = require("../../ui/pages/trace/app");
+const app_7 = require("../../ui/pages/bot/app");
+const app_8 = require("../../ui/pages/conversations/app");
+const app_9 = require("../../ui/pages/apps/app");
+const app_10 = require("../../ui/pages/loom/app");
+const app_11 = require("../../ui/pages/metaapps/app");
+const app_12 = require("../../ui/pages/services/app");
+const app_13 = require("../../ui/pages/settings/app");
 const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
 const uiMetaApps_1 = require("./uiMetaApps");
@@ -34,21 +35,23 @@ const PAGE_BUILDERS = {
     'hub': () => (0, app_1.buildHubPageDefinition)(),
     'publish': () => (0, app_3.buildPublishPageDefinition)(),
     'my-services': (i18n) => (0, app_2.buildMyServicesPageDefinition)({ i18n }),
-    'trace': () => (0, app_5.buildTracePageDefinition)(),
-    'refund': () => (0, app_4.buildRefundPageDefinition)(),
-    'bot': () => (0, app_6.buildBotPageDefinition)(),
-    'conversations': app_7.buildConversationsPageDefinition,
-    'services': app_11.buildServicesPageDefinition,
-    'apps': app_8.buildAppsPageDefinition,
-    'settings': app_12.buildSettingsPageDefinition,
-    'loom': () => (0, app_9.buildLoomPageDefinition)(),
-    'metaapps': app_10.buildMetaAppsPageDefinition,
+    'products': () => (0, app_4.buildProductsPageDefinition)(),
+    'trace': () => (0, app_6.buildTracePageDefinition)(),
+    'refund': () => (0, app_5.buildRefundPageDefinition)(),
+    'bot': () => (0, app_7.buildBotPageDefinition)(),
+    'conversations': app_8.buildConversationsPageDefinition,
+    'services': app_12.buildServicesPageDefinition,
+    'apps': app_9.buildAppsPageDefinition,
+    'settings': app_13.buildSettingsPageDefinition,
+    'loom': () => (0, app_10.buildLoomPageDefinition)(),
+    'metaapps': app_11.buildMetaAppsPageDefinition,
 };
 const NAV_ITEMS = [
     { page: 'bot', labelKey: 'nav.botPage' },
     { page: 'conversations', labelKey: 'nav.conversations' },
     { page: 'services', labelKey: 'nav.services' },
     { page: 'apps', labelKey: 'nav.apps' },
+    { page: 'products', labelKey: 'nav.products' },
 ];
 const HIDDEN_UI_PAGES = new Set();
 function escapeHtml(value) {

@@ -220,6 +220,90 @@ test('runCli rejects `metabot network bots --limit` when value is not a positive
   });
 });
 
+test('runCli forwards network products filters with query and limit', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['network', 'products', '--online', '--cached', '--query', 'mobile top-up', '--limit', '5'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listProducts: async (input) => {
+          calls.push(input);
+          return commandSuccess({ products: [], total: 0 });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ online: true, cached: true, query: 'mobile top-up', limit: 5 }]);
+});
+
+test('runCli treats network products --search as a query alias', async () => {
+  const calls = [];
+
+  const exitCode = await runCli(['network', 'products', '--search', 'gift card'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listProducts: async (input) => {
+          calls.push(input);
+          return commandSuccess({ products: [], total: 0 });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ query: 'gift card' }]);
+});
+
+test('runCli rejects `metabot network products --limit` when value is not a positive integer', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['network', 'products', '--limit', 'abc'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listProducts: async () => commandSuccess({ products: [] }),
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(JSON.parse(stdout.join('').trim()), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Unsupported --limit value: abc. Supported range: 1-100.',
+  });
+});
+
+test('runCli rejects `metabot network products --limit` when value has trailing text', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['network', 'products', '--limit', '5abc'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      network: {
+        listProducts: async () => commandSuccess({ products: [] }),
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(JSON.parse(stdout.join('').trim()), {
+    ok: false,
+    state: 'failed',
+    code: 'invalid_flag',
+    message: 'Unsupported --limit value: 5abc. Supported range: 1-100.',
+  });
+});
+
 test('runCli dispatches `metabot network sources add --base-url --label` with parsed source input', async () => {
   const stdout = [];
   const calls = [];

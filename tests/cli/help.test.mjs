@@ -23,6 +23,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+config\s+/m);
   assert.match(output, /^\s+wallet\s+/m);
   assert.match(output, /^\s+services\s+/m);
+  assert.match(output, /^\s+products\s+/m);
   assert.match(output, /^\s+provider\s+/m);
   assert.match(output, /^\s+host\s+/m);
   assert.match(output, /^\s+trace\s+/m);
@@ -53,6 +54,7 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'bot'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'products'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'browser'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'metaapp'));
@@ -202,6 +204,86 @@ test('runCli prints metaapp preview help with manifest-file override', async () 
   assert.match(output, /--manifest-file <path>/);
   assert.match(output, /manifest override file/i);
   assert.match(output, /metabot metaapp preview --project-dir \.\/dist-site --manifest-file metaapp\.json/);
+});
+
+test('runCli prints products help with publish, skills, and owned list commands', async () => {
+  const groupStdout = [];
+  const groupExitCode = await runCli(['products', '--help'], {
+    stdout: { write: (chunk) => { groupStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(groupExitCode, 0);
+  const groupOutput = groupStdout.join('');
+  assert.match(groupOutput, /^Usage:\s+metabot products <subcommand>/m);
+  assert.match(groupOutput, /skills\s+List product fulfillment skills from one seller bot primary runtime\./);
+  assert.match(groupOutput, /publish\s+Publish a product listing payload after validating seller fulfillment skills\./);
+  assert.match(groupOutput, /owned\s+List locally owned product listings\./);
+
+  const publishStdout = [];
+  const publishExitCode = await runCli(['products', 'publish', '--help'], {
+    stdout: { write: (chunk) => { publishStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(publishExitCode, 0);
+  const publishOutput = publishStdout.join('');
+  assert.match(publishOutput, /^Usage:\s+metabot products publish \[--from <bot-slug>\] --payload-file <path> \[--chain <mvc\|btc\|doge\|opcat>\]/m);
+  assert.match(publishOutput, /all fulfillment\.fulfillmentSkills must exist in the seller bot primary runtime/i);
+
+  const skillsStdout = [];
+  const skillsExitCode = await runCli(['products', 'skills', '--help'], {
+    stdout: { write: (chunk) => { skillsStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(skillsExitCode, 0);
+  assert.match(skillsStdout.join(''), /^Usage:\s+metabot products skills \[--from <bot-slug>\]/m);
+
+  const ownedStdout = [];
+  const ownedExitCode = await runCli(['products', 'owned', 'list', '--help'], {
+    stdout: { write: (chunk) => { ownedStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(ownedExitCode, 0);
+  assert.match(ownedStdout.join(''), /^Usage:\s+metabot products owned list \[--from <bot-slug> \| --all\] \[--page <n>\] \[--page-size <n>\] \[--refresh\]/m);
+});
+
+test('runCli prints network help with products directory command', async () => {
+  const groupStdout = [];
+  const groupExitCode = await runCli(['network', '--help'], {
+    stdout: { write: (chunk) => { groupStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(groupExitCode, 0);
+  const groupOutput = groupStdout.join('');
+  assert.match(groupOutput, /^Usage:\s+metabot network <subcommand>/m);
+  assert.match(groupOutput, /services\s+List MetaBot services from chain discovery and local fallbacks\./);
+  assert.match(groupOutput, /products\s+List product listings from chain discovery and local product cache\./);
+
+  const jsonStdout = [];
+  const jsonExitCode = await runCli(['network', '--help', '--json'], {
+    stdout: { write: (chunk) => { jsonStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(jsonExitCode, 0);
+  const jsonOutput = JSON.parse(jsonStdout.join(''));
+  assert.ok(jsonOutput.subcommands.some((entry) => entry.name === 'products'));
+
+  const productsStdout = [];
+  const productsExitCode = await runCli(['network', 'products', '--help'], {
+    stdout: { write: (chunk) => { productsStdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(productsExitCode, 0);
+  const productsOutput = productsStdout.join('');
+  assert.match(productsOutput, /^Usage:\s+metabot network products \[--online\] \[--cached\] \[--query <text>\] \[--search <text>\] \[--limit <n>\]/m);
+  assert.match(productsOutput, /--online\s+Return only product listings whose sellers currently appear in socket presence\./);
+  assert.match(productsOutput, /--search <text>\s+Alias for --query\./);
 });
 
 test('runCli prints loom group help for validation and export commands', async () => {
@@ -960,6 +1042,7 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.deepEqual(output.commandPath, ['ui', 'open']);
   assert.match(output.summary, /apps/);
   assert.match(output.summary, /conversations/);
+  assert.match(output.summary, /products/);
   assert.match(output.summary, /services/);
   assert.match(output.summary, /settings/);
   assert.match(output.usage, /\[--from <bot-slug>\]/);
@@ -967,11 +1050,13 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
   assert.match(output.requiredFlags[0].description, /apps/);
   assert.match(output.requiredFlags[0].description, /conversations/);
+  assert.match(output.requiredFlags[0].description, /products/);
   assert.match(output.requiredFlags[0].description, /services/);
   assert.match(output.requiredFlags[0].description, /settings/);
   assert.doesNotMatch(output.requiredFlags[0].description, /chat-viewer/);
   assert.doesNotMatch(output.summary, /metaapps/);
   assert.doesNotMatch(output.requiredFlags[0].description, /metaapps/);
+  assert.ok(output.requiredFlags.some((entry) => entry.flag === '--page' && /products/.test(entry.description)));
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--from'));
   const traceFlag = output.optionalFlags.find((entry) => entry.flag === '--trace-id');
   assert.ok(traceFlag);
@@ -986,6 +1071,8 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.ok(output.examples.includes('metabot ui open --page conversations --from alice'));
   assert.ok(output.examples.includes('metabot ui open --page settings'));
   assert.ok(output.examples.includes('metabot ui open --page apps'));
+  assert.ok(output.examples.includes('metabot ui open --page products'));
+  assert.ok(output.examples.includes('metabot ui open --page products --from alice'));
   assert.ok(!output.examples.includes('metabot ui open --page metaapps'));
 });
 

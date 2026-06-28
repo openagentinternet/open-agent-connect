@@ -13,6 +13,7 @@ const SUPPORTED_UI_PAGES = new Set([
   'chat',
   'publish',
   'my-services',
+  'products',
   'trace',
   'refund',
   'loom',

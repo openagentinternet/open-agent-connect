@@ -576,6 +576,10 @@
       .provider-field {
         position: relative;
       }
+      .chain-field {
+        position: relative;
+        z-index: 30;
+      }
       .homepage-panel {
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
@@ -713,11 +717,14 @@
         cursor: not-allowed;
         text-decoration: none;
       }
-      .provider-picker {
+      .provider-picker,
+      .chain-picker {
         position: relative;
       }
       .provider-trigger,
-      .provider-option {
+      .provider-option,
+      .chain-trigger,
+      .chain-option {
         width: 100%;
         min-height: 36px;
         display: flex;
@@ -733,12 +740,16 @@
         text-align: left;
       }
       .provider-trigger:hover,
-      .provider-option:hover {
+      .provider-option:hover,
+      .chain-trigger:hover,
+      .chain-option:hover {
         background: var(--surface2);
         border-color: var(--border2);
       }
       .provider-trigger span:nth-child(2),
-      .provider-option span:nth-child(2) {
+      .provider-option span:nth-child(2),
+      .chain-trigger span:nth-child(2),
+      .chain-option span:nth-child(2) {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -752,8 +763,8 @@
         font-size: 10px;
       }
       .provider-logo {
-        width: 18px;
-        height: 18px;
+        width: 20px;
+        height: 20px;
         border-radius: 5px;
         display: inline-flex;
         align-items: center;
@@ -762,34 +773,38 @@
         font-size: 8px;
         font-weight: 600;
         flex-shrink: 0;
-        color: #fff;
-        background: #475569;
+        color: var(--text);
+        background: #fff;
+        border: 1px solid rgba(15, 23, 42, .12);
+        overflow: hidden;
       }
-      .provider-logo svg {
-        width: 14px;
-        height: 14px;
+      .provider-logo svg,
+      .provider-logo img {
+        width: 16px;
+        height: 16px;
         display: block;
+        object-fit: contain;
       }
-      .provider-logo-codex {
-        background: #111827;
+      .chain-logo {
+        width: 20px;
+        height: 20px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        background: #fff;
+        border: 1px solid rgba(15, 23, 42, .12);
+        overflow: hidden;
       }
-      .provider-logo-claude-code {
-        background: #d97757;
+      .chain-logo img {
+        width: 16px;
+        height: 16px;
+        display: block;
+        object-fit: contain;
       }
-      .provider-logo-openclaw {
-        background: #e8453a;
-      }
-      .provider-logo-opencode {
-        background: #656363;
-      }
-      .provider-logo-cursor {
-        background: #43413c;
-      }
-      .provider-logo-kimi,
-      .provider-logo-kiro {
-        background: #7048e8;
-      }
-      .provider-menu {
+      .provider-menu,
+      .chain-menu {
         position: absolute;
         z-index: 20;
         top: calc(100% + 4px);
@@ -805,7 +820,17 @@
         background: var(--surface);
         box-shadow: 0 14px 32px rgba(15,23,42,.16);
       }
-      .provider-option[selected] {
+      .chain-menu {
+        position: static;
+        z-index: auto;
+        top: auto;
+        left: auto;
+        right: auto;
+        margin-top: 4px;
+        max-height: none;
+      }
+      .provider-option[selected],
+      .chain-option[selected] {
         border-color: var(--accent);
         background: var(--surface3);
       }
@@ -875,11 +900,15 @@
         padding: 7px 9px;
       }
       .settings-note {
+        position: relative;
+        z-index: 0;
         color: var(--muted);
         font-size: 12px;
         line-height: 1.5;
       }
       .settings-save-row {
+        position: relative;
+        z-index: 0;
         display: flex;
         align-items: center;
         gap: 12px;

@@ -47,6 +47,7 @@ export interface CliDependencies {
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     listBots?: (input: { online?: boolean; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    listProducts?: (input: { online?: boolean; cached?: boolean; query?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     listSources?: () => Awaitable<MetabotCommandResult<unknown>>;
     addSource?: (input: { baseUrl: string; label?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     removeSource?: (input: { baseUrl: string }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -96,6 +97,33 @@ export interface CliDependencies {
     }) => Awaitable<MetabotCommandResult<unknown>>;
     call?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     rate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  products?: {
+    listPublishSkills?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    buy?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    listOwned?: (input: {
+      from?: string;
+      all: boolean;
+      page: number;
+      pageSize: number;
+      refresh: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    listOrders?: (input: {
+      from?: string;
+      all: boolean;
+      role: 'buyer' | 'seller' | 'all';
+      state?: string;
+      page: number;
+      pageSize: number;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    inspectOrder?: (input: {
+      from?: string;
+      orderId?: string;
+      productOrderPinId?: string;
+      paymentTxid?: string;
+      orderTxid?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   provider?: {
     inspectOrder?: (input: { from?: string; orderId?: string; paymentTxid?: string }) => Awaitable<MetabotCommandResult<unknown>>;

@@ -18,6 +18,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-identity-manage',
   'metabot-network-manage',
   'metabot-browser-open',
+  'metabot-product-commerce',
   'metabot-call-remote-service',
   'metabot-chat-privatechat',
   'metabot-omni-reader',
@@ -47,7 +48,7 @@ const EXPECTED_TRACE_WATCH_LINE = '$HOME/.metabot/bin/metabot trace watch --from
 const EXPECTED_TRACE_GET_LINE = '$HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id trace-123';
 const EXPECTED_TRACE_UI_LINE = '$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id trace-123';
 const BARE_METABOT_COMMAND_PATTERN =
-  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution|browser|metaapp)\b/;
+  /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution|browser|metaapp|products)\b/;
 
 function escapeForRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -299,6 +300,29 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.doesNotMatch(content, /metabot metaapp publish --from <bot-slug> --project-dir/);
   assert.doesNotMatch(content, /metabot metaapp update --target-pin-id <pinid> --from <bot-slug> --project-dir/);
   assert.doesNotMatch(content, /ui open --page metaapps/);
+});
+
+test('buildAgentConnectSkillpacks includes the Product Commerce skill workflow in the shared pack', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-product-commerce'), 'utf8');
+  assert.match(content, /^name:\s*metabot-product-commerce$/m);
+  assert.match(content, /products skills --from <seller-slug> --json/);
+  assert.match(content, /products publish --from <seller-slug> --payload-file <path>/);
+  assert.match(content, /network products --online --query <text> --json/);
+  assert.match(content, /products buy --from <buyer-slug> --request-file <path> --json/);
+  assert.match(content, /products orders list --from <bot-slug> --role <buyer\|seller\|all> --json/);
+  assert.match(content, /products orders inspect --from <bot-slug>/);
+  assert.match(content, /metabot ui open --page products/);
+  assert.match(content, /explicit confirmation/i);
+  assert.match(content, /fulfillmentSkills/i);
+  assert.match(content, /productType: "virtual"/);
+  assert.match(content, /fulfillment\.fulfillmentType: "digital_delivery"/);
+  assert.match(content, /fulfillment\.deliveryEndpoint: "simplemsg"/);
+  assert.match(content, /product-order context enters the fulfillment conversation\/runtime context/i);
+  assert.match(content, /Do not invent seller identity fields/i);
+  assert.match(content, /V1 does not require `?product-review`?/i);
+  assert.doesNotMatch(content, /manual refund confirmation/i);
 });
 
 test('buildAgentConnectSkillpacks updates generated ui-open help to recommend apps instead of metaapps', async () => {

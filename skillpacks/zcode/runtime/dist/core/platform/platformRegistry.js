@@ -288,7 +288,7 @@ exports.PLATFORM_DEFINITIONS = [
     {
         id: 'codebuddy',
         displayName: 'CodeBuddy',
-        logoPath: '/ui/assets/platforms/generic.svg',
+        logoPath: '/ui/assets/platforms/codebuddy.svg',
         runtime: {
             binaryNames: ['codebuddy'],
             versionArgs: ['--version'],
@@ -311,7 +311,7 @@ exports.PLATFORM_DEFINITIONS = [
     {
         id: 'zcode',
         displayName: 'ZCode',
-        logoPath: '/ui/assets/platforms/generic.svg',
+        logoPath: '/ui/assets/platforms/zcode.svg',
         runtime: {
             binaryNames: ['zcode'],
             versionArgs: ['--version'],
@@ -335,7 +335,7 @@ exports.PLATFORM_DEFINITIONS = [
     {
         id: 'workbuddy',
         displayName: 'WorkBuddy',
-        logoPath: '/ui/assets/platforms/generic.svg',
+        logoPath: '/ui/assets/platforms/codebuddy.svg',
         runtime: {
             binaryNames: ['codebuddy', 'cbc'],
             versionArgs: ['--version'],

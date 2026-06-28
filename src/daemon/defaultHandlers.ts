@@ -95,7 +95,10 @@ import {
   type MyServicesProfileInput,
 } from '../core/services/myServices';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
-import { validateServicePublishProviderSkills } from '../core/services/servicePublishValidation';
+import {
+  validateServicePublishProviderSkill,
+  validateServicePublishProviderSkills,
+} from '../core/services/servicePublishValidation';
 import {
   buildSkillServiceOrderPayload,
   getPrimaryProviderSkill,
@@ -106,6 +109,39 @@ import {
   normalizeAllowChatSkills,
   validateAllowChatSkills,
 } from '../core/services/chatSkillPolicy';
+import {
+  executeProductPurchase,
+  publishProductListingToChain,
+  publishProductOrderToChain,
+  type ProductPaymentExecutor,
+  type ProductOrderPublisher,
+  type ProductSimplemsgSender,
+} from '../core/products/productPublishChain';
+import { listProductDirectory, type ProductDirectoryProduct } from '../core/products/productDirectory';
+import {
+  createProductServicePaymentVerifier,
+  fulfillProductOrderForSeller,
+  type ProductChainPin,
+  type ProductFulfillmentRoundInput,
+  type ProductFulfillmentRoundResult,
+} from '../core/products/productFulfillment';
+import {
+  parseProductDeliveryMessage,
+  parseProductOrderNotification,
+} from '../core/products/productOrderMessages';
+import { planProductPurchase } from '../core/products/productPurchasePlanner';
+import {
+  createProductStateStore,
+  getProductOrderRecordId,
+  type OwnedProductListingRecord,
+  type ProductBuyerOrderRecord,
+  type ProductListingLookup,
+  type ProductOrderLookup,
+  type ProductSellerOrderRecord,
+  type ProductState,
+} from '../core/products/productStateStore';
+import { validateProductListingPayload } from '../core/products/productValidation';
+import type { ProductListingPayload, ProductOrderPayload, ProductSku } from '../core/products/productTypes';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
@@ -1916,6 +1952,42 @@ async function fetchProtocolPinDetail(inputFetch: {
   };
 }
 
+async function fetchProductProtocolPinDetail(inputFetch: {
+  pinId: string;
+  chainApiBaseUrl?: string;
+}): Promise<ProductChainPin | null> {
+  const pinId = normalizeText(inputFetch.pinId);
+  if (!pinId) {
+    return null;
+  }
+  const response = await fetch(`${normalizeChainApiBaseUrl(inputFetch.chainApiBaseUrl)}/pin/${encodeURIComponent(pinId)}`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`product_pin_fetch_failed: Chain API returned HTTP ${response.status}.`);
+  }
+  const payload = await response.json() as unknown;
+  const root = readObject(payload) ?? {};
+  const data = readObject(root.data) ?? {};
+  return {
+    ...root,
+    ...data,
+    pinId: normalizeText(data.id) || normalizeText(data.pinId) || normalizeText(root.id) || pinId,
+    path: normalizeText(data.path) || normalizeText(root.path) || null,
+    content: selectProtocolPinContent(payload),
+    contentSummary: data.contentSummary ?? root.contentSummary,
+    globalMetaId: normalizeText(data.globalMetaId) || normalizeText(root.globalMetaId) || null,
+    creatorGlobalMetaId: normalizeText(data.creatorGlobalMetaId) || normalizeText(data.createGlobalMetaId) || normalizeText(root.creatorGlobalMetaId) || null,
+    createGlobalMetaId: normalizeText(data.createGlobalMetaId) || normalizeText(root.createGlobalMetaId) || null,
+    createMetaId: normalizeText(data.createMetaId) || normalizeText(root.createMetaId) || null,
+    createAddress: normalizeText(data.createAddress) || normalizeText(root.createAddress) || null,
+    creatorAddress: normalizeText(data.creatorAddress) || normalizeText(root.creatorAddress) || null,
+    mvcAddress: normalizeText(data.mvcAddress) || normalizeText(root.mvcAddress) || null,
+    timestamp: normalizeText(data.timestamp) || normalizeText(root.timestamp) || null,
+  };
+}
+
 function decimalAmountToSatoshis(value: string): number {
   const amount = normalizeText(value);
   if (!/^\d+(?:\.\d{1,8})?$/.test(amount)) {
@@ -2257,6 +2329,19 @@ function readCallRequest(rawInput: Record<string, unknown>) {
     taskContext: normalizeText(request.taskContext),
     rawRequest,
     serviceQuery,
+    spendCap: readObject(request.spendCap),
+    policyMode: request.policyMode,
+    confirmed: request.confirmed === true || rawInput.confirmed === true,
+  };
+}
+
+function readProductPurchaseRequest(rawInput: Record<string, unknown>) {
+  const request = readObject(rawInput.request) ?? rawInput;
+  return {
+    query: normalizeText(request.query ?? rawInput.query),
+    listingPinId: normalizeText(request.listingPinId),
+    skuId: normalizeText(request.skuId),
+    comment: typeof request.comment === 'string' ? request.comment : undefined,
     spendCap: readObject(request.spendCap),
     policyMode: request.policyMode,
     confirmed: request.confirmed === true || rawInput.confirmed === true,
@@ -4558,6 +4643,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
   fetchPrivateChatHistory?: FetchPrivateHistory;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   servicePaymentExecutor?: ServicePaymentExecutor;
+  productPaymentExecutor?: ProductPaymentExecutor;
+  productOrderPublisher?: ProductOrderPublisher;
+  productSimplemsgSender?: ProductSimplemsgSender;
   ratingFollowupRetryDelaysMs?: number[];
   a2aConversationPersister?: A2AConversationMessagePersister;
   buyerRatingReplyRunner?: ChatReplyRunner;
@@ -4681,6 +4769,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
     secretStore,
     adapters: adapters ?? new Map(),
   });
+  const productPaymentExecutor: ProductPaymentExecutor = input.productPaymentExecutor ?? {
+    async execute(paymentInput) {
+      return servicePaymentExecutor.execute({
+        servicePinId: paymentInput.listingPinId,
+        providerGlobalMetaId: paymentInput.sellerGlobalMetaId,
+        paymentAddress: paymentInput.toAddress,
+        amount: paymentInput.amount,
+        currency: paymentInput.currency,
+        paymentChain: paymentInput.paymentChain,
+        settlementKind: paymentInput.settlementKind,
+      });
+    },
+  };
   async function executeSellerRefundTransfer(inputRefund: RefundTransferInput) {
     const chain = normalizeText(inputRefund.paymentChain).toLowerCase();
     const adapter = adapters.get(chain as Parameters<typeof adapters.get>[0]);
@@ -9890,6 +9991,179 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  function readInboundProductOrderRequest(content: string): { productOrderPinId: string } | null {
+    const request = parseProductOrderNotification(content);
+    return request ? { productOrderPinId: request.productOrderPinId } : null;
+  }
+
+  async function runProductFulfillmentRound(
+    round: ProductFulfillmentRoundInput,
+  ): Promise<ProductFulfillmentRoundResult> {
+    if (!input.llmExecutor) {
+      return {
+        state: 'failed',
+        code: 'llm_runtime_unavailable',
+        message: 'LLM executor is not configured for product fulfillment.',
+      };
+    }
+    const metaBotSlug = path.basename(input.homeDir);
+    const runtimeResolver = createLlmRuntimeResolver({
+      runtimeStore: llmRuntimeStore,
+      bindingStore: llmBindingStore,
+      getPreferredRuntimeId: async () => null,
+    });
+    const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+    if (!resolved.runtime || resolved.runtime.health !== 'healthy') {
+      return {
+        state: 'failed',
+        code: 'llm_runtime_unavailable',
+        message: `No healthy LLM runtime is available for MetaBot ${metaBotSlug}.`,
+      };
+    }
+    const systemPrompt = [
+      'You are the seller-side product fulfillment executor for an already-paid inbound product order.',
+      'Fulfill only the product order described in the runtime context.',
+      'Use the available local fulfillment skills as needed. Do not delegate to a remote service or ask the buyer to run commands.',
+      'Return only the buyer-facing delivery result.',
+    ].join('\n');
+    const prompt = [
+      'Product fulfillment runtime context:',
+      JSON.stringify(round.context, null, 2),
+    ].join('\n');
+    const sessionTimeoutMs = 120_000;
+    const sessionId = await input.llmExecutor.execute({
+      runtimeId: resolved.runtime.id,
+      runtime: resolved.runtime,
+      prompt,
+      systemPrompt,
+      cwd: runtimeStateStore.paths.profileRoot,
+      skills: round.fulfillmentSkills,
+      metaBotSlug,
+      timeout: sessionTimeoutMs,
+    });
+    const deadline = Date.now() + sessionTimeoutMs;
+    while (Date.now() <= deadline) {
+      const session = await input.llmExecutor.getSession(sessionId);
+      if (session?.result) {
+        if (session.result.status === 'completed' && normalizeText(session.result.output)) {
+          if (resolved.bindingId) {
+            runtimeResolver.markBindingUsed(resolved.bindingId).catch(() => {});
+          }
+          return {
+            state: 'completed',
+            responseText: session.result.output,
+            metadata: {
+              runtimeId: resolved.runtime.id,
+              sessionId,
+              fulfillmentSkills: round.fulfillmentSkills,
+            },
+          };
+        }
+        return {
+          state: 'failed',
+          code: session.result.status === 'completed' ? 'product_fulfillment_empty' : 'product_fulfillment_runtime_failed',
+          message: session.result.error || 'Product fulfillment runtime did not complete successfully.',
+          metadata: {
+            runtimeId: resolved.runtime.id,
+            sessionId,
+          },
+        };
+      }
+      await sleep(500);
+    }
+    return {
+      state: 'failed',
+      code: 'product_fulfillment_timeout',
+      message: 'Product fulfillment runtime timed out.',
+      metadata: {
+        runtimeId: resolved.runtime.id,
+        sessionId,
+      },
+    };
+  }
+
+  async function handleInboundProductOrderMessage(inputMessage: {
+    fromGlobalMetaId: string;
+    content: string;
+    messagePinId?: string | null;
+    timestamp?: number | null;
+  }): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    const state = await runtimeStateStore.readState();
+    if (!state.identity) {
+      return commandFailed('identity_missing', 'Create a local MetaBot identity before fulfilling product orders.');
+    }
+    const request = readInboundProductOrderRequest(inputMessage.content);
+    if (!request) {
+      return commandSuccess({ handled: false });
+    }
+    if (!request.productOrderPinId) {
+      return commandFailed('invalid_product_order_protocol', 'Inbound product ORDER is missing productOrderPinId.');
+    }
+    const productStateStore = createProductStateStore(input.homeDir);
+    const orderTxid = normalizeOrderProtocolReference(inputMessage.messagePinId)
+      || normalizeText(inputMessage.messagePinId)
+      || request.productOrderPinId;
+    const fulfillment = await fulfillProductOrderForSeller({
+      productOrderPinId: request.productOrderPinId,
+      orderTxid,
+      buyer: {
+        globalMetaId: inputMessage.fromGlobalMetaId,
+      },
+      orderA2AMetadata: {
+        messagePinId: inputMessage.messagePinId ?? null,
+        timestamp: inputMessage.timestamp ?? null,
+        rawContent: inputMessage.content,
+      },
+      localSeller: {
+        globalMetaId: state.identity.globalMetaId,
+        name: state.identity.name,
+        mvcAddress: state.identity.mvcAddress,
+        addresses: state.identity.addresses,
+        chatPublicKey: state.identity.chatPublicKey,
+      },
+      productStateStore,
+      chainFetcher: {
+        fetchProductOrderPin: (productOrderPinId) => fetchProductProtocolPinDetail({
+          pinId: productOrderPinId,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+        }),
+        fetchProductListingPin: (listingPinId) => fetchProductProtocolPinDetail({
+          pinId: listingPinId,
+          chainApiBaseUrl: input.chainApiBaseUrl,
+        }),
+      },
+      paymentVerifier: createProductServicePaymentVerifier({ adapters }),
+      fulfillmentRunner: {
+        execute: runProductFulfillmentRound,
+      },
+      deliverySender: {
+        async send(messageInput) {
+          const peerChatPublicKey = await resolvePeerChatPublicKey(messageInput.toGlobalMetaId) ?? '';
+          if (!peerChatPublicKey) {
+            throw new Error('peer_chat_public_key_missing: Remote product buyer has no published chat public key on chain.');
+          }
+          return sendProviderOrderPrivateMessage({
+            toGlobalMetaId: messageInput.toGlobalMetaId,
+            peerChatPublicKey,
+            content: messageInput.content,
+          });
+        },
+      },
+      now: () => Date.now(),
+    });
+    if (!fulfillment.ok) {
+      return commandFailed(fulfillment.code, fulfillment.message, fulfillment.data ? { data: fulfillment.data } : undefined);
+    }
+    return commandSuccess({
+      handled: true,
+      duplicate: fulfillment.duplicate,
+      delivered: fulfillment.delivered,
+      pending: fulfillment.pending,
+      protocol: 'product-order',
+      ...fulfillment.data,
+    });
+  }
+
   async function handleInboundOrderProtocolMessage(inputMessage: {
     fromGlobalMetaId: string;
     content: string;
@@ -9915,6 +10189,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     const content = normalizeText(inputMessage.content);
     if (/^\[ORDER\]/iu.test(content)) {
+      const productOrderRequest = readInboundProductOrderRequest(content);
+      if (productOrderRequest) {
+        return handleInboundProductOrderMessage(inputMessage);
+      }
       const orderTxid = normalizeOrderProtocolReference(inputMessage.messagePinId)
         || normalizeOrderProtocolReference(extractOrderLineValue(content, 'order id'))
         || normalizeOrderProtocolReference(extractOrderLineValue(content, 'order pin id'))
@@ -9950,6 +10228,75 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
     const delivery = parseDeliveryMessage(content);
     const needsRating = parseNeedsRatingMessage(content);
+    const productDelivery = delivery ? parseProductDeliveryMessage(content) : null;
+    if (productDelivery) {
+      const productStateStore = createProductStateStore(input.homeDir);
+      const orderTxidFromDelivery = normalizeOrderProtocolReference(delivery?.orderTxid);
+      const productOrderLookup = await productStateStore.findOrderByProductOrderPinId(productDelivery.productOrderPinId);
+      const paymentLookup = await productStateStore.findOrderByPaymentTxid(productDelivery.paymentTxid);
+      const orderLookup = orderTxidFromDelivery
+        ? await productStateStore.findOrderByOrderTxid(orderTxidFromDelivery)
+        : null;
+      const existingBuyerOrder = [productOrderLookup, paymentLookup, orderLookup]
+        .find((entry) => entry?.source === 'buyerOrders')?.item ?? null;
+      const cachedOrderTxid = normalizeOrderProtocolReference(existingBuyerOrder?.orderTxid);
+      const cachedSellerGlobalMetaId = normalizeText(existingBuyerOrder?.sellerGlobalMetaId);
+      const deliveryMatchesCachedOrder = Boolean(
+        existingBuyerOrder
+        && normalizeText(existingBuyerOrder.productOrderPinId) === productDelivery.productOrderPinId
+        && normalizeText(existingBuyerOrder.listingPinId) === productDelivery.listingPinId
+        && normalizeText(existingBuyerOrder.skuId) === productDelivery.skuId
+        && normalizeText(existingBuyerOrder.paymentTxid) === productDelivery.paymentTxid
+        && (!cachedOrderTxid || !orderTxidFromDelivery || cachedOrderTxid === orderTxidFromDelivery)
+        && (!cachedSellerGlobalMetaId || cachedSellerGlobalMetaId === normalizeText(inputMessage.fromGlobalMetaId))
+      );
+      if (!deliveryMatchesCachedOrder || !existingBuyerOrder) {
+        return commandSuccess({
+          handled: false,
+          rated: false,
+          protocol: 'product-order',
+        });
+      }
+      const runtimeState = await runtimeStateStore.readState();
+      const orderTxid = orderTxidFromDelivery
+        || cachedOrderTxid
+        || null;
+      await productStateStore.upsertBuyerOrder({
+        productOrderPinId: productDelivery.productOrderPinId,
+        listingPinId: productDelivery.listingPinId,
+        skuId: productDelivery.skuId,
+        paymentTxid: productDelivery.paymentTxid,
+        orderTxid,
+        sellerGlobalMetaId: cachedSellerGlobalMetaId || inputMessage.fromGlobalMetaId,
+        buyerGlobalMetaId: normalizeText(existingBuyerOrder.buyerGlobalMetaId)
+          || normalizeText(runtimeState.identity?.globalMetaId)
+          || null,
+        traceId: normalizeText(existingBuyerOrder.traceId) || null,
+        sessionId: normalizeText(existingBuyerOrder.sessionId) || null,
+        deliverySummary: {
+          result: productDelivery.result,
+          deliveryPinId: normalizeText(inputMessage.messagePinId) || null,
+          deliveredAt: productDelivery.deliveredAt,
+        },
+        state: 'delivered',
+        localUpdatedAt: Number.isFinite(inputMessage.timestamp)
+          ? Math.trunc(Number(inputMessage.timestamp))
+          : Date.now(),
+      });
+      return commandSuccess({
+        handled: true,
+        rated: false,
+        protocol: 'product-order',
+        orderTxid,
+        productOrderPinId: productDelivery.productOrderPinId,
+        listingPinId: productDelivery.listingPinId,
+        skuId: productDelivery.skuId,
+        paymentTxid: productDelivery.paymentTxid,
+        deliveryPinId: normalizeText(inputMessage.messagePinId) || null,
+        result: productDelivery.result,
+        deliveredAt: productDelivery.deliveredAt,
+      });
+    }
     if (!delivery && !needsRating) {
       return commandSuccess({ handled: false, rated: false });
     }
@@ -10835,6 +11182,520 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
   }));
 
+  async function resolveProductActor(rawFrom: unknown): Promise<{
+    requestedSlug: string;
+    metaBotSlug: string;
+    profileHomeDir: string;
+    runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+    state: RuntimeState;
+    signer: Signer;
+  } | { failure: MetabotCommandResult<never> }> {
+    const requestedSlug = normalizeText(rawFrom);
+    const selectedProfile = requestedSlug
+      ? await getMetabotProfile(normalizedSystemHomeDir, requestedSlug)
+      : null;
+    if (requestedSlug && !selectedProfile) {
+      return {
+        failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`),
+      };
+    }
+
+    const profileHomeDir = path.resolve(selectedProfile?.homeDir ?? input.homeDir);
+    const profileRuntimeStateStore = profileHomeDir === path.resolve(input.homeDir)
+      ? runtimeStateStore
+      : createRuntimeStateStore(profileHomeDir);
+    const state = await profileRuntimeStateStore.readState();
+    if (!state.identity) {
+      return {
+        failure: commandFailed('identity_missing', 'Create a local MetaBot identity before using product seller commands.'),
+      };
+    }
+
+    return {
+      requestedSlug,
+      metaBotSlug: selectedProfile?.slug ?? path.basename(profileHomeDir),
+      profileHomeDir,
+      runtimeStateStore: profileRuntimeStateStore,
+      state,
+      signer: createSignerForProfileHome(profileHomeDir),
+    };
+  }
+
+  async function listProductPublishSkillsForActor(rawFrom: unknown): Promise<MetabotCommandResult<unknown>> {
+    const actor = await resolveProductActor(rawFrom);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+
+    const catalog = createPlatformSkillCatalog({
+      runtimeStore: actor.profileHomeDir === path.resolve(input.homeDir)
+        ? llmRuntimeStore
+        : createLlmRuntimeStore(actor.profileHomeDir),
+      bindingStore: actor.profileHomeDir === path.resolve(input.homeDir)
+        ? llmBindingStore
+        : createLlmBindingStore(actor.profileHomeDir),
+      systemHomeDir: actor.runtimeStateStore.paths.systemHomeDir,
+      projectRoot: actor.runtimeStateStore.paths.profileRoot,
+      env: process.env,
+    });
+    const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug: actor.metaBotSlug });
+    if (!result.ok) {
+      return commandFailed(result.code, result.message);
+    }
+
+    return commandSuccess({
+      metaBotSlug: actor.metaBotSlug,
+      identity: {
+        metabotId: actor.state.identity!.metabotId,
+        name: actor.state.identity!.name,
+        globalMetaId: actor.state.identity!.globalMetaId,
+        mvcAddress: actor.state.identity!.mvcAddress,
+        addresses: actor.state.identity!.addresses,
+      },
+      runtime: {
+        id: result.runtime.id,
+        provider: result.runtime.provider,
+        displayName: result.runtime.displayName,
+        health: result.runtime.health,
+        version: result.runtime.version,
+        logoPath: result.runtime.logoPath,
+      },
+      platform: result.platform,
+      skills: result.skills,
+      rootDiagnostics: result.rootDiagnostics,
+    });
+  }
+
+  async function validateProductFulfillmentSkills(inputValidation: {
+    payload: ProductListingPayload;
+    actor: Exclude<Awaited<ReturnType<typeof resolveProductActor>>, { failure: MetabotCommandResult<never> }>;
+  }): Promise<MetabotCommandResult<never> | null> {
+    const uniqueSkills = [...new Set(inputValidation.payload.fulfillment.fulfillmentSkills)];
+    for (const fulfillmentSkill of uniqueSkills) {
+      const validation = await validateServicePublishProviderSkill({
+        metaBotSlug: inputValidation.actor.metaBotSlug,
+        providerSkill: fulfillmentSkill,
+        runtimeStore: inputValidation.actor.profileHomeDir === path.resolve(input.homeDir)
+          ? llmRuntimeStore
+          : createLlmRuntimeStore(inputValidation.actor.profileHomeDir),
+        bindingStore: inputValidation.actor.profileHomeDir === path.resolve(input.homeDir)
+          ? llmBindingStore
+          : createLlmBindingStore(inputValidation.actor.profileHomeDir),
+        systemHomeDir: inputValidation.actor.runtimeStateStore.paths.systemHomeDir,
+        projectRoot: inputValidation.actor.runtimeStateStore.paths.profileRoot,
+        env: process.env,
+      });
+      if (!validation.ok) {
+        return commandFailed(validation.code, validation.message);
+      }
+    }
+    return null;
+  }
+
+  function summarizeOwnedProductListing(record: OwnedProductListingRecord) {
+    return {
+      listingPinId: record.listingPinId,
+      title: record.title,
+      name: record.name,
+      productType: record.productType,
+      skuCount: record.skuCount,
+      fulfillmentSkills: [...record.fulfillmentSkills],
+      available: record.available,
+      revokedAt: record.revokedAt,
+      localUpdatedAt: record.localUpdatedAt,
+    };
+  }
+
+  function readProductListingFromState(state: ProductState, listingPinId: string): ProductListingLookup | null {
+    const normalizedListingPinId = normalizeText(listingPinId);
+    const owned = state.ownedListings.find(item => item.listingPinId === normalizedListingPinId);
+    if (owned) {
+      return { source: 'ownedListings', item: owned };
+    }
+    const cached = state.directoryCache.find(item => item.listingPinId === normalizedListingPinId);
+    return cached ? { source: 'directoryCache', item: cached } : null;
+  }
+
+  function summarizeProductOrderRow(inputOrder: {
+    lookup: ProductOrderLookup;
+    listing: ProductListingLookup | null;
+    localIdentity: RuntimeIdentityRecord | null;
+  }) {
+    const record = inputOrder.lookup.item;
+    const listingPayload = inputOrder.listing?.item.payload ?? null;
+    const sku = listingPayload?.skus.find(item => item.skuId === record.skuId) ?? null;
+    const sellerGlobalMetaId = inputOrder.lookup.source === 'sellerOrders'
+      ? normalizeText(inputOrder.localIdentity?.globalMetaId)
+      : record.role === 'buyer'
+        ? normalizeText(record.sellerGlobalMetaId)
+        : '';
+    const buyerGlobalMetaId = inputOrder.lookup.source === 'buyerOrders'
+      ? normalizeText(inputOrder.localIdentity?.globalMetaId)
+      : normalizeText(record.buyerGlobalMetaId);
+    return {
+      orderId: getProductOrderRecordId(record),
+      role: record.role,
+      state: record.state,
+      productOrderPinId: record.productOrderPinId,
+      listingPinId: record.listingPinId,
+      skuId: record.skuId,
+      title: listingPayload?.title ?? null,
+      seller: {
+        globalMetaId: sellerGlobalMetaId || null,
+        name: inputOrder.lookup.source === 'sellerOrders'
+          ? normalizeText(inputOrder.localIdentity?.name) || null
+          : inputOrder.listing?.source === 'directoryCache'
+            ? normalizeText(inputOrder.listing.item.sellerName) || null
+            : null,
+      },
+      buyer: {
+        globalMetaId: buyerGlobalMetaId || null,
+        name: inputOrder.lookup.source === 'buyerOrders'
+          ? normalizeText(inputOrder.localIdentity?.name) || null
+          : null,
+      },
+      paymentTxid: record.paymentTxid,
+      orderTxid: record.orderTxid,
+      delivery: record.deliverySummary,
+      traceId: record.role === 'buyer' ? record.traceId : null,
+      updatedAt: record.localUpdatedAt,
+      sku: sku ? {
+        skuId: sku.skuId,
+        name: sku.name,
+        price: sku.price,
+      } : null,
+    };
+  }
+
+  function productOrderPayloadFromRecord(record: ProductBuyerOrderRecord | ProductSellerOrderRecord): ProductOrderPayload | null {
+    if (record.role === 'seller' && record.productOrderPayload) {
+      return record.productOrderPayload;
+    }
+    if (record.role === 'buyer' && record.productOrderPayload) {
+      return record.productOrderPayload;
+    }
+    return null;
+  }
+
+  function buildProductOrderInspection(inputOrder: {
+    lookup: ProductOrderLookup;
+    listing: ProductListingLookup | null;
+    localIdentity: RuntimeIdentityRecord | null;
+  }) {
+    const record = inputOrder.lookup.item;
+    const listingPayload = inputOrder.listing?.item.payload ?? null;
+    const selectedSku: ProductSku | null = listingPayload?.skus.find(item => item.skuId === record.skuId)
+      ?? (record.role === 'seller' ? record.selectedSku : null)
+      ?? null;
+    const orderPayload = productOrderPayloadFromRecord(record);
+    const row = summarizeProductOrderRow(inputOrder);
+    const traceId = record.role === 'buyer' ? record.traceId : null;
+    const sessionId = record.role === 'buyer' ? record.sessionId : null;
+    const localUiUrl = traceId
+      ? buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+          traceId,
+          ...(sessionId ? { sessionId } : {}),
+        })
+      : null;
+    return {
+      order: row,
+      product: listingPayload ? {
+        listingPinId: record.listingPinId,
+        name: listingPayload.name,
+        title: listingPayload.title,
+        productType: listingPayload.productType,
+        coverImage: listingPayload.coverImage,
+      } : {
+        listingPinId: record.listingPinId,
+        name: null,
+        title: null,
+        productType: null,
+        coverImage: null,
+      },
+      sku: selectedSku ? {
+        skuId: selectedSku.skuId,
+        name: selectedSku.name,
+        image: selectedSku.image,
+        descriptionContentType: selectedSku.descriptionContentType,
+        description: selectedSku.description,
+        price: selectedSku.price,
+        initialStock: selectedSku.initialStock,
+      } : null,
+      buyer: row.buyer,
+      seller: row.seller,
+      payment: {
+        paymentTxid: record.paymentTxid,
+        settlementKind: orderPayload?.settlementKind ?? 'native',
+        amount: selectedSku?.price.amount ?? null,
+        currency: selectedSku?.price.currency ?? null,
+        verified: record.role === 'seller' ? record.paymentVerified : null,
+      },
+      fulfillment: {
+        fulfillmentType: listingPayload?.fulfillment.fulfillmentType ?? null,
+        deliveryEndpoint: listingPayload?.fulfillment.deliveryEndpoint ?? null,
+        fulfillmentSkills: record.role === 'seller' && record.fulfillmentSkills.length > 0
+          ? [...record.fulfillmentSkills]
+          : [...(listingPayload?.fulfillment.fulfillmentSkills ?? [])],
+        state: record.role === 'seller' ? record.fulfillmentState : record.state,
+        failureReason: record.role === 'seller' ? record.failureReason : null,
+      },
+      delivery: {
+        summary: record.deliverySummary,
+        deliveryPinId: record.role === 'seller' ? record.deliveryPinId : record.deliverySummary?.deliveryPinId ?? null,
+      },
+      trace: {
+        traceId,
+        sessionId,
+        localUiUrl,
+      },
+      raw: {
+        productListing: listingPayload,
+        productOrder: orderPayload,
+      },
+    };
+  }
+
+  async function listLocalProductOrders(request: {
+    from?: unknown;
+    all?: unknown;
+    role?: unknown;
+    state?: unknown;
+    page?: unknown;
+    pageSize?: unknown;
+  }): Promise<MetabotCommandResult<unknown>> {
+    const selected = await selectProductProfileRecordsForRequest(request);
+    if (selected.failure) {
+      return selected.failure;
+    }
+
+    const requestedRole = normalizeText(request.role).toLowerCase();
+    const role = requestedRole === 'seller' || requestedRole === 'all' ? requestedRole : 'buyer';
+    const requestedState = normalizeText(request.state).toLowerCase();
+    const page = normalizeMyServicesPage(request.page, 1);
+    const pageSize = normalizeMyServicesPage(request.pageSize, 20);
+    const rows: Array<ReturnType<typeof summarizeProductOrderRow>> = [];
+
+    for (const profile of selected.profiles) {
+      const productStore = createProductStateStore(profile.homeDir);
+      const [productState, runtimeState] = await Promise.all([
+        productStore.readState(),
+        createRuntimeStateStore(profile.homeDir).readState(),
+      ]);
+      for (const order of await productStore.listOrders()) {
+        if (role !== 'all' && order.item.role !== role) {
+          continue;
+        }
+        if (requestedState && normalizeText(order.item.state).toLowerCase() !== requestedState) {
+          continue;
+        }
+        rows.push(summarizeProductOrderRow({
+          lookup: order,
+          listing: readProductListingFromState(productState, order.item.listingPinId),
+          localIdentity: runtimeState.identity,
+        }));
+      }
+    }
+
+    rows.sort((left, right) => right.updatedAt - left.updatedAt);
+    const total = rows.length;
+    const offset = (page - 1) * pageSize;
+    return commandSuccess({
+      items: rows.slice(offset, offset + pageSize),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  }
+
+  function readProductOrderInspectSelector(request: {
+    orderId?: unknown;
+    productOrderPinId?: unknown;
+    paymentTxid?: unknown;
+    orderTxid?: unknown;
+  }): {
+    ok: true;
+    key: 'orderId' | 'productOrderPinId' | 'paymentTxid' | 'orderTxid';
+    value: string;
+  } | {
+    ok: false;
+    result: MetabotCommandResult<never>;
+  } {
+    const selectors = [
+      ['orderId', normalizeText(request.orderId)],
+      ['productOrderPinId', normalizeText(request.productOrderPinId)],
+      ['paymentTxid', normalizeText(request.paymentTxid)],
+      ['orderTxid', normalizeText(request.orderTxid)],
+    ] as const;
+    const selected = selectors.filter(([, value]) => value);
+    if (selected.length === 0) {
+      return {
+        ok: false,
+        result: commandFailed(
+          'missing_product_order_selector',
+          'Provide exactly one product order selector: orderId, productOrderPinId, paymentTxid, or orderTxid.',
+        ),
+      };
+    }
+    if (selected.length > 1) {
+      return {
+        ok: false,
+        result: commandFailed(
+          'ambiguous_product_order_selector',
+          'Use only one product order selector: orderId, productOrderPinId, paymentTxid, or orderTxid.',
+        ),
+      };
+    }
+    const [key, value] = selected[0];
+    return { ok: true, key, value };
+  }
+
+  async function inspectLocalProductOrder(request: {
+    from?: unknown;
+    orderId?: unknown;
+    productOrderPinId?: unknown;
+    paymentTxid?: unknown;
+    orderTxid?: unknown;
+  }): Promise<MetabotCommandResult<unknown>> {
+    const selector = readProductOrderInspectSelector(request);
+    if (!selector.ok) {
+      return selector.result;
+    }
+    const selected = await selectProductProfileRecordsForRequest(request);
+    if (selected.failure) {
+      return selected.failure;
+    }
+
+    const matches: Array<{
+      lookup: ProductOrderLookup;
+      productState: ProductState;
+      localIdentity: RuntimeIdentityRecord | null;
+    }> = [];
+    for (const profile of selected.profiles) {
+      const productStore = createProductStateStore(profile.homeDir);
+      const [productState, runtimeState] = await Promise.all([
+        productStore.readState(),
+        createRuntimeStateStore(profile.homeDir).readState(),
+      ]);
+      const lookup = selector.key === 'orderId'
+        ? await productStore.findOrderByOrderId(selector.value)
+        : selector.key === 'productOrderPinId'
+          ? await productStore.findOrderByProductOrderPinId(selector.value)
+          : selector.key === 'paymentTxid'
+            ? await productStore.findOrderByPaymentTxid(selector.value)
+            : await productStore.findOrderByOrderTxid(selector.value);
+      if (lookup) {
+        matches.push({ lookup, productState, localIdentity: runtimeState.identity });
+      }
+    }
+
+    if (matches.length === 0) {
+      return commandFailed(
+        'product_order_not_found',
+        'Product order was not found in the local cache. Chain fallback for uncached product-order pins is not implemented in this inspection path.',
+      );
+    }
+    if (matches.length > 1) {
+      return commandFailed(
+        'ambiguous_product_order_selector',
+        `Product order selector matched ${matches.length} local orders. Use a more specific selector.`,
+      );
+    }
+
+    const match = matches[0];
+    return commandSuccess(buildProductOrderInspection({
+      lookup: match.lookup,
+      listing: readProductListingFromState(match.productState, match.lookup.item.listingPinId),
+      localIdentity: match.localIdentity,
+    }));
+  }
+
+  function buildProductOrderTraceId(inputTrace: {
+    sellerGlobalMetaId?: string | null;
+    listingPinId?: string | null;
+  }): string {
+    const sellerPart = sanitizeServiceSegment(normalizeText(inputTrace.sellerGlobalMetaId).slice(0, 16)) || 'seller';
+    const listingPart = sanitizeServiceSegment(normalizeText(inputTrace.listingPinId).slice(0, 16)) || 'listing';
+    const suffix = createHash('sha256')
+      .update(`${Date.now()}:${Math.random()}:${sellerPart}:${listingPart}`)
+      .digest('hex')
+      .slice(0, 8);
+    return `trace-product-${sellerPart}-${listingPart}-${suffix}`;
+  }
+
+  async function resolveProductSellerIdentity(product: ProductDirectoryProduct) {
+    const sellerGlobalMetaId = normalizeText(product.sellerGlobalMetaId);
+    let profile: IdentityProfileRecord | null = null;
+    if (sellerGlobalMetaId) {
+      const profiles = await listIdentityProfiles(normalizedSystemHomeDir);
+      profile = profiles.find((entry: IdentityProfileRecord) => normalizeText(entry.globalMetaId) === sellerGlobalMetaId) ?? null;
+    }
+
+    let runtimeIdentity: RuntimeIdentityRecord | null = null;
+    if (profile) {
+      try {
+        runtimeIdentity = (await createRuntimeStateStore(profile.homeDir).readState()).identity;
+      } catch {
+        runtimeIdentity = null;
+      }
+    }
+
+    const mvcAddress = normalizeText(product.sellerMvcAddress)
+      || normalizeText(runtimeIdentity?.addresses?.mvc)
+      || normalizeText(runtimeIdentity?.mvcAddress)
+      || normalizeText(profile?.mvcAddress);
+    return {
+      globalMetaId: sellerGlobalMetaId || normalizeText(runtimeIdentity?.globalMetaId) || normalizeText(profile?.globalMetaId),
+      name: normalizeText(product.sellerName) || normalizeText(runtimeIdentity?.name) || normalizeText(profile?.name),
+      mvcAddress,
+      addresses: {
+        mvc: mvcAddress,
+        btc: normalizeText(runtimeIdentity?.addresses?.btc),
+      },
+      chatPublicKey: normalizeText(product.sellerChatPublicKey) || normalizeText(runtimeIdentity?.chatPublicKey),
+    };
+  }
+
+  async function listProductProfileRecords(): Promise<Array<{
+    slug: string;
+    name: string;
+    homeDir: string;
+  }>> {
+    return listMyServicesProfileRecords();
+  }
+
+  async function selectProductProfileRecordsForRequest(
+    request: { from?: unknown; all?: unknown },
+  ): Promise<{
+    profiles: Array<{ slug: string; name: string; homeDir: string }>;
+    failure?: MetabotCommandResult<never>;
+  }> {
+    const profiles = await listProductProfileRecords();
+    const requestedFrom = normalizeText(request.from);
+    if (requestedFrom) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, requestedFrom);
+      if (!selectedProfile) {
+        return {
+          profiles: [],
+          failure: commandFailed('profile_not_found', `MetaBot profile not found: ${requestedFrom}`),
+        };
+      }
+      const selectedHomeDir = path.resolve(selectedProfile.homeDir);
+      return {
+        profiles: profiles.filter((profile) => path.resolve(profile.homeDir) === selectedHomeDir),
+      };
+    }
+
+    if (request.all === true) {
+      return { profiles };
+    }
+
+    const activeHomeDir = path.resolve(input.homeDir);
+    return {
+      profiles: profiles.filter((profile) => path.resolve(profile.homeDir) === activeHomeDir),
+    };
+  }
+
   const handlers: MetabotDaemonHttpHandlers = {
     browser: {
       getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
@@ -11579,6 +12440,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
       },
+      listProducts: async ({ online, cached, query, limit }) => {
+        const productStateStore = createProductStateStore(input.homeDir);
+        try {
+          const directory = await listProductDirectory({
+            productStateStore,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+            onlineOnly: online === true,
+            cached: cached === true,
+            query,
+            limit,
+          });
+
+          return commandSuccess({
+            products: directory.products,
+            total: directory.total,
+            source: directory.source,
+            onlineOnly: directory.onlineOnly,
+            cacheUpdatedAt: directory.cacheUpdatedAt,
+          });
+        } catch (error) {
+          return commandFailed(
+            'product_directory_unavailable',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
       listSources: async () => {
         const sources = sortDirectorySeeds(await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath));
         return commandSuccess({ sources });
@@ -11754,6 +12643,274 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         return settleProviderSellerRefund({ orderId, paymentTxid });
       },
+    },
+    products: {
+      listPublishSkills: async (request = {}) => listProductPublishSkillsForActor(request.from),
+      publish: async (rawInput) => {
+        const actor = await resolveProductActor(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+
+        const validation = validateProductListingPayload(rawInput);
+        if (!validation.ok) {
+          return commandFailed(validation.code, validation.message);
+        }
+        const payload = validation.value;
+
+        const fulfillmentSkillValidation = await validateProductFulfillmentSkills({ payload, actor });
+        if (fulfillmentSkillValidation) {
+          return fulfillmentSkillValidation;
+        }
+
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.profileHomeDir);
+          const published = await publishProductListingToChain({
+            signer: actor.signer,
+            payload,
+            network,
+          });
+          const listingPinId = normalizeText(published.chainWrite.pinId);
+          await createProductStateStore(actor.profileHomeDir).upsertOwnedListing({
+            listingPinId,
+            localMetabotSlug: actor.metaBotSlug,
+            payload: published.payload as ProductListingPayload,
+            available: true,
+          });
+
+          return commandSuccess({
+            listingPinId,
+            txids: published.chainWrite.txids,
+            title: payload.title,
+            productType: payload.productType,
+            skuCount: payload.skus.length,
+            fulfillmentSkills: [...payload.fulfillment.fulfillmentSkills],
+            network: published.chainWrite.network,
+          });
+        } catch (error) {
+          return commandFailed(
+            'product_publish_failed',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      },
+      buy: async (rawInput) => {
+        const actor = await resolveProductActor(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+
+        const productStateStore = createProductStateStore(actor.profileHomeDir);
+        let directory;
+        try {
+          directory = await listProductDirectory({
+            productStateStore,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+            cached: true,
+          });
+        } catch (error) {
+          return commandFailed(
+            'product_directory_unavailable',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+
+        const purchaseRequest = readProductPurchaseRequest(rawInput);
+        const plan = planProductPurchase({
+          request: purchaseRequest,
+          products: directory.products,
+        });
+
+        if (!plan.ok) {
+          return commandFailed(plan.code, plan.message);
+        }
+
+        if (plan.state === 'awaiting_confirmation') {
+          return commandAwaitingConfirmation({
+            product: plan.product,
+            sku: plan.sku,
+            seller: plan.seller,
+            payment: plan.payment,
+            confirmation: {
+              requiresConfirmation: plan.confirmation.requiresConfirmation,
+              policyMode: plan.confirmation.policyMode,
+            },
+            confirmRequest: plan.confirmRequest,
+          });
+        }
+
+        if (purchaseRequest.confirmed !== true) {
+          return commandSuccess({
+            product: plan.product,
+            sku: plan.sku,
+            seller: plan.seller,
+            payment: plan.payment,
+            confirmation: {
+              requiresConfirmation: plan.confirmation.requiresConfirmation,
+              policyMode: plan.confirmation.policyMode,
+            },
+            readyForPayment: true,
+          });
+        }
+
+        let executionDirectory = directory;
+        try {
+          executionDirectory = await listProductDirectory({
+            productStateStore,
+            chainApiBaseUrl: input.chainApiBaseUrl,
+            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceFailureMode: input.socketPresenceFailureMode,
+            cached: true,
+            onlineOnly: true,
+          });
+        } catch (error) {
+          return commandFailed(
+            'product_directory_unavailable',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+
+        const executionPlan = planProductPurchase({
+          request: purchaseRequest,
+          products: executionDirectory.products,
+        });
+        if (!executionPlan.ok) {
+          return commandFailed(executionPlan.code, executionPlan.message);
+        }
+
+        const selectedProduct = executionDirectory.products.find((product) => (
+          normalizeText(product.listingPinId) === normalizeText(executionPlan.product.listingPinId)
+        ));
+        const traceId = buildProductOrderTraceId({
+          sellerGlobalMetaId: executionPlan.seller.globalMetaId,
+          listingPinId: executionPlan.product.listingPinId,
+        });
+        const sessionId = `session-${traceId}`;
+        const localUiUrl = buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+          traceId,
+          sessionId,
+        });
+        const productOrderPublisher: ProductOrderPublisher = input.productOrderPublisher ?? {
+          async publish(orderInput) {
+            return publishProductOrderToChain({
+              signer: actor.signer,
+              payload: orderInput.payload,
+              network: orderInput.network,
+            });
+          },
+        };
+        const productSimplemsgSender: ProductSimplemsgSender = input.productSimplemsgSender ?? {
+          async send(messageInput) {
+            if (!selectedProduct) {
+              throw new Error('product_not_found: Product listing was not found for simplemsg dispatch.');
+            }
+            const privateChatIdentity = await actor.signer.getPrivateChatIdentity();
+            const sellerIdentity = await resolveProductSellerIdentity(selectedProduct);
+            let peerChatPublicKey = normalizeText(sellerIdentity.chatPublicKey);
+            if (!peerChatPublicKey && normalizeText(messageInput.toGlobalMetaId) === normalizeText(actor.state.identity!.globalMetaId)) {
+              peerChatPublicKey = normalizeText(actor.state.identity!.chatPublicKey);
+            }
+            if (!peerChatPublicKey) {
+              peerChatPublicKey = await resolvePeerChatPublicKey(messageInput.toGlobalMetaId) ?? '';
+            }
+            if (!peerChatPublicKey) {
+              throw new Error('peer_chat_public_key_missing: Remote product seller has no published chat public key on chain.');
+            }
+            const outbound = sendPrivateChat({
+              fromIdentity: {
+                globalMetaId: privateChatIdentity.globalMetaId,
+                privateKeyHex: privateChatIdentity.privateKeyHex,
+              },
+              toGlobalMetaId: messageInput.toGlobalMetaId,
+              peerChatPublicKey,
+              content: messageInput.content,
+            });
+            const write = await writePinRetryingMempoolConflict({
+              signer: actor.signer,
+              retryDelaysMs: DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS,
+              request: {
+                operation: 'create',
+                path: outbound.path,
+                encryption: outbound.encryption,
+                version: outbound.version,
+                contentType: outbound.contentType,
+                payload: outbound.payload,
+                encoding: 'utf-8',
+                network: 'mvc',
+              },
+            });
+            const txids = Array.isArray(write.txids)
+              ? write.txids.map((entry) => normalizeText(entry)).filter(Boolean)
+              : [];
+            return {
+              orderTxid: normalizeOrderProtocolReference(txids[0])
+                || normalizeOrderProtocolReference(write.pinId)
+                || txids[0]
+                || normalizeText(write.pinId),
+              txids,
+              pinId: write.pinId,
+            };
+          },
+        };
+
+        const execution = await executeProductPurchase({
+          request: purchaseRequest,
+          products: executionDirectory.products,
+          buyerIdentity: {
+            globalMetaId: actor.state.identity!.globalMetaId,
+            name: actor.state.identity!.name,
+          },
+          resolveSellerIdentity: async ({ product }) => resolveProductSellerIdentity(product),
+          paymentExecutor: productPaymentExecutor,
+          productOrderPublisher,
+          simplemsgSender: productSimplemsgSender,
+          productStateStore,
+          traceId,
+          sessionId,
+          localUiUrl,
+        });
+
+        if (!execution.ok) {
+          return commandFailed(execution.code, execution.message, execution.data ? { data: execution.data } : undefined);
+        }
+
+        return commandSuccess({
+          confirmation: {
+            requiresConfirmation: executionPlan.confirmation.requiresConfirmation,
+            policyMode: executionPlan.confirmation.policyMode,
+          },
+          ...execution.data,
+        });
+      },
+      listOwned: async (request) => {
+        const selected = await selectProductProfileRecordsForRequest(request);
+        if (selected.failure) {
+          return selected.failure;
+        }
+
+        const page = normalizeMyServicesPage(request.page, 1);
+        const pageSize = normalizeMyServicesPage(request.pageSize, 20);
+        const rows: Array<ReturnType<typeof summarizeOwnedProductListing>> = [];
+        for (const profile of selected.profiles) {
+          const state = await createProductStateStore(profile.homeDir).readState();
+          rows.push(...state.ownedListings.map(summarizeOwnedProductListing));
+        }
+        rows.sort((left, right) => right.localUpdatedAt - left.localUpdatedAt);
+        const total = rows.length;
+        const offset = (page - 1) * pageSize;
+
+        return commandSuccess({
+          items: rows.slice(offset, offset + pageSize),
+          page,
+          pageSize,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / pageSize)),
+        });
+      },
+      listOrders: async (request) => listLocalProductOrders(request),
+      inspectOrder: async (request) => inspectLocalProductOrder(request),
     },
     services: {
       listMyServices: async (request) => {
