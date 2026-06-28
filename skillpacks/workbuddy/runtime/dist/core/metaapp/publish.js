@@ -13,12 +13,13 @@ const node_fs_1 = require("node:fs");
 const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const commandResult_1 = require("../contracts/commandResult");
+const metafileUri_1 = require("../files/metafileUri");
 const manifest_1 = require("./manifest");
 const pinId_1 = require("./pinId");
 const projectInspector_1 = require("./projectInspector");
 const share_1 = require("./share");
 const zipArchive_1 = require("./zipArchive");
-const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>';
+const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>.zip';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -30,13 +31,6 @@ function normalizeStringArray(value) {
         .filter((entry) => typeof entry === 'string')
         .map((entry) => entry.trim())
         .filter(Boolean);
-}
-function stripZipSuffixFromMetafileUri(value) {
-    const normalized = normalizeText(value);
-    if (!/^metafile:\/\//iu.test(normalized)) {
-        return normalized;
-    }
-    return normalized.replace(/\.zip(?=([?#].*)?$)/iu, '');
 }
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
@@ -96,8 +90,9 @@ function finalizeManifestForWrite(input) {
     const fallbackAppName = slugFromProjectDir(input.plan.projectDir);
     const title = normalizeText(input.manifest.title) || normalizeText(input.manifest.appName) || fallbackAppName;
     const appName = normalizeText(input.manifest.appName) || slugFromProjectDir(title);
-    const artifactUri = stripZipSuffixFromMetafileUri(input.artifactUri);
-    const explicitCode = stripZipSuffixFromMetafileUri(normalizeText(input.manifest.code));
+    const artifactUri = (0, metafileUri_1.appendMetafileUriExtension)(input.artifactUri, '.zip');
+    const codeExtension = (0, metafileUri_1.extensionFromContentType)(input.manifest.codeType) ?? '.zip';
+    const explicitCode = (0, metafileUri_1.appendMetafileUriExtension)(normalizeText(input.manifest.code), codeExtension);
     const code = explicitCode || (input.plan.projectType === 'static' || input.compatibilityMirrorContent
         ? artifactUri
         : '');
@@ -224,11 +219,11 @@ async function createConfirmationData(input, deps, plan, manifest) {
 function uploadArtifactUri(upload) {
     const metafileUri = normalizeText(upload.metafileUri);
     if (metafileUri) {
-        return stripZipSuffixFromMetafileUri(metafileUri);
+        return (0, metafileUri_1.appendMetafileUriExtension)(metafileUri, '.zip');
     }
     const pinId = normalizeText(upload.pinId);
     if (pinId) {
-        return `metafile://${pinId}`;
+        return (0, metafileUri_1.metafileUriFromPinId)(pinId, '.zip');
     }
     throw new Error('Upload result did not include a metafile URI or pinId.');
 }

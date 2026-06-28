@@ -284,8 +284,8 @@ test('publishServiceToChain uploads a service icon data URL before writing the s
     encoding: 'base64',
     network: 'mvc',
   });
-  assert.equal(JSON.parse(writes[1].payload).serviceIcon, 'metafile://file-pin-1');
-  assert.equal(published.record.serviceIcon, 'metafile://file-pin-1');
+  assert.equal(JSON.parse(writes[1].payload).serviceIcon, 'metafile://file-pin-1.png');
+  assert.equal(published.record.serviceIcon, 'metafile://file-pin-1.png');
   assert.equal(published.serviceIconUpload.pinId, 'file-pin-1');
 });
 
@@ -327,5 +327,5 @@ test('publishServiceToChain uploads service icons on a file-capable network when
   assert.equal(writes[0].network, 'mvc');
   assert.equal(writes[1].path, '/protocols/skill-service');
   assert.equal(writes[1].network, 'doge');
-  assert.equal(JSON.parse(writes[1].payload).serviceIcon, 'metafile://file-pin-1');
+  assert.equal(JSON.parse(writes[1].payload).serviceIcon, 'metafile://file-pin-1.png');
 });

@@ -78,7 +78,7 @@ $HOME/.metabot/bin/metabot file upload --from <bot-slug> --request-file request.
 
 - Use `/file` as MetaWeb path.
 - Read local file from `filePath`, encode as base64, and upload through shared runtime.
-- Return resulting `metafile://...` URI for later references.
+- Return the resulting `metafile://...` URI for later references. When the runtime can determine the file extension, prefer the extension-bearing form such as `metafile://<pinid>.png`; bare `metafile://<pinid>` remains acceptable only when the type is unknown.
 - If human names BTC (`btc`, `比特币`, `bitcoin`) or OPCAT (`opcat`), pass `--chain btc` or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies.
 - DOGE is not supported for file upload. If the human asks for DOGE file upload, explain that this specific flow currently supports MVC, BTC, and OPCAT only.
 

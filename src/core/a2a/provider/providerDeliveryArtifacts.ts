@@ -9,6 +9,7 @@ import {
   type A2ADeliveryArtifact,
   type A2ADeliveryArtifactKind,
 } from '../deliveryArtifacts';
+import { appendMetafileUriExtension } from '../../files/metafileUri';
 import { buildMetafileContentUrls } from '../../files/metafileUrls';
 import { verifyMetafileAvailability } from '../../files/metafileVerifier';
 import {
@@ -852,10 +853,11 @@ function uploadResultToArtifact(result: UploadLargeFileResult): A2ADeliveryArtif
   const urls = buildMetafileContentUrls(base.pinId);
   const contentType = safeArtifactContentType(result.contentType);
   const extension = base.extension ?? safeArtifactExtension(result.extension);
+  const uri = extension ? appendMetafileUriExtension(base.uri, extension) : base.uri;
   const kind: A2ADeliveryArtifactKind = inferDeliveryArtifactKind(extension, contentType);
 
   return {
-    uri: base.uri,
+    uri,
     pinId: base.pinId,
     kind,
     fileName: safeArtifactFileName(result.fileName, base.fileName),

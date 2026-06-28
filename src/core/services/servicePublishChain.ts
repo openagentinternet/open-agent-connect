@@ -1,4 +1,5 @@
 import type { ChainWriteResult } from '../chain/writePin';
+import { extensionFromContentType, metafileUriFromPinId } from '../files/metafileUri';
 import type { Signer } from '../signing/signer';
 import {
   buildPublishedService,
@@ -84,7 +85,7 @@ export async function uploadServiceIconDataUrl(input: {
     network,
   });
   return {
-    serviceIconUri: `metafile://${normalizeText(upload.pinId)}`,
+    serviceIconUri: metafileUriFromPinId(upload.pinId, extensionFromContentType(parsed.mimeType)),
     upload,
   };
 }

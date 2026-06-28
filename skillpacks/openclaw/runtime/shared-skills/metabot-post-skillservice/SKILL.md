@@ -65,7 +65,7 @@ Treat "publish" or "register a skill service" as a guided workflow. Do not ask t
    - `outputType`: one of `text`, `image`, `video`, `audio`, or `other`.
 4. Resolve the service icon.
    - If the human provides an existing `metafile://...` URI, put it directly in `serviceIconUri`.
-   - If the human provides a local image path, hand off to `metabot-upload-file` to upload it first, then store the returned `metafile://<pinid>` in `serviceIconUri`.
+   - If the human provides a local image path, hand off to `metabot-upload-file` to upload it first, then store the returned extension-bearing URI such as `metafile://<pinid>.png` in `serviceIconUri` when the image type is known.
    - If the human does not want an icon, omit `serviceIconUri`.
    - Preserve the DOGE caveat: service records can publish on DOGE, but dependent file upload does not support DOGE.
 5. Resolve the write chain.
@@ -114,7 +114,7 @@ Prepare a publish payload file:
   "executionReminder": "Check the weather first. Post a buzz only when the buyer explicitly requested an on-chain post.",
   "metadata": "{\"category\":\"weather\"}",
   "outputType": "text",
-  "serviceIconUri": "metafile://pinid"
+  "serviceIconUri": "metafile://pinid.png"
 }
 ```
 

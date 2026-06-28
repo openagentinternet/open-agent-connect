@@ -508,6 +508,24 @@ test('normal flow prepares staging, writes claim, moves workspace, uploads log, 
   assert.deepEqual(statusPayload.processLogs, ['metafile://process-log.md']);
 });
 
+test('process log upload fallback appends markdown extension when only pinId is returned', async () => {
+  const { input, events } = createDeps({
+    async uploadFile(input) {
+      events.push({ type: 'uploadFile', input });
+      return {
+        pinId: 'process-log-pin',
+        network: input.network,
+      };
+    },
+  });
+
+  const result = await runLoomClaimAndStartWorkflow(input);
+
+  assert.equal(result.ok, true);
+  const [, statusPayload] = payloadsFromWrites(events);
+  assert.deepEqual(statusPayload.processLogs, ['metafile://process-log-pin.md']);
+});
+
 test('--reset-workspace in normal mode deletes only the current staging workspace', async () => {
   const { input, events } = createDeps({ resetWorkspace: true });
 

@@ -8,6 +8,7 @@ exports.uploadFileBufferToChain = uploadFileBufferToChain;
 exports.uploadLocalFileToChain = uploadLocalFileToChain;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const metafileUri_1 = require("./metafileUri");
 const MIME_MAP = {
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
@@ -42,10 +43,13 @@ function normalizeText(value) {
 function inferUploadContentType(filePath) {
     return MIME_MAP[node_path_1.default.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
 }
+function inferMetafileExtension(fileExtension, contentType) {
+    return (0, metafileUri_1.extensionFromContentType)(contentType) ?? (0, metafileUri_1.safeMetafileExtension)(fileExtension) ?? '';
+}
 async function uploadFileBufferToChain(input) {
     const fileName = node_path_1.default.basename(normalizeText(input.fileName) || 'upload.bin');
-    const extension = node_path_1.default.extname(fileName).toLowerCase();
     const contentType = normalizeText(input.contentType) || inferUploadContentType(fileName);
+    const extension = inferMetafileExtension(node_path_1.default.extname(fileName).toLowerCase(), contentType);
     const network = normalizeText(input.network) || 'mvc';
     if (network.toLowerCase() === 'doge') {
         throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');
@@ -81,8 +85,8 @@ async function uploadLocalFileToChain(input) {
     }
     const resolvedPath = node_path_1.default.resolve(filePath);
     const buffer = await node_fs_1.promises.readFile(resolvedPath);
-    const extension = node_path_1.default.extname(resolvedPath).toLowerCase();
     const contentType = normalizeText(input.contentType) || inferUploadContentType(resolvedPath);
+    const extension = inferMetafileExtension(node_path_1.default.extname(resolvedPath).toLowerCase(), contentType);
     const network = normalizeText(input.network) || 'mvc';
     if (network.toLowerCase() === 'doge') {
         throw new Error('DOGE is not supported for file upload. Use mvc, btc, or opcat.');

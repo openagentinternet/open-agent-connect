@@ -976,10 +976,11 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['file', 'upload-large'],
         summary: 'Upload one local file through the daemon large-file route and return the daemon result.',
-        usage: 'metabot file upload-large [--from <bot-slug>] --request-file <path> [--chain <mvc|btc|opcat>] [--verify]',
-        requiredFlags: [
-            { flag: '--request-file', value: '<path>', description: 'JSON request file.' },
-        ],
+        usage: [
+            'metabot file upload-large --file <path> [--from <bot-slug>] [--content-type <mime>] [--chain <mvc|btc|opcat>] [--verify]',
+            'metabot file upload-large <path> [--from <bot-slug>] [--content-type <mime>] [--chain <mvc|btc|opcat>] [--verify]',
+            'metabot file upload-large --request-file <path> [--from <bot-slug>] [--chain <mvc|btc|opcat>] [--verify]',
+        ].join('\n'),
         requestShape: {
             filePath: '/absolute/or/relative/path/to/file',
             contentType: 'optional MIME type',
@@ -1001,10 +1002,19 @@ const COMMAND_HELP_SPECS = [
             'Fails with large_file_upload_unavailable when the daemon has no production large-file uploader configured.',
         ],
         examples: [
+            'metabot file upload-large --from alice --file ./dist/metaapp.zip --content-type application/zip --verify',
+            'metabot file upload-large ./dist/metaapp.zip --from alice --verify',
             'metabot file upload-large --from alice --request-file large-file-request.json --verify',
-            'metabot file upload-large --from alice --request-file large-file-opcat-request.json --chain opcat',
         ],
-        optionalFlags: [FROM_BOT_FLAG, FILE_UPLOAD_CHAIN_FLAG, VERIFY_FLAG, HELP_JSON_FLAG],
+        optionalFlags: [
+            FROM_BOT_FLAG,
+            { flag: '--file', value: '<path>', description: 'Direct local file path for large upload.' },
+            { flag: '--request-file', value: '<path>', description: 'JSON request file for compatibility.' },
+            { flag: '--content-type', value: '<mime>', description: 'Optional MIME type for --file or positional path uploads.' },
+            FILE_UPLOAD_CHAIN_FLAG,
+            VERIFY_FLAG,
+            HELP_JSON_FLAG,
+        ],
     },
     {
         commandPath: ['buzz'],
@@ -2367,7 +2377,7 @@ const COMMAND_HELP_SPECS = [
             {
                 flag: '--uri',
                 value: '<resource-uri>',
-                description: 'Optional Browser resource URI to preload, such as metaid://<globalMetaId>, metaapp://<pinId>, or metafile://<pinId>.',
+                description: 'Optional Browser resource URI to preload, such as metaid://<globalMetaId>, metaapp://<pinId>, or metafile://<pinId>.png.',
             },
             HELP_JSON_FLAG,
         ],
@@ -2381,7 +2391,7 @@ const COMMAND_HELP_SPECS = [
             'metabot browser open',
             'metabot browser open --uri metaid://<globalMetaId>',
             'metabot browser open --uri metaapp://<pinId>',
-            'metabot browser open --uri metafile://<pinId>',
+            'metabot browser open --uri metafile://<pinId>.png',
         ],
     },
     {

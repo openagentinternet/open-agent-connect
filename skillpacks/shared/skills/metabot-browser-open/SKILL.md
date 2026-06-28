@@ -60,7 +60,7 @@ $HOME/.metabot/bin/metabot browser open --uri metaapp://<pinId>
 Open a MetaFile when the pinId is already known:
 
 ```bash
-$HOME/.metabot/bin/metabot browser open --uri metafile://<pinId>
+$HOME/.metabot/bin/metabot browser open --uri metafile://<pinId>.png
 ```
 
 ## Expectations
@@ -77,7 +77,7 @@ $HOME/.metabot/bin/metabot browser open --uri metafile://<pinId>
 - `browser open`
 - `browser open --uri metaid://<globalMetaId>`
 - `browser open --uri metaapp://<pinId>`
-- `browser open --uri metafile://<pinId>`
+- `browser open --uri metafile://<pinId>.png`
 
 ## Out of Scope
 

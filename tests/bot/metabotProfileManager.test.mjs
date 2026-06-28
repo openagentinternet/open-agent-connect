@@ -300,6 +300,36 @@ test('updateMetabotProfile persists homepage JSON under runtime state', async (t
   assert.deepEqual(persisted, homepage);
 });
 
+test('updateMetabotProfile appends known metafile extension for homepage payloads', async (t) => {
+  const homeDir = await createProfileHome('metabot-homepage-profile-ext-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const created = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage File Bot',
+    bio: 'Original bio.',
+  });
+
+  const homepage = {
+    uri: 'metafile://homepage-pin-123',
+    renderer: 'auto',
+    contentType: 'image/png',
+  };
+  const expected = {
+    ...homepage,
+    uri: 'metafile://homepage-pin-123.png',
+  };
+  const updated = await updateMetabotProfile(systemHomeDir, created.slug, { homepage });
+  const loaded = await getMetabotProfile(systemHomeDir, created.slug);
+  const paths = resolveMetabotPaths(created.homeDir);
+  const persisted = JSON.parse(await readFile(paths.homepageStatePath, 'utf8'));
+
+  assert.deepEqual(updated.homepage, expected);
+  assert.deepEqual(loaded.homepage, expected);
+  assert.deepEqual(persisted, expected);
+});
+
 test('updateMetabotProfile clears homepage when explicitly set to null', async (t) => {
   const homeDir = await createProfileHome('metabot-homepage-clear-profile-');
   t.after(async () => {
@@ -815,7 +845,10 @@ test('syncMetabotInfoToChain writes homepage JSON to /info/homepage on MVC', asy
   assert.equal(calls[0].network, 'mvc');
   assert.equal(calls[0].contentType, 'application/json');
   assert.equal(calls[0].encoding, 'utf-8');
-  assert.deepEqual(JSON.parse(calls[0].payload), homepage);
+  assert.deepEqual(JSON.parse(calls[0].payload), {
+    ...homepage,
+    uri: 'metafile://file-pin-123.png',
+  });
 });
 
 test('syncMetabotInfoToChain writes empty create to /info/homepage when homepage is cleared', async () => {

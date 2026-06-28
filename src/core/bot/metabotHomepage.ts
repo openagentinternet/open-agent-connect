@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { appendMetafileUriExtension, extensionFromContentType } from '../files/metafileUri';
 
 export type MetabotHomepageRenderer = 'auto' | 'metaapp';
 
@@ -36,6 +37,15 @@ function validateHomepageUri(uri: string): void {
   }
 }
 
+function withRecommendedMetafileExtension(homepage: MetabotHomepage): MetabotHomepage {
+  const extension = extensionFromContentType(homepage.contentType);
+  if (!extension || !homepage.uri.toLowerCase().startsWith('metafile://')) {
+    return homepage;
+  }
+  const uri = appendMetafileUriExtension(homepage.uri, extension);
+  return uri === homepage.uri ? homepage : { ...homepage, uri };
+}
+
 export function normalizeMetabotHomepage(value: unknown): MetabotHomepage | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -47,7 +57,7 @@ export function normalizeMetabotHomepage(value: unknown): MetabotHomepage | null
   validateHomepageUri(uri);
   const renderer = normalizeRenderer(record.renderer, uri);
   const contentType = normalizeText(record.contentType) || defaultContentType(uri, renderer);
-  return { uri, renderer, contentType };
+  return withRecommendedMetafileExtension({ uri, renderer, contentType });
 }
 
 export function sameMetabotHomepage(left: MetabotHomepage | null | undefined, right: MetabotHomepage | null | undefined): boolean {
@@ -83,5 +93,5 @@ export async function writeMetabotHomepage(filePath: string, homepage: MetabotHo
 }
 
 export function serializeMetabotHomepagePayload(homepage: MetabotHomepage): string {
-  return JSON.stringify(homepage);
+  return JSON.stringify(withRecommendedMetafileExtension(homepage));
 }

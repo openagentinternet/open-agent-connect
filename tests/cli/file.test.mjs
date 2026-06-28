@@ -249,6 +249,246 @@ test('runCli dispatches `metabot file upload-large --request-file` to uploadLarg
   });
 });
 
+test('runCli dispatches upload-large --file to uploadLarge', async () => {
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '--from',
+    'alice',
+    '--file',
+    '/tmp/archive.zip',
+    '--content-type',
+    'application/zip',
+    '--chain',
+    'mvc',
+    '--verify',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'large-file-path-1' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    filePath: '/tmp/archive.zip',
+    contentType: 'application/zip',
+    network: 'mvc',
+    from: 'alice',
+    verify: true,
+  }]);
+});
+
+test('runCli dispatches upload-large positional path to uploadLarge', async () => {
+  const calls = [];
+  const exitCode = await runCli(['file', 'upload-large', '/tmp/archive.zip'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'large-file-positional-1' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ filePath: '/tmp/archive.zip' }]);
+});
+
+test('runCli dispatches upload-large positional path with direct flags to uploadLarge', async () => {
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '/tmp/archive.zip',
+    '--from',
+    'alice',
+    '--content-type',
+    'application/zip',
+    '--chain',
+    'opcat',
+    '--verify',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'large-file-positional-flags-1' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{
+    filePath: '/tmp/archive.zip',
+    contentType: 'application/zip',
+    network: 'opcat',
+    from: 'alice',
+    verify: true,
+  }]);
+});
+
+test('runCli rejects conflicting upload-large path inputs', async () => {
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '/tmp/archive.zip',
+    '--request-file',
+    '/tmp/request.json',
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Choose exactly one/i);
+});
+
+test('runCli rejects upload-large --file plus --request-file', async () => {
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '--file',
+    '/tmp/archive.zip',
+    '--request-file',
+    '/tmp/request.json',
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Choose exactly one/i);
+});
+
+test('runCli rejects upload-large --file when the file value is missing before dependency call', async () => {
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '--file',
+    '--content-type',
+    'application/zip',
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Missing value for --file/i);
+});
+
+test('runCli rejects upload-large --content-type when the MIME value is missing before dependency call', async () => {
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '--file',
+    '/tmp/archive.zip',
+    '--content-type',
+    '--verify',
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Missing value for --content-type/i);
+});
+
+test('runCli rejects multiple upload-large positional paths before dependency call', async () => {
+  const stdout = [];
+  const calls = [];
+  const exitCode = await runCli([
+    'file',
+    'upload-large',
+    '--from',
+    'alice',
+    '/tmp/archive.zip',
+    '/tmp/other.zip',
+  ], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+    dependencies: {
+      file: {
+        uploadLarge: async (input) => {
+          calls.push(input);
+          return commandSuccess({ pinId: 'should-not-happen' });
+        },
+      },
+    },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  const envelope = JSON.parse(stdout.join('').trim());
+  assert.equal(envelope.code, 'invalid_flag');
+  assert.match(envelope.message, /Choose exactly one/i);
+});
+
 test('runCli resolves upload-large relative file paths from the request file directory', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-large-relative-'));
   const requestDir = path.join(tempDir, 'requests');

@@ -19,6 +19,7 @@ const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const { createMetaAppLocalCacheStore } = require('../../dist/core/metaapp/localCache.js');
 
 function runtime(provider, id, health = 'healthy') {
   const now = '2026-05-06T00:00:00.000Z';
@@ -42,6 +43,43 @@ function makeSigner(writePin) {
     getIdentity: async () => ({}),
     getPrivateChatIdentity: async () => ({}),
     writePin,
+  };
+}
+
+const KNOWN_LARGE_UPLOAD_ERROR_CODES = [
+  'large_file_upload_unavailable',
+  'large_file_upload_too_large',
+  'large_file_upload_chain_unsupported',
+  'large_file_upload_funding_failed',
+  'large_file_upload_metafs_failed',
+];
+
+function makeLargeUploadResult(input, overrides = {}) {
+  const pinId = overrides.pinId ?? 'large-file-pin-1';
+  return {
+    pinId,
+    txids: overrides.txids ?? ['large-file-tx-1'],
+    totalCost: overrides.totalCost ?? 11,
+    network: input.network,
+    fileName: input.fileName,
+    contentType: input.contentType,
+    bytes: input.bytes,
+    extension: input.extension,
+    metafileUri: overrides.metafileUri ?? `metafile://${pinId}${input.extension}`,
+    globalMetaId: overrides.globalMetaId ?? 'gm-large-upload-bot',
+    uploadMode: 'chunked',
+    previewUrl: 'https://example.invalid/preview',
+    downloadUrl: 'https://example.invalid/download',
+  };
+}
+
+function makeThrowingLargeUploader(code, message = `${code} detail`) {
+  return {
+    upload: async () => {
+      const error = new Error(message);
+      error.code = code;
+      throw error;
+    },
   };
 }
 
@@ -103,6 +141,48 @@ async function writeRuntimeIdentity(homeDir, name = 'Runtime Bot') {
     traces: [],
     sellerOrders: [],
   });
+}
+
+async function writeLargeMetaAppProject(rootDir, slug, manifest = {}) {
+  const projectDir = path.join(rootDir, slug);
+  await mkdir(path.join(projectDir, 'dist', 'assets'), { recursive: true });
+  await writeFile(path.join(projectDir, 'dist', 'index.html'), '<h1>Large MetaApp</h1>', 'utf8');
+  await writeFile(path.join(projectDir, 'dist', 'assets', 'large.bin'), Buffer.alloc((2 * 1024 * 1024) + 128, 7));
+  await writeFile(path.join(projectDir, '.metaapp.json'), JSON.stringify({
+    title: 'Large MetaApp',
+    appName: slug,
+    ...manifest,
+  }), 'utf8');
+  return projectDir;
+}
+
+async function writePreviousMetaAppRecord(homeDir, record = {}) {
+  const pinId = record.pinId ?? `${'b'.repeat(64)}i0`;
+  await createMetaAppLocalCacheStore(homeDir).upsertLocal({
+    pinId,
+    firstPinId: record.firstPinId ?? pinId,
+    operation: record.operation ?? 'create',
+    title: record.title ?? 'Previous MetaApp',
+    appName: record.appName ?? 'previous-metaapp',
+    intro: record.intro ?? '',
+    icon: record.icon ?? '',
+    coverImg: record.coverImg ?? '',
+    tags: record.tags ?? [],
+    runtime: record.runtime ?? 'browser',
+    indexFile: record.indexFile ?? 'index.html',
+    version: record.version ?? '1.0.0',
+    code: record.code ?? 'metafile://previous-code',
+    content: record.content ?? 'metafile://previous-content',
+    contentType: record.contentType ?? 'application/zip',
+    codeType: record.codeType ?? 'application/zip',
+    ownerGlobalMetaId: record.ownerGlobalMetaId ?? 'gm-previous-metaapp-owner',
+    ownerAddress: record.ownerAddress ?? 'mvc-previous-metaapp-owner',
+    network: record.network ?? 'mvc',
+    metawebUrl: record.metawebUrl ?? `https://metaweb.world/metaapp/${pinId}`,
+    updatedAt: record.updatedAt ?? 1_700_000_000_000,
+    source: 'local',
+  });
+  return pinId;
 }
 
 function fakeBalanceAdapter(chain, calls) {
@@ -398,8 +478,12 @@ test('default file.uploadLarge preserves unavailable uploader failure code', asy
     homeDir,
     systemHomeDir,
     signer: makeSigner(async () => {
-      throw new Error('direct signer should not be used for large uploads without a largeUploader');
+      throw new Error('direct signer should not be used for injected unavailable large uploads');
     }),
+    providerLargeFileUploader: makeThrowingLargeUploader(
+      'large_file_upload_unavailable',
+      'Large file uploader temporarily unavailable.',
+    ),
     getDaemonRecord: () => null,
   });
 
@@ -411,7 +495,7 @@ test('default file.uploadLarge preserves unavailable uploader failure code', asy
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'large_file_upload_unavailable');
-  assert.match(result.message, /Large file upload requires an injected largeUploader/);
+  assert.match(result.message, /temporarily unavailable/);
 });
 
 test('default file.uploadLarge passes the injected production large uploader', async (t) => {
@@ -486,6 +570,289 @@ test('default file.uploadLarge passes the injected production large uploader', a
   assert.equal(largeUploadCalls.length, 1);
   assert.equal(largeUploadCalls[0].filePath, filePath);
   assert.equal(largeUploadCalls[0].contentType, 'video/mp4');
+});
+
+test('default file.uploadLarge uses the factory production large uploader when explicit uploader is omitted', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-large-upload-factory-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const filePath = path.join(homeDir, 'large-video.mp4');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await createRuntimeStateStore(homeDir).writeState({
+    identity: {
+      metabotId: 1,
+      name: 'Large Upload Factory Bot',
+      createdAt: 1776836000000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: {
+        btc: 'btc-address',
+        mvc: 'mvc-address',
+        doge: 'doge-address',
+        opcat: 'opcat-address',
+      },
+      mvcAddress: 'mvc-address',
+      metaId: 'metaid-large-upload-factory-bot',
+      globalMetaId: 'gm-large-upload-factory-bot',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+  const largeUploadCalls = [];
+  let factoryCalls = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async () => {
+      throw new Error('direct signer should not be used for factory large uploads');
+    }),
+    createProviderLargeFileUploader: () => {
+      factoryCalls += 1;
+      return {
+        upload: async (input) => {
+          largeUploadCalls.push(input);
+          return makeLargeUploadResult(input, {
+            pinId: 'factory-large-file-pin-1',
+            txids: ['factory-large-file-tx-1'],
+          });
+        },
+      };
+    },
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.file.uploadLarge({
+    filePath,
+    contentType: 'video/mp4',
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.pinId, 'factory-large-file-pin-1');
+  assert.equal(result.data.uploadMode, 'chunked');
+  assert.equal(factoryCalls, 1);
+  assert.equal(largeUploadCalls.length, 1);
+  assert.equal(largeUploadCalls[0].filePath, filePath);
+  assert.equal(largeUploadCalls[0].contentType, 'video/mp4');
+});
+
+test('default file.uploadLarge preserves known large uploader failure codes', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-large-upload-errors-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const filePath = path.join(homeDir, 'large-video.mp4');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await createRuntimeStateStore(homeDir).writeState({
+    identity: {
+      metabotId: 1,
+      name: 'Large Upload Error Bot',
+      createdAt: 1776836000000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: {
+        btc: 'btc-address',
+        mvc: 'mvc-address',
+        doge: 'doge-address',
+        opcat: 'opcat-address',
+      },
+      mvcAddress: 'mvc-address',
+      metaId: 'metaid-large-upload-error-bot',
+      globalMetaId: 'gm-large-upload-error-bot',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+
+  for (const code of KNOWN_LARGE_UPLOAD_ERROR_CODES) {
+    const handlers = createDefaultMetabotDaemonHandlers({
+      homeDir,
+      systemHomeDir,
+      signer: makeSigner(async () => {
+        throw new Error(`direct signer should not be used for ${code}`);
+      }),
+      providerLargeFileUploader: makeThrowingLargeUploader(code, `${code} mapped message`),
+      getDaemonRecord: () => null,
+    });
+
+    const result = await handlers.file.uploadLarge({
+      filePath,
+      contentType: 'video/mp4',
+      network: 'mvc',
+    });
+
+    assert.equal(result.ok, false, code);
+    assert.equal(result.code, code);
+    assert.match(result.message, new RegExp(`${code} mapped message`));
+  }
+});
+
+test('default metaapp.publish uploads large runtime archive through the large upload boundary', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-metaapp-large-publish-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'MetaApp Large Publish Bot');
+  const projectDir = await writeLargeMetaAppProject(homeDir, 'large-publish-app', {
+    title: 'Large Publish App',
+  });
+  const publishPinId = `${'a'.repeat(64)}i0`;
+  const writeCalls = [];
+  const largeUploadCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      if (input.path === '/file') {
+        return {
+          pinId: 'direct-metaapp-file-pin',
+          txids: ['direct-metaapp-file-tx'],
+          totalCost: 1,
+          network: input.network,
+          globalMetaId: 'gm-runtime-bot',
+        };
+      }
+      return {
+        pinId: publishPinId,
+        firstPinId: publishPinId,
+        txids: ['metaapp-publish-tx'],
+        totalCost: 2,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        globalMetaId: 'gm-runtime-bot',
+        mvcAddress: 'mvc-runtime-address',
+      };
+    }),
+    providerLargeFileUploader: {
+      upload: async (input) => {
+        largeUploadCalls.push(input);
+        return makeLargeUploadResult(input, {
+          pinId: 'chunked-metaapp-publish-pin',
+          txids: ['chunked-metaapp-publish-tx'],
+          metafileUri: 'metafile://chunked-metaapp-publish-pin.zip',
+          globalMetaId: 'gm-runtime-bot',
+        });
+      },
+    },
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.metaapp.publishProject({
+    projectDir,
+    confirm: true,
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.upload.uploadMode, 'chunked');
+  assert.equal(largeUploadCalls.length, 1);
+  assert.equal(largeUploadCalls[0].contentType, 'application/zip');
+  assert.equal(largeUploadCalls[0].network, 'mvc');
+  assert.equal(largeUploadCalls[0].fileName, 'metaapp.zip');
+  assert.equal(largeUploadCalls[0].extension, '.zip');
+  assert.ok(largeUploadCalls[0].bytes > (2 * 1024 * 1024));
+  assert.equal(writeCalls.length, 1);
+  assert.equal(writeCalls[0].path, '/protocols/metaapp');
+  assert.equal(writeCalls[0].operation, 'create');
+  assert.equal(writeCalls[0].network, 'mvc');
+  const payload = JSON.parse(writeCalls[0].payload);
+  assert.equal(payload.content, 'metafile://chunked-metaapp-publish-pin.zip');
+});
+
+test('default metaapp.update uploads large runtime archive through the large upload boundary', async (t) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 404,
+    json: async () => ({ code: 404, message: 'not found' }),
+  });
+  const homeDir = await createProfileHome('metabot-default-metaapp-large-update-');
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'MetaApp Large Update Bot');
+  const targetPinId = await writePreviousMetaAppRecord(homeDir);
+  const projectDir = await writeLargeMetaAppProject(homeDir, 'large-update-app', {
+    title: 'Large Update App',
+  });
+  const updatePinId = `${'c'.repeat(64)}i0`;
+  const writeCalls = [];
+  const largeUploadCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      if (input.path === '/file') {
+        return {
+          pinId: 'direct-metaapp-update-file-pin',
+          txids: ['direct-metaapp-update-file-tx'],
+          totalCost: 1,
+          network: input.network,
+          globalMetaId: 'gm-runtime-bot',
+        };
+      }
+      return {
+        pinId: updatePinId,
+        firstPinId: targetPinId,
+        txids: ['metaapp-update-tx'],
+        totalCost: 2,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        globalMetaId: 'gm-runtime-bot',
+        mvcAddress: 'mvc-runtime-address',
+      };
+    }),
+    providerLargeFileUploader: {
+      upload: async (input) => {
+        largeUploadCalls.push(input);
+        return makeLargeUploadResult(input, {
+          pinId: 'chunked-metaapp-update-pin',
+          txids: ['chunked-metaapp-update-tx'],
+          metafileUri: 'metafile://chunked-metaapp-update-pin.zip',
+          globalMetaId: 'gm-runtime-bot',
+        });
+      },
+    },
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.metaapp.updateProject({
+    projectDir,
+    targetPinId,
+    confirm: true,
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.upload.uploadMode, 'chunked');
+  assert.equal(largeUploadCalls.length, 1);
+  assert.equal(largeUploadCalls[0].contentType, 'application/zip');
+  assert.equal(largeUploadCalls[0].network, 'mvc');
+  assert.equal(largeUploadCalls[0].fileName, 'metaapp.zip');
+  assert.equal(largeUploadCalls[0].extension, '.zip');
+  assert.ok(largeUploadCalls[0].bytes > (2 * 1024 * 1024));
+  assert.equal(writeCalls.length, 1);
+  assert.equal(writeCalls[0].path, `@${targetPinId}`);
+  assert.equal(writeCalls[0].operation, 'modify');
+  assert.equal(writeCalls[0].network, 'mvc');
+  const payload = JSON.parse(writeCalls[0].payload);
+  assert.equal(payload.content, 'metafile://chunked-metaapp-update-pin.zip');
 });
 
 test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {
@@ -2082,7 +2449,7 @@ test('default bot uploadHomepageFile uses the selected profile signer for non-ac
   assert.deepEqual(createSignerHomes, [targetProfile.homeDir]);
 });
 
-test('default bot uploadHomepageFile uses the injected large uploader above the direct threshold', async (t) => {
+test('default bot uploadHomepageFile uses the factory large uploader above the direct threshold', async (t) => {
   const homeDir = await createProfileHome('metabot-default-homepage-large-upload-');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -2102,6 +2469,7 @@ test('default bot uploadHomepageFile uses the injected large uploader above the 
   await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
   const writeCalls = [];
   const largeUploadCalls = [];
+  let factoryCalls = 0;
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir: profile.homeDir,
     systemHomeDir,
@@ -2110,25 +2478,19 @@ test('default bot uploadHomepageFile uses the injected large uploader above the 
       writeCalls.push(input);
       throw new Error('direct signer should not be used for chunked homepage uploads');
     }),
-    providerLargeFileUploader: {
-      upload: async (input) => {
-        largeUploadCalls.push(input);
-        return {
-          pinId: 'homepage-large-pin-1',
-          txids: ['homepage-large-tx-1'],
-          totalCost: 42,
-          network: input.network,
-          fileName: input.fileName,
-          contentType: input.contentType,
-          bytes: input.bytes,
-          extension: input.extension,
-          metafileUri: `metafile://homepage-large-pin-1${input.extension}`,
-          globalMetaId: 'gm-homepage-large-upload-bot',
-          uploadMode: 'chunked',
-          previewUrl: 'https://example.invalid/preview',
-          downloadUrl: 'https://example.invalid/download',
-        };
-      },
+    createProviderLargeFileUploader: () => {
+      factoryCalls += 1;
+      return {
+        upload: async (input) => {
+          largeUploadCalls.push(input);
+          return makeLargeUploadResult(input, {
+            pinId: 'homepage-large-pin-1',
+            txids: ['homepage-large-tx-1'],
+            totalCost: 42,
+            globalMetaId: 'gm-homepage-large-upload-bot',
+          });
+        },
+      };
     },
   });
 
@@ -2144,9 +2506,52 @@ test('default bot uploadHomepageFile uses the injected large uploader above the 
   assert.equal(result.data.bytes, (2 * 1024 * 1024) + 1);
   assert.equal(result.data.metafileUri, 'metafile://homepage-large-pin-1.mp4');
   assert.deepEqual(writeCalls, []);
+  assert.equal(factoryCalls, 1);
   assert.equal(largeUploadCalls.length, 1);
   assert.equal(largeUploadCalls[0].filePath, filePath);
   assert.equal(largeUploadCalls[0].contentType, 'video/mp4');
+});
+
+test('default bot uploadHomepageFile preserves known large uploader failure codes', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-homepage-large-upload-errors-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage Large Upload Error Bot',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-homepage-large-upload-error-bot',
+    mvcAddress: 'addr-homepage-large-upload-error-bot',
+  });
+  const filePath = path.join(profile.homeDir, 'homepage-video.mp4');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+
+  for (const code of KNOWN_LARGE_UPLOAD_ERROR_CODES) {
+    const handlers = createDefaultMetabotDaemonHandlers({
+      homeDir: profile.homeDir,
+      systemHomeDir,
+      getDaemonRecord: () => null,
+      signer: makeSigner(async () => {
+        throw new Error(`direct signer should not be used for ${code}`);
+      }),
+      providerLargeFileUploader: makeThrowingLargeUploader(code, `${code} homepage mapped message`),
+    });
+
+    const result = await handlers.bot.uploadHomepageFile({
+      slug: profile.slug,
+      filePath,
+      contentType: 'video/mp4',
+    });
+
+    assert.equal(result.ok, false, code);
+    assert.equal(result.code, code);
+    assert.match(result.message, new RegExp(`${code} homepage mapped message`));
+  }
 });
 
 test('default bot updateProfile rejects invalid homepage input without calling signer', async (t) => {

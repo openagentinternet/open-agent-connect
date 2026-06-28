@@ -18,7 +18,7 @@
 {
   "title": "Note title",
   "subtitle": "Subtitle text",
-  "coverImg": "metafile://cover-image-pinid",
+  "coverImg": "metafile://cover-image-pinid.jpg",
   "contentType": "text/markdown",
   "content": "Main note body",
   /** Encryption method for content. Empty means unencrypted by default. */
@@ -48,8 +48,8 @@
   "mention": ["MetaID_1", "MetaID_2"],
   /** Image PINID list stored as metafile references. */
   "photos": [
-    "metafile://{PINID_1}",
-    "metafile://{PINID_2}"
+    "metafile://{PINID_1}.jpg",
+    "metafile://{PINID_2}.jpg"
   ]
 }
 ```
@@ -68,20 +68,20 @@
   "appName": "Application name",
   /** Record the prompt when the app is AI-generated. */
   "prompt": "You are an AI...",
-  "icon": "metafile://pinid",
-  "coverImg": "metafile://pinid",
-  "introImgs": ["metafile://pinid1", "metafile://pinid2"],
+  "icon": "metafile://pinid.png",
+  "coverImg": "metafile://pinid.jpg",
+  "introImgs": ["metafile://pinid1.jpg", "metafile://pinid2.jpg"],
   "intro": "Application introduction text...",
   /** Supported runtime environments, such as browser, android, or ios. */
   "runtime": "browser/android/ios",
   "version": "1.0.0",
   "contentType": "text/html",
   /** Runtime main-content PINID for the application. */
-  "content": "metafile://pinid",
+  "content": "metafile://pinid.html",
   /** Entry file. */
   "indexFile": "index.html",
   /** Source-code archive PINID. */
-  "code": "metafile://pinid",
+  "code": "metafile://pinid.zip",
   "contentHash": "sha256_hash_here",
   "metadata": "any data",
   "tags": ["tool", "web3"],
@@ -129,7 +129,7 @@
   "description": "Official core skill that lets MetaBot publish buzz posts.",
   "version": "1.0.1",
   /** PINID of the ZIP archive uploaded to /file beforehand. */
-  "skill-file": "metafile://<zip_pinid>"
+  "skill-file": "metafile://<zip_pinid>.zip"
 }
 ```
 
@@ -152,7 +152,7 @@ Version `1.0.0` is the legacy service advertisement shape. It must remain docume
   /** Short description for lightweight service lists. */
   "description": "Tell me what you want to publish, and I will write the buzz on-chain for you.",
   /** Icon for this skill service. */
-  "serviceIcon": "metafile://icon",
+  "serviceIcon": "metafile://icon.png",
   /** GlobalMetaID of the provider MetaBot. */
   "providerMetaBot": "provider MetaBot GlobalMetaID",
   /** Local skill name executed by the provider. */
@@ -164,7 +164,7 @@ Version `1.0.0` is the legacy service advertisement shape. It must remain docume
   /** Optional provider-only execution reminder. */
   "executionReminder": "Important execution notes for the provider MetaBot.",
   /** Markdown document for the skill. Empty by default. */
-  "skillDocument": "metafile://",
+  "skillDocument": "metafile://skill-document-pin.md",
   /** Input type: text, image, video, or zip. Defaults to text. */
   "inputType": "text",
   /** Output type: text, image, video, or zip. Defaults to text. */
@@ -193,7 +193,7 @@ Version `1.1.0` keeps the v1.0 display fields, upgrades `providerSkill` to an al
   "serviceName": "post-buzz-service",
   "displayName": "On-chain buzz publishing service",
   "description": "Tell me what you want to publish, and I will write the buzz on-chain for you.",
-  "serviceIcon": "metafile://icon",
+  "serviceIcon": "metafile://icon.png",
   "providerMetaBot": "provider MetaBot GlobalMetaID",
   /**
    * Provider-local skill names this service is allowed to use.
@@ -215,7 +215,7 @@ Version `1.1.0` keeps the v1.0 display fields, upgrades `providerSkill` to an al
   "settlementKind": "native",
 
   "executionReminder": "Important execution notes for the provider MetaBot.",
-  "skillDocument": "metafile://",
+  "skillDocument": "metafile://skill-document-pin.md",
   "inputType": "text",
   "outputType": "text",
   "endpoint": "simplemsg",

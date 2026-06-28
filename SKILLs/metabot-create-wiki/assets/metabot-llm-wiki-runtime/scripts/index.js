@@ -154,6 +154,14 @@ function safeTrim(value) {
   return String(value == null ? '' : value).trim();
 }
 
+function withZipMetafileExtension(value) {
+  const uri = safeTrim(value);
+  if (!/^metafile:\/\//i.test(uri) || /\.[a-z0-9][a-z0-9+-]{0,31}(?=([?#].*)?$)/i.test(uri)) {
+    return uri;
+  }
+  return uri.replace(/([?#].*)?$/u, '.zip$1');
+}
+
 function parseOptionalBooleanFlag(value, fieldName) {
   if (value === undefined || value === null) return undefined;
   if (typeof value === 'boolean') return value;
@@ -2749,10 +2757,12 @@ function actionPublishZip(input, paths, state) {
     uploadResult = commandResult.envelope;
     const uploadData = commandResult.data || {};
     const pinId = safeTrim(uploadData.pinId);
-    zipUri = safeTrim(uploadData.metafileUri)
-      || safeTrim(uploadData.uri)
-      || safeTrim(uploadData.fileUri)
-      || (pinId ? `metafile://${pinId}` : '');
+    zipUri = withZipMetafileExtension(
+      safeTrim(uploadData.metafileUri)
+        || safeTrim(uploadData.uri)
+        || safeTrim(uploadData.fileUri)
+        || (pinId ? `metafile://${pinId}` : '')
+    );
     if (!zipUri) {
       throw new SkillError('publish_failed', 'metabot file upload-large did not return a metafile URI or pinId.', true);
     }

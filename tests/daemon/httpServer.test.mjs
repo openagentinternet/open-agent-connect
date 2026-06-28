@@ -1966,7 +1966,44 @@ test('POST /api/bot/profiles/:slug/homepage/upload forwards raw selected file by
   assert.equal(payload.data.metafileUri, 'metafile://homepage-file-pin-1.png');
 });
 
-test('POST /api/bot/profiles/:slug/homepage/upload rejects files above the direct limit', async (t) => {
+test('POST /api/bot/profiles/:slug/homepage/upload forwards files above the direct upload boundary', async (t) => {
+  let observedFilePath = '';
+  let observedBytes = Buffer.alloc(0);
+  const uploadBytes = Buffer.alloc((2 * 1024 * 1024) + 1, 3);
+  const server = await startServer({
+    uploadHomepageFile: async (input) => {
+      observedFilePath = input.filePath;
+      observedBytes = await readFile(input.filePath);
+      return commandSuccess({
+        pinId: 'homepage-large-file-pin-1',
+        metafileUri: 'metafile://homepage-large-file-pin-1.html',
+        contentType: input.contentType,
+        network: 'mvc',
+        txids: ['tx-homepage-large-file-1'],
+        bytes: observedBytes.byteLength,
+      });
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/homepage/upload?fileName=${encodeURIComponent('large.html')}`, {
+    method: 'POST',
+    headers: { 'content-type': 'text/html' },
+    body: uploadBytes,
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(server.calls.botHomepageUpload.length, 1);
+  assert.equal(server.calls.botHomepageUpload[0].slug, 'alice-bot');
+  assert.equal(server.calls.botHomepageUpload[0].fileName, 'large.html');
+  assert.equal(server.calls.botHomepageUpload[0].contentType, 'text/html');
+  assert.equal(Buffer.compare(observedBytes, uploadBytes), 0);
+  await waitForFileRemoved(observedFilePath);
+  assert.equal(payload.data.bytes, uploadBytes.byteLength);
+});
+
+test('POST /api/bot/profiles/:slug/homepage/upload rejects files above the 50 MiB cap', async (t) => {
   let handlerCalls = 0;
   const server = await startServer({
     uploadHomepageFile: async () => {
@@ -1979,13 +2016,37 @@ test('POST /api/bot/profiles/:slug/homepage/upload rejects files above the direc
   const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/homepage/upload?fileName=${encodeURIComponent('too-large.html')}`, {
     method: 'POST',
     headers: { 'content-type': 'text/html' },
-    body: Buffer.alloc((2 * 1024 * 1024) + 1),
+    body: Buffer.alloc((50 * 1024 * 1024) + 1),
   });
   const payload = await response.json();
 
   assert.equal(response.status, 413);
   assert.equal(payload.ok, false);
   assert.equal(payload.code, 'homepage_upload_too_large');
+  assert.match(payload.message, /50 MiB/);
+  assert.equal(handlerCalls, 0);
+});
+
+test('POST /api/bot/profiles/:slug/homepage/upload rejects empty bodies before calling the handler', async (t) => {
+  let handlerCalls = 0;
+  const server = await startServer({
+    uploadHomepageFile: async () => {
+      handlerCalls += 1;
+      return commandSuccess({});
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/homepage/upload?fileName=${encodeURIComponent('empty.html')}`, {
+    method: 'POST',
+    headers: { 'content-type': 'text/html' },
+    body: Buffer.alloc(0),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'homepage_upload_empty');
   assert.equal(handlerCalls, 0);
 });
 
@@ -3388,7 +3449,7 @@ test('GET /ui/apps serves the Apps owner console and appears after Services', as
   assert.match(html, /data-apps-shell/);
   assert.match(html, /data-apps-grid/);
   assert.match(html, /data-apps-publish-open/);
-  assert.match(html, /\/api\/apps/);
+  assert.match(html, /\/api\/metaapp\/publish/);
   assert.match(nav, /href="\/ui\/services"[\s\S]*href="\/ui\/apps"/);
   assert.doesNotMatch(nav, /href="\/ui\/metaapps"/);
   assert.doesNotMatch(html, /\/api\/wallet/);

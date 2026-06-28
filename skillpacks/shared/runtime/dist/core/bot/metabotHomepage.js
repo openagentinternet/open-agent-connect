@@ -10,6 +10,7 @@ exports.writeMetabotHomepage = writeMetabotHomepage;
 exports.serializeMetabotHomepagePayload = serializeMetabotHomepagePayload;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const metafileUri_1 = require("../files/metafileUri");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -35,6 +36,14 @@ function validateHomepageUri(uri) {
         throw new Error('Homepage uri must start with metafile:// or metaapp:// and must not contain whitespace.');
     }
 }
+function withRecommendedMetafileExtension(homepage) {
+    const extension = (0, metafileUri_1.extensionFromContentType)(homepage.contentType);
+    if (!extension || !homepage.uri.toLowerCase().startsWith('metafile://')) {
+        return homepage;
+    }
+    const uri = (0, metafileUri_1.appendMetafileUriExtension)(homepage.uri, extension);
+    return uri === homepage.uri ? homepage : { ...homepage, uri };
+}
 function normalizeMetabotHomepage(value) {
     if (value === undefined)
         return undefined;
@@ -48,7 +57,7 @@ function normalizeMetabotHomepage(value) {
     validateHomepageUri(uri);
     const renderer = normalizeRenderer(record.renderer, uri);
     const contentType = normalizeText(record.contentType) || defaultContentType(uri, renderer);
-    return { uri, renderer, contentType };
+    return withRecommendedMetafileExtension({ uri, renderer, contentType });
 }
 function sameMetabotHomepage(left, right) {
     if (!left && !right)
@@ -85,5 +94,5 @@ async function writeMetabotHomepage(filePath, homepage) {
     await node_fs_1.promises.writeFile(filePath, `${JSON.stringify(homepage, null, 2)}\n`, 'utf8');
 }
 function serializeMetabotHomepagePayload(homepage) {
-    return JSON.stringify(homepage);
+    return JSON.stringify(withRecommendedMetafileExtension(homepage));
 }

@@ -8,6 +8,7 @@ import {
   commandSuccess,
   type MetabotCommandResult,
 } from '../contracts/commandResult';
+import { appendMetafileUriExtension, extensionFromContentType, metafileUriFromPinId } from '../files/metafileUri';
 import { buildMetaAppManifestDraft } from './manifest';
 import { assertMetaAppPinId } from './pinId';
 import { inspectMetaAppProject } from './projectInspector';
@@ -25,7 +26,7 @@ import type {
 } from './types';
 import { writeMetaAppZipArchive } from './zipArchive';
 
-const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>';
+const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>.zip';
 
 export interface UploadLikeResult {
   pinId?: string;
@@ -124,14 +125,6 @@ function normalizeStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
-function stripZipSuffixFromMetafileUri(value: string): string {
-  const normalized = normalizeText(value);
-  if (!/^metafile:\/\//iu.test(normalized)) {
-    return normalized;
-  }
-  return normalized.replace(/\.zip(?=([?#].*)?$)/iu, '');
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -208,8 +201,9 @@ function finalizeManifestForWrite(input: {
   const fallbackAppName = slugFromProjectDir(input.plan.projectDir);
   const title = normalizeText(input.manifest.title) || normalizeText(input.manifest.appName) || fallbackAppName;
   const appName = normalizeText(input.manifest.appName) || slugFromProjectDir(title);
-  const artifactUri = stripZipSuffixFromMetafileUri(input.artifactUri);
-  const explicitCode = stripZipSuffixFromMetafileUri(normalizeText(input.manifest.code));
+  const artifactUri = appendMetafileUriExtension(input.artifactUri, '.zip');
+  const codeExtension = extensionFromContentType(input.manifest.codeType) ?? '.zip';
+  const explicitCode = appendMetafileUriExtension(normalizeText(input.manifest.code), codeExtension);
   const code = explicitCode || (
     input.plan.projectType === 'static' || input.compatibilityMirrorContent
       ? artifactUri
@@ -374,11 +368,11 @@ async function createConfirmationData(
 function uploadArtifactUri(upload: UploadLikeResult): string {
   const metafileUri = normalizeText(upload.metafileUri);
   if (metafileUri) {
-    return stripZipSuffixFromMetafileUri(metafileUri);
+    return appendMetafileUriExtension(metafileUri, '.zip');
   }
   const pinId = normalizeText(upload.pinId);
   if (pinId) {
-    return `metafile://${pinId}`;
+    return metafileUriFromPinId(pinId, '.zip');
   }
   throw new Error('Upload result did not include a metafile URI or pinId.');
 }

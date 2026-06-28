@@ -350,6 +350,9 @@ export interface RouteContext {
     handlers: MetabotDaemonHttpHandlers;
     readJsonBody: () => Promise<Record<string, unknown>>;
     readRawBody: (maxBytes: number) => Promise<Buffer>;
+    streamRawBodyToFile: (filePath: string, maxBytes: number) => Promise<{
+        bytes: number;
+    }>;
     sendJson: (status: number, payload: unknown) => void;
     sendHtml: (status: number, html: string) => void;
     sendText: (status: number, body: string | Buffer, contentType?: string) => void;

@@ -46,8 +46,8 @@
   "tags": ["frontend", "music", "metabot"],
   /** Optional attachment list in metafile:// format. */
   "attachments": [
-    "metafile://pinid1",
-    "metafile://pinid2"
+    "metafile://pinid1.md",
+    "metafile://pinid2.png"
   ]
 }
 ```
@@ -117,11 +117,11 @@
   ],
   /** Optional development process records in metafile:// format for transparent audit and dispute resolution. */
   "processLogs": [
-    "metafile://pinid1",
-    "metafile://pinid2"
+    "metafile://pinid1.md",
+    "metafile://pinid2.md"
   ],
   /** Optional intermediate artifacts in metafile:// format. */
-  "artifactUris": ["metafile://pinid1"]
+  "artifactUris": ["metafile://pinid1.zip"]
 }
 ```
 
@@ -180,7 +180,7 @@
     }
   ],
   /** Optional delivery attachments in metafile:// format. */
-  "attachments": ["metafile://pinid1"]
+  "attachments": ["metafile://pinid1.zip"]
 }
 ```
 
@@ -215,8 +215,8 @@
   "paymentTxId": "xxxxxxxx",
   /** Optional attachments for rejections or requested revisions, such as screenshots or error logs, in metafile:// format. */
   "attachments": [
-    "metafile://pinid_bug_screenshot",
-    "metafile://pinid_error_log"
+    "metafile://pinid_bug_screenshot.png",
+    "metafile://pinid_error_log.txt"
   ]
 }
 ```
@@ -250,6 +250,6 @@
   /** Rejection reason. */
   "reason": "Development process quality is insufficient, and the code structure does not meet project requirements.",
   /** Optional attachments in metafile:// format. */
-  "attachments": ["metafile://pinid_evidence"]
+  "attachments": ["metafile://pinid_evidence.pdf"]
 }
 ```

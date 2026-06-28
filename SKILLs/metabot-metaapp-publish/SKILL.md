@@ -15,7 +15,7 @@ Handle browser-runnable apps, games, and sites as MetaApps through the existing 
 
 ## Actor Selection
 
-`file upload`, `metaapp publish`, `metaapp update`, `metaapp delete`, `metaapp publish-project`, `metaapp update-project`, `metaapp share --announce`, and `metaapp comment` accept optional `--from <bot-slug>`.
+`file upload`, `file upload-large`, `metaapp publish`, `metaapp update`, `metaapp delete`, `metaapp publish-project`, `metaapp update-project`, `metaapp share --announce`, and `metaapp comment` accept optional `--from <bot-slug>`.
 
 Before any upload or final protocol write, confirm the MetaBot actor before every on-chain write. This is mandatory in a multi-MetaBot, multi-account system because ZIP files, cover images, intro images, announcements, comments, deletion revokes, and the final MetaApp JSON all belong to the signing MetaBot.
 
@@ -94,6 +94,20 @@ The human can customize values or accept the AI defaults. Local image files must
 
 Use this when the MetaAPP payload already references uploaded assets with `metafile://` or HTTP(S) image URLs.
 
+If you are assembling the payload manually, create a ZIP from the runtime artifact directory, preserving relative paths so `indexFile` exists at the ZIP root or at the declared relative path. Upload the ZIP through the large-file boundary and upload any local image assets only after showing the upload list and confirming the MetaBot actor.
+
+```bash
+{{METABOT_CLI}} file upload-large --from <bot-slug> --file /absolute/path/to/metaapp.zip --content-type application/zip
+```
+
+For small known image assets, direct file upload remains acceptable:
+
+```bash
+{{METABOT_CLI}} file upload --from <bot-slug> --request-file <image-upload.json>
+```
+
+Then publish, update, delete, or list through the MetaApp CLI:
+
 ```bash
 {{METABOT_CLI}} metaapp list --from <bot-slug>
 {{METABOT_CLI}} metaapp publish --from <bot-slug> --payload-file <path> --confirm
@@ -103,6 +117,12 @@ Use this when the MetaAPP payload already references uploaded assets with `metaf
 
 Payload files should contain the MetaAPP protocol JSON body, not a chain-write wrapper. Direct publish creates a `/protocols/metaapp` pin. Direct update modifies the target MetaApp pin. Direct delete revokes the target pin and should be treated as irreversible by the user-facing workflow.
 
+When image asset size is unknown, use `file upload-large --from <bot-slug> --file <absolute-path> --content-type <mime>` instead.
+
+If the human explicitly chooses BTC or OPCAT for file uploads, pass `--chain btc` or `--chain opcat`. DOGE is not supported for file upload. HTTP(S) image URLs may be used directly only in image fields such as `coverImg`, `icon`, and `introImgs`; package fields must stay upload-backed.
+
+Use `metafile://...` references returned by upload commands and preserve their file extensions when present. `content` is the browser runtime artifact ZIP and must be non-empty. `code` is optional source-code material and may be empty, an explicit source archive `metafile://...`, or the runtime ZIP only when compatibility requires mirroring. Bare `metafile://<pinId>` remains protocol-valid when the extension is unknown, but official MetaApp writes should use `metafile://<pinId>.<ext>` whenever the file type is known.
+
 Example direct payload:
 
 ```json
@@ -110,15 +130,15 @@ Example direct payload:
   "title": "My MetaApp",
   "appName": "my-metaapp",
   "coverImg": "https://example.com/cover.png",
-  "icon": "metafile://icon-pin",
+  "icon": "metafile://icon-pin.png",
   "intro": "Short human-facing description.",
-  "introImgs": ["https://example.com/screen.png"],
+  "introImgs": ["metafile://screen-pin.png"],
   "runtime": "browser",
   "version": "1.0.0",
   "indexFile": "index.html",
-  "content": "metafile://zip-pin",
+  "content": "metafile://zip-pin.zip",
   "contentType": "application/zip",
-  "code": "metafile://source-pin",
+  "code": "metafile://source-pin.zip",
   "codeType": "application/zip",
   "tags": [],
   "disabled": false

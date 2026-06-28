@@ -59,6 +59,7 @@ const privateConversation_1 = require("../core/chat/privateConversation");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const nativeWallet_1 = require("../core/wallet/nativeWallet");
 const uploadLargeFile_1 = require("../core/files/uploadLargeFile");
+const metaFsLargeUploader_1 = require("../core/files/metaFsLargeUploader");
 const uploadFile_1 = require("../core/files/uploadFile");
 const postBuzz_1 = require("../core/buzz/postBuzz");
 const previewSessions_1 = require("../core/metaapp/previewSessions");
@@ -115,12 +116,23 @@ const DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS = [1_500, 5_000, 10_000];
 const LOOM_DRAFT_LLM_TIMEOUT_MS = 120_000;
 const LOOM_DEV_ROUND_LLM_TIMEOUT_MS = 900_000;
 const LOOM_DRAFT_LLM_POLL_INTERVAL_MS = 500;
+const KNOWN_LARGE_FILE_UPLOAD_ERROR_CODES = new Set([
+    'large_file_upload_unavailable',
+    'large_file_upload_too_large',
+    'large_file_upload_chain_unsupported',
+    'large_file_upload_funding_failed',
+    'large_file_upload_metafs_failed',
+]);
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
 function readErrorCode(error, fallback) {
     const code = error instanceof Error ? error.code : undefined;
     return normalizeText(code) || fallback;
+}
+function readKnownLargeFileUploadErrorCode(error) {
+    const code = readErrorCode(error, '');
+    return KNOWN_LARGE_FILE_UPLOAD_ERROR_CODES.has(code) ? code : '';
 }
 function readErrorMessage(error, code, fallback) {
     const rawMessage = normalizeText(error instanceof Error ? error.message : String(error ?? ''));
@@ -3467,7 +3479,11 @@ function createDefaultMetabotDaemonHandlers(input) {
         adapters,
     });
     const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFile_1.uploadLargeFileToChain;
-    const providerLargeFileUploader = input.providerLargeFileUploader;
+    const providerLargeFileUploader = input.providerLargeFileUploader === null
+        ? undefined
+        : input.providerLargeFileUploader
+            ?? input.createProviderLargeFileUploader?.()
+            ?? (0, metaFsLargeUploader_1.createMetaFsLargeUploader)();
     const configStore = (0, configStore_1.createConfigStore)(input.homeDir);
     function isSupportedWriteNetwork(value) {
         return configTypes_1.DEFAULT_WRITE_NETWORKS.includes(value);
@@ -9060,11 +9076,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                     }, {
                         uploadFile: async (uploadInput) => {
                             const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
-                            const uploaded = await (0, uploadFile_1.uploadLocalFileToChain)({
+                            const uploaded = await (0, uploadLargeFile_1.uploadLargeFileToChain)({
                                 filePath: uploadInput.filePath,
                                 contentType: uploadInput.contentType,
                                 network,
                                 signer: actor.signer,
+                                largeUploader: providerLargeFileUploader,
                             });
                             return uploaded;
                         },
@@ -9129,11 +9146,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                     }, {
                         uploadFile: async (uploadInput) => {
                             const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
-                            const uploaded = await (0, uploadFile_1.uploadLocalFileToChain)({
+                            const uploaded = await (0, uploadLargeFile_1.uploadLargeFileToChain)({
                                 filePath: uploadInput.filePath,
                                 contentType: uploadInput.contentType,
                                 network,
                                 signer: actor.signer,
+                                largeUploader: providerLargeFileUploader,
                             });
                             return uploaded;
                         },
@@ -12014,9 +12032,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
-                    const code = error instanceof Error ? error.code : undefined;
-                    if (code === 'large_file_upload_unavailable') {
-                        return (0, commandResult_1.commandFailed)('large_file_upload_unavailable', message);
+                    const code = readKnownLargeFileUploadErrorCode(error);
+                    if (code) {
+                        return (0, commandResult_1.commandFailed)(code, message);
                     }
                     return (0, commandResult_1.commandFailed)('file_upload_failed', message);
                 }
@@ -12748,9 +12766,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
-                    const code = error instanceof Error ? error.code : undefined;
-                    if (code === 'large_file_upload_unavailable') {
-                        return (0, commandResult_1.commandFailed)('large_file_upload_unavailable', message);
+                    const code = readKnownLargeFileUploadErrorCode(error);
+                    if (code) {
+                        return (0, commandResult_1.commandFailed)(code, message);
                     }
                     return (0, commandResult_1.commandFailed)('homepage_upload_failed', message);
                 }

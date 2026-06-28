@@ -11,6 +11,7 @@ const node_fs_1 = require("node:fs");
 const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const deliveryArtifacts_1 = require("../deliveryArtifacts");
+const metafileUri_1 = require("../../files/metafileUri");
 const metafileUrls_1 = require("../../files/metafileUrls");
 const metafileVerifier_1 = require("../../files/metafileVerifier");
 const uploadLargeFile_1 = require("../../files/uploadLargeFile");
@@ -625,9 +626,10 @@ function uploadResultToArtifact(result) {
     const urls = (0, metafileUrls_1.buildMetafileContentUrls)(base.pinId);
     const contentType = safeArtifactContentType(result.contentType);
     const extension = base.extension ?? safeArtifactExtension(result.extension);
+    const uri = extension ? (0, metafileUri_1.appendMetafileUriExtension)(base.uri, extension) : base.uri;
     const kind = (0, deliveryArtifacts_1.inferDeliveryArtifactKind)(extension, contentType);
     return {
-        uri: base.uri,
+        uri,
         pinId: base.pinId,
         kind,
         fileName: safeArtifactFileName(result.fileName, base.fileName),

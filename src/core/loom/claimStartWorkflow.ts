@@ -3,6 +3,7 @@ import {
   commandSuccess,
   type MetabotCommandResult,
 } from '../contracts/commandResult';
+import { appendMetafileUriExtension, metafileUriFromPinId } from '../files/metafileUri';
 import type { LoomCommandRunner } from './commandRunner';
 import { buildLoomChainWriteRequest, type LoomChainWriteRequest } from './chainRequest';
 import {
@@ -855,9 +856,12 @@ export async function runLoomClaimAndStartWorkflow(
       network: processLogFileChain,
       contentType: 'text/markdown',
     });
-    const processLogUri = nonEmptyString(uploadedLog.metafileUri)
+    const rawProcessLogUri = nonEmptyString(uploadedLog.metafileUri)
       ?? nonEmptyString(uploadedLog.uri)
-      ?? (nonEmptyString(uploadedLog.pinId) ? `metafile://${uploadedLog.pinId}` : undefined);
+      ?? (nonEmptyString(uploadedLog.pinId) ? metafileUriFromPinId(uploadedLog.pinId, '.md') : undefined);
+    const processLogUri = rawProcessLogUri
+      ? appendMetafileUriExtension(rawProcessLogUri, '.md')
+      : undefined;
     if (!processLogUri) {
       throw new Error('Loom process log upload did not return a metafile URI.');
     }

@@ -1,5 +1,8 @@
 import http from 'node:http';
 import { Buffer } from 'node:buffer';
+import { once } from 'node:events';
+import { createWriteStream } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { commandFailed } from '../core/contracts/commandResult';
 import { handleConfigRoutes } from './routes/config';
 import { handleBuzzRoutes } from './routes/buzz';
@@ -123,6 +126,41 @@ async function readRawBody(req: http.IncomingMessage, maxBytes: number): Promise
   return chunks.length ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0);
 }
 
+async function streamRawBodyToFile(
+  req: http.IncomingMessage,
+  filePath: string,
+  maxBytes: number,
+): Promise<{ bytes: number }> {
+  const normalizedMaxBytes = Math.max(0, Math.floor(maxBytes));
+  const stream = createWriteStream(filePath);
+  const streamError = new Promise<never>((_resolve, reject) => {
+    stream.once('error', reject);
+  });
+  streamError.catch(() => {});
+  let totalBytes = 0;
+
+  try {
+    for await (const chunk of req) {
+      const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      totalBytes += bufferChunk.byteLength;
+      if (totalBytes > normalizedMaxBytes) {
+        throw new Error(`Request body is too large. Maximum size is ${normalizedMaxBytes} bytes.`);
+      }
+      if (!stream.write(bufferChunk)) {
+        await Promise.race([once(stream, 'drain'), streamError]);
+      }
+    }
+
+    stream.end();
+    await Promise.race([once(stream, 'finish'), streamError]);
+    return { bytes: totalBytes };
+  } catch (error) {
+    stream.destroy();
+    await rm(filePath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 export function createHttpServer(handlers: MetabotDaemonHttpHandlers = {}): http.Server {
   return http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -134,6 +172,7 @@ export function createHttpServer(handlers: MetabotDaemonHttpHandlers = {}): http
       handlers,
       readJsonBody: () => readJsonBody(req),
       readRawBody: (maxBytes) => readRawBody(req, maxBytes),
+      streamRawBodyToFile: (filePath, maxBytes) => streamRawBodyToFile(req, filePath, maxBytes),
       sendJson: (status, payload) => sendJson(res, status, payload),
       sendHtml: (status, html) => sendHtml(res, status, html),
       sendText: (status, body, contentType) => sendText(res, status, body, contentType),
