@@ -3295,6 +3295,7 @@ test('inbound provider ORDER preserves large_file_upload_unavailable when no lar
     llmExecuteHook: (request) => output.write(request),
     llmOutput: () => output.outputText('Large image complete.'),
     llmSessionCwd: () => output.sessionCwd(),
+    providerLargeFileUploader: null,
     rawTxs: {
       [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
     },

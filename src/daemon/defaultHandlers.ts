@@ -4558,7 +4558,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   providerOrderReplyRunner?: ChatReplyRunner;
   providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
   providerArtifactUploadLargeFile?: typeof uploadLargeFileToChain;
-  providerLargeFileUploader?: ProductionLargeFileUploader;
+  providerLargeFileUploader?: ProductionLargeFileUploader | null;
   createProviderLargeFileUploader?: () => ProductionLargeFileUploader;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   onIdentityProfileRegistered?: () => Promise<void> | void;
@@ -4585,9 +4585,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     adapters,
   });
   const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFileToChain;
-  const providerLargeFileUploader = input.providerLargeFileUploader
-    ?? input.createProviderLargeFileUploader?.()
-    ?? createMetaFsLargeUploader();
+  const providerLargeFileUploader = input.providerLargeFileUploader === null
+    ? undefined
+    : input.providerLargeFileUploader
+      ?? input.createProviderLargeFileUploader?.()
+      ?? createMetaFsLargeUploader();
   const configStore = createConfigStore(input.homeDir);
   function isSupportedWriteNetwork(value: string): value is DefaultWriteNetwork {
     return DEFAULT_WRITE_NETWORKS.includes(value as DefaultWriteNetwork);
