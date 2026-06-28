@@ -1479,18 +1479,31 @@ test('metaapp owner runtime commands call durable metaapp daemon routes', async 
   };
 
   const baseEnv = { METABOT_DAEMON_BASE_URL: 'http://127.0.0.1:48271' };
+  const payloadFile = path.join(homeDir, 'metaapp-payload.json');
+  await writeFile(payloadFile, JSON.stringify({
+    title: 'Owner App',
+    appName: 'owner-app',
+    runtime: ['browser'],
+  }), 'utf8');
+
   const list = await runCommandWithEnv(homeDir, ['metaapp', 'list', '--from', 'alice', '--size', '12', '--cursor', 'cursor-1'], baseEnv);
   const deleted = await runCommandWithEnv(homeDir, ['metaapp', 'delete', '--from', 'alice', '--target-pin-id', 'a'.repeat(64) + 'i0', '--confirm'], baseEnv);
+  const publishedPayload = await runCommandWithEnv(homeDir, ['metaapp', 'publish', '--from', 'alice', '--payload-file', payloadFile, '--chain', 'mvc', '--confirm'], baseEnv);
+  const updatedPayload = await runCommandWithEnv(homeDir, ['metaapp', 'update', '--from', 'alice', '--target-pin-id', 'c'.repeat(64) + 'i0', '--payload-file', payloadFile, '--chain', 'mvc', '--confirm'], baseEnv);
   const publishedProject = await runCommandWithEnv(homeDir, ['metaapp', 'publish-project', '--from', 'alice', '--project-dir', './site', '--manifest-file', './metaapp.json', '--confirm'], baseEnv);
   const updatedProject = await runCommandWithEnv(homeDir, ['metaapp', 'update-project', '--from', 'alice', '--target-pin-id', 'b'.repeat(64) + 'i0', '--project-dir', './site', '--confirm'], baseEnv);
 
   assert.equal(list.exitCode, 0);
   assert.equal(deleted.exitCode, 0);
+  assert.equal(publishedPayload.exitCode, 0);
+  assert.equal(updatedPayload.exitCode, 0);
   assert.equal(publishedProject.exitCode, 0);
   assert.equal(updatedProject.exitCode, 0);
   assert.deepEqual(requests.map(({ method, pathname }) => ({ method, pathname })), [
     { method: 'GET', pathname: '/api/metaapp/list' },
     { method: 'POST', pathname: '/api/metaapp/delete' },
+    { method: 'POST', pathname: '/api/metaapp/publish' },
+    { method: 'POST', pathname: '/api/metaapp/update' },
     { method: 'POST', pathname: '/api/metaapp/publish-project' },
     { method: 'POST', pathname: '/api/metaapp/update-project' },
   ]);
@@ -1500,12 +1513,29 @@ test('metaapp owner runtime commands call durable metaapp daemon routes', async 
     from: 'alice',
     confirm: true,
   });
-  assert.equal(requests[2].body.projectDir, path.join(homeDir, 'site'));
-  assert.equal(requests[2].body.manifestFile, path.join(homeDir, 'metaapp.json'));
-  assert.equal(requests[2].body.from, 'alice');
-  assert.equal(requests[2].body.confirm, true);
-  assert.equal(requests[3].body.projectDir, path.join(homeDir, 'site'));
-  assert.equal(requests[3].body.targetPinId, 'b'.repeat(64) + 'i0');
+  assert.deepEqual(requests[2].body, {
+    title: 'Owner App',
+    appName: 'owner-app',
+    runtime: ['browser'],
+    network: 'mvc',
+    from: 'alice',
+    confirm: true,
+  });
+  assert.deepEqual(requests[3].body, {
+    title: 'Owner App',
+    appName: 'owner-app',
+    runtime: ['browser'],
+    targetPinId: 'c'.repeat(64) + 'i0',
+    network: 'mvc',
+    from: 'alice',
+    confirm: true,
+  });
+  assert.equal(requests[4].body.projectDir, path.join(homeDir, 'site'));
+  assert.equal(requests[4].body.manifestFile, path.join(homeDir, 'metaapp.json'));
+  assert.equal(requests[4].body.from, 'alice');
+  assert.equal(requests[4].body.confirm, true);
+  assert.equal(requests[5].body.projectDir, path.join(homeDir, 'site'));
+  assert.equal(requests[5].body.targetPinId, 'b'.repeat(64) + 'i0');
 });
 
 test('buzz post succeeds immediately after bootstrap identity create', async (t) => {
