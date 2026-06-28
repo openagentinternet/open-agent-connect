@@ -34,11 +34,38 @@ Should not trigger when:
 
 ## Privacy Rule
 
-Never read large local files into model context. Do not paste, summarize, base64 encode, or inspect the file body in chat. Only pass the absolute local path to the CLI request file and let the runtime stream or read the bytes outside model context.
+Never read large local files into model context. Do not paste, summarize, base64 encode, or inspect the file body in chat. Only pass the absolute local path to the CLI and let the runtime stream or read the bytes outside model context.
 
 ## Command
 
-Prepare a temporary request JSON file:
+Use the path-first command by default:
+
+```bash
+{{METABOT_CLI}} file upload-large --from <bot-slug> --file /absolute/path/to/archive.zip --content-type application/zip --verify
+```
+
+Required flag:
+
+- `--file`: absolute local path to the file.
+
+Optional flags:
+
+- `--content-type`: MIME type when known; omit it when the runtime should infer the type.
+- `--verify`: request post-upload verification when supported by the runtime.
+
+When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). Only pass `--chain mvc`, `--chain btc`, or `--chain opcat` when the human explicitly requests that chain:
+
+```bash
+{{METABOT_CLI}} file upload-large --from <bot-slug> --file /absolute/path/to/archive.zip --content-type application/zip --chain mvc --verify
+{{METABOT_CLI}} file upload-large --from <bot-slug> --file /absolute/path/to/archive.zip --content-type application/zip --chain btc --verify
+{{METABOT_CLI}} file upload-large --from <bot-slug> --file /absolute/path/to/archive.zip --content-type application/zip --chain opcat --verify
+```
+
+DOGE is unsupported for file upload. If the human asks for DOGE file upload, explain that file upload currently excludes DOGE and ask for a supported chain or the configured default.
+
+## Compatibility Request File
+
+Use `--request-file` only for compatibility with existing automation or when a workflow already has a request JSON file:
 
 ```json
 {
@@ -57,27 +84,9 @@ Optional fields:
 - `contentType`: MIME type when known; omit it when the runtime should infer the type.
 - `verify`: boolean request for post-upload verification when supported by the runtime.
 
-Then call:
-
 ```bash
-{{METABOT_CLI}} file upload-large --request-file request.json
+{{METABOT_CLI}} file upload-large --from <bot-slug> --request-file request.json --verify
 ```
-
-With an actor:
-
-```bash
-{{METABOT_CLI}} file upload-large --from <bot-slug> --request-file request.json
-```
-
-When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). Only pass `--chain mvc`, `--chain btc`, or `--chain opcat` when the human explicitly requests that chain:
-
-```bash
-{{METABOT_CLI}} file upload-large --from <bot-slug> --request-file request.json --chain mvc
-{{METABOT_CLI}} file upload-large --from <bot-slug> --request-file request.json --chain btc
-{{METABOT_CLI}} file upload-large --from <bot-slug> --request-file request.json --chain opcat
-```
-
-DOGE is unsupported for file upload. If the human asks for DOGE file upload, explain that file upload currently excludes DOGE and ask for a supported chain or the configured default.
 
 ## Size And Chain Limits
 
@@ -104,7 +113,8 @@ If verification was requested and the runtime reports verification unavailable, 
 ## Required Semantics
 
 - Use `/file` as the MetaWeb path for the resulting file metadata.
-- Use a temporary JSON request file rather than embedding file bytes in the command line.
+- Prefer `--file /absolute/path` for human-run uploads.
+- Use a temporary JSON request file only for compatibility or automation.
 - Forward `--from <bot-slug>` when the workflow already has a selected actor.
 - Pass `--chain mvc`, `--chain btc`, or `--chain opcat` only when explicitly requested by the human.
 - Stop on CLI or runtime errors and report the structured error details.

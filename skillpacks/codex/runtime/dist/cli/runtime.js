@@ -675,13 +675,11 @@ async function readPreferredLlmRuntimeId(paths) {
     }
 }
 async function refreshLlmRuntimeStoreFromDiscovery(runtimeStore, env) {
-    const [previous, result] = await Promise.all([
-        runtimeStore.read(),
-        (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env }),
-    ]);
+    const previous = await runtimeStore.read();
+    const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env, knownRuntimes: previous.runtimes });
     const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
     for (const runtime of result.runtimes) {
-        await runtimeStore.upsertRuntime(runtime);
+        await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
     }
     for (const runtime of previous.runtimes) {
         if (runtime.provider === 'custom')
@@ -2844,11 +2842,15 @@ async function serveCliDaemonProcess(context) {
     });
     // Discover LLM runtimes in background (non-blocking).
     const metaBotSlug = node_path_1.default.basename(paths.profileRoot);
-    void (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: context.env }).then(async (result) => {
+    void (async () => {
+        const previous = await llmRuntimeStore.read();
+        const result = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: context.env, knownRuntimes: previous.runtimes });
         for (const runtime of result.runtimes) {
-            await llmRuntimeStore.upsertRuntime(runtime).catch(() => { });
+            await llmRuntimeStore
+                .upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true })
+                .catch(() => { });
         }
-    });
+    })().catch(() => { });
     const chatStateStore = (0, privateChatStateStore_1.createPrivateChatStateStore)(paths);
     const chatStrategyStore = (0, chatStrategyStore_1.createChatStrategyStore)(paths);
     const chatAutoReplyOrchestrator = (0, privateChatAutoReply_1.createPrivateChatAutoReplyOrchestrator)({

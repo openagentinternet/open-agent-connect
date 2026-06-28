@@ -6,6 +6,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createHttpServer = createHttpServer;
 const node_http_1 = __importDefault(require("node:http"));
 const node_buffer_1 = require("node:buffer");
+const node_events_1 = require("node:events");
+const node_fs_1 = require("node:fs");
+const promises_1 = require("node:fs/promises");
 const commandResult_1 = require("../core/contracts/commandResult");
 const config_1 = require("./routes/config");
 const buzz_1 = require("./routes/buzz");
@@ -95,6 +98,49 @@ async function readJsonBody(req) {
     }
     return parsed;
 }
+async function readRawBody(req, maxBytes) {
+    const chunks = [];
+    let totalBytes = 0;
+    const normalizedMaxBytes = Math.max(0, Math.floor(maxBytes));
+    for await (const chunk of req) {
+        const bufferChunk = node_buffer_1.Buffer.isBuffer(chunk) ? chunk : node_buffer_1.Buffer.from(String(chunk));
+        totalBytes += bufferChunk.byteLength;
+        if (totalBytes > normalizedMaxBytes) {
+            throw new Error(`Request body is too large. Maximum size is ${normalizedMaxBytes} bytes.`);
+        }
+        chunks.push(bufferChunk);
+    }
+    return chunks.length ? node_buffer_1.Buffer.concat(chunks, totalBytes) : node_buffer_1.Buffer.alloc(0);
+}
+async function streamRawBodyToFile(req, filePath, maxBytes) {
+    const normalizedMaxBytes = Math.max(0, Math.floor(maxBytes));
+    const stream = (0, node_fs_1.createWriteStream)(filePath);
+    const streamError = new Promise((_resolve, reject) => {
+        stream.once('error', reject);
+    });
+    streamError.catch(() => { });
+    let totalBytes = 0;
+    try {
+        for await (const chunk of req) {
+            const bufferChunk = node_buffer_1.Buffer.isBuffer(chunk) ? chunk : node_buffer_1.Buffer.from(String(chunk));
+            totalBytes += bufferChunk.byteLength;
+            if (totalBytes > normalizedMaxBytes) {
+                throw new Error(`Request body is too large. Maximum size is ${normalizedMaxBytes} bytes.`);
+            }
+            if (!stream.write(bufferChunk)) {
+                await Promise.race([(0, node_events_1.once)(stream, 'drain'), streamError]);
+            }
+        }
+        stream.end();
+        await Promise.race([(0, node_events_1.once)(stream, 'finish'), streamError]);
+        return { bytes: totalBytes };
+    }
+    catch (error) {
+        stream.destroy();
+        await (0, promises_1.rm)(filePath, { force: true }).catch(() => { });
+        throw error;
+    }
+}
 function createHttpServer(handlers = {}) {
     return node_http_1.default.createServer(async (req, res) => {
         const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -104,6 +150,8 @@ function createHttpServer(handlers = {}) {
             url: requestUrl,
             handlers,
             readJsonBody: () => readJsonBody(req),
+            readRawBody: (maxBytes) => readRawBody(req, maxBytes),
+            streamRawBodyToFile: (filePath, maxBytes) => streamRawBodyToFile(req, filePath, maxBytes),
             sendJson: (status, payload) => sendJson(res, status, payload),
             sendHtml: (status, html) => sendHtml(res, status, html),
             sendText: (status, body, contentType) => sendText(res, status, body, contentType),

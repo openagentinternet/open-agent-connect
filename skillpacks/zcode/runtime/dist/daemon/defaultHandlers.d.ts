@@ -121,6 +121,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
     providerArtifactUploadLargeFile?: typeof uploadLargeFileToChain;
     providerLargeFileUploader?: ProductionLargeFileUploader;
+    createProviderLargeFileUploader?: () => ProductionLargeFileUploader;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     onIdentityProfileRegistered?: () => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;

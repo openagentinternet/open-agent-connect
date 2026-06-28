@@ -15,7 +15,7 @@ Handle browser-runnable apps, games, and sites as MetaApps through the existing 
 
 ## Actor Selection
 
-`file upload`, `chain write`, `metaapp publish`, `metaapp update`, `metaapp share --announce`, and `metaapp comment` accept optional `--from <bot-slug>`.
+`file upload`, `file upload-large`, `chain write`, `metaapp publish`, `metaapp update`, `metaapp share --announce`, and `metaapp comment` accept optional `--from <bot-slug>`.
 
 Before any upload or final protocol write, confirm the MetaBot actor before every on-chain write. This is mandatory in a multi-MetaBot, multi-account system because ZIP files, cover images, intro images, announcements, comments, and the final MetaApp JSON all belong to the signing MetaBot.
 
@@ -73,24 +73,19 @@ Stop if preview reports a manual action. Otherwise use the preview plan to ident
 The human can customize values or accept the AI defaults. If a local file is selected for `coverImg`, `icon`, or `introImgs`, it must be uploaded before it appears in the final JSON.
 
 4. Prepare ZIP and asset uploads.
-   Create a ZIP from the previewed runtime artifact directory, preserving relative paths so `indexFile` exists at the ZIP root or at the declared relative path. Upload the ZIP and any local image assets only after showing the upload list and confirming the MetaBot actor.
-
-```json
-{
-  "filePath": "/absolute/path/to/metaapp.zip",
-  "contentType": "application/zip"
-}
-```
+   Create a ZIP from the previewed runtime artifact directory, preserving relative paths so `indexFile` exists at the ZIP root or at the declared relative path. Upload the ZIP through the large-file boundary and upload any local image assets only after showing the upload list and confirming the MetaBot actor.
 
 ```bash
-{{METABOT_CLI}} file upload --from <bot-slug> --request-file <zip-upload.json>
+{{METABOT_CLI}} file upload-large --from <bot-slug> --file /absolute/path/to/metaapp.zip --content-type application/zip
 ```
 
-For image assets, use the same command with the image file and content type:
+For small known image assets, direct file upload remains acceptable:
 
 ```bash
 {{METABOT_CLI}} file upload --from <bot-slug> --request-file <image-upload.json>
 ```
+
+When image asset size is unknown, use `file upload-large --file <absolute-path> --content-type <mime>` instead.
 
 If the human explicitly chooses BTC or OPCAT for file uploads, pass `--chain btc` or `--chain opcat`. DOGE is not supported for file upload. If the human provides an `http://` or `https://` image URL, do not put that URL in the MetaApp JSON; ask to fetch and upload it as a file or leave the field empty.
 

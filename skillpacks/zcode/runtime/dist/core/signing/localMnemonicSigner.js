@@ -5,42 +5,10 @@ exports.executeTransfer = executeTransfer;
 const deriveIdentity_1 = require("../identity/deriveIdentity");
 const loadIdentity_1 = require("../identity/loadIdentity");
 const writePin_1 = require("../chain/writePin");
+const spendQueue_1 = require("../wallet/spendQueue");
 const DEFAULT_BTC_WRITE_FEE_RATE = 2;
-const walletSpendQueues = new Map();
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
-}
-async function withWalletSpendQueue(key, run) {
-    const previous = walletSpendQueues.get(key) ?? Promise.resolve();
-    let releaseCurrent;
-    const current = new Promise((resolve) => {
-        releaseCurrent = resolve;
-    });
-    const currentChain = previous.catch(() => undefined).then(() => current);
-    walletSpendQueues.set(key, currentChain);
-    await previous.catch(() => undefined);
-    try {
-        return await run();
-    }
-    finally {
-        releaseCurrent();
-        if (walletSpendQueues.get(key) === currentChain) {
-            walletSpendQueues.delete(key);
-        }
-    }
-}
-async function resolveWalletSpendQueueKey(input) {
-    let address = normalizeText(input.fallbackAddress);
-    try {
-        address = normalizeText(await input.adapter.deriveAddress(input.mnemonic, input.path)) || address;
-    }
-    catch {
-        // Fall back to the derivation path so failed address derivation does not remove spend serialization.
-    }
-    return [
-        input.adapter.network,
-        address || normalizeText(input.path) || 'default',
-    ].join(':');
 }
 async function loadSignerIdentity(secretStore) {
     const secrets = await secretStore.readIdentitySecrets();
@@ -87,13 +55,13 @@ function createLocalMnemonicSigner(input) {
             if (!adapter) {
                 throw new Error(`Chain write network ${request.network} is not supported.`);
             }
-            const lockKey = await resolveWalletSpendQueueKey({
+            const lockKey = await (0, spendQueue_1.resolveWalletSpendQueueKey)({
                 adapter,
                 mnemonic: identity.mnemonic,
                 path: identity.path,
                 fallbackAddress: identity.addresses?.[request.network] ?? identity.mvcAddress,
             });
-            return withWalletSpendQueue(lockKey, async () => {
+            return (0, spendQueue_1.withWalletSpendQueue)(lockKey, async () => {
                 const feeRate = input.feeRates?.[request.network];
                 const inscriptionResult = await adapter.buildInscription({
                     request,
@@ -128,12 +96,12 @@ function createLocalMnemonicSigner(input) {
  * Replaces the old `executeMvcTransfer` / `executeBtcTransfer` per-chain functions.
  */
 async function executeTransfer(adapter, input) {
-    const lockKey = await resolveWalletSpendQueueKey({
+    const lockKey = await (0, spendQueue_1.resolveWalletSpendQueueKey)({
         adapter,
         mnemonic: input.mnemonic,
         path: input.path,
     });
-    return withWalletSpendQueue(lockKey, async () => {
+    return (0, spendQueue_1.withWalletSpendQueue)(lockKey, async () => {
         const { rawTx, fee } = await adapter.buildTransfer({
             mnemonic: input.mnemonic,
             path: input.path,

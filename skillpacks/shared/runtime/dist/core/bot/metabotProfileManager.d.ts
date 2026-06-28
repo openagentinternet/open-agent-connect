@@ -1,8 +1,10 @@
 import type { IdentityProfileRecord } from '../identity/identityProfiles';
 import { type MetabotHomepage } from './metabotHomepage';
+import type { ChainWriteEncoding } from '../chain/writePin';
 import type { LlmProvider, LlmRuntime } from '../llm/llmTypes';
 import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
+import { type ProfilePublishPayloadInput } from './profilePublishState';
 export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 export interface MetabotProfileFull extends IdentityProfileRecord {
     bio: string;
@@ -46,6 +48,12 @@ export interface UpdateMetabotInfoInput {
 export interface SyncMetabotInfoToChainOptions {
     delayMs?: number;
     operation?: 'create' | 'modify';
+    deferPublishStateWrite?: boolean;
+}
+export interface MetabotInfoPublishTarget extends ProfilePublishPayloadInput {
+    encoding: ChainWriteEncoding;
+    operation?: 'create' | 'modify' | 'revoke';
+    skipIfUnpublished?: boolean;
 }
 export interface MetabotWalletInfo {
     slug: string;
@@ -86,4 +94,8 @@ export declare function getMetabotWalletInfo(systemHomeDir: string, slug: string
 export declare function getMetabotMnemonicBackup(systemHomeDir: string, slug: string): Promise<MetabotMnemonicBackup>;
 export declare function deleteMetabotProfile(systemHomeDir: string, slug: string): Promise<DeleteMetabotProfileResult>;
 export declare function updateMetabotProfile(systemHomeDir: string, slug: string, input: UpdateMetabotInfoInput): Promise<MetabotProfileFull>;
-export declare function syncMetabotInfoToChain(signer: Signer, profile: MetabotProfileFull, changedFields: string[], options?: SyncMetabotInfoToChainOptions): Promise<ChainWriteResult[]>;
+export declare function buildMetabotInfoPublishTargets(profile: MetabotProfileFull, fields: Iterable<string>): MetabotInfoPublishTarget[];
+export declare function recordMetabotInfoPublishResults(profile: MetabotProfileFull | {
+    homeDir: string;
+}, targets: MetabotInfoPublishTarget[], results: ChainWriteResult[]): Promise<void>;
+export declare function syncMetabotInfoToChain(signer: Signer, profile: MetabotProfileFull, fieldsOrTargets: string[] | MetabotInfoPublishTarget[], options?: SyncMetabotInfoToChainOptions): Promise<ChainWriteResult[]>;

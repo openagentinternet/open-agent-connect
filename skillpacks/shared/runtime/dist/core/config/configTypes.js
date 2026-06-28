@@ -9,6 +9,11 @@ function isDefaultWriteNetwork(value) {
     return typeof value === 'string' && exports.DEFAULT_WRITE_NETWORKS.includes(value);
 }
 function createDefaultConfig() {
+    // Source Browser URL defaults from core so it remains the single source of
+    // truth. Pick fields explicitly rather than spreading: core's
+    // BrowserBaseConfig is wider than OAC's BrowserConfig (it carries
+    // renderCustomBotPages/nameResolution) and defaults localMode to false.
+    const browserDefaults = (0, agent_browser_core_1.createDefaultBrowserConfig)();
     return {
         chain: {
             defaultWriteNetwork: 'mvc',
@@ -17,10 +22,10 @@ function createDefaultConfig() {
             simplemsgListenerEnabled: true,
         },
         browser: {
-            metasoP2PBaseUrl: 'https://so.metaid.io',
-            metafileContentBaseUrl: 'https://so.metaid.io/content',
-            manApiBaseUrl: 'https://manapi.metaid.io',
-            blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+            metasoP2PBaseUrl: browserDefaults.metasoP2PBaseUrl,
+            metafileContentBaseUrl: browserDefaults.metafileContentBaseUrl,
+            manApiBaseUrl: browserDefaults.manApiBaseUrl,
+            blockExplorerBaseUrl: browserDefaults.blockExplorerBaseUrl,
             botHomepageTemplateId: agent_browser_core_1.DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
             defaultChainName: 'mvc',
             localMode: true,

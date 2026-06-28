@@ -45,7 +45,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.homepageDefault': "Default";
         readonly 'bot.homepageMetafile': "Metafile";
         readonly 'bot.homepageMetaApp': "MetaApp";
-        readonly 'bot.homepageMetafileNote': "Upload a local file and save it as metafile://<pinId>.";
+        readonly 'bot.homepageMetafileNote': "Upload a local file up to 50 MiB and save it as metafile://<pinId>.";
         readonly 'bot.homepageMetaAppNote': "Paste a MetaApp pin ID and save it as metaapp://<pinId>.";
         readonly 'bot.homepageMetaAppHelp': "Use the metabot-homepage-guide skill and metabot-metaapp-publish skill to create a unique Bot Page, package and publish it on-chain through the MetaApp protocol, then paste the MetaApp pin ID here.";
         readonly 'bot.homepageMetaAppHelpLabel': "How to get a MetaApp pin ID";
@@ -58,6 +58,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.homepageUploading': "Uploading homepage file...";
         readonly 'bot.homepageReadyToSave': "Homepage ready to save.";
         readonly 'bot.homepageUploadRequired': "Upload a homepage file before saving.";
+        readonly 'bot.homepageUploadTooLarge': "Homepage file must be 50 MiB or smaller.";
         readonly 'bot.homepageDefaultReadyToSave': "Default homepage ready to save.";
         readonly 'bot.homepageInvalidMetaAppPin': "Enter a MetaApp pin ID without spaces.";
         readonly 'bot.savePublicIdentity': "Save Public Identity";
@@ -70,6 +71,9 @@ export declare const DICTIONARIES: {
         readonly 'bot.role': "Role";
         readonly 'bot.soul': "Soul";
         readonly 'bot.goal': "Goal";
+        readonly 'bot.rolePlaceholder': "Describe what this Bot should be or specialize in.";
+        readonly 'bot.soulPlaceholder': "Describe the tone, style, and boundaries.";
+        readonly 'bot.goalPlaceholder': "Describe what this Bot should help users accomplish.";
         readonly 'bot.primaryLlmProvider': "Primary LLM Provider";
         readonly 'bot.fallbackLlmProvider': "Fallback LLM Provider";
         readonly 'bot.noLlmLabel': "NO LLM";
@@ -428,7 +432,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.homepageDefault': "默认";
         readonly 'bot.homepageMetafile': "MetaFile";
         readonly 'bot.homepageMetaApp': "MetaApp";
-        readonly 'bot.homepageMetafileNote': "上传本地文件，并保存为 metafile://<pinId>。";
+        readonly 'bot.homepageMetafileNote': "上传不超过 50 MiB 的本地文件，并保存为 metafile://<pinId>。";
         readonly 'bot.homepageMetaAppNote': "粘贴 MetaApp pin ID，并保存为 metaapp://<pinId>。";
         readonly 'bot.homepageMetaAppHelp': "请先使用 metabot-homepage-guide 技能和 metabot-metaapp-publish 技能制作一个独一无二的 Bot Page，并以 MetaApp 协议封装上链，然后将 MetaApp pin ID 复制到这里。";
         readonly 'bot.homepageMetaAppHelpLabel': "如何获取 MetaApp pin ID";
@@ -441,6 +445,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.homepageUploading': "正在上传主页文件...";
         readonly 'bot.homepageReadyToSave': "主页已准备保存。";
         readonly 'bot.homepageUploadRequired': "请先上传主页文件再保存。";
+        readonly 'bot.homepageUploadTooLarge': "主页文件必须小于或等于 50 MiB。";
         readonly 'bot.homepageDefaultReadyToSave': "默认主页已准备保存。";
         readonly 'bot.homepageInvalidMetaAppPin': "请输入不含空格的 MetaApp pin ID。";
         readonly 'bot.savePublicIdentity': "保存公开身份";
@@ -453,6 +458,9 @@ export declare const DICTIONARIES: {
         readonly 'bot.role': "角色";
         readonly 'bot.soul': "灵魂";
         readonly 'bot.goal': "目标";
+        readonly 'bot.rolePlaceholder': "描述这个 Bot 的角色或擅长方向。";
+        readonly 'bot.soulPlaceholder': "描述语气、风格和边界。";
+        readonly 'bot.goalPlaceholder': "描述这个 Bot 应该帮助用户完成什么。";
         readonly 'bot.primaryLlmProvider': "主 LLM 提供方";
         readonly 'bot.fallbackLlmProvider': "备用 LLM 提供方";
         readonly 'bot.noLlmLabel': "NO LLM";

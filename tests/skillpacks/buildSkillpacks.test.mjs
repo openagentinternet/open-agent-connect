@@ -285,7 +285,8 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.match(content, /content.*browser runtime artifact/i);
   assert.match(content, /Publish Wizard/i);
   assert.match(content, /confirm the MetaBot actor before every on-chain write/i);
-  assert.match(content, /metabot file upload --from <bot-slug> --request-file/i);
+  assert.match(content, /file upload-large --from <bot-slug> --file .*metaapp\.zip/i);
+  assert.doesNotMatch(content, /metabot file upload --from <bot-slug> --request-file <zip-upload\.json>/i);
   assert.match(content, /metabot chain write --from <bot-slug> --request-file/i);
   assert.match(content, /No Web2 URLs or local filesystem paths/i);
   assert.match(content, /open the published MetaApp in Browser/i);
@@ -805,7 +806,8 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
 
   const largeFileContent = await readFile(sharedSkillFile(outputRoot, 'metabot-upload-largefile'), 'utf8');
   assert.match(largeFileContent, /^name:\s*metabot-upload-largefile$/m);
-  assert.match(largeFileContent, /file upload-large --request-file/);
+  assert.match(largeFileContent, /file upload-large --from <bot-slug> --file/);
+  assert.match(largeFileContent, /Compatibility[\s\S]*file upload-large --from <bot-slug> --request-file request\.json --verify/i);
   assert.match(largeFileContent, /2 MiB direct threshold/i);
   assert.match(largeFileContent, /50 MiB hard cap/i);
   assert.match(largeFileContent, /DOGE is unsupported for file upload/i);

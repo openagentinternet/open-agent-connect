@@ -7,69 +7,18 @@ const meta_contract_1 = require("meta-contract");
 const utxo_wallet_service_1 = require("@metalet/utxo-wallet-service");
 const writePin_1 = require("../writePin");
 const deriveIdentity_1 = require("../../identity/deriveIdentity");
+const mvcPendingUtxos_1 = require("../mvcPendingUtxos");
 const utxoBroadcastErrors_1 = require("../utxoBroadcastErrors");
 const METALET_HOST = 'https://www.metalet.space';
 const NET = 'livenet';
 const P2PKH_INPUT_SIZE = 148;
 const DEFAULT_MVC_FEE_RATE = 1;
-// ---- pending UTXO tracking (for local change detection) ----
-const PENDING_SPENT_OUTPOINT_TTL_MS = 10 * 60 * 1000;
-/** Maps address:txid:outputIndex → pending spent outpoint */
-const pendingSpentOutpoints = new Map();
-const pendingAvailableUtxos = new Map();
 const deferredTrackers = new Map();
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
 function normalizeOutpointTxid(value) {
     return normalizeText(value).toLowerCase();
-}
-function buildOutpointKey(address, txId, outputIndex) {
-    return [normalizeText(address), normalizeOutpointTxid(txId), String(outputIndex)].join(':');
-}
-function prunePendingSpentOutpoints(now = Date.now()) {
-    for (const [key, value] of pendingSpentOutpoints.entries()) {
-        if (value.expiresAt <= now)
-            pendingSpentOutpoints.delete(key);
-    }
-    for (const [key, value] of pendingAvailableUtxos.entries()) {
-        if (value.expiresAt <= now)
-            pendingAvailableUtxos.delete(key);
-    }
-}
-function rememberPendingTransaction(input) {
-    const now = input.now ?? Date.now();
-    prunePendingSpentOutpoints(now);
-    const expiresAt = now + PENDING_SPENT_OUTPOINT_TTL_MS;
-    for (const utxo of input.spentUtxos) {
-        const key = buildOutpointKey(input.address, utxo.txId, utxo.outputIndex);
-        pendingSpentOutpoints.set(key, { expiresAt });
-        pendingAvailableUtxos.delete(key);
-    }
-    for (const utxo of input.createdUtxos) {
-        if (utxo.satoshis < 600)
-            continue;
-        const key = buildOutpointKey(input.address, utxo.txId, utxo.outputIndex);
-        if (!pendingSpentOutpoints.has(key)) {
-            pendingAvailableUtxos.set(key, { utxo, expiresAt });
-        }
-    }
-}
-function resolveSpendableUtxos(input) {
-    const now = input.now ?? Date.now();
-    prunePendingSpentOutpoints(now);
-    const merged = new Map();
-    for (const utxo of input.utxos) {
-        merged.set(buildOutpointKey(input.address, utxo.txId, utxo.outputIndex), utxo);
-    }
-    for (const [key, value] of pendingAvailableUtxos.entries()) {
-        if (normalizeText(value.utxo.address) === normalizeText(input.address)) {
-            merged.set(key, value.utxo);
-        }
-    }
-    return [...merged.entries()]
-        .filter(([key]) => !pendingSpentOutpoints.has(key))
-        .map(([, utxo]) => utxo);
 }
 function extractOwnedOutputs(input) {
     const txId = normalizeOutpointTxid(input.txid);
@@ -93,8 +42,7 @@ function extractOwnedOutputs(input) {
     return owned;
 }
 function __clearPendingMvcSpentOutpointsForTests() {
-    pendingSpentOutpoints.clear();
-    pendingAvailableUtxos.clear();
+    (0, mvcPendingUtxos_1.__clearPendingMvcUtxosForTests)();
     deferredTrackers.clear();
 }
 // ---- helpers ----
@@ -260,7 +208,7 @@ exports.mvcChainAdapter = {
         if (json?.code !== 0) {
             const tracker = deferredTrackers.get(rawTx);
             if (tracker && (0, utxoBroadcastErrors_1.isRetryableUtxoFundingError)(json?.message)) {
-                rememberPendingTransaction({
+                (0, mvcPendingUtxos_1.rememberPendingMvcTransaction)({
                     address: tracker.address,
                     spentUtxos: tracker.spentUtxos,
                     createdUtxos: [],
@@ -273,7 +221,7 @@ exports.mvcChainAdapter = {
         // Complete deferred pending UTXO tracking
         const tracker = deferredTrackers.get(rawTx);
         if (tracker) {
-            rememberPendingTransaction({
+            (0, mvcPendingUtxos_1.rememberPendingMvcTransaction)({
                 address: tracker.address,
                 spentUtxos: tracker.spentUtxos,
                 createdUtxos: tracker.createdUtxosFactory(txid),
@@ -287,7 +235,7 @@ exports.mvcChainAdapter = {
             ? input.feeRate : DEFAULT_MVC_FEE_RATE;
         const { privateKey, address } = buildMvcPrivateKey(input.mnemonic, input.path);
         const rawUtxos = await this.fetchUtxos(address);
-        const utxos = resolveSpendableUtxos({ address, utxos: rawUtxos });
+        const utxos = (0, mvcPendingUtxos_1.resolveSpendableMvcUtxos)({ address, utxos: rawUtxos });
         const SIMPLE_BASE_SIZE = 96;
         const picked = pickUtxos(utxos, input.amountSatoshis, feeRate, SIMPLE_BASE_SIZE);
         const senderAddress = new meta_contract_1.mvc.Address(address, meta_contract_1.mvc.Networks.livenet);
@@ -324,7 +272,7 @@ exports.mvcChainAdapter = {
     async buildInscription(input) {
         const { privateKey, address } = buildMvcPrivateKey(input.identity.mnemonic, input.identity.path);
         const rawUtxos = await this.fetchUtxos(address);
-        const usableUtxos = resolveSpendableUtxos({ address, utxos: rawUtxos });
+        const usableUtxos = (0, mvcPendingUtxos_1.resolveSpendableMvcUtxos)({ address, utxos: rawUtxos });
         const addressObject = new meta_contract_1.mvc.Address(address, meta_contract_1.mvc.Networks.livenet);
         const opReturnParts = buildOpReturnParts(input.request);
         const opReturnScriptSize = getOpReturnScriptSize(opReturnParts);

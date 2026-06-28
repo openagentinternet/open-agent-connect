@@ -59,6 +59,22 @@ function isUsableRuntime(runtime) {
         && (0, platformRegistry_1.isPlatformId)(runtime.provider)
         && normalizeText(runtime.binaryPath));
 }
+function selectHealthySameProviderRuntime(runtimes, runtime) {
+    if (!runtime || !(0, platformRegistry_1.isPlatformId)(runtime.provider)) {
+        return undefined;
+    }
+    return runtimes
+        .filter((entry) => entry.id !== runtime.id && entry.provider === runtime.provider && isUsableRuntime(entry))
+        .sort((left, right) => {
+        if (left.updatedAt !== right.updatedAt) {
+            return right.updatedAt.localeCompare(left.updatedAt);
+        }
+        if (left.lastSeenAt !== right.lastSeenAt) {
+            return right.lastSeenAt.localeCompare(left.lastSeenAt);
+        }
+        return left.id.localeCompare(right.id);
+    })[0];
+}
 function resolveCatalogRoot(input) {
     if (input.root.kind === 'project') {
         return node_path_1.default.resolve(input.projectRoot, input.root.path);
@@ -183,8 +199,10 @@ function createPlatformSkillCatalog(options) {
                 ? runtimeState.runtimes.find((entry) => entry.id === fallbackBinding.llmRuntimeId)
                 : undefined;
             let binding = primaryBinding;
-            let runtime = primaryRuntime;
-            if (allowFallbackRuntime && !isUsableRuntime(primaryRuntime) && fallbackBinding && isUsableRuntime(fallbackRuntime)) {
+            let runtime = isUsableRuntime(primaryRuntime)
+                ? primaryRuntime
+                : selectHealthySameProviderRuntime(runtimeState.runtimes, primaryRuntime) ?? primaryRuntime;
+            if (allowFallbackRuntime && !isUsableRuntime(runtime) && fallbackBinding && isUsableRuntime(fallbackRuntime)) {
                 binding = fallbackBinding;
                 runtime = fallbackRuntime;
             }
