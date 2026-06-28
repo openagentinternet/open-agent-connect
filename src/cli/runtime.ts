@@ -2036,19 +2036,39 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
         manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
       }),
-      publish: async (input) => requestJson(context, 'POST', '/api/metaapp/publish', {
+      publish: async (input) => requestJson(context, 'POST', '/api/metaapp/publish', input),
+      update: async (input) => requestJson(context, 'POST', '/api/metaapp/update', input),
+      delete: async (input) => requestJson(context, 'POST', '/api/metaapp/delete', input),
+      list: async (input) => {
+        const query = new URLSearchParams();
+        if (typeof input.from === 'string') {
+          query.set('from', input.from);
+        }
+        if (typeof input.cursor === 'string') {
+          query.set('cursor', input.cursor);
+        }
+        if (typeof input.size === 'number') {
+          query.set('size', String(input.size));
+        }
+        if (input.refresh === true) {
+          query.set('refresh', 'true');
+        }
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return requestJson(context, 'GET', `/api/metaapp/list${suffix}`);
+      },
+      publishProject: async (input) => requestJson(context, 'POST', '/api/metaapp/publish-project', {
         ...input,
         projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
         manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
       }),
-      update: async (input) => requestJson(context, 'POST', '/api/metaapp/update', {
+      updateProject: async (input) => requestJson(context, 'POST', '/api/metaapp/update-project', {
         ...input,
         projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
         manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
       }),
       share: async (input) => requestJson(context, 'POST', '/api/metaapp/share', input),
       view: async (input) => openLocalUiPage({
-        page: 'metaapps',
+        page: 'apps',
         ...(typeof input.from === 'string' ? { from: input.from } : {}),
         ...(typeof input.pinId === 'string' ? { pinId: input.pinId } : {}),
         ...(typeof input.firstPinId === 'string' ? { firstPinId: input.firstPinId } : {}),

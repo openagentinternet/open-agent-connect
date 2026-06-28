@@ -384,7 +384,33 @@ test('runCli dispatches `metabot metaapp comment` with parsed comment inputs', a
   });
 });
 
-test('runCli dispatches `metabot ui open --page metaapps` to the injected ui.open handler', async () => {
+test('runCli dispatches `metabot ui open --page apps` to the injected ui.open handler', async () => {
+  const calls = [];
+  const { exitCode, envelope } = await runMetaAppCli([
+    'ui',
+    'open',
+    '--page',
+    'apps',
+  ], {
+    ui: {
+      open: async (input) => {
+        calls.push(input);
+        return commandSuccess({
+          page: input.page,
+          localUiUrl: 'http://127.0.0.1:4827/ui/apps',
+        });
+      },
+    },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [{ page: 'apps' }]);
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.data.page, 'apps');
+  assert.match(envelope.data.localUiUrl, /\/ui\/apps$/);
+});
+
+test('runCli keeps `metabot ui open --page metaapps` compatibility', async () => {
   const calls = [];
   const { exitCode, envelope } = await runMetaAppCli([
     'ui',
@@ -407,5 +433,4 @@ test('runCli dispatches `metabot ui open --page metaapps` to the injected ui.ope
   assert.deepEqual(calls, [{ page: 'metaapps' }]);
   assert.equal(envelope.ok, true);
   assert.equal(envelope.data.page, 'metaapps');
-  assert.match(envelope.data.localUiUrl, /\/ui\/metaapps$/);
 });
