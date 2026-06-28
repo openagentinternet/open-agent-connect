@@ -156,6 +156,7 @@ Update `scripts/build-metabot-skillpacks.mjs`:
 
 ```js
 const METABOT_SKILLS = [
+  'metabot-ask-master',
   'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',
