@@ -1777,23 +1777,6 @@ function createDefaultCliDependencies(context) {
                 const suffix = query.size ? `?${query.toString()}` : '';
                 return requestJson(context, 'GET', `/api/network/bots${suffix}`);
             },
-            listProducts: async (input) => {
-                const query = new URLSearchParams();
-                if (input.online !== undefined) {
-                    query.set('online', input.online ? 'true' : 'false');
-                }
-                if (input.cached === true) {
-                    query.set('cached', 'true');
-                }
-                if (typeof input.query === 'string' && input.query.trim()) {
-                    query.set('query', input.query.trim());
-                }
-                if (typeof input.limit === 'number' && Number.isFinite(input.limit)) {
-                    query.set('limit', String(Math.max(1, Math.floor(input.limit))));
-                }
-                const suffix = query.size ? `?${query.toString()}` : '';
-                return requestJson(context, 'GET', `/api/network/products${suffix}`);
-            },
             listSources: async () => requestJson(context, 'GET', '/api/network/sources'),
             addSource: async (input) => requestJson(context, 'POST', '/api/network/sources', input),
             removeSource: async (input) => requestJson(context, 'DELETE', '/api/network/sources', input),
@@ -1906,65 +1889,6 @@ function createDefaultCliDependencies(context) {
                 }
                 const suffix = query.size ? `?${query.toString()}` : '';
                 return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
-            },
-        },
-        products: {
-            listPublishSkills: async (input = {}) => {
-                const query = new URLSearchParams();
-                if (input.from) {
-                    query.set('from', input.from);
-                }
-                const suffix = query.size ? `?${query.toString()}` : '';
-                return requestJson(context, 'GET', `/api/products/skills${suffix}`);
-            },
-            publish: async (input) => requestJson(context, 'POST', '/api/products/publish', input),
-            buy: async (input) => requestJson(context, 'POST', '/api/products/buy', input),
-            listOwned: async (input) => {
-                const query = new URLSearchParams({
-                    page: String(input.page),
-                    pageSize: String(input.pageSize),
-                    refresh: input.refresh ? 'true' : 'false',
-                    all: input.all ? 'true' : 'false',
-                });
-                if (input.from) {
-                    query.set('from', input.from);
-                }
-                return requestJson(context, 'GET', `/api/products/owned?${query.toString()}`);
-            },
-            listOrders: async (input) => {
-                const query = new URLSearchParams({
-                    page: String(input.page),
-                    pageSize: String(input.pageSize),
-                    all: input.all ? 'true' : 'false',
-                    role: input.role,
-                });
-                if (input.from) {
-                    query.set('from', input.from);
-                }
-                if (input.state) {
-                    query.set('state', input.state);
-                }
-                return requestJson(context, 'GET', `/api/products/orders?${query.toString()}`);
-            },
-            inspectOrder: async (input) => {
-                const query = new URLSearchParams();
-                if (input.orderId) {
-                    query.set('orderId', input.orderId);
-                }
-                if (input.productOrderPinId) {
-                    query.set('productOrderPinId', input.productOrderPinId);
-                }
-                if (input.paymentTxid) {
-                    query.set('paymentTxid', input.paymentTxid);
-                }
-                if (input.orderTxid) {
-                    query.set('orderTxid', input.orderTxid);
-                }
-                if (input.from) {
-                    query.set('from', input.from);
-                }
-                const suffix = query.size ? `?${query.toString()}` : '';
-                return requestJson(context, 'GET', `/api/products/orders/inspect${suffix}`);
             },
         },
         provider: {
@@ -2718,7 +2642,6 @@ function mergeCliDependencies(context) {
         identity: { ...defaults.identity, ...provided.identity },
         network: { ...defaults.network, ...provided.network },
         services: { ...defaults.services, ...provided.services },
-        products: { ...defaults.products, ...provided.products },
         provider: { ...defaults.provider, ...provided.provider },
         chat: { ...defaults.chat, ...provided.chat },
         file: { ...defaults.file, ...provided.file },

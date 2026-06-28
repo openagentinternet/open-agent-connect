@@ -14,10 +14,6 @@ const {
   getUnifiedA2ATraceSessionForProfile,
   listUnifiedA2ATraceSessionsForProfile,
 } = require('../../dist/core/a2a/traceProjection.js');
-const { buildDeliveryMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
-const {
-  buildProductOrderNotification,
-} = require('../../dist/core/products/productOrderMessages.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const {
   setActiveMetabotHome,
@@ -1105,98 +1101,6 @@ test('trace get by trace id recovers completed unified A2A order results', async
   assert.equal(traceResult.data.a2a.taskRunState, 'completed');
   assert.equal(traceResult.data.inspector.publicStatusSnapshots.at(-1).status, 'completed');
   assert.match(watchOutput, /"status":"completed"/);
-});
-
-test('unified A2A trace projection exposes product delivery metadata and result text', async () => {
-  const { homeDir, profile } = await createProfileFixture();
-  const productOrderPinId = 'product-order-pin-1';
-  const listingPinId = 'listing-pin-1';
-  const skuId = 'space-00005';
-  const paymentTxid = 'product-payment-txid-1';
-  await persistA2AConversationMessage({
-    homeDir,
-    local: {
-      profileSlug: 'alice',
-      globalMetaId: LOCAL_GLOBAL_META_ID,
-      name: 'Alice',
-      avatar: 'https://example.test/alice.png',
-    },
-    peer: {
-      globalMetaId: PEER_GLOBAL_META_ID,
-      name: 'Remote Bot',
-      avatar: 'https://example.test/remote.png',
-      chatPublicKey: 'remote-chat-public-key',
-    },
-    message: {
-      direction: 'outgoing',
-      content: buildProductOrderNotification({
-        productOrderPinId,
-        listingPinId,
-        skuId,
-        paymentTxid,
-      }),
-      pinId: `${ORDER_TXID}i0`,
-      txid: ORDER_TXID,
-      txids: [ORDER_TXID],
-      orderTxid: ORDER_TXID,
-      paymentTxid,
-      timestamp: BASE_TIME,
-    },
-    orderSession: {
-      role: 'caller',
-      state: 'awaiting_delivery',
-      orderTxid: ORDER_TXID,
-      paymentTxid,
-      serviceName: 'Mobile Top-up Card',
-    },
-  });
-  await persistA2AConversationMessage({
-    homeDir,
-    local: {
-      profileSlug: 'alice',
-      globalMetaId: LOCAL_GLOBAL_META_ID,
-      name: 'Alice',
-      avatar: 'https://example.test/alice.png',
-    },
-    peer: {
-      globalMetaId: PEER_GLOBAL_META_ID,
-      name: 'Remote Bot',
-      avatar: 'https://example.test/remote.png',
-      chatPublicKey: 'remote-chat-public-key',
-    },
-    message: {
-      direction: 'incoming',
-      content: buildDeliveryMessage({
-        productOrderPinId,
-        listingPinId,
-        skuId,
-        paymentTxid,
-        result: 'Top-up card: XXXX-XXXX',
-        deliveredAt: BASE_TIME + 60,
-      }, ORDER_TXID),
-      pinId: 'product-delivery-pin-1',
-      txid: 'product-delivery-tx-1',
-      txids: ['product-delivery-tx-1'],
-      timestamp: BASE_TIME + 60,
-    },
-  });
-
-  const detail = await getUnifiedA2ATraceSessionForProfile({
-    profile,
-    sessionId: `a2a-order-${ORDER_TXID}`,
-  });
-
-  assert.ok(detail);
-  assert.equal(detail.resultText, 'Top-up card: XXXX-XXXX');
-  assert.equal(detail.responseText, 'Top-up card: XXXX-XXXX');
-  const delivery = detail.transcriptItems.find((item) => item.type === 'delivery');
-  assert.ok(delivery);
-  assert.equal(delivery.content, 'Top-up card: XXXX-XXXX');
-  assert.equal(delivery.metadata.productOrderPinId, productOrderPinId);
-  assert.equal(delivery.metadata.listingPinId, listingPinId);
-  assert.equal(delivery.metadata.skuId, skuId);
-  assert.equal(delivery.metadata.paymentTxid, paymentTxid);
-  assert.equal(delivery.metadata.deliveredAt, BASE_TIME + 60);
 });
 
 test('inbound NeedsRating order protocol auto-rates the matching buyer trace', async () => {

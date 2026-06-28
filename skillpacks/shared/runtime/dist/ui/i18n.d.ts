@@ -10,7 +10,6 @@ export declare const DICTIONARIES: {
         readonly 'nav.conversations': "Conversations";
         readonly 'nav.services': "Services";
         readonly 'nav.apps': "Apps";
-        readonly 'nav.products': "Products";
         readonly 'nav.settings': "Settings";
         readonly 'action.openBrowser': "Open Browser";
         readonly 'action.openInBrowser': "Open in Browser";
@@ -512,7 +511,6 @@ export declare const DICTIONARIES: {
         readonly 'nav.conversations': "对话";
         readonly 'nav.services': "服务";
         readonly 'nav.apps': "应用";
-        readonly 'nav.products': "商品";
         readonly 'nav.settings': "设置";
         readonly 'action.openBrowser': "打开浏览器";
         readonly 'action.openInBrowser': "在浏览器中打开";

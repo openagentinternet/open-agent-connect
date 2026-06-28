@@ -21,22 +21,6 @@ function parseLimit(value: string | null): number | undefined {
   return parsed;
 }
 
-function parseStrictLimit(value: string | null): { limit?: number; error?: ReturnType<typeof commandFailed> } {
-  if (value == null) return {};
-  const normalized = value.trim();
-  if (!normalized) return {};
-  const parsed = Number.parseInt(normalized, 10);
-  if (!/^\d+$/.test(normalized) || !Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
-    return {
-      error: commandFailed(
-        'invalid_flag',
-        `Unsupported --limit value: ${value}. Supported range: 1-100.`,
-      ),
-    };
-  }
-  return { limit: parsed };
-}
-
 export const handleNetworkRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
 
@@ -73,30 +57,6 @@ export const handleNetworkRoutes: RouteHandler = async (context) => {
           limit: parseLimit(url.searchParams.get('limit')),
         })
       : commandFailed('not_implemented', 'Network bots handler is not configured.');
-    context.sendJson(200, result);
-    return true;
-  }
-
-  if (url.pathname === '/api/network/products') {
-    if (req.method !== 'GET') {
-      context.sendMethodNotAllowed(['GET']);
-      return true;
-    }
-
-    const query = url.searchParams.get('query') ?? url.searchParams.get('q') ?? url.searchParams.get('search') ?? undefined;
-    const parsedLimit = parseStrictLimit(url.searchParams.get('limit'));
-    if (parsedLimit.error) {
-      context.sendJson(200, parsedLimit.error);
-      return true;
-    }
-    const result = handlers.network?.listProducts
-      ? await handlers.network.listProducts({
-          online: parseBoolean(url.searchParams.get('online')),
-          cached: parseBoolean(url.searchParams.get('cached')),
-          query,
-          limit: parsedLimit.limit,
-        })
-      : commandFailed('not_implemented', 'Network products handler is not configured.');
     context.sendJson(200, result);
     return true;
   }

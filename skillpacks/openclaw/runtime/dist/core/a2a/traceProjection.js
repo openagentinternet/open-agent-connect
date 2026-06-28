@@ -334,7 +334,6 @@ function projectProtocolMessage(input) {
             artifacts,
             metadata: {
                 ...metadata,
-                paymentTxid: normalizeText(parsed?.paymentTxid) || normalizeText(metadata.paymentTxid) || null,
                 deliveryPinId: normalizeText(message.pinId) || null,
                 deliveryPayload,
                 deliveryArtifacts: artifacts,
@@ -343,9 +342,6 @@ function projectProtocolMessage(input) {
                 servicePinId: normalizeText(parsed?.servicePinId)
                     || (session.type === 'service_order' ? normalizeText(session.servicePinId) : null)
                     || null,
-                productOrderPinId: normalizeText(parsed?.productOrderPinId) || null,
-                listingPinId: normalizeText(parsed?.listingPinId) || null,
-                skuId: normalizeText(parsed?.skuId) || null,
                 deliveredAt: normalizeTimestamp(parsed?.deliveredAt, normalizeTimestamp(message.timestamp)),
             },
         };

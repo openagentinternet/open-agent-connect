@@ -3,7 +3,6 @@ import path from 'node:path';
 import { buildHubPageDefinition } from '../../ui/pages/hub/app';
 import { buildMyServicesPageDefinition } from '../../ui/pages/my-services/app';
 import { buildPublishPageDefinition } from '../../ui/pages/publish/app';
-import { buildProductsPageDefinition } from '../../ui/pages/products/app';
 import { buildRefundPageDefinition } from '../../ui/pages/refund/app';
 import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
@@ -36,7 +35,6 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'hub': () => buildHubPageDefinition(),
   'publish': () => buildPublishPageDefinition(),
   'my-services': (i18n) => buildMyServicesPageDefinition({ i18n }),
-  'products': () => buildProductsPageDefinition(),
   'trace': () => buildTracePageDefinition(),
   'refund': () => buildRefundPageDefinition(),
   'bot': () => buildBotPageDefinition(),
@@ -53,7 +51,6 @@ const NAV_ITEMS: Array<{ page: MetabotUiPageName; labelKey: I18nKey }> = [
   { page: 'conversations', labelKey: 'nav.conversations' },
   { page: 'services', labelKey: 'nav.services' },
   { page: 'apps', labelKey: 'nav.apps' },
-  { page: 'products', labelKey: 'nav.products' },
 ];
 
 const HIDDEN_UI_PAGES = new Set<MetabotUiPageName>();

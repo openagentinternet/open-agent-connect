@@ -163,7 +163,6 @@ exports.ROOT_COMMAND_HELP = {
         { name: 'wallet', summary: 'Inspect local wallet balances across supported chains.' },
         { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },
         { name: 'services', summary: 'Publish, call, and rate remote MetaBot services.' },
-        { name: 'products', summary: 'Publish and inspect seller-owned product listings.' },
         { name: 'provider', summary: 'Inspect local provider orders and settle seller-side refunds.' },
         { name: 'chat', summary: 'Send encrypted private MetaWeb messages to another MetaBot.' },
         { name: 'host', summary: 'Project shared MetaBot skills into one host-native skills root.' },
@@ -185,197 +184,6 @@ exports.ROOT_COMMAND_HELP = {
 };
 const COMMAND_HELP_SPECS = [
     exports.ROOT_COMMAND_HELP,
-    {
-        commandPath: ['products'],
-        summary: 'Product commerce commands for seller listing publication, purchase planning, and local owner inventory.',
-        usage: 'metabot products <subcommand>',
-        subcommands: [
-            { name: 'skills', summary: 'List product fulfillment skills from one seller bot primary runtime.' },
-            { name: 'publish', summary: 'Publish a product listing payload after validating seller fulfillment skills.' },
-            { name: 'buy', summary: 'Plan or confirm a Product V1 virtual goods purchase from a request file.' },
-            { name: 'owned', summary: 'List locally owned product listings.' },
-            { name: 'orders', summary: 'List and inspect cached product orders.' },
-        ],
-        optionalFlags: [HELP_JSON_FLAG],
-    },
-    {
-        commandPath: ['products', 'skills'],
-        summary: 'List skills from one seller bot primary runtime for product fulfillment.',
-        usage: 'metabot products skills [--from <bot-slug>]',
-        successFields: [
-            'metaBotSlug',
-            'identity',
-            'runtime',
-            'platform',
-            'skills',
-            'rootDiagnostics',
-        ],
-        failureSemantics: [
-            'Fails before chain writes when no identity exists, the primary runtime is missing, or the primary runtime is unavailable.',
-            'Fallback runtime skills are intentionally excluded from this list.',
-        ],
-        examples: [
-            'metabot products skills',
-            'metabot products skills --from alice',
-        ],
-        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-    },
-    {
-        commandPath: ['products', 'publish'],
-        summary: 'Publish a product-listing protocol payload after seller fulfillment skill validation.',
-        usage: 'metabot products publish [--from <bot-slug>] --payload-file <path> [--chain <mvc|btc|doge|opcat>]',
-        requiredFlags: [
-            { flag: '--payload-file', value: '<path>', description: 'Path to a product-listing JSON payload.' },
-        ],
-        optionalFlags: [FROM_BOT_FLAG, CHAIN_WRITE_FLAG, HELP_JSON_FLAG],
-        successFields: [
-            'listingPinId',
-            'txids',
-            'title',
-            'productType',
-            'skuCount',
-            'fulfillmentSkills',
-            'network',
-        ],
-        failureSemantics: [
-            'Fails when product-listing payload validation fails, no local identity exists, or the chain write is rejected.',
-            'All fulfillment.fulfillmentSkills must exist in the seller bot primary runtime before any chain write.',
-            'Protocol payloads never include seller identity, payment address, timestamps, shipping policy, review policy, or MRC20 fields.',
-        ],
-        examples: [
-            'metabot products publish --from seller --payload-file listing.json',
-            'metabot products publish --from seller --payload-file listing.json --chain opcat',
-        ],
-    },
-    {
-        commandPath: ['products', 'buy'],
-        summary: 'Plan or confirm a Product V1 virtual goods purchase from a request file.',
-        usage: 'metabot products buy [--from <bot-slug>] --request-file <path>',
-        requiredFlags: [
-            { flag: '--request-file', value: '<path>', description: 'Path to a product purchase request JSON file.' },
-        ],
-        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
-        requestShape: {
-            query: 'buy Alice 0.00005 SPACE mobile top-up card',
-            listingPinId: '',
-            skuId: 'space-00005',
-            comment: '',
-            spendCap: {
-                amount: '0.00005',
-                currency: 'SPACE',
-            },
-            policyMode: 'confirm_paid_only',
-            confirmed: false,
-        },
-        successFields: [
-            'product',
-            'sku',
-            'seller',
-            'payment',
-            'confirmation',
-            'confirmRequest',
-        ],
-        failureSemantics: [
-            'Fails before wallet payment when the cached product is offline, unsupported in Product V1, or exceeds the spend cap.',
-            'Product V1 only supports virtual products fulfilled by digital_delivery over simplemsg.',
-            'The CLI only reads the request file and dispatches to the daemon; wallet payment and product-order writes are not performed locally.',
-        ],
-        examples: [
-            'metabot products buy --from bob --request-file request.json',
-        ],
-    },
-    {
-        commandPath: ['products', 'owned'],
-        summary: 'Owner-side product listing commands.',
-        usage: 'metabot products owned <subcommand>',
-        subcommands: [
-            { name: 'list', summary: 'List product listings owned by the active, selected, or all local MetaBots.' },
-        ],
-        optionalFlags: [HELP_JSON_FLAG],
-    },
-    {
-        commandPath: ['products', 'owned', 'list'],
-        summary: 'List product listings owned by the active, selected, or all local MetaBots.',
-        usage: 'metabot products owned list [--from <bot-slug> | --all] [--page <n>] [--page-size <n>] [--refresh]',
-        optionalFlags: [
-            FROM_BOT_FLAG,
-            { flag: '--all', description: 'Aggregate owned listings across all local MetaBot profiles.' },
-            { flag: '--page', value: '<n>', description: 'Page number. Defaults to 1.' },
-            { flag: '--page-size', value: '<n>', description: 'Page size. Defaults to 20.' },
-            { flag: '--refresh', description: 'Reload local product state before rendering the owner view.' },
-            HELP_JSON_FLAG,
-        ],
-        successFields: ['items', 'page', 'pageSize', 'total', 'totalPages'],
-        examples: [
-            'metabot products owned list',
-            'metabot products owned list --from alice',
-            'metabot products owned list --all --refresh',
-        ],
-    },
-    {
-        commandPath: ['products', 'orders'],
-        summary: 'Product order inspection commands backed by the local product cache.',
-        usage: 'metabot products orders <subcommand>',
-        subcommands: [
-            { name: 'list', summary: 'List cached buyer and seller product orders.' },
-            { name: 'inspect', summary: 'Inspect one cached product order by id, product-order pin, payment txid, or order txid.' },
-        ],
-        optionalFlags: [HELP_JSON_FLAG],
-    },
-    {
-        commandPath: ['products', 'orders', 'list'],
-        summary: 'List cached product orders for the active, selected, or all local MetaBots.',
-        usage: 'metabot products orders list [--from <bot-slug> | --all] [--role <buyer|seller|all>] [--state <state>] [--page <n>] [--page-size <n>]',
-        optionalFlags: [
-            FROM_BOT_FLAG,
-            { flag: '--all', description: 'Aggregate cached orders across all local MetaBot profiles.' },
-            { flag: '--role', value: '<buyer|seller|all>', description: 'Order role filter. Defaults to buyer.' },
-            { flag: '--state', value: '<state>', description: 'Filter by cached product order state.' },
-            { flag: '--page', value: '<n>', description: 'Page number. Defaults to 1.' },
-            { flag: '--page-size', value: '<n>', description: 'Page size. Defaults to 20.' },
-            HELP_JSON_FLAG,
-        ],
-        successFields: ['items', 'page', 'pageSize', 'total', 'totalPages'],
-        examples: [
-            'metabot products orders list --from bob --role buyer --state delivered',
-            'metabot products orders list --all --role all',
-        ],
-    },
-    {
-        commandPath: ['products', 'orders', 'inspect'],
-        summary: 'Inspect one cached product order without dumping private delivery message bodies.',
-        usage: 'metabot products orders inspect [--from <bot-slug>] (--order-id <id> | --product-order-pin-id <pin-id> | --payment-txid <txid> | --order-txid <txid>)',
-        optionalFlags: [
-            FROM_BOT_FLAG,
-            { flag: '--order-id', value: '<id>', description: 'Order id from product order list output.' },
-            { flag: '--product-order-pin-id', value: '<pin-id>', description: 'Public product-order protocol pin id.' },
-            { flag: '--payment-txid', value: '<txid>', description: 'Payment transaction id.' },
-            { flag: '--order-txid', value: '<txid>', description: 'Simplemsg order notification transaction id.' },
-            HELP_JSON_FLAG,
-        ],
-        successFields: [
-            'order',
-            'product',
-            'sku',
-            'buyer',
-            'seller',
-            'payment',
-            'fulfillment',
-            'delivery',
-            'trace',
-            'raw.productListing',
-            'raw.productOrder',
-        ],
-        failureSemantics: [
-            'Exactly one selector is required.',
-            'Inspection is cache-first and returns a stable miss when no local buyer or seller order matches.',
-            'Raw debug payloads are limited to public product-listing and product-order JSON; decrypted private delivery bodies are not returned as raw blobs.',
-        ],
-        examples: [
-            'metabot products orders inspect --order-id product-order-pin-1',
-            'metabot products orders inspect --payment-txid payment-txid-1',
-        ],
-    },
     {
         commandPath: ['loom'],
         summary: 'Loom commands for validating protocol payloads, delegated task workflows, raw cache sync, and task inspection.',
@@ -1725,7 +1533,6 @@ const COMMAND_HELP_SPECS = [
         subcommands: [
             { name: 'services', summary: 'List MetaBot services from chain discovery and local fallbacks.' },
             { name: 'bots', summary: 'List online MetaBots from socket presence with service-directory fallback.' },
-            { name: 'products', summary: 'List product listings from chain discovery and local product cache.' },
             { name: 'sources', summary: 'Manage local seeded directory sources.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
@@ -1749,34 +1556,6 @@ const COMMAND_HELP_SPECS = [
         ],
         examples: [
             'metabot network services --online',
-        ],
-    },
-    {
-        commandPath: ['network', 'products'],
-        summary: 'List product commerce listings discovered from MetaWeb and optional local product cache.',
-        usage: 'metabot network products [--online] [--cached] [--query <text>] [--search <text>] [--limit <n>]',
-        optionalFlags: [
-            { flag: '--online', description: 'Return only product listings whose sellers currently appear in socket presence.' },
-            { flag: '--cached', description: 'Search only the local product directory cache without refreshing chain data.' },
-            { flag: '--query', value: '<text>', description: 'Search by product name, title, description, SKU text, seller name, or price currency.' },
-            { flag: '--search', value: '<text>', description: 'Alias for --query.' },
-            { flag: '--limit', value: '<n>', description: 'Maximum rows to return. Supported range: 1-100. Default: 20.' },
-            HELP_JSON_FLAG,
-        ],
-        successFields: [
-            'products',
-            'total',
-            'source',
-            'onlineOnly',
-            'cacheUpdatedAt',
-        ],
-        failureSemantics: [
-            'Fails when --limit is outside 1-100.',
-            'Chain refresh failures fall back to local product cache when cached listings exist.',
-        ],
-        examples: [
-            'metabot network products --online --query "mobile top-up" --limit 5',
-            'metabot network products --cached --search SPACE',
         ],
     },
     {
@@ -2626,10 +2405,10 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['ui', 'open'],
-        summary: 'Open one local MetaBot runtime HTML page such as bot, conversations, services, apps, products, settings, hub, buzz, chat, publish, my-services, trace, or refund.',
+        summary: 'Open one local MetaBot runtime HTML page such as bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, or refund.',
         usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>]',
         requiredFlags: [
-            { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, products, settings, hub, buzz, chat, publish, my-services, trace, or refund.' },
+            { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, or refund.' },
         ],
         optionalFlags: [
             FROM_BOT_FLAG,
@@ -2656,8 +2435,6 @@ const COMMAND_HELP_SPECS = [
             'metabot ui open --page trace --from alice --trace-id trace-123',
             'metabot ui open --page publish --from alice',
             'metabot ui open --page my-services --service-id <service-pin-id>',
-            'metabot ui open --page products',
-            'metabot ui open --page products --from alice',
         ],
     },
     {

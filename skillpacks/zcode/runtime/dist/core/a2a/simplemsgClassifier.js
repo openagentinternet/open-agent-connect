@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.classifySimplemsgContent = classifySimplemsgContent;
-const productOrderMessages_1 = require("../products/productOrderMessages");
 const ORDER_TXID_RE = /^[0-9a-f]{64}$/i;
 const TAG_RE = /^\[([A-Za-z_]+)(?::([0-9a-fA-F]{64})(?:\s+([A-Za-z0-9_-]+))?)?\]/;
 const LEGACY_ORDER_END_RE = /^\[(ORDER_END)(?:\s+([A-Za-z0-9_-]+))?\]/i;
@@ -32,41 +31,6 @@ function extractOrderPinId(value) {
     const match = normalizeText(value).match(ORDER_PIN_LINE_RE);
     return normalizeText(match?.[1]) || null;
 }
-function readProductMetadata(tag, content) {
-    if (tag === 'ORDER') {
-        return (0, productOrderMessages_1.parseProductOrderNotification)(content);
-    }
-    if (tag === 'DELIVERY') {
-        const delivery = (0, productOrderMessages_1.parseProductDeliveryMessage)(content);
-        return delivery
-            ? {
-                productOrderPinId: delivery.productOrderPinId,
-                listingPinId: delivery.listingPinId,
-                skuId: delivery.skuId,
-                paymentTxid: delivery.paymentTxid,
-                deliveredAt: delivery.deliveredAt,
-            }
-            : null;
-    }
-    return null;
-}
-function classifyOrderProtocol(input) {
-    const product = readProductMetadata(input.tag, input.content);
-    const base = {
-        kind: 'order_protocol',
-        tag: input.tag,
-        orderTxid: input.orderTxid,
-        orderPinId: input.orderPinId,
-        reason: input.reason,
-    };
-    return product
-        ? {
-            ...base,
-            orderKind: 'product_order',
-            product,
-        }
-        : base;
-}
 function classifySimplemsgContent(content) {
     const text = normalizeText(content);
     if (!text) {
@@ -78,23 +42,23 @@ function classifySimplemsgContent(content) {
         if (!tag) {
             return { kind: 'private_chat' };
         }
-        return classifyOrderProtocol({
+        return {
+            kind: 'order_protocol',
             tag,
             orderTxid: normalizeOrderTxid(match[2]),
             orderPinId: extractOrderPinId(text),
             reason: tag === 'ORDER_END' ? normalizeText(match[3]) || null : null,
-            content: text,
-        });
+        };
     }
     const legacyOrderEndMatch = text.match(LEGACY_ORDER_END_RE);
     if (legacyOrderEndMatch) {
-        return classifyOrderProtocol({
+        return {
+            kind: 'order_protocol',
             tag: 'ORDER_END',
             orderTxid: null,
             orderPinId: extractOrderPinId(text),
             reason: normalizeText(legacyOrderEndMatch[2]) || null,
-            content: text,
-        });
+        };
     }
     return { kind: 'private_chat' };
 }

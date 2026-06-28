@@ -40,14 +40,6 @@ function normalizeTxids(value) {
         ? value.map((entry) => normalizeText(entry)).filter(Boolean)
         : [];
 }
-function normalizeOrderReference(value) {
-    const normalized = normalizeText(value);
-    if (!normalized) {
-        return null;
-    }
-    const pinMatch = normalized.match(/^([0-9a-f]{64})i\d+$/iu);
-    return pinMatch ? pinMatch[1].toLowerCase() : normalized;
-}
 function isSensitiveRawMetadataKey(key) {
     return SENSITIVE_RAW_METADATA_KEYS.has(key.toLowerCase());
 }
@@ -165,12 +157,7 @@ async function persistA2AConversationMessage(input) {
     const classifiedOrderTxid = classification.kind === 'order_protocol'
         ? classification.orderTxid
         : null;
-    const productOrderTxid = classification.kind === 'order_protocol'
-        && classification.orderKind === 'product_order'
-        && classification.tag === 'ORDER'
-        ? normalizeOrderReference(txid) || normalizeOrderReference(input.message.pinId)
-        : null;
-    const orderTxid = normalizeText(input.message.orderTxid) || classifiedOrderTxid || productOrderTxid || null;
+    const orderTxid = normalizeText(input.message.orderTxid) || classifiedOrderTxid || null;
     const serviceOrderPinId = normalizeText(input.message.serviceOrderPinId)
         || normalizeText(input.message.orderPinId)
         || (classification.kind === 'order_protocol' ? normalizeText(classification.orderPinId) : '')
@@ -261,15 +248,9 @@ async function persistA2AConversationMessage(input) {
                 || null,
             paymentTxid: normalizeText(input.orderSession?.paymentTxid)
                 || message.paymentTxid
-                || (classification.kind === 'order_protocol' && classification.orderKind === 'product_order'
-                    ? normalizeText(classification.product?.paymentTxid)
-                    : null)
                 || normalizeText(existingOrderSession?.paymentTxid)
                 || null,
             servicePinId: normalizeText(input.orderSession?.servicePinId)
-                || (classification.kind === 'order_protocol' && classification.orderKind === 'product_order'
-                    ? normalizeText(classification.product?.listingPinId)
-                    : null)
                 || normalizeText(existingOrderSession?.servicePinId)
                 || null,
             serviceName: normalizeText(input.orderSession?.serviceName)
