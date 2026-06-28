@@ -2026,6 +2026,40 @@ test('bot page homepage upload allows files above the direct upload boundary', a
   assert.equal(context.state._pendingHomepage.contentType, 'text/html');
 });
 
+test('bot page homepage upload appends file extension when response only returns pinId', async () => {
+  const fields = {
+    '[data-homepage-status]': field(),
+    '[data-act="upload-homepage"]': field(),
+  };
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          pinId: 'homepage-pin-123',
+          contentType: 'text/html',
+        },
+      }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice' }];
+  context.renderPublicIdentityTab = () => {};
+
+  await context.handleHomepageUploadFile({
+    name: 'homepage.html',
+    type: 'text/html',
+    size: 12,
+  });
+
+  assert.equal(context.state._pendingHomepage.uri, 'metafile://homepage-pin-123.html');
+  assert.equal(context.state._pendingHomepage.contentType, 'text/html');
+});
+
 test('bot page homepage upload rejects files above 50 MiB before fetch', async () => {
   const fields = {
     '[data-homepage-status]': field(),

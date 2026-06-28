@@ -91,6 +91,13 @@ function homepageSourceFromHomepage(homepage){
   if(!homepage)return'default';
   return /^metaapp:\/\//i.test(homepage.uri)?'metaapp':'metafile';
 }
+function fileExtensionSuffix(fileName){
+  var base=String(fileName||'').trim().split(/[\\/]/).pop()||'';
+  var index=base.lastIndexOf('.');
+  if(index<=0||index>=base.length-1)return'';
+  var suffix=base.slice(index).toLowerCase();
+  return /^\.[a-z0-9]{1,16}$/.test(suffix)?suffix:'';
+}
 function homepageSourceValue(profile){
   if(state._homepageSource)return state._homepageSource;
   return homepageSourceFromHomepage(homepageDraft(profile));
@@ -800,7 +807,7 @@ function handleHomepageUploadFile(file){
     if(state.selectedSlug!==profileSlug||state._homepageUploadToken!==uploadToken)return;
     var data=r.data||{};
     var uri=String(data.metafileUri||data.uri||'').trim();
-    if(!uri&&data.pinId)uri='metafile://'+data.pinId;
+    if(!uri&&data.pinId)uri='metafile://'+data.pinId+fileExtensionSuffix(file.name);
     if(!uri)throw new Error(uiText('bot.uploadFailed','Upload failed'));
     state._pendingHomepage={
       uri:uri,
