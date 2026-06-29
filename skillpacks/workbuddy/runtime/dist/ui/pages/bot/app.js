@@ -16,7 +16,7 @@ function buildBotPageScript() {
     return String.raw `var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
 var HOMEPAGE_UPLOAD_MAX_BYTES=50*1024*1024;
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
 var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
@@ -82,6 +82,7 @@ function clearSelectedProfileDrafts(){
   state._homepageSource='';
   state._homepageUploadWorking=false;
   state._homepageUploadToken+=1;
+  state._homepageMetaAppPickerOpen=false;
 }
 function setSelectedSlug(slug,options){
   options=options||{};
@@ -157,16 +158,81 @@ function homepageSourceOptionsMarkup(selected){
     homepageSourceOptionMarkup('metafile',uiText('bot.homepageMetafile','Metafile'),selected)+
     homepageSourceOptionMarkup('metaapp',uiText('bot.homepageMetaApp','MetaApp'),selected);
 }
+function homepageProtocolInputMarkup(input){
+  return '<label class="homepage-protocol-input">'+
+    '<span class="homepage-protocol-prefix" aria-hidden="true">'+esc(input.prefix)+'</span>'+
+    '<input data-field="'+esc(input.field)+'" value="'+esc(input.value||'')+'" placeholder="'+esc(input.placeholder||'')+'" spellcheck="false" autocomplete="off" aria-invalid="false" />'+
+  '</label>';
+}
 function normalizeMetaAppHomepageInput(value){
-  var pin=String(value==null?'':value).trim();
-  if(/^metaapp:\/\//i.test(pin))pin=pin.slice('metaapp://'.length).trim();
-  if(!pin||/\s/u.test(pin)||/:\/\//.test(pin))throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
+  var pin=normalizeHomepagePinInput(value,'metaapp://',uiText('bot.homepageEmptyMetaAppPin','Enter a MetaApp pin ID before saving.'),uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
   return {uri:'metaapp://'+pin,renderer:'metaapp',contentType:'application/vnd.metaapp'};
+}
+function normalizeMetafileHomepageInput(value,contentType){
+  var pin=normalizeHomepagePinInput(value,'metafile://',uiText('bot.homepageEmptyMetafilePin','Enter a Metafile pin ID before saving.'),uiText('bot.homepageInvalidMetafilePin','Enter a Metafile pin ID without spaces.'));
+  return {uri:'metafile://'+pin,renderer:'auto',contentType:contentType||'application/octet-stream'};
+}
+function normalizeHomepagePinInput(value,scheme,emptyMessage,invalidMessage){
+  var pin=String(value==null?'':value).trim();
+  if(pin.toLowerCase().indexOf(scheme)===0)pin=pin.slice(scheme.length).trim();
+  if(!pin)throw new Error(emptyMessage);
+  if(/\s/u.test(pin)||/:\/\//.test(pin))throw new Error(invalidMessage);
+  return pin;
 }
 function metaAppPinFromHomepage(homepage){
   homepage=normalizeHomepage(homepage);
   if(!homepage||!/^metaapp:\/\//i.test(homepage.uri))return '';
   return homepage.uri.slice('metaapp://'.length);
+}
+function metafilePinFromHomepage(homepage){
+  homepage=normalizeHomepage(homepage);
+  if(!homepage||!/^metafile:\/\//i.test(homepage.uri))return '';
+  return homepage.uri.slice('metafile://'.length);
+}
+function fieldInputInvalid(field,invalid){
+  var input=q('[data-field="'+field+'"]');
+  if(input&&input.setAttribute)input.setAttribute('aria-invalid',invalid?'true':'false');
+  if(invalid&&input&&input.focus)input.focus();
+}
+function clearHomepageInputInvalid(field){
+  fieldInputInvalid(field,false);
+  renderHomepageDraftStatus('', '');
+}
+function selectedProfileSlug(){
+  var profile=selectedProfile();
+  return profile&&profile.slug?profile.slug:state.selectedSlug;
+}
+function recordPinId(record){
+  return String(record&&record.pinId||record&&record.firstPinId||'').trim();
+}
+function recordMetaAppName(record){
+  return String(record&&record.appName||record&&record.title||record&&record.name||uiText('bot.homepageUntitledMetaApp','Untitled MetaApp')).trim();
+}
+function normalizeMetaAppListResponse(response){
+  var data=response&&response.data!==undefined?response.data:response;
+  var records=Array.isArray(data&&data.records)?data.records:(Array.isArray(data)?data:[]);
+  return records.filter(function(record){return Boolean(recordPinId(record))});
+}
+function metafileRefFromValue(value){
+  var raw=String(value==null?'':value).trim();
+  if(!raw)return '';
+  if(/^metafile:\/\//i.test(raw))return raw.slice('metafile://'.length).trim().split(/[?#]/)[0]||'';
+  if(/^[0-9a-f]{64}(?:i[0-9]+)?(?:\.[a-z0-9][a-z0-9+-]{0,31})?$/iu.test(raw))return raw;
+  return '';
+}
+function imageUrlForMetaAppIcon(value){
+  var raw=String(value==null?'':value).trim();
+  if(!raw)return '';
+  if(/^(data:|blob:|https?:\/\/|\/)/iu.test(raw))return raw;
+  var ref=metafileRefFromValue(raw);
+  return ref?'/api/file/avatar?ref='+encodeURIComponent(ref):'';
+}
+function metaAppIconMarkup(record){
+  var name=recordMetaAppName(record);
+  var icon=imageUrlForMetaAppIcon(record&&record.icon||record&&record.iconImg||record&&record.iconImage);
+  if(icon)return '<img src="'+esc(icon)+'" alt="" loading="lazy" />';
+  var chars=Array.from(name||'?').filter(function(char){return char.trim()}).slice(0,2).join('').toUpperCase()||'?';
+  return '<span>'+esc(chars)+'</span>';
 }
 function availableRuntimes(){return state.runtimes.filter(function(r){return r.health==='healthy'&&r.provider})}
 function providerDisplayName(provider){var rt=availableRuntimes().find(function(r){return r.provider===provider});return rt?runtimeLabel(rt):(provider||'No provider')}
@@ -361,28 +427,66 @@ function homepagePanelMarkup(profile){
   var status=source==='default'?uiText('bot.homepageDefault','Default'):(source==='metaapp'?uiText('bot.homepageMetaApp','MetaApp'):uiText('bot.homepageMetafile','Metafile'));
   var viewDisabled=profile&&profile.globalMetaId?'':' disabled';
   var viewLink=' <button type="button" class="homepage-view-link" data-act="view-homepage"'+viewDisabled+'>'+esc(uiText('bot.homepageViewLink','click here to view'))+'</button>';
-  var helpCopy=uiText('bot.homepageMetaAppHelp','Use the metabot-homepage-guide skill and metabot-metaapp-publish skill to create a unique Bot Page, package and publish it on-chain through the MetaApp protocol, then paste the MetaApp pin ID here.');
   var metaAppSource=source==='metaapp'?(state._pendingHomepage!==undefined?state._pendingHomepage:profile&&profile.homepage):null;
   var metaAppPin=metaAppPinFromHomepage(metaAppSource);
+  var metafileSource=source==='metafile'?(state._pendingHomepage!==undefined?state._pendingHomepage:profile&&profile.homepage):null;
+  var metafilePin=metafilePinFromHomepage(metafileSource);
   var control='';
   if(source==='default'){
-    control='<div class="homepage-final-uri">'+esc(uiText('bot.homepageDefaultActive','Default Bot Page renderer is active.'))+viewLink+'</div>';
+    control='<div class="homepage-final-uri">'+esc(uiText('bot.homepageDefaultActive','Default home page renderer is active.'))+viewLink+'</div>';
   }else if(source==='metafile'){
-	    control='<div class="homepage-source-note">'+esc(uiText('bot.homepageMetafileNote','Upload a local file and save it as metafile://<pinId>.<ext>.'))+'</div>'+
-      '<div class="homepage-control-row"><button type="button" class="btn btn-sm" data-act="upload-homepage"'+(state._homepageUploadWorking?' disabled':'')+'>'+esc(uiText('bot.upload','Upload'))+'</button><input type="file" data-homepage-file-input hidden /></div>';
+    control='<div class="homepage-control-row homepage-protocol-row">'+
+      homepageProtocolInputMarkup({prefix:'metafile://',field:'homepage-metafile-pin',value:metafilePin,placeholder:uiText('bot.homepageMetafilePinPlaceholder','pinId.ext')})+
+      '<button type="button" class="btn btn-sm" data-act="upload-homepage"'+(state._homepageUploadWorking?' disabled':'')+'>'+esc(uiText('bot.upload','Upload'))+'</button>'+
+      '<input type="file" data-homepage-file-input hidden />'+
+    '</div>';
   }else{
-    control='<div class="homepage-source-note">'+esc(uiText('bot.homepageMetaAppNote','Paste a MetaApp pin ID and save it as metaapp://<pinId>.'))+'</div>'+
-      '<div class="homepage-control-row homepage-metaapp-row"><input data-field="homepage-metaapp-pin" placeholder="'+esc(uiText('bot.homepagePinPlaceholder','MetaApp pin ID'))+'" value="'+esc(metaAppPin)+'" /><button type="button" class="btn btn-sm" data-act="preview-homepage-metaapp">'+esc(uiText('bot.homepagePreviewMetaApp','Preview'))+'</button><span class="homepage-help-wrap" data-homepage-help><button type="button" class="homepage-help" data-act="toggle-homepage-help" aria-label="'+esc(uiText('bot.homepageMetaAppHelpLabel','How to get a MetaApp pin ID'))+'" aria-expanded="false" aria-controls="homepage-metaapp-help">?</button><span class="homepage-help-popover" id="homepage-metaapp-help" data-homepage-help-popover role="tooltip">'+esc(helpCopy)+'</span></span></div>';
+    control='<div class="homepage-control-row homepage-protocol-row homepage-metaapp-row">'+
+      homepageProtocolInputMarkup({prefix:'metaapp://',field:'homepage-metaapp-pin',value:metaAppPin,placeholder:uiText('bot.homepagePinPlaceholder','MetaApp pin ID')})+
+      '<span class="homepage-metaapp-picker-wrap">'+
+        '<button type="button" class="btn btn-sm" data-act="select-homepage-metaapp" aria-haspopup="dialog" aria-expanded="'+(state._homepageMetaAppPickerOpen?'true':'false')+'">'+esc(uiText('bot.homepageSelectMetaApp','Select'))+'</button>'+
+        (state._homepageMetaAppPickerOpen?homepageMetaAppPickerMarkup(profile):'')+
+      '</span>'+
+    '</div>';
   }
   return '<div class="field field-full"><label>'+esc(uiText('bot.homepage','Homepage'))+'</label>'+
     '<div class="homepage-panel" data-homepage-panel>'+
-      '<div class="homepage-panel-head"><div><div class="homepage-panel-title">'+esc(uiText('bot.homepage','Homepage'))+'</div><div class="homepage-panel-subtitle">'+esc(uiText('bot.homepageSource','Custom Bot page source'))+'</div></div><span class="homepage-status-pill">'+esc(status)+'</span></div>'+
+      '<div class="homepage-panel-head"><div><div class="homepage-panel-title">'+esc(uiText('bot.homepage','Homepage'))+'</div><div class="homepage-panel-subtitle">'+esc(uiText('bot.homepageSource','Custom home page source'))+'</div></div><span class="homepage-status-pill">'+esc(status)+'</span></div>'+
       '<div class="homepage-source-row">'+
-        '<div class="homepage-source-select"><label for="homepage-source">'+esc(uiText('bot.homepageSource','Custom Bot page source'))+'</label><select id="homepage-source" data-field="homepage-source">'+homepageSourceOptionsMarkup(source)+'</select></div>'+
+        '<div class="homepage-source-select"><label for="homepage-source">'+esc(uiText('bot.homepageSource','Custom home page source'))+'</label><select id="homepage-source" data-field="homepage-source">'+homepageSourceOptionsMarkup(source)+'</select></div>'+
         '<div class="homepage-control-slot" data-homepage-control-slot>'+control+'</div>'+
       '</div>'+
       '<div class="save-status" data-homepage-status></div>'+
     '</div></div>';
+}
+function homepageMetaAppPickerMarkup(profile){
+  var slug=profile&&profile.slug||state.selectedSlug||'';
+  var status=state._homepageMetaAppsStatusBySlug[slug]||'';
+  var error=state._homepageMetaAppsErrorBySlug[slug]||'';
+  var records=state._homepageMetaAppsBySlug[slug]||[];
+  var body='';
+  if(status==='loading'||(!status&&!records.length)){
+    body='<div class="homepage-metaapp-loading">'+esc(uiText('bot.homepageLoadingMetaApps','Loading MetaApps...'))+'</div>';
+  }else if(error){
+    body='<div class="homepage-metaapp-empty"><strong>'+esc(uiText('bot.homepageMetaAppsLoadFailed','MetaApps could not be loaded.'))+'</strong><p>'+esc(error)+'</p><button type="button" class="btn btn-sm" data-act="reload-homepage-metaapps">'+esc(uiText('bot.retry','Retry'))+'</button></div>';
+  }else if(!records.length){
+    var appsHref='/ui/apps'+(slug?'?from='+encodeURIComponent(slug):'');
+    body='<div class="homepage-metaapp-empty">'+
+      '<strong>'+esc(uiText('bot.homepageNoMetaAppsTitle','No MetaApps published for this Bot.'))+'</strong>'+
+      '<p>'+esc(uiText('bot.homepageNoMetaAppsMessage','Publish the first MetaApp on-chain in Apps, then return here and select it as the homepage.'))+'</p>'+
+      '<a class="btn btn-sm btn-primary" href="'+esc(appsHref)+'">'+esc(uiText('bot.homepageCreateMetaApp','Create MetaApp'))+'</a>'+
+    '</div>';
+  }else{
+    body='<div class="homepage-metaapp-list" data-homepage-metaapp-list>'+records.map(function(record){
+      var pinId=recordPinId(record);
+      var name=recordMetaAppName(record);
+      return '<button type="button" class="homepage-metaapp-option" data-act="choose-homepage-metaapp" data-metaapp-pin="'+esc(pinId)+'">'+
+        '<span class="homepage-metaapp-icon">'+metaAppIconMarkup(record)+'</span>'+
+        '<span class="homepage-metaapp-copy"><strong>'+esc(name)+'</strong><code>'+esc(pinId)+'</code></span>'+
+      '</button>';
+    }).join('')+'</div>';
+  }
+  return '<div class="homepage-metaapp-picker" role="dialog" aria-label="'+esc(uiText('bot.homepageSelectMetaApp','Select'))+'">'+body+'</div>';
 }
 function wireProviderPickers(){
   qq('[data-provider-toggle]').forEach(function(btn){
@@ -829,22 +933,39 @@ function renderHomepageDraftStatus(message,tone){
 function rerenderPublicIdentityForHomepage(){
   renderPublicIdentityTab({preserveDraft:true});
 }
-function toggleHomepageHelp(button){
-  var wrap=button&&button.closest&&button.closest('[data-homepage-help]');
-  if(!wrap||!wrap.classList)return;
-  var open=!(wrap.classList.contains&&wrap.classList.contains('open'));
-  wrap.classList.toggle('open',open);
-  if(button.setAttribute)button.setAttribute('aria-expanded',open?'true':'false');
-}
 function readMetaAppHomepageDraftFromInput(options){
   options=options||{};
   var input=q('[data-field="homepage-metaapp-pin"]');
   var value=String(input&&input.value||'').trim();
-  if(!value)return undefined;
   try{
-    return normalizeMetaAppHomepageInput(value);
+    var draft=normalizeMetaAppHomepageInput(value);
+    fieldInputInvalid('homepage-metaapp-pin',false);
+    return draft;
   }catch(error){
+    fieldInputInvalid('homepage-metaapp-pin',true);
     if(options.optional)return undefined;
+    throw error;
+  }
+}
+function readMetafileHomepageDraftFromInput(profile){
+  var input=q('[data-field="homepage-metafile-pin"]');
+  var pending=normalizeHomepage(state._pendingHomepage);
+  var current=normalizeHomepage(profile&&profile.homepage);
+  if(!input){
+    if(pending&&homepageSourceFromHomepage(pending)==='metafile')return pending;
+    if(current&&homepageSourceFromHomepage(current)==='metafile')return current;
+    throw new Error(uiText('bot.homepageUploadRequired','Upload a homepage file before saving.'));
+  }
+  var value=String(input&&input.value||'').trim();
+  var contentType=(pending&&homepageSourceFromHomepage(pending)==='metafile'&&pending.contentType)||(current&&homepageSourceFromHomepage(current)==='metafile'&&current.contentType)||'application/octet-stream';
+  try{
+    var draft=normalizeMetafileHomepageInput(value,contentType);
+    fieldInputInvalid('homepage-metafile-pin',false);
+    if(pending&&pending.uri===draft.uri)return pending;
+    if(current&&current.uri===draft.uri)return current;
+    return draft;
+  }catch(error){
+    fieldInputInvalid('homepage-metafile-pin',true);
     throw error;
   }
 }
@@ -853,25 +974,9 @@ function readHomepageDraftForSave(profile){
   if(source==='default')return null;
   if(source==='metaapp'){
     var metaAppDraft=readMetaAppHomepageDraftFromInput();
-    if(!metaAppDraft)throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
     return metaAppDraft;
   }
-  var pending=normalizeHomepage(state._pendingHomepage);
-  if(pending&&homepageSourceFromHomepage(pending)==='metafile')return pending;
-  var current=normalizeHomepage(profile&&profile.homepage);
-  if(current&&homepageSourceFromHomepage(current)==='metafile')return current;
-  throw new Error(uiText('bot.homepageUploadRequired','Upload a homepage file before saving.'));
-}
-function previewHomepageMetaApp(){
-  try{
-    var draft=readMetaAppHomepageDraftFromInput();
-    if(!draft)throw new Error(uiText('bot.homepageInvalidMetaAppPin','Enter a MetaApp pin ID without spaces.'));
-    state._pendingHomepage=draft;
-    state._homepageSource='metaapp';
-    window.location.href=metaAppBrowserPath(metaAppPinFromHomepage(draft));
-  }catch(error){
-    renderHomepageDraftStatus(error.message,'error');
-  }
+  return readMetafileHomepageDraftFromInput(profile);
 }
 function handleHomepageSourceChange(){
   var profile=selectedProfile();
@@ -879,10 +984,54 @@ function handleHomepageSourceChange(){
   state._homepageSource=source;
   state._homepageUploadWorking=false;
   state._homepageUploadToken+=1;
+  state._homepageMetaAppPickerOpen=false;
   if(source==='default')state._pendingHomepage=null;
   else state._pendingHomepage=undefined;
   rerenderPublicIdentityForHomepage();
   if(source==='default')renderHomepageDraftStatus(uiText('bot.homepageDefaultReadyToSave','Default homepage ready to save.'),'success');
+}
+function loadHomepageMetaApps(slug,force){
+  slug=String(slug||'').trim();
+  if(!slug)return Promise.resolve([]);
+  var status=state._homepageMetaAppsStatusBySlug[slug]||'';
+  if(!force&&(status==='loading'||status==='loaded'))return Promise.resolve(state._homepageMetaAppsBySlug[slug]||[]);
+  state._homepageMetaAppsStatusBySlug[slug]='loading';
+  state._homepageMetaAppsErrorBySlug[slug]='';
+  rerenderPublicIdentityForHomepage();
+  return api('/api/metaapp/list?from='+encodeURIComponent(slug)+'&size=24').then(function(response){
+    var records=normalizeMetaAppListResponse(response);
+    state._homepageMetaAppsBySlug[slug]=records;
+    state._homepageMetaAppsStatusBySlug[slug]='loaded';
+    state._homepageMetaAppsErrorBySlug[slug]='';
+    if(slug===selectedProfileSlug()&&state._homepageMetaAppPickerOpen)rerenderPublicIdentityForHomepage();
+    return records;
+  }).catch(function(error){
+    state._homepageMetaAppsBySlug[slug]=[];
+    state._homepageMetaAppsStatusBySlug[slug]='error';
+    state._homepageMetaAppsErrorBySlug[slug]=error&&error.message?error.message:String(error||uiText('bot.homepageMetaAppsLoadFailed','MetaApps could not be loaded.'));
+    if(slug===selectedProfileSlug()&&state._homepageMetaAppPickerOpen)rerenderPublicIdentityForHomepage();
+    return [];
+  });
+}
+function toggleHomepageMetaAppPicker(forceReload){
+  var slug=selectedProfileSlug();
+  if(!slug)return;
+  state._homepageMetaAppPickerOpen=!state._homepageMetaAppPickerOpen||Boolean(forceReload);
+  rerenderPublicIdentityForHomepage();
+  if(state._homepageMetaAppPickerOpen)loadHomepageMetaApps(slug,Boolean(forceReload));
+}
+function chooseHomepageMetaAppPin(pinId){
+  var pin=String(pinId||'').trim();
+  if(!pin)return;
+  try{
+    state._pendingHomepage=normalizeMetaAppHomepageInput(pin);
+    state._homepageSource='metaapp';
+    state._homepageMetaAppPickerOpen=false;
+    rerenderPublicIdentityForHomepage();
+    renderHomepageDraftStatus(uiText('bot.homepageReadyToSave','Homepage ready to save.'),'success');
+  }catch(error){
+    renderHomepageDraftStatus(error.message,'error');
+  }
 }
 function handleHomepageUploadFile(file){
   var profile=selectedProfile();if(!profile||!profile.slug||!file)return Promise.resolve();
@@ -928,8 +1077,11 @@ function wireHomepageControls(){
   var source=q('[data-field="homepage-source"]');if(source)source.addEventListener('change',handleHomepageSourceChange);
   if(upload&&input)upload.addEventListener('click',function(){input.click()});
   if(input)input.addEventListener('change',function(){var file=this.files&&this.files[0];if(file)handleHomepageUploadFile(file)});
-  var preview=q('[data-act="preview-homepage-metaapp"]');if(preview)preview.addEventListener('click',previewHomepageMetaApp);
-  var help=q('[data-act="toggle-homepage-help"]');if(help)help.addEventListener('click',function(event){if(event&&event.preventDefault)event.preventDefault();toggleHomepageHelp(this)});
+  var metafilePin=q('[data-field="homepage-metafile-pin"]');if(metafilePin)metafilePin.addEventListener('input',function(){clearHomepageInputInvalid('homepage-metafile-pin')});
+  var metaappPin=q('[data-field="homepage-metaapp-pin"]');if(metaappPin)metaappPin.addEventListener('input',function(){clearHomepageInputInvalid('homepage-metaapp-pin')});
+  var selectMetaApp=q('[data-act="select-homepage-metaapp"]');if(selectMetaApp)selectMetaApp.addEventListener('click',function(event){if(event&&event.preventDefault)event.preventDefault();toggleHomepageMetaAppPicker(false)});
+  var reloadMetaApps=q('[data-act="reload-homepage-metaapps"]');if(reloadMetaApps)reloadMetaApps.addEventListener('click',function(event){if(event&&event.preventDefault)event.preventDefault();toggleHomepageMetaAppPicker(true)});
+  qq('[data-act="choose-homepage-metaapp"]').forEach(function(option){option.addEventListener('click',function(event){if(event&&event.preventDefault)event.preventDefault();chooseHomepageMetaAppPin(this.getAttribute('data-metaapp-pin')||'')})});
   var view=q('[data-act="view-homepage"]');if(view)view.addEventListener('click',viewSelectedBotPage);
 }
 

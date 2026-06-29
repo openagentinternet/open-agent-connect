@@ -22,14 +22,17 @@ const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
 const uiMetaApps_1 = require("./uiMetaApps");
 const UI_ROUTE_PREFIX = '/ui/';
-const PLATFORM_ASSET_PREFIX = '/ui/assets/platforms/';
-const PLATFORM_ASSET_CONTENT_TYPES = {
+const UI_ASSET_CONTENT_TYPES = {
     '.svg': 'image/svg+xml; charset=utf-8',
     '.png': 'image/png',
     '.webp': 'image/webp',
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
 };
+const UI_ASSET_ROUTES = [
+    { prefix: '/ui/assets/platforms/', directory: 'platforms', label: 'Platform' },
+    { prefix: '/ui/assets/chains/', directory: 'chains', label: 'Chain' },
+];
 const PAGE_BUILDERS = {
     'hub': () => (0, app_1.buildHubPageDefinition)(),
     'publish': () => (0, app_3.buildPublishPageDefinition)(),
@@ -147,29 +150,30 @@ function isBrowserPagePath(pathname) {
         || /^\/browser\/(?:metaid|metaapp|metafile)\/[^/?#]+$/u.test(pathname)
         || /^\/browser\/map\/[^?#]+$/u.test(pathname);
 }
-async function servePlatformAsset(context) {
+async function serveBundledUiAsset(context) {
     const { req, url } = context;
-    if (!url.pathname.startsWith(PLATFORM_ASSET_PREFIX)) {
+    const route = UI_ASSET_ROUTES.find((candidate) => url.pathname.startsWith(candidate.prefix));
+    if (!route) {
         return false;
     }
     if (req.method !== 'GET') {
         context.sendMethodNotAllowed(['GET']);
         return true;
     }
-    const filename = decodeURIComponent(url.pathname.slice(PLATFORM_ASSET_PREFIX.length));
+    const filename = decodeURIComponent(url.pathname.slice(route.prefix.length));
     if (filename !== node_path_1.default.basename(filename)) {
-        context.sendJson(400, { ok: false, state: 'failed', code: 'bad_request', message: 'Invalid platform asset path.' });
+        context.sendJson(400, { ok: false, state: 'failed', code: 'bad_request', message: `Invalid ${route.label.toLowerCase()} asset path.` });
         return true;
     }
     const ext = node_path_1.default.extname(filename).toLowerCase();
-    const contentType = PLATFORM_ASSET_CONTENT_TYPES[ext];
+    const contentType = UI_ASSET_CONTENT_TYPES[ext];
     if (!contentType) {
-        context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: 'Platform asset not found.' });
+        context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: `${route.label} asset not found.` });
         return true;
     }
     const candidates = [
-        node_path_1.default.resolve(__dirname, '../../ui/assets/platforms', filename),
-        node_path_1.default.resolve(__dirname, '../../../src/ui/assets/platforms', filename),
+        node_path_1.default.resolve(__dirname, '../../ui/assets', route.directory, filename),
+        node_path_1.default.resolve(__dirname, '../../../src/ui/assets', route.directory, filename),
     ];
     for (const candidate of candidates) {
         try {
@@ -180,7 +184,7 @@ async function servePlatformAsset(context) {
         }
         catch { /* try next */ }
     }
-    context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: 'Platform asset not found.' });
+    context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: `${route.label} asset not found.` });
     return true;
 }
 const handleUiRoutes = async (context) => {
@@ -217,7 +221,7 @@ const handleUiRoutes = async (context) => {
         context.sendJson(404, { ok: false, state: 'failed', code: 'not_found', message: 'shared.css not found' });
         return true;
     }
-    if (await servePlatformAsset(context)) {
+    if (await serveBundledUiAsset(context)) {
         return true;
     }
     if (await (0, uiMetaApps_1.handleBundledMetaAppRoutes)(context)) {

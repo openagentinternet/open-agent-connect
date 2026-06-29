@@ -283,22 +283,28 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.match(content, /metaapp share --pin-id/);
   assert.match(content, /metaapp view/);
   assert.match(content, /metaapp comment/);
+  assert.match(content, /Unified Publish Wizard/i);
   assert.match(content, /Direct MetaAPP Protocol Publish/i);
-  assert.match(content, /Project Packaging Publish/i);
+  assert.match(content, /publish-project Fast Path/i);
   assert.match(content, /publish.*update.*delete.*explicit confirmation.*--confirm/is);
   assert.match(content, /coverImg/);
+  assert.match(content, /icon/);
+  assert.match(content, /title.*appName.*content.*non-empty/is);
+  assert.match(content, /title.*appName.*prompt.*icon.*coverImg.*introImgs.*intro.*runtime.*version.*contentType.*content.*indexFile.*code.*contentHash.*metadata.*tags.*disabled.*codeType/is);
   assert.match(content, /HTTP\(S\) image URLs/i);
-  assert.match(content, /content.*code.*metafile:\/\/ references only/is);
-  assert.match(content, /Publish Wizard/i);
+  assert.match(content, /image\/png.*image\/jpeg.*image\/webp.*image\/gif.*image\/svg\+xml/is);
+  assert.match(content, /content.*metafile:\/\/ references only/is);
+  assert.match(content, /Show the final MetaAPP JSON/i);
   assert.match(content, /confirm the MetaBot actor before every on-chain write/i);
   assert.match(content, /\/ui\/apps/);
   assert.match(content, /file upload-large --from <bot-slug> --file .*metaapp\.zip/i);
   assert.match(content, /file upload-large --from <bot-slug> --file <absolute-path> --content-type <mime>/i);
   assert.doesNotMatch(content, /metabot file upload --from <bot-slug> --request-file <zip-upload\.json>/i);
-  assert.match(content, /open the published MetaApp in Browser/i);
+  assert.match(content, /\/browser\/metaapp\/<pinId>/i);
   assert.doesNotMatch(content, /metabot metaapp publish --from <bot-slug> --project-dir/);
   assert.doesNotMatch(content, /metabot metaapp update --target-pin-id <pinid> --from <bot-slug> --project-dir/);
   assert.doesNotMatch(content, /ui open --page metaapps/);
+  assert.doesNotMatch(content, /metawebUrl/);
 });
 
 test('buildAgentConnectSkillpacks updates generated ui-open help to recommend apps instead of metaapps', async () => {

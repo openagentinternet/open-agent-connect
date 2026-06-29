@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OAC Bot Homepage Source Prototype</title>
+    <style>
+      :root {
+        --bg: #eef3f9;
+        --surface: #ffffff;
+        --surface-soft: #f7f9fc;
+        --panel: #fbfcfe;
+        --border: #d9e1ed;
+        --border-strong: #c9d3e4;
+        --text: #162132;
+        --muted: #6a778b;
+        --dim: #8b95a5;
+        --accent: #2e6fed;
+        --accent-soft: #eaf1ff;
+        --accent-border: #cfe0ff;
+        --green: #15803d;
+        --green-soft: #dcfce7;
+        --amber: #b45309;
+        --amber-soft: #fef3c7;
+        --red: #b91c1c;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --shadow: 0 18px 46px rgba(19, 35, 67, 0.12), 0 3px 12px rgba(19, 35, 67, 0.06);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        background: var(--bg);
+        font: 14px/1.5 var(--sans);
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 54px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.94);
+      }
+
+      .brand {
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 800;
+        text-decoration: none;
+      }
+
+      .divider {
+        width: 1px;
+        height: 24px;
+        background: var(--border);
+      }
+
+      .page-title {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .spacer {
+        flex: 1;
+      }
+
+      .nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .nav a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .nav a.active {
+        border-color: var(--accent-border);
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .page {
+        width: min(1280px, calc(100vw - 32px));
+        margin: 18px auto 36px;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 244px minmax(0, 1fr);
+        min-height: 720px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: var(--shadow);
+      }
+
+      .bot-list {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .bot-list-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .bot-list-title {
+        flex: 1;
+        color: var(--muted);
+        font: 500 11px/1 var(--mono);
+        text-transform: uppercase;
+      }
+
+      .bot-count {
+        color: var(--dim);
+        font: 11px/1 var(--mono);
+      }
+
+      .bot-list-scroll {
+        display: grid;
+        align-content: start;
+        gap: 6px;
+        padding: 8px;
+      }
+
+      .bot-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        min-width: 0;
+        padding: 10px 12px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+      }
+
+      .bot-item:hover,
+      .bot-item.active {
+        border-color: var(--accent-border);
+        background: var(--accent-soft);
+      }
+
+      .avatar {
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 36px;
+        height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background:
+          radial-gradient(circle at top left, rgba(46, 111, 237, 0.26), transparent 56%),
+          linear-gradient(135deg, #edf4ff, #eefaf6);
+        color: #36507a;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .avatar.large {
+        width: 56px;
+        height: 56px;
+        font-size: 18px;
+      }
+
+      .bot-item-main {
+        min-width: 0;
+      }
+
+      .bot-item-name {
+        overflow: hidden;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .bot-item-id {
+        margin-top: 2px;
+        overflow: hidden;
+        color: var(--dim);
+        font: 11px/1.35 var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .detail {
+        min-width: 0;
+        background: var(--bg);
+      }
+
+      .detail-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .detail-title {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .detail-title strong {
+        display: block;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .detail-title span {
+        display: block;
+        margin-top: 2px;
+        overflow: hidden;
+        color: var(--dim);
+        font: 11px/1.3 var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .btn:hover {
+        border-color: var(--border-strong);
+        background: var(--surface-soft);
+      }
+
+      .btn.primary {
+        border-color: var(--accent-border);
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .tabs {
+        display: flex;
+        gap: 1px;
+        overflow-x: auto;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .tab {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 0 12px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: var(--surface-soft);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .tab.active {
+        border-color: var(--border-strong);
+        background: var(--surface);
+        color: var(--accent);
+      }
+
+      .tab-body {
+        display: grid;
+        gap: 16px;
+        padding: 18px 22px 22px;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .field-full {
+        grid-column: 1 / -1;
+      }
+
+      .field label,
+      .source-label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .input,
+      .select,
+      .textarea {
+        width: 100%;
+        min-height: 36px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .input,
+      .textarea {
+        padding: 7px 9px;
+      }
+
+      .select {
+        padding: 7px 9px;
+      }
+
+      .textarea {
+        min-height: 82px;
+        resize: vertical;
+      }
+
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .panel-body {
+        padding: 16px;
+      }
+
+      .panel-title {
+        margin: 0 0 12px;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .homepage-panel {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .homepage-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 14px 0;
+      }
+
+      .homepage-title {
+        color: var(--text);
+        font-weight: 800;
+      }
+
+      .homepage-subtitle {
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .source-pill {
+        flex: 0 0 auto;
+        padding: 5px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .homepage-grid {
+        display: grid;
+        grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+        gap: 12px;
+        align-items: end;
+        padding: 12px 14px 14px;
+      }
+
+      .homepage-control {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+        position: relative;
+      }
+
+      .protocol-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .protocol-field {
+        display: flex;
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
+      .protocol-label {
+        display: inline-flex;
+        align-items: center;
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 0 10px;
+        border: 1px solid var(--border);
+        border-right: 0;
+        border-radius: 8px 0 0 8px;
+        background: var(--surface-soft);
+        color: #3c4a5e;
+        font: 12px/1 var(--mono);
+      }
+
+      .protocol-input {
+        min-width: 0;
+        min-height: 36px;
+        flex: 1 1 auto;
+        border: 1px solid var(--border);
+        border-radius: 0 8px 8px 0;
+        background: var(--surface);
+        color: var(--text);
+        font: 12px/1.3 var(--mono);
+        padding: 0 10px;
+      }
+
+      .protocol-input:focus,
+      .select:focus,
+      .input:focus,
+      .textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .protocol-field:focus-within .protocol-label {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      .status-line {
+        min-height: 18px;
+        color: var(--muted);
+        font: 11px/1.4 var(--mono);
+      }
+
+      .status-line.success {
+        color: var(--green);
+      }
+
+      .status-line.saving {
+        color: var(--amber);
+      }
+
+      .metaapp-picker {
+        position: absolute;
+        z-index: 20;
+        right: 0;
+        bottom: calc(100% + 6px);
+        width: min(560px, 100%);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
+      }
+
+      .metaapp-picker[hidden] {
+        display: none;
+      }
+
+      .metaapp-picker-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .metaapp-picker-head strong {
+        font-size: 12px;
+      }
+
+      .metaapp-list {
+        display: grid;
+        max-height: 300px;
+        overflow: auto;
+        padding: 6px;
+      }
+
+      .metaapp-option {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        width: 100%;
+        padding: 9px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        text-align: left;
+      }
+
+      .metaapp-option:hover {
+        border-color: var(--accent-border);
+        background: var(--accent-soft);
+      }
+
+      .app-icon {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: linear-gradient(135deg, #e8f2ff, #f0fbf5);
+        color: #36507a;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .metaapp-main {
+        min-width: 0;
+      }
+
+      .metaapp-name {
+        overflow: hidden;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 800;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .metaapp-pin {
+        margin-top: 2px;
+        overflow: hidden;
+        color: var(--dim);
+        font: 11px/1.4 var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .save-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding-top: 14px;
+        border-top: 1px solid var(--border);
+      }
+
+      @media (max-width: 900px) {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .bot-list {
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .homepage-grid,
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .protocol-row {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .protocol-field {
+          width: 100%;
+        }
+
+        .metaapp-picker {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#">Open Agent Connect</a>
+      <div class="divider"></div>
+      <span class="page-title">Bot</span>
+      <div class="spacer"></div>
+      <nav class="nav" aria-label="Local UI">
+        <a class="active" href="#">Bot</a>
+        <a href="#">APPs</a>
+        <a href="#">Conversations</a>
+        <a href="#">Services</a>
+      </nav>
+    </header>
+
+    <main class="page">
+      <section class="workspace">
+        <aside class="bot-list" aria-label="Local Bots">
+          <div class="bot-list-head">
+            <div class="bot-list-title">Local Bots</div>
+            <div class="bot-count">2</div>
+          </div>
+          <div class="bot-list-scroll">
+            <button class="bot-item active" type="button" data-bot="eric">
+              <span class="avatar">Er</span>
+              <span class="bot-item-main">
+                <span class="bot-item-name">eric</span>
+                <span class="bot-item-id">2NZmuKbQ4yHxnRv7L3mAo1pTcWdqfQ8Hr</span>
+              </span>
+            </button>
+            <button class="bot-item" type="button" data-bot="atlas">
+              <span class="avatar">At</span>
+              <span class="bot-item-main">
+                <span class="bot-item-name">atlas-research</span>
+                <span class="bot-item-id">9Lp2xRb7cMsaP4jKQe81Nm5vax7KcYd</span>
+              </span>
+            </button>
+          </div>
+        </aside>
+
+        <section class="detail">
+          <header class="detail-header">
+            <span class="avatar large" data-avatar>Er</span>
+            <div class="detail-title">
+              <strong data-bot-name>eric</strong>
+              <span data-global-metaid>2NZmuKbQ4yHxnRv7L3mAo1pTcWdqfQ8Hr</span>
+            </div>
+            <button class="btn primary" type="button">Open Homepage</button>
+          </header>
+
+          <div class="tabs" role="tablist" aria-label="Bot settings">
+            <button class="tab active" type="button">Basic</button>
+            <button class="tab" type="button">Behavior</button>
+            <button class="tab" type="button">Chat Skills</button>
+            <button class="tab" type="button">Advanced</button>
+          </div>
+
+          <div class="tab-body">
+            <section class="panel">
+              <div class="panel-body">
+                <h2 class="panel-title">Basic</h2>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="bot-name">Name</label>
+                    <input id="bot-name" class="input" value="eric" />
+                  </div>
+                  <div class="field">
+                    <label for="primary-provider">Primary Provider</label>
+                    <select id="primary-provider" class="select">
+                      <option>Codex</option>
+                      <option>Claude Code</option>
+                      <option>Gemini</option>
+                    </select>
+                  </div>
+                  <div class="field field-full">
+                    <label for="bot-bio">Bio</label>
+                    <textarea id="bot-bio" class="textarea">A concise engineering assistant for OAC development work.</textarea>
+                  </div>
+
+                  <div class="field field-full">
+                    <label>Homepage</label>
+                    <section class="homepage-panel" aria-label="Homepage settings">
+                      <div class="homepage-head">
+                        <div>
+                          <div class="homepage-title">Homepage</div>
+                          <div class="homepage-subtitle">Custom home page source</div>
+                        </div>
+                        <span class="source-pill" data-source-pill>Metafile</span>
+                      </div>
+
+                      <div class="homepage-grid">
+                        <div class="field">
+                          <label class="source-label" for="homepage-source">Custom home page source</label>
+                          <select id="homepage-source" class="select" data-homepage-source>
+                            <option value="default">Default</option>
+                            <option value="metafile" selected>Metafile</option>
+                            <option value="metaapp">MetaApp</option>
+                          </select>
+                        </div>
+
+                        <div class="homepage-control" data-homepage-control></div>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+
+                <div class="save-row">
+                  <button class="btn primary" type="button">Save Changes</button>
+                  <span class="status-line" data-save-status></span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const pins = {
+        metafileHtml: '261a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8i0.html',
+        metafileZip: '9d8c7b6a5f4e3d2c1098a7b6c5d4e3f2019a8b7c6d5e4f3021a9b8c7d6e5f4a3i0.zip',
+        metaappOne: 'b1029384756aefdc00112233445566778899aabbccddeeff0011223344556677i0',
+        metaappTwo: 'cafe00112233445566778899aabbccddeeff00112233445566778899aabbcci0',
+        metaappThree: 'd00d778899aabbccddeeff00112233445566778899aabbccddeeff00112233i0'
+      };
+
+      const bots = {
+        eric: {
+          initials: 'Er',
+          name: 'eric',
+          globalMetaId: '2NZmuKbQ4yHxnRv7L3mAo1pTcWdqfQ8Hr',
+          homepage: { source: 'metafile', ref: pins.metafileHtml },
+          metaapps: [
+            { appName: 'Eric Home', pinId: pins.metaappOne, icon: 'EH' },
+            { appName: 'Release Notes Board', pinId: pins.metaappTwo, icon: 'RN' },
+            { appName: 'Trace Review Desk', pinId: pins.metaappThree, icon: 'TR' }
+          ]
+        },
+        atlas: {
+          initials: 'At',
+          name: 'atlas-research',
+          globalMetaId: '9Lp2xRb7cMsaP4jKQe81Nm5vax7KcYd',
+          homepage: { source: 'metaapp', ref: pins.metaappTwo },
+          metaapps: [
+            { appName: 'Atlas Home', pinId: pins.metaappTwo, icon: 'AH' },
+            { appName: 'Research Notebook', pinId: pins.metaappThree, icon: 'RN' }
+          ]
+        }
+      };
+
+      let activeBotKey = 'eric';
+      let draft = { ...bots.eric.homepage };
+
+      const sourceSelect = document.querySelector('[data-homepage-source]');
+      const control = document.querySelector('[data-homepage-control]');
+      const sourcePill = document.querySelector('[data-source-pill]');
+      const saveStatus = document.querySelector('[data-save-status]');
+
+      function sourceLabel(source) {
+        if (source === 'metafile') return 'Metafile';
+        if (source === 'metaapp') return 'MetaApp';
+        return 'Default';
+      }
+
+      function protocolFor(source) {
+        if (source === 'metafile') return 'metafile://';
+        if (source === 'metaapp') return 'metaapp://';
+        return '';
+      }
+
+      function setStatus(text, tone) {
+        saveStatus.textContent = text || '';
+        saveStatus.className = 'status-line' + (tone ? ' ' + tone : '');
+      }
+
+      function escapeHtml(value) {
+        return String(value == null ? '' : value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function shortPin(pinId) {
+        const value = String(pinId || '');
+        return value.length > 24 ? value.slice(0, 14) + '...' + value.slice(-8) : value;
+      }
+
+      function renderMetaAppPicker() {
+        const bot = bots[activeBotKey];
+        return `
+          <div class="metaapp-picker" data-metaapp-picker hidden>
+            <div class="metaapp-picker-head">
+              <strong>Select MetaApp</strong>
+              <button class="btn" type="button" data-close-picker>Close</button>
+            </div>
+            <div class="metaapp-list">
+              ${bot.metaapps.map((app) => `
+                <button class="metaapp-option" type="button" data-select-metaapp="${escapeHtml(app.pinId)}">
+                  <span class="app-icon">${escapeHtml(app.icon)}</span>
+                  <span class="metaapp-main">
+                    <span class="metaapp-name">${escapeHtml(app.appName)}</span>
+                    <span class="metaapp-pin">${escapeHtml(shortPin(app.pinId))}</span>
+                  </span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      function renderHomepageControl() {
+        sourceSelect.value = draft.source;
+        sourcePill.textContent = sourceLabel(draft.source);
+
+        if (draft.source === 'default') {
+          control.innerHTML = `
+            <div class="status-line success">Default homepage is selected.</div>
+          `;
+          return;
+        }
+
+        const isMetaApp = draft.source === 'metaapp';
+        const action = isMetaApp
+          ? '<button class="btn" type="button" data-open-picker>Select</button>'
+          : '<button class="btn" type="button" data-upload-homepage>Upload</button>';
+        control.innerHTML = `
+          <div class="protocol-row">
+            <div class="protocol-field">
+              <span class="protocol-label">${escapeHtml(protocolFor(draft.source))}</span>
+              <input class="protocol-input" data-homepage-ref value="${escapeHtml(draft.ref || '')}" spellcheck="false" />
+            </div>
+            ${action}
+          </div>
+          ${isMetaApp ? renderMetaAppPicker() : ''}
+        `;
+      }
+
+      function syncRefFromInput() {
+        const input = document.querySelector('[data-homepage-ref]');
+        if (!input) return;
+        draft.ref = input.value.trim();
+      }
+
+      function bindHomepageControl() {
+        control.addEventListener('input', (event) => {
+          if (event.target.matches('[data-homepage-ref]')) {
+            syncRefFromInput();
+            setStatus('', '');
+          }
+        });
+
+        control.addEventListener('click', (event) => {
+          const upload = event.target.closest('[data-upload-homepage]');
+          if (upload) {
+            event.preventDefault();
+            draft.source = 'metafile';
+            draft.ref = pins.metafileZip;
+            renderHomepageControl();
+            setStatus('Upload stored. Ready to save.', 'success');
+            return;
+          }
+
+          const openPicker = event.target.closest('[data-open-picker]');
+          if (openPicker) {
+            event.preventDefault();
+            const picker = document.querySelector('[data-metaapp-picker]');
+            if (picker) picker.hidden = !picker.hidden;
+            return;
+          }
+
+          const closePicker = event.target.closest('[data-close-picker]');
+          if (closePicker) {
+            event.preventDefault();
+            const picker = document.querySelector('[data-metaapp-picker]');
+            if (picker) picker.hidden = true;
+            return;
+          }
+
+          const selected = event.target.closest('[data-select-metaapp]');
+          if (selected) {
+            event.preventDefault();
+            draft.source = 'metaapp';
+            draft.ref = selected.getAttribute('data-select-metaapp') || '';
+            renderHomepageControl();
+            setStatus('MetaApp selected. Ready to save.', 'success');
+          }
+        });
+      }
+
+      function switchBot(key) {
+        activeBotKey = key;
+        const bot = bots[key];
+        draft = { ...bot.homepage };
+        document.querySelector('[data-avatar]').textContent = bot.initials;
+        document.querySelector('[data-bot-name]').textContent = bot.name;
+        document.querySelector('[data-global-metaid]').textContent = bot.globalMetaId;
+        document.querySelector('#bot-name').value = bot.name;
+        document.querySelectorAll('[data-bot]').forEach((button) => {
+          button.classList.toggle('active', button.getAttribute('data-bot') === key);
+        });
+        renderHomepageControl();
+        setStatus('', '');
+      }
+
+      sourceSelect.addEventListener('change', () => {
+        const selected = sourceSelect.value;
+        const botHomepage = bots[activeBotKey].homepage;
+        draft.source = selected;
+        draft.ref = botHomepage.source === selected ? botHomepage.ref : '';
+        renderHomepageControl();
+        setStatus(selected === 'default' ? 'Default homepage ready to save.' : '', selected === 'default' ? 'success' : '');
+      });
+
+      document.querySelectorAll('[data-bot]').forEach((button) => {
+        button.addEventListener('click', () => switchBot(button.getAttribute('data-bot')));
+      });
+
+      bindHomepageControl();
+      renderHomepageControl();
+    </script>
+  </body>
+</html>
