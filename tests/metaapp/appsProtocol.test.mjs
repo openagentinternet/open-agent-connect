@@ -254,6 +254,8 @@ test('buildMetaAppRevokeWrite creates a PIN-level revoke request', () => {
   assert.deepEqual(buildMetaAppRevokeWrite(PIN), {
     operation: 'revoke',
     path: `@${PIN}`,
+    contentType: 'application/json',
+    payload: '',
   });
 });
 

@@ -239,6 +239,8 @@ export function buildMetaAppModifyWrite(targetPinId: string, payload: MetaAppMan
 export function buildMetaAppRevokeWrite(targetPinId: string): {
   operation: 'revoke';
   path: string;
+  contentType: 'application/json';
+  payload: string;
 } {
   if (!METAAPP_PIN_ID_PATTERN.test(targetPinId)) {
     throw new Error('targetPinId must be a MetaID pin id.');
@@ -246,6 +248,8 @@ export function buildMetaAppRevokeWrite(targetPinId: string): {
   return {
     operation: 'revoke',
     path: `@${targetPinId}`,
+    contentType: 'application/json',
+    payload: '',
   };
 }
 

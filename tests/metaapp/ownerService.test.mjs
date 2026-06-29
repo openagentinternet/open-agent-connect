@@ -90,6 +90,26 @@ test('deleteMetaAppPin writes revoke at target pin when confirmed', async () => 
   assert.equal(result.ok, true);
   assert.equal(writes[0].operation, 'revoke');
   assert.equal(writes[0].path, `@${PIN}`);
+  assert.equal(writes[0].contentType, 'application/json');
+  assert.equal(writes[0].payload, '');
+});
+
+test('deleteMetaAppPin sends a chain-write-safe revoke payload', async () => {
+  const writes = [];
+  const { ctx } = actor({
+    writePin: async (input) => {
+      if (typeof input.payload !== 'string' && !Buffer.isBuffer(input.payload)) {
+        throw new Error('Chain write payload must be a string or Buffer.');
+      }
+      writes.push(input);
+      return { pinId: PIN, txids: ['tx'], network: input.network ?? 'mvc' };
+    },
+  });
+  const result = await deleteMetaAppPin(ctx, { targetPinId: PIN, confirm: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(writes[0].operation, 'revoke');
+  assert.equal(writes[0].payload, '');
 });
 
 test('owner write helpers reject missing confirmation before chain writes', async () => {
