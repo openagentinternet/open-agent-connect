@@ -1,10 +1,20 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleFileRoutes = void 0;
+const promises_1 = require("node:fs/promises");
+const node_os_1 = __importDefault(require("node:os"));
+const node_path_1 = __importDefault(require("node:path"));
 const commandResult_1 = require("../../core/contracts/commandResult");
+const uploadLargeFile_1 = require("../../core/files/uploadLargeFile");
 const AVATAR_ROUTE_PATH = '/api/file/avatar';
 const FILE_UPLOAD_ROUTE_PATH = '/api/file/upload';
 const FILE_UPLOAD_LARGE_ROUTE_PATH = '/api/file/upload-large';
+const FILE_UPLOAD_TEMP_PREFIX = 'oac-file-upload-';
+const FILE_UPLOAD_DEFAULT_FILE_NAME = 'upload.bin';
+const FILE_UPLOAD_MAX_LABEL = '50 MiB';
 const DEFAULT_P2P_CONTENT_BASE = 'http://localhost:7281';
 const AVATAR_FETCH_TIMEOUT_MS = 4500;
 // Avatars rarely change. Cache the resolved bytes per pin id in-process and
@@ -21,11 +31,32 @@ const PIN_CONTENT_PATTERNS = [
     /^\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/([^/?#]+)/iu,
     /^\/metafile-indexer\/api\/v1\/users\/avatar\/accelerate\/([^/?#]+)/iu,
 ];
+const EXTENSION_BEARING_METAFILE_PIN_PATTERN = /^([0-9a-f]{64}i0)(?:\.[a-z0-9][a-z0-9+-]{0,31})?$/iu;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function normalizeHeaderValue(value) {
+    return normalizeText(Array.isArray(value) ? value[0] : value);
+}
+function normalizeUploadFileName(value) {
+    const decoded = normalizeText(value);
+    const baseName = node_path_1.default.basename(decoded).replace(/\0/gu, '').trim();
+    return baseName || FILE_UPLOAD_DEFAULT_FILE_NAME;
+}
+function normalizeUploadContentType(value) {
+    const contentType = normalizeHeaderValue(value).split(';')[0]?.trim();
+    return contentType || 'application/octet-stream';
+}
+function isRawFileUploadMode(url) {
+    return normalizeText(url.searchParams.get('mode')).toLowerCase() === 'raw';
+}
 function stripQueryAndFragment(value) {
     return value.split(/[?#]/u)[0] ?? value;
+}
+function normalizeMetafilePinReference(value) {
+    const stripped = stripQueryAndFragment(value).trim();
+    const match = stripped.match(EXTENSION_BEARING_METAFILE_PIN_PATTERN);
+    return match?.[1] ?? stripped;
 }
 function isLikelyPinId(value) {
     return /^[0-9a-f]{64}(?:i\d+)?$/iu.test(value) || /^[A-Za-z0-9._:-]{8,256}$/u.test(value);
@@ -36,7 +67,7 @@ function extractAvatarPinId(reference) {
         return '';
     }
     if (/^metafile:\/\//iu.test(normalized)) {
-        const pinId = stripQueryAndFragment(normalized.slice('metafile://'.length).trim());
+        const pinId = normalizeMetafilePinReference(normalized.slice('metafile://'.length).trim());
         return isLikelyPinId(pinId) ? pinId : '';
     }
     const path = (() => {
@@ -53,11 +84,11 @@ function extractAvatarPinId(reference) {
     for (const pattern of PIN_CONTENT_PATTERNS) {
         const match = path.match(pattern);
         if (match?.[1]) {
-            const pinId = decodeURIComponent(stripQueryAndFragment(match[1]));
+            const pinId = normalizeMetafilePinReference(decodeURIComponent(match[1]));
             return isLikelyPinId(pinId) ? pinId : '';
         }
     }
-    const bare = stripQueryAndFragment(normalized);
+    const bare = normalizeMetafilePinReference(normalized);
     if (!bare.includes('/') && !bare.includes('\\') && isLikelyPinId(bare)) {
         return bare;
     }
@@ -143,6 +174,52 @@ async function serveAvatarRoute(context) {
     context.sendJson(404, (0, commandResult_1.commandFailed)('avatar_not_found', `Avatar content was not found for ${pinId}.`));
     return true;
 }
+async function serveRawFileUploadRoute(context, isLargeUpload) {
+    const { req, url, handlers } = context;
+    const handler = isLargeUpload ? handlers.file?.uploadLarge : handlers.file?.upload;
+    if (!handler) {
+        context.sendJson(400, (0, commandResult_1.commandFailed)('not_implemented', isLargeUpload
+            ? 'Large file upload handler is not configured.'
+            : 'File upload handler is not configured.'));
+        return;
+    }
+    const from = normalizeText(url.searchParams.get('from'));
+    const fileName = normalizeUploadFileName(url.searchParams.get('fileName'));
+    const contentType = normalizeUploadContentType(req.headers['content-type']);
+    let tempDir = '';
+    try {
+        tempDir = await (0, promises_1.mkdtemp)(node_path_1.default.join(node_os_1.default.tmpdir(), FILE_UPLOAD_TEMP_PREFIX));
+        const filePath = node_path_1.default.join(tempDir, fileName);
+        const { bytes } = await context.streamRawBodyToFile(filePath, uploadLargeFile_1.LARGE_UPLOAD_MAX_BYTES);
+        if (bytes === 0) {
+            context.sendJson(400, (0, commandResult_1.commandFailed)('file_upload_empty', 'File upload requires non-empty file data.'));
+            return;
+        }
+        const input = {
+            filePath,
+            fileName,
+            contentType,
+        };
+        if (from) {
+            input.from = from;
+        }
+        const result = await handler(input);
+        context.sendJson(200, result);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/too large/iu.test(message)) {
+            context.sendJson(413, (0, commandResult_1.commandFailed)('file_upload_too_large', `File upload must be ${FILE_UPLOAD_MAX_LABEL} or smaller.`));
+            return;
+        }
+        throw error;
+    }
+    finally {
+        if (tempDir) {
+            await (0, promises_1.rm)(tempDir, { recursive: true, force: true });
+        }
+    }
+}
 const handleFileRoutes = async (context) => {
     const { req, url, handlers } = context;
     if (await serveAvatarRoute(context)) {
@@ -155,8 +232,12 @@ const handleFileRoutes = async (context) => {
         context.sendMethodNotAllowed(['POST']);
         return true;
     }
-    const input = await context.readJsonBody();
     const isLargeUpload = url.pathname === FILE_UPLOAD_LARGE_ROUTE_PATH;
+    if (isRawFileUploadMode(url)) {
+        await serveRawFileUploadRoute(context, isLargeUpload);
+        return true;
+    }
+    const input = await context.readJsonBody();
     const handler = isLargeUpload ? handlers.file?.uploadLarge : handlers.file?.upload;
     const result = handler
         ? await handler(input)

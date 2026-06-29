@@ -284,7 +284,7 @@ test('browser renders the no-Bot state and owner panel launch chrome in Simplifi
   assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /Worker Bot/);
   assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /访问主页/);
   assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /发送信息/);
-  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /关注该 Bot/);
+  assert.doesNotMatch(owner.nodes['[data-browser-owner-panel]'].innerHTML, /关注该 Bot/);
   assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /复制 GlobalMetaId/);
 });
 

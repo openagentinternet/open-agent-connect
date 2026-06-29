@@ -1,6 +1,6 @@
 {
   "name": "@openagentinternet/agent-browser-ui",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -32,9 +32,9 @@
     }
   },
   "dependencies": {
-    "@openagentinternet/agent-browser-core": "0.3.3",
-    "@openagentinternet/agent-browser-host-contract": "0.3.3",
-    "@openagentinternet/agent-browser-renderers": "0.3.3"
+    "@openagentinternet/agent-browser-core": "0.3.4",
+    "@openagentinternet/agent-browser-host-contract": "0.3.4",
+    "@openagentinternet/agent-browser-renderers": "0.3.4"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"

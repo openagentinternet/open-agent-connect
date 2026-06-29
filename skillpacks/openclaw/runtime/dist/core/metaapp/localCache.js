@@ -28,7 +28,10 @@ function normalizeNumber(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 function normalizeOperation(value) {
-    return value === 'create' || value === 'modify' ? value : null;
+    const operation = normalizeText(value).toLowerCase();
+    return operation === 'create' || operation === 'modify' || operation === 'revoke'
+        ? operation
+        : null;
 }
 function normalizeSource(value) {
     return value === 'local' || value === 'indexer' ? value : null;
@@ -157,6 +160,12 @@ function createEmptyState() {
         updatedAt: null,
     };
 }
+function recordGroupKey(record) {
+    return normalizeText(record.firstPinId) || normalizeText(record.pinId);
+}
+function isHiddenOperation(operation) {
+    return operation === 'revoke';
+}
 function normalizeState(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return createEmptyState();
@@ -241,14 +250,24 @@ function createMetaAppLocalCacheStore(pathsOrHomeDir) {
                 this.readIndexer(),
                 this.readLocal(),
             ]);
+            const hiddenGroupKeys = new Set();
+            for (const item of [...indexerState.records, ...localState.records]) {
+                const groupKey = recordGroupKey(item);
+                if (groupKey && isHiddenOperation(item.operation)) {
+                    hiddenGroupKeys.add(groupKey);
+                }
+            }
             const seenPinIds = new Set();
             const merged = [];
             for (const item of indexerState.records) {
+                if (isHiddenOperation(item.operation) || hiddenGroupKeys.has(recordGroupKey(item))) {
+                    continue;
+                }
                 seenPinIds.add(item.pinId);
                 merged.push(item);
             }
             for (const item of localState.records) {
-                if (seenPinIds.has(item.pinId)) {
+                if (isHiddenOperation(item.operation) || hiddenGroupKeys.has(recordGroupKey(item)) || seenPinIds.has(item.pinId)) {
                     continue;
                 }
                 seenPinIds.add(item.pinId);

@@ -17,7 +17,7 @@ function normalizeOptionalText(value) {
     return text || undefined;
 }
 function normalizeOperation(value) {
-    return value === 'modify' ? 'modify' : 'create';
+    return value === 'modify' || value === 'revoke' ? value : 'create';
 }
 function normalizeTags(value) {
     const source = Array.isArray(value)

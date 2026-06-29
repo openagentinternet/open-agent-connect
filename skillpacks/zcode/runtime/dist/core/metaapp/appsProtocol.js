@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.METAAPP_CODE_TYPE_OPTIONS = exports.METAAPP_CONTENT_TYPE_OPTIONS = exports.METAAPP_RUNTIME_OPTIONS = exports.METAAPP_PIN_ID_PATTERN = void 0;
+exports.METAAPP_CODE_TYPE_OPTIONS = exports.METAAPP_CONTENT_TYPE_OPTIONS = exports.METAAPP_RUNTIME_OPTIONS = exports.METAAPP_METAFILE_REFERENCE_PATTERN = exports.METAAPP_PIN_ID_PATTERN = void 0;
 exports.normalizeMetafileReference = normalizeMetafileReference;
 exports.normalizeMetafileReferenceList = normalizeMetafileReferenceList;
 exports.normalizeMetaAppImageReference = normalizeMetaAppImageReference;
@@ -14,6 +14,7 @@ exports.metaAppFormFailure = metaAppFormFailure;
 exports.metaAppFormSuccess = metaAppFormSuccess;
 const commandResult_1 = require("../contracts/commandResult");
 exports.METAAPP_PIN_ID_PATTERN = /^[0-9a-f]{64}i0$/i;
+exports.METAAPP_METAFILE_REFERENCE_PATTERN = /^([0-9a-f]{64}i0)(?:\.[a-z0-9][a-z0-9+-]{0,31})?$/i;
 exports.METAAPP_RUNTIME_OPTIONS = ['browser', 'android', 'ios', 'windows', 'macOS', 'linux'];
 exports.METAAPP_CONTENT_TYPE_OPTIONS = [
     'application/zip',
@@ -70,11 +71,11 @@ function isHttpUrl(value) {
 }
 function normalizeMetafileReference(value, fieldName) {
     const raw = normalizeText(value);
-    const pinId = stripMetafilePrefix(raw).trim();
-    if (!exports.METAAPP_PIN_ID_PATTERN.test(pinId)) {
-        throw new Error(`${fieldName} must be a MetaID pin id or metafile:// pin id.`);
+    const reference = stripMetafilePrefix(raw).trim();
+    if (!exports.METAAPP_METAFILE_REFERENCE_PATTERN.test(reference)) {
+        throw new Error(`${fieldName} must be a MetaID pin id or metafile:// pin id with an optional file extension.`);
     }
-    return `metafile://${pinId}`;
+    return `metafile://${reference}`;
 }
 function normalizeMetafileReferenceList(value, fieldName) {
     const values = Array.isArray(value)
@@ -119,6 +120,12 @@ function serializeMetaAppRuntime(value) {
     }
     return [...new Set(selected)].join('/');
 }
+function serializeOptionalMetaAppRuntime(value) {
+    const rawValues = Array.isArray(value)
+        ? value.map((item) => normalizeText(item))
+        : normalizeText(value).split('/').map((item) => item.trim());
+    return rawValues.some(Boolean) ? serializeMetaAppRuntime(value) : 'browser';
+}
 function normalizeOption(value, fieldName, allowedValues, fallback) {
     const text = normalizeText(value);
     if (!text)
@@ -152,25 +159,32 @@ function normalizeMetadata(value) {
 function normalizeOptionalMetafile(value, fieldName) {
     return normalizeText(value) ? normalizeMetafileReference(value, fieldName) : undefined;
 }
+function normalizeRequiredMetafile(value, fieldName) {
+    if (!normalizeText(value)) {
+        throw new Error(`${fieldName} is required.`);
+    }
+    return normalizeMetafileReference(value, fieldName);
+}
+function normalizeOptionalMetaAppImageReference(value, fieldName) {
+    return normalizeText(value) ? normalizeMetaAppImageReference(value, fieldName) : undefined;
+}
 function buildMetaAppProtocolPayload(input) {
-    const title = normalizeText(input.title);
     const appName = normalizeText(input.appName);
-    if (!title)
-        throw new Error('title is required.');
     if (!appName)
         throw new Error('appName is required.');
+    const title = normalizeText(input.title) || appName;
     return {
         title,
         appName,
         prompt: normalizeText(input.prompt) || undefined,
-        icon: normalizeMetaAppImageReference(input.icon, 'icon'),
-        coverImg: normalizeMetaAppImageReference(input.coverImg, 'coverImg'),
+        icon: normalizeOptionalMetaAppImageReference(input.icon, 'icon'),
+        coverImg: normalizeOptionalMetaAppImageReference(input.coverImg, 'coverImg'),
         introImgs: normalizeMetaAppImageReferenceList(input.introImgs, 'introImgs'),
         intro: normalizeText(input.intro) || undefined,
-        runtime: serializeMetaAppRuntime(input.runtime),
+        runtime: serializeOptionalMetaAppRuntime(input.runtime),
         version: normalizeText(input.version) || undefined,
         contentType: normalizeOption(input.contentType, 'contentType', exports.METAAPP_CONTENT_TYPE_OPTIONS, 'application/zip'),
-        content: normalizeOptionalMetafile(input.content, 'content'),
+        content: normalizeRequiredMetafile(input.content, 'content'),
         indexFile: normalizeText(input.indexFile) || undefined,
         code: normalizeOptionalMetafile(input.code, 'code'),
         contentHash: normalizeText(input.contentHash) || undefined,
@@ -206,6 +220,8 @@ function buildMetaAppRevokeWrite(targetPinId) {
     return {
         operation: 'revoke',
         path: `@${targetPinId}`,
+        contentType: 'application/json',
+        payload: '',
     };
 }
 function metaAppFormFailure(error) {

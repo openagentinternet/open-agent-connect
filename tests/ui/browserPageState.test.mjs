@@ -352,7 +352,7 @@ test('Browser owner panel renders current Bot owner actions from ABC contract', 
   assert.match(ownerPanel.textContent, /Alice/);
   assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="visit-home"/);
   assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="send-message" disabled/);
-  assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="follow" disabled/);
+  assert.doesNotMatch(ownerPanel.innerHTML, /data-browser-owner-panel-action="follow"/);
   assert.match(ownerPanel.innerHTML, /data-browser-owner-copy-meta="idq1alice"/);
 });
 
@@ -671,26 +671,19 @@ test('Browser menu is data-driven and opens cache management settings', async ()
   assert.equal(fetchCalls.at(-1), '/api/browser/cache?actorId=worker');
 });
 
-test('Browser template settings select the default Bot homepage template', async () => {
+test('Browser template settings expose the default Bot homepage template', async () => {
   const { context, elements, fetchCalls } = createBrowserContext();
 
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
 
   assert.ok(Array.isArray(context.browserBotHomepageTemplates));
-  assert.equal(context.browserBotHomepageTemplates.map((template) => template.id).join(','), 'document,compact-list');
+  assert.equal(context.browserBotHomepageTemplates.map((template) => template.id).join(','), 'document');
 
   await context.handleBrowserMenuAction('templates');
 
   assert.equal(elements['[data-browser-modal-root]'].hidden, false);
   assert.match(elements['[data-browser-modal-root]'].innerHTML, /Document/);
-  assert.match(elements['[data-browser-modal-root]'].innerHTML, /Compact List/);
-
-  await context.selectBotHomepageTemplate('compact-list');
-
-  assert.equal(context.state.settingsData.browser.botHomepageTemplateId, 'compact-list');
-  assert.equal(context.state.current.renderer.templateId, 'compact-list');
-  assert.match(elements['[data-browser-viewport]'].innerHTML, /browser-bot-template-compact-list/);
-  assert.equal(fetchCalls.at(-1), '/api/browser/settings?actorId=worker');
+  assert.doesNotMatch(elements['[data-browser-modal-root]'].innerHTML, /Compact List/);
 });
 
 test('Browser history controls navigate without replacing Browser chrome', async () => {
