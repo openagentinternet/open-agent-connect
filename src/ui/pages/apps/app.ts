@@ -4,7 +4,7 @@ import type { LocalUiPageDefinition } from '../types';
 import {
   METAAPP_CODE_TYPE_OPTIONS,
   METAAPP_CONTENT_TYPE_OPTIONS,
-  METAAPP_PIN_ID_PATTERN,
+  METAAPP_METAFILE_REFERENCE_PATTERN,
 } from '../../../core/metaapp/appsProtocol';
 
 interface AppsPageRuntimeText {
@@ -264,7 +264,7 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     script: buildAppsPageRuntimeSource(runtimeText, {
       codeTypeOptions: [...METAAPP_CODE_TYPE_OPTIONS],
       contentTypeOptions: [...METAAPP_CONTENT_TYPE_OPTIONS],
-      pinPatternSource: METAAPP_PIN_ID_PATTERN.source,
+      metafileReferencePatternSource: METAAPP_METAFILE_REFERENCE_PATTERN.source,
     }),
   };
 }
@@ -274,7 +274,7 @@ function buildAppsPageRuntimeSource(
   options: {
     codeTypeOptions: string[];
     contentTypeOptions: string[];
-    pinPatternSource: string;
+    metafileReferencePatternSource: string;
   },
 ): string {
   return `(() => {
@@ -283,7 +283,7 @@ function buildAppsPageRuntimeSource(
   const UI_TEXT = ${JSON.stringify(text)};
   const CONTENT_TYPE_OPTIONS = ${JSON.stringify(options.contentTypeOptions)};
   const CODE_TYPE_OPTIONS = ${JSON.stringify(options.codeTypeOptions)};
-  const METAAPP_PIN_ID_PATTERN = new RegExp(${JSON.stringify(options.pinPatternSource)}, 'i');
+  const METAAPP_METAFILE_REFERENCE_PATTERN = new RegExp(${JSON.stringify(options.metafileReferencePatternSource)}, 'i');
   const COPY_ICON_HTML = '<span aria-hidden="true">&#x29C9;</span>';
   const state = {
     profiles: [],
@@ -456,16 +456,16 @@ function buildAppsPageRuntimeSource(
     return error;
   };
 
-  const assertMetafilePinId = (pinId, fieldName) => {
-    if (!METAAPP_PIN_ID_PATTERN.test(pinId)) {
+  const assertMetafileReference = (reference, fieldName) => {
+    if (!METAAPP_METAFILE_REFERENCE_PATTERN.test(reference)) {
       throw fieldValidationError(fieldName, uiText('apps.form.invalidPin', UI_TEXT.invalidPin));
     }
   };
 
   const normalizeMetafileInput = (value, fieldName) => {
-    const pinId = stripMetafileUri(value);
-    if (pinId) assertMetafilePinId(pinId, fieldName);
-    return pinId ? 'metafile://' + pinId : '';
+    const reference = stripMetafileUri(value);
+    if (reference) assertMetafileReference(reference, fieldName);
+    return reference ? 'metafile://' + reference : '';
   };
 
   const normalizeMetafileListInput = (value, fieldName) => {

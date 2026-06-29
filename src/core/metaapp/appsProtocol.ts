@@ -2,6 +2,7 @@ import { commandFailed, commandSuccess, type MetabotCommandResult } from '../con
 import type { MetaAppManifestInput } from './types';
 
 export const METAAPP_PIN_ID_PATTERN = /^[0-9a-f]{64}i0$/i;
+export const METAAPP_METAFILE_REFERENCE_PATTERN = /^([0-9a-f]{64}i0)(?:\.[a-z0-9][a-z0-9+-]{0,31})?$/i;
 
 export const METAAPP_RUNTIME_OPTIONS = ['browser', 'android', 'ios', 'windows', 'macOS', 'linux'] as const;
 export type MetaAppRuntimeOption = typeof METAAPP_RUNTIME_OPTIONS[number];
@@ -65,11 +66,11 @@ function isHttpUrl(value: string): boolean {
 
 export function normalizeMetafileReference(value: unknown, fieldName: string): string {
   const raw = normalizeText(value);
-  const pinId = stripMetafilePrefix(raw).trim();
-  if (!METAAPP_PIN_ID_PATTERN.test(pinId)) {
-    throw new Error(`${fieldName} must be a MetaID pin id or metafile:// pin id.`);
+  const reference = stripMetafilePrefix(raw).trim();
+  if (!METAAPP_METAFILE_REFERENCE_PATTERN.test(reference)) {
+    throw new Error(`${fieldName} must be a MetaID pin id or metafile:// pin id with an optional file extension.`);
   }
-  return `metafile://${pinId}`;
+  return `metafile://${reference}`;
 }
 
 export function normalizeMetafileReferenceList(value: unknown, fieldName: string): string[] {

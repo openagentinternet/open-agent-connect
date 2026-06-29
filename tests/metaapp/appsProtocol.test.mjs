@@ -20,10 +20,13 @@ const {
 
 const PIN = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
 const SECOND_PIN = `${'a'.repeat(64)}i0`;
+const THIRD_PIN = `${'b'.repeat(64)}i0`;
 
-test('normalizeMetafileReference accepts raw pin id and metafile uri', () => {
+test('normalizeMetafileReference accepts raw pin id, metafile uri, and extension-bearing refs', () => {
   assert.equal(normalizeMetafileReference(PIN, 'icon'), `metafile://${PIN}`);
   assert.equal(normalizeMetafileReference(` metafile://${PIN} `, 'icon'), `metafile://${PIN}`);
+  assert.equal(normalizeMetafileReference(`${PIN}.png`, 'icon'), `metafile://${PIN}.png`);
+  assert.equal(normalizeMetafileReference(` metafile://${SECOND_PIN}.zip `, 'content'), `metafile://${SECOND_PIN}.zip`);
 });
 
 test('normalizeMetafileReference rejects invalid pin ids', () => {
@@ -35,8 +38,8 @@ test('normalizeMetafileReference rejects invalid pin ids', () => {
 
 test('normalizeMetafileReferenceList parses comma and newline separated pin ids', () => {
   assert.deepEqual(
-    normalizeMetafileReferenceList(`${PIN},\nmetafile://${SECOND_PIN}`, 'introImgs'),
-    [`metafile://${PIN}`, `metafile://${SECOND_PIN}`],
+    normalizeMetafileReferenceList(`${PIN}.png,\nmetafile://${SECOND_PIN}.webp`, 'introImgs'),
+    [`metafile://${PIN}.png`, `metafile://${SECOND_PIN}.webp`],
   );
 });
 
@@ -45,7 +48,7 @@ test('normalizeMetaAppImageReference accepts http image URLs and metafile refs',
     normalizeMetaAppImageReference('https://cdn.example.test/icon.png', 'icon'),
     'https://cdn.example.test/icon.png',
   );
-  assert.equal(normalizeMetaAppImageReference(PIN, 'icon'), `metafile://${PIN}`);
+  assert.equal(normalizeMetaAppImageReference(`${PIN}.png`, 'icon'), `metafile://${PIN}.png`);
 });
 
 test('normalizeMetaAppImageReferenceList preserves mixed http and metafile refs', () => {
@@ -127,6 +130,22 @@ test('buildMetaAppProtocolPayload preserves http image fields', () => {
   assert.deepEqual(payload.introImgs, ['https://cdn.example.test/one.png', `metafile://${PIN}`]);
   assert.equal(payload.content, `metafile://${PIN}`);
   assert.equal(payload.code, `metafile://${PIN}`);
+});
+
+test('buildMetaAppProtocolPayload preserves extension-bearing metafile refs', () => {
+  const payload = buildMetaAppProtocolPayload(validInput({
+    icon: `metafile://${PIN}.png`,
+    coverImg: `${SECOND_PIN}.jpg`,
+    introImgs: [`${PIN}.webp`, `metafile://${SECOND_PIN}.gif`],
+    content: `metafile://${PIN}.html`,
+    code: `${THIRD_PIN}.js`,
+  }));
+
+  assert.equal(payload.icon, `metafile://${PIN}.png`);
+  assert.equal(payload.coverImg, `metafile://${SECOND_PIN}.jpg`);
+  assert.deepEqual(payload.introImgs, [`metafile://${PIN}.webp`, `metafile://${SECOND_PIN}.gif`]);
+  assert.equal(payload.content, `metafile://${PIN}.html`);
+  assert.equal(payload.code, `metafile://${THIRD_PIN}.js`);
 });
 
 test('buildMetaAppProtocolPayload rejects unsupported runtime values', () => {

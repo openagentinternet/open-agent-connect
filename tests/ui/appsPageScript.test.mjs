@@ -1064,11 +1064,11 @@ test('publish submits normalized form payload to /api/metaapp/publish', async ()
   context.setField('prompt', 'Build an index from trusted sources.');
   context.setField('intro', 'Indexes a project knowledge base.');
   context.setField('tags', 'wiki, builder');
-  context.setField('icon', PIN);
-  context.setField('coverImg', `metafile://${PIN}`);
-  context.setField('introImgs', `${PIN}\n${secondPin}`);
-  context.setField('content', PIN);
-  context.setField('code', secondPin);
+  context.setField('icon', `metafile://${PIN}.png`);
+  context.setField('coverImg', `${secondPin}.jpg`);
+  context.setField('introImgs', `${PIN}.webp\nmetafile://${secondPin}.gif`);
+  context.setField('content', `metafile://${PIN}.html`);
+  context.setField('code', `${secondPin}.js`);
   context.setChecked('runtime', 'android', true);
   context.setField('contentType', 'text/html');
   context.setField('codeType', 'application/javascript');
@@ -1082,11 +1082,11 @@ test('publish submits normalized form payload to /api/metaapp/publish', async ()
   assert.equal(request.confirm, true);
   assert.equal(request.title, 'Agent Wiki Builder');
   assert.equal(request.appName, 'Agent Wiki Builder');
-  assert.equal(request.icon, `metafile://${PIN}`);
-  assert.equal(request.coverImg, `metafile://${PIN}`);
-  assert.deepEqual(request.introImgs, [`metafile://${PIN}`, `metafile://${secondPin}`]);
-  assert.equal(request.content, `metafile://${PIN}`);
-  assert.equal(request.code, `metafile://${secondPin}`);
+  assert.equal(request.icon, `metafile://${PIN}.png`);
+  assert.equal(request.coverImg, `metafile://${secondPin}.jpg`);
+  assert.deepEqual(request.introImgs, [`metafile://${PIN}.webp`, `metafile://${secondPin}.gif`]);
+  assert.equal(request.content, `metafile://${PIN}.html`);
+  assert.equal(request.code, `metafile://${secondPin}.js`);
   assert.deepEqual(request.runtime, ['browser', 'android']);
   assert.equal(request.contentType, 'text/html');
   assert.equal(request.codeType, 'application/javascript');
@@ -1200,7 +1200,7 @@ test('upload with a browser File posts raw bytes to large upload route and store
     uploadResponse: {
       ok: true,
       state: 'success',
-      data: { metafileUri: `metafile://${uploadedPin}` },
+      data: { metafileUri: `metafile://${uploadedPin}.zip` },
     },
   });
 
@@ -1218,7 +1218,7 @@ test('upload with a browser File posts raw bytes to large upload route and store
   assert.equal(uploadUrl.searchParams.get('mode'), 'raw');
   assert.equal(uploadUrl.searchParams.get('from'), 'alice');
   assert.equal(uploadUrl.searchParams.get('fileName'), 'bundle.zip');
-  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, `metafile://${uploadedPin}`);
+  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, `metafile://${uploadedPin}.zip`);
 
   context.setField('appName', 'Uploaded App');
   context.setField('title', 'Uploaded App');
@@ -1228,7 +1228,7 @@ test('upload with a browser File posts raw bytes to large upload route and store
 
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
-  assert.equal(request.content, `metafile://${uploadedPin}`);
+  assert.equal(request.content, `metafile://${uploadedPin}.zip`);
 });
 
 test('upload failure after raw browser file upload shows a field-level error and does not fake a URI', async () => {
@@ -1381,7 +1381,7 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
     uploadResponse: (url, body, count) => ({
       ok: true,
       state: 'success',
-      data: { metafileUri: count === 1 ? `metafile://${firstUploadedPin}` : `metafile://${secondUploadedPin}` },
+      data: { metafileUri: count === 1 ? `metafile://${firstUploadedPin}.png` : `metafile://${secondUploadedPin}.png` },
     }),
   });
 
@@ -1407,7 +1407,7 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
   );
   assert.equal(
     context.elements['[data-apps-modal-root]'].querySelector('[name="introImgs"]').value,
-    `metafile://${firstUploadedPin}\nmetafile://${secondUploadedPin}`,
+    `metafile://${firstUploadedPin}.png\nmetafile://${secondUploadedPin}.png`,
   );
 
   context.setField('appName', 'Uploaded Intro App');
@@ -1418,5 +1418,5 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
 
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
-  assert.deepEqual(request.introImgs, [`metafile://${firstUploadedPin}`, `metafile://${secondUploadedPin}`]);
+  assert.deepEqual(request.introImgs, [`metafile://${firstUploadedPin}.png`, `metafile://${secondUploadedPin}.png`]);
 });
