@@ -10828,6 +10828,58 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  function metaAppRecordGroupKey(record: unknown): string {
+    const data = readObject(record);
+    if (!data) {
+      return '';
+    }
+    return normalizeText(data.firstPinId) || normalizeText(data.pinId);
+  }
+
+  async function filterOwnerMetaAppListWithLocalRevokes(
+    homeDir: string,
+    result: MetabotCommandResult<Record<string, unknown>>,
+  ): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    if (!result.ok || result.state !== 'success') {
+      return result;
+    }
+
+    const data = readObject(result.data);
+    const records = Array.isArray(data?.records) ? data.records : null;
+    if (!data || !records) {
+      return result;
+    }
+
+    const localState = await createMetaAppLocalCacheStore(homeDir).readLocal();
+    const revokedGroupKeys = new Set(
+      localState.records
+        .filter((record) => record.operation === 'revoke')
+        .map((record) => metaAppRecordGroupKey(record))
+        .filter(Boolean),
+    );
+    if (revokedGroupKeys.size === 0) {
+      return result;
+    }
+
+    const filteredRecords = records.filter((record) => !revokedGroupKeys.has(metaAppRecordGroupKey(record)));
+    const removedCount = records.length - filteredRecords.length;
+    if (removedCount <= 0) {
+      return result;
+    }
+
+    const total = typeof data.total === 'number' && Number.isFinite(data.total)
+      ? Math.max(0, data.total - removedCount)
+      : data.total;
+    return {
+      ...result,
+      data: {
+        ...data,
+        records: filteredRecords,
+        ...(total !== undefined ? { total } : {}),
+      },
+    };
+  }
+
   const loomActionHandler = createLoomDaemonActionHandler(createLoomDaemonActionDependencies({
     resolveActor: resolveLoomActor,
     resolveTaskState: async (actor, taskPinId, options) => {
@@ -11322,7 +11374,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
 
           try {
-            return await listOwnerMetaApps(
+            const result = await listOwnerMetaApps(
               createMetaAppOwnerServiceActor(rawInput, actor),
               {
                 cursor: typeof rawInput.cursor === 'string' ? rawInput.cursor : '',
@@ -11332,6 +11384,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 },
               },
             );
+            return await filterOwnerMetaAppListWithLocalRevokes(actor.homeDir, result);
           } catch (error) {
             return commandFailed(
               'metaapp_list_failed',

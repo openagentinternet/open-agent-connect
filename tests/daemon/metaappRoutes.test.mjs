@@ -492,6 +492,58 @@ test('default metaapp owner delete hides matching local cache records immediatel
   );
 });
 
+test('default metaapp owner list hides MAN records revoked in local cache', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(),
+    metaAppManFetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 1,
+        data: {
+          list: [
+            {
+              id: TARGET_PIN_ID,
+              operation: 'create',
+              timestamp: 1_700_000_000_000,
+              content: JSON.stringify({
+                title: 'Deleted MetaAPP still visible from MAN',
+                appName: 'deleted-metaapp',
+                runtime: 'browser',
+                version: '1.0.0',
+                contentType: 'application/zip',
+                codeType: 'application/zip',
+                content: `metafile://${TARGET_PIN_ID}.zip`,
+                code: `metafile://${TARGET_PIN_ID}.zip`,
+              }),
+            },
+          ],
+          nextCursor: '',
+          total: 1,
+        },
+      }),
+    }),
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const deleted = await fetchJson(server.baseUrl, '/api/metaapp/delete', {
+    method: 'POST',
+    body: { from: 'alice', targetPinId: TARGET_PIN_ID, confirm: true },
+  });
+  const listed = await fetchJson(server.baseUrl, '/api/metaapp/list?from=alice&size=12');
+
+  assert.equal(deleted.payload.ok, true);
+  assert.deepEqual(
+    listed.payload.data.records.map((record) => record.pinId),
+    [],
+  );
+});
+
 test('default metaapp owner publish keeps pin id in relative localUiUrl without daemon record', async (t) => {
   const fixture = await createAliceFixture(t);
   const handlers = createDefaultMetabotDaemonHandlers({
