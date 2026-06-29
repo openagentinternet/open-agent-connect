@@ -1,9 +1,16 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { commandFailed } from '../../core/contracts/commandResult';
+import { LARGE_UPLOAD_MAX_BYTES } from '../../core/files/uploadLargeFile';
 import type { RouteHandler } from './types';
 
 const AVATAR_ROUTE_PATH = '/api/file/avatar';
 const FILE_UPLOAD_ROUTE_PATH = '/api/file/upload';
 const FILE_UPLOAD_LARGE_ROUTE_PATH = '/api/file/upload-large';
+const FILE_UPLOAD_TEMP_PREFIX = 'oac-file-upload-';
+const FILE_UPLOAD_DEFAULT_FILE_NAME = 'upload.bin';
+const FILE_UPLOAD_MAX_LABEL = '50 MiB';
 const DEFAULT_P2P_CONTENT_BASE = 'http://localhost:7281';
 const AVATAR_FETCH_TIMEOUT_MS = 4500;
 // Avatars rarely change. Cache the resolved bytes per pin id in-process and
@@ -28,6 +35,25 @@ const PIN_CONTENT_PATTERNS = [
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeHeaderValue(value: string | string[] | undefined): string {
+  return normalizeText(Array.isArray(value) ? value[0] : value);
+}
+
+function normalizeUploadFileName(value: string | null): string {
+  const decoded = normalizeText(value);
+  const baseName = path.basename(decoded).replace(/\0/gu, '').trim();
+  return baseName || FILE_UPLOAD_DEFAULT_FILE_NAME;
+}
+
+function normalizeUploadContentType(value: string | string[] | undefined): string {
+  const contentType = normalizeHeaderValue(value).split(';')[0]?.trim();
+  return contentType || 'application/octet-stream';
+}
+
+function isRawFileUploadMode(url: URL): boolean {
+  return normalizeText(url.searchParams.get('mode')).toLowerCase() === 'raw';
 }
 
 function stripQueryAndFragment(value: string): string {
@@ -161,6 +187,63 @@ async function serveAvatarRoute(context: Parameters<RouteHandler>[0]): Promise<b
   return true;
 }
 
+async function serveRawFileUploadRoute(context: Parameters<RouteHandler>[0], isLargeUpload: boolean): Promise<void> {
+  const { req, url, handlers } = context;
+  const handler = isLargeUpload ? handlers.file?.uploadLarge : handlers.file?.upload;
+  if (!handler) {
+    context.sendJson(
+      400,
+      commandFailed(
+        'not_implemented',
+        isLargeUpload
+          ? 'Large file upload handler is not configured.'
+          : 'File upload handler is not configured.',
+      ),
+    );
+    return;
+  }
+
+  const from = normalizeText(url.searchParams.get('from'));
+  const fileName = normalizeUploadFileName(url.searchParams.get('fileName'));
+  const contentType = normalizeUploadContentType(req.headers['content-type']);
+  let tempDir = '';
+
+  try {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), FILE_UPLOAD_TEMP_PREFIX));
+    const filePath = path.join(tempDir, fileName);
+    const { bytes } = await context.streamRawBodyToFile(filePath, LARGE_UPLOAD_MAX_BYTES);
+    if (bytes === 0) {
+      context.sendJson(400, commandFailed('file_upload_empty', 'File upload requires non-empty file data.'));
+      return;
+    }
+
+    const input: Record<string, unknown> = {
+      filePath,
+      fileName,
+      contentType,
+    };
+    if (from) {
+      input.from = from;
+    }
+    const result = await handler(input);
+    context.sendJson(200, result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/too large/iu.test(message)) {
+      context.sendJson(
+        413,
+        commandFailed('file_upload_too_large', `File upload must be ${FILE_UPLOAD_MAX_LABEL} or smaller.`),
+      );
+      return;
+    }
+    throw error;
+  } finally {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+}
+
 export const handleFileRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
 
@@ -177,8 +260,13 @@ export const handleFileRoutes: RouteHandler = async (context) => {
     return true;
   }
 
-  const input = await context.readJsonBody();
   const isLargeUpload = url.pathname === FILE_UPLOAD_LARGE_ROUTE_PATH;
+  if (isRawFileUploadMode(url)) {
+    await serveRawFileUploadRoute(context, isLargeUpload);
+    return true;
+  }
+
+  const input = await context.readJsonBody();
   const handler = isLargeUpload ? handlers.file?.uploadLarge : handlers.file?.upload;
   const result = handler
     ? await handler(input)

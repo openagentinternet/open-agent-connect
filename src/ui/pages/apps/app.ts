@@ -101,7 +101,6 @@ interface AppsPageRuntimeText {
   untitledMetaApp: string;
   upload: string;
   uploadFailed: string;
-  uploadMissingPath: string;
   uploadStored: string;
   versionLabel: string;
 }
@@ -202,7 +201,6 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     untitledMetaApp: tx('apps.untitledMetaApp'),
     upload: tx('apps.form.upload'),
     uploadFailed: tx('apps.form.uploadFailed'),
-    uploadMissingPath: tx('apps.form.uploadMissingPath'),
     uploadStored: tx('apps.form.uploadStored'),
     versionLabel: tx('apps.form.version'),
   };
@@ -941,6 +939,19 @@ function buildAppsPageRuntimeSource(
     body: JSON.stringify(payload),
   });
 
+  const postRawFile = (url, file) => {
+    const params = new URLSearchParams();
+    params.set('mode', 'raw');
+    if (state.selectedSlug) params.set('from', state.selectedSlug);
+    const fileName = normalizeText(file && file.name);
+    if (fileName) params.set('fileName', fileName);
+    return fetchJson(url + '?' + params.toString(), {
+      method: 'POST',
+      headers: { 'content-type': normalizeText(file && file.type) || 'application/octet-stream' },
+      body: file,
+    });
+  };
+
   const reloadFirstAppsPage = async () => {
     state.cursorStack = [''];
     state.cursor = '';
@@ -1014,20 +1025,12 @@ function buildAppsPageRuntimeSource(
     setModalFieldStatus(fieldName, '', '');
     const files = Array.from(target.files || []);
     if (!files.length) return;
-    for (const file of files) {
-      if (!normalizeText(file && file.path)) {
-        setModalFieldStatus(fieldName, uiText('apps.form.uploadMissingPath', UI_TEXT.uploadMissingPath), 'error');
-        return;
-      }
-    }
     try {
       for (const file of files) {
-        const filePath = normalizeText(file.path);
-        const result = await postJson(Number(file.size || 0) > UPLOAD_LARGE_THRESHOLD_BYTES ? '/api/file/upload-large' : '/api/file/upload', {
-          from: state.selectedSlug,
-          filePath,
-          contentType: normalizeText(file.type) || 'application/octet-stream',
-        });
+        const result = await postRawFile(
+          Number(file.size || 0) > UPLOAD_LARGE_THRESHOLD_BYTES ? '/api/file/upload-large' : '/api/file/upload',
+          file,
+        );
         const uri = normalizeText(result && result.metafileUri) || (normalizeText(result && result.pinId) ? 'metafile://' + normalizeText(result && result.pinId) : '');
         if (!uri) {
           throw new Error(uiText('apps.form.noUploadResult', UI_TEXT.noUploadResult));

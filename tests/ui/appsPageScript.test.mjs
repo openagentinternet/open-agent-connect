@@ -385,10 +385,14 @@ function createAppsPageContext(options = {}) {
     URLSearchParams,
     document,
     fetch: (url, fetchOptions = {}) => {
-      fetchUrls.push(String(url));
+      const urlText = String(url);
+      fetchUrls.push(urlText);
       if ((fetchOptions.method || '').toUpperCase() === 'POST') {
-        const bodyPayload = fetchOptions.body ? JSON.parse(fetchOptions.body) : null;
-        fetchBodies.push({ url: String(url), body: bodyPayload });
+        const isFileUpload = urlText.startsWith('/api/file/upload') || urlText.startsWith('/api/file/upload-large');
+        const bodyPayload = isFileUpload && typeof fetchOptions.body !== 'string'
+          ? fetchOptions.body ?? null
+          : fetchOptions.body ? JSON.parse(fetchOptions.body) : null;
+        fetchBodies.push({ url: urlText, body: bodyPayload, headers: fetchOptions.headers ?? {} });
         if (String(url) === '/api/metaapp/publish' || String(url) === '/api/metaapp/update' || String(url) === '/api/metaapp/delete') {
           if (!bodyPayload || bodyPayload.confirm !== true) {
             return Promise.resolve(response({
@@ -403,9 +407,9 @@ function createAppsPageContext(options = {}) {
             data: { pinId: `${'b'.repeat(64)}i0` },
           }));
         }
-        if (String(url) === '/api/file/upload' || String(url) === '/api/file/upload-large') {
+        if (isFileUpload) {
           const uploadPayload = typeof options.uploadResponse === 'function'
-            ? options.uploadResponse(String(url), bodyPayload, fetchBodies.filter((entry) => entry.url === '/api/file/upload' || entry.url === '/api/file/upload-large').length)
+            ? options.uploadResponse(urlText, bodyPayload, fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload') || entry.url.startsWith('/api/file/upload-large')).length)
             : options.uploadResponse;
           return Promise.resolve(response(uploadPayload ?? {
             ok: true,
@@ -1185,8 +1189,13 @@ test('manual multi asset field normalizes comma and newline PINs into metafile a
   assert.deepEqual(request.introImgs, [`metafile://${PIN}`, `metafile://${secondPin}`, `metafile://${thirdPin}`]);
 });
 
-test('upload with a file path calls large upload route and stores returned metafile URI', async () => {
+test('upload with a browser File posts raw bytes to large upload route and stores returned metafile URI', async () => {
   const uploadedPin = `${'e'.repeat(64)}i0`;
+  const selectedFile = {
+    name: 'bundle.zip',
+    size: 5 * 1024 * 1024,
+    type: 'application/zip',
+  };
   const context = createAppsPageContext({
     uploadResponse: {
       ok: true,
@@ -1198,20 +1207,17 @@ test('upload with a file path calls large upload route and stores returned metaf
   context.run();
   await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
-  await context.uploadAssetFile('content', {
-    name: 'bundle.zip',
-    path: '/tmp/bundle.zip',
-    size: 5 * 1024 * 1024,
-    type: 'application/zip',
-  });
+  await context.uploadAssetFile('content', selectedFile);
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/file/upload-large'), 'large upload request');
-  const upload = context.fetchBodies.find((entry) => entry.url === '/api/file/upload-large').body;
-  assert.deepEqual(upload, {
-    from: 'alice',
-    filePath: '/tmp/bundle.zip',
-    contentType: 'application/zip',
-  });
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url.startsWith('/api/file/upload-large?')), 'large upload request');
+  const upload = context.fetchBodies.find((entry) => entry.url.startsWith('/api/file/upload-large?'));
+  assert.equal(upload.body, selectedFile);
+  assert.equal(upload.headers['content-type'], 'application/zip');
+  const uploadUrl = new URL(upload.url, 'http://localhost');
+  assert.equal(uploadUrl.pathname, '/api/file/upload-large');
+  assert.equal(uploadUrl.searchParams.get('mode'), 'raw');
+  assert.equal(uploadUrl.searchParams.get('from'), 'alice');
+  assert.equal(uploadUrl.searchParams.get('fileName'), 'bundle.zip');
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, `metafile://${uploadedPin}`);
 
   context.setField('appName', 'Uploaded App');
@@ -1225,8 +1231,14 @@ test('upload with a file path calls large upload route and stores returned metaf
   assert.equal(request.content, `metafile://${uploadedPin}`);
 });
 
-test('upload without a file path shows a field-level error and does not fake a URI', async () => {
-  const context = createAppsPageContext();
+test('upload failure after raw browser file upload shows a field-level error and does not fake a URI', async () => {
+  const context = createAppsPageContext({
+    uploadResponse: {
+      ok: false,
+      state: 'failed',
+      message: 'upload unavailable',
+    },
+  });
 
   context.run();
   await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
@@ -1237,12 +1249,11 @@ test('upload without a file path shows a field-level error and does not fake a U
     type: 'application/zip',
   });
 
-  const uploadRequests = context.fetchBodies.filter((entry) => entry.url === '/api/file/upload' || entry.url === '/api/file/upload-large');
-  assert.deepEqual(uploadRequests, []);
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url.startsWith('/api/file/upload?')), 'upload request');
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, '');
   const error = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-field-error="content"]');
   assert.ok(error);
-  assert.match(error.textContent, /path/i);
+  assert.match(error.textContent, /upload unavailable/i);
 });
 
 test('invalid manual asset PIN blocks publish and marks the field error', async () => {
@@ -1378,17 +1389,21 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
   await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
   await context.uploadAssetFile('introImgs', [
-    { name: 'one.png', path: '/tmp/one.png', size: 512, type: 'image/png' },
-    { name: 'two.png', path: '/tmp/two.png', size: 1024, type: 'image/png' },
+    { name: 'one.png', size: 512, type: 'image/png' },
+    { name: 'two.png', size: 1024, type: 'image/png' },
   ]);
 
   await context.waitFor(
-    () => context.fetchBodies.filter((entry) => entry.url === '/api/file/upload').length === 2,
+    () => context.fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload?')).length === 2,
     'two upload requests',
   );
   assert.deepEqual(
-    context.fetchBodies.filter((entry) => entry.url === '/api/file/upload').map((entry) => entry.body.filePath),
-    ['/tmp/one.png', '/tmp/two.png'],
+    context.fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload?')).map((entry) => entry.body.name),
+    ['one.png', 'two.png'],
+  );
+  assert.deepEqual(
+    context.fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload?')).map((entry) => new URL(entry.url, 'http://localhost').searchParams.get('fileName')),
+    ['one.png', 'two.png'],
   );
   assert.equal(
     context.elements['[data-apps-modal-root]'].querySelector('[name="introImgs"]').value,
