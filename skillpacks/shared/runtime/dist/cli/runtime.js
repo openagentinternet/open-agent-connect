@@ -635,7 +635,9 @@ function resolveLocalUiPath(page) {
     }
     return `/ui/${page}`;
 }
-const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile']);
+const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile', 'pin']);
+const BROWSER_PIN_ID_PATTERN = /^[0-9a-f]{64}i0$/iu;
+const BROWSER_DOMAIN_ALIAS_PATTERN = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
 function resolveLocalBrowserPath(uri) {
     const trimmedUri = uri.trim();
     const match = trimmedUri === uri
@@ -645,6 +647,12 @@ function resolveLocalBrowserPath(uri) {
     const resourceId = match?.[2];
     if (scheme && resourceId && BROWSER_DEEP_LINK_SCHEMES.has(scheme)) {
         return `/browser/${scheme}/${encodeURIComponent(resourceId)}`;
+    }
+    if (!match && trimmedUri === uri && BROWSER_PIN_ID_PATTERN.test(uri)) {
+        return `/browser/pin/${encodeURIComponent(uri)}`;
+    }
+    if (!match && trimmedUri === uri && BROWSER_DOMAIN_ALIAS_PATTERN.test(uri)) {
+        return `/browser/metaid/${encodeURIComponent(uri)}`;
     }
     const query = new URLSearchParams();
     query.set('uri', uri);

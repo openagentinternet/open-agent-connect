@@ -48,15 +48,17 @@ const BASE_SKILL_REGISTRY = {
     'metabot-browser-open': {
         skillName: 'metabot-browser-open',
         title: 'MetaBot Browser Open',
-        summary: 'Open Agent Internet Browser for public Bot pages, MetaApps, and MetaFiles through the local Browser entrypoint.',
-        instructions: 'Use the Browser CLI directly. Open Browser with no URI when the human asks for the Browser itself. When a Bot page, MetaApp, or MetaFile target is already known, pass the corresponding metaid://, metaapp://, or metafile:// URI. Do not search, create identities, or open Bot Hub from this skill.',
+        summary: 'Open Agent Internet Browser for public Bot pages, domain aliases, chain pins, MetaApps, and MetaFiles through the local Browser entrypoint.',
+        instructions: 'Use the Browser CLI directly. Open Browser with no URI when the human asks for the Browser itself. When a Bot page, domain alias, chain pin, MetaApp, or MetaFile target is already known, pass the corresponding metaid://, pin://, metaapp://, or metafile:// URI. Treat dot-separated aliases such as sunnyfung.eth as metaid:// aliases. Treat 64-hex pin ids ending in i0 as pin:// resources. Do not search, create identities, or open Bot Hub from this skill.',
         commandTemplate: 'metabot browser open',
         outputExpectation: 'Return the Browser localUiUrl plus the opened URI when one was requested.',
-        fallbackPolicy: 'If the target resource is unknown, ask for the Bot globalMetaId, MetaApp pinId, or MetaFile pinId instead of guessing.',
+        fallbackPolicy: 'If the target resource is unknown, ask for the Bot globalMetaId, domain alias, chain pinId, MetaApp pinId, or MetaFile pinId instead of guessing.',
         scope: {
             allowedCommands: [
                 'metabot browser open',
                 'metabot browser open --uri metaid://idq1example',
+                'metabot browser open --uri metaid://sunnyfung.eth',
+                'metabot browser open --uri pin://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
                 'metabot browser open --uri metaapp://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
                 'metabot browser open --uri metafile://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0.png',
             ],

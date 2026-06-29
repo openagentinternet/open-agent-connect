@@ -2431,7 +2431,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       {
         flag: '--uri',
         value: '<resource-uri>',
-        description: 'Optional Browser resource URI to preload, such as metaid://<globalMetaId>, metaapp://<pinId>, or metafile://<pinId>.png.',
+        description: 'Optional Browser resource URI to preload, such as metaid://<globalMetaId>, metaid://sunnyfung.eth, metaapp://<pinId>, metafile://<pinId>.png, or pin://<pinId>.',
       },
       HELP_JSON_FLAG,
     ],
@@ -2444,8 +2444,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot browser open',
       'metabot browser open --uri metaid://<globalMetaId>',
+      'metabot browser open --uri metaid://sunnyfung.eth',
       'metabot browser open --uri metaapp://<pinId>',
       'metabot browser open --uri metafile://<pinId>.png',
+      'metabot browser open --uri pin://<pinId>',
     ],
   },
   {

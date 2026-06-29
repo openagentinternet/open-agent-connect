@@ -167,7 +167,7 @@ async function renderBuiltInPage(page: MetabotUiPageName, languagePreference?: s
 
 function isBrowserPagePath(pathname: string): boolean {
   return pathname === '/browser'
-    || /^\/browser\/(?:metaid|metaapp|metafile)\/[^/?#]+$/u.test(pathname)
+    || /^\/browser\/(?:metaid|metaapp|metafile|pin)\/[^/?#]+$/u.test(pathname)
     || /^\/browser\/map\/[^?#]+$/u.test(pathname);
 }
 

@@ -210,6 +210,14 @@ test('runCli supports `metabot skills resolve --skill metabot-browser-open --for
   assert.equal(result.payload.data.contract.commandTemplate, 'metabot browser open');
   assert.equal(result.payload.data.contract.scope.localUiOpen, true);
   assert.equal(result.payload.data.contract.scope.chainWrite, false);
+  assert.equal(
+    result.payload.data.contract.scope.allowedCommands.includes('metabot browser open --uri metaid://sunnyfung.eth'),
+    true,
+  );
+  assert.equal(
+    result.payload.data.contract.scope.allowedCommands.includes('metabot browser open --uri pin://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0'),
+    true,
+  );
 });
 
 test('runCli no-host json shape keeps top-level host and marks shared-default resolution', async () => {

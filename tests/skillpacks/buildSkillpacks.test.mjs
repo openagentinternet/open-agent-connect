@@ -250,6 +250,9 @@ test('buildAgentConnectSkillpacks includes the Browser open workflow skill', asy
   assert.match(content, /metaid:\/\//);
   assert.match(content, /metaapp:\/\//);
   assert.match(content, /metafile:\/\//);
+  assert.match(content, /sunnyfung\.eth/);
+  assert.match(content, /pin:\/\//);
+  assert.match(content, /64 hex characters followed by `i0`/i);
 });
 
 test('buildAgentConnectSkillpacks includes the Loom wish-to-task publishing workflow skill', async () => {

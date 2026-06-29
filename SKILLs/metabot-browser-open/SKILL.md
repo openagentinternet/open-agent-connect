@@ -1,6 +1,6 @@
 ---
 name: metabot-browser-open
-description: Use when a human asks to open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a MetaApp, or a MetaFile through the existing local Browser entrypoint.
+description: Use when a human asks to open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, or a MetaFile through the existing local Browser entrypoint.
 ---
 
 # Bot Browser Open
@@ -23,6 +23,8 @@ Should trigger when:
 
 - The human asks to open Agent Internet Browser or Bot Browser itself.
 - The human asks to open a known Bot page or Bot homepage in Browser.
+- The human asks to open a known domain alias such as `sunnyfung.eth` in Browser.
+- The human asks to open a known chain pin id in Browser.
 - The human asks to open a known MetaApp or MetaFile in Browser.
 
 Should not trigger when:
@@ -31,6 +33,15 @@ Should not trigger when:
 - The human asks to create or switch local identity.
 - The human asks to place a service order or inspect trace follow-up.
 - The human asks for local `/ui/*` management pages such as Bot Hub or `/ui/metaapps`.
+
+## Target Routing
+
+- No target: run `browser open`.
+- Global MetaID: pass `metaid://<globalMetaId>`.
+- Domain alias: if the target looks like dot-separated `name.tld`, including ENS names ending in `.eth`, pass `metaid://<domainAlias>`. Example: `sunnyfung.eth` becomes `metaid://sunnyfung.eth` and opens `/browser/metaid/sunnyfung.eth`.
+- Chain pin: if the target is 64 hex characters followed by `i0`, pass `pin://<pinId>` and open `/browser/pin/<pinId>`.
+- MetaApp: pass `metaapp://<pinId>`.
+- MetaFile: pass `metafile://<pinId>` and keep a file extension when the human supplied one.
 
 ## Commands
 
@@ -44,6 +55,18 @@ Open a Bot page or homepage when the GlobalMetaId is already known:
 
 ```bash
 {{METABOT_CLI}} browser open --uri metaid://<globalMetaId>
+```
+
+Open a Bot page or homepage when a domain alias is already known:
+
+```bash
+{{METABOT_CLI}} browser open --uri metaid://sunnyfung.eth
+```
+
+Open a chain pin when a 64 hex characters followed by `i0` pinId is already known:
+
+```bash
+{{METABOT_CLI}} browser open --uri pin://<pinId>
 ```
 
 Open a MetaApp when the pinId is already known:
@@ -61,9 +84,9 @@ Open a MetaFile when the pinId is already known:
 ## Expectations
 
 - Use Browser CLI directly. Open Browser with no URI when the human asks for the Browser itself.
-- When a Bot page, MetaApp, or MetaFile target is already known, pass the corresponding `metaid://`, `metaapp://`, or `metafile://` URI.
+- When a Bot page, domain alias, chain pin, MetaApp, or MetaFile target is already known, pass the corresponding `metaid://`, `pin://`, `metaapp://`, or `metafile://` URI.
 - Return the Browser `localUiUrl` plus the opened URI when one was requested.
-- If the target resource is unknown, ask for the Bot `globalMetaId`, MetaApp `pinId`, or MetaFile `pinId` instead of guessing.
+- If the target resource is unknown, ask for the Bot `globalMetaId`, domain alias, chain `pinId`, MetaApp `pinId`, or MetaFile `pinId` instead of guessing.
 - Keep Browser positioned as a peer surface beside Bot Hub and existing local `/ui/*` pages. Do not treat Browser as a replacement for those pages.
 - Use the same language the human is currently using.
 
@@ -71,6 +94,8 @@ Open a MetaFile when the pinId is already known:
 
 - `browser open`
 - `browser open --uri metaid://<globalMetaId>`
+- `browser open --uri metaid://sunnyfung.eth`
+- `browser open --uri pin://<pinId>`
 - `browser open --uri metaapp://<pinId>`
 - `browser open --uri metafile://<pinId>.png`
 

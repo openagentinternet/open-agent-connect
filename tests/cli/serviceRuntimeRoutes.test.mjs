@@ -150,3 +150,35 @@ test('default CLI service dependencies use canonical service daemon routes', asy
     },
   ]);
 });
+
+test('default CLI browser dependency opens domain aliases and pin ids through Browser routes', async (t) => {
+  const daemon = await startRecordingDaemon();
+  t.after(async () => daemon.close());
+
+  const dependencies = createDefaultCliDependencies({
+    cwd: process.cwd(),
+    env: {
+      METABOT_DAEMON_BASE_URL: daemon.baseUrl,
+    },
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+  });
+  const pinId = `${'a'.repeat(64)}i0`;
+
+  const domainAlias = await dependencies.browser.open({ uri: 'metaid://sunnyfung.eth' });
+  const bareDomainAlias = await dependencies.browser.open({ uri: 'sunnyfung.eth' });
+  const customDomainAlias = await dependencies.browser.open({ uri: 'metaid://agent.example' });
+  const pin = await dependencies.browser.open({ uri: `pin://${pinId}` });
+  const barePin = await dependencies.browser.open({ uri: pinId });
+
+  assert.equal(domainAlias.ok, true);
+  assert.equal(bareDomainAlias.ok, true);
+  assert.equal(customDomainAlias.ok, true);
+  assert.equal(pin.ok, true);
+  assert.equal(barePin.ok, true);
+  assert.equal(domainAlias.data.localUiUrl, `${daemon.baseUrl}/browser/metaid/sunnyfung.eth`);
+  assert.equal(bareDomainAlias.data.localUiUrl, `${daemon.baseUrl}/browser/metaid/sunnyfung.eth`);
+  assert.equal(customDomainAlias.data.localUiUrl, `${daemon.baseUrl}/browser/metaid/agent.example`);
+  assert.equal(pin.data.localUiUrl, `${daemon.baseUrl}/browser/pin/${pinId}`);
+  assert.equal(barePin.data.localUiUrl, `${daemon.baseUrl}/browser/pin/${pinId}`);
+});

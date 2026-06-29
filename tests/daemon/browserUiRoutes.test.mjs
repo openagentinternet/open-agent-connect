@@ -7,6 +7,7 @@ const { createHttpServer } = require('../../dist/daemon/httpServer.js');
 
 const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
 const MAP_PIN_ID = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0';
+const PIN_ID = `${'b'.repeat(64)}i0`;
 
 async function startServer() {
   const server = createHttpServer();
@@ -41,15 +42,20 @@ test('GET Browser deep links serve the Agent Internet Browser shell', async (t) 
 
   const metaId = await fetch(`${baseUrl}/browser/metaid/idq1alice`);
   const metaApp = await fetch(`${baseUrl}/browser/metaapp/8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0`);
+  const pin = await fetch(`${baseUrl}/browser/pin/${PIN_ID}`);
   const metaIdHtml = await metaId.text();
   const metaAppHtml = await metaApp.text();
+  const pinHtml = await pin.text();
 
   assert.equal(metaId.status, 200);
   assert.equal(metaApp.status, 200);
+  assert.equal(pin.status, 200);
   assert.match(metaIdHtml, /Agent Internet Browser/);
   assert.match(metaIdHtml, /data-browser-uri-input/);
   assert.match(metaAppHtml, /Agent Internet Browser/);
   assert.match(metaAppHtml, /data-browser-uri-input/);
+  assert.match(pinHtml, /Agent Internet Browser/);
+  assert.match(pinHtml, /data-browser-uri-input/);
 });
 
 test('serves Browser shell for /browser/map/simplebuzz/pin MAP routes', async (t) => {

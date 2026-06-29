@@ -12,7 +12,7 @@ const {
 } = require('../../dist/core/contracts/commandResult.js');
 const pkg = require('../../package.json');
 
-const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile']);
+const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile', 'pin']);
 
 function resolveHarnessBrowserPath(uri) {
   if (!uri) {
@@ -385,11 +385,12 @@ test('runCli dispatches `metabot browser open --uri` and returns the deep-link r
   });
 });
 
-test('runCli dispatches MetaApp and MetaFile browser resources as deep-link routes', async () => {
+test('runCli dispatches MetaApp, MetaFile, and pin browser resources as deep-link routes', async () => {
   const pinId = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0';
   const cases = [
     [`metaapp://${pinId}`, `/browser/metaapp/${pinId}`],
     [`metafile://${pinId}`, `/browser/metafile/${pinId}`],
+    [`pin://${pinId}`, `/browser/pin/${pinId}`],
   ];
 
   for (const [uri, localUiUrl] of cases) {

@@ -147,7 +147,7 @@ async function renderBuiltInPage(page, languagePreference) {
 }
 function isBrowserPagePath(pathname) {
     return pathname === '/browser'
-        || /^\/browser\/(?:metaid|metaapp|metafile)\/[^/?#]+$/u.test(pathname)
+        || /^\/browser\/(?:metaid|metaapp|metafile|pin)\/[^/?#]+$/u.test(pathname)
         || /^\/browser\/map\/[^?#]+$/u.test(pathname);
 }
 async function serveBundledUiAsset(context) {
