@@ -468,6 +468,49 @@ test('default metaapp owner publish keeps pin id in relative localUiUrl without 
   assert.equal(publish.payload.data.localUiUrl, '/ui/apps?pinId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0');
 });
 
+test('default metaapp owner publish and update accept empty optional asset fields', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const writes = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(writes),
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+  const body = {
+    from: 'alice',
+    title: 'Minimal MetaAPP',
+    appName: 'Minimal MetaAPP',
+    icon: '',
+    coverImg: '',
+    introImgs: '',
+    runtime: ['browser'],
+    content: TARGET_PIN_ID,
+    code: '',
+    confirm: true,
+  };
+
+  const publish = await fetchJson(server.baseUrl, '/api/metaapp/publish', {
+    method: 'POST',
+    body,
+  });
+  const update = await fetchJson(server.baseUrl, '/api/metaapp/update', {
+    method: 'POST',
+    body: { ...body, targetPinId: TARGET_PIN_ID },
+  });
+
+  assert.equal(publish.payload.ok, true);
+  assert.equal(update.payload.ok, true);
+  assert.equal(writes.length, 2);
+  const publishedPayload = JSON.parse(writes[0].payload);
+  assert.equal(Object.prototype.hasOwnProperty.call(publishedPayload, 'icon'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(publishedPayload, 'coverImg'), false);
+  assert.deepEqual(publishedPayload.introImgs, []);
+  assert.equal(publishedPayload.content, `metafile://${TARGET_PIN_ID}`);
+});
+
 test('default metaapp owner list returns identity_missing when selected Bot has no runtime identity', async (t) => {
   const fixture = await createAliceFixture(t, { withIdentity: false });
   const handlers = createDefaultMetabotDaemonHandlers({

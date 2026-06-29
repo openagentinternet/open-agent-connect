@@ -148,6 +148,35 @@ test('buildMetaAppProtocolPayload preserves extension-bearing metafile refs', ()
   assert.equal(payload.code, `metafile://${THIRD_PIN}.js`);
 });
 
+test('buildMetaAppProtocolPayload treats only appName and content as required', () => {
+  const payload = buildMetaAppProtocolPayload({
+    appName: 'Minimal MetaAPP',
+    title: '',
+    icon: '',
+    coverImg: '',
+    introImgs: '',
+    runtime: '',
+    content: PIN,
+    code: '',
+  });
+
+  assert.equal(payload.appName, 'Minimal MetaAPP');
+  assert.equal(payload.title, 'Minimal MetaAPP');
+  assert.equal(payload.icon, undefined);
+  assert.equal(payload.coverImg, undefined);
+  assert.deepEqual(payload.introImgs, []);
+  assert.equal(payload.runtime, 'browser');
+  assert.equal(payload.content, `metafile://${PIN}`);
+  assert.equal(payload.code, undefined);
+});
+
+test('buildMetaAppProtocolPayload rejects empty content', () => {
+  assert.throws(
+    () => buildMetaAppProtocolPayload(validInput({ content: '' })),
+    /content is required/i,
+  );
+});
+
 test('buildMetaAppProtocolPayload rejects unsupported runtime values', () => {
   assert.throws(
     () => buildMetaAppProtocolPayload(validInput({ runtime: ['browser', 'beos'] })),
