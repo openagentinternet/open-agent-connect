@@ -11,6 +11,7 @@ const { createHttpServer } = require('../../dist/daemon/httpServer.js');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
 const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { createMetaAppLocalCacheStore } = require('../../dist/core/metaapp/localCache.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
 const ALICE_MVC_ADDRESS = '16UjcYNBG9GTK4uq2f7yYEbuifqCzoLMGS';
@@ -77,6 +78,31 @@ function fakeSigner(writes = []) {
         contentType: input.contentType,
       };
     },
+  };
+}
+
+function localMetaAppRecord(pinId, overrides = {}) {
+  return {
+    pinId,
+    firstPinId: overrides.firstPinId ?? pinId,
+    operation: overrides.operation ?? 'create',
+    title: overrides.title ?? 'Local MetaAPP',
+    appName: overrides.appName ?? 'local-metaapp',
+    version: overrides.version ?? '1.0.0',
+    runtime: overrides.runtime ?? 'browser',
+    indexFile: overrides.indexFile ?? 'index.html',
+    code: overrides.code ?? `metafile://${pinId}.zip`,
+    content: overrides.content ?? `metafile://${pinId}.zip`,
+    contentType: overrides.contentType ?? 'application/zip',
+    codeType: overrides.codeType ?? 'application/zip',
+    tags: overrides.tags ?? [],
+    ownerGlobalMetaId: overrides.ownerGlobalMetaId ?? 'idq1alice',
+    ownerAddress: overrides.ownerAddress ?? ALICE_MVC_ADDRESS,
+    network: overrides.network ?? 'mvc',
+    metawebUrl: overrides.metawebUrl ?? `https://metaweb.world/metaapp/${pinId}`,
+    updatedAt: overrides.updatedAt ?? 1_700_000_000_000,
+    source: overrides.source ?? 'local',
+    raw: overrides.raw,
   };
 }
 
@@ -439,6 +465,85 @@ test('default metaapp owner publish update and delete write expected chain opera
   assert.match(update.payload.data.localUiUrl, /^http:\/\/127\.0\.0\.1:24885\/ui\/apps\?/);
 });
 
+test('default metaapp owner delete hides matching local cache records immediately', async (t) => {
+  const fixture = await createAliceFixture(t);
+  await createMetaAppLocalCacheStore(fixture.homeDir).upsertLocal(localMetaAppRecord(TARGET_PIN_ID, {
+    title: 'Stale Local MetaAPP',
+  }));
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(),
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const deleted = await fetchJson(server.baseUrl, '/api/metaapp/delete', {
+    method: 'POST',
+    body: { from: 'alice', targetPinId: TARGET_PIN_ID, confirm: true },
+  });
+  const listed = await fetchJson(server.baseUrl, '/api/metaapps?from=alice&mine=true');
+
+  assert.equal(deleted.payload.ok, true);
+  assert.deepEqual(
+    listed.payload.data.records.map((record) => record.pinId),
+    [],
+  );
+});
+
+test('default metaapp owner list hides MAN records revoked in local cache', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(),
+    metaAppManFetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 1,
+        data: {
+          list: [
+            {
+              id: TARGET_PIN_ID,
+              operation: 'create',
+              timestamp: 1_700_000_000_000,
+              content: JSON.stringify({
+                title: 'Deleted MetaAPP still visible from MAN',
+                appName: 'deleted-metaapp',
+                runtime: 'browser',
+                version: '1.0.0',
+                contentType: 'application/zip',
+                codeType: 'application/zip',
+                content: `metafile://${TARGET_PIN_ID}.zip`,
+                code: `metafile://${TARGET_PIN_ID}.zip`,
+              }),
+            },
+          ],
+          nextCursor: '',
+          total: 1,
+        },
+      }),
+    }),
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const deleted = await fetchJson(server.baseUrl, '/api/metaapp/delete', {
+    method: 'POST',
+    body: { from: 'alice', targetPinId: TARGET_PIN_ID, confirm: true },
+  });
+  const listed = await fetchJson(server.baseUrl, '/api/metaapp/list?from=alice&size=12');
+
+  assert.equal(deleted.payload.ok, true);
+  assert.deepEqual(
+    listed.payload.data.records.map((record) => record.pinId),
+    [],
+  );
+});
+
 test('default metaapp owner publish keeps pin id in relative localUiUrl without daemon record', async (t) => {
   const fixture = await createAliceFixture(t);
   const handlers = createDefaultMetabotDaemonHandlers({
@@ -466,6 +571,49 @@ test('default metaapp owner publish keeps pin id in relative localUiUrl without 
   });
 
   assert.equal(publish.payload.data.localUiUrl, '/ui/apps?pinId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0');
+});
+
+test('default metaapp owner publish and update accept empty optional asset fields', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const writes = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(writes),
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+  const body = {
+    from: 'alice',
+    title: 'Minimal MetaAPP',
+    appName: 'Minimal MetaAPP',
+    icon: '',
+    coverImg: '',
+    introImgs: '',
+    runtime: ['browser'],
+    content: TARGET_PIN_ID,
+    code: '',
+    confirm: true,
+  };
+
+  const publish = await fetchJson(server.baseUrl, '/api/metaapp/publish', {
+    method: 'POST',
+    body,
+  });
+  const update = await fetchJson(server.baseUrl, '/api/metaapp/update', {
+    method: 'POST',
+    body: { ...body, targetPinId: TARGET_PIN_ID },
+  });
+
+  assert.equal(publish.payload.ok, true);
+  assert.equal(update.payload.ok, true);
+  assert.equal(writes.length, 2);
+  const publishedPayload = JSON.parse(writes[0].payload);
+  assert.equal(Object.prototype.hasOwnProperty.call(publishedPayload, 'icon'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(publishedPayload, 'coverImg'), false);
+  assert.deepEqual(publishedPayload.introImgs, []);
+  assert.equal(publishedPayload.content, `metafile://${TARGET_PIN_ID}`);
 });
 
 test('default metaapp owner list returns identity_missing when selected Bot has no runtime identity', async (t) => {

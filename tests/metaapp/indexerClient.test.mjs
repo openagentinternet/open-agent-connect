@@ -175,6 +175,19 @@ test('normalizer maps official records into MetaAppGalleryRecord', async () => {
   });
 });
 
+test('normalizer preserves revoke operations for cache tombstones', async () => {
+  const client = createMetaAppIndexerClient({
+    baseUrl: 'https://indexer.example',
+    fetch: makeFetch({ code: 0, data: { apps: [officialRecord({ operation: 'revoke' })] } }, []),
+    now: () => 1_800_000_000,
+  });
+
+  const result = await client.list();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data[0].operation, 'revoke');
+});
+
 test('malformed and failed indexer responses return typed failures without throwing', async () => {
   const malformedClient = createMetaAppIndexerClient({
     baseUrl: 'https://indexer.example',

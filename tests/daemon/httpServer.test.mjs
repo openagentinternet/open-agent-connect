@@ -129,6 +129,9 @@ async function startServer(options = {}) {
     file: {
       upload: async (input) => {
         calls.file.push(input);
+        if (options.uploadFile) {
+          return options.uploadFile(input);
+        }
         return commandSuccess({
           pinId: 'file-pin-1',
           metafileUri: 'metafile://file-pin-1.png',
@@ -136,6 +139,9 @@ async function startServer(options = {}) {
       },
       uploadLarge: async (input) => {
         calls.fileLarge.push(input);
+        if (options.uploadLargeFile) {
+          return options.uploadLargeFile(input);
+        }
         return commandSuccess({
           pinId: 'large-file-pin-1',
           metafileUri: 'metafile://large-file-pin-1.mp4',
@@ -1241,6 +1247,43 @@ test('POST /api/file/upload parses the JSON body and forwards it to file.upload'
   });
 });
 
+test('POST /api/file/upload raw mode forwards selected file bytes through a temporary file', async (t) => {
+  let observedFilePath = '';
+  let observedBytes = Buffer.alloc(0);
+  const server = await startServer({
+    uploadFile: async (input) => {
+      observedFilePath = input.filePath;
+      observedBytes = await readFile(input.filePath);
+      return commandSuccess({
+        pinId: 'file-pin-raw-1',
+        metafileUri: 'metafile://file-pin-raw-1.png',
+        contentType: input.contentType,
+        network: 'mvc',
+        txids: ['tx-file-raw-1'],
+        bytes: observedBytes.byteLength,
+      });
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/file/upload?mode=raw&from=alice&fileName=${encodeURIComponent('cover.png')}`, {
+    method: 'POST',
+    headers: { 'content-type': 'image/png' },
+    body: Buffer.from('pngdata'),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(server.calls.file.length, 1);
+  assert.equal(server.calls.file[0].from, 'alice');
+  assert.equal(server.calls.file[0].fileName, 'cover.png');
+  assert.equal(server.calls.file[0].contentType, 'image/png');
+  assert.equal(Buffer.compare(observedBytes, Buffer.from('pngdata')), 0);
+  await waitForFileRemoved(observedFilePath);
+  assert.equal(payload.data.pinId, 'file-pin-raw-1');
+  assert.equal(payload.data.metafileUri, 'metafile://file-pin-raw-1.png');
+});
+
 test('POST /api/file/upload-large parses the JSON body and forwards it to file.uploadLarge', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -1271,6 +1314,43 @@ test('POST /api/file/upload-large parses the JSON body and forwards it to file.u
       uploadMode: 'chunked',
     },
   });
+});
+
+test('POST /api/file/upload-large raw mode forwards selected file bytes to file.uploadLarge', async (t) => {
+  let observedFilePath = '';
+  let observedBytes = Buffer.alloc(0);
+  const uploadBytes = Buffer.alloc((2 * 1024 * 1024) + 1, 7);
+  const server = await startServer({
+    uploadLargeFile: async (input) => {
+      observedFilePath = input.filePath;
+      observedBytes = await readFile(input.filePath);
+      return commandSuccess({
+        pinId: 'large-file-pin-raw-1',
+        metafileUri: 'metafile://large-file-pin-raw-1.zip',
+        uploadMode: 'chunked',
+        contentType: input.contentType,
+        bytes: observedBytes.byteLength,
+      });
+    },
+  });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/file/upload-large?mode=raw&from=alice&fileName=${encodeURIComponent('bundle.zip')}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/zip' },
+    body: uploadBytes,
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(server.calls.fileLarge.length, 1);
+  assert.equal(server.calls.fileLarge[0].from, 'alice');
+  assert.equal(server.calls.fileLarge[0].fileName, 'bundle.zip');
+  assert.equal(server.calls.fileLarge[0].contentType, 'application/zip');
+  assert.equal(Buffer.compare(observedBytes, uploadBytes), 0);
+  await waitForFileRemoved(observedFilePath);
+  assert.equal(payload.data.pinId, 'large-file-pin-raw-1');
+  assert.equal(payload.data.bytes, uploadBytes.byteLength);
 });
 
 test('POST /api/file/upload-large returns not_implemented when file.uploadLarge is missing', async (t) => {
@@ -1357,6 +1437,43 @@ test('GET /api/file/avatar resolves MetaID avatar pin references through the dae
   assert.ok(
     fetchedUrls.some((url) => url === 'http://localhost:7281/content/avatar-pin-1i0'),
     `Expected local P2P content endpoint to be tried first, got ${fetchedUrls.join(', ')}`,
+  );
+});
+
+test('GET /api/file/avatar strips metafile URI extensions before fetching content', async (t) => {
+  const avatarPinId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0';
+  const originalFetch = globalThis.fetch;
+  const fetchedUrls = [];
+  globalThis.fetch = async (url) => {
+    fetchedUrls.push(String(url));
+    if (String(url).includes(`/content/${avatarPinId}`)) {
+      return new Response(Buffer.from([137, 80, 78, 71]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      });
+    }
+    return new Response('missing', {
+      status: 404,
+      headers: { 'content-type': 'text/plain' },
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const reference = `metafile://${avatarPinId}.png`;
+  const response = await originalFetch(`${server.baseUrl}/api/file/avatar?ref=${encodeURIComponent(reference)}`);
+  const body = Buffer.from(await response.arrayBuffer());
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /image\/png/i);
+  assert.deepEqual([...body], [137, 80, 78, 71]);
+  assert.ok(
+    fetchedUrls.some((url) => url === `http://localhost:7281/content/${avatarPinId}`),
+    `Expected extension-bearing metafile URI to resolve through bare pin id, got ${fetchedUrls.join(', ')}`,
   );
 });
 

@@ -10703,6 +10703,71 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return localRecords.find((record: MetaAppGalleryRecord) => record.pinId === targetPinId) ?? null;
   }
 
+  async function upsertMetaAppLocalRevoke(input: {
+    actor: {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      mvcAddress: string;
+    };
+    rawInput: Record<string, unknown>;
+    result: MetabotCommandResult<Record<string, unknown>>;
+  }): Promise<void> {
+    if (!input.result.ok || input.result.state !== 'success' || !input.result.data || typeof input.result.data !== 'object') {
+      return;
+    }
+    const data = input.result.data as Record<string, unknown>;
+    const targetPinId = normalizeText(data.revokedPinId ?? input.rawInput.targetPinId);
+    const revokePinId = normalizeText(data.pinId);
+    if (!targetPinId || !revokePinId) {
+      return;
+    }
+
+    const cache = createMetaAppLocalCacheStore(input.actor.homeDir);
+    const existingRecords = await cache.listMerged().catch(() => [] as MetaAppGalleryRecord[]);
+    const previous = existingRecords.find((record) => record.pinId === targetPinId || record.firstPinId === targetPinId) ?? null;
+    const state = await input.actor.runtimeStateStore.readState().catch(() => null);
+    const identity = readObject(state?.identity);
+    const chainWrite = readObject(data.chainWrite);
+    const network = normalizeText(chainWrite?.network ?? input.rawInput.network) || previous?.network || 'mvc';
+
+    await cache.upsertLocal({
+      pinId: revokePinId,
+      firstPinId: targetPinId,
+      operation: 'revoke',
+      title: previous?.title || targetPinId,
+      appName: previous?.appName || previous?.title || targetPinId,
+      prompt: previous?.prompt,
+      icon: previous?.icon,
+      coverImg: previous?.coverImg,
+      introImgs: previous?.introImgs,
+      intro: previous?.intro,
+      version: previous?.version || '1.0.0',
+      runtime: previous?.runtime || 'browser',
+      indexFile: previous?.indexFile || 'index.html',
+      code: previous?.code || '',
+      content: previous?.content || '',
+      contentType: previous?.contentType || 'application/zip',
+      codeType: previous?.codeType || 'application/zip',
+      tags: previous?.tags || [],
+      ownerGlobalMetaId: previous?.ownerGlobalMetaId || normalizeText(identity?.globalMetaId) || 'unknown',
+      ownerAddress: previous?.ownerAddress || input.actor.mvcAddress,
+      network,
+      metawebUrl: previous?.metawebUrl || `https://metaweb.world/metaapp/${encodeURIComponent(targetPinId)}`,
+      localUiUrl: buildMetaAppAppsLocalUiUrl(targetPinId),
+      updatedAt: Date.now(),
+      source: 'local',
+      disabled: previous?.disabled,
+      status: previous?.status,
+      runUrl: previous?.runUrl,
+      downloadUrl: previous?.downloadUrl,
+      raw: {
+        chainWrite: chainWrite ?? undefined,
+        revokedPinId: targetPinId,
+        previousPinId: previous?.pinId,
+      },
+    });
+  }
+
   async function listMetaAppsForActor(actor: {
     homeDir: string;
     runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
@@ -10761,6 +10826,58 @@ export function createDefaultMetabotDaemonHandlers(input: {
         ...(typeof indexerRefreshError.status === 'number' ? { status: indexerRefreshError.status } : {}),
       } : null,
     });
+  }
+
+  function metaAppRecordGroupKey(record: unknown): string {
+    const data = readObject(record);
+    if (!data) {
+      return '';
+    }
+    return normalizeText(data.firstPinId) || normalizeText(data.pinId);
+  }
+
+  async function filterOwnerMetaAppListWithLocalRevokes(
+    homeDir: string,
+    result: MetabotCommandResult<Record<string, unknown>>,
+  ): Promise<MetabotCommandResult<Record<string, unknown>>> {
+    if (!result.ok || result.state !== 'success') {
+      return result;
+    }
+
+    const data = readObject(result.data);
+    const records = Array.isArray(data?.records) ? data.records : null;
+    if (!data || !records) {
+      return result;
+    }
+
+    const localState = await createMetaAppLocalCacheStore(homeDir).readLocal();
+    const revokedGroupKeys = new Set(
+      localState.records
+        .filter((record) => record.operation === 'revoke')
+        .map((record) => metaAppRecordGroupKey(record))
+        .filter(Boolean),
+    );
+    if (revokedGroupKeys.size === 0) {
+      return result;
+    }
+
+    const filteredRecords = records.filter((record) => !revokedGroupKeys.has(metaAppRecordGroupKey(record)));
+    const removedCount = records.length - filteredRecords.length;
+    if (removedCount <= 0) {
+      return result;
+    }
+
+    const total = typeof data.total === 'number' && Number.isFinite(data.total)
+      ? Math.max(0, data.total - removedCount)
+      : data.total;
+    return {
+      ...result,
+      data: {
+        ...data,
+        records: filteredRecords,
+        ...(total !== undefined ? { total } : {}),
+      },
+    };
   }
 
   const loomActionHandler = createLoomDaemonActionHandler(createLoomDaemonActionDependencies({
@@ -11157,10 +11274,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         try {
-          return await deleteMetaAppPin(
+          const result = await deleteMetaAppPin(
             createMetaAppOwnerServiceActor(rawInput, actor),
             rawInput,
           );
+          await upsertMetaAppLocalRevoke({ actor, rawInput, result }).catch(() => undefined);
+          return result;
         } catch (error) {
           return commandFailed(
             'metaapp_delete_failed',
@@ -11255,7 +11374,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
 
           try {
-            return await listOwnerMetaApps(
+            const result = await listOwnerMetaApps(
               createMetaAppOwnerServiceActor(rawInput, actor),
               {
                 cursor: typeof rawInput.cursor === 'string' ? rawInput.cursor : '',
@@ -11265,6 +11384,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 },
               },
             );
+            return await filterOwnerMetaAppListWithLocalRevokes(actor.homeDir, result);
           } catch (error) {
             return commandFailed(
               'metaapp_list_failed',

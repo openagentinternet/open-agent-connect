@@ -2,6 +2,7 @@ import { commandFailed, commandSuccess, type MetabotCommandResult } from '../con
 import type { MetaAppManifestInput } from './types';
 
 export const METAAPP_PIN_ID_PATTERN = /^[0-9a-f]{64}i0$/i;
+export const METAAPP_METAFILE_REFERENCE_PATTERN = /^([0-9a-f]{64}i0)(?:\.[a-z0-9][a-z0-9+-]{0,31})?$/i;
 
 export const METAAPP_RUNTIME_OPTIONS = ['browser', 'android', 'ios', 'windows', 'macOS', 'linux'] as const;
 export type MetaAppRuntimeOption = typeof METAAPP_RUNTIME_OPTIONS[number];
@@ -65,11 +66,11 @@ function isHttpUrl(value: string): boolean {
 
 export function normalizeMetafileReference(value: unknown, fieldName: string): string {
   const raw = normalizeText(value);
-  const pinId = stripMetafilePrefix(raw).trim();
-  if (!METAAPP_PIN_ID_PATTERN.test(pinId)) {
-    throw new Error(`${fieldName} must be a MetaID pin id or metafile:// pin id.`);
+  const reference = stripMetafilePrefix(raw).trim();
+  if (!METAAPP_METAFILE_REFERENCE_PATTERN.test(reference)) {
+    throw new Error(`${fieldName} must be a MetaID pin id or metafile:// pin id with an optional file extension.`);
   }
-  return `metafile://${pinId}`;
+  return `metafile://${reference}`;
 }
 
 export function normalizeMetafileReferenceList(value: unknown, fieldName: string): string[] {
@@ -120,6 +121,13 @@ export function serializeMetaAppRuntime(value: unknown): string {
   return [...new Set(selected)].join('/');
 }
 
+function serializeOptionalMetaAppRuntime(value: unknown): string {
+  const rawValues = Array.isArray(value)
+    ? value.map((item) => normalizeText(item))
+    : normalizeText(value).split('/').map((item) => item.trim());
+  return rawValues.some(Boolean) ? serializeMetaAppRuntime(value) : 'browser';
+}
+
 function normalizeOption(
   value: unknown,
   fieldName: string,
@@ -159,24 +167,34 @@ function normalizeOptionalMetafile(value: unknown, fieldName: string): string | 
   return normalizeText(value) ? normalizeMetafileReference(value, fieldName) : undefined;
 }
 
+function normalizeRequiredMetafile(value: unknown, fieldName: string): string {
+  if (!normalizeText(value)) {
+    throw new Error(`${fieldName} is required.`);
+  }
+  return normalizeMetafileReference(value, fieldName);
+}
+
+function normalizeOptionalMetaAppImageReference(value: unknown, fieldName: string): string | undefined {
+  return normalizeText(value) ? normalizeMetaAppImageReference(value, fieldName) : undefined;
+}
+
 export function buildMetaAppProtocolPayload(input: Record<string, unknown>): MetaAppManifestInput {
-  const title = normalizeText(input.title);
   const appName = normalizeText(input.appName);
-  if (!title) throw new Error('title is required.');
   if (!appName) throw new Error('appName is required.');
+  const title = normalizeText(input.title) || appName;
 
   return {
     title,
     appName,
     prompt: normalizeText(input.prompt) || undefined,
-    icon: normalizeMetaAppImageReference(input.icon, 'icon'),
-    coverImg: normalizeMetaAppImageReference(input.coverImg, 'coverImg'),
+    icon: normalizeOptionalMetaAppImageReference(input.icon, 'icon'),
+    coverImg: normalizeOptionalMetaAppImageReference(input.coverImg, 'coverImg'),
     introImgs: normalizeMetaAppImageReferenceList(input.introImgs, 'introImgs'),
     intro: normalizeText(input.intro) || undefined,
-    runtime: serializeMetaAppRuntime(input.runtime),
+    runtime: serializeOptionalMetaAppRuntime(input.runtime),
     version: normalizeText(input.version) || undefined,
     contentType: normalizeOption(input.contentType, 'contentType', METAAPP_CONTENT_TYPE_OPTIONS, 'application/zip'),
-    content: normalizeOptionalMetafile(input.content, 'content'),
+    content: normalizeRequiredMetafile(input.content, 'content'),
     indexFile: normalizeText(input.indexFile) || undefined,
     code: normalizeOptionalMetafile(input.code, 'code'),
     contentHash: normalizeText(input.contentHash) || undefined,
@@ -221,6 +239,8 @@ export function buildMetaAppModifyWrite(targetPinId: string, payload: MetaAppMan
 export function buildMetaAppRevokeWrite(targetPinId: string): {
   operation: 'revoke';
   path: string;
+  contentType: 'application/json';
+  payload: string;
 } {
   if (!METAAPP_PIN_ID_PATTERN.test(targetPinId)) {
     throw new Error('targetPinId must be a MetaID pin id.');
@@ -228,6 +248,8 @@ export function buildMetaAppRevokeWrite(targetPinId: string): {
   return {
     operation: 'revoke',
     path: `@${targetPinId}`,
+    contentType: 'application/json',
+    payload: '',
   };
 }
 

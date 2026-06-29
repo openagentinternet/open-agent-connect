@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -241,6 +242,12 @@ function buildFakeModalTree(html, ownerDocument) {
     deleteError.ownerDocument = ownerDocument;
     form.appendChild(deleteError);
   }
+  for (const match of body.matchAll(/<[^>]+\bdata-apps-content-hash-source\b([^>]*)>([\s\S]*?)<\/[^>]+>/giu)) {
+    const source = new FakeElement({ 'data-apps-content-hash-source': '', ...parseAttributes(match[1] || '') });
+    source.ownerDocument = ownerDocument;
+    source.textContent = decodeAttributeValue((match[2] || '').replace(/<[^>]+>/gu, '').trim());
+    form.appendChild(source);
+  }
 
   return [form];
 }
@@ -385,10 +392,14 @@ function createAppsPageContext(options = {}) {
     URLSearchParams,
     document,
     fetch: (url, fetchOptions = {}) => {
-      fetchUrls.push(String(url));
+      const urlText = String(url);
+      fetchUrls.push(urlText);
       if ((fetchOptions.method || '').toUpperCase() === 'POST') {
-        const bodyPayload = fetchOptions.body ? JSON.parse(fetchOptions.body) : null;
-        fetchBodies.push({ url: String(url), body: bodyPayload });
+        const isFileUpload = urlText.startsWith('/api/file/upload') || urlText.startsWith('/api/file/upload-large');
+        const bodyPayload = isFileUpload && typeof fetchOptions.body !== 'string'
+          ? fetchOptions.body ?? null
+          : fetchOptions.body ? JSON.parse(fetchOptions.body) : null;
+        fetchBodies.push({ url: urlText, body: bodyPayload, headers: fetchOptions.headers ?? {} });
         if (String(url) === '/api/metaapp/publish' || String(url) === '/api/metaapp/update' || String(url) === '/api/metaapp/delete') {
           if (!bodyPayload || bodyPayload.confirm !== true) {
             return Promise.resolve(response({
@@ -397,15 +408,18 @@ function createAppsPageContext(options = {}) {
               message: 'confirmation required',
             }));
           }
-          return Promise.resolve(response(options.mutationResponse ?? {
+          const mutationPayload = typeof options.mutationResponse === 'function'
+            ? options.mutationResponse(urlText, bodyPayload)
+            : options.mutationResponse;
+          return Promise.resolve(mutationPayload ?? {
             ok: true,
             state: 'success',
             data: { pinId: `${'b'.repeat(64)}i0` },
-          }));
+          }).then((payload) => response(payload));
         }
-        if (String(url) === '/api/file/upload' || String(url) === '/api/file/upload-large') {
+        if (isFileUpload) {
           const uploadPayload = typeof options.uploadResponse === 'function'
-            ? options.uploadResponse(String(url), bodyPayload, fetchBodies.filter((entry) => entry.url === '/api/file/upload' || entry.url === '/api/file/upload-large').length)
+            ? options.uploadResponse(urlText, bodyPayload, fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload') || entry.url.startsWith('/api/file/upload-large')).length)
             : options.uploadResponse;
           return Promise.resolve(response(uploadPayload ?? {
             ok: true,
@@ -451,6 +465,15 @@ function createAppsPageContext(options = {}) {
     },
     setTimeout,
     clearTimeout,
+    crypto: {
+      subtle: {
+        digest: async (algorithm, data) => {
+          assert.equal(String(algorithm).toUpperCase(), 'SHA-256');
+          const digest = createHash('sha256').update(Buffer.from(data)).digest();
+          return digest.buffer.slice(digest.byteOffset, digest.byteOffset + digest.byteLength);
+        },
+      },
+    },
   };
   context.window = context;
 
@@ -614,6 +637,38 @@ test('apps page resolves metafile card cover and icon images', async () => {
   const html = context.elements['[data-apps-grid]'].innerHTML;
   assert.match(html, new RegExp(`class="apps-card-cover-img" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
   assert.match(html, new RegExp(`class="apps-card-icon" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
+});
+
+test('apps page resolves extension-bearing metafile images on cards and detail shots', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Extension Metafile Image App',
+        appName: 'Extension Metafile Image App',
+        icon: `metafile://${PIN}.png`,
+        coverImg: `metafile://${PIN}.jpg`,
+        introImgs: [`metafile://${PIN}.webp`],
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Extension Metafile Image App'), 'render extension metafile image app');
+  let html = context.elements['[data-apps-grid]'].innerHTML;
+  assert.match(html, new RegExp(`class="apps-card-cover-img" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
+  assert.match(html, new RegExp(`class="apps-card-icon" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
+  assert.doesNotMatch(html, /ref=[^"]+\.png/u);
+  assert.doesNotMatch(html, /ref=[^"]+\.jpg/u);
+
+  await context.clickGridAction(`[data-apps-detail="${PIN}"]`);
+  html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, /apps-detail-shots/);
+  assert.match(html, new RegExp(`src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
+  assert.doesNotMatch(html, /ref=[^"]+\.webp/u);
 });
 
 test('apps page Bot picker renders profile avatars when available', async () => {
@@ -1047,6 +1102,29 @@ test('publish and edit modals expose matching MetaAPP form groups and edit save 
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="title"]').value, 'Editable App');
 });
 
+test('publish modal shows the selected Bot as publisher', async () => {
+  const avatarDataUrl = 'data:image/png;base64,cHVibGlzaGVy';
+  const context = createAppsPageContext({
+    url: 'http://localhost/ui/apps?from=bob',
+    profiles: profilesPayload([
+      { slug: 'alice', name: 'Alice', globalMetaId: 'idq1alice', avatar: null, isActive: true },
+      { slug: 'bob', name: 'Builder Bot', globalMetaId: 'idq1bob', avatarDataUrl, isActive: false },
+    ]),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-bot-picker]'].innerHTML.includes('Builder Bot'), 'selected bot render');
+  await context.clickElement('[data-apps-publish-open]');
+
+  const publishHtml = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(publishHtml, /data-apps-publisher-badge/);
+  assert.match(publishHtml, /Published by/);
+  assert.match(publishHtml, /Builder Bot/);
+  assert.match(publishHtml, /aria-label="Published by Builder Bot"/);
+  assert.match(publishHtml, /class="apps-bot-avatar" src="data:image\/png;base64,cHVibGlzaGVy"/);
+  assert.match(publishHtml, /id="apps-modal-title"[\s\S]*data-apps-publisher-badge[\s\S]*apps-modal-close/);
+});
+
 test('publish submits normalized form payload to /api/metaapp/publish', async () => {
   const secondPin = `${'a'.repeat(64)}i0`;
   const context = createAppsPageContext();
@@ -1060,11 +1138,11 @@ test('publish submits normalized form payload to /api/metaapp/publish', async ()
   context.setField('prompt', 'Build an index from trusted sources.');
   context.setField('intro', 'Indexes a project knowledge base.');
   context.setField('tags', 'wiki, builder');
-  context.setField('icon', PIN);
-  context.setField('coverImg', `metafile://${PIN}`);
-  context.setField('introImgs', `${PIN}\n${secondPin}`);
-  context.setField('content', PIN);
-  context.setField('code', secondPin);
+  context.setField('icon', `metafile://${PIN}.png`);
+  context.setField('coverImg', `${secondPin}.jpg`);
+  context.setField('introImgs', `${PIN}.webp\nmetafile://${secondPin}.gif`);
+  context.setField('content', `metafile://${PIN}.html`);
+  context.setField('code', `${secondPin}.js`);
   context.setChecked('runtime', 'android', true);
   context.setField('contentType', 'text/html');
   context.setField('codeType', 'application/javascript');
@@ -1078,17 +1156,69 @@ test('publish submits normalized form payload to /api/metaapp/publish', async ()
   assert.equal(request.confirm, true);
   assert.equal(request.title, 'Agent Wiki Builder');
   assert.equal(request.appName, 'Agent Wiki Builder');
-  assert.equal(request.icon, `metafile://${PIN}`);
-  assert.equal(request.coverImg, `metafile://${PIN}`);
-  assert.deepEqual(request.introImgs, [`metafile://${PIN}`, `metafile://${secondPin}`]);
-  assert.equal(request.content, `metafile://${PIN}`);
-  assert.equal(request.code, `metafile://${secondPin}`);
+  assert.equal(request.icon, `metafile://${PIN}.png`);
+  assert.equal(request.coverImg, `metafile://${secondPin}.jpg`);
+  assert.deepEqual(request.introImgs, [`metafile://${PIN}.webp`, `metafile://${secondPin}.gif`]);
+  assert.equal(request.content, `metafile://${PIN}.html`);
+  assert.equal(request.code, `metafile://${secondPin}.js`);
   assert.deepEqual(request.runtime, ['browser', 'android']);
   assert.equal(request.contentType, 'text/html');
   assert.equal(request.codeType, 'application/javascript');
   assert.deepEqual(request.metadata, { scope: 'publish' });
   const reload = context.fetchUrls.findLast((url) => url.startsWith('/api/metaapp/list?'));
   assert.equal(new URL(reload, 'http://localhost').searchParams.get('cursor'), null);
+});
+
+test('publish keeps the modal open with chain progress and success txids', async () => {
+  const publishPin = `${'c'.repeat(64)}i0`;
+  const mutation = deferred();
+  const context = createAppsPageContext({
+    mutationResponse: () => mutation.promise,
+  });
+
+  context.run();
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
+  await context.clickElement('[data-apps-publish-open]');
+
+  context.setField('appName', 'Agent Wiki Builder');
+  context.setField('title', 'Agent Wiki Builder');
+  context.setField('content', `metafile://${PIN}.html`);
+
+  const submit = context.submitModalForm();
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+
+  let html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.match(html, /data-apps-chain-status="pending"/);
+  assert.match(html, /Writing to chain/);
+  assert.match(html, /Agent Wiki Builder/);
+  assert.doesNotMatch(html, /data-apps-form/);
+
+  mutation.resolve({
+    ok: true,
+    state: 'success',
+    data: {
+      pinId: publishPin,
+      metaappUri: `metaapp://${publishPin}`,
+      chainWrite: {
+        path: '/protocols/metaapp',
+        txids: ['tx-publish-1', 'tx-publish-2'],
+      },
+    },
+  });
+  await submit;
+
+  html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.match(html, /data-apps-chain-status="success"/);
+  assert.match(html, /MetaAPP published on-chain/);
+  assert.match(html, /tx-publish-1/);
+  assert.match(html, /tx-publish-2/);
+  assert.match(html, /1 to 2 minutes/);
+  assert.match(html, /data-apps-copy-value="tx-publish-1"/);
+
+  await context.clickModalAction('[data-apps-copy-value="tx-publish-1"]');
+  assert.deepEqual(context.clipboardWrites, ['tx-publish-1']);
 });
 
 test('publish preserves http image refs while keeping packages as metafile refs', async () => {
@@ -1116,6 +1246,64 @@ test('publish preserves http image refs while keeping packages as metafile refs'
   assert.deepEqual(request.introImgs, ['https://cdn.example.test/intro.png', `metafile://${secondPin}`]);
   assert.equal(request.content, `metafile://${PIN}`);
   assert.equal(request.code, `metafile://${secondPin}`);
+});
+
+test('edit keeps the modal open with chain progress and update txids', async () => {
+  const updatePin = `${'d'.repeat(64)}i0`;
+  const mutation = deferred();
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Editable App',
+        appName: 'Editable App',
+        runtime: 'browser',
+        content: `metafile://${PIN}.html`,
+        disabled: false,
+      }],
+      total: 1,
+    }),
+    mutationResponse: () => mutation.promise,
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Editable App'), 'render editable app');
+  await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
+  context.setField('title', 'Updated Editable App');
+
+  const submit = context.submitModalForm();
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/update'), 'update request');
+
+  let html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.match(html, /data-apps-chain-status="pending"/);
+  assert.match(html, /Writing to chain/);
+  assert.match(html, /Updated Editable App/);
+  assert.doesNotMatch(html, /data-apps-form/);
+
+  mutation.resolve({
+    ok: true,
+    state: 'success',
+    data: {
+      pinId: updatePin,
+      targetPinId: PIN,
+      chainWrite: {
+        path: `@${PIN}`,
+        txids: ['tx-update-1'],
+      },
+    },
+  });
+  await submit;
+
+  html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.match(html, /data-apps-chain-status="success"/);
+  assert.match(html, /MetaAPP updated on-chain/);
+  assert.match(html, /tx-update-1/);
+  assert.match(html, /1 to 2 minutes/);
+
+  await context.clickModalAction('[data-apps-copy-value="tx-update-1"]');
+  assert.deepEqual(context.clipboardWrites, ['tx-update-1']);
 });
 
 test('edit submits to /api/metaapp/update with target pin and changed values', async () => {
@@ -1149,6 +1337,8 @@ test('edit submits to /api/metaapp/update with target pin and changed values', a
   await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
 
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="title"]').value, 'Original Title');
+  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="version"]').value, 'v1.0.1');
+  assert.match(context.elements['[data-apps-modal-root]'].innerHTML, /Previous version: v1\.0\.0/);
   context.setField('title', 'Updated Title');
   context.setField('appName', 'Updated App');
   context.setChecked('runtime', 'ios', true);
@@ -1161,7 +1351,34 @@ test('edit submits to /api/metaapp/update with target pin and changed values', a
   assert.equal(request.targetPinId, PIN);
   assert.equal(request.title, 'Updated Title');
   assert.equal(request.appName, 'Updated App');
+  assert.equal(request.version, 'v1.0.1');
   assert.deepEqual(request.runtime, ['browser', 'ios']);
+});
+
+test('publish form marks required and optional fields while defaulting optional title to app name', async () => {
+  const context = createAppsPageContext();
+
+  context.run();
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
+  await context.clickElement('[data-apps-publish-open]');
+
+  const html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, /data-apps-required-field="appName"/);
+  assert.match(html, /data-apps-required-field="content"/);
+  assert.match(html, /data-apps-optional-field="title"/);
+  assert.match(html, /data-apps-optional-field="icon"/);
+  assert.match(html, /apps-required-mark[^>]*>\*<\/span>/);
+  assert.match(html, /\(optional\)/);
+
+  context.setField('appName', 'Required Fields App');
+  context.setField('content', PIN);
+  await context.submitModalForm();
+
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
+  assert.equal(request.appName, 'Required Fields App');
+  assert.equal(request.title, 'Required Fields App');
+  assert.equal(request.content, `metafile://${PIN}`);
 });
 
 test('manual multi asset field normalizes comma and newline PINs into metafile array', async () => {
@@ -1177,6 +1394,7 @@ test('manual multi asset field normalizes comma and newline PINs into metafile a
   context.setField('icon', PIN);
   context.setField('coverImg', PIN);
   context.setField('introImgs', `${PIN}, ${secondPin}\nmetafile://${thirdPin}`);
+  context.setField('content', PIN);
 
   await context.submitModalForm();
 
@@ -1185,34 +1403,43 @@ test('manual multi asset field normalizes comma and newline PINs into metafile a
   assert.deepEqual(request.introImgs, [`metafile://${PIN}`, `metafile://${secondPin}`, `metafile://${thirdPin}`]);
 });
 
-test('upload with a file path calls large upload route and stores returned metafile URI', async () => {
+test('upload with a browser File posts raw bytes to large upload route and stores returned metafile URI', async () => {
   const uploadedPin = `${'e'.repeat(64)}i0`;
+  const fileBytes = Buffer.from('content package bytes');
+  const expectedHash = createHash('sha256').update(fileBytes).digest('hex');
+  const selectedFile = {
+    name: 'bundle.zip',
+    size: 5 * 1024 * 1024,
+    type: 'application/zip',
+    arrayBuffer: async () => fileBytes.buffer.slice(fileBytes.byteOffset, fileBytes.byteOffset + fileBytes.byteLength),
+  };
   const context = createAppsPageContext({
     uploadResponse: {
       ok: true,
       state: 'success',
-      data: { metafileUri: `metafile://${uploadedPin}` },
+      data: { metafileUri: `metafile://${uploadedPin}.zip` },
     },
   });
 
   context.run();
   await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
-  await context.uploadAssetFile('content', {
-    name: 'bundle.zip',
-    path: '/tmp/bundle.zip',
-    size: 5 * 1024 * 1024,
-    type: 'application/zip',
-  });
+  await context.uploadAssetFile('content', selectedFile);
 
-  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/file/upload-large'), 'large upload request');
-  const upload = context.fetchBodies.find((entry) => entry.url === '/api/file/upload-large').body;
-  assert.deepEqual(upload, {
-    from: 'alice',
-    filePath: '/tmp/bundle.zip',
-    contentType: 'application/zip',
-  });
-  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, `metafile://${uploadedPin}`);
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url.startsWith('/api/file/upload-large?')), 'large upload request');
+  const upload = context.fetchBodies.find((entry) => entry.url.startsWith('/api/file/upload-large?'));
+  assert.equal(upload.body, selectedFile);
+  assert.equal(upload.headers['content-type'], 'application/zip');
+  const uploadUrl = new URL(upload.url, 'http://localhost');
+  assert.equal(uploadUrl.pathname, '/api/file/upload-large');
+  assert.equal(uploadUrl.searchParams.get('mode'), 'raw');
+  assert.equal(uploadUrl.searchParams.get('from'), 'alice');
+  assert.equal(uploadUrl.searchParams.get('fileName'), 'bundle.zip');
+  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, `metafile://${uploadedPin}.zip`);
+  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="contentHash"]').value, expectedHash);
+  const contentHashSource = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-content-hash-source]');
+  assert.ok(contentHashSource);
+  assert.match(contentHashSource.textContent, new RegExp(`metafile://${uploadedPin}\\.zip`));
 
   context.setField('appName', 'Uploaded App');
   context.setField('title', 'Uploaded App');
@@ -1222,11 +1449,18 @@ test('upload with a file path calls large upload route and stores returned metaf
 
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
-  assert.equal(request.content, `metafile://${uploadedPin}`);
+  assert.equal(request.content, `metafile://${uploadedPin}.zip`);
+  assert.equal(request.contentHash, expectedHash);
 });
 
-test('upload without a file path shows a field-level error and does not fake a URI', async () => {
-  const context = createAppsPageContext();
+test('upload failure after raw browser file upload shows a field-level error and does not fake a URI', async () => {
+  const context = createAppsPageContext({
+    uploadResponse: {
+      ok: false,
+      state: 'failed',
+      message: 'upload unavailable',
+    },
+  });
 
   context.run();
   await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
@@ -1237,12 +1471,11 @@ test('upload without a file path shows a field-level error and does not fake a U
     type: 'application/zip',
   });
 
-  const uploadRequests = context.fetchBodies.filter((entry) => entry.url === '/api/file/upload' || entry.url === '/api/file/upload-large');
-  assert.deepEqual(uploadRequests, []);
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url.startsWith('/api/file/upload?')), 'upload request');
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, '');
   const error = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-field-error="content"]');
   assert.ok(error);
-  assert.match(error.textContent, /path/i);
+  assert.match(error.textContent, /upload unavailable/i);
 });
 
 test('invalid manual asset PIN blocks publish and marks the field error', async () => {
@@ -1255,6 +1488,7 @@ test('invalid manual asset PIN blocks publish and marks the field error', async 
   context.setField('title', 'Invalid Asset App');
   context.setField('icon', 'not-a-pin');
   context.setField('coverImg', PIN);
+  context.setField('content', PIN);
 
   await context.submitModalForm();
 
@@ -1275,6 +1509,7 @@ test('invalid intro image PIN blocks edit update and marks introImgs', async () 
         icon: `metafile://${PIN}`,
         coverImg: `metafile://${PIN}`,
         introImgs: [`metafile://${PIN}`],
+        content: `metafile://${PIN}`,
         runtime: 'browser',
         contentType: 'application/zip',
         codeType: 'application/zip',
@@ -1370,7 +1605,7 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
     uploadResponse: (url, body, count) => ({
       ok: true,
       state: 'success',
-      data: { metafileUri: count === 1 ? `metafile://${firstUploadedPin}` : `metafile://${secondUploadedPin}` },
+      data: { metafileUri: count === 1 ? `metafile://${firstUploadedPin}.png` : `metafile://${secondUploadedPin}.png` },
     }),
   });
 
@@ -1378,30 +1613,35 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
   await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
   await context.clickElement('[data-apps-publish-open]');
   await context.uploadAssetFile('introImgs', [
-    { name: 'one.png', path: '/tmp/one.png', size: 512, type: 'image/png' },
-    { name: 'two.png', path: '/tmp/two.png', size: 1024, type: 'image/png' },
+    { name: 'one.png', size: 512, type: 'image/png' },
+    { name: 'two.png', size: 1024, type: 'image/png' },
   ]);
 
   await context.waitFor(
-    () => context.fetchBodies.filter((entry) => entry.url === '/api/file/upload').length === 2,
+    () => context.fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload?')).length === 2,
     'two upload requests',
   );
   assert.deepEqual(
-    context.fetchBodies.filter((entry) => entry.url === '/api/file/upload').map((entry) => entry.body.filePath),
-    ['/tmp/one.png', '/tmp/two.png'],
+    context.fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload?')).map((entry) => entry.body.name),
+    ['one.png', 'two.png'],
+  );
+  assert.deepEqual(
+    context.fetchBodies.filter((entry) => entry.url.startsWith('/api/file/upload?')).map((entry) => new URL(entry.url, 'http://localhost').searchParams.get('fileName')),
+    ['one.png', 'two.png'],
   );
   assert.equal(
     context.elements['[data-apps-modal-root]'].querySelector('[name="introImgs"]').value,
-    `metafile://${firstUploadedPin}\nmetafile://${secondUploadedPin}`,
+    `metafile://${firstUploadedPin}.png\nmetafile://${secondUploadedPin}.png`,
   );
 
   context.setField('appName', 'Uploaded Intro App');
   context.setField('title', 'Uploaded Intro App');
   context.setField('icon', PIN);
   context.setField('coverImg', PIN);
+  context.setField('content', PIN);
   await context.submitModalForm();
 
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
-  assert.deepEqual(request.introImgs, [`metafile://${firstUploadedPin}`, `metafile://${secondUploadedPin}`]);
+  assert.deepEqual(request.introImgs, [`metafile://${firstUploadedPin}.png`, `metafile://${secondUploadedPin}.png`]);
 });

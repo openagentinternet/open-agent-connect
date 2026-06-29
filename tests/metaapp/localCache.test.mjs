@@ -154,6 +154,30 @@ test('modify update records keep firstPinId from the supplied target', async () 
   assert.equal(state.records[0].firstPinId, 'original-create-pin');
 });
 
+test('local revoke records hide matching local and indexer records while sync catches up', async () => {
+  const store = createMetaAppLocalCacheStore(await makeProfileRoot('revoke'));
+  await store.writeIndexer({
+    version: 1,
+    updatedAt: 20,
+    records: [
+      record('indexed-create-pin', { source: 'indexer', firstPinId: 'original-create-pin', title: 'Indexed create' }),
+    ],
+  });
+  await store.writeLocal({
+    version: 1,
+    updatedAt: 30,
+    records: [
+      record('local-create-pin', { firstPinId: 'original-create-pin', title: 'Local create' }),
+      record('local-revoke-pin', { firstPinId: 'original-create-pin', operation: 'revoke', updatedAt: 30 }),
+      record('unrelated-local-pin', { firstPinId: 'unrelated-local-pin', title: 'Unrelated local' }),
+    ],
+  });
+
+  const merged = await store.listMerged();
+
+  assert.deepEqual(merged.map((item) => item.pinId), ['unrelated-local-pin']);
+});
+
 test('merged listing returns indexer records first and then local optimistic records not yet indexed', async () => {
   const store = createMetaAppLocalCacheStore(await makeProfileRoot('merge'));
   await store.writeIndexer({

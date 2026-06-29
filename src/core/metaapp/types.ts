@@ -41,7 +41,7 @@ export interface MetaAppPreviewPlan {
   manualAction?: MetaAppManualAction;
 }
 
-export type MetaAppOperation = 'create' | 'modify';
+export type MetaAppOperation = 'create' | 'modify' | 'revoke';
 
 export interface MetaAppGalleryRecord {
   pinId: string;
