@@ -496,26 +496,6 @@
         box-shadow: 0 0 0 3px var(--accent-soft);
       }
 
-      .current-uri {
-        display: flex;
-        gap: 8px;
-        min-width: 0;
-        color: var(--dim);
-        font-size: 12px;
-      }
-
-      .current-uri span {
-        flex: 0 0 auto;
-        font-weight: 700;
-      }
-
-      .current-uri code {
-        min-width: 0;
-        overflow-wrap: anywhere;
-        color: #415065;
-        font-family: var(--mono);
-      }
-
       .status-line {
         min-height: 18px;
         color: var(--muted);
@@ -534,7 +514,7 @@
         position: absolute;
         z-index: 20;
         right: 0;
-        top: calc(100% + 6px);
+        bottom: calc(100% + 6px);
         width: min(560px, 100%);
         border: 1px solid var(--border);
         border-radius: 8px;
@@ -827,11 +807,6 @@
         return '';
       }
 
-      function currentUri() {
-        if (draft.source === 'default') return 'Default';
-        return protocolFor(draft.source) + (draft.ref || '');
-      }
-
       function setStatus(text, tone) {
         saveStatus.textContent = text || '';
         saveStatus.className = 'status-line' + (tone ? ' ' + tone : '');
@@ -881,7 +856,6 @@
         if (draft.source === 'default') {
           control.innerHTML = `
             <div class="status-line success">Default homepage is selected.</div>
-            <div class="current-uri"><span>Current URI</span><code>Default</code></div>
           `;
           return;
         }
@@ -898,8 +872,6 @@
             </div>
             ${action}
           </div>
-          <div class="current-uri"><span>Current URI</span><code data-current-uri>${escapeHtml(currentUri())}</code></div>
-          <div class="status-line" data-inline-status></div>
           ${isMetaApp ? renderMetaAppPicker() : ''}
         `;
       }
@@ -908,8 +880,6 @@
         const input = document.querySelector('[data-homepage-ref]');
         if (!input) return;
         draft.ref = input.value.trim();
-        const uri = document.querySelector('[data-current-uri]');
-        if (uri) uri.textContent = currentUri();
       }
 
       function bindHomepageControl() {
