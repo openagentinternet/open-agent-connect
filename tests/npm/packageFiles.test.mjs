@@ -37,6 +37,10 @@ const AGENT_BROWSER_DEV_PACKAGES = ['@openagentinternet/agent-browser-test-harne
 const EXACT_SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 async function readPackDryRun() {
+  await execFile('npm', ['run', 'build'], {
+    cwd: REPO_ROOT,
+    maxBuffer: 100 * 1024 * 1024,
+  });
   const { stdout } = await execFile('npm', ['pack', '--dry-run', '--json'], {
     cwd: REPO_ROOT,
     maxBuffer: 100 * 1024 * 1024,

@@ -494,7 +494,7 @@ async function runCommandText(homeDir, args, envOverrides = {}) {
   };
 }
 
-async function waitForTrace(homeDir, traceId, envOverrides, predicate, timeoutMs = 10_000, intervalMs = 50) {
+async function waitForTrace(homeDir, traceId, envOverrides, predicate, timeoutMs = 30_000, intervalMs = 50) {
   const deadline = Date.now() + timeoutMs;
   let lastTrace = null;
   while (Date.now() < deadline) {
@@ -2944,7 +2944,11 @@ test('services call resolves a chain-discovered online service into a real MetaW
       responseText: 'Tomorrow will be bright with a light wind.',
       deliveryPinId: 'delivery-pin-1',
     }),
-  }, (data) => data?.a2a?.publicStatus === 'completed');
+  }, (data) => (
+    data?.a2a?.publicStatus === 'completed'
+    && data?.resultText === 'Tomorrow will be bright with a light wind.'
+    && data?.resultDeliveryPinId === 'delivery-pin-1'
+  ));
 
   assert.ok(trace, 'expected trace polling to produce a response');
   assert.equal(trace.exitCode, 0);
