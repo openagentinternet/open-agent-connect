@@ -2482,6 +2482,26 @@ test('GET /ui/assets/platforms/codex.svg serves a platform logo asset', async (t
   assert.match(svg, /<svg\b/i);
 });
 
+test('GET /ui/assets/chains serves default write network chain icons', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const assets = [
+    { path: '/ui/assets/chains/mvc.png', contentType: /image\/png/i },
+    { path: '/ui/assets/chains/btc.svg', contentType: /image\/svg\+xml/i },
+    { path: '/ui/assets/chains/doge.svg', contentType: /image\/svg\+xml/i },
+    { path: '/ui/assets/chains/opcat.png', contentType: /image\/png/i },
+  ];
+
+  for (const asset of assets) {
+    const response = await fetch(`${server.baseUrl}${asset.path}`);
+
+    assert.equal(response.status, 200, asset.path);
+    assert.match(response.headers.get('content-type') ?? '', asset.contentType, asset.path);
+    assert.ok((await response.arrayBuffer()).byteLength > 0, asset.path);
+  }
+});
+
 test('GET /api/network/services forwards query filters to network.listServices', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
