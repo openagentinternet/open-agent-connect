@@ -401,11 +401,14 @@ function createAppsPageContext(options = {}) {
               message: 'confirmation required',
             }));
           }
-          return Promise.resolve(response(options.mutationResponse ?? {
+          const mutationPayload = typeof options.mutationResponse === 'function'
+            ? options.mutationResponse(urlText, bodyPayload)
+            : options.mutationResponse;
+          return Promise.resolve(mutationPayload ?? {
             ok: true,
             state: 'success',
             data: { pinId: `${'b'.repeat(64)}i0` },
-          }));
+          }).then((payload) => response(payload));
         }
         if (isFileUpload) {
           const uploadPayload = typeof options.uploadResponse === 'function'
@@ -1118,6 +1121,58 @@ test('publish submits normalized form payload to /api/metaapp/publish', async ()
   assert.equal(new URL(reload, 'http://localhost').searchParams.get('cursor'), null);
 });
 
+test('publish keeps the modal open with chain progress and success txids', async () => {
+  const publishPin = `${'c'.repeat(64)}i0`;
+  const mutation = deferred();
+  const context = createAppsPageContext({
+    mutationResponse: () => mutation.promise,
+  });
+
+  context.run();
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
+  await context.clickElement('[data-apps-publish-open]');
+
+  context.setField('appName', 'Agent Wiki Builder');
+  context.setField('title', 'Agent Wiki Builder');
+  context.setField('content', `metafile://${PIN}.html`);
+
+  const submit = context.submitModalForm();
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+
+  let html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.match(html, /data-apps-chain-status="pending"/);
+  assert.match(html, /Writing to chain/);
+  assert.match(html, /Agent Wiki Builder/);
+  assert.doesNotMatch(html, /data-apps-form/);
+
+  mutation.resolve({
+    ok: true,
+    state: 'success',
+    data: {
+      pinId: publishPin,
+      metaappUri: `metaapp://${publishPin}`,
+      chainWrite: {
+        path: '/protocols/metaapp',
+        txids: ['tx-publish-1', 'tx-publish-2'],
+      },
+    },
+  });
+  await submit;
+
+  html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.match(html, /data-apps-chain-status="success"/);
+  assert.match(html, /MetaAPP published on-chain/);
+  assert.match(html, /tx-publish-1/);
+  assert.match(html, /tx-publish-2/);
+  assert.match(html, /1 to 2 minutes/);
+  assert.match(html, /data-apps-copy-value="tx-publish-1"/);
+
+  await context.clickModalAction('[data-apps-copy-value="tx-publish-1"]');
+  assert.deepEqual(context.clipboardWrites, ['tx-publish-1']);
+});
+
 test('publish preserves http image refs while keeping packages as metafile refs', async () => {
   const secondPin = `${'a'.repeat(64)}i0`;
   const context = createAppsPageContext();
@@ -1143,6 +1198,64 @@ test('publish preserves http image refs while keeping packages as metafile refs'
   assert.deepEqual(request.introImgs, ['https://cdn.example.test/intro.png', `metafile://${secondPin}`]);
   assert.equal(request.content, `metafile://${PIN}`);
   assert.equal(request.code, `metafile://${secondPin}`);
+});
+
+test('edit keeps the modal open with chain progress and update txids', async () => {
+  const updatePin = `${'d'.repeat(64)}i0`;
+  const mutation = deferred();
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Editable App',
+        appName: 'Editable App',
+        runtime: 'browser',
+        content: `metafile://${PIN}.html`,
+        disabled: false,
+      }],
+      total: 1,
+    }),
+    mutationResponse: () => mutation.promise,
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Editable App'), 'render editable app');
+  await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
+  context.setField('title', 'Updated Editable App');
+
+  const submit = context.submitModalForm();
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/update'), 'update request');
+
+  let html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.match(html, /data-apps-chain-status="pending"/);
+  assert.match(html, /Writing to chain/);
+  assert.match(html, /Updated Editable App/);
+  assert.doesNotMatch(html, /data-apps-form/);
+
+  mutation.resolve({
+    ok: true,
+    state: 'success',
+    data: {
+      pinId: updatePin,
+      targetPinId: PIN,
+      chainWrite: {
+        path: `@${PIN}`,
+        txids: ['tx-update-1'],
+      },
+    },
+  });
+  await submit;
+
+  html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.equal(context.elements['[data-apps-modal-root]'].hidden, false);
+  assert.match(html, /data-apps-chain-status="success"/);
+  assert.match(html, /MetaAPP updated on-chain/);
+  assert.match(html, /tx-update-1/);
+  assert.match(html, /1 to 2 minutes/);
+
+  await context.clickModalAction('[data-apps-copy-value="tx-update-1"]');
+  assert.deepEqual(context.clipboardWrites, ['tx-update-1']);
 });
 
 test('edit submits to /api/metaapp/update with target pin and changed values', async () => {

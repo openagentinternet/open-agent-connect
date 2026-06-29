@@ -13,6 +13,18 @@ interface AppsPageRuntimeText {
   basicInformation: string;
   botFallback: string;
   cancel: string;
+  chainCopyTxid: string;
+  chainErrorTitle: string;
+  chainNoTxid: string;
+  chainPendingTitle: string;
+  chainPublishPendingMessage: string;
+  chainPublishSuccessMessage: string;
+  chainPublishSuccessTitle: string;
+  chainSyncDelayNotice: string;
+  chainTransactionIds: string;
+  chainUpdatePendingMessage: string;
+  chainUpdateSuccessMessage: string;
+  chainUpdateSuccessTitle: string;
   close: string;
   copied: string;
   codeLabel: string;
@@ -114,6 +126,18 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     basicInformation: tx('apps.form.basicInformation'),
     botFallback: tx('apps.botFallback'),
     cancel: tx('apps.form.cancel'),
+    chainCopyTxid: tx('apps.chain.copyTxid'),
+    chainErrorTitle: tx('apps.chain.errorTitle'),
+    chainNoTxid: tx('apps.chain.noTxid'),
+    chainPendingTitle: tx('apps.chain.pendingTitle'),
+    chainPublishPendingMessage: tx('apps.chain.publishPendingMessage'),
+    chainPublishSuccessMessage: tx('apps.chain.publishSuccessMessage'),
+    chainPublishSuccessTitle: tx('apps.chain.publishSuccessTitle'),
+    chainSyncDelayNotice: tx('apps.chain.syncDelayNotice'),
+    chainTransactionIds: tx('apps.chain.transactionIds'),
+    chainUpdatePendingMessage: tx('apps.chain.updatePendingMessage'),
+    chainUpdateSuccessMessage: tx('apps.chain.updateSuccessMessage'),
+    chainUpdateSuccessTitle: tx('apps.chain.updateSuccessTitle'),
     close: tx('apps.form.close'),
     copied: tx('apps.copied'),
     codeLabel: tx('apps.form.code'),
@@ -662,6 +686,143 @@ function buildAppsPageRuntimeSource(
       '</section>';
   };
 
+  const renderChainVisual = (done) => {
+    return '<div class="apps-chain-visual' + (done ? ' apps-chain-visual-done' : '') + '" aria-hidden="true">' +
+      '<span class="apps-chain-link"></span>' +
+      '<span class="apps-chain-node apps-chain-node-left"></span>' +
+      '<span class="apps-chain-core"></span>' +
+      '<span class="apps-chain-node apps-chain-node-right"></span>' +
+    '</div>';
+  };
+
+  const chainModeText = (mode, publishKey, publishFallback, updateKey, updateFallback) => {
+    return mode === 'edit'
+      ? uiText(updateKey, updateFallback)
+      : uiText(publishKey, publishFallback);
+  };
+
+  const metaAppActionName = (payload, fallback) => {
+    return normalizeText(payload && (payload.title || payload.appName)) || normalizeText(fallback) || uiText('apps.untitledMetaApp', UI_TEXT.untitledMetaApp);
+  };
+
+  const renderChainStatusShell = (status, title, description, bodyHtml, actionsHtml) => {
+    const closeButton = status === 'pending'
+      ? ''
+      : '<button class="apps-modal-close" type="button" data-apps-modal-close aria-label="' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '">x</button>';
+    return '<div class="apps-modal-backdrop"' + (status === 'pending' ? '' : ' data-apps-modal-close') + '></div>' +
+      '<section class="apps-modal-dialog apps-chain-dialog" role="dialog" aria-modal="true" aria-labelledby="apps-modal-title" tabindex="-1">' +
+        '<header class="apps-modal-header">' +
+          '<div><h2 id="apps-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(description) + '</p></div>' +
+          closeButton +
+        '</header>' +
+        bodyHtml +
+        (actionsHtml ? '<footer class="apps-modal-actions apps-chain-actions">' + actionsHtml + '</footer>' : '') +
+      '</section>';
+  };
+
+  const renderChainPendingModal = (mode, payload, fallbackName) => {
+    const name = metaAppActionName(payload, fallbackName);
+    const title = uiText('apps.chain.pendingTitle', UI_TEXT.chainPendingTitle);
+    const message = chainModeText(
+      mode,
+      'apps.chain.publishPendingMessage',
+      UI_TEXT.chainPublishPendingMessage,
+      'apps.chain.updatePendingMessage',
+      UI_TEXT.chainUpdatePendingMessage,
+    );
+    const body = '<div class="apps-chain-body" data-apps-chain-status="pending">' +
+      renderChainVisual(false) +
+      '<div class="apps-chain-copy">' +
+        '<strong>' + escapeHtml(name) + '</strong>' +
+        '<p>' + escapeHtml(message) + '</p>' +
+      '</div>' +
+    '</div>';
+    return renderChainStatusShell('pending', title, message, body, '');
+  };
+
+  const chainWriteFromResult = (result) => {
+    const chainWrite = result && result.chainWrite;
+    return chainWrite && typeof chainWrite === 'object' && !Array.isArray(chainWrite) ? chainWrite : {};
+  };
+
+  const chainTxidRows = (result) => {
+    const chainWrite = chainWriteFromResult(result);
+    const txids = [];
+    const push = (value) => {
+      const text = normalizeText(value);
+      if (text && !txids.includes(text)) txids.push(text);
+    };
+    if (Array.isArray(chainWrite.txids)) chainWrite.txids.forEach(push);
+    if (Array.isArray(result && result.txids)) result.txids.forEach(push);
+    push(chainWrite.txid);
+    push(result && result.txid);
+    const path = normalizeText(chainWrite.path || (result && result.path)) || 'transaction';
+    if (!txids.length) {
+      return '<div class="apps-chain-note">' + escapeHtml(uiText('apps.chain.noTxid', UI_TEXT.chainNoTxid)) + '</div>';
+    }
+    const copyLabel = uiText('apps.chain.copyTxid', UI_TEXT.chainCopyTxid);
+    return '<div class="apps-chain-txid-list">' + txids.map((txid) => (
+      '<div class="apps-chain-txid-row">' +
+        '<div><span>' + escapeHtml(path) + '</span><code>' + escapeHtml(txid) + '</code></div>' +
+        '<button class="apps-copy-btn" type="button" data-apps-copy-value="' + escapeHtml(txid) + '">' + escapeHtml(copyLabel) + '</button>' +
+      '</div>'
+    )).join('') + '</div>';
+  };
+
+  const renderChainSuccessModal = (mode, payload, result, fallbackName) => {
+    const name = metaAppActionName(payload, fallbackName);
+    const title = chainModeText(
+      mode,
+      'apps.chain.publishSuccessTitle',
+      UI_TEXT.chainPublishSuccessTitle,
+      'apps.chain.updateSuccessTitle',
+      UI_TEXT.chainUpdateSuccessTitle,
+    );
+    const message = chainModeText(
+      mode,
+      'apps.chain.publishSuccessMessage',
+      UI_TEXT.chainPublishSuccessMessage,
+      'apps.chain.updateSuccessMessage',
+      UI_TEXT.chainUpdateSuccessMessage,
+    );
+    const body = '<div class="apps-chain-body" data-apps-chain-status="success">' +
+      renderChainVisual(true) +
+      '<div class="apps-chain-copy">' +
+        '<strong>' + escapeHtml(name) + '</strong>' +
+        '<p>' + escapeHtml(message) + '</p>' +
+      '</div>' +
+      '<section class="apps-chain-section">' +
+        '<h3>' + escapeHtml(uiText('apps.chain.transactionIds', UI_TEXT.chainTransactionIds)) + '</h3>' +
+        chainTxidRows(result || {}) +
+      '</section>' +
+      '<p class="apps-chain-note">' + escapeHtml(uiText('apps.chain.syncDelayNotice', UI_TEXT.chainSyncDelayNotice)) + '</p>' +
+    '</div>';
+    const actions = '<button class="btn btn-primary" type="button" data-apps-modal-close>' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '</button>';
+    return renderChainStatusShell('success', title, message, body, actions);
+  };
+
+  const renderChainErrorModal = (mode, payload, message, fallbackName) => {
+    const name = metaAppActionName(payload, fallbackName);
+    const title = uiText('apps.chain.errorTitle', UI_TEXT.chainErrorTitle);
+    const body = '<div class="apps-chain-body" data-apps-chain-status="error">' +
+      '<div class="apps-chain-copy">' +
+        '<strong>' + escapeHtml(name) + '</strong>' +
+        '<p class="apps-chain-error">' + escapeHtml(message || uiText('apps.requestFailed', UI_TEXT.requestFailed)) + '</p>' +
+      '</div>' +
+    '</div>';
+    const actions = '<button class="btn btn-primary" type="button" data-apps-modal-close>' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '</button>';
+    return renderChainStatusShell('error', title, chainModeText(mode, 'apps.form.publishTitle', UI_TEXT.publishModalTitle, 'apps.form.editTitle', UI_TEXT.editModalTitle), body, actions);
+  };
+
+  const showChainStatusModal = (html) => {
+    if (!elements.modalRoot) return;
+    state.modal = null;
+    elements.modalRoot.hidden = false;
+    elements.modalRoot.innerHTML = html;
+    const dialog = elements.modalRoot.querySelector('.apps-modal-dialog');
+    if (dialog && typeof dialog.focus === 'function') dialog.focus();
+  };
+
   const displayValue = (value) => {
     if (Array.isArray(value)) return value.map(normalizeText).filter(Boolean).join('\\n') || '-';
     if (value && typeof value === 'object') return JSON.stringify(value, null, 2);
@@ -991,13 +1152,19 @@ function buildAppsPageRuntimeSource(
     const mode = form.getAttribute('data-apps-form-mode') || 'publish';
     const targetPinId = normalizeText(form.getAttribute('data-apps-target-pin-id'));
     if (mode === 'edit') payload.targetPinId = targetPinId;
+    const displayName = metaAppActionName(payload, targetPinId);
     try {
-      await postJson(mode === 'edit' ? '/api/metaapp/update' : '/api/metaapp/publish', payload);
-      closeAppsModal();
-      await reloadFirstAppsPage();
+      showChainStatusModal(renderChainPendingModal(mode, payload, displayName));
+      const result = await postJson(mode === 'edit' ? '/api/metaapp/update' : '/api/metaapp/publish', payload);
+      showChainStatusModal(renderChainSuccessModal(mode, payload, result, displayName));
+      try {
+        await reloadFirstAppsPage();
+      } catch (error) {
+        showNotice('error', uiText('apps.loadErrorTitle', UI_TEXT.loadErrorTitle), error && error.message ? error.message : String(error));
+      }
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
-      setModalFormError(uiText('apps.form.errorTitle', UI_TEXT.formErrorTitle) + ' ' + message);
+      showChainStatusModal(renderChainErrorModal(mode, payload, uiText('apps.form.errorTitle', UI_TEXT.formErrorTitle) + ' ' + message, displayName));
     }
   };
 
