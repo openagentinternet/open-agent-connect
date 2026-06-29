@@ -1,6 +1,9 @@
 import { sendPrivateChat } from './privateChat';
 import { loadChatPersona } from './chatPersonaLoader';
-import { persistA2AConversationMessageBestEffort } from '../a2a/conversationPersistence';
+import {
+  persistA2AConversationMessageBestEffort,
+  type A2AConversationMessagePersister,
+} from '../a2a/conversationPersistence';
 import { classifySimplemsgContent } from '../a2a/simplemsgClassifier';
 import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './privateChatStateStore';
 import type { ChatStrategyStore } from './chatStrategyStore';
@@ -30,6 +33,7 @@ export interface PrivateChatAutoReplyDependencies {
   selfGlobalMetaId: () => Promise<string | null>;
   resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
   replyRunner: ChatReplyRunner;
+  a2aConversationPersister?: A2AConversationMessagePersister;
   now?: () => number;
 }
 
@@ -327,7 +331,7 @@ export function createPrivateChatAutoReplyOrchestrator(
           chain: outboundReply.network ?? 'mvc',
           timestamp: outboundRecord.timestamp,
         },
-      });
+      }, deps.a2aConversationPersister);
 
       const latestConversation = await deps.stateStore.getConversationByPeer(input.peerGlobalMetaId);
       let updatedConversation: PrivateChatConversation = {
@@ -472,7 +476,7 @@ export function createPrivateChatAutoReplyOrchestrator(
           timestamp: inboundMessageRecord.timestamp,
           raw: message.rawMessage,
         },
-      });
+      }, deps.a2aConversationPersister);
 
       if (conversation.state === 'closed') {
         await deps.stateStore.upsertConversation(conversation);
