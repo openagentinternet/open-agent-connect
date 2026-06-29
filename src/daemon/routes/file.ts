@@ -32,6 +32,7 @@ const PIN_CONTENT_PATTERNS = [
   /^\/metafile-indexer\/api\/v1\/files\/accelerate\/content\/([^/?#]+)/iu,
   /^\/metafile-indexer\/api\/v1\/users\/avatar\/accelerate\/([^/?#]+)/iu,
 ];
+const EXTENSION_BEARING_METAFILE_PIN_PATTERN = /^([0-9a-f]{64}i0)(?:\.[a-z0-9][a-z0-9+-]{0,31})?$/iu;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -60,6 +61,12 @@ function stripQueryAndFragment(value: string): string {
   return value.split(/[?#]/u)[0] ?? value;
 }
 
+function normalizeMetafilePinReference(value: string): string {
+  const stripped = stripQueryAndFragment(value).trim();
+  const match = stripped.match(EXTENSION_BEARING_METAFILE_PIN_PATTERN);
+  return match?.[1] ?? stripped;
+}
+
 function isLikelyPinId(value: string): boolean {
   return /^[0-9a-f]{64}(?:i\d+)?$/iu.test(value) || /^[A-Za-z0-9._:-]{8,256}$/u.test(value);
 }
@@ -70,7 +77,7 @@ function extractAvatarPinId(reference: unknown): string {
     return '';
   }
   if (/^metafile:\/\//iu.test(normalized)) {
-    const pinId = stripQueryAndFragment(normalized.slice('metafile://'.length).trim());
+    const pinId = normalizeMetafilePinReference(normalized.slice('metafile://'.length).trim());
     return isLikelyPinId(pinId) ? pinId : '';
   }
 
@@ -88,12 +95,12 @@ function extractAvatarPinId(reference: unknown): string {
   for (const pattern of PIN_CONTENT_PATTERNS) {
     const match = path.match(pattern);
     if (match?.[1]) {
-      const pinId = decodeURIComponent(stripQueryAndFragment(match[1]));
+      const pinId = normalizeMetafilePinReference(decodeURIComponent(match[1]));
       return isLikelyPinId(pinId) ? pinId : '';
     }
   }
 
-  const bare = stripQueryAndFragment(normalized);
+  const bare = normalizeMetafilePinReference(normalized);
   if (!bare.includes('/') && !bare.includes('\\') && isLikelyPinId(bare)) {
     return bare;
   }

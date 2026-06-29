@@ -1440,6 +1440,43 @@ test('GET /api/file/avatar resolves MetaID avatar pin references through the dae
   );
 });
 
+test('GET /api/file/avatar strips metafile URI extensions before fetching content', async (t) => {
+  const avatarPinId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0';
+  const originalFetch = globalThis.fetch;
+  const fetchedUrls = [];
+  globalThis.fetch = async (url) => {
+    fetchedUrls.push(String(url));
+    if (String(url).includes(`/content/${avatarPinId}`)) {
+      return new Response(Buffer.from([137, 80, 78, 71]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      });
+    }
+    return new Response('missing', {
+      status: 404,
+      headers: { 'content-type': 'text/plain' },
+    });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const reference = `metafile://${avatarPinId}.png`;
+  const response = await originalFetch(`${server.baseUrl}/api/file/avatar?ref=${encodeURIComponent(reference)}`);
+  const body = Buffer.from(await response.arrayBuffer());
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /image\/png/i);
+  assert.deepEqual([...body], [137, 80, 78, 71]);
+  assert.ok(
+    fetchedUrls.some((url) => url === `http://localhost:7281/content/${avatarPinId}`),
+    `Expected extension-bearing metafile URI to resolve through bare pin id, got ${fetchedUrls.join(', ')}`,
+  );
+});
+
 test('POST /api/buzz/post parses the JSON body and forwards it to buzz.post', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());

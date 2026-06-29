@@ -623,6 +623,38 @@ test('apps page resolves metafile card cover and icon images', async () => {
   assert.match(html, new RegExp(`class="apps-card-icon" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
 });
 
+test('apps page resolves extension-bearing metafile images on cards and detail shots', async () => {
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        title: 'Extension Metafile Image App',
+        appName: 'Extension Metafile Image App',
+        icon: `metafile://${PIN}.png`,
+        coverImg: `metafile://${PIN}.jpg`,
+        introImgs: [`metafile://${PIN}.webp`],
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Extension Metafile Image App'), 'render extension metafile image app');
+  let html = context.elements['[data-apps-grid]'].innerHTML;
+  assert.match(html, new RegExp(`class="apps-card-cover-img" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
+  assert.match(html, new RegExp(`class="apps-card-icon" src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
+  assert.doesNotMatch(html, /ref=[^"]+\.png/u);
+  assert.doesNotMatch(html, /ref=[^"]+\.jpg/u);
+
+  await context.clickGridAction(`[data-apps-detail="${PIN}"]`);
+  html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, /apps-detail-shots/);
+  assert.match(html, new RegExp(`src="/api/file/avatar\\?ref=${PIN}"`, 'u'));
+  assert.doesNotMatch(html, /ref=[^"]+\.webp/u);
+});
+
 test('apps page Bot picker renders profile avatars when available', async () => {
   const avatarDataUrl = 'data:image/png;base64,aW1hZ2U=';
   const context = createAppsPageContext({

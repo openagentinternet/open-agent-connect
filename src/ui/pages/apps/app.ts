@@ -394,16 +394,21 @@ function buildAppsPageRuntimeSource(
     }
   };
   const extractMetafilePinReference = (value) => {
+    const normalizePinReference = (reference) => {
+      const text = normalizeText(reference).split(/[?#]/)[0].trim();
+      const match = text.match(METAAPP_METAFILE_REFERENCE_PATTERN);
+      return match && match[1] ? match[1] : text;
+    };
     const raw = normalizeText(value);
     if (!raw) return '';
     if (raw.toLowerCase().indexOf('metafile://') === 0) {
       const suffix = raw.slice('metafile://'.length).trim().split(/[?#]/)[0] || '';
-      return suffix;
+      return normalizePinReference(suffix);
     }
     const path = pathFromUrlLike(raw);
     for (const prefix of FILE_CONTENT_PATH_PREFIXES) {
       if (path.toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
-        return decodeURIComponent((path.slice(prefix.length).split(/[?#]/)[0] || '').trim());
+        return normalizePinReference(decodeURIComponent((path.slice(prefix.length).split(/[?#]/)[0] || '').trim()));
       }
     }
     if (/^[0-9a-f]{64}(?:i[0-9]+)?$/iu.test(raw)) return raw;
