@@ -40,7 +40,7 @@ function normalizeOptionalText(value: unknown): string | undefined {
 }
 
 function normalizeOperation(value: unknown): MetaAppOperation {
-  return value === 'modify' ? 'modify' : 'create';
+  return value === 'modify' || value === 'revoke' ? value : 'create';
 }
 
 function normalizeTags(value: unknown): string[] {

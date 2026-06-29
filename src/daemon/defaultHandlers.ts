@@ -10703,6 +10703,71 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return localRecords.find((record: MetaAppGalleryRecord) => record.pinId === targetPinId) ?? null;
   }
 
+  async function upsertMetaAppLocalRevoke(input: {
+    actor: {
+      homeDir: string;
+      runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
+      mvcAddress: string;
+    };
+    rawInput: Record<string, unknown>;
+    result: MetabotCommandResult<Record<string, unknown>>;
+  }): Promise<void> {
+    if (!input.result.ok || input.result.state !== 'success' || !input.result.data || typeof input.result.data !== 'object') {
+      return;
+    }
+    const data = input.result.data as Record<string, unknown>;
+    const targetPinId = normalizeText(data.revokedPinId ?? input.rawInput.targetPinId);
+    const revokePinId = normalizeText(data.pinId);
+    if (!targetPinId || !revokePinId) {
+      return;
+    }
+
+    const cache = createMetaAppLocalCacheStore(input.actor.homeDir);
+    const existingRecords = await cache.listMerged().catch(() => [] as MetaAppGalleryRecord[]);
+    const previous = existingRecords.find((record) => record.pinId === targetPinId || record.firstPinId === targetPinId) ?? null;
+    const state = await input.actor.runtimeStateStore.readState().catch(() => null);
+    const identity = readObject(state?.identity);
+    const chainWrite = readObject(data.chainWrite);
+    const network = normalizeText(chainWrite?.network ?? input.rawInput.network) || previous?.network || 'mvc';
+
+    await cache.upsertLocal({
+      pinId: revokePinId,
+      firstPinId: targetPinId,
+      operation: 'revoke',
+      title: previous?.title || targetPinId,
+      appName: previous?.appName || previous?.title || targetPinId,
+      prompt: previous?.prompt,
+      icon: previous?.icon,
+      coverImg: previous?.coverImg,
+      introImgs: previous?.introImgs,
+      intro: previous?.intro,
+      version: previous?.version || '1.0.0',
+      runtime: previous?.runtime || 'browser',
+      indexFile: previous?.indexFile || 'index.html',
+      code: previous?.code || '',
+      content: previous?.content || '',
+      contentType: previous?.contentType || 'application/zip',
+      codeType: previous?.codeType || 'application/zip',
+      tags: previous?.tags || [],
+      ownerGlobalMetaId: previous?.ownerGlobalMetaId || normalizeText(identity?.globalMetaId) || 'unknown',
+      ownerAddress: previous?.ownerAddress || input.actor.mvcAddress,
+      network,
+      metawebUrl: previous?.metawebUrl || `https://metaweb.world/metaapp/${encodeURIComponent(targetPinId)}`,
+      localUiUrl: buildMetaAppAppsLocalUiUrl(targetPinId),
+      updatedAt: Date.now(),
+      source: 'local',
+      disabled: previous?.disabled,
+      status: previous?.status,
+      runUrl: previous?.runUrl,
+      downloadUrl: previous?.downloadUrl,
+      raw: {
+        chainWrite: chainWrite ?? undefined,
+        revokedPinId: targetPinId,
+        previousPinId: previous?.pinId,
+      },
+    });
+  }
+
   async function listMetaAppsForActor(actor: {
     homeDir: string;
     runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
@@ -11157,10 +11222,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         try {
-          return await deleteMetaAppPin(
+          const result = await deleteMetaAppPin(
             createMetaAppOwnerServiceActor(rawInput, actor),
             rawInput,
           );
+          await upsertMetaAppLocalRevoke({ actor, rawInput, result }).catch(() => undefined);
+          return result;
         } catch (error) {
           return commandFailed(
             'metaapp_delete_failed',

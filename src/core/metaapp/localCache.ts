@@ -38,7 +38,10 @@ function normalizeNumber(value: unknown): number | null {
 }
 
 function normalizeOperation(value: unknown): MetaAppOperation | null {
-  return value === 'create' || value === 'modify' ? value : null;
+  const operation = normalizeText(value).toLowerCase();
+  return operation === 'create' || operation === 'modify' || operation === 'revoke'
+    ? operation
+    : null;
 }
 
 function normalizeSource(value: unknown): 'local' | 'indexer' | null {
@@ -176,6 +179,14 @@ function createEmptyState(): MetaAppCacheState {
   };
 }
 
+function recordGroupKey(record: MetaAppGalleryRecord): string {
+  return normalizeText(record.firstPinId) || normalizeText(record.pinId);
+}
+
+function isHiddenOperation(operation: MetaAppOperation): boolean {
+  return operation === 'revoke';
+}
+
 function normalizeState(value: unknown): MetaAppCacheState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return createEmptyState();
@@ -263,15 +274,25 @@ export function createMetaAppLocalCacheStore(pathsOrHomeDir: string | MetabotPat
         this.readIndexer(),
         this.readLocal(),
       ]);
+      const hiddenGroupKeys = new Set<string>();
+      for (const item of [...indexerState.records, ...localState.records]) {
+        const groupKey = recordGroupKey(item);
+        if (groupKey && isHiddenOperation(item.operation)) {
+          hiddenGroupKeys.add(groupKey);
+        }
+      }
       const seenPinIds = new Set<string>();
       const merged: MetaAppGalleryRecord[] = [];
 
       for (const item of indexerState.records) {
+        if (isHiddenOperation(item.operation) || hiddenGroupKeys.has(recordGroupKey(item))) {
+          continue;
+        }
         seenPinIds.add(item.pinId);
         merged.push(item);
       }
       for (const item of localState.records) {
-        if (seenPinIds.has(item.pinId)) {
+        if (isHiddenOperation(item.operation) || hiddenGroupKeys.has(recordGroupKey(item)) || seenPinIds.has(item.pinId)) {
           continue;
         }
         seenPinIds.add(item.pinId);
