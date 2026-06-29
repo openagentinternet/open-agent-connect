@@ -9,6 +9,7 @@ import {
 
 interface AppsPageRuntimeText {
   appNameLabel: string;
+  appNameRequired: string;
   assets: string;
   basicInformation: string;
   botFallback: string;
@@ -30,7 +31,9 @@ interface AppsPageRuntimeText {
   codeLabel: string;
   codeTypeLabel: string;
   contentHashLabel: string;
+  contentHashSource: string;
   contentLabel: string;
+  contentRequired: string;
   contentTypeLabel: string;
   copyPinId: string;
   coverImgLabel: string;
@@ -81,6 +84,8 @@ interface AppsPageRuntimeText {
   noLocalBotAvailable: string;
   noUploadResult: string;
   pageSizeLabel: string;
+  optionalLabel: string;
+  previousVersionLabel: string;
   promptLabel: string;
   publishModalDescription: string;
   publishModalTitle: string;
@@ -122,6 +127,7 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
   const tx = i18n.t;
   const runtimeText: AppsPageRuntimeText = {
     appNameLabel: tx('apps.form.appName'),
+    appNameRequired: tx('apps.form.appNameRequired'),
     assets: tx('apps.form.assets'),
     basicInformation: tx('apps.form.basicInformation'),
     botFallback: tx('apps.botFallback'),
@@ -143,7 +149,9 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     codeLabel: tx('apps.form.code'),
     codeTypeLabel: tx('apps.form.codeType'),
     contentHashLabel: tx('apps.form.contentHash'),
+    contentHashSource: tx('apps.form.contentHashSource'),
     contentLabel: tx('apps.form.content'),
+    contentRequired: tx('apps.form.contentRequired'),
     contentTypeLabel: tx('apps.form.contentType'),
     copyPinId: tx('apps.copyPinId'),
     coverImgLabel: tx('apps.form.coverImg'),
@@ -194,6 +202,8 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     noLocalBotAvailable: tx('apps.noLocalBotAvailable'),
     noUploadResult: tx('apps.form.noUploadResult'),
     pageSizeLabel: tx('apps.pageSizeLabel'),
+    optionalLabel: tx('apps.form.optional'),
+    previousVersionLabel: tx('apps.form.previousVersion'),
     promptLabel: tx('apps.form.prompt'),
     publishModalDescription: tx('apps.form.publishDescription'),
     publishModalTitle: tx('apps.form.publishTitle'),
@@ -474,6 +484,7 @@ function buildAppsPageRuntimeSource(
     ['content', 'apps.form.content', UI_TEXT.contentLabel, false, false],
     ['code', 'apps.form.code', UI_TEXT.codeLabel, false, false],
   ];
+  const REQUIRED_FORM_FIELDS = new Set(['appName', 'content']);
   const UPLOAD_LARGE_THRESHOLD_BYTES = 4 * 1024 * 1024;
 
   const stripMetafileUri = (value) => {
@@ -529,6 +540,43 @@ function buildAppsPageRuntimeSource(
     return record[name];
   };
 
+  const bumpVersionValue = (value) => {
+    const text = normalizeText(value) || 'v1.0.0';
+    const match = text.match(/^(.*?)(\\d+)(\\D*)$/u);
+    if (!match) return text + '.1';
+    return match[1] + String(Number(match[2]) + 1) + match[3];
+  };
+
+  const fieldRequirementAttributes = (name) => REQUIRED_FORM_FIELDS.has(name)
+    ? ' data-apps-required-field="' + escapeHtml(name) + '"'
+    : ' data-apps-optional-field="' + escapeHtml(name) + '"';
+
+  const renderRequirementMarker = (name) => REQUIRED_FORM_FIELDS.has(name)
+    ? '<span class="apps-required-mark" aria-hidden="true">*</span>'
+    : '<span class="apps-optional-mark">' + escapeHtml(uiText('apps.form.optional', UI_TEXT.optionalLabel)) + '</span>';
+
+  const renderFieldLabel = (name, label, metaHtml) => {
+    return '<span class="apps-field-label" data-apps-field-label="' + escapeHtml(name) + '">' +
+      '<span class="apps-field-label-main">' + escapeHtml(label) + renderRequirementMarker(name) + '</span>' +
+      (metaHtml || '') +
+    '</span>';
+  };
+
+  const renderPreviousVersionLabel = (version) => {
+    const normalized = normalizeText(version);
+    if (!normalized) return '';
+    return '<small class="apps-previous-version" data-apps-previous-version="' + escapeHtml(normalized) + '">' +
+      escapeHtml(uiText('apps.form.previousVersion', UI_TEXT.previousVersionLabel, { version: normalized })) +
+    '</small>';
+  };
+
+  const renderContentHashSourceLabel = (uri) => {
+    const normalized = normalizeText(uri);
+    return '<small class="apps-content-hash-source" data-apps-content-hash-source' + (normalized ? '' : ' hidden') + '>' +
+      escapeHtml(normalized ? uiText('apps.form.contentHashSource', UI_TEXT.contentHashSource, { uri: normalized }) : '') +
+    '</small>';
+  };
+
   const assetInputValue = (value) => {
     if (Array.isArray(value)) {
       return value.map(stripMetafileUri).filter(Boolean).join('\\n');
@@ -542,17 +590,19 @@ function buildAppsPageRuntimeSource(
     return JSON.stringify(metadata, null, 2);
   };
 
-  const renderTextField = (name, label, value, wide) => {
-    return '<label class="apps-form-field' + (wide ? ' wide' : '') + '">' +
-      '<span>' + escapeHtml(label) + '</span>' +
+  const renderTextField = (name, label, value, wide, metaHtml) => {
+    return '<label class="apps-form-field' + (wide ? ' wide' : '') + '"' + fieldRequirementAttributes(name) + '>' +
+      renderFieldLabel(name, label, metaHtml) +
       '<input name="' + escapeHtml(name) + '" value="' + escapeHtml(value || '') + '">' +
+      '<p class="apps-field-error" data-apps-field-error="' + escapeHtml(name) + '" hidden></p>' +
     '</label>';
   };
 
   const renderTextareaField = (name, label, value, wide, placeholder) => {
-    return '<label class="apps-form-field' + (wide ? ' wide' : '') + '">' +
-      '<span>' + escapeHtml(label) + '</span>' +
+    return '<label class="apps-form-field' + (wide ? ' wide' : '') + '"' + fieldRequirementAttributes(name) + '>' +
+      renderFieldLabel(name, label, '') +
       '<textarea name="' + escapeHtml(name) + '"' + (placeholder ? ' placeholder="' + escapeHtml(placeholder) + '"' : '') + '>' + escapeHtml(value || '') + '</textarea>' +
+      '<p class="apps-field-error" data-apps-field-error="' + escapeHtml(name) + '" hidden></p>' +
     '</label>';
   };
 
@@ -560,8 +610,8 @@ function buildAppsPageRuntimeSource(
     const selectedValue = normalizeText(value) || options[0] || '';
     const hasSelectedOption = options.includes(selectedValue);
     const selectOptions = hasSelectedOption || !selectedValue ? options : [selectedValue, ...options];
-    return '<label class="apps-form-field">' +
-      '<span>' + escapeHtml(label) + '</span>' +
+    return '<label class="apps-form-field"' + fieldRequirementAttributes(name) + '>' +
+      renderFieldLabel(name, label, '') +
       '<select name="' + escapeHtml(name) + '">' +
         selectOptions.map((option) => {
           const isCurrent = !hasSelectedOption && option === selectedValue;
@@ -580,9 +630,9 @@ function buildAppsPageRuntimeSource(
     const manualControl = multiple
       ? '<textarea name="' + escapeHtml(fieldName) + '" placeholder="' + escapeHtml(placeholder) + '">' + escapeHtml(value) + '</textarea>'
       : '<input name="' + escapeHtml(fieldName) + '" value="' + escapeHtml(value) + '" placeholder="' + escapeHtml(placeholder) + '">';
-    return '<div class="apps-asset-field" data-apps-asset-field="' + escapeHtml(fieldName) + '">' +
+    return '<div class="apps-asset-field" data-apps-asset-field="' + escapeHtml(fieldName) + '"' + fieldRequirementAttributes(fieldName) + '>' +
       '<div class="apps-asset-heading">' +
-        '<label>' + escapeHtml(uiText(labelKey, fallbackLabel)) + '</label>' +
+        '<label>' + renderFieldLabel(fieldName, uiText(labelKey, fallbackLabel), '') + '</label>' +
         '<label class="apps-upload-button">' +
           '<input type="file" data-apps-asset-file="' + escapeHtml(fieldName) + '"' + (multiple ? ' multiple' : '') + '>' +
           '<span>' + escapeHtml(uiText('apps.form.upload', UI_TEXT.upload)) + '</span>' +
@@ -599,8 +649,8 @@ function buildAppsPageRuntimeSource(
 
   const renderRuntimeOptions = (record) => {
     const selected = new Set(normalizeRuntimeSelection(record && record.runtime));
-    return '<fieldset class="apps-runtime-field">' +
-      '<legend>' + escapeHtml(uiText('apps.form.runtime', UI_TEXT.runtimeLabel)) + '</legend>' +
+    return '<fieldset class="apps-runtime-field"' + fieldRequirementAttributes('runtime') + '>' +
+      '<legend>' + renderFieldLabel('runtime', uiText('apps.form.runtime', UI_TEXT.runtimeLabel), '') + '</legend>' +
       '<div class="apps-runtime-options">' +
         RUNTIME_OPTIONS.map(([value, key, fallback]) => (
           '<label class="apps-runtime-option">' +
@@ -631,6 +681,9 @@ function buildAppsPageRuntimeSource(
     const title = isEdit ? uiText('apps.form.editTitle', UI_TEXT.editModalTitle) : uiText('apps.form.publishTitle', UI_TEXT.publishModalTitle);
     const description = isEdit ? uiText('apps.form.editDescription', UI_TEXT.editModalDescription) : uiText('apps.form.publishDescription', UI_TEXT.publishModalDescription);
     const publisherBadge = isEdit ? '' : renderPublisherBadge();
+    const previousVersion = isEdit ? normalizeText(fieldValue(record, 'version', '')) : '';
+    const versionValue = isEdit ? bumpVersionValue(previousVersion || 'v1.0.0') : fieldValue(record, 'version', 'v1.0.0');
+    const contentHashSource = normalizeText(fieldValue(record, 'contentHash', '')) ? normalizeText(fieldValue(record, 'content', '')) : '';
     return '<div class="apps-modal-backdrop" data-apps-modal-close></div>' +
       '<section class="apps-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="apps-modal-title" tabindex="-1">' +
         '<header class="apps-modal-header">' +
@@ -661,13 +714,13 @@ function buildAppsPageRuntimeSource(
             renderRuntimeOptions(record) +
             '<div class="apps-field-grid">' +
               renderTextField('indexFile', uiText('apps.form.indexFile', UI_TEXT.indexFileLabel), fieldValue(record, 'indexFile', 'index.html')) +
-              renderTextField('version', uiText('apps.form.version', UI_TEXT.versionLabel), fieldValue(record, 'version', 'v1.0.0')) +
+              renderTextField('version', uiText('apps.form.version', UI_TEXT.versionLabel), versionValue, false, renderPreviousVersionLabel(previousVersion)) +
               renderSelectField('contentType', uiText('apps.form.contentType', UI_TEXT.contentTypeLabel), fieldValue(record, 'contentType', 'application/zip'), CONTENT_TYPE_OPTIONS) +
               renderSelectField('codeType', uiText('apps.form.codeType', UI_TEXT.codeTypeLabel), fieldValue(record, 'codeType', 'application/zip'), CODE_TYPE_OPTIONS) +
-              renderTextField('contentHash', uiText('apps.form.contentHash', UI_TEXT.contentHashLabel), fieldValue(record, 'contentHash', ''), true) +
+              renderTextField('contentHash', uiText('apps.form.contentHash', UI_TEXT.contentHashLabel), fieldValue(record, 'contentHash', ''), true, renderContentHashSourceLabel(contentHashSource)) +
               renderTextareaField('metadata', uiText('apps.form.metadata', UI_TEXT.metadataLabel), metadataInputValue(record), true, uiText('apps.form.metadataPlaceholder', UI_TEXT.metadataPlaceholder)) +
             '</div>' +
-            '<label class="apps-disabled-row"><input type="checkbox" name="disabled" value="true"' + (record && record.disabled === true ? ' checked' : '') + '><span>' + escapeHtml(uiText('apps.form.disabled', UI_TEXT.disabledFieldLabel)) + '</span></label>' +
+            '<label class="apps-disabled-row"' + fieldRequirementAttributes('disabled') + '><input type="checkbox" name="disabled" value="true"' + (record && record.disabled === true ? ' checked' : '') + '>' + renderFieldLabel('disabled', uiText('apps.form.disabled', UI_TEXT.disabledFieldLabel), '') + '</label>' +
             '<p class="apps-field-help">' + escapeHtml(uiText('apps.form.disabledHelp', UI_TEXT.disabledFieldHelp)) + '</p>' +
           '</section>' +
           '<p class="apps-form-error" data-apps-form-error hidden></p>' +
@@ -1035,6 +1088,7 @@ function buildAppsPageRuntimeSource(
     for (const [fieldName] of ASSET_FIELDS) {
       setModalFieldStatus(fieldName, '', '');
     }
+    setModalFieldStatus('appName', '', '');
     setModalFieldStatus('metadata', '', '');
   };
 
@@ -1085,18 +1139,27 @@ function buildAppsPageRuntimeSource(
     const runtime = Array.from(form.querySelectorAll('input[name="runtime"]:checked'))
       .map((input) => normalizeText(input.value))
       .filter(Boolean);
+    const appName = normalizeText(data.get('appName'));
+    const title = normalizeText(data.get('title')) || appName;
+    const content = normalizeMetafileInput(data.get('content'), 'content');
+    if (!appName) {
+      throw fieldValidationError('appName', uiText('apps.form.appNameRequired', UI_TEXT.appNameRequired));
+    }
+    if (!content) {
+      throw fieldValidationError('content', uiText('apps.form.contentRequired', UI_TEXT.contentRequired));
+    }
     return {
       from: state.selectedSlug,
       confirm: true,
-      appName: normalizeText(data.get('appName')),
-      title: normalizeText(data.get('title')),
+      appName,
+      title,
       prompt: normalizeText(data.get('prompt')),
       intro: normalizeText(data.get('intro')),
       tags: splitListInput(data.get('tags')),
       icon: normalizeImageAssetInput(data.get('icon'), 'icon'),
       coverImg: normalizeImageAssetInput(data.get('coverImg'), 'coverImg'),
       introImgs: normalizeImageAssetListInput(data.get('introImgs'), 'introImgs'),
-      content: normalizeMetafileInput(data.get('content'), 'content'),
+      content,
       code: normalizeMetafileInput(data.get('code'), 'code'),
       runtime: runtime.length ? runtime : ['browser'],
       indexFile: normalizeText(data.get('indexFile')),
@@ -1200,6 +1263,28 @@ function buildAppsPageRuntimeSource(
     }
   };
 
+  const sha256HexFromFile = async (file) => {
+    if (!file || typeof file.arrayBuffer !== 'function') return '';
+    if (!window.crypto || !window.crypto.subtle || typeof window.crypto.subtle.digest !== 'function') return '';
+    const buffer = await file.arrayBuffer();
+    const digest = await window.crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  };
+
+  const setContentHashFromUpload = (hash, uri) => {
+    const normalizedHash = normalizeText(hash);
+    const normalizedUri = normalizeText(uri);
+    const field = findModalField('contentHash');
+    if (field && normalizedHash) field.value = normalizedHash;
+    if (!elements.modalRoot) return;
+    const source = elements.modalRoot.querySelector('[data-apps-content-hash-source]');
+    if (!source) return;
+    source.hidden = !normalizedUri;
+    source.textContent = normalizedUri
+      ? uiText('apps.form.contentHashSource', UI_TEXT.contentHashSource, { uri: normalizedUri })
+      : '';
+  };
+
   const storeAssetUri = (fieldName, uri) => {
     const field = findModalField(fieldName);
     if (!field) return;
@@ -1218,6 +1303,12 @@ function buildAppsPageRuntimeSource(
     if (!files.length) return;
     try {
       for (const file of files) {
+        let contentHash = '';
+        if (fieldName === 'content') {
+          try {
+            contentHash = await sha256HexFromFile(file);
+          } catch {}
+        }
         const result = await postRawFile(
           Number(file.size || 0) > UPLOAD_LARGE_THRESHOLD_BYTES ? '/api/file/upload-large' : '/api/file/upload',
           file,
@@ -1227,6 +1318,9 @@ function buildAppsPageRuntimeSource(
           throw new Error(uiText('apps.form.noUploadResult', UI_TEXT.noUploadResult));
         }
         storeAssetUri(fieldName, uri);
+        if (fieldName === 'content' && contentHash) {
+          setContentHashFromUpload(contentHash, uri);
+        }
       }
       setModalFieldStatus(fieldName, uiText('apps.form.uploadStored', UI_TEXT.uploadStored), 'success');
     } catch (error) {

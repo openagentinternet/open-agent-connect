@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
@@ -241,6 +242,12 @@ function buildFakeModalTree(html, ownerDocument) {
     deleteError.ownerDocument = ownerDocument;
     form.appendChild(deleteError);
   }
+  for (const match of body.matchAll(/<[^>]+\bdata-apps-content-hash-source\b([^>]*)>([\s\S]*?)<\/[^>]+>/giu)) {
+    const source = new FakeElement({ 'data-apps-content-hash-source': '', ...parseAttributes(match[1] || '') });
+    source.ownerDocument = ownerDocument;
+    source.textContent = decodeAttributeValue((match[2] || '').replace(/<[^>]+>/gu, '').trim());
+    form.appendChild(source);
+  }
 
   return [form];
 }
@@ -458,6 +465,15 @@ function createAppsPageContext(options = {}) {
     },
     setTimeout,
     clearTimeout,
+    crypto: {
+      subtle: {
+        digest: async (algorithm, data) => {
+          assert.equal(String(algorithm).toUpperCase(), 'SHA-256');
+          const digest = createHash('sha256').update(Buffer.from(data)).digest();
+          return digest.buffer.slice(digest.byteOffset, digest.byteOffset + digest.byteLength);
+        },
+      },
+    },
   };
   context.window = context;
 
@@ -1321,6 +1337,8 @@ test('edit submits to /api/metaapp/update with target pin and changed values', a
   await context.clickGridAction(`[data-apps-edit="${PIN}"]`);
 
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="title"]').value, 'Original Title');
+  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="version"]').value, 'v1.0.1');
+  assert.match(context.elements['[data-apps-modal-root]'].innerHTML, /Previous version: v1\.0\.0/);
   context.setField('title', 'Updated Title');
   context.setField('appName', 'Updated App');
   context.setChecked('runtime', 'ios', true);
@@ -1333,7 +1351,34 @@ test('edit submits to /api/metaapp/update with target pin and changed values', a
   assert.equal(request.targetPinId, PIN);
   assert.equal(request.title, 'Updated Title');
   assert.equal(request.appName, 'Updated App');
+  assert.equal(request.version, 'v1.0.1');
   assert.deepEqual(request.runtime, ['browser', 'ios']);
+});
+
+test('publish form marks required and optional fields while defaulting optional title to app name', async () => {
+  const context = createAppsPageContext();
+
+  context.run();
+  await context.waitFor(() => context.fetchUrls.some((url) => url.startsWith('/api/metaapp/list?')), 'apps request');
+  await context.clickElement('[data-apps-publish-open]');
+
+  const html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, /data-apps-required-field="appName"/);
+  assert.match(html, /data-apps-required-field="content"/);
+  assert.match(html, /data-apps-optional-field="title"/);
+  assert.match(html, /data-apps-optional-field="icon"/);
+  assert.match(html, /apps-required-mark[^>]*>\*<\/span>/);
+  assert.match(html, /\(optional\)/);
+
+  context.setField('appName', 'Required Fields App');
+  context.setField('content', PIN);
+  await context.submitModalForm();
+
+  await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
+  const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
+  assert.equal(request.appName, 'Required Fields App');
+  assert.equal(request.title, 'Required Fields App');
+  assert.equal(request.content, `metafile://${PIN}`);
 });
 
 test('manual multi asset field normalizes comma and newline PINs into metafile array', async () => {
@@ -1349,6 +1394,7 @@ test('manual multi asset field normalizes comma and newline PINs into metafile a
   context.setField('icon', PIN);
   context.setField('coverImg', PIN);
   context.setField('introImgs', `${PIN}, ${secondPin}\nmetafile://${thirdPin}`);
+  context.setField('content', PIN);
 
   await context.submitModalForm();
 
@@ -1359,10 +1405,13 @@ test('manual multi asset field normalizes comma and newline PINs into metafile a
 
 test('upload with a browser File posts raw bytes to large upload route and stores returned metafile URI', async () => {
   const uploadedPin = `${'e'.repeat(64)}i0`;
+  const fileBytes = Buffer.from('content package bytes');
+  const expectedHash = createHash('sha256').update(fileBytes).digest('hex');
   const selectedFile = {
     name: 'bundle.zip',
     size: 5 * 1024 * 1024,
     type: 'application/zip',
+    arrayBuffer: async () => fileBytes.buffer.slice(fileBytes.byteOffset, fileBytes.byteOffset + fileBytes.byteLength),
   };
   const context = createAppsPageContext({
     uploadResponse: {
@@ -1387,6 +1436,10 @@ test('upload with a browser File posts raw bytes to large upload route and store
   assert.equal(uploadUrl.searchParams.get('from'), 'alice');
   assert.equal(uploadUrl.searchParams.get('fileName'), 'bundle.zip');
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="content"]').value, `metafile://${uploadedPin}.zip`);
+  assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="contentHash"]').value, expectedHash);
+  const contentHashSource = context.elements['[data-apps-modal-root]'].querySelector('[data-apps-content-hash-source]');
+  assert.ok(contentHashSource);
+  assert.match(contentHashSource.textContent, new RegExp(`metafile://${uploadedPin}\\.zip`));
 
   context.setField('appName', 'Uploaded App');
   context.setField('title', 'Uploaded App');
@@ -1397,6 +1450,7 @@ test('upload with a browser File posts raw bytes to large upload route and store
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
   const request = context.fetchBodies.find((entry) => entry.url === '/api/metaapp/publish').body;
   assert.equal(request.content, `metafile://${uploadedPin}.zip`);
+  assert.equal(request.contentHash, expectedHash);
 });
 
 test('upload failure after raw browser file upload shows a field-level error and does not fake a URI', async () => {
@@ -1434,6 +1488,7 @@ test('invalid manual asset PIN blocks publish and marks the field error', async 
   context.setField('title', 'Invalid Asset App');
   context.setField('icon', 'not-a-pin');
   context.setField('coverImg', PIN);
+  context.setField('content', PIN);
 
   await context.submitModalForm();
 
@@ -1454,6 +1509,7 @@ test('invalid intro image PIN blocks edit update and marks introImgs', async () 
         icon: `metafile://${PIN}`,
         coverImg: `metafile://${PIN}`,
         introImgs: [`metafile://${PIN}`],
+        content: `metafile://${PIN}`,
         runtime: 'browser',
         contentType: 'application/zip',
         codeType: 'application/zip',
@@ -1582,6 +1638,7 @@ test('multiple intro image uploads store returned URIs in order and submit an ar
   context.setField('title', 'Uploaded Intro App');
   context.setField('icon', PIN);
   context.setField('coverImg', PIN);
+  context.setField('content', PIN);
   await context.submitModalForm();
 
   await context.waitFor(() => context.fetchBodies.some((entry) => entry.url === '/api/metaapp/publish'), 'publish request');
