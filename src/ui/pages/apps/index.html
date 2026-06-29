@@ -472,6 +472,16 @@
         border-bottom: 1px solid var(--border);
         background: var(--surface);
       }
+      .apps-modal-header-main {
+        min-width: 0;
+      }
+      .apps-modal-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+        margin-left: auto;
+      }
       .apps-modal-header h2 {
         font-size: 17px;
         font-weight: 700;
@@ -486,6 +496,35 @@
       }
       .apps-modal-header p {
         margin-top: 4px;
+      }
+      .apps-publisher-badge {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        max-width: min(280px, 34vw);
+        min-height: 30px;
+        padding: 3px 8px;
+        border: 1px solid var(--border2);
+        border-radius: 999px;
+        background: var(--surface2);
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .apps-publisher-badge .apps-bot-avatar {
+        width: 22px;
+        height: 22px;
+      }
+      .apps-publisher-label {
+        color: var(--dim);
+      }
+      .apps-publisher-badge strong {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 600;
+        text-overflow: ellipsis;
       }
       .apps-modal-close {
         width: 30px;
@@ -956,6 +995,16 @@
         .apps-form-section {
           padding-left: 16px;
           padding-right: 16px;
+        }
+        .apps-modal-header {
+          flex-wrap: wrap;
+        }
+        .apps-modal-header-actions {
+          width: 100%;
+          justify-content: space-between;
+        }
+        .apps-publisher-badge {
+          max-width: calc(100% - 42px);
         }
       }
     </style>

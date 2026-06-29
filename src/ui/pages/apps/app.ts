@@ -73,6 +73,7 @@ interface AppsPageRuntimeText {
   publishModalDescription: string;
   publishModalTitle: string;
   publishOnChain: string;
+  publishedByLabel: string;
   shareCopyLink: string;
   shareMetaAppUri: string;
   shareModalDescription: string;
@@ -173,6 +174,7 @@ export function buildAppsPageDefinition(i18n: LocalUiI18nContext = createI18nCon
     publishModalDescription: tx('apps.form.publishDescription'),
     publishModalTitle: tx('apps.form.publishTitle'),
     publishOnChain: tx('apps.form.publishOnChain'),
+    publishedByLabel: tx('apps.form.publishedBy'),
     shareCopyLink: tx('apps.share.copyLink'),
     shareMetaAppUri: tx('apps.share.metaappUri'),
     shareModalDescription: tx('apps.share.description'),
@@ -581,16 +583,33 @@ function buildAppsPageRuntimeSource(
     '</fieldset>';
   };
 
+  const renderPublisherBadge = () => {
+    const profile = selectedProfile();
+    if (!profile) return '';
+    const label = profileLabel(profile);
+    const prefix = uiText('apps.form.publishedBy', UI_TEXT.publishedByLabel);
+    const accessibleLabel = prefix + ' ' + label;
+    return '<div class="apps-publisher-badge" data-apps-publisher-badge title="' + escapeHtml(accessibleLabel) + '" aria-label="' + escapeHtml(accessibleLabel) + '">' +
+      '<span class="apps-publisher-label">' + escapeHtml(prefix) + '</span>' +
+      profileAvatarMarkup(profile) +
+      '<strong>' + escapeHtml(label) + '</strong>' +
+    '</div>';
+  };
+
   const renderMetaAppForm = (mode, record) => {
     const isEdit = mode === 'edit';
     const targetPinId = isEdit ? recordPinId(record) : '';
     const title = isEdit ? uiText('apps.form.editTitle', UI_TEXT.editModalTitle) : uiText('apps.form.publishTitle', UI_TEXT.publishModalTitle);
     const description = isEdit ? uiText('apps.form.editDescription', UI_TEXT.editModalDescription) : uiText('apps.form.publishDescription', UI_TEXT.publishModalDescription);
+    const publisherBadge = isEdit ? '' : renderPublisherBadge();
     return '<div class="apps-modal-backdrop" data-apps-modal-close></div>' +
       '<section class="apps-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="apps-modal-title" tabindex="-1">' +
         '<header class="apps-modal-header">' +
-          '<div><h2 id="apps-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(description) + '</p></div>' +
-          '<button class="apps-modal-close" type="button" data-apps-modal-close aria-label="' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '">x</button>' +
+          '<div class="apps-modal-header-main"><h2 id="apps-modal-title">' + escapeHtml(title) + '</h2><p>' + escapeHtml(description) + '</p></div>' +
+          '<div class="apps-modal-header-actions">' +
+            publisherBadge +
+            '<button class="apps-modal-close" type="button" data-apps-modal-close aria-label="' + escapeHtml(uiText('apps.form.close', UI_TEXT.close)) + '">x</button>' +
+          '</div>' +
         '</header>' +
         '<form data-apps-form data-apps-form-mode="' + escapeHtml(mode) + '" data-apps-target-pin-id="' + escapeHtml(targetPinId) + '">' +
           '<section class="apps-form-section" data-apps-form-section="basic">' +

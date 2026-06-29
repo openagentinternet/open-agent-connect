@@ -1051,6 +1051,29 @@ test('publish and edit modals expose matching MetaAPP form groups and edit save 
   assert.equal(context.elements['[data-apps-modal-root]'].querySelector('[name="title"]').value, 'Editable App');
 });
 
+test('publish modal shows the selected Bot as publisher', async () => {
+  const avatarDataUrl = 'data:image/png;base64,cHVibGlzaGVy';
+  const context = createAppsPageContext({
+    url: 'http://localhost/ui/apps?from=bob',
+    profiles: profilesPayload([
+      { slug: 'alice', name: 'Alice', globalMetaId: 'idq1alice', avatar: null, isActive: true },
+      { slug: 'bob', name: 'Builder Bot', globalMetaId: 'idq1bob', avatarDataUrl, isActive: false },
+    ]),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-bot-picker]'].innerHTML.includes('Builder Bot'), 'selected bot render');
+  await context.clickElement('[data-apps-publish-open]');
+
+  const publishHtml = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(publishHtml, /data-apps-publisher-badge/);
+  assert.match(publishHtml, /Published by/);
+  assert.match(publishHtml, /Builder Bot/);
+  assert.match(publishHtml, /aria-label="Published by Builder Bot"/);
+  assert.match(publishHtml, /class="apps-bot-avatar" src="data:image\/png;base64,cHVibGlzaGVy"/);
+  assert.match(publishHtml, /id="apps-modal-title"[\s\S]*data-apps-publisher-badge[\s\S]*apps-modal-close/);
+});
+
 test('publish submits normalized form payload to /api/metaapp/publish', async () => {
   const secondPin = `${'a'.repeat(64)}i0`;
   const context = createAppsPageContext();
