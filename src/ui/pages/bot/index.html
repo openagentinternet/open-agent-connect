@@ -625,10 +625,54 @@
         gap: 8px;
         min-height: 36px;
       }
-      .homepage-help-wrap {
+      .homepage-protocol-row {
         position: relative;
+      }
+      .homepage-protocol-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 36px;
+        display: flex;
+        align-items: stretch;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+      }
+      .homepage-protocol-input:focus-within {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(47, 111, 126, 0.13);
+      }
+      .homepage-protocol-input:has(input[aria-invalid="true"]) {
+        border-color: var(--red);
+        box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.11);
+      }
+      .homepage-protocol-prefix {
         display: inline-flex;
         align-items: center;
+        flex: 0 0 auto;
+        padding: 0 10px;
+        border-right: 1px solid var(--border);
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+      }
+      .homepage-protocol-input input {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 12px;
+        outline: 0;
+        padding: 0 10px;
+      }
+      .homepage-protocol-input input[aria-invalid="true"] {
+        background: rgba(185, 28, 28, 0.04);
       }
       .homepage-metaapp-row {
         display: flex;
@@ -638,55 +682,106 @@
       .homepage-metaapp-row input {
         min-width: 0;
       }
-      .homepage-help {
-        width: 18px;
-        height: 18px;
-        border: 1px solid var(--border);
-        border-radius: 50%;
+      .homepage-metaapp-picker-wrap {
+        position: relative;
         display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--surface);
-        color: var(--muted);
-        font: inherit;
-        font-size: 12px;
-        line-height: 1;
-        padding: 0;
-        cursor: pointer;
+        flex: 0 0 auto;
       }
-      .homepage-help:hover,
-      .homepage-help:focus-visible {
-        color: var(--text);
-        border-color: var(--border2);
-      }
-      .homepage-help-popover {
+      .homepage-metaapp-picker {
         position: absolute;
-        z-index: 20;
-        top: calc(100% + 8px);
         right: 0;
-        width: min(320px, calc(100vw - 36px));
-        padding: 10px 12px;
+        bottom: calc(100% + 8px);
+        z-index: 40;
+        width: min(420px, calc(100vw - 48px));
+        padding: 8px;
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         background: var(--card);
-        box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
-        color: var(--text);
-        font-size: 12px;
-        font-weight: 500;
-        line-height: 1.5;
-        opacity: 0;
-        pointer-events: none;
-        transform: translateY(-4px);
-        transition: opacity .15s ease, transform .15s ease, visibility .15s ease;
-        visibility: hidden;
+        box-shadow: 0 18px 44px rgba(15, 23, 42, 0.16);
       }
-      .homepage-help-wrap:hover .homepage-help-popover,
-      .homepage-help-wrap:focus-within .homepage-help-popover,
-      .homepage-help-wrap.open .homepage-help-popover {
-        opacity: 1;
-        pointer-events: auto;
-        transform: translateY(0);
-        visibility: visible;
+      .homepage-metaapp-list {
+        max-height: 216px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-right: 2px;
+      }
+      .homepage-metaapp-option {
+        width: 100%;
+        min-height: 62px;
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        padding: 8px;
+        text-align: left;
+      }
+      .homepage-metaapp-option:hover,
+      .homepage-metaapp-option:focus-visible {
+        border-color: var(--border);
+        background: var(--panel-soft);
+        outline: 0;
+      }
+      .homepage-metaapp-icon {
+        width: 38px;
+        height: 38px;
+        border-radius: 8px;
+        overflow: hidden;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--panel-soft);
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .homepage-metaapp-icon img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .homepage-metaapp-copy {
+        min-width: 0;
+        display: grid;
+        gap: 4px;
+      }
+      .homepage-metaapp-copy strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .homepage-metaapp-copy code {
+        overflow: hidden;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .homepage-metaapp-empty,
+      .homepage-metaapp-loading {
+        padding: 12px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .homepage-metaapp-empty strong {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text);
+        font-size: 13px;
+      }
+      .homepage-metaapp-empty p {
+        margin: 0 0 10px;
       }
       .homepage-status-pill {
         border: 1px solid var(--border);
@@ -1641,6 +1736,16 @@
         .homepage-metaapp-row {
           align-items: stretch;
           flex-direction: column;
+        }
+        .homepage-protocol-input,
+        .homepage-metaapp-picker-wrap,
+        .homepage-metaapp-picker-wrap .btn {
+          width: 100%;
+        }
+        .homepage-metaapp-picker {
+          left: 0;
+          right: auto;
+          width: min(100%, calc(100vw - 48px));
         }
         .runtime-modal-box {
           width: min(100%, calc(100vw - 24px));
