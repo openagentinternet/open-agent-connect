@@ -227,7 +227,7 @@ test('Browser trusted metaid-pin-write uses the selected signer after confirmati
     }),
   });
 
-  const result = await handlers.browser.runTrustedAction({
+  const forged = await handlers.browser.runTrustedAction({
     from: active.slug,
     resourceUri: 'metaapp://bridge-app',
     kind: 'metaid-pin-write',
@@ -240,6 +240,33 @@ test('Browser trusted metaid-pin-write uses the selected signer after confirmati
       payload: { encoding: 'utf8', value: '{"content":"hello"}' },
       confirmed: true,
     },
+  });
+  assert.equal(forged.ok, false);
+  assert.equal(forged.state, 'manual_action_required');
+  assert.deepEqual(writes, []);
+
+  const preview = await handlers.browser.runTrustedAction({
+    from: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+    },
+  });
+  assert.equal(preview.ok, false);
+  assert.equal(preview.state, 'manual_action_required');
+  assert.equal(typeof preview.data.confirmRequest.payload.hostConfirmation.token, 'string');
+
+  const result = await handlers.browser.runTrustedAction({
+    from: active.slug,
+    resourceUri: preview.data.confirmRequest.resourceUri,
+    kind: preview.data.confirmRequest.kind,
+    payload: preview.data.confirmRequest.payload,
   });
 
   assert.equal(result.ok, true);

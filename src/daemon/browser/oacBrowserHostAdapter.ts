@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { listMetabotProfiles, type MetabotProfileFull } from '../../core/bot/metabotProfileManager';
 import type {
@@ -60,6 +61,9 @@ type OacBrowserActionHandler = (input: Record<string, unknown>) => Promise<Metab
 type OacMetaIdPinWriteOperation = 'create' | 'modify' | 'revoke';
 type OacMetaIdPinWritePayloadEncoding = 'utf-8' | 'base64';
 
+const DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
+const PIN_ID_PATTERN = /^[0-9a-f]{64}i\d+$/iu;
+
 export interface OacBrowserMetaAppBridgeActor {
   uri: string;
   globalMetaId: string;
@@ -75,6 +79,8 @@ export interface OacBrowserMetaIdPinWriteRequest {
   contentType: string;
   encoding: OacMetaIdPinWritePayloadEncoding;
   payload: string;
+  originalId?: string;
+  appAction?: string;
 }
 
 export interface OacBrowserMetaIdPinWriteResult {
@@ -108,6 +114,19 @@ export interface CreateOacBrowserHostAdapterInput {
   writeMetaIdPin?: OacBrowserMetaIdPinWriteHandler;
   fetch?: typeof fetch;
   env?: NodeJS.ProcessEnv;
+  now?: () => number;
+  confirmationTtlMs?: number;
+}
+
+interface PendingPinWriteConfirmation {
+  id: string;
+  tokenHash: string;
+  actorId: string;
+  actorGlobalMetaId: string;
+  actorUri: string;
+  resourceUri: string;
+  requestHash: string;
+  expiresAt: number;
 }
 
 function normalizeText(value: unknown): string {
@@ -229,6 +248,35 @@ function isValidBase64Payload(value: string): boolean {
   }
 }
 
+function isPinId(value: string): boolean {
+  return PIN_ID_PATTERN.test(value);
+}
+
+function normalizeTargetPinId(value: unknown): string {
+  const text = normalizeText(value);
+  if (!text) return '';
+  if (text.startsWith('@')) return text.slice(1);
+  if (text.startsWith('pin://')) return text.slice('pin://'.length);
+  return text;
+}
+
+function targetPinIdFromPath(value: string): string {
+  if (!value.startsWith('@')) return '';
+  const pinId = value.slice(1);
+  return isPinId(pinId) ? pinId : '';
+}
+
+function normalizeOptionalBridgeField(value: unknown, fieldName: string):
+  | { value?: string }
+  | { failure: BrowserCommandResult<BrowserTrustedActionResult> } {
+  const text = normalizeText(value);
+  if (!text) return {};
+  if (/[\r\n]/u.test(text)) {
+    return { failure: invalidBridgeParams(`metaid.pin.write ${fieldName} must be a single-line string.`) };
+  }
+  return { value: text };
+}
+
 function payloadByteSize(input: { payload: string; encoding: OacMetaIdPinWritePayloadEncoding }): number {
   return input.encoding === 'base64'
     ? Buffer.from(input.payload, 'base64').byteLength
@@ -244,6 +292,7 @@ function validateMetaIdPinWritePayload(payload: Record<string, unknown>):
     request: OacBrowserMetaIdPinWriteRequest;
     bridgePayload: Record<string, unknown>;
     display?: { title?: string; summary?: string };
+    hostConfirmation?: { id: string; token: string };
     confirmed: boolean;
     payloadSize: number;
   }
@@ -254,8 +303,20 @@ function validateMetaIdPinWritePayload(payload: Record<string, unknown>):
   }
 
   const pathValue = normalizeText(payload.path);
-  if (!pathValue || !pathValue.startsWith('/')) {
-    return { failure: invalidBridgeParams('metaid.pin.write path must be an absolute MetaID protocol path.') };
+  if (operation === 'create') {
+    if (!pathValue || !pathValue.startsWith('/')) {
+      return { failure: invalidBridgeParams('metaid.pin.write create path must be an absolute MetaID protocol path.') };
+    }
+  } else {
+    // OAC's signer targets modify/revoke writes through path: @pinId; originalId is preserved but must agree.
+    const targetPinId = targetPinIdFromPath(pathValue);
+    if (!targetPinId) {
+      return { failure: invalidBridgeParams('metaid.pin.write modify and revoke path must be @<pinId>.') };
+    }
+    const originalId = normalizeTargetPinId(payload.originalId);
+    if (originalId && (!isPinId(originalId) || originalId !== targetPinId)) {
+      return { failure: invalidBridgeParams('metaid.pin.write originalId must match the @<pinId> path target.') };
+    }
   }
 
   const encryption = normalizePinWriteEncryption(payload.encryption);
@@ -283,6 +344,17 @@ function validateMetaIdPinWritePayload(payload: Record<string, unknown>):
     return { failure: invalidBridgeParams('metaid.pin.write base64 payload is invalid.') };
   }
 
+  const originalIdResult = normalizeOptionalBridgeField(payload.originalId, 'originalId');
+  if ('failure' in originalIdResult) return originalIdResult;
+  const appActionResult = normalizeOptionalBridgeField(payload.appAction, 'appAction');
+  if ('failure' in appActionResult) return appActionResult;
+  const hostConfirmationSource = browserRecord(payload.hostConfirmation);
+  const hostConfirmationId = normalizeText(hostConfirmationSource.id);
+  const hostConfirmationToken = normalizeText(hostConfirmationSource.token);
+  const hostConfirmation = hostConfirmationId && hostConfirmationToken
+    ? { id: hostConfirmationId, token: hostConfirmationToken }
+    : undefined;
+
   const request: OacBrowserMetaIdPinWriteRequest = {
     operation,
     path: pathValue,
@@ -291,6 +363,8 @@ function validateMetaIdPinWritePayload(payload: Record<string, unknown>):
     contentType,
     encoding,
     payload: payloadValue,
+    ...(originalIdResult.value ? { originalId: originalIdResult.value } : {}),
+    ...(appActionResult.value ? { appAction: appActionResult.value } : {}),
   };
   const display = normalizeBridgeDisplay(payload.display);
   const bridgePayload: Record<string, unknown> = {
@@ -303,6 +377,8 @@ function validateMetaIdPinWritePayload(payload: Record<string, unknown>):
       encoding: encoding === 'utf-8' ? 'utf8' : 'base64',
       value: payloadValue,
     },
+    ...(originalIdResult.value ? { originalId: originalIdResult.value } : {}),
+    ...(appActionResult.value ? { appAction: appActionResult.value } : {}),
     ...(display ? { display } : {}),
   };
 
@@ -310,6 +386,7 @@ function validateMetaIdPinWritePayload(payload: Record<string, unknown>):
     request,
     bridgePayload,
     ...(display ? { display } : {}),
+    ...(hostConfirmation ? { hostConfirmation } : {}),
     confirmed: payload.confirmed === true,
     payloadSize: payloadByteSize(request),
   };
@@ -375,6 +452,40 @@ function sanitizePinWriteResultData(input: {
     path: pathValue,
     actor,
   };
+}
+
+function sha256Text(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function safeHashEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, 'hex');
+  const rightBuffer = Buffer.from(right, 'hex');
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function pinWriteRequestHash(input: {
+  actorId: string;
+  actor: OacBrowserMetaAppBridgeActor;
+  resourceUri: string;
+  request: OacBrowserMetaIdPinWriteRequest;
+}): string {
+  const payloadHash = sha256Text(input.request.payload);
+  return sha256Text(JSON.stringify({
+    actorId: input.actorId,
+    actorGlobalMetaId: input.actor.globalMetaId,
+    actorUri: input.actor.uri,
+    resourceUri: input.resourceUri,
+    operation: input.request.operation,
+    path: input.request.path,
+    encryption: input.request.encryption,
+    version: input.request.version,
+    contentType: input.request.contentType,
+    encoding: input.request.encoding,
+    payloadHash,
+    originalId: input.request.originalId ?? '',
+    appAction: input.request.appAction ?? '',
+  }));
 }
 
 function followUpActionFromOac(result: MetabotCommandResult<unknown>): BrowserFollowUpAction | undefined {
@@ -633,6 +744,11 @@ function successTrustedActionResult(
 export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterInput): BrowserHostAdapter {
   const env = input.env ?? process.env;
   const fetchImpl = input.fetch ?? globalThis.fetch;
+  const nowMs = input.now ?? (() => Date.now());
+  const confirmationTtlMs = Number.isFinite(input.confirmationTtlMs) && Number(input.confirmationTtlMs) > 0
+    ? Math.floor(Number(input.confirmationTtlMs))
+    : DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS;
+  const pendingPinWriteConfirmations = new Map<string, PendingPinWriteConfirmation>();
 
   async function resolveActor(
     actorInput?: BrowserActorInput & { from?: string },
@@ -681,8 +797,35 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
   function metaIdPinWriteConfirmation(inputForConfirmation: {
     actionInput: BrowserTrustedActionInput & { from?: string };
     actor: OacBrowserMetaAppBridgeActor;
+    actorId: string;
     validation: Exclude<ReturnType<typeof validateMetaIdPinWritePayload>, { failure: BrowserCommandResult<BrowserTrustedActionResult> }>;
   }): BrowserCommandResult<BrowserTrustedActionResult> {
+    const issuedAt = nowMs();
+    for (const [id, pending] of pendingPinWriteConfirmations.entries()) {
+      if (pending.expiresAt <= issuedAt) {
+        pendingPinWriteConfirmations.delete(id);
+      }
+    }
+    const confirmationId = `pin-write-${randomUUID()}`;
+    const confirmationToken = randomBytes(32).toString('base64url');
+    const expiresAt = issuedAt + confirmationTtlMs;
+    const requestHash = pinWriteRequestHash({
+      actorId: inputForConfirmation.actorId,
+      actor: inputForConfirmation.actor,
+      resourceUri: inputForConfirmation.actionInput.resourceUri,
+      request: inputForConfirmation.validation.request,
+    });
+    pendingPinWriteConfirmations.set(confirmationId, {
+      id: confirmationId,
+      tokenHash: sha256Text(confirmationToken),
+      actorId: inputForConfirmation.actorId,
+      actorGlobalMetaId: inputForConfirmation.actor.globalMetaId,
+      actorUri: inputForConfirmation.actor.uri,
+      resourceUri: inputForConfirmation.actionInput.resourceUri,
+      requestHash,
+      expiresAt,
+    });
+
     return browserManualActionRequired(
       'manual_action_required',
       'Confirm this MetaID PIN write before OAC signs or broadcasts it.',
@@ -694,6 +837,8 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
             path: inputForConfirmation.validation.request.path,
             contentType: inputForConfirmation.validation.request.contentType,
             payloadSize: inputForConfirmation.validation.payloadSize,
+            confirmationId,
+            expiresAt,
             ...(inputForConfirmation.validation.display ? { display: inputForConfirmation.validation.display } : {}),
           },
           confirmRequest: {
@@ -702,11 +847,59 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
             payload: {
               ...inputForConfirmation.validation.bridgePayload,
               confirmed: true,
+              hostConfirmation: {
+                id: confirmationId,
+                token: confirmationToken,
+              },
             },
           },
         },
       },
     );
+  }
+
+  function consumeMetaIdPinWriteConfirmation(inputForConfirmation: {
+    actionInput: BrowserTrustedActionInput & { from?: string };
+    actor: OacBrowserMetaAppBridgeActor;
+    actorId: string;
+    validation: Exclude<ReturnType<typeof validateMetaIdPinWritePayload>, { failure: BrowserCommandResult<BrowserTrustedActionResult> }>;
+  }): boolean {
+    const hostConfirmation = inputForConfirmation.validation.hostConfirmation;
+    if (!inputForConfirmation.validation.confirmed || !hostConfirmation) {
+      return false;
+    }
+
+    const pending = pendingPinWriteConfirmations.get(hostConfirmation.id);
+    if (!pending) {
+      return false;
+    }
+
+    const currentTime = nowMs();
+    if (pending.expiresAt <= currentTime) {
+      pendingPinWriteConfirmations.delete(pending.id);
+      return false;
+    }
+
+    const requestHash = pinWriteRequestHash({
+      actorId: inputForConfirmation.actorId,
+      actor: inputForConfirmation.actor,
+      resourceUri: inputForConfirmation.actionInput.resourceUri,
+      request: inputForConfirmation.validation.request,
+    });
+    const tokenHash = sha256Text(hostConfirmation.token);
+    if (
+      pending.actorId !== inputForConfirmation.actorId
+      || pending.actorGlobalMetaId !== inputForConfirmation.actor.globalMetaId
+      || pending.actorUri !== inputForConfirmation.actor.uri
+      || pending.resourceUri !== inputForConfirmation.actionInput.resourceUri
+      || pending.requestHash !== requestHash
+      || !safeHashEqual(pending.tokenHash, tokenHash)
+    ) {
+      return false;
+    }
+
+    pendingPinWriteConfirmations.delete(pending.id);
+    return true;
   }
 
   async function runMetaIdPinWriteAction(
@@ -723,10 +916,17 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       return actor.failure;
     }
 
-    if (!validation.confirmed) {
+    const confirmedByHost = consumeMetaIdPinWriteConfirmation({
+      actionInput,
+      actor: actor.actor,
+      actorId: actor.actorId,
+      validation,
+    });
+    if (!confirmedByHost) {
       return metaIdPinWriteConfirmation({
         actionInput,
         actor: actor.actor,
+        actorId: actor.actorId,
         validation,
       });
     }
