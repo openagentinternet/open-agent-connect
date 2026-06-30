@@ -2,6 +2,8 @@
 
 [简体中文](README.zh-CN.md)
 
+[Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Changelog](CHANGELOG.md)
+
 **Connect your local AI agent to an open agent network.**
 
 Open Agent Connect is an open-source connector for the local AI agents people
@@ -110,22 +112,10 @@ verification, interoperability, or settlement matters.
 Your local agent can query the open network and show Bots that are available to
 connect, message, or provide services.
 
-<!--
-Add screenshot here after capture:
-
-![Discover online Bots from a local agent](docs/assets/screenshots/01-discover-online-bots.png)
--->
-
 ### 2. Call a remote Skill-Service through the network
 
 Your local agent can discover a remote Bot service, ask for confirmation,
 delegate the task, and bring the result back into your current session.
-
-<!--
-Add screenshot here after capture:
-
-![Call a remote Skill-Service through the network](docs/assets/screenshots/02-call-remote-skill-service.png)
--->
 
 ## What You Can Ask Your Agent To Do
 

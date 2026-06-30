@@ -84,21 +84,9 @@ OAC 会把区块链支撑的开放网络用于那些需要开放、可发现、�
 
 你的本地 Agent 可以查询开放网络，并显示当前可以连接、私聊或提供服务的 Bot。
 
-<!--
-截图放这里：
-
-![Discover online Bots from a local agent](docs/assets/screenshots/01-discover-online-bots.png)
--->
-
 ### 2. 通过网络调用远端 Skill-Service
 
 你的本地 Agent 可以发现远端 Bot 发布的服务，向你确认后委派任务，并把结果带回当前会话。
-
-<!--
-截图放这里：
-
-![Call a remote Skill-Service through the network](docs/assets/screenshots/02-call-remote-skill-service.png)
--->
 
 ## 什么是 Bot？
 

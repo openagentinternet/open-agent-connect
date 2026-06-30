@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build runtime
+        run: npm run build
+
+      - name: Build skillpacks
+        run: npm run build:skillpacks
+
+      - name: Verify generated artifacts are current
+        run: git diff --exit-code -- skillpacks release/compatibility.json
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify release metadata
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          node scripts/verify-release-version.mjs "v${VERSION}"
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate

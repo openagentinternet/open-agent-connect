@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose an improvement to Open Agent Connect.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or developer problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful change.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Installer CLI
+        - Metabot CLI
+        - Local daemon
+        - Browser UI
+        - Identity or wallet
+        - Chain or protocol write
+        - Encrypted messaging
+        - Remote service call
+        - Skillpacks
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and security notes
+      description: Mention protocol compatibility, storage layout, chain writes, secrets, or migration risks.

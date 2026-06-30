@@ -1,0 +1,72 @@
+name: Bug report
+description: Report a reproducible problem in Open Agent Connect.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include mnemonics, private keys, API tokens, cookies, or private logs. For vulnerabilities, use the security reporting process in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Package version, commit, or release tag.
+      placeholder: "0.2.23"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Installer CLI
+        - Metabot CLI
+        - Local daemon
+        - Browser UI
+        - Identity or wallet
+        - Chain or protocol write
+        - Encrypted messaging
+        - Remote service call
+        - Skillpacks
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reproduction you can.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node.js version, npm version, agent host, and install method.
+      placeholder: |
+        OS:
+        Node:
+        npm:
+        Agent host:
+        Install method:
+    validations:
+      required: true

@@ -18,7 +18,7 @@ Primary project:
 
 Reference implementation:
 
-- IDBots workspace: `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots`
+- IDBots workspace: `<idbots-repo-root>`
 - OAC should deeply copy the relevant IDBots behavior and semantics, not its storage engine or UI framework.
 
 Owner-approved product decisions:
@@ -113,13 +113,13 @@ OAC files:
 
 IDBots files:
 
-- `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/src/main/services/gigSquareServiceMutationService.ts`: service publish/mutation semantics, including plain `providerSkill` and `endpoint: simplemsg`.
-- `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/src/main/services/privateChatDaemon.ts`: inbound `[ORDER]` handling, payment verification, seller order creation, acknowledgement, delivery, rating, and refund-triggering behavior.
-- `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/src/main/services/orderPromptBuilder.ts`: paid-order prompt construction and required-skill instruction.
-- `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/src/main/services/privateChatOrderCowork.ts`: provider execution session lifecycle, timeout handling, deliverable validation, artifact upload, delivery text, and rating invite.
-- `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/src/main/services/serviceOrderLifecycleService.ts`: buyer/seller order states, timeout scans, refund request creation, retry, and rating timeout closure.
-- `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/src/main/services/serviceRefundSettlementService.ts`: seller refund settlement, refund transfer, finalization proof, mirrored order updates.
-- `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/src/main/main.ts`: refund request payload construction and `/protocols/service-refund-request` pin creation wiring.
+- `<idbots-repo-root>/src/main/services/gigSquareServiceMutationService.ts`: service publish/mutation semantics, including plain `providerSkill` and `endpoint: simplemsg`.
+- `<idbots-repo-root>/src/main/services/privateChatDaemon.ts`: inbound `[ORDER]` handling, payment verification, seller order creation, acknowledgement, delivery, rating, and refund-triggering behavior.
+- `<idbots-repo-root>/src/main/services/orderPromptBuilder.ts`: paid-order prompt construction and required-skill instruction.
+- `<idbots-repo-root>/src/main/services/privateChatOrderCowork.ts`: provider execution session lifecycle, timeout handling, deliverable validation, artifact upload, delivery text, and rating invite.
+- `<idbots-repo-root>/src/main/services/serviceOrderLifecycleService.ts`: buyer/seller order states, timeout scans, refund request creation, retry, and rating timeout closure.
+- `<idbots-repo-root>/src/main/services/serviceRefundSettlementService.ts`: seller refund settlement, refund transfer, finalization proof, mirrored order updates.
+- `<idbots-repo-root>/src/main/main.ts`: refund request payload construction and `/protocols/service-refund-request` pin creation wiring.
 
 ## Protocol Decisions
 
@@ -424,7 +424,7 @@ Reference compatibility tests:
 Real-chain acceptance:
 
 - Later implementation phases should include real-chain smoke tests when the phase touches chain publishing, chain reads, paid order delivery, rating, or refund settlement.
-- The local `eric` MetaBot profile can be used for real-chain validation. Its local account material, including mnemonic or wallet secrets, is stored under `~/.metabot/profiles/eric` in a hidden subdirectory on this machine.
+- A disposable or explicitly approved funded local MetaBot profile can be used for real-chain validation. Its local account material, including mnemonic or wallet secrets, is stored under its profile home in a hidden runtime subdirectory on the developer machine.
 - The implementation session may use that local profile for test publishing and data retrieval, but must never copy mnemonic words, private keys, or other wallet secrets into source code, tests, documentation, logs, commits, buzz posts, or subagent prompts.
 - Real-chain acceptance should verify observable chain data, such as actual `/protocols/skill-service`, `/protocols/simplemsg`, `/protocols/skill-service-rate`, `/protocols/service-refund-request`, or refund finalization pins, rather than relying only on local JSON state.
 - Any real-chain test must record non-secret evidence: pin id, txid, protocol path, provider/caller `globalMetaId`, service pin id, order txid, payment txid, refund request pin id, refund txid, and finalization pin id as applicable.
@@ -502,7 +502,7 @@ Objective acceptance criteria:
 - Given a matching primary skill, publish validation succeeds and returns the selected skill name, platform id, runtime id, and root diagnostics for local use only.
 - No runtime id, runtime provider, binary path, cwd, model, or skill root path is added to the `/protocols/skill-service` chain payload.
 - Skill names containing `/`, `\`, `..`, or empty/whitespace-only names are rejected by catalog and publish validation.
-- Real-chain publish smoke validation using the local `eric` profile proves that a valid published `/protocols/skill-service` pin contains `providerSkill` and does not contain runtime metadata. Record the pin id and txid as non-secret evidence.
+- Real-chain publish smoke validation using a disposable or explicitly approved funded local profile proves that a valid published `/protocols/skill-service` pin contains `providerSkill` and does not contain runtime metadata. Record the pin id and txid as non-secret evidence.
 - Unit tests cover at least: Codex primary with fallback exclusion, missing primary runtime, unavailable primary runtime, missing skill, unsafe skill name, and no runtime fields in publish payload.
 - `npm test` or the repository's relevant targeted test command passes before commit.
 
@@ -531,7 +531,7 @@ Objective acceptance criteria:
 - Server-side publish handler revalidates `providerSkill`; bypassing the UI cannot publish an invalid skill.
 - CLI publish with a payload whose `providerSkill` is missing from the primary runtime fails before chain write.
 - CLI publish with a valid primary runtime skill reaches the existing chain publish flow.
-- A real-chain publish through UI or CLI using the local `eric` profile creates a service pin that can be read back and parsed by OAC's chain service directory.
+- A real-chain publish through UI or CLI using a disposable or explicitly approved funded local profile creates a service pin that can be read back and parsed by OAC's chain service directory.
 - Tests or browser automation verify both enabled and disabled UI states.
 - `npm test` or the repository's relevant targeted test command passes before commit.
 
@@ -590,7 +590,7 @@ Objective acceptance criteria:
 - A successful order sends one `[NeedsRating:<orderTxid>]` message after delivery.
 - Reprocessing the same order message does not send duplicate delivery or rating messages.
 - Delivery/rating messages remain parseable by existing buyer-side OAC handling and IDBots-style parsers.
-- Real-chain private-message validation using the local `eric` profile, or a documented paired local profile, proves that delivery and rating messages are written and readable as `/protocols/simplemsg` pins. Record non-secret pin ids and txids.
+- Real-chain private-message validation using a disposable or explicitly approved funded local profile, or a documented paired local profile, proves that delivery and rating messages are written and readable as `/protocols/simplemsg` pins. Record non-secret pin ids and txids.
 - Tests cover valid paid order, unpaid order, duplicate order, and generic-chat bypass.
 - `npm test` or the repository's relevant targeted test command passes before commit.
 
