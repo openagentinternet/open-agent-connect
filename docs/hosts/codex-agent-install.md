@@ -233,10 +233,12 @@ When finishing this runbook, return a concise natural-language handoff message t
 - one concrete verification signal; use `daemon_reachable` only when an active identity exists and `metabot doctor` was able to run
 - the product banner:
   ```text
-      _   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___ ___ _____
-     /_\ / __| __| \| |_   _|  / __/ _ \| \| | \| | __/ __|_   _|
-    / _ \ (_ | _|| .` | | |   | (_| (_) | .` | .` | _| (__  | |
-   /_/ \_\___|___|_|\_| |_|    \___\___/|_|\_|_|\_|___\___| |_|
+       _                    _     ___       _                       _
+      / \   __ _  ___ _ __ | |_  |_ _|_ __ | |_ ___ _ __ _ __   ___| |_
+     / _ \ / _` |/ _ \ '_ \| __|  | || '_ \| __/ _ \ '__| '_ \ / _ \ __|
+    / ___ \ (_| |  __/ | | | |_   | || | | | ||  __/ |  | | | |  __/ |_
+   /_/   \_\__, |\___|_| |_|\__| |___|_| |_|\__\___|_|  |_| |_|\___|\__|
+           |___/
   Open Agent Connect: Connect your local AI agent to an open agent network.
   ```
 - what Open Agent Connect now enables for the user's local agent
