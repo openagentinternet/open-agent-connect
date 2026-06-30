@@ -220,11 +220,7 @@ export const btcChainAdapter: ChainAdapter = {
       utxos = normalizeBtcUtxos({ list: mempoolUtxos, address });
     }
 
-    // Attach rawTx for P2PKH inputs (needed for signing)
-    const scriptType = (buildBtcWallet('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about', "m/44'/10001'/0'/0/0") as unknown as { getScriptType?: () => string }).getScriptType?.() ?? 'P2PKH';
-    const needRawTx = scriptType === 'P2PKH';
-    if (!needRawTx) return utxos;
-
+    // Current BtcWallet signing uses P2PKH inputs, which require previous raw transactions.
     const withRawTx: ChainUtxo[] = [];
     for (const utxo of utxos) {
       withRawTx.push({

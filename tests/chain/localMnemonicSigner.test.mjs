@@ -558,6 +558,12 @@ test('BTC adapter fails when signTx produces no reveal transaction', async () =>
           }),
         };
       }
+      if (value.includes('/wallet-api/v3/tx/raw')) {
+        return {
+          ok: true,
+          json: async () => ({ code: 0, data: { rawTx: 'raw-prev-tx-hex' } }),
+        };
+      }
       if (value.includes('/wallet-api/v3/tx/broadcast')) {
         const body = JSON.parse(String(init.body));
         const txId = body.rawTx === 'raw-commit-hex' ? 'e'.repeat(64) : 'f'.repeat(64);
