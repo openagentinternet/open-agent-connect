@@ -10644,6 +10644,37 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
   const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry();
   let daemonHandlers: MetabotDaemonHttpHandlers | null = null;
+  function safeBrowserBridgeErrorMessage(error: unknown, fallback: string): string {
+    const message = error instanceof Error ? error.message : normalizeText(error);
+    if (!message) return fallback;
+    if (/\/Users\/|\.metabot|\/api\/|private\s*key|mnemonic|token|secret|stack\s*trace/iu.test(message)) {
+      return fallback;
+    }
+    return message;
+  }
+
+  async function resolveBrowserBridgeActorForHome(homeDir: string): Promise<
+    | {
+      uri: string;
+      globalMetaId: string;
+      name: string;
+    }
+    | null
+  > {
+    const profiles = await listMetabotProfiles(normalizedSystemHomeDir);
+    const resolvedHomeDir = path.resolve(homeDir);
+    const profile = profiles.find((candidate) => path.resolve(candidate.homeDir) === resolvedHomeDir) ?? null;
+    const globalMetaId = normalizeText(profile?.globalMetaId);
+    if (!profile || !globalMetaId) {
+      return null;
+    }
+    return {
+      uri: `metaid://${globalMetaId}`,
+      globalMetaId,
+      name: normalizeText(profile.name) || profile.slug,
+    };
+  }
+
   const browserHostAdapterInput: Parameters<typeof createOacBrowserHostAdapter>[0] = {
     homeDir: input.homeDir,
     systemHomeDir: normalizedSystemHomeDir,
@@ -10655,6 +10686,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
     serviceCall: async (request) => daemonHandlers?.services?.call
       ? daemonHandlers.services.call(request)
       : commandFailed('not_implemented', 'Service call handler is not configured.'),
+    writeMetaIdPin: async ({ actorId, request }) => {
+      try {
+        const actor = await resolveActorWriteContext(actorId);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const bridgeActor = await resolveBrowserBridgeActorForHome(actor.homeDir);
+        if (!bridgeActor) {
+          return commandManualActionRequired(
+            'actor_required',
+            'A selected MetaID Actor Bot with a Global MetaID is required.',
+          );
+        }
+        const network = await resolveWriteNetworkForHome(undefined, actor.homeDir);
+        const result = await actor.signer.writePin({
+          ...request,
+          network,
+        });
+        return commandSuccess({
+          pinId: result.pinId,
+          txid: result.txids[0] ?? '',
+          txids: result.txids,
+          operation: request.operation,
+          path: result.path,
+          actor: bridgeActor,
+        });
+      } catch (error) {
+        return commandFailed(
+          'pin_write_failed',
+          safeBrowserBridgeErrorMessage(error, 'MetaID PIN write failed.'),
+        );
+      }
+    },
     fetch: globalThis.fetch,
     env: process.env,
   };

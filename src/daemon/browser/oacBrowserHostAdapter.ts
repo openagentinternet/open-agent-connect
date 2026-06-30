@@ -57,6 +57,40 @@ import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/pre
 
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
 type OacBrowserActionHandler = (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+type OacMetaIdPinWriteOperation = 'create' | 'modify' | 'revoke';
+type OacMetaIdPinWritePayloadEncoding = 'utf-8' | 'base64';
+
+export interface OacBrowserMetaAppBridgeActor {
+  uri: string;
+  globalMetaId: string;
+  name: string;
+  avatarPinId?: string;
+}
+
+export interface OacBrowserMetaIdPinWriteRequest {
+  operation: OacMetaIdPinWriteOperation;
+  path: string;
+  encryption: '0' | '1' | '2';
+  version: string;
+  contentType: string;
+  encoding: OacMetaIdPinWritePayloadEncoding;
+  payload: string;
+}
+
+export interface OacBrowserMetaIdPinWriteResult {
+  pinId: string;
+  txid?: string;
+  txids?: string[];
+  operation?: OacMetaIdPinWriteOperation;
+  path?: string;
+  actor?: OacBrowserMetaAppBridgeActor;
+}
+
+type OacBrowserMetaIdPinWriteHandler = (input: {
+  actorId?: string;
+  resourceUri: string;
+  request: OacBrowserMetaIdPinWriteRequest;
+}) => Promise<MetabotCommandResult<OacBrowserMetaIdPinWriteResult>>;
 
 export interface OacBrowserActorContext {
   homeDir: string;
@@ -71,6 +105,7 @@ export interface CreateOacBrowserHostAdapterInput {
   metaAppPreviewSessions: MetaAppPreviewSessions;
   privateChat?: OacBrowserActionHandler;
   serviceCall?: OacBrowserActionHandler;
+  writeMetaIdPin?: OacBrowserMetaIdPinWriteHandler;
   fetch?: typeof fetch;
   env?: NodeJS.ProcessEnv;
 }
@@ -119,12 +154,227 @@ function profileToBrowserActor(profile: MetabotProfileFull, selectedHomeDir: str
   };
 }
 
+function profileToMetaAppBridgeActor(profile: MetabotProfileFull): OacBrowserMetaAppBridgeActor | null {
+  const globalMetaId = normalizeText(profile.globalMetaId);
+  if (!globalMetaId) {
+    return null;
+  }
+  return {
+    uri: `metaid://${globalMetaId}`,
+    globalMetaId,
+    name: normalizeText(profile.name) || profile.slug,
+  };
+}
+
 function toBrowserRecord(value: object): Record<string, unknown> {
   return { ...value };
 }
 
 function browserRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function safeBridgeMessage(value: unknown, fallback: string): string {
+  const message = normalizeText(value);
+  if (!message) return fallback;
+  if (/\/Users\/|\.metabot|\/api\/|private\s*key|mnemonic|token|stack\s*trace/iu.test(message)) {
+    return fallback;
+  }
+  return message;
+}
+
+function normalizeBridgeDisplay(value: unknown): { title?: string; summary?: string } | undefined {
+  const source = browserRecord(value);
+  const title = normalizeText(source.title);
+  const summary = normalizeText(source.summary);
+  if (!title && !summary) {
+    return undefined;
+  }
+  return {
+    ...(title ? { title } : {}),
+    ...(summary ? { summary } : {}),
+  };
+}
+
+function normalizePinWriteOperation(value: unknown): OacMetaIdPinWriteOperation | null {
+  const operation = normalizeText(value).toLowerCase();
+  return operation === 'create' || operation === 'modify' || operation === 'revoke' ? operation : null;
+}
+
+function normalizePinWriteEncryption(value: unknown): '0' | '1' | '2' | null {
+  const encryption = normalizeText(value);
+  return encryption === '0' || encryption === '1' || encryption === '2' ? encryption : null;
+}
+
+function normalizePinWritePayloadEncoding(value: unknown): OacMetaIdPinWritePayloadEncoding | null {
+  const encoding = normalizeText(value).toLowerCase();
+  if (encoding === 'utf8' || encoding === 'utf-8') return 'utf-8';
+  if (encoding === 'base64') return 'base64';
+  return null;
+}
+
+function isValidBase64Payload(value: string): boolean {
+  if (!value || value.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)) {
+    return false;
+  }
+  try {
+    Buffer.from(value, 'base64');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function payloadByteSize(input: { payload: string; encoding: OacMetaIdPinWritePayloadEncoding }): number {
+  return input.encoding === 'base64'
+    ? Buffer.from(input.payload, 'base64').byteLength
+    : Buffer.byteLength(input.payload, 'utf8');
+}
+
+function invalidBridgeParams(message: string): BrowserCommandResult<BrowserTrustedActionResult> {
+  return browserFailure('invalid_params', message);
+}
+
+function validateMetaIdPinWritePayload(payload: Record<string, unknown>):
+  | {
+    request: OacBrowserMetaIdPinWriteRequest;
+    bridgePayload: Record<string, unknown>;
+    display?: { title?: string; summary?: string };
+    confirmed: boolean;
+    payloadSize: number;
+  }
+  | { failure: BrowserCommandResult<BrowserTrustedActionResult> } {
+  const operation = normalizePinWriteOperation(payload.operation);
+  if (!operation) {
+    return { failure: invalidBridgeParams('metaid.pin.write operation must be create, modify, or revoke.') };
+  }
+
+  const pathValue = normalizeText(payload.path);
+  if (!pathValue || !pathValue.startsWith('/')) {
+    return { failure: invalidBridgeParams('metaid.pin.write path must be an absolute MetaID protocol path.') };
+  }
+
+  const encryption = normalizePinWriteEncryption(payload.encryption);
+  if (!encryption) {
+    return { failure: invalidBridgeParams('metaid.pin.write encryption must be 0, 1, or 2.') };
+  }
+
+  const version = normalizeText(payload.version);
+  if (!version) {
+    return { failure: invalidBridgeParams('metaid.pin.write version is required.') };
+  }
+
+  const contentType = normalizeText(payload.contentType);
+  if (!contentType || /[\r\n]/u.test(contentType)) {
+    return { failure: invalidBridgeParams('metaid.pin.write contentType is required.') };
+  }
+
+  const rawPayload = browserRecord(payload.payload);
+  const encoding = normalizePinWritePayloadEncoding(rawPayload.encoding);
+  const payloadValue = stringField(rawPayload.value);
+  if (!encoding || payloadValue === null) {
+    return { failure: invalidBridgeParams('metaid.pin.write payload requires encoding and string value.') };
+  }
+  if (encoding === 'base64' && !isValidBase64Payload(payloadValue)) {
+    return { failure: invalidBridgeParams('metaid.pin.write base64 payload is invalid.') };
+  }
+
+  const request: OacBrowserMetaIdPinWriteRequest = {
+    operation,
+    path: pathValue,
+    encryption,
+    version,
+    contentType,
+    encoding,
+    payload: payloadValue,
+  };
+  const display = normalizeBridgeDisplay(payload.display);
+  const bridgePayload: Record<string, unknown> = {
+    operation,
+    path: pathValue,
+    encryption,
+    version,
+    contentType,
+    payload: {
+      encoding: encoding === 'utf-8' ? 'utf8' : 'base64',
+      value: payloadValue,
+    },
+    ...(display ? { display } : {}),
+  };
+
+  return {
+    request,
+    bridgePayload,
+    ...(display ? { display } : {}),
+    confirmed: payload.confirmed === true,
+    payloadSize: payloadByteSize(request),
+  };
+}
+
+function sanitizeMetaAppBridgeActor(value: unknown): OacBrowserMetaAppBridgeActor | null {
+  const source = browserRecord(value);
+  const globalMetaId = normalizeText(source.globalMetaId);
+  const uri = normalizeText(source.uri) || (globalMetaId ? `metaid://${globalMetaId}` : '');
+  const name = normalizeText(source.name);
+  if (!globalMetaId || !uri.startsWith('metaid://') || !name) {
+    return null;
+  }
+  const avatarPinId = normalizeText(source.avatarPinId);
+  return {
+    uri,
+    globalMetaId,
+    name,
+    ...(avatarPinId && !avatarPinId.includes('/') && !avatarPinId.includes('\\') ? { avatarPinId } : {}),
+  };
+}
+
+function mapPinWriteFailureCode(value: string): string {
+  if (value === 'profile_not_found' || value === 'identity_missing' || value === 'browser_identity_required') {
+    return 'actor_required';
+  }
+  if (value === 'manual_action_required' || value === 'confirmation_required') {
+    return 'manual_action_required';
+  }
+  if (value === 'invalid_argument' || value === 'invalid_browser_action') {
+    return 'invalid_params';
+  }
+  return value || 'pin_write_failed';
+}
+
+function firstString(value: unknown): string {
+  if (!Array.isArray(value)) return '';
+  for (const item of value) {
+    const text = normalizeText(item);
+    if (text) return text;
+  }
+  return '';
+}
+
+function sanitizePinWriteResultData(input: {
+  resultData: unknown;
+  request: OacBrowserMetaIdPinWriteRequest;
+  actor: OacBrowserMetaAppBridgeActor;
+}): Record<string, unknown> | null {
+  const source = browserRecord(input.resultData);
+  const pinId = normalizeText(source.pinId);
+  const txid = normalizeText(source.txid) || firstString(source.txids);
+  if (!pinId || !txid) {
+    return null;
+  }
+  const operation = normalizePinWriteOperation(source.operation) ?? input.request.operation;
+  const pathValue = normalizeText(source.path) || input.request.path;
+  const actor = sanitizeMetaAppBridgeActor(source.actor) ?? input.actor;
+  return {
+    pinId,
+    txid,
+    operation,
+    path: pathValue,
+    actor,
+  };
 }
 
 function followUpActionFromOac(result: MetabotCommandResult<unknown>): BrowserFollowUpAction | undefined {
@@ -390,6 +640,134 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     return input.resolveActorWriteContext(actorSelector(actorInput));
   }
 
+  async function resolveMetaAppBridgeActor(
+    actorInput?: BrowserActorInput & { from?: string },
+  ): Promise<{ actor: OacBrowserMetaAppBridgeActor; actorId: string } | { failure: BrowserCommandResult<BrowserTrustedActionResult> }> {
+    const actor = await resolveActor(actorInput);
+    if ('failure' in actor) {
+      const code = mapPinWriteFailureCode(browserFailureCode(actor.failure));
+      return {
+        failure: browserManualActionRequired(
+          code,
+          safeBridgeMessage(browserFailureMessage(actor.failure), 'A selected MetaID Actor Bot is required.'),
+        ),
+      };
+    }
+
+    let profiles: MetabotProfileFull[];
+    try {
+      profiles = await listMetabotProfiles(input.systemHomeDir);
+    } catch {
+      return {
+        failure: browserManualActionRequired(
+          'actor_required',
+          'A selected MetaID Actor Bot is required.',
+        ),
+      };
+    }
+    const selectedProfile = findProfileByHomeDir(profiles, actor.homeDir);
+    const bridgeActor = selectedProfile ? profileToMetaAppBridgeActor(selectedProfile) : null;
+    if (!selectedProfile || !bridgeActor) {
+      return {
+        failure: browserManualActionRequired(
+          'actor_required',
+          'A selected MetaID Actor Bot with a Global MetaID is required.',
+        ),
+      };
+    }
+    return { actor: bridgeActor, actorId: selectedProfile.slug };
+  }
+
+  function metaIdPinWriteConfirmation(inputForConfirmation: {
+    actionInput: BrowserTrustedActionInput & { from?: string };
+    actor: OacBrowserMetaAppBridgeActor;
+    validation: Exclude<ReturnType<typeof validateMetaIdPinWritePayload>, { failure: BrowserCommandResult<BrowserTrustedActionResult> }>;
+  }): BrowserCommandResult<BrowserTrustedActionResult> {
+    return browserManualActionRequired(
+      'manual_action_required',
+      'Confirm this MetaID PIN write before OAC signs or broadcasts it.',
+      {
+        data: {
+          confirmation: {
+            actor: inputForConfirmation.actor,
+            operation: inputForConfirmation.validation.request.operation,
+            path: inputForConfirmation.validation.request.path,
+            contentType: inputForConfirmation.validation.request.contentType,
+            payloadSize: inputForConfirmation.validation.payloadSize,
+            ...(inputForConfirmation.validation.display ? { display: inputForConfirmation.validation.display } : {}),
+          },
+          confirmRequest: {
+            resourceUri: inputForConfirmation.actionInput.resourceUri,
+            kind: 'metaid-pin-write',
+            payload: {
+              ...inputForConfirmation.validation.bridgePayload,
+              confirmed: true,
+            },
+          },
+        },
+      },
+    );
+  }
+
+  async function runMetaIdPinWriteAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    const payload = readActionPayload(actionInput);
+    const validation = validateMetaIdPinWritePayload(payload);
+    if ('failure' in validation) {
+      return validation.failure;
+    }
+
+    const actor = await resolveMetaAppBridgeActor(actionInput);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+
+    if (!validation.confirmed) {
+      return metaIdPinWriteConfirmation({
+        actionInput,
+        actor: actor.actor,
+        validation,
+      });
+    }
+
+    if (!input.writeMetaIdPin) {
+      return browserFailure('unsupported_method', 'OAC Browser MetaID PIN write is not configured.');
+    }
+
+    const result = await input.writeMetaIdPin({
+      actorId: actor.actorId,
+      resourceUri: actionInput.resourceUri,
+      request: validation.request,
+    });
+
+    if (!result.ok) {
+      const code = mapPinWriteFailureCode(browserFailureCode(result));
+      const message = safeBridgeMessage(browserFailureMessage(result), 'MetaID PIN write failed.');
+      if (result.state === 'manual_action_required') {
+        return browserManualActionRequired(code, message);
+      }
+      if (result.state === 'waiting') {
+        return browserWaiting(code, message);
+      }
+      return browserFailure(code === 'actor_required' ? code : 'pin_write_failed', message);
+    }
+
+    const data = sanitizePinWriteResultData({
+      resultData: result.data,
+      request: validation.request,
+      actor: actor.actor,
+    });
+    if (!data) {
+      return browserFailure('pin_write_failed', 'MetaID PIN write did not return a pinId and txid.');
+    }
+    return browserSuccess({
+      kind: 'metaid-pin-write' as BrowserTrustedActionInput['kind'],
+      handled: true,
+      data: data as BrowserTrustedActionResult['data'],
+    });
+  }
+
   async function getRuntime(runtimeInput: BrowserRuntimeInput & { from?: string } = {}): Promise<BrowserCommandResult<BrowserRuntimeSnapshot>> {
     const requestedActor = actorSelector(runtimeInput);
     const activeHomeDir = path.resolve(input.homeDir);
@@ -545,6 +923,17 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
   ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
     if (actionInput.kind === 'copy-uri') {
       return copyUriTrustedActionResult(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'metafile-upload') {
+      return browserFailure(
+        'unsupported_method',
+        'OAC Browser MetaFile upload requires a host-owned file picker.',
+      );
+    }
+
+    if ((actionInput.kind as string) === 'metaid-pin-write') {
+      return runMetaIdPinWriteAction(actionInput);
     }
 
     const actor = await resolveActor(actionInput);
