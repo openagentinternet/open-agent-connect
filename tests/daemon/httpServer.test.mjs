@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { access, readFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import { createRequire } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
@@ -1030,6 +1031,43 @@ async function waitForFileRemoved(filePath) {
   assert.fail(`Expected temporary upload file to be removed: ${filePath}`);
 }
 
+async function requestJsonWithHeaders(baseUrl, path, options = {}) {
+  const url = new URL(path, baseUrl);
+  const body = options.body ? JSON.stringify(options.body) : undefined;
+  const headers = {
+    ...(body
+      ? {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body),
+        }
+      : {}),
+    ...(options.headers ?? {}),
+  };
+
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({
+      hostname: url.hostname,
+      port: url.port,
+      path: `${url.pathname}${url.search}`,
+      method: options.method ?? 'GET',
+      headers,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({
+          status: res.statusCode,
+          payload: text ? JSON.parse(text) : null,
+        });
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 function createFakeMetaAppsElement() {
   return {
     dataset: {},
@@ -1108,6 +1146,72 @@ function readMetaAppsActionLinks(detailHtml) {
   return [...detailHtml.matchAll(/<a class="metaapps-action" href="([^"]+)"[^>]*>([^<]+)<\/a>/g)]
     .map((match) => ({ href: match[1], label: match[2] }));
 }
+
+test('local daemon rejects cross-site mutating API requests before route handlers run', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/services/call`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'https://attacker.example',
+    },
+    body: JSON.stringify({
+      request: {
+        servicePinId: 'service-weather',
+        providerGlobalMetaId: 'gm-weather-seller',
+        userTask: 'trigger wallet-adjacent action',
+      },
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 403);
+  assert.equal(payload.code, 'forbidden_origin');
+  assert.deepEqual(server.calls.services, []);
+});
+
+test('local daemon accepts same-origin mutating API requests', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    request: {
+      servicePinId: 'service-weather',
+      providerGlobalMetaId: 'gm-weather-seller',
+      userTask: 'tell me tomorrow weather',
+    },
+  };
+  const response = await fetch(`${server.baseUrl}/api/services/call`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: new URL(server.baseUrl).origin,
+    },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(server.calls.services, [request]);
+});
+
+test('local daemon rejects non-local Host headers before sensitive read handlers run', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const result = await requestJsonWithHeaders(server.baseUrl, '/api/bot/profiles/alice-bot/backup', {
+    headers: {
+      host: 'attacker.example',
+    },
+  });
+
+  assert.equal(result.status, 403);
+  assert.equal(result.payload.code, 'forbidden_host');
+  assert.deepEqual(server.calls.botBackup, []);
+});
 
 test('GET /api/daemon/status returns the daemon status envelope', async (t) => {
   const server = await startServer();

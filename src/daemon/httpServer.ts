@@ -25,6 +25,7 @@ import { handleBrowserRoutes } from './routes/browser';
 import type { MetabotDaemonHttpHandlers, RouteContext, RouteHandler } from './routes/types';
 
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
+const LOCAL_DAEMON_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 const ROUTES: RouteHandler[] = [
   handleConfigRoutes,
@@ -78,6 +79,90 @@ function sendText(
     'cache-control': 'no-store',
   });
   res.end(body);
+}
+
+function normalizeHeaderValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return String(value[0] ?? '').trim();
+  return String(value ?? '').trim();
+}
+
+function readHostAuthority(value: string | string[] | undefined): string {
+  const raw = normalizeHeaderValue(value).toLowerCase();
+  if (!raw) return '';
+  try {
+    return new URL(`http://${raw}`).host.toLowerCase();
+  } catch {
+    return raw;
+  }
+}
+
+function readHostName(value: string | string[] | undefined): string {
+  const raw = normalizeHeaderValue(value);
+  if (!raw) return '';
+  try {
+    return new URL(`http://${raw}`).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  } catch {
+    return raw.split(':')[0]?.replace(/^\[|\]$/g, '').toLowerCase() ?? '';
+  }
+}
+
+function isLocalDaemonHostName(hostname: string): boolean {
+  return LOCAL_DAEMON_HOSTS.has(hostname.replace(/^\[|\]$/g, '').toLowerCase());
+}
+
+function isUnsafeMethod(method: string | undefined): boolean {
+  const normalized = String(method || 'GET').toUpperCase();
+  return normalized !== 'GET' && normalized !== 'HEAD' && normalized !== 'OPTIONS';
+}
+
+function rejectLocalDaemonBoundary(req: http.IncomingMessage, url: URL): { code: string; message: string } | null {
+  const hostName = readHostName(req.headers.host);
+  if (hostName && !isLocalDaemonHostName(hostName)) {
+    return {
+      code: 'forbidden_host',
+      message: 'Local daemon requests must use localhost or a loopback address.',
+    };
+  }
+
+  if (!url.pathname.startsWith('/api/') || !isUnsafeMethod(req.method)) {
+    return null;
+  }
+
+  const fetchSite = normalizeHeaderValue(req.headers['sec-fetch-site']).toLowerCase();
+  if (fetchSite === 'cross-site') {
+    return {
+      code: 'forbidden_origin',
+      message: 'Cross-site requests are not allowed for local daemon API writes.',
+    };
+  }
+
+  const origin = normalizeHeaderValue(req.headers.origin);
+  if (!origin) return null;
+
+  try {
+    const parsedOrigin = new URL(origin);
+    const originHostName = parsedOrigin.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    if (!['http:', 'https:'].includes(parsedOrigin.protocol) || !isLocalDaemonHostName(originHostName)) {
+      return {
+        code: 'forbidden_origin',
+        message: 'Cross-origin requests are not allowed for local daemon API writes.',
+      };
+    }
+    const requestAuthority = readHostAuthority(req.headers.host);
+    if (requestAuthority && parsedOrigin.host.toLowerCase() !== requestAuthority) {
+      return {
+        code: 'forbidden_origin',
+        message: 'Origin must match the local daemon host for API writes.',
+      };
+    }
+  } catch {
+    return {
+      code: 'forbidden_origin',
+      message: 'Invalid Origin header for local daemon API write.',
+    };
+  }
+
+  return null;
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
@@ -164,6 +249,11 @@ async function streamRawBodyToFile(
 export function createHttpServer(handlers: MetabotDaemonHttpHandlers = {}): http.Server {
   return http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+    const boundaryRejection = rejectLocalDaemonBoundary(req, requestUrl);
+    if (boundaryRejection) {
+      sendJson(res, 403, commandFailed(boundaryRejection.code, boundaryRejection.message));
+      return;
+    }
 
     const context: RouteContext = {
       req,
