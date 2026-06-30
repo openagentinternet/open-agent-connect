@@ -29,6 +29,7 @@ const llm_1 = require("./routes/llm");
 const bot_1 = require("./routes/bot");
 const browser_1 = require("./routes/browser");
 const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
+const LOCAL_DAEMON_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const ROUTES = [
     config_1.handleConfigRoutes,
     buzz_1.handleBuzzRoutes,
@@ -73,6 +74,86 @@ function sendText(res, status, body, contentType = 'text/plain; charset=utf-8') 
         'cache-control': 'no-store',
     });
     res.end(body);
+}
+function normalizeHeaderValue(value) {
+    if (Array.isArray(value))
+        return String(value[0] ?? '').trim();
+    return String(value ?? '').trim();
+}
+function readHostAuthority(value) {
+    const raw = normalizeHeaderValue(value).toLowerCase();
+    if (!raw)
+        return '';
+    try {
+        return new URL(`http://${raw}`).host.toLowerCase();
+    }
+    catch {
+        return raw;
+    }
+}
+function readHostName(value) {
+    const raw = normalizeHeaderValue(value);
+    if (!raw)
+        return '';
+    try {
+        return new URL(`http://${raw}`).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    }
+    catch {
+        return raw.split(':')[0]?.replace(/^\[|\]$/g, '').toLowerCase() ?? '';
+    }
+}
+function isLocalDaemonHostName(hostname) {
+    return LOCAL_DAEMON_HOSTS.has(hostname.replace(/^\[|\]$/g, '').toLowerCase());
+}
+function isUnsafeMethod(method) {
+    const normalized = String(method || 'GET').toUpperCase();
+    return normalized !== 'GET' && normalized !== 'HEAD' && normalized !== 'OPTIONS';
+}
+function rejectLocalDaemonBoundary(req, url) {
+    const hostName = readHostName(req.headers.host);
+    if (hostName && !isLocalDaemonHostName(hostName)) {
+        return {
+            code: 'forbidden_host',
+            message: 'Local daemon requests must use localhost or a loopback address.',
+        };
+    }
+    if (!url.pathname.startsWith('/api/') || !isUnsafeMethod(req.method)) {
+        return null;
+    }
+    const fetchSite = normalizeHeaderValue(req.headers['sec-fetch-site']).toLowerCase();
+    if (fetchSite === 'cross-site') {
+        return {
+            code: 'forbidden_origin',
+            message: 'Cross-site requests are not allowed for local daemon API writes.',
+        };
+    }
+    const origin = normalizeHeaderValue(req.headers.origin);
+    if (!origin)
+        return null;
+    try {
+        const parsedOrigin = new URL(origin);
+        const originHostName = parsedOrigin.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+        if (!['http:', 'https:'].includes(parsedOrigin.protocol) || !isLocalDaemonHostName(originHostName)) {
+            return {
+                code: 'forbidden_origin',
+                message: 'Cross-origin requests are not allowed for local daemon API writes.',
+            };
+        }
+        const requestAuthority = readHostAuthority(req.headers.host);
+        if (requestAuthority && parsedOrigin.host.toLowerCase() !== requestAuthority) {
+            return {
+                code: 'forbidden_origin',
+                message: 'Origin must match the local daemon host for API writes.',
+            };
+        }
+    }
+    catch {
+        return {
+            code: 'forbidden_origin',
+            message: 'Invalid Origin header for local daemon API write.',
+        };
+    }
+    return null;
 }
 async function readJsonBody(req) {
     const chunks = [];
@@ -144,6 +225,11 @@ async function streamRawBodyToFile(req, filePath, maxBytes) {
 function createHttpServer(handlers = {}) {
     return node_http_1.default.createServer(async (req, res) => {
         const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+        const boundaryRejection = rejectLocalDaemonBoundary(req, requestUrl);
+        if (boundaryRejection) {
+            sendJson(res, 403, (0, commandResult_1.commandFailed)(boundaryRejection.code, boundaryRejection.message));
+            return;
+        }
         const context = {
             req,
             res,

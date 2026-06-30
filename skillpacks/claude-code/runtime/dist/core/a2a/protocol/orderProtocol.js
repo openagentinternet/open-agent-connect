@@ -16,7 +16,7 @@ const NEEDS_RATING_TAG = 'NeedsRating';
 const ORDER_END_TAG = 'ORDER_END';
 const ORDER_TXID_RE = /^[0-9a-f]{64}$/i;
 const ORDER_TAG_RE = /^\[([A-Za-z_]+)(?::([0-9a-fA-F]{64})(?:\s+([A-Za-z0-9_-]+))?)?\]/;
-const ORDER_PIN_LINE_RE = /^\s*order\s+pin\s+id\s*[:：=]\s*([A-Za-z0-9][A-Za-z0-9._:-]{5,127})\s*$/im;
+const ORDER_PIN_LINE_RE = /^\s*order\s+pin\s+id\s*[:：=]\s*([/A-Za-z0-9][A-Za-z0-9._:/-]{5,127})\s*$/im;
 function normalizeOrderProtocolTxid(value) {
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
     return ORDER_TXID_RE.test(normalized) ? normalized : '';
