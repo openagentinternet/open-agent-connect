@@ -52,6 +52,11 @@ test('scoped protocol helpers match IDBots tag syntax', () => {
     orderPinId,
     content: 'please rate',
   });
+  assert.deepEqual(parseNeedsRatingMessage(`[NeedsRating:${orderTxid}] please rate\norder pin id: /protocols/${orderPinId}`), {
+    orderTxid,
+    orderPinId: `/protocols/${orderPinId}`,
+    content: 'please rate',
+  });
   assert.deepEqual(parseOrderStatusMessage(`[ORDER_STATUS:${orderTxid}] accepted`), {
     orderTxid,
     content: 'accepted',
@@ -64,6 +69,12 @@ test('scoped protocol helpers match IDBots tag syntax', () => {
   assert.deepEqual(parseOrderEndMessage(`[ORDER_END:${orderTxid} rated] thanks\norder pin id: ${orderPinId}`), {
     orderTxid,
     orderPinId,
+    reason: 'rated',
+    content: 'thanks',
+  });
+  assert.deepEqual(parseOrderEndMessage(`[ORDER_END:${orderTxid} rated] thanks\norder pin id: /protocols/${orderPinId}`), {
+    orderTxid,
+    orderPinId: `/protocols/${orderPinId}`,
     reason: 'rated',
     content: 'thanks',
   });

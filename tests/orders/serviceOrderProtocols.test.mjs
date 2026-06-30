@@ -235,6 +235,10 @@ test('parseNeedsRatingMessage extracts the remote T-stage invite body', () => {
   );
   assert.equal(parseNeedsRatingMessage('[NEEDSRATING] rate me'), 'rate me');
   assert.equal(parseNeedsRatingMessage(`[NeedsRating:${orderTxid}] rate me`), 'rate me');
+  assert.equal(
+    parseNeedsRatingMessage(`[NeedsRating:${orderTxid}] rate me\norder pin id: /protocols/skill-service-order-pin-1`),
+    'rate me'
+  );
   assert.equal(parseNeedsRatingMessage('plain text'), null);
 });
 
