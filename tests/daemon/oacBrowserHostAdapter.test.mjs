@@ -57,8 +57,11 @@ async function createAdapter(input) {
     metaAppPreviewSessions: createMetaAppPreviewSessionRegistry(),
     env: input.env ?? {},
     fetch: input.fetch,
+    now: input.now,
+    confirmationTtlMs: input.confirmationTtlMs,
     privateChat: input.privateChat,
     serviceCall: input.serviceCall,
+    writeMetaIdPin: input.writeMetaIdPin,
     resolveActorWriteContext: async (rawActor) => {
       const slug = typeof rawActor === 'string' ? rawActor.trim() : '';
       if (!slug) {
@@ -1031,6 +1034,571 @@ test('OAC browser host adapter requires a selected actor with a Global MetaID fo
   assert.equal(result.ok, false);
   assert.equal(result.state, 'manual_action_required');
   assert.equal(result.code, 'browser_identity_required');
+});
+
+test('OAC browser host adapter previews metaid-pin-write through manual confirmation before signing', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pin-preview');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Pin Preview Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18PinPreview',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    writeMetaIdPin: async (input) => {
+      calls.push(input);
+      return { ok: true, state: 'success', data: { pinId: 'pin-preview', txid: 'tx-preview' } };
+    },
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json;utf-8',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+      display: { title: 'Publish post', summary: 'hello' },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'manual_action_required');
+  assert.equal(result.code, 'manual_action_required');
+  assert.deepEqual(calls, []);
+  assert.deepEqual(result.data.confirmation.actor, {
+    uri: `metaid://${LOCAL_GLOBAL_META_ID}`,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    name: 'Pin Preview Bot',
+  });
+  assert.deepEqual(result.data.confirmation.display, {
+    title: 'Publish post',
+    summary: 'hello',
+  });
+  assert.equal(result.data.confirmation.operation, 'create');
+  assert.equal(result.data.confirmation.path, '/protocols/simplebuzz');
+  assert.equal(result.data.confirmation.contentType, 'application/json;utf-8');
+  assert.equal(result.data.confirmation.payloadSize, Buffer.byteLength('{"content":"hello"}', 'utf8'));
+  assert.equal(result.data.confirmRequest.kind, 'metaid-pin-write');
+  assert.equal(result.data.confirmRequest.payload.confirmed, true);
+  assert.equal(typeof result.data.confirmation.confirmationId, 'string');
+  assert.equal(typeof result.data.confirmation.expiresAt, 'number');
+  assert.deepEqual(
+    Object.keys(result.data.confirmRequest.payload.hostConfirmation).sort(),
+    ['id', 'token'],
+  );
+  assert.equal(result.data.confirmRequest.payload.hostConfirmation.id, result.data.confirmation.confirmationId);
+});
+
+test('OAC browser host adapter rejects invalid metaid-pin-write payloads before signer access', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pin-invalid');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Invalid Pin Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18InvalidPin',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    writeMetaIdPin: async (input) => {
+      calls.push(input);
+      return { ok: true, state: 'success', data: { pinId: 'should-not-write', txid: 'tx' } };
+    },
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create',
+      path: '',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_params');
+  assert.deepEqual(calls, []);
+});
+
+test('OAC browser host adapter rejects forged metaid-pin-write confirmation before signer access', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pin-forged-confirm');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Forged Pin Confirm Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18ForgedPinConfirm',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    writeMetaIdPin: async (input) => {
+      calls.push(input);
+      return { ok: true, state: 'success', data: { pinId: 'forged-pin', txid: 'forged-tx' } };
+    },
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+      confirmed: true,
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'manual_action_required');
+  assert.equal(result.code, 'manual_action_required');
+  assert.deepEqual(calls, []);
+});
+
+test('OAC browser host adapter confirms metaid-pin-write with host-owned state and sanitized result data', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pin-confirm');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Pin Confirm Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18PinConfirm',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    writeMetaIdPin: async (input) => {
+      calls.push(input);
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          pinId: 'pin-confirm',
+          txid: 'tx-confirm',
+          operation: input.request.operation,
+          path: input.request.path,
+          actor: {
+            uri: `metaid://${LOCAL_GLOBAL_META_ID}`,
+            globalMetaId: LOCAL_GLOBAL_META_ID,
+            name: 'Pin Confirm Bot',
+          },
+          explorerUrl: 'https://explorer.example/tx-confirm',
+          wallet: { address: '18PinConfirm' },
+          route: '/api/internal/secret',
+        },
+      };
+    },
+  });
+
+  const preview = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json;utf-8',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+    },
+  });
+  assert.equal(preview.ok, false);
+  assert.equal(preview.state, 'manual_action_required');
+  assert.deepEqual(calls, []);
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: preview.data.confirmRequest.resourceUri,
+    kind: preview.data.confirmRequest.kind,
+    payload: preview.data.confirmRequest.payload,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.kind, 'metaid-pin-write');
+  assert.equal(result.data.handled, true);
+  assert.deepEqual(calls.map((call) => ({
+    actorId: call.actorId,
+    resourceUri: call.resourceUri,
+    request: call.request,
+  })), [{
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    request: {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json;utf-8',
+      encoding: 'utf-8',
+      payload: '{"content":"hello"}',
+    },
+  }]);
+  assert.deepEqual(result.data.data, {
+    pinId: 'pin-confirm',
+    txid: 'tx-confirm',
+    operation: 'create',
+    path: '/protocols/simplebuzz',
+    actor: {
+      uri: `metaid://${LOCAL_GLOBAL_META_ID}`,
+      globalMetaId: LOCAL_GLOBAL_META_ID,
+      name: 'Pin Confirm Bot',
+    },
+  });
+});
+
+test('OAC browser host adapter rejects reused mismatched and expired metaid-pin-write confirmations', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pin-confirm-guard');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+  let now = 1_000;
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Pin Confirm Guard Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18PinConfirmGuard',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    now: () => now,
+    confirmationTtlMs: 500,
+    writeMetaIdPin: async (input) => {
+      calls.push(input);
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          pinId: `pin-guard-${calls.length}`,
+          txid: `tx-guard-${calls.length}`,
+          operation: input.request.operation,
+          path: input.request.path,
+          actor: {
+            uri: `metaid://${LOCAL_GLOBAL_META_ID}`,
+            globalMetaId: LOCAL_GLOBAL_META_ID,
+            name: 'Pin Confirm Guard Bot',
+          },
+        },
+      };
+    },
+  });
+
+  const payload = {
+    operation: 'create',
+    path: '/protocols/simplebuzz',
+    encryption: '0',
+    version: '1.0.0',
+    contentType: 'application/json',
+    payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+  };
+
+  const reusablePreview = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload,
+  });
+  const firstConfirm = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: reusablePreview.data.confirmRequest.resourceUri,
+    kind: reusablePreview.data.confirmRequest.kind,
+    payload: reusablePreview.data.confirmRequest.payload,
+  });
+  assert.equal(firstConfirm.ok, true);
+
+  const reusedConfirm = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: reusablePreview.data.confirmRequest.resourceUri,
+    kind: reusablePreview.data.confirmRequest.kind,
+    payload: reusablePreview.data.confirmRequest.payload,
+  });
+  assert.equal(reusedConfirm.ok, false);
+  assert.equal(reusedConfirm.code, 'manual_action_required');
+
+  const mismatchPreview = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload,
+  });
+  const mismatchedConfirm = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: mismatchPreview.data.confirmRequest.resourceUri,
+    kind: mismatchPreview.data.confirmRequest.kind,
+    payload: {
+      ...mismatchPreview.data.confirmRequest.payload,
+      contentType: 'text/plain',
+    },
+  });
+  assert.equal(mismatchedConfirm.ok, false);
+  assert.equal(mismatchedConfirm.code, 'manual_action_required');
+
+  const expiredPreview = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload,
+  });
+  now += 1_000;
+  const expiredConfirm = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: expiredPreview.data.confirmRequest.resourceUri,
+    kind: expiredPreview.data.confirmRequest.kind,
+    payload: expiredPreview.data.confirmRequest.payload,
+  });
+  assert.equal(expiredConfirm.ok, false);
+  assert.equal(expiredConfirm.code, 'manual_action_required');
+  assert.equal(calls.length, 1);
+});
+
+test('OAC browser host adapter treats create modify and revoke as peer metaid-pin-write operations', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pin-operations');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const requests = [];
+  const targetPinId = `${'a'.repeat(64)}i0`;
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Pin Operations Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18PinOperations',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    writeMetaIdPin: async (input) => {
+      requests.push(input.request);
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          pinId: `${input.request.operation}-pin`,
+          txid: `${input.request.operation}-tx`,
+          operation: input.request.operation,
+          path: input.request.path,
+          actor: {
+            uri: `metaid://${LOCAL_GLOBAL_META_ID}`,
+            globalMetaId: LOCAL_GLOBAL_META_ID,
+            name: 'Pin Operations Bot',
+          },
+        },
+      };
+    },
+  });
+
+  for (const operation of ['create', 'modify', 'revoke']) {
+    const pathValue = operation === 'create' ? '/protocols/simplebuzz' : `@${targetPinId}`;
+    const initial = await adapter.runTrustedAction({
+      actorId: active.slug,
+      resourceUri: 'metaapp://bridge-app',
+      kind: 'metaid-pin-write',
+      payload: {
+        operation,
+        path: pathValue,
+        encryption: '0',
+        version: '1.0.0',
+        contentType: 'application/json',
+        payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+        appAction: `${operation}-from-app`,
+        ...(operation === 'create' ? {} : { originalId: targetPinId }),
+      },
+    });
+    assert.equal(initial.ok, false);
+    assert.equal(initial.state, 'manual_action_required');
+
+    const result = await adapter.runTrustedAction({
+      actorId: active.slug,
+      resourceUri: initial.data.confirmRequest.resourceUri,
+      kind: initial.data.confirmRequest.kind,
+      payload: initial.data.confirmRequest.payload,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.data.data.operation, operation);
+  }
+
+  assert.deepEqual(requests.map((request) => ({
+    operation: request.operation,
+    path: request.path,
+    originalId: request.originalId,
+    appAction: request.appAction,
+  })), [
+    {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      originalId: undefined,
+      appAction: 'create-from-app',
+    },
+    {
+      operation: 'modify',
+      path: `@${targetPinId}`,
+      originalId: targetPinId,
+      appAction: 'modify-from-app',
+    },
+    {
+      operation: 'revoke',
+      path: `@${targetPinId}`,
+      originalId: targetPinId,
+      appAction: 'revoke-from-app',
+    },
+  ]);
+});
+
+test('OAC browser host adapter validates modify and revoke target pins explicitly', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pin-target-validation');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Pin Target Validation Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18PinTargetValidation',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    writeMetaIdPin: async (input) => {
+      calls.push(input);
+      return { ok: true, state: 'success', data: { pinId: 'pin-target', txid: 'tx-target' } };
+    },
+  });
+
+  const wrongPath = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'modify',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+      originalId: `${'b'.repeat(64)}i0`,
+    },
+  });
+  assert.equal(wrongPath.ok, false);
+  assert.equal(wrongPath.code, 'invalid_params');
+
+  const mismatchedOriginalId = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'revoke',
+      path: `@${'c'.repeat(64)}i0`,
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json',
+      payload: { encoding: 'utf8', value: '' },
+      originalId: `${'d'.repeat(64)}i0`,
+    },
+  });
+  assert.equal(mismatchedOriginalId.ok, false);
+  assert.equal(mismatchedOriginalId.code, 'invalid_params');
+  assert.deepEqual(calls, []);
+});
+
+test('OAC browser host adapter requires a chain-backed actor for metaid-pin-write', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-pin-no-actor');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfile(systemHomeDir, {
+    name: 'Pending Pin Bot',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    writeMetaIdPin: async (input) => {
+      calls.push(input);
+      return { ok: true, state: 'success', data: { pinId: 'pin', txid: 'tx' } };
+    },
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+      confirmed: true,
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'actor_required');
+  assert.deepEqual(calls, []);
+});
+
+test('OAC browser host adapter explicitly rejects metafile-upload until a host picker exists', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-metafile-upload');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Metafile Upload Bot',
+    homeDir: profileHome,
+    globalMetaId: LOCAL_GLOBAL_META_ID,
+    mvcAddress: '18MetafileUpload',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metafile-upload',
+    payload: {
+      source: { kind: 'host-picker', multiple: true },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'unsupported_method');
+  assert.doesNotMatch(result.message, /\/Users\/|\.metabot|\/api\//);
 });
 
 test('OAC browser host adapter ignores payload local identity fields for open-conversation', async (t) => {

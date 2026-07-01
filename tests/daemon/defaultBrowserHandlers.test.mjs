@@ -9,6 +9,14 @@ const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaul
 const { createMetabotProfile, createMetabotProfileFromIdentity } = require('../../dist/core/bot/metabotProfileManager.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 
+function makeSigner(writePin) {
+  return {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({}),
+    writePin,
+  };
+}
+
 test('Browser context defaults to the active local Bot and can switch using identity by slug', async (t) => {
   const profileHome = await createProfileHome('browser-default-context');
   t.after(async () => cleanupProfileHome(profileHome));
@@ -181,4 +189,110 @@ test('Browser settings expose and persist browser base URL configuration by acti
   assert.equal(configOnDisk.browser.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(configOnDisk.browser.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(configOnDisk.browser.botHomepageTemplateId, 'compact-list');
+});
+
+test('Browser trusted metaid-pin-write uses the selected signer after confirmation and returns sanitized bridge result', async (t) => {
+  const profileHome = await createProfileHome('browser-default-pin-write');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const writes = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Browser Write Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1browserwrite',
+    mvcAddress: '18BrowserWrite',
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writes.push(input);
+      return {
+        pinId: 'pin-browser-write',
+        txids: ['tx-browser-write'],
+        totalCost: 12,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: 'idq1browserwrite',
+        mvcAddress: '18BrowserWrite',
+        explorerUrl: 'https://explorer.example/tx-browser-write',
+        wallet: { address: '18BrowserWrite' },
+        route: '/api/internal/chain-write',
+      };
+    }),
+  });
+
+  const forged = await handlers.browser.runTrustedAction({
+    from: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+      confirmed: true,
+    },
+  });
+  assert.equal(forged.ok, false);
+  assert.equal(forged.state, 'manual_action_required');
+  assert.deepEqual(writes, []);
+
+  const preview = await handlers.browser.runTrustedAction({
+    from: active.slug,
+    resourceUri: 'metaapp://bridge-app',
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      encryption: '0',
+      version: '1.0.0',
+      contentType: 'application/json',
+      payload: { encoding: 'utf8', value: '{"content":"hello"}' },
+    },
+  });
+  assert.equal(preview.ok, false);
+  assert.equal(preview.state, 'manual_action_required');
+  assert.equal(typeof preview.data.confirmRequest.payload.hostConfirmation.token, 'string');
+
+  const result = await handlers.browser.runTrustedAction({
+    from: active.slug,
+    resourceUri: preview.data.confirmRequest.resourceUri,
+    kind: preview.data.confirmRequest.kind,
+    payload: preview.data.confirmRequest.payload,
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writes, [{
+    operation: 'create',
+    path: '/protocols/simplebuzz',
+    encryption: '0',
+    version: '1.0.0',
+    contentType: 'application/json',
+    encoding: 'utf-8',
+    payload: '{"content":"hello"}',
+    network: 'mvc',
+  }]);
+  assert.deepEqual(result.data, {
+    kind: 'metaid-pin-write',
+    handled: true,
+    data: {
+      pinId: 'pin-browser-write',
+      txid: 'tx-browser-write',
+      operation: 'create',
+      path: '/protocols/simplebuzz',
+      actor: {
+        uri: 'metaid://idq1browserwrite',
+        globalMetaId: 'idq1browserwrite',
+        name: 'Browser Write Bot',
+      },
+    },
+  });
 });

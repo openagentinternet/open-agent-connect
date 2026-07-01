@@ -24,6 +24,7 @@ async function startServer() {
     getCache: [],
     clearCache: [],
     actions: [],
+    metafileUploads: [],
   };
   const server = createHttpServer({
     browser: {
@@ -149,6 +150,10 @@ async function startServer() {
           });
         }
         return browserSuccess({ kind: input.kind, handled: true, data: { accepted: true } });
+      },
+      metafileUpload: async (input) => {
+        calls.metafileUploads.push(input);
+        return browserFailure('unsupported_method', 'OAC Browser MetaFile upload requires a host-owned file picker.');
       },
     },
   });
@@ -338,6 +343,31 @@ test('POST /api/browser/actions serializes waiting and manual action results wit
   assert.equal(manualPayload.state, 'manual_action_required');
   assert.equal(manualPayload.code, 'browser_settings_required');
   assert.equal(manualPayload.action.href || manualPayload.action.route, expectedManualFollowUpTarget);
+});
+
+test('POST /api/browser/metafile-upload forwards host-picker requests and returns stable bridge errors', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/api/browser/metafile-upload?actorId=alice`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: { kind: 'host-picker', multiple: true, accept: ['application/pdf'] },
+      purpose: 'netdisk',
+    }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'unsupported_method');
+  assert.doesNotMatch(payload.message, /\/Users\/|\.metabot|\/api\//);
+  assert.deepEqual(calls.metafileUploads, [{
+    actorId: 'alice',
+    source: { kind: 'host-picker', multiple: true, accept: ['application/pdf'] },
+    purpose: 'netdisk',
+  }]);
 });
 
 test('GET and PUT /api/browser/settings forward from slug and browser settings payload', async (t) => {
