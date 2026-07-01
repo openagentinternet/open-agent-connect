@@ -5900,13 +5900,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       resolvePeerChatPublicKey,
       replyRunner: guidanceReplyRunner,
+      a2aConversationPersister,
     }, profileAutoReplyConfig);
 
-    const previousA2AMessage = await readLatestA2AConversationMessage({
-      homeDir: profileHomeDir,
-      localGlobalMetaId: state.identity.globalMetaId,
-      peerGlobalMetaId,
-    });
     await orchestrator.handleLocalGuidedTurn(peerGlobalMetaId, {
       guidanceToConsume: pendingGuidance.claim,
     });
@@ -5934,17 +5930,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
       localGlobalMetaId: state.identity.globalMetaId,
       peerGlobalMetaId,
     });
-    if (latestA2AMessage && latestA2AMessage.messageId !== previousA2AMessage?.messageId) {
-      publishConversationEvent({
-        type: 'conversation-message',
-        localGlobalMetaId: state.identity.globalMetaId,
-        peerGlobalMetaId,
-        messageId: latestA2AMessage.messageId,
-        timestamp: latestA2AMessage.timestamp,
-        kind: latestA2AMessage.kind,
-        protocolTag: latestA2AMessage.protocolTag ?? null,
-      });
-    }
 
     return commandSuccess({
       localGlobalMetaId: state.identity.globalMetaId,

@@ -134,6 +134,7 @@ async function createAutoReplyHarness(options = {}) {
     resolvePeerChatPublicKey: async () => (
       hasResolvePeerChatPublicKeyOverride ? options.resolvePeerChatPublicKey : peerKeys.publicKeyHex
     ),
+    a2aConversationPersister: options.a2aConversationPersister,
     replyRunner: async (input) => {
       runnerInputs.push(input);
       if (options.replyRunner) {
@@ -1052,6 +1053,67 @@ test('guided local turns do not send a stale claimed guidance after a newer guid
   conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
   assert.equal(conversation.pendingGuidanceText, null);
   assert.equal(conversation.pendingGuidanceCreatedAt, null);
+});
+
+test('guided local turns use injected A2A persister for the outbound message', async () => {
+  const now = 1_770_000_000_000;
+  const persistedInputs = [];
+  const harness = await createAutoReplyHarness({
+    now,
+    a2aConversationPersister: async (input) => {
+      persistedInputs.push(input);
+      return {
+        messageId: input.message.messageId ?? input.message.pinId ?? 'persisted-guided-message',
+        sessionId: 'a2a-peer-local-peer',
+        orderSessionId: null,
+        direction: input.message.direction,
+        kind: 'private_chat',
+        protocolTag: null,
+        orderTxid: null,
+        serviceOrderPinId: null,
+        orderPinId: null,
+        paymentTxid: null,
+        content: input.message.content,
+        contentType: 'text/plain',
+        chain: input.message.chain ?? null,
+        pinId: input.message.pinId ?? null,
+        txid: input.message.txid ?? null,
+        txids: input.message.txids ?? [],
+        replyPinId: null,
+        timestamp: input.message.timestamp ?? now,
+        chainTimestamp: null,
+        sender: { globalMetaId: input.local.globalMetaId, name: null, avatar: null, chatPublicKey: null },
+        recipient: { globalMetaId: input.peer.globalMetaId, name: null, avatar: null, chatPublicKey: null },
+        raw: null,
+      };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: now - 1000,
+    updatedAt: now - 500,
+    pendingGuidanceText: 'Keep the response visible immediately.',
+    pendingGuidanceCreatedAt: now - 100,
+  });
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(persistedInputs.length, 1);
+  assert.equal(persistedInputs[0].local.globalMetaId, harness.localGlobalMetaId);
+  assert.equal(persistedInputs[0].peer.globalMetaId, harness.peerGlobalMetaId);
+  assert.equal(persistedInputs[0].message.direction, 'outgoing');
+  assert.equal(persistedInputs[0].message.content, 'reply from LLM');
+  assert.equal(persistedInputs[0].message.pinId, 'reply-pin-1');
+  assert.deepEqual(persistedInputs[0].message.txids, ['reply-tx-1']);
 });
 
 test('guided local turns are a no-op for closed conversations without pending guidance', async () => {
