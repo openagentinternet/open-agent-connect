@@ -127,5 +127,17 @@ async function handleBrowserApiRoutes(context) {
         context.sendJson(statusForBrowserResult(result), result);
         return true;
     }
+    if (url.pathname === '/api/browser/metafile-upload') {
+        if (method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const input = await context.readJsonBody();
+        const result = handlers?.metafileUpload
+            ? await handlers.metafileUpload({ ...input, ...actorRouteInput(url, input) })
+            : (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC Browser MetaFile upload requires a host-owned file picker.');
+        context.sendJson(statusForBrowserResult(result), result);
+        return true;
+    }
     return false;
 }

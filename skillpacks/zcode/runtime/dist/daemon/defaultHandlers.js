@@ -4565,12 +4565,8 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
             resolvePeerChatPublicKey,
             replyRunner: guidanceReplyRunner,
+            a2aConversationPersister,
         }, profileAutoReplyConfig);
-        const previousA2AMessage = await readLatestA2AConversationMessage({
-            homeDir: profileHomeDir,
-            localGlobalMetaId: state.identity.globalMetaId,
-            peerGlobalMetaId,
-        });
         await orchestrator.handleLocalGuidedTurn(peerGlobalMetaId, {
             guidanceToConsume: pendingGuidance.claim,
         });
@@ -4588,17 +4584,6 @@ function createDefaultMetabotDaemonHandlers(input) {
             localGlobalMetaId: state.identity.globalMetaId,
             peerGlobalMetaId,
         });
-        if (latestA2AMessage && latestA2AMessage.messageId !== previousA2AMessage?.messageId) {
-            publishConversationEvent({
-                type: 'conversation-message',
-                localGlobalMetaId: state.identity.globalMetaId,
-                peerGlobalMetaId,
-                messageId: latestA2AMessage.messageId,
-                timestamp: latestA2AMessage.timestamp,
-                kind: latestA2AMessage.kind,
-                protocolTag: latestA2AMessage.protocolTag ?? null,
-            });
-        }
         return (0, commandResult_1.commandSuccess)({
             localGlobalMetaId: state.identity.globalMetaId,
             peerGlobalMetaId,
@@ -8762,6 +8747,29 @@ function createDefaultMetabotDaemonHandlers(input) {
     }
     const metaAppPreviewSessions = (0, previewSessions_1.createMetaAppPreviewSessionRegistry)();
     let daemonHandlers = null;
+    function safeBrowserBridgeErrorMessage(error, fallback) {
+        const message = error instanceof Error ? error.message : normalizeText(error);
+        if (!message)
+            return fallback;
+        if (/\/Users\/|\.metabot|\/api\/|private\s*key|mnemonic|token|secret|stack\s*trace/iu.test(message)) {
+            return fallback;
+        }
+        return message;
+    }
+    async function resolveBrowserBridgeActorForHome(homeDir) {
+        const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(normalizedSystemHomeDir);
+        const resolvedHomeDir = node_path_1.default.resolve(homeDir);
+        const profile = profiles.find((candidate) => node_path_1.default.resolve(candidate.homeDir) === resolvedHomeDir) ?? null;
+        const globalMetaId = normalizeText(profile?.globalMetaId);
+        if (!profile || !globalMetaId) {
+            return null;
+        }
+        return {
+            uri: `metaid://${globalMetaId}`,
+            globalMetaId,
+            name: normalizeText(profile.name) || profile.slug,
+        };
+    }
     const browserHostAdapterInput = {
         homeDir: input.homeDir,
         systemHomeDir: normalizedSystemHomeDir,
@@ -8773,6 +8781,34 @@ function createDefaultMetabotDaemonHandlers(input) {
         serviceCall: async (request) => daemonHandlers?.services?.call
             ? daemonHandlers.services.call(request)
             : (0, commandResult_1.commandFailed)('not_implemented', 'Service call handler is not configured.'),
+        writeMetaIdPin: async ({ actorId, request }) => {
+            try {
+                const actor = await resolveActorWriteContext(actorId);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const bridgeActor = await resolveBrowserBridgeActorForHome(actor.homeDir);
+                if (!bridgeActor) {
+                    return (0, commandResult_1.commandManualActionRequired)('actor_required', 'A selected MetaID Actor Bot with a Global MetaID is required.');
+                }
+                const network = await resolveWriteNetworkForHome(undefined, actor.homeDir);
+                const result = await actor.signer.writePin({
+                    ...request,
+                    network,
+                });
+                return (0, commandResult_1.commandSuccess)({
+                    pinId: result.pinId,
+                    txid: result.txids[0] ?? '',
+                    txids: result.txids,
+                    operation: request.operation,
+                    path: result.path,
+                    actor: bridgeActor,
+                });
+            }
+            catch (error) {
+                return (0, commandResult_1.commandFailed)('pin_write_failed', safeBrowserBridgeErrorMessage(error, 'MetaID PIN write failed.'));
+            }
+        },
         fetch: globalThis.fetch,
         env: process.env,
     };

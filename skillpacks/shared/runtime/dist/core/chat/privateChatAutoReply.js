@@ -210,7 +210,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     chain: outboundReply.network ?? 'mvc',
                     timestamp: outboundRecord.timestamp,
                 },
-            });
+            }, deps.a2aConversationPersister);
             const latestConversation = await deps.stateStore.getConversationByPeer(input.peerGlobalMetaId);
             let updatedConversation = {
                 ...input.conversation,
@@ -329,7 +329,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     timestamp: inboundMessageRecord.timestamp,
                     raw: message.rawMessage,
                 },
-            });
+            }, deps.a2aConversationPersister);
             if (conversation.state === 'closed') {
                 await deps.stateStore.upsertConversation(conversation);
                 return;

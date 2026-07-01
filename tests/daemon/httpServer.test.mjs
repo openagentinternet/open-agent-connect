@@ -2672,7 +2672,7 @@ test('GET /browser supports zh-CN launch chrome language selection', async (t) =
   assert.match(html, /创建你的第一个 Bot/);
   assert.match(html, /访问主页/);
   assert.match(html, /发送信息/);
-  assert.match(html, /关注该 Bot/);
+  assert.match(html, /书签 \/ 最近/);
   assert.match(html, /复制 GlobalMetaId/);
 });
 

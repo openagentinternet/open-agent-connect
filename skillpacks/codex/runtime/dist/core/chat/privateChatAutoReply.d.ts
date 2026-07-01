@@ -1,3 +1,4 @@
+import { type A2AConversationMessagePersister } from '../a2a/conversationPersistence';
 import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './privateChatStateStore';
 import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
@@ -11,6 +12,7 @@ export interface PrivateChatAutoReplyDependencies {
     selfGlobalMetaId: () => Promise<string | null>;
     resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
     replyRunner: ChatReplyRunner;
+    a2aConversationPersister?: A2AConversationMessagePersister;
     now?: () => number;
 }
 export interface PrivateChatAutoReplyOrchestrator {
