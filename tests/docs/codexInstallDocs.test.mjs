@@ -6,6 +6,8 @@ import test from 'node:test';
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const CHINESE_OAC_CAPABILITY_PROMPT = /OAC \u53ef\u4ee5\u505a\u4ec0\u4e48/;
 const CHINESE_METABOT_CAPABILITY_PROMPT = /MetaBot \u5177\u5907\u4ec0\u4e48\u80fd\u529b/;
+const AGENT_INTERNET_BANNER_LINE = /_                    _     ___       _                       _/;
+const LEGACY_OAC_BANNER_LINE = /_   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___ ___ _____/;
 
 test('README exposes one user-facing install prompt and the npm fallback', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
@@ -53,6 +55,8 @@ test('unified install guide defines the remote GitHub install and host bind flow
   assert.match(guide, /~\/\.metabot\/bin/);
   assert.match(guide, /## Agent Response Contract \(Required\)/);
   assert.match(guide, /## Welcome Message Shape \(Required\)/);
+  assert.match(guide, AGENT_INTERNET_BANNER_LINE);
+  assert.doesNotMatch(guide, LEGACY_OAC_BANNER_LINE);
   assert.match(guide, /Open Agent Connect: Connect your local AI agent to an open agent network\./);
   assert.match(guide, /related skills are bound and ready to use/i);
   assert.match(guide, /do not mention internal install constraints/i);
@@ -247,6 +251,8 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /one clear next action to open Agent Internet Browser/i);
   assert.match(runbook, /## Welcome Message Shape \(Required\)/);
   assert.match(runbook, /Do not use one fixed canned paragraph/i);
+  assert.match(runbook, AGENT_INTERNET_BANNER_LINE);
+  assert.doesNotMatch(runbook, LEGACY_OAC_BANNER_LINE);
   assert.match(runbook, /what changed for the user after install/i);
   assert.match(runbook, /what to do next right now/i);
   assert.match(runbook, /Open Agent Connect: Connect your local AI agent to an open agent network/i);
