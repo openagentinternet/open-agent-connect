@@ -25,8 +25,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-post-skillservice',
   'metabot-create-wiki',
   'metabot-loom-wish2task',
-  'metabot-metaapp-publish',
-  'metabot-homepage-guide',
+  'metabot-metaapp',
   'metabot-upload-file',
   'metabot-upload-largefile',
   'metabot-wallet-manage',
@@ -270,12 +269,12 @@ test('buildAgentConnectSkillpacks includes the Loom wish-to-task publishing work
   assert.match(content, /metabot ui open --page loom/);
 });
 
-test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow skill', async () => {
+test('buildAgentConnectSkillpacks includes the unified MetaApp workflow skill', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
-  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-metaapp-publish'), 'utf8');
-  assert.match(content, /^name:\s*metabot-metaapp-publish$/m);
-  assert.match(content, /Bot, bot, and MetaBot wording as equivalent/i);
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-metaapp'), 'utf8');
+  assert.match(content, /^name:\s*metabot-metaapp$/m);
+  assert.match(content, /single MetaApp workflow entrypoint/i);
   assert.match(content, /metaapp preview/);
   assert.match(content, /metabot metaapp list --from <bot-slug>/);
   assert.match(content, /metabot metaapp publish --from <bot-slug> --payload-file <path> --confirm/);
@@ -286,10 +285,26 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.match(content, /metaapp share --pin-id/);
   assert.match(content, /metaapp view/);
   assert.match(content, /metaapp comment/);
-  assert.match(content, /Unified Publish Wizard/i);
+  assert.match(content, /Publish Wizard/i);
   assert.match(content, /Direct MetaAPP Protocol Publish/i);
   assert.match(content, /publish-project Fast Path/i);
   assert.match(content, /publish.*update.*delete.*explicit confirmation.*--confirm/is);
+  assert.match(content, /Bot Homepage MetaApp Rules/i);
+  assert.match(content, /https:\/\/so\.metaid\.io\/api\/bot-homepage\/globalmetaid\/<globalMetaId>\?version=v3/);
+  assert.match(content, /body\.code === 0/);
+  assert.match(content, /schemaVersion === "botHomepage\.v3"/);
+  assert.match(content, /data\.json/);
+  assert.match(content, /profile\.homepage\.payload\.uri/);
+  assert.match(content, /metaid:\/\//);
+  assert.match(content, /pin:\/\//);
+  assert.match(content, /metaapp:\/\//);
+  assert.match(content, /metafile:\/\//);
+  assert.match(content, /map:\/\//);
+  assert.match(content, /AgentBrowser\.navigate/);
+  assert.match(content, /browser\.actor\.current/);
+  assert.match(content, /metaid\.pin\.write/);
+  assert.match(content, /metafile\.upload/);
+  assert.match(content, /bot update --from <bot-slug> --payload-file <homepage-payload\.json>/);
   assert.match(content, /coverImg/);
   assert.match(content, /icon/);
   assert.match(content, /title.*appName.*content.*non-empty/is);
@@ -307,7 +322,8 @@ test('buildAgentConnectSkillpacks includes the MetaApp publish/share workflow sk
   assert.doesNotMatch(content, /metabot metaapp publish --from <bot-slug> --project-dir/);
   assert.doesNotMatch(content, /metabot metaapp update --target-pin-id <pinid> --from <bot-slug> --project-dir/);
   assert.doesNotMatch(content, /ui open --page metaapps/);
-  assert.doesNotMatch(content, /metawebUrl/);
+  assert.doesNotMatch(content, /metabot-homepage-guide/);
+  assert.doesNotMatch(content, /metabot-metaapp-publish/);
 });
 
 test('buildAgentConnectSkillpacks updates generated ui-open help to recommend apps instead of metaapps', async () => {
@@ -743,14 +759,15 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.doesNotMatch(content, /\.metabot\/hot/);
 });
 
-test('buildAgentConnectSkillpacks publishes Browser follow-ups in remote-service and homepage shared skills', async () => {
+test('buildAgentConnectSkillpacks publishes Browser follow-ups in remote-service and MetaApp shared skills', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
   const remoteService = await readFile(sharedSkillFile(outputRoot, 'metabot-call-remote-service'), 'utf8');
   assert.match(remoteService, /open the provider Bot page in Browser/i);
 
-  const homepageGuide = await readFile(sharedSkillFile(outputRoot, 'metabot-homepage-guide'), 'utf8');
-  assert.match(homepageGuide, /open the homepage MetaApp in Browser/i);
+  const metaapp = await readFile(sharedSkillFile(outputRoot, 'metabot-metaapp'), 'utf8');
+  assert.match(metaapp, /\/browser\/metaapp\/<pinId>/i);
+  assert.match(metaapp, /Bot homepage/i);
 });
 
 test('buildAgentConnectSkillpacks publishes provider service lifecycle commands in the shared pack', async () => {
