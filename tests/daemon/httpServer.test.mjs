@@ -2660,11 +2660,28 @@ test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async
   assert.doesNotMatch(html, /href="\/ui\/browser"[^>]*>打开浏览器<\/a>/);
 });
 
-test('GET /browser supports zh-CN launch chrome language selection', async (t) => {
+test('GET /browser ignores lang query for Browser routes', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/browser?lang=zh-CN`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /<html lang="en">/);
+  assert.match(html, /Agent Internet Browser/);
+  assert.doesNotMatch(html, /创建你的第一个 Bot/);
+});
+
+test('GET /browser uses Accept-Language chrome selection without a lang query', async (t) => {
+  const server = await startServer({ useBuiltInUiPages: true });
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/browser`, {
+    headers: {
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    },
+  });
   const html = await response.text();
 
   assert.equal(response.status, 200);
