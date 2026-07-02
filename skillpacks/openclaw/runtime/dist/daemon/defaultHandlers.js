@@ -3597,29 +3597,6 @@ function createDefaultMetabotDaemonHandlers(input) {
     // when switching between UI tabs within a session.
     const CHAIN_PROFILE_CACHE_TTL_MS = 30 * 60 * 1000;
     const chainProfileCache = new Map();
-    const conversationEventSubscribers = new Set();
-    function publishConversationEvent(event) {
-        for (const subscriber of conversationEventSubscribers) {
-            try {
-                subscriber(event);
-            }
-            catch {
-                // One disconnected event consumer must not block message persistence.
-            }
-        }
-    }
-    function subscribeConversationEvents(localGlobalMetaId, subscriber) {
-        const normalizedLocal = normalizeText(localGlobalMetaId);
-        const filteredSubscriber = (event) => {
-            if (event.localGlobalMetaId === normalizedLocal) {
-                subscriber(event);
-            }
-        };
-        conversationEventSubscribers.add(filteredSubscriber);
-        return () => {
-            conversationEventSubscribers.delete(filteredSubscriber);
-        };
-    }
     async function* streamConversationEventsForLocalBot(localGlobalMetaId, signal) {
         const normalizedLocal = normalizeText(localGlobalMetaId);
         const queue = [{
@@ -3643,7 +3620,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 currentNotify();
             }
         };
-        const unsubscribe = subscribeConversationEvents(normalizedLocal, (event) => {
+        const unsubscribe = (0, conversationPersistence_1.subscribeA2AConversationPersistenceEvents)(normalizedLocal, (event) => {
             queue.push(event);
             wake();
         });
@@ -3679,27 +3656,22 @@ function createDefaultMetabotDaemonHandlers(input) {
             unsubscribe();
         }
     }
-    function buildConversationMessageEvent(persistInput, message) {
-        const localGlobalMetaId = normalizeText(persistInput.local.globalMetaId);
-        const peerGlobalMetaId = normalizeText(persistInput.peer.globalMetaId);
-        if (!localGlobalMetaId || !peerGlobalMetaId) {
-            return null;
-        }
-        return {
-            type: 'conversation-message',
-            localGlobalMetaId,
-            peerGlobalMetaId,
-            messageId: message.messageId,
-            timestamp: message.timestamp,
-            kind: message.kind,
-            protocolTag: message.protocolTag ?? null,
-        };
-    }
     const a2aConversationPersister = async (persistInput) => {
         const message = await baseA2AConversationPersister(persistInput);
-        const event = buildConversationMessageEvent(persistInput, message);
-        if (event) {
-            publishConversationEvent(event);
+        if (baseA2AConversationPersister !== conversationPersistence_1.persistA2AConversationMessage) {
+            const localGlobalMetaId = normalizeText(persistInput.local.globalMetaId);
+            const peerGlobalMetaId = normalizeText(persistInput.peer.globalMetaId);
+            if (localGlobalMetaId && peerGlobalMetaId) {
+                (0, conversationPersistence_1.publishA2AConversationPersistenceEvent)({
+                    type: 'conversation-message',
+                    localGlobalMetaId,
+                    peerGlobalMetaId,
+                    messageId: message.messageId,
+                    timestamp: message.timestamp,
+                    kind: message.kind,
+                    protocolTag: message.protocolTag ?? null,
+                });
+            }
         }
         return message;
     };

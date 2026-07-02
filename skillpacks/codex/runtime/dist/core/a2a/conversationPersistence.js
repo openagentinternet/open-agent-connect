@@ -3,6 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.publishA2AConversationPersistenceEvent = publishA2AConversationPersistenceEvent;
+exports.subscribeA2AConversationPersistenceEvents = subscribeA2AConversationPersistenceEvents;
 exports.sanitizeA2ARawMetadata = sanitizeA2ARawMetadata;
 exports.buildA2APeerSessionId = buildA2APeerSessionId;
 exports.buildA2AOrderSessionId = buildA2AOrderSessionId;
@@ -25,6 +27,7 @@ const SENSITIVE_RAW_METADATA_KEYS = new Set([
     'privatekey',
     'privatekeyhex',
 ]);
+const conversationPersistenceSubscribers = new Set();
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -39,6 +42,28 @@ function normalizeTxids(value) {
     return Array.isArray(value)
         ? value.map((entry) => normalizeText(entry)).filter(Boolean)
         : [];
+}
+function publishA2AConversationPersistenceEvent(event) {
+    for (const subscriber of conversationPersistenceSubscribers) {
+        try {
+            subscriber(event);
+        }
+        catch {
+            // One disconnected consumer must not block message persistence.
+        }
+    }
+}
+function subscribeA2AConversationPersistenceEvents(localGlobalMetaId, subscriber) {
+    const normalizedLocal = normalizeText(localGlobalMetaId);
+    const filteredSubscriber = (event) => {
+        if (event.localGlobalMetaId === normalizedLocal) {
+            subscriber(event);
+        }
+    };
+    conversationPersistenceSubscribers.add(filteredSubscriber);
+    return () => {
+        conversationPersistenceSubscribers.delete(filteredSubscriber);
+    };
 }
 function isSensitiveRawMetadataKey(key) {
     return SENSITIVE_RAW_METADATA_KEYS.has(key.toLowerCase());
@@ -287,6 +312,15 @@ async function persistA2AConversationMessage(input) {
                 || null,
         });
     }
+    publishA2AConversationPersistenceEvent({
+        type: 'conversation-message',
+        localGlobalMetaId,
+        peerGlobalMetaId,
+        messageId: message.messageId,
+        timestamp: message.timestamp,
+        kind: message.kind,
+        protocolTag: message.protocolTag ?? null,
+    });
     return message;
 }
 async function persistA2AConversationMessageBestEffort(input, persister = persistA2AConversationMessage) {
