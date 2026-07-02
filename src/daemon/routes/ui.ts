@@ -171,6 +171,18 @@ function isBrowserPagePath(pathname: string): boolean {
     || /^\/browser\/map\/[^?#]+$/u.test(pathname);
 }
 
+function getBrowserLanguagePreference(req: Parameters<RouteHandler>[0]['req']): string | null {
+  const header = req.headers['accept-language'];
+  if (Array.isArray(header)) {
+    const preferred = header.find((value) => typeof value === 'string' && value.trim().length > 0);
+    return preferred ? preferred.trim() : null;
+  }
+  if (typeof header === 'string' && header.trim().length > 0) {
+    return header.trim();
+  }
+  return null;
+}
+
 async function serveBundledUiAsset(context: Parameters<RouteHandler>[0]): Promise<boolean> {
   const { req, url } = context;
   const route = UI_ASSET_ROUTES.find((candidate) => url.pathname.startsWith(candidate.prefix));
@@ -223,7 +235,7 @@ export const handleUiRoutes: RouteHandler = async (context) => {
     }
     const html = handlers.ui?.renderPage
       ? await handlers.ui.renderPage('browser')
-      : await renderBrowserPageHtml(undefined, url.searchParams.get('lang'));
+      : await renderBrowserPageHtml(undefined, getBrowserLanguagePreference(req));
     context.sendHtml(200, html);
     return true;
   }
@@ -276,7 +288,7 @@ export const handleUiRoutes: RouteHandler = async (context) => {
   if (page === 'browser') {
     const html = handlers.ui?.renderPage
       ? await handlers.ui.renderPage(page)
-      : await renderBrowserPageHtml(undefined, url.searchParams.get('lang'));
+      : await renderBrowserPageHtml(undefined, getBrowserLanguagePreference(req));
     context.sendHtml(200, html);
     return true;
   }
