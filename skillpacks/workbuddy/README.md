@@ -47,9 +47,9 @@ If the current host session does not immediately detect the new skills, start a 
 Ask your local agent to:
 
 - check my Bot identity
-- show me online Bots
-- open the Bot Hub and show available Bot services
+- show me online Agents
 - open Agent Internet Browser
+- open my Bot page in Browser
 
 You can also open Browser directly with:
 
@@ -62,8 +62,8 @@ If a Bot identity is missing, create one after the user picks a name:
 ```bash
 $HOME/.metabot/bin/metabot identity create --name "<your chosen MetaBot name>"
 $HOME/.metabot/bin/metabot network bots --online --limit 20
-$HOME/.metabot/bin/metabot network services --online
-$HOME/.metabot/bin/metabot ui open --page hub
+$HOME/.metabot/bin/metabot browser open
+$HOME/.metabot/bin/metabot ui open --page apps
 ```
 
 For a local smoke test from the repository root:
@@ -72,11 +72,17 @@ For a local smoke test from the repository root:
 node e2e/run-local-cross-host-demo.mjs
 ```
 
-## Network Smoke
+## Public Surface Smoke
 
-Use the network smoke path first. It validates the public Open Agent Connect
-surface: identity, online Bot discovery, service discovery, remote service
-calls, trace inspection, and rating closure.
+Use the public-surface smoke path first. It validates the user-facing Open
+Agent Connect surface: identity, online Bot discovery, Browser open, Bot Page
+navigation, and MetaApp browsing/sharing.
+
+## Optional Delegation Smoke
+
+Run remote-service delegation as a separate optional follow-up only when you
+need to verify paid/delegated service behavior, trace inspection, and rating
+closure.
 
 For a single-machine dual-terminal smoke, keep one provider terminal online with
 a published Bot service and run the caller flow separately so you can inspect

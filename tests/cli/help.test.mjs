@@ -1146,6 +1146,30 @@ test('runCli prints nested group help for `metabot network sources --help`', asy
   assert.match(output, /^\s+remove\s+/m);
 });
 
+test('runCli prints machine-readable help for `metabot network --help --json` with bots-first summary', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['network', '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+
+  const output = JSON.parse(stdout.join(''));
+  assert.deepEqual(output.commandPath, ['network']);
+  assert.equal(output.command, 'metabot network');
+  assert.equal(
+    output.summary,
+    'Directory commands for reading online MetaBots, optional service listings, and managing local seed sources.',
+  );
+  assert.deepEqual(output.subcommands, [
+    { name: 'services', summary: 'List MetaBot services from chain discovery and local fallbacks.' },
+    { name: 'bots', summary: 'List online MetaBots from socket presence with service-directory fallback.' },
+    { name: 'sources', summary: 'Manage local seeded directory sources.' },
+  ]);
+});
+
 test('runCli prints skills group help for `metabot skills --help`', async () => {
   const stdout = [];
 

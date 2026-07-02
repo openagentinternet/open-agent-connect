@@ -6,8 +6,8 @@ const BASE_SKILL_REGISTRY = {
     'metabot-network-directory': {
         skillName: 'metabot-network-directory',
         title: 'MetaBot Network Directory',
-        summary: 'Resolve cached online MetaBot services with machine-first search before optional human UI browsing.',
-        instructions: 'Run the machine-first online services command. When a user intent is known, add --query with concise task keywords so the runtime refreshes and searches the local online skill-service cache before agent continuation.',
+        summary: 'Resolve online MetaBot service listings when a user explicitly wants a remote capability, before optional human UI browsing.',
+        instructions: 'Run the machine-first online services command. When a user intent is known, add --query with concise task keywords so the runtime refreshes and searches the local online skill-service cache before agent continuation. Use this for explicit service lookup, not first-run Bot-page or Browser onboarding.',
         commandTemplate: 'metabot network services --online',
         outputExpectation: 'Return structured JSON with a services array preserving servicePinId, providerGlobalMetaId, price, ratingAvg, ratingCount, updatedAt, and providerDaemonBaseUrl when present.',
         fallbackPolicy: 'Only open the local hub page when a human explicitly asks to browse services.',
@@ -25,11 +25,11 @@ const BASE_SKILL_REGISTRY = {
     'metabot-network-manage': {
         skillName: 'metabot-network-manage',
         title: 'MetaBot Network Manage',
-        summary: 'Manage MetaWeb discovery with machine-first online bot reads, cached online service search, and local source registry operations.',
-        instructions: 'Use machine-first network commands before optional UI browsing. For online MetaBots, start with metabot network bots --online --limit 20. For service discovery, prefer metabot network services --online, and add --query when the user has a concrete task intent. Use metabot network sources add/list/remove for local registry maintenance, and refresh online services after source changes. Only open the local hub page when a human explicitly wants rich browsing.',
+        summary: 'Manage MetaWeb discovery with online bot reads first, optional service search second, and local source registry operations.',
+        instructions: 'Use machine-first network commands before optional UI browsing. For first-run discovery, start with metabot network bots --online --limit 20 and Bot page follow-up in Browser. Use service discovery only when the user explicitly asks for services or a remote capability. For online MetaBots, start with metabot network bots --online --limit 20. For service discovery, prefer metabot network services --online, and add --query when the user has a concrete task intent. Use metabot network sources add/list/remove for local registry maintenance, and refresh online services after source changes. Only open the local hub page when a human explicitly wants rich service browsing.',
         commandTemplate: 'metabot network services --online',
         outputExpectation: 'Return structured output that preserves online bots or services plus any providerDaemonBaseUrl hints needed for downstream routing.',
-        fallbackPolicy: 'If discovery is empty or a human asks for richer browsing, offer metabot ui open --page hub. Do not place remote orders, inspect trace lifecycle, or create/switch identity from this skill.',
+        fallbackPolicy: 'If discovery is empty or a human asks for richer browsing, offer the Browser skill for a selected Bot page or metabot ui open --page hub for service comparison. Do not place remote orders, inspect trace lifecycle, or create/switch identity from this skill.',
         scope: {
             allowedCommands: [
                 'metabot network bots --online --limit 20',

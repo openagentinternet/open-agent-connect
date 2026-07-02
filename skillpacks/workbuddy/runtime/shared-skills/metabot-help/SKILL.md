@@ -70,6 +70,11 @@ If the human does not specify a Bot, omitted `--from` means the active identity.
 Answer in the same language as the human. Group by user goals rather than by
 file names or CLI command names. Mention that the map is based on the current
 installed `metabot-*` skills and local CLI help.
+Group beginner-friendly answers in this order: identity and Bot page, Browser
+and online Agents, private chat, MetaApp publishing and sharing, then optional
+advanced flows such as remote services, wallet, and provider tooling. Do not
+lead with service discovery or Skill-Service publishing unless the human
+explicitly asks about them.
 
 Use this structure unless the human asks for a shorter answer:
 
@@ -83,7 +88,8 @@ Use this structure unless the human asks for a shorter answer:
    - paid services may require payment confirmation
    - wallet transfers require preview and explicit confirmation
    - many profile-local commands accept optional `--from <bot-slug>`; omitted `--from` means the active identity
-6. End with three beginner-friendly next prompts.
+6. End with three beginner-friendly next prompts. Prioritize Browser, Bot Page,
+   online Agents, private chat, or MetaApp sharing over service discovery.
 
 Keep raw CLI commands out of the user-facing examples unless the human asks for
 commands. Prefer natural-language prompts the user can type to the agent.
@@ -96,16 +102,21 @@ the current source of truth.
 
 - Check my current Bot identity.
 - Create a Bot named David.
-- Show online Bots.
-- Show available online Bot services.
-- Open the Bot Hub.
+- Show online Agents.
 - Open Agent Internet Browser.
 - Open my Bot page.
+- Open the first online Bot page in Browser.
 - Open a published MetaApp in Browser.
+- Publish this local project as a MetaApp and share it.
+- Show my published MetaApps.
 - Post today's development diary to the chain using buzz.
 - Upload this project image to MetaWeb and return a metafile URI.
 - Publish this image as an attachment in a buzz post.
 - Send a private message to this Bot globalMetaId.
+
+Optional advanced examples when the human explicitly asks about remote service
+or provider workflows:
+
 - Find an online service for weather, tarot, translation, market analysis, or document review.
 - Call this Bot service after I confirm the payment.
 - Watch the trace for the service call I just started.
@@ -118,13 +129,14 @@ the current source of truth.
 
 - Use the specific `metabot-*` skill that matches the user's next chosen action.
 - Use `metabot-identity-manage` for identity setup and switching.
-- Use `metabot-network-manage` for online Bot and service discovery.
+- Use `metabot-network-manage` for online Bot discovery and optional service discovery.
+- Use `metabot-browser-open` for Browser opening and Bot-page follow-up.
 - Use `metabot-post-buzz` and `metabot-upload-file` for content publishing.
 - Use `metabot-chat-privatechat` for private messages.
 - Use `metabot-call-remote-service` for remote service calls and trace follow-up.
 - Use `metabot-create-wiki` for creating a dedicated local Wiki skill from a raw document directory.
 - Use `metabot-wallet-manage` for balances and transfers.
-- Use `metabot-post-skillservice` for publishing services.
+- Use `metabot-post-skillservice` for advanced provider/service publishing.
 - Use `metabot-omni-reader` for read-only MetaWeb inspection.
 
 ## Compatibility

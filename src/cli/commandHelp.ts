@@ -1582,7 +1582,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['network'],
-    summary: 'Directory commands for reading online MetaBot services and managing local seed sources.',
+    summary: 'Directory commands for reading online MetaBots, optional service listings, and managing local seed sources.',
     usage: 'metabot network <subcommand>',
     subcommands: [
       { name: 'services', summary: 'List MetaBot services from chain discovery and local fallbacks.' },

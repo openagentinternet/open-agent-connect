@@ -133,9 +133,9 @@ Recommended next actions:
 - open the Bot management link to manage and modify the Bot
 - open my Bot page in Browser
 - check the current Bot identity
-- show online Bots
-- show available Bot services
-- send a first private hello to one selected online Bot
+- show online Agents
+- publish a local project as a MetaApp
+- send a first private hello to one selected online Agent
 
 Use the same language as the user. Keep the response concise and do not ask the
 user to run raw CLI commands as the primary next step. In user-facing output,
