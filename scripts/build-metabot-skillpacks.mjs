@@ -27,7 +27,6 @@ const METABOT_SKILLS = [
   'metabot-loom-wish2task',
   'metabot-metaapp',
   'metabot-upload-file',
-  'metabot-upload-largefile',
   'metabot-wallet-manage',
 ];
 

@@ -429,7 +429,7 @@ $HOME/.metabot/bin/metabot metaapp comment --pin-id <pinid> --comment <text> --f
 ## Handoff To
 
 - `metabot-post-buzz` for general buzz posting unrelated to MetaApp share announcements.
-- `metabot-upload-file` or `metabot-upload-largefile` when the human only wants file upload without MetaApp publishing.
+- `metabot-upload-file` when the human only wants file upload without MetaApp publishing.
 - `metabot-identity-manage` when the publishing Bot slug or local identity is unknown.
 - `metabot-network-manage` when network context must be discovered first.
 

@@ -27,12 +27,12 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-loom-wish2task',
   'metabot-metaapp',
   'metabot-upload-file',
-  'metabot-upload-largefile',
   'metabot-wallet-manage',
 ];
 const REMOVED_SKILLS = [
   'metabot-ask-master',
   'metabot-bootstrap',
+  'metabot-upload-largefile',
   'metabot-network-directory',
   'metabot-network-sources',
   'metabot-trace-inspector',
@@ -840,23 +840,21 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   assert.match(buzzContent, /Do not auto-open the local Buzz page/i);
 
   const fileContent = await readFile(sharedSkillFile(outputRoot, 'metabot-upload-file'), 'utf8');
-  assert.match(fileContent, /file upload/);
+  assert.match(fileContent, /^name:\s*metabot-upload-file$/m);
+  assert.match(fileContent, /single file upload skill/i);
+  assert.match(fileContent, /file upload-large --from <bot-slug> --file/);
+  assert.match(fileContent, /Compatibility[\s\S]*file upload --from <bot-slug> --request-file request\.json/i);
+  assert.match(fileContent, /2 MiB direct threshold/i);
+  assert.match(fileContent, /50 MiB hard cap/i);
+  assert.match(fileContent, /DOGE is unsupported for file upload/i);
+  assert.match(fileContent, /MVC-only unless the runtime grows support/i);
+  assert.match(fileContent, /never read large local files into model context/i);
+  assert.match(fileContent, /pinId/);
+  assert.match(fileContent, /metafileUri/);
+  assert.match(fileContent, /previewUrl/);
+  assert.match(fileContent, /downloadUrl/);
   assert.match(fileContent, /\/file/);
   assert.match(fileContent, /Bot, bot, and MetaBot as equivalent user wording/i);
-
-  const largeFileContent = await readFile(sharedSkillFile(outputRoot, 'metabot-upload-largefile'), 'utf8');
-  assert.match(largeFileContent, /^name:\s*metabot-upload-largefile$/m);
-  assert.match(largeFileContent, /file upload-large --from <bot-slug> --file/);
-  assert.match(largeFileContent, /Compatibility[\s\S]*file upload-large --from <bot-slug> --request-file request\.json --verify/i);
-  assert.match(largeFileContent, /2 MiB direct threshold/i);
-  assert.match(largeFileContent, /50 MiB hard cap/i);
-  assert.match(largeFileContent, /DOGE is unsupported for file upload/i);
-  assert.match(largeFileContent, /MVC-only unless the runtime grows support/i);
-  assert.match(largeFileContent, /never read large local files into model context/i);
-  assert.match(largeFileContent, /pinId/);
-  assert.match(largeFileContent, /metafileUri/);
-  assert.match(largeFileContent, /previewUrl/);
-  assert.match(largeFileContent, /downloadUrl/);
 });
 
 test('shared install.sh copies shared skills and installs a runnable metabot shim from the bundled runtime', async () => {

@@ -22,8 +22,10 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-create-wiki',
   'metabot-metaapp',
   'metabot-upload-file',
-  'metabot-upload-largefile',
   'metabot-wallet-manage',
+];
+const RETIRED_NPM_SKILLS = [
+  'metabot-upload-largefile',
 ];
 const OFFICIAL_SKILL_PREFIX = 'metabot-';
 const PACKAGE_SKILL_FILE_PATTERN = /^SKILLs\/([^/]+)\/SKILL\.md$/;
@@ -118,6 +120,13 @@ test('npm package includes runtime install inputs and excludes generated/develop
       packageJson.files.includes(`SKILLs/${skillName}/SKILL.md`),
       true,
       `expected package.json files to include ${skillName}`,
+    );
+  }
+  for (const skillName of RETIRED_NPM_SKILLS) {
+    assert.equal(
+      packageJson.files.includes(`SKILLs/${skillName}/SKILL.md`),
+      false,
+      `expected package.json files to exclude retired skill ${skillName}`,
     );
   }
 
