@@ -109,7 +109,7 @@ Open a MetaFile when the pinId is already known:
 ## Handoff To
 
 - `metabot-network-manage` when the human first needs to discover online Bots or browse Bot Hub.
-- `metabot-metaapp-publish` when the human needs MetaApp preview, publish, update, share, or comments instead of opening an existing MetaApp.
+- `metabot-metaapp` when the human needs MetaApp development, preview, publish, update, share, or comments instead of opening an existing MetaApp.
 - `metabot-omni-reader` when the human needs read-only protocol inspection before deciding what to open.
 
 ## Compatibility

@@ -315,6 +315,7 @@ test('bot page Basic tab renders Homepage source select from existing MetaApp ch
   assert.doesNotMatch(root.innerHTML, /data-homepage-help-popover/);
   assert.doesNotMatch(root.innerHTML, /metabot-homepage-guide/);
   assert.doesNotMatch(root.innerHTML, /metabot-metaapp-publish/);
+  assert.doesNotMatch(root.innerHTML, /metabot-metaapp/);
   assert.doesNotMatch(root.innerHTML, /Final URI/);
   assert.doesNotMatch(root.innerHTML, /metaapp:\/\/metaapp-pin-123/);
   assert.doesNotMatch(root.innerHTML, /Homepage package upload will be available later/);

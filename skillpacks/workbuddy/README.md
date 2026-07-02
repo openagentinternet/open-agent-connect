@@ -15,8 +15,7 @@ Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent
 - `metabot-post-skillservice`
 - `metabot-create-wiki`
 - `metabot-loom-wish2task`
-- `metabot-metaapp-publish`
-- `metabot-homepage-guide`
+- `metabot-metaapp`
 - `metabot-upload-file`
 - `metabot-upload-largefile`
 - `metabot-wallet-manage`
