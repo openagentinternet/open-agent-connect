@@ -24,7 +24,6 @@ const METABOT_SKILLS = [
   'metabot-post-buzz',
   'metabot-post-skillservice',
   'metabot-create-wiki',
-  'metabot-loom-wish2task',
   'metabot-metaapp',
   'metabot-upload-file',
   'metabot-wallet-manage',

@@ -14,7 +14,6 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-chat-privatechat',
   'metabot-help',
   'metabot-identity-manage',
-  'metabot-loom-wish2task',
   'metabot-network-manage',
   'metabot-omni-reader',
   'metabot-post-buzz',
@@ -25,6 +24,7 @@ const EXPECTED_NPM_SKILLS = [
   'metabot-wallet-manage',
 ];
 const RETIRED_NPM_SKILLS = [
+  'metabot-loom-wish2task',
   'metabot-upload-largefile',
 ];
 const OFFICIAL_SKILL_PREFIX = 'metabot-';

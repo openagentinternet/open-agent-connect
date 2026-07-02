@@ -24,7 +24,6 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-post-buzz',
   'metabot-post-skillservice',
   'metabot-create-wiki',
-  'metabot-loom-wish2task',
   'metabot-metaapp',
   'metabot-upload-file',
   'metabot-wallet-manage',
@@ -32,6 +31,7 @@ const EXPECTED_METABOT_SKILLS = [
 const REMOVED_SKILLS = [
   'metabot-ask-master',
   'metabot-bootstrap',
+  'metabot-loom-wish2task',
   'metabot-upload-largefile',
   'metabot-network-directory',
   'metabot-network-sources',
@@ -252,21 +252,6 @@ test('buildAgentConnectSkillpacks includes the Browser open workflow skill', asy
   assert.match(content, /sunnyfung\.eth/);
   assert.match(content, /pin:\/\//);
   assert.match(content, /64 hex characters followed by `i0`/i);
-});
-
-test('buildAgentConnectSkillpacks includes the Loom wish-to-task publishing workflow skill', async () => {
-  const { outputRoot } = await getBuiltSkillpacks();
-
-  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-loom-wish2task'), 'utf8');
-  assert.match(content, /^name:\s*metabot-loom-wish2task$/m);
-  assert.match(content, /rough.*wish/i);
-  assert.match(content, /GitHub repository/i);
-  assert.match(content, /requirement/i);
-  assert.match(content, /criteria/i);
-  assert.match(content, /explicit confirmation/i);
-  assert.match(content, /metabot loom validate --protocol task/);
-  assert.match(content, /metabot loom post-task --from <bot-slug> --payload-file/);
-  assert.match(content, /metabot ui open --page loom/);
 });
 
 test('buildAgentConnectSkillpacks includes the unified MetaApp workflow skill', async () => {
