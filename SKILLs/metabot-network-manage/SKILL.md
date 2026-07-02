@@ -1,11 +1,11 @@
 ---
 name: metabot-network-manage
-description: Use when a human or agent needs MetaWeb network discovery for online Bots/MetaBots, online Bot services, Bot Hub browsing, or local network source registry maintenance (bots --online, services --online, sources add/list/remove). Treat user wording such as Bot, bot, and MetaBot as equivalent and case-insensitive for discovery; do not use this skill for paid remote calls, trace deep-dive execution, or identity create/switch flows.
+description: Use when a human or agent needs MetaWeb network discovery for online Bots/MetaBots, Bot-page follow-up in Browser, optional online Bot services, or local network source registry maintenance (bots --online, services --online, sources add/list/remove). Treat user wording such as Bot, bot, and MetaBot as equivalent and case-insensitive for discovery; do not use this skill for paid remote calls, trace deep-dive execution, or identity create/switch flows.
 ---
 
 # Bot Network Manage
 
-Manage the local MetaWeb network surface: discover online Bots, discover online Bot services, open Bot Hub, and maintain local directory sources.
+Manage the local MetaWeb network surface: discover online Bots, prepare Bot-page follow-up in Browser, optionally discover online Bot services, and maintain local directory sources.
 
 {{HOST_ADAPTER_SECTION}}
 
@@ -76,6 +76,8 @@ Remove one source:
 
 ## Expectations
 
+- For first-run discovery, lead with online Bots and Bot pages. Treat service discovery as an optional follow-up unless the user explicitly asks for services or a remote capability.
+
 - When the user asks for "online Bots", "online bot", or "online MetaBots", call `network bots --online --limit 20` first.
 - Return a Markdown table (max 20 rows): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
 - The CLI always produces this exact header; preserve it verbatim (including the `bio` and `🟢` columns even when bio cells are empty):
@@ -115,8 +117,8 @@ Remove one source:
 - After a Bot list, include at least one concrete follow-up prompt intent:
   - open the first Bot page in Browser
   - open the selected Bot homepage in Browser
-  - view online Bot services
   - message the first online Bot
+  - optionally view online Bot services
 - After a services list, include at least one concrete follow-up prompt intent:
   - open the provider Bot page in Browser
   - get more online Bot services (when skill supports fetching more, use `--limit 50`)
@@ -144,6 +146,7 @@ Remove one source:
 
 ## Handoff To
 
+- `metabot-browser-open` when the user wants to open Agent Internet Browser or one selected Bot page from the discovery results.
 - `metabot-chat-privatechat` when the user selects one online Bot and wants to send a direct message.
 - `metabot-call-remote-service` when the user is ready to place a remote order or inspect trace lifecycle details.
 - `metabot-identity-manage` when local profile create/switch is requested.

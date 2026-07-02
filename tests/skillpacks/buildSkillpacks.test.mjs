@@ -237,6 +237,16 @@ test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic a
   assert.match(content, /Open Agent Internet Browser/i);
   assert.match(content, /Open my Bot page/i);
   assert.match(content, /Open a published MetaApp in Browser/i);
+  assert.match(
+    content,
+    /Group beginner-friendly answers in this order: identity and Bot page, Browser\s+and online Agents, private chat, MetaApp publishing and sharing, then optional\s+advanced flows such as remote services, wallet, and provider tooling/i
+  );
+  assert.match(
+    content,
+    /prioritize Browser, Bot Page,\s+online Agents, private chat, or MetaApp sharing over service discovery/i
+  );
+  assert.doesNotMatch(content, /Show available online Bot services\./);
+  assert.doesNotMatch(content, /Open the Bot Hub\./);
 });
 
 test('buildAgentConnectSkillpacks includes the Browser open workflow skill', async () => {
@@ -552,19 +562,22 @@ test('buildAgentConnectSkillpacks host README lists the active metabot skills on
   }
 });
 
-test('buildAgentConnectSkillpacks host README advertises the network smoke contract', async () => {
+test('buildAgentConnectSkillpacks host README keeps public-surface smoke primary and delegation smoke optional', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
-    assert.match(readme, /## Network Smoke/);
+    assert.match(readme, /## Public Surface Smoke/);
+    assert.match(readme, /identity, online Bot discovery, Browser open, Bot Page\s+navigation, and MetaApp browsing\/sharing/);
+    assert.match(readme, /## Optional Delegation Smoke/);
+    assert.match(readme, /Run remote-service delegation as a separate optional follow-up/i);
     assert.match(readme, /online Bot discovery/);
-    assert.match(readme, /service discovery/);
-    assert.match(readme, /remote service/);
+    assert.match(readme, /paid\/delegated service behavior/);
     assert.match(readme, /trace inspection/);
     assert.match(readme, /rating closure/);
     assert.match(readme, /metabot network bots --online --limit 20/);
-    assert.match(readme, /metabot network services --online/);
+    assert.match(readme, /metabot browser open/);
+    assert.match(readme, /metabot ui open --page apps/);
     assert.doesNotMatch(readme, /metabot advisor (list|ask|trace)/);
   }
 });
@@ -685,6 +698,10 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /network sources add/);
   assert.match(content, /network sources list/);
   assert.match(content, /network sources remove/);
+  assert.match(
+    content,
+    /For first-run discovery, lead with online Bots and Bot pages\. Treat service discovery as an optional follow-up unless the user explicitly asks for services or a remote capability\./i
+  );
   assert.match(content, /Markdown table \(max 20 rows\)/i);
   assert.match(content, /\|\s*#\s*\|\s*name\s*\|\s*globalmetaid\s*\|\s*bio\s*\|\s*Last Seen\s*\|/);
   assert.match(content, /When no online bots or services are found, explicitly say the list is currently empty/i);
@@ -700,6 +717,7 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /## In Scope/);
   assert.match(content, /## Out of Scope/);
   assert.match(content, /## Handoff To/);
+  assert.match(content, /metabot-browser-open/);
   assert.match(content, /metabot-chat-privatechat/);
   assert.match(content, /metabot-call-remote-service/);
   assert.doesNotMatch(content, /runtime-resolve shim/i);
@@ -723,9 +741,10 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /## First Bot Creation Handoff/);
   assert.match(content, /Bot, bot, and MetaBot as equivalent and case-insensitive/i);
   assert.match(content, /user chosen\s+name as part of the onboarding experience/i);
-  assert.match(content, /show online Bots/i);
-  assert.match(content, /show available Bot services/i);
+  assert.match(content, /show online Agents/i);
+  assert.match(content, /publish a local project as a MetaApp/i);
   assert.match(content, /open my Bot page in Browser/i);
+  assert.doesNotMatch(content, /show available Bot services/i);
   assert.match(content, /create a MetaBot/i);
   assert.match(content, /create a Bot/i);
   assert.match(content, /create a bot/i);
@@ -1000,15 +1019,16 @@ test('codex install runbook documents install verification and first-run handoff
   assert.doesNotMatch(installRunbook, /\.metabot\/hot/);
 });
 
-test('generated host packs keep Bot Hub guidance and add Browser first actions', async () => {
+test('generated host packs keep Browser and Bot page first actions', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
     const readme = await readFile(path.join(outputRoot, host, 'README.md'), 'utf8');
     assert.match(readme, /check my Bot identity/i);
-    assert.match(readme, /show me online Bots/i);
-    assert.match(readme, /open the Bot Hub and show available Bot services/i);
+    assert.match(readme, /show me online Agents/i);
     assert.match(readme, /open Agent Internet Browser/i);
+    assert.match(readme, /open my Bot page in Browser/i);
+    assert.doesNotMatch(readme, /open the Bot Hub and show available Bot services/i);
     assert.match(readme, /\$HOME\/\.metabot\/bin\/metabot browser open/i);
   }
 });

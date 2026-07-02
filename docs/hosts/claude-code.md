@@ -33,9 +33,9 @@ metabot skills resolve --skill metabot-network-directory --format markdown
 Ask your local agent to:
 
 - check my Bot identity
-- show me online Bots
-- open the Bot Hub and show available Bot services
+- show me online Agents
 - open Agent Internet Browser
+- open my Bot page in Browser
 
 If a Bot identity is missing, create one after the user picks a name:
 
@@ -44,7 +44,10 @@ metabot identity create --name "<your chosen Bot name>"
 metabot doctor
 ```
 
-## Remote Delegation Reminder
+## Optional Remote Delegation
+
+For most first-run onboarding, stop at identity, Browser, Bot Page, and MetaApp sharing.
+Use the remote service flow only when the user explicitly asks for delegated service execution.
 
 Before any paid remote call, show the provider, service, price, currency, and wait for explicit confirmation.
 When you need the first remote service flow:

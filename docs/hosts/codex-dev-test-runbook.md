@@ -107,10 +107,18 @@ metabot identity --help
 metabot skills resolve --skill metabot-network-directory --format markdown
 ```
 
-Optional functional smoke:
+Optional public-surface smoke:
 
 ```bash
 metabot network bots --online --limit 20
+metabot browser open
+metabot ui open --page apps
+```
+
+Optional remote-delegation smoke when you are specifically verifying service
+execution:
+
+```bash
 metabot network services --online
 metabot ui open --page hub
 ```

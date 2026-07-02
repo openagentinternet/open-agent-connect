@@ -110,6 +110,10 @@ test('runCli supports `metabot skills resolve --skill metabot-network-manage --f
   assert.equal(result.payload.data.includes('# Resolved Skill Contract: metabot-network-manage'), true);
   assert.equal(result.payload.data.includes('Host: `shared`'), true);
   assert.equal(result.payload.data.includes('metabot network bots --online --limit 20'), true);
+  assert.equal(
+    result.payload.data.includes('For first-run discovery, start with metabot network bots --online --limit 20 and Bot page follow-up in Browser. Use service discovery only when the user explicitly asks for services or a remote capability.'),
+    true,
+  );
 });
 
 test('runCli supports no-host shared-default resolution for existing public skill `metabot-network-directory` in json mode', async () => {
@@ -186,6 +190,11 @@ test('runCli supports `metabot skills resolve --skill metabot-network-manage --f
   assert.equal(result.payload.ok, true);
   assert.equal(result.payload.data.format, 'json');
   assert.equal(result.payload.data.contract.skillName, 'metabot-network-manage');
+  assert.match(result.payload.data.contract.summary, /online bot reads first, optional service search second/i);
+  assert.match(
+    result.payload.data.contract.instructions,
+    /For first-run discovery, start with metabot network bots --online --limit 20 and Bot page follow-up in Browser/i
+  );
   assert.equal(
     result.payload.data.contract.scope.allowedCommands.includes('metabot network bots --online --limit 20'),
     true,
