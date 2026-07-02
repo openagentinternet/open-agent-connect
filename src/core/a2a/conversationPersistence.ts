@@ -57,11 +57,23 @@ export type A2AConversationMessagePersister = (
   input: PersistA2AConversationMessageInput
 ) => Promise<A2AConversationMessage>;
 
+export interface A2AConversationPersistenceEvent {
+  type: 'conversation-message';
+  localGlobalMetaId: string;
+  peerGlobalMetaId: string;
+  messageId: string;
+  timestamp: number;
+  kind: string;
+  protocolTag: string | null;
+}
+
 export interface PersistA2AConversationMessageBestEffortResult {
   persisted: boolean;
   message: A2AConversationMessage | null;
   errorMessage: string | null;
 }
+
+const conversationPersistenceSubscribers = new Set<(event: A2AConversationPersistenceEvent) => void>();
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -79,6 +91,34 @@ function normalizeTxids(value: string[] | null | undefined): string[] {
   return Array.isArray(value)
     ? value.map((entry) => normalizeText(entry)).filter(Boolean)
     : [];
+}
+
+export function publishA2AConversationPersistenceEvent(
+  event: A2AConversationPersistenceEvent,
+): void {
+  for (const subscriber of conversationPersistenceSubscribers) {
+    try {
+      subscriber(event);
+    } catch {
+      // One disconnected consumer must not block message persistence.
+    }
+  }
+}
+
+export function subscribeA2AConversationPersistenceEvents(
+  localGlobalMetaId: string,
+  subscriber: (event: A2AConversationPersistenceEvent) => void,
+): () => void {
+  const normalizedLocal = normalizeText(localGlobalMetaId);
+  const filteredSubscriber = (event: A2AConversationPersistenceEvent) => {
+    if (event.localGlobalMetaId === normalizedLocal) {
+      subscriber(event);
+    }
+  };
+  conversationPersistenceSubscribers.add(filteredSubscriber);
+  return () => {
+    conversationPersistenceSubscribers.delete(filteredSubscriber);
+  };
 }
 
 function isSensitiveRawMetadataKey(key: string): boolean {
@@ -360,6 +400,15 @@ export async function persistA2AConversationMessage(
         || null,
     });
   }
+  publishA2AConversationPersistenceEvent({
+    type: 'conversation-message',
+    localGlobalMetaId,
+    peerGlobalMetaId,
+    messageId: message.messageId,
+    timestamp: message.timestamp,
+    kind: message.kind,
+    protocolTag: message.protocolTag ?? null,
+  });
   return message;
 }
 

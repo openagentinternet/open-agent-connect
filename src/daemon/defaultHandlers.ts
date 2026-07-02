@@ -246,6 +246,9 @@ import {
   buildA2APeerSessionId,
   persistA2AConversationMessage,
   persistA2AConversationMessageBestEffort,
+  publishA2AConversationPersistenceEvent,
+  subscribeA2AConversationPersistenceEvents,
+  type A2AConversationPersistenceEvent,
   type A2AConversationMessagePersister,
 } from '../core/a2a/conversationPersistence';
 import {
@@ -4736,43 +4739,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     avatar: string;
   };
 
-  type ConversationEvent = {
-    type: 'conversation-message' | 'conversation-update';
+  type ConversationEvent = A2AConversationPersistenceEvent | {
+    type: 'conversation-update';
     localGlobalMetaId: string;
-    peerGlobalMetaId?: string;
-    messageId?: string;
     timestamp: number;
-    kind?: string;
-    protocolTag?: string | null;
   };
-
-  const conversationEventSubscribers = new Set<(event: ConversationEvent) => void>();
-
-  function publishConversationEvent(event: ConversationEvent): void {
-    for (const subscriber of conversationEventSubscribers) {
-      try {
-        subscriber(event);
-      } catch {
-        // One disconnected event consumer must not block message persistence.
-      }
-    }
-  }
-
-  function subscribeConversationEvents(
-    localGlobalMetaId: string,
-    subscriber: (event: ConversationEvent) => void,
-  ): () => void {
-    const normalizedLocal = normalizeText(localGlobalMetaId);
-    const filteredSubscriber = (event: ConversationEvent) => {
-      if (event.localGlobalMetaId === normalizedLocal) {
-        subscriber(event);
-      }
-    };
-    conversationEventSubscribers.add(filteredSubscriber);
-    return () => {
-      conversationEventSubscribers.delete(filteredSubscriber);
-    };
-  }
 
   async function* streamConversationEventsForLocalBot(
     localGlobalMetaId: string,
@@ -4800,7 +4771,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         currentNotify();
       }
     };
-    const unsubscribe = subscribeConversationEvents(normalizedLocal, (event) => {
+    const unsubscribe = subscribeA2AConversationPersistenceEvents(normalizedLocal, (event) => {
       queue.push(event);
       wake();
     });
@@ -4836,31 +4807,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
   }
 
-  function buildConversationMessageEvent(
-    persistInput: Parameters<A2AConversationMessagePersister>[0],
-    message: A2AConversationMessage,
-  ): ConversationEvent | null {
-    const localGlobalMetaId = normalizeText(persistInput.local.globalMetaId);
-    const peerGlobalMetaId = normalizeText(persistInput.peer.globalMetaId);
-    if (!localGlobalMetaId || !peerGlobalMetaId) {
-      return null;
-    }
-    return {
-      type: 'conversation-message',
-      localGlobalMetaId,
-      peerGlobalMetaId,
-      messageId: message.messageId,
-      timestamp: message.timestamp,
-      kind: message.kind,
-      protocolTag: message.protocolTag ?? null,
-    };
-  }
-
   const a2aConversationPersister: A2AConversationMessagePersister = async (persistInput) => {
     const message = await baseA2AConversationPersister(persistInput);
-    const event = buildConversationMessageEvent(persistInput, message);
-    if (event) {
-      publishConversationEvent(event);
+    if (baseA2AConversationPersister !== persistA2AConversationMessage) {
+      const localGlobalMetaId = normalizeText(persistInput.local.globalMetaId);
+      const peerGlobalMetaId = normalizeText(persistInput.peer.globalMetaId);
+      if (localGlobalMetaId && peerGlobalMetaId) {
+        publishA2AConversationPersistenceEvent({
+          type: 'conversation-message',
+          localGlobalMetaId,
+          peerGlobalMetaId,
+          messageId: message.messageId,
+          timestamp: message.timestamp,
+          kind: message.kind,
+          protocolTag: message.protocolTag ?? null,
+        });
+      }
     }
     return message;
   };

@@ -9,10 +9,12 @@ import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../help
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
+const { persistA2AConversationMessageBestEffort } = require('../../dist/core/a2a/conversationPersistence.js');
 const { createPrivateChatStateStore } = require('../../dist/core/chat/privateChatStateStore.js');
 const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
 const LOCAL_GLOBAL_META_ID = 'idq1localhandler000000000000000000000000';
@@ -308,6 +310,52 @@ test('default conversation event stream publishes a message event after A2A pers
   assert.equal(event.value.type, 'conversation-message');
   assert.equal(event.value.localGlobalMetaId, LOCAL_GLOBAL_META_ID);
   assert.equal(event.value.peerGlobalMetaId, PEER_GLOBAL_META_ID);
+  assert.equal(event.value.kind, 'private_chat');
+});
+
+test('default conversation event stream publishes a message event after external A2A persistence', async (t) => {
+  const { homeDir, handlers } = await createFixture(t);
+
+  const stream = await handlers.conversations.streamEvents({
+    local: LOCAL_GLOBAL_META_ID,
+  });
+  const iterator = stream[Symbol.asyncIterator]();
+  const initial = await iterator.next();
+  const nextEvent = iterator.next();
+
+  const persisted = await persistA2AConversationMessageBestEffort({
+    paths: resolveMetabotPaths(homeDir),
+    local: actor(LOCAL_GLOBAL_META_ID, 'Eric'),
+    peer: actor(PEER_GLOBAL_META_ID, 'Remote Bot'),
+    message: {
+      messageId: 'listener-msg-1',
+      direction: 'incoming',
+      content: 'remote pushed a new message',
+      contentType: 'text/plain',
+      pinId: 'listener-pin-1',
+      txid: 'listener-tx-1',
+      txids: ['listener-tx-1'],
+      timestamp: BASE_TIME + 3,
+      raw: {
+        source: 'simplemsg-listener',
+      },
+    },
+  });
+
+  const event = await Promise.race([
+    nextEvent,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timed out waiting for externally persisted conversation SSE event')), 500);
+    }),
+  ]);
+  await iterator.return?.();
+
+  assert.equal(initial.value.type, 'conversation-update');
+  assert.equal(persisted.persisted, true);
+  assert.equal(event.value.type, 'conversation-message');
+  assert.equal(event.value.localGlobalMetaId, LOCAL_GLOBAL_META_ID);
+  assert.equal(event.value.peerGlobalMetaId, PEER_GLOBAL_META_ID);
+  assert.equal(event.value.messageId, 'listener-msg-1');
   assert.equal(event.value.kind, 'private_chat');
 });
 
