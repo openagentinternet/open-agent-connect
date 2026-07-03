@@ -3238,6 +3238,15 @@ test('inbound provider ORDER upload failure marks seller order failed without de
   const orderTxid = 'b'.repeat(64);
   const paymentTxid = 'c'.repeat(64);
   const uploadCalls = [];
+  const feeAssist = {
+    attempted: true,
+    used: false,
+    mode: 'mvc_sponsor_v2',
+    sponsor: 'mvc_sponsor_v2',
+    stage: 'commit',
+    reason: 'commit_failed',
+    orderId: 'provider-order-upload-failure',
+  };
   const output = createAttemptOutputController('upload-fails.png');
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
@@ -3251,6 +3260,7 @@ test('inbound provider ORDER upload failure marks seller order failed without de
       uploadCalls.push(input);
       const error = new Error('simulated provider artifact upload failure');
       error.code = 'provider_artifact_upload_failed';
+      error.data = { feeAssist };
       throw error;
     },
   });
@@ -3264,6 +3274,7 @@ test('inbound provider ORDER upload failure marks seller order failed without de
 
   assert.equal(result.ok, false);
   assert.equal(result.code, 'provider_artifact_upload_failed');
+  assert.deepEqual(result.data.feeAssist, feeAssist);
   assert.equal(uploadCalls.length, 1);
   const contents = harness.writes
     .filter((entry) => entry.path === '/protocols/simplemsg')
@@ -3283,6 +3294,17 @@ test('inbound provider ORDER upload failure marks seller order failed without de
   assert.equal(sellerOrder.state, 'failed');
   assert.equal(sellerOrder.failureReason, 'simulated provider artifact upload failure');
   assert.equal(sellerOrder.endReason, 'provider_artifact_upload_failed');
+
+  const sessionState = await createSessionStateStore(harness.homeDir).readState();
+  const failureItem = sessionState.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-artifact-failure`);
+  assert.ok(failureItem);
+  assert.deepEqual(failureItem.metadata.feeAssist, feeAssist);
+
+  const traceResult = await harness.handlers.trace.getTrace({ traceId: trace.traceId });
+  assert.equal(traceResult.ok, true);
+  const projectedFailure = traceResult.data.inspector.transcriptItems.find((item) => item.id === failureItem.id);
+  assert.ok(projectedFailure);
+  assert.deepEqual(projectedFailure.metadata.feeAssist, feeAssist);
   assertNoProviderLocalPathLeak(trace, output.filePath);
 });
 
@@ -3643,6 +3665,15 @@ test('/api services.execute image output does not complete session while artifac
 test('/api services.execute upload failure marks direct seller order and trace failed', async (t) => {
   const paymentTxid = '3'.repeat(64);
   const uploadCalls = [];
+  const feeAssist = {
+    attempted: true,
+    used: false,
+    mode: 'mvc_sponsor_v2',
+    sponsor: 'mvc_sponsor_v2',
+    stage: 'commit',
+    reason: 'commit_failed',
+    orderId: 'provider-direct-upload-failure',
+  };
   const output = createAttemptOutputController('direct-upload-fails.png');
   const harness = await createInboundProviderOrderHarness(t, {
     service: { outputType: 'image' },
@@ -3653,6 +3684,7 @@ test('/api services.execute upload failure marks direct seller order and trace f
       uploadCalls.push(input);
       const error = new Error(`simulated direct artifact upload failure at ${output.filePath}`);
       error.code = 'provider_artifact_upload_failed';
+      error.data = { feeAssist };
       throw error;
     },
   });
@@ -3683,6 +3715,7 @@ test('/api services.execute upload failure marks direct seller order and trace f
   assert.equal(result.ok, false);
   assert.equal(result.code, 'provider_artifact_upload_failed');
   assert.match(result.message, /simulated direct artifact upload failure/);
+  assert.deepEqual(result.data.feeAssist, feeAssist);
   assertNoProviderLocalPathLeak(result.message, output.filePath);
   assert.equal(uploadCalls.length, 1);
 
@@ -3709,6 +3742,7 @@ test('/api services.execute upload failure marks direct seller order and trace f
   assert.ok(failureItem);
   assert.equal(failureItem.type, 'failure');
   assert.match(failureItem.content, /simulated direct artifact upload failure/);
+  assert.deepEqual(failureItem.metadata.feeAssist, feeAssist);
   assertNoProviderLocalPathLeak(failureItem, output.filePath);
 
   const traceResult = await harness.handlers.trace.getTrace({ traceId: 'trace-provider-direct-artifact-failure' });
@@ -3717,6 +3751,7 @@ test('/api services.execute upload failure marks direct seller order and trace f
   assert.equal(traceResult.data.a2a.taskRunState, 'failed');
   const projectedFailure = traceResult.data.inspector.transcriptItems.find((item) => item.id === failureItem.id);
   assert.ok(projectedFailure);
+  assert.deepEqual(projectedFailure.metadata.feeAssist, feeAssist);
   assertNoProviderLocalPathLeak(traceResult.data, output.filePath);
 });
 

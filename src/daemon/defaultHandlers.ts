@@ -405,6 +405,10 @@ function readLargeFileUploadFailureData(error: unknown): Record<string, unknown>
   };
 }
 
+function readLargeFileUploadFailureFeeAssist(error: unknown): Record<string, unknown> | undefined {
+  return readLargeFileUploadFailureData(error)?.feeAssist as Record<string, unknown> | undefined;
+}
+
 function readErrorMessage(error: unknown, code: string, fallback: string): string {
   const rawMessage = normalizeText(error instanceof Error ? error.message : String(error ?? ''));
   const prefix = code ? `${code}:` : '';
@@ -4682,6 +4686,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
         `chain.defaultWriteNetwork must be one of ${DEFAULT_WRITE_NETWORKS.join(', ')}.`,
       );
     }
+    if (
+      chainInput.mvcSponsorUploadEnabled !== undefined
+      && typeof chainInput.mvcSponsorUploadEnabled !== 'boolean'
+    ) {
+      return commandFailed(
+        'invalid_argument',
+        'chain.mvcSponsorUploadEnabled must be a boolean.',
+      );
+    }
     const current = await targetConfigStore.read();
     const next = {
       ...current,
@@ -8244,6 +8257,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     userTask: string;
     failureText: string;
     failureCode?: string | null;
+    feeAssist?: Record<string, unknown> | null;
     providerRuntime?: SessionTraceProviderRuntimeInput | null;
   }): Promise<void> {
     const trace = buildSessionTrace({
@@ -8321,6 +8335,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             metadata: {
               failed: true,
               refundRequired: Boolean(inputFailure.paymentTxid),
+              ...(inputFailure.feeAssist ? { feeAssist: inputFailure.feeAssist } : {}),
             },
           },
         ],
@@ -9377,6 +9392,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           'Provider artifact delivery preparation failed.',
         );
         const data = readLargeFileUploadFailureData(error);
+        const feeAssist = readLargeFileUploadFailureFeeAssist(error);
         const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
         const failedApplied = sessionEngine.applyProviderRunnerResult({
           session: received.session,
@@ -9412,6 +9428,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               orderTxid,
               paymentTxid: paymentTxid || null,
               refundRequired: !serviceIsFree,
+              ...(feeAssist ? { feeAssist } : {}),
             },
           },
           {
@@ -9493,6 +9510,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           userTask,
           failureText,
           failureCode,
+          feeAssist,
           providerRuntime: providerRuntimeDiagnostics,
         });
         return commandFailed(failureCode, failureText, data ? { data } : undefined);
@@ -13674,6 +13692,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               [providerExecutionCwd],
             );
             const data = readLargeFileUploadFailureData(error);
+            const feeAssist = readLargeFileUploadFailureFeeAssist(error);
             const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
             const failedApplied = sessionEngine.applyProviderRunnerResult({
               session: received.session,
@@ -13696,6 +13715,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   runnerState: 'failed',
                   paymentTxid: execution.payment.paymentTxid,
                   orderReference: execution.payment.orderReference,
+                  ...(feeAssist ? { feeAssist } : {}),
                 },
               },
             ]);
@@ -13773,6 +13793,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                       providerSessionId: failedApplied.session.sessionId,
                       providerTaskRunId: failedApplied.taskRun.runId,
                       providerEvent: failedApplied.event,
+                      ...(feeAssist ? { feeAssist } : {}),
                     },
                   },
                 ],

@@ -315,6 +315,35 @@ test('default bot config handlers persist chain config per MetaBot profile', asy
   assert.equal(ericConfigOnDisk.chain.mvcSponsorUploadEnabled, true);
 });
 
+test('default bot config handlers reject non-boolean mvc sponsor upload flags', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-config-invalid-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const alice = await createMetabotProfile(systemHomeDir, { name: 'Alice Bot' });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const before = await createConfigStore(alice.homeDir).read();
+  const result = await handlers.bot.setConfig({
+    slug: alice.slug,
+    chain: {
+      mvcSponsorUploadEnabled: 'false',
+    },
+  });
+  const after = await createConfigStore(alice.homeDir).read();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_argument');
+  assert.match(result.message, /chain\.mvcSponsorUploadEnabled must be a boolean/i);
+  assert.deepEqual(after, before);
+});
+
 test('default bot getWallet queries balances with displayed wallet addresses', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-wallet-');
   t.after(async () => {
