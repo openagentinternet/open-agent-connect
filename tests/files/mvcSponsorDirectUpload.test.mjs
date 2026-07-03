@@ -3,11 +3,15 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import test from 'node:test';
+import test, { afterEach, beforeEach } from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { mvc } = require('meta-contract');
 const mvcChainAdapter = require('../../dist/core/chain/adapters/mvc.js').default;
+const {
+  __clearPendingMvcUtxosForTests,
+  resolveSpendableMvcUtxos,
+} = require('../../dist/core/chain/mvcPendingUtxos.js');
 const {
   uploadMvcSponsorDirectFile,
 } = require('../../dist/core/files/mvcSponsorDirectUpload.js');
@@ -38,6 +42,14 @@ const fixtureUtxo = {
   address: FIXTURE_ADDRESS,
   height: 1,
 };
+
+beforeEach(() => {
+  __clearPendingMvcUtxosForTests();
+});
+
+afterEach(() => {
+  __clearPendingMvcUtxosForTests();
+});
 
 async function tempFile(name, content) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-sponsor-direct-'));
@@ -199,6 +211,19 @@ test('uploadMvcSponsorDirectFile uses sponsor v2 when advisory quota is sufficie
     assert.notEqual(prePayload.publicKey, identity.publicKey);
     assert.equal(commitPayload.publicKey, helperSignature.publicKey);
     assert.equal(typeof signedHash, 'string');
+
+    const spendable = resolveSpendableMvcUtxos({
+      address: FIXTURE_ADDRESS,
+      utxos: [fixtureUtxo],
+    });
+    assert.equal(
+      spendable.some((utxo) => utxo.txId === fixtureUtxo.txId && utxo.outputIndex === fixtureUtxo.outputIndex),
+      false,
+    );
+    assert.equal(
+      spendable.some((utxo) => utxo.txId === 'b'.repeat(64) && utxo.address === FIXTURE_ADDRESS && utxo.satoshis >= 600),
+      true,
+    );
   } finally {
     restore();
   }
@@ -255,6 +280,44 @@ test('uploadMvcSponsorDirectFile falls back to self-paid when address info is un
     assert.equal(result.feeAssist.used, false);
     assert.equal(result.feeAssist.reason, 'service_unavailable');
     assert.equal(result.feeAssist.stage, 'address_info');
+  } finally {
+    restore();
+  }
+});
+
+test('uploadMvcSponsorDirectFile does not self-pay when MVC UTXO fetch fails for a non-balance reason', async () => {
+  const restore = patchMvcUtxos();
+  mvcChainAdapter.fetchUtxos = async () => {
+    throw new Error('mvc indexer unavailable');
+  };
+  try {
+    const filePath = await tempFile('fetch-fail.txt', 'fetch fail');
+    let writePinCalled = false;
+    const sponsorClient = createSponsorClient();
+
+    await assert.rejects(
+      () => uploadMvcSponsorDirectFile({
+        filePath,
+        fileName: 'fetch-fail.txt',
+        contentType: 'text/plain',
+        bytes: Buffer.byteLength('fetch fail'),
+        extension: '.txt',
+        network: 'mvc',
+        signer: fakeSigner({
+          writePin: async () => {
+            writePinCalled = true;
+            throw new Error('self-paid writePin should not be called');
+          },
+        }),
+        mvcSponsorClient: sponsorClient,
+      }),
+      (error) => {
+        assert.match(error.message, /mvc indexer unavailable/i);
+        assert.notEqual(error.data?.feeAssist?.reason, 'no_user_utxo');
+        return true;
+      },
+    );
+    assert.equal(writePinCalled, false);
   } finally {
     restore();
   }
@@ -468,6 +531,55 @@ test('uploadMvcSponsorDirectFile hard-fails when pre rejects the prepared transa
         assert.equal(error.data.feeAssist.used, false);
         assert.equal(error.data.feeAssist.sponsor, 'mvc_sponsor_v2');
         assert.equal(typeof error.data.feeAssist.advisoryFeeEstimate, 'number');
+        return true;
+      },
+    );
+    assert.equal(writePinCalled, false);
+  } finally {
+    restore();
+  }
+});
+
+test('uploadMvcSponsorDirectFile hard-fails when pre reports insufficient quota', async () => {
+  const restore = patchMvcUtxos();
+  try {
+    const filePath = await tempFile('pre-quota.txt', 'pre quota');
+    let writePinCalled = false;
+    const sponsorClient = createSponsorClient({
+      methods: {
+        async preSponsor(payload) {
+          this.calls.push(['preSponsor', payload]);
+          throw sponsorError('pre quota exhausted', {
+            code: 'mvc_fee_assist_pre_failed',
+            stage: 'pre',
+            reason: 'insufficient_quota',
+          });
+        },
+      },
+    });
+
+    await assert.rejects(
+      () => uploadMvcSponsorDirectFile({
+        filePath,
+        fileName: 'pre-quota.txt',
+        contentType: 'text/plain',
+        bytes: Buffer.byteLength('pre quota'),
+        extension: '.txt',
+        network: 'mvc',
+        signer: fakeSigner({
+          writePin: async () => {
+            writePinCalled = true;
+            throw new Error('self-paid writePin should not be called');
+          },
+        }),
+        mvcSponsorClient: sponsorClient,
+      }),
+      (error) => {
+        assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+        assert.equal(error.data.feeAssist.reason, 'insufficient_quota');
+        assert.equal(error.data.feeAssist.stage, 'pre');
+        assert.equal(error.data.feeAssist.used, false);
+        assert.equal(error.data.feeAssist.sponsor, 'mvc_sponsor_v2');
         return true;
       },
     );

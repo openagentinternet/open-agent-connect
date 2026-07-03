@@ -3,10 +3,13 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import test from 'node:test';
+import test, { afterEach, beforeEach } from 'node:test';
 
 const require = createRequire(import.meta.url);
 const mvcChainAdapter = require('../../dist/core/chain/adapters/mvc.js').default;
+const {
+  __clearPendingMvcUtxosForTests,
+} = require('../../dist/core/chain/mvcPendingUtxos.js');
 const {
   DIRECT_UPLOAD_MAX_BYTES,
   LARGE_UPLOAD_MAX_BYTES,
@@ -34,6 +37,14 @@ const fixtureUtxo = {
   address: FIXTURE_ADDRESS,
   height: 1,
 };
+
+beforeEach(() => {
+  __clearPendingMvcUtxosForTests();
+});
+
+afterEach(() => {
+  __clearPendingMvcUtxosForTests();
+});
 
 async function tempFile(name, sizeOrContent) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-large-upload-'));

@@ -89,6 +89,10 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+function isNoUserUtxoDraftError(error: unknown): boolean {
+  return /MetaBot balance is insufficient for this chain write\./i.test(getErrorMessage(error, ''));
+}
+
 function estimateDraftMinerFee(input: {
   unsignedTxHex: string;
   userInputTotal: number;
@@ -201,7 +205,7 @@ export async function uploadMvcSponsorDirectFile(input: {
   });
   const address = identity.addresses?.mvc || identity.mvcAddress;
 
-  let quotaBefore: MvcSponsorAddressInfo;
+  let quotaBefore!: MvcSponsorAddressInfo;
   try {
     quotaBefore = await input.mvcSponsorClient.getAddressInfo({ address });
   } catch (error) {
@@ -231,6 +235,15 @@ export async function uploadMvcSponsorDirectFile(input: {
       userInputTotal: draft.userInputs.reduce((sum, utxo) => sum + utxo.satoshis, 0),
     });
   } catch (error) {
+    if (!isNoUserUtxoDraftError(error)) {
+      attachFeeAssistError({
+        error,
+        fallbackCode: 'mvc_fee_assist_address_info_failed',
+        fallbackReason: 'service_unavailable',
+        stage: 'address_info',
+        quotaBefore,
+      });
+    }
     return fallbackSelfPaidForSponsorError({
       error,
       filePath: input.filePath,
