@@ -24,6 +24,7 @@ export type ProviderExpectedArtifactFamily = 'text' | 'image' | 'video' | 'audio
 
 type VerifyAvailability = Parameters<typeof uploadLargeFileToChain>[0]['verifyAvailability'];
 type LargeUploader = Parameters<typeof uploadLargeFileToChain>[0]['largeUploader'];
+type MvcSponsorClient = Parameters<typeof uploadLargeFileToChain>[0]['mvcSponsorClient'];
 
 export interface ResolveProviderDeliveryArtifactsInput {
   responseText: string;
@@ -35,6 +36,7 @@ export interface ResolveProviderDeliveryArtifactsInput {
   uploadLargeFile?: typeof uploadLargeFileToChain;
   verifyAvailability?: VerifyAvailability;
   largeUploader?: LargeUploader;
+  mvcSponsorClient?: MvcSponsorClient;
 }
 
 export interface ResolveProviderDeliveryArtifactsResult {
@@ -71,11 +73,15 @@ const SAFE_CONTENT_TYPE_PATTERN =
 
 export class ProviderDeliveryArtifactError extends Error {
   code: string;
+  data?: Record<string, unknown>;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, data?: Record<string, unknown>) {
     super(`${code}: ${message}`);
     this.name = 'ProviderDeliveryArtifactError';
     this.code = code;
+    if (data) {
+      this.data = data;
+    }
   }
 }
 
@@ -83,8 +89,22 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function providerArtifactError(code: string, message: string): ProviderDeliveryArtifactError {
-  return new ProviderDeliveryArtifactError(code, message);
+function readUploadFailureData(error: unknown): Record<string, unknown> | undefined {
+  const data = (error as { data?: unknown } | undefined)?.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return undefined;
+  }
+  const feeAssist = (data as Record<string, unknown>).feeAssist;
+  if (!feeAssist || typeof feeAssist !== 'object' || Array.isArray(feeAssist)) {
+    return undefined;
+  }
+  return {
+    feeAssist: feeAssist as Record<string, unknown>,
+  };
+}
+
+function providerArtifactError(code: string, message: string, data?: Record<string, unknown>): ProviderDeliveryArtifactError {
+  return new ProviderDeliveryArtifactError(code, message, data);
 }
 
 export function classifyProviderOutputType(outputType: unknown): ProviderExpectedArtifactFamily {
@@ -1083,6 +1103,7 @@ async function uploadResolvedLocalArtifact(input: {
   uploadLargeFile?: typeof uploadLargeFileToChain;
   verifyAvailability?: VerifyAvailability;
   largeUploader?: LargeUploader;
+  mvcSponsorClient?: MvcSponsorClient;
 }): Promise<A2ADeliveryArtifact> {
   const uploader = input.uploadLargeFile ?? uploadLargeFileToChain;
   const snapshot = await snapshotProviderArtifactForUpload(input.file);
@@ -1097,6 +1118,7 @@ async function uploadResolvedLocalArtifact(input: {
       verify: true,
       verifyAvailability: input.verifyAvailability,
       largeUploader: input.largeUploader,
+      mvcSponsorClient: input.mvcSponsorClient,
     });
   } catch (error) {
     const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined;
@@ -1115,6 +1137,7 @@ async function uploadResolvedLocalArtifact(input: {
     throw providerArtifactError(
       'provider_artifact_upload_failed',
       uploadSafeMessage,
+      readUploadFailureData(error),
     );
   } finally {
     await fs.rm(snapshot.directory, { recursive: true, force: true }).catch(() => undefined);
@@ -1168,6 +1191,7 @@ export async function resolveProviderDeliveryArtifacts(
     uploadLargeFile: input.uploadLargeFile,
     verifyAvailability: input.verifyAvailability,
     largeUploader: input.largeUploader,
+    mvcSponsorClient: input.mvcSponsorClient,
   });
   const publicResponseText = stripLocalCandidateLines(responseText, localFile.lineIndexes);
   const workspaceScrubbedResponseText = await scrubExecutionWorkspacePathMentions(

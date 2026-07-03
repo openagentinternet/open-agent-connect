@@ -9362,6 +9362,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           signer,
           uploadLargeFile: providerArtifactUploadLargeFile,
           largeUploader: providerLargeFileUploader,
+          mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(
+            runtimeStateStore.paths.profileRoot,
+            artifactNetwork,
+          ),
         });
         responseText = normalizeText(resolvedDelivery.responseText);
         deliveryArtifacts = resolvedDelivery.artifacts;
@@ -9372,6 +9376,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           failureCode,
           'Provider artifact delivery preparation failed.',
         );
+        const data = readLargeFileUploadFailureData(error);
         const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
         const failedApplied = sessionEngine.applyProviderRunnerResult({
           session: received.session,
@@ -9490,7 +9495,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           failureCode,
           providerRuntime: providerRuntimeDiagnostics,
         });
-        return commandFailed(failureCode, failureText);
+        return commandFailed(failureCode, failureText, data ? { data } : undefined);
       }
     }
     const deliveryMessage = buildDeliveryMessage({
@@ -13653,6 +13658,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
               signer,
               uploadLargeFile: providerArtifactUploadLargeFile,
               largeUploader: providerLargeFileUploader,
+              mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(
+                runtimeStateStore.paths.profileRoot,
+                artifactNetwork,
+              ),
             });
             responseText = normalizeText(resolvedDelivery.responseText);
             deliveryArtifacts = resolvedDelivery.artifacts;
@@ -13664,6 +13673,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               'Provider artifact delivery preparation failed.',
               [providerExecutionCwd],
             );
+            const data = readLargeFileUploadFailureData(error);
             const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
             const failedApplied = sessionEngine.applyProviderRunnerResult({
               session: received.session,
@@ -13809,7 +13819,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ],
               sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
             }));
-            return commandFailed(failureCode, failureText);
+            return commandFailed(failureCode, failureText, data ? { data } : undefined);
           }
         }
         const providerMessage = responseText;
