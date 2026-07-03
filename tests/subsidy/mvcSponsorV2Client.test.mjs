@@ -18,7 +18,7 @@ function jsonResponse(body, options = {}) {
   };
 }
 
-test('mvcSponsorV2Client normalizes address info snapshots', async () => {
+test('mvcSponsorV2Client normalizes v2 quota snapshots into numeric fields', async () => {
   const calls = [];
   const client = createMvcSponsorV2Client({
     baseUrl: 'https://www.metaso.network/assist-open-api/',
@@ -27,17 +27,19 @@ test('mvcSponsorV2Client normalizes address info snapshots', async () => {
       return jsonResponse({
         code: 0,
         data: {
-          address: 'mvc-address-1',
-          gas_chain: 'mvc',
-          balance: '12.34',
-          rewardAmount: '5.6',
-          used_amount: '1.2',
+          exists: true,
+          balance: '98',
+          grantedAmount: '100',
+          reservedAmount: '1.5',
+          spentAmount: 0.5,
+          availableAmount: '98',
+          status: 'active',
         },
       });
     },
   });
 
-  const result = await client.getAddressInfo({ address: ' mvc-address-1 ' });
+  const snapshot = await client.getAddressInfo({ address: ' mvc-address-1 ' });
 
   assert.deepEqual(calls, [{
     url: 'https://www.metaso.network/assist-open-api/v2/assist/gas/address/info?address=mvc-address-1&gasChain=mvc',
@@ -48,33 +50,71 @@ test('mvcSponsorV2Client normalizes address info snapshots', async () => {
       },
     },
   }]);
-  assert.deepEqual(result, {
-    address: 'mvc-address-1',
-    gasChain: 'mvc',
-    balance: '12.34',
-    rewardAmount: '5.6',
-    usedAmount: '1.2',
+  assert.deepEqual(snapshot, {
+    exists: true,
+    balance: 98,
+    grantedAmount: 100,
+    reservedAmount: 1.5,
+    spentAmount: 0.5,
+    availableAmount: 98,
+    status: 'active',
     raw: {
-      address: 'mvc-address-1',
-      gas_chain: 'mvc',
-      balance: '12.34',
-      rewardAmount: '5.6',
-      used_amount: '1.2',
+      exists: true,
+      balance: '98',
+      grantedAmount: '100',
+      reservedAmount: '1.5',
+      spentAmount: 0.5,
+      availableAmount: '98',
+      status: 'active',
     },
   });
 });
 
-test('mvcSponsorV2Client normalizes challenge pre and commit requests', async () => {
+test('mvcSponsorV2Client posts challenge without forcing an address payload', async () => {
+  const calls = [];
+  const client = createMvcSponsorV2Client({
+    baseUrl: 'https://www.metaso.network/assist-open-api',
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return jsonResponse({
+        code: 0,
+        data: {
+          challengeId: 'challenge-1',
+          message: 'assist-sponsor:challenge-1',
+          expiresAt: '2026-07-03T10:00:00.000Z',
+        },
+      });
+    },
+  });
+
+  const challenge = await client.getChallenge();
+
+  assert.deepEqual(calls, [{
+    url: 'https://www.metaso.network/assist-open-api/v2/assist/gas/mvc/challenge',
+    init: {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    },
+  }]);
+  assert.deepEqual(challenge, {
+    challengeId: 'challenge-1',
+    message: 'assist-sponsor:challenge-1',
+    expiresAt: '2026-07-03T10:00:00.000Z',
+    raw: {
+      challengeId: 'challenge-1',
+      message: 'assist-sponsor:challenge-1',
+      expiresAt: '2026-07-03T10:00:00.000Z',
+    },
+  });
+});
+
+test('mvcSponsorV2Client strictly normalizes pre and commit success payloads', async () => {
   const calls = [];
   const responses = [
-    jsonResponse({
-      code: 0,
-      data: {
-        challengeId: 'challenge-1',
-        message: 'assist-sponsor:challenge-1',
-        expiresAt: '2026-07-03T10:00:00.000Z',
-      },
-    }),
     jsonResponse({
       code: 0,
       data: {
@@ -88,13 +128,12 @@ test('mvcSponsorV2Client normalizes challenge pre and commit requests', async ()
     jsonResponse({
       code: 0,
       data: {
-        txHex: 'fully-signed-tx-hex',
         txId: 'tx-1',
-        orderId: 'order-1',
+        txSize: '345',
+        minerFee: 111,
       },
     }),
   ];
-
   const client = createMvcSponsorV2Client({
     baseUrl: 'https://www.metaso.network/assist-open-api',
     fetchImpl: async (url, init) => {
@@ -103,11 +142,10 @@ test('mvcSponsorV2Client normalizes challenge pre and commit requests', async ()
     },
   });
 
-  const challenge = await client.getChallenge({ address: 'mvc-address-1' });
   const pre = await client.preSponsor({
     address: 'mvc-address-1',
     txHex: 'unsigned-tx-hex',
-    challengeId: challenge.challengeId,
+    challengeId: 'challenge-1',
     publicKey: 'public-key-hex',
     signature: 'base64-signature',
   });
@@ -119,19 +157,6 @@ test('mvcSponsorV2Client normalizes challenge pre and commit requests', async ()
   });
 
   assert.deepEqual(calls, [
-    {
-      url: 'https://www.metaso.network/assist-open-api/v2/assist/gas/mvc/challenge',
-      init: {
-        method: 'POST',
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          address: 'mvc-address-1',
-        }),
-      },
-    },
     {
       url: 'https://www.metaso.network/assist-open-api/v2/assist/gas/mvc/pre',
       init: {
@@ -166,21 +191,10 @@ test('mvcSponsorV2Client normalizes challenge pre and commit requests', async ()
       },
     },
   ]);
-
-  assert.deepEqual(challenge, {
-    challengeId: 'challenge-1',
-    message: 'assist-sponsor:challenge-1',
-    expiresAt: '2026-07-03T10:00:00.000Z',
-    raw: {
-      challengeId: 'challenge-1',
-      message: 'assist-sponsor:challenge-1',
-      expiresAt: '2026-07-03T10:00:00.000Z',
-    },
-  });
   assert.deepEqual(pre, {
     preparedTxHex: 'prepared-tx-hex',
     orderId: 'order-1',
-    minerFee: '111',
+    minerFee: 111,
     userInputIndexes: [0, 2, 4],
     expiresAt: '2026-07-03T10:01:00.000Z',
     raw: {
@@ -192,27 +206,82 @@ test('mvcSponsorV2Client normalizes challenge pre and commit requests', async ()
     },
   });
   assert.deepEqual(commit, {
-    txHex: 'fully-signed-tx-hex',
     txId: 'tx-1',
-    orderId: 'order-1',
+    txSize: 345,
+    minerFee: 111,
     raw: {
-      txHex: 'fully-signed-tx-hex',
       txId: 'tx-1',
-      orderId: 'order-1',
+      txSize: '345',
+      minerFee: 111,
     },
   });
 });
 
-test('mvcSponsorV2Client maps business failures into stable error reasons', async () => {
-  const client = createMvcSponsorV2Client({
+test('mvcSponsorV2Client rejects malformed success payloads instead of defaulting required v2 fields', async () => {
+  const missingPreFieldClient = createMvcSponsorV2Client({
     fetchImpl: async () => jsonResponse({
-      code: 4001,
-      message: 'available amount not enough for current address',
+      code: 0,
+      data: {
+        preparedTxHex: 'prepared-tx-hex',
+        orderId: 'order-1',
+        expiresAt: '2026-07-03T10:01:00.000Z',
+      },
     }),
   });
 
   await assert.rejects(
-    () => client.preSponsor({
+    () => missingPreFieldClient.preSponsor({
+      address: 'mvc-address-1',
+      txHex: 'unsigned-tx-hex',
+      challengeId: 'challenge-1',
+      publicKey: 'public-key-hex',
+      signature: 'base64-signature',
+    }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+      assert.equal(error.stage, 'pre');
+      assert.equal(error.reason, 'pre_rejected');
+      assert.match(error.serviceMessage, /missing required fields/i);
+      return true;
+    },
+  );
+
+  const missingCommitFieldClient = createMvcSponsorV2Client({
+    fetchImpl: async () => jsonResponse({
+      code: 0,
+      data: {
+        txSize: '345',
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => missingCommitFieldClient.commitSponsor({
+      orderId: 'order-1',
+      signedTxHex: 'signed-tx-hex',
+      publicKey: 'public-key-hex',
+      signature: 'commit-signature',
+    }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_commit_failed');
+      assert.equal(error.stage, 'commit');
+      assert.equal(error.reason, 'commit_failed');
+      assert.match(error.serviceMessage, /missing required fields/i);
+      return true;
+    },
+  );
+});
+
+test('mvcSponsorV2Client maps business failures into stable quota and pre_rejected reasons', async () => {
+  const quotaClient = createMvcSponsorV2Client({
+    fetchImpl: async () => jsonResponse({
+      code: 4001,
+      message: 'sponsor available amount not enough',
+    }, { ok: false, status: 400 }),
+  });
+
+  await assert.rejects(
+    () => quotaClient.preSponsor({
       address: 'mvc-address-1',
       txHex: 'unsigned-tx-hex',
       challengeId: 'challenge-1',
@@ -224,13 +293,36 @@ test('mvcSponsorV2Client maps business failures into stable error reasons', asyn
       assert.equal(error.stage, 'pre');
       assert.equal(error.reason, 'insufficient_quota');
       assert.match(error.serviceMessage, /available amount not enough/i);
-      assert.equal(error.message, error.serviceMessage);
+      return true;
+    },
+  );
+
+  const rejectedClient = createMvcSponsorV2Client({
+    fetchImpl: async () => jsonResponse({
+      code: 4003,
+      message: 'address not match first input address',
+    }, { ok: false, status: 400 }),
+  });
+
+  await assert.rejects(
+    () => rejectedClient.preSponsor({
+      address: 'mvc-address-1',
+      txHex: 'unsigned-tx-hex',
+      challengeId: 'challenge-1',
+      publicKey: 'public-key-hex',
+      signature: 'base64-signature',
+    }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+      assert.equal(error.stage, 'pre');
+      assert.equal(error.reason, 'pre_rejected');
+      assert.match(error.serviceMessage, /address not match/i);
       return true;
     },
   );
 });
 
-test('mvcSponsorV2Client maps transport and commit failures into stable errors with service context', async () => {
+test('mvcSponsorV2Client keeps service failures separate from validation failures', async () => {
   const transportClient = createMvcSponsorV2Client({
     fetchImpl: async () => {
       throw new Error('socket hang up');
@@ -238,7 +330,7 @@ test('mvcSponsorV2Client maps transport and commit failures into stable errors w
   });
 
   await assert.rejects(
-    () => transportClient.getChallenge({ address: 'mvc-address-1' }),
+    () => transportClient.getChallenge(),
     (error) => {
       assert.equal(error.code, 'mvc_fee_assist_challenge_failed');
       assert.equal(error.stage, 'challenge');
@@ -248,35 +340,20 @@ test('mvcSponsorV2Client maps transport and commit failures into stable errors w
     },
   );
 
-  const commitClient = createMvcSponsorV2Client({
-    fetchImpl: async () => jsonResponse({
-      code: 5002,
-      message: 'commit failed: duplicate order state',
-      data: {
-        feeAssist: {
-          orderId: 'order-1',
-        },
-      },
-    }),
-  });
-
+  const client = createMvcSponsorV2Client();
   await assert.rejects(
-    () => commitClient.commitSponsor({
-      orderId: 'order-1',
-      signedTxHex: 'signed-tx-hex',
+    () => client.preSponsor({
+      address: '',
+      txHex: 'unsigned-tx-hex',
+      challengeId: 'challenge-1',
       publicKey: 'public-key-hex',
-      signature: 'commit-signature',
+      signature: 'base64-signature',
     }),
     (error) => {
-      assert.equal(error.code, 'mvc_fee_assist_commit_failed');
-      assert.equal(error.stage, 'commit');
-      assert.equal(error.reason, 'commit_failed');
-      assert.match(error.serviceMessage, /commit failed/i);
-      assert.deepEqual(error.data, {
-        feeAssist: {
-          orderId: 'order-1',
-        },
-      });
+      assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+      assert.equal(error.stage, 'pre');
+      assert.equal(error.reason, 'pre_rejected');
+      assert.match(error.serviceMessage, /address is required/i);
       return true;
     },
   );

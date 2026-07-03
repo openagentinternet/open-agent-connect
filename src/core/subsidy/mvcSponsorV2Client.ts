@@ -14,7 +14,7 @@ type FetchImpl = (input: string, init?: {
 }) => Promise<FetchResponseLike>;
 
 type SponsorStage = 'address_info' | 'challenge' | 'pre' | 'commit';
-type SponsorReason = 'insufficient_quota' | 'service_unavailable' | 'commit_failed';
+type SponsorReason = 'insufficient_quota' | 'service_unavailable' | 'commit_failed' | 'pre_rejected' | 'invalid_request';
 
 export interface MvcSponsorV2ClientError extends Error {
   code: string;
@@ -26,11 +26,13 @@ export interface MvcSponsorV2ClientError extends Error {
 }
 
 export interface MvcSponsorAddressInfo {
-  address: string;
-  gasChain: string;
-  balance: string;
-  rewardAmount: string;
-  usedAmount: string;
+  exists: boolean;
+  balance: number;
+  grantedAmount: number;
+  reservedAmount: number;
+  spentAmount: number;
+  availableAmount: number;
+  status: string;
   raw: Record<string, unknown>;
 }
 
@@ -44,16 +46,16 @@ export interface MvcSponsorChallenge {
 export interface MvcSponsorPreResult {
   preparedTxHex: string;
   orderId: string;
-  minerFee: string;
+  minerFee: number;
   userInputIndexes: number[];
   expiresAt?: string;
   raw: Record<string, unknown>;
 }
 
 export interface MvcSponsorCommitResult {
-  txHex: string;
-  txId?: string;
-  orderId: string;
+  txId: string;
+  txSize?: number;
+  minerFee?: number;
   raw: Record<string, unknown>;
 }
 
@@ -91,6 +93,9 @@ function normalizeReason(stage: SponsorStage, message: string): SponsorReason {
   if (/available amount not enough|quota not granted|insufficient quota|insufficient balance/i.test(message)) {
     return 'insufficient_quota';
   }
+  if (stage === 'pre' && /\b(address not match|txin empty|tx in empty|rejected|invalid tx|invalid transaction|first input)\b/i.test(message)) {
+    return 'pre_rejected';
+  }
   if (stage === 'commit' || /commit/i.test(message)) {
     return 'commit_failed';
   }
@@ -100,12 +105,13 @@ function normalizeReason(stage: SponsorStage, message: string): SponsorReason {
 function createSponsorError(stage: SponsorStage, message: string, extra: {
   status?: number;
   data?: unknown;
+  reason?: SponsorReason;
 } = {}): MvcSponsorV2ClientError {
   const serviceMessage = normalizeText(message) || `MVC sponsor ${stage} failed.`;
   const error = new Error(serviceMessage) as MvcSponsorV2ClientError;
   error.code = `mvc_fee_assist_${stage}_failed`;
   error.stage = stage;
-  error.reason = normalizeReason(stage, serviceMessage);
+  error.reason = extra.reason ?? normalizeReason(stage, serviceMessage);
   error.serviceMessage = serviceMessage;
   if (extra.status !== undefined) {
     error.status = extra.status;
@@ -190,9 +196,49 @@ async function requestJson(
   return unwrapEnvelope(body, stage);
 }
 
+function normalizeBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+  }
+  return null;
+}
+
+function normalizeRequiredNumber(stage: SponsorStage, record: Record<string, unknown>, ...keys: string[]): number {
+  for (const key of keys) {
+    const raw = record[key];
+    const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+  throw createSponsorError(stage, `Sponsor ${stage} response is missing required fields.`, {
+    data: record,
+    reason: stage === 'commit' ? 'commit_failed' : stage === 'pre' ? 'pre_rejected' : 'service_unavailable',
+  });
+}
+
+function normalizeOptionalNumber(record: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const raw = record[key];
+    const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function normalizeUserInputIndexes(value: unknown): number[] {
-  if (!Array.isArray(value)) {
-    return [];
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('missing');
   }
   const result: number[] = [];
   for (const item of value) {
@@ -201,22 +247,28 @@ function normalizeUserInputIndexes(value: unknown): number[] {
       result.push(Math.floor(numeric));
     }
   }
+  if (result.length === 0) {
+    throw new Error('missing');
+  }
   return result;
 }
 
 function normalizeAddressInfo(record: Record<string, unknown>): MvcSponsorAddressInfo {
-  const address = pickText(record, 'address');
-  if (!address) {
-    throw createSponsorError('address_info', 'Sponsor address info response is missing address.', {
+  const exists = normalizeBoolean(record.exists);
+  const status = pickText(record, 'status');
+  if (exists === null || !status) {
+    throw createSponsorError('address_info', 'Sponsor address info response is missing required fields.', {
       data: record,
     });
   }
   return {
-    address,
-    gasChain: pickText(record, 'gasChain', 'gas_chain') || 'mvc',
-    balance: pickText(record, 'balance') || '0',
-    rewardAmount: pickText(record, 'rewardAmount', 'reward_amount') || '0',
-    usedAmount: pickText(record, 'usedAmount', 'used_amount') || '0',
+    exists,
+    balance: normalizeRequiredNumber('address_info', record, 'balance'),
+    grantedAmount: normalizeRequiredNumber('address_info', record, 'grantedAmount', 'granted_amount'),
+    reservedAmount: normalizeRequiredNumber('address_info', record, 'reservedAmount', 'reserved_amount'),
+    spentAmount: normalizeRequiredNumber('address_info', record, 'spentAmount', 'spent_amount'),
+    availableAmount: normalizeRequiredNumber('address_info', record, 'availableAmount', 'available_amount'),
+    status,
     raw: record,
   };
 }
@@ -244,34 +296,50 @@ function normalizePreResult(record: Record<string, unknown>): MvcSponsorPreResul
   if (!preparedTxHex || !orderId) {
     throw createSponsorError('pre', 'Sponsor pre response is missing required fields.', {
       data: record,
+      reason: 'pre_rejected',
+    });
+  }
+  let userInputIndexes: number[];
+  try {
+    userInputIndexes = normalizeUserInputIndexes(record.userInputIndexes ?? record.user_input_indexes);
+  } catch {
+    throw createSponsorError('pre', 'Sponsor pre response is missing required fields.', {
+      data: record,
+      reason: 'pre_rejected',
     });
   }
   const expiresAt = pickText(record, 'expiresAt', 'expires_at');
   return {
     preparedTxHex,
     orderId,
-    minerFee: pickText(record, 'minerFee', 'miner_fee') || '0',
-    userInputIndexes: normalizeUserInputIndexes(record.userInputIndexes ?? record.user_input_indexes),
+    minerFee: normalizeRequiredNumber('pre', record, 'minerFee', 'miner_fee'),
+    userInputIndexes,
     expiresAt: expiresAt || undefined,
     raw: record,
   };
 }
 
 function normalizeCommitResult(record: Record<string, unknown>): MvcSponsorCommitResult {
-  const txHex = pickText(record, 'txHex', 'signedTxHex', 'finalTxHex', 'final_tx_hex');
-  const orderId = pickText(record, 'orderId', 'order_id');
-  if (!txHex || !orderId) {
+  const txId = pickText(record, 'txId', 'txid');
+  if (!txId) {
     throw createSponsorError('commit', 'Sponsor commit response is missing required fields.', {
       data: record,
+      reason: 'commit_failed',
     });
   }
-  const txId = pickText(record, 'txId', 'txid');
-  return {
-    txHex,
-    txId: txId || undefined,
-    orderId,
+  const result: MvcSponsorCommitResult = {
+    txId,
     raw: record,
   };
+  const txSize = normalizeOptionalNumber(record, 'txSize', 'tx_size');
+  const minerFee = normalizeOptionalNumber(record, 'minerFee', 'miner_fee');
+  if (txSize !== undefined) {
+    result.txSize = txSize;
+  }
+  if (minerFee !== undefined) {
+    result.minerFee = minerFee;
+  }
+  return result;
 }
 
 function createJsonHeaders(): Record<string, string> {
@@ -281,6 +349,16 @@ function createJsonHeaders(): Record<string, string> {
   };
 }
 
+function requireText(stage: SponsorStage, field: string, value: unknown): string {
+  const normalized = normalizeText(value);
+  if (normalized) {
+    return normalized;
+  }
+  throw createSponsorError(stage, `${field} is required`, {
+    reason: stage === 'commit' ? 'commit_failed' : stage === 'pre' ? 'pre_rejected' : 'invalid_request',
+  });
+}
+
 export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = {}) {
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const fetchImpl = (input.fetchImpl ?? fetch) as FetchImpl;
@@ -288,10 +366,7 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
   return {
     baseUrl,
     async getAddressInfo(payload: { address: string }): Promise<MvcSponsorAddressInfo> {
-      const address = normalizeText(payload?.address);
-      if (!address) {
-        throw new Error('address is required');
-      }
+      const address = requireText('address_info', 'address', payload?.address);
       const url = new URL(`${baseUrl}/v2/assist/gas/address/info`);
       url.searchParams.set('address', address);
       url.searchParams.set('gasChain', 'mvc');
@@ -303,15 +378,11 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
       }, 'address_info');
       return normalizeAddressInfo(record);
     },
-    async getChallenge(payload: { address: string }): Promise<MvcSponsorChallenge> {
-      const address = normalizeText(payload?.address);
-      if (!address) {
-        throw new Error('address is required');
-      }
+    async getChallenge(): Promise<MvcSponsorChallenge> {
       const record = await requestJson(fetchImpl, `${baseUrl}/v2/assist/gas/mvc/challenge`, {
         method: 'POST',
         headers: createJsonHeaders(),
-        body: JSON.stringify({ address }),
+        body: JSON.stringify({}),
       }, 'challenge');
       return normalizeChallenge(record);
     },
@@ -326,11 +397,11 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
         method: 'POST',
         headers: createJsonHeaders(),
         body: JSON.stringify({
-          address: normalizeText(payload?.address),
-          txHex: normalizeText(payload?.txHex),
-          challengeId: normalizeText(payload?.challengeId),
-          publicKey: normalizeText(payload?.publicKey),
-          signature: normalizeText(payload?.signature),
+          address: requireText('pre', 'address', payload?.address),
+          txHex: requireText('pre', 'txHex', payload?.txHex),
+          challengeId: requireText('pre', 'challengeId', payload?.challengeId),
+          publicKey: requireText('pre', 'publicKey', payload?.publicKey),
+          signature: requireText('pre', 'signature', payload?.signature),
         }),
       }, 'pre');
       return normalizePreResult(record);
@@ -345,10 +416,10 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
         method: 'POST',
         headers: createJsonHeaders(),
         body: JSON.stringify({
-          orderId: normalizeText(payload?.orderId),
-          signedTxHex: normalizeText(payload?.signedTxHex),
-          publicKey: normalizeText(payload?.publicKey),
-          signature: normalizeText(payload?.signature),
+          orderId: requireText('commit', 'orderId', payload?.orderId),
+          signedTxHex: requireText('commit', 'signedTxHex', payload?.signedTxHex),
+          publicKey: requireText('commit', 'publicKey', payload?.publicKey),
+          signature: requireText('commit', 'signature', payload?.signature),
         }),
       }, 'commit');
       return normalizeCommitResult(record);
