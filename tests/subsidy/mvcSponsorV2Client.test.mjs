@@ -272,6 +272,66 @@ test('mvcSponsorV2Client rejects malformed success payloads instead of defaultin
   );
 });
 
+test('mvcSponsorV2Client rejects mixed invalid userInputIndexes instead of filtering them', async () => {
+  const client = createMvcSponsorV2Client({
+    fetchImpl: async () => jsonResponse({
+      code: 0,
+      data: {
+        preparedTxHex: 'prepared-tx-hex',
+        orderId: 'order-1',
+        minerFee: '111',
+        userInputIndexes: [0, 'bad', 2],
+        expiresAt: '2026-07-03T10:01:00.000Z',
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => client.preSponsor({
+      address: 'mvc-address-1',
+      txHex: 'unsigned-tx-hex',
+      challengeId: 'challenge-1',
+      publicKey: 'public-key-hex',
+      signature: 'base64-signature',
+    }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+      assert.equal(error.stage, 'pre');
+      assert.equal(error.reason, 'pre_rejected');
+      assert.match(error.serviceMessage, /missing required fields/i);
+      return true;
+    },
+  );
+});
+
+test('mvcSponsorV2Client rejects blank numeric strings in required quota fields', async () => {
+  const client = createMvcSponsorV2Client({
+    fetchImpl: async () => jsonResponse({
+      code: 0,
+      data: {
+        exists: true,
+        balance: ' ',
+        grantedAmount: '100',
+        reservedAmount: '1.5',
+        spentAmount: 0.5,
+        availableAmount: '98',
+        status: 'active',
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => client.getAddressInfo({ address: 'mvc-address-1' }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_address_info_failed');
+      assert.equal(error.stage, 'address_info');
+      assert.equal(error.reason, 'service_unavailable');
+      assert.match(error.serviceMessage, /missing required fields/i);
+      return true;
+    },
+  );
+});
+
 test('mvcSponsorV2Client maps business failures into stable quota and pre_rejected reasons', async () => {
   const quotaClient = createMvcSponsorV2Client({
     fetchImpl: async () => jsonResponse({

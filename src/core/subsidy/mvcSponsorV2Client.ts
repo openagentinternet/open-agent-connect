@@ -214,6 +214,9 @@ function normalizeBoolean(value: unknown): boolean | null {
 function normalizeRequiredNumber(stage: SponsorStage, record: Record<string, unknown>, ...keys: string[]): number {
   for (const key of keys) {
     const raw = record[key];
+    if (typeof raw === 'string' && !raw.trim()) {
+      continue;
+    }
     const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
     if (Number.isFinite(value)) {
       return value;
@@ -228,6 +231,9 @@ function normalizeRequiredNumber(stage: SponsorStage, record: Record<string, unk
 function normalizeOptionalNumber(record: Record<string, unknown>, ...keys: string[]): number | undefined {
   for (const key of keys) {
     const raw = record[key];
+    if (typeof raw === 'string' && !raw.trim()) {
+      continue;
+    }
     const value = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
     if (Number.isFinite(value)) {
       return value;
@@ -243,12 +249,10 @@ function normalizeUserInputIndexes(value: unknown): number[] {
   const result: number[] = [];
   for (const item of value) {
     const numeric = Number(item);
-    if (Number.isFinite(numeric) && numeric >= 0) {
-      result.push(Math.floor(numeric));
+    if (!Number.isFinite(numeric) || !Number.isInteger(numeric) || numeric < 0) {
+      throw new Error('invalid');
     }
-  }
-  if (result.length === 0) {
-    throw new Error('missing');
+    result.push(numeric);
   }
   return result;
 }
