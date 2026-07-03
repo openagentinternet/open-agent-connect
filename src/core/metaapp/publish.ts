@@ -115,6 +115,20 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readFeeAssistFailureData(error: unknown): Record<string, unknown> | undefined {
+  const data = (error as { data?: unknown } | undefined)?.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return undefined;
+  }
+  const feeAssist = (data as Record<string, unknown>).feeAssist;
+  if (!feeAssist || typeof feeAssist !== 'object' || Array.isArray(feeAssist)) {
+    return undefined;
+  }
+  return {
+    feeAssist: feeAssist as Record<string, unknown>,
+  };
+}
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -414,8 +428,12 @@ async function writePublishedMetaApp(input: {
       network: input.network,
     });
   } catch (error) {
+    const feeAssistData = readFeeAssistFailureData(error);
     return commandFailed('metaapp_upload_failed', `Unable to upload MetaApp archive: ${errorMessage(error)}`, {
-      data: { archive },
+      data: {
+        archive,
+        ...(feeAssistData ?? {}),
+      },
     });
   }
 

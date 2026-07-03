@@ -372,7 +372,67 @@ test('file upload failure returns metaapp_upload_failed and skips chain write', 
 
   assert.equal(result.state, 'failed');
   assert.equal(result.code, 'metaapp_upload_failed');
+  assert.ok(result.data.archive);
+  assert.equal(typeof result.data.archive.filePath, 'string');
   assert.deepEqual(deps.calls.map((call) => call.type), ['upload']);
+});
+
+test('file upload failure preserves structured feeAssist data', async () => {
+  const projectDir = await makeProject('upload-failure-fee-assist');
+  const deps = createDeps({
+    async uploadFile(input) {
+      deps.calls.push({ type: 'upload', input });
+      const error = new Error('upload exploded');
+      error.data = {
+        feeAssist: {
+          attempted: true,
+          used: false,
+          mode: 'mvc_sponsor_v2',
+          sponsor: 'mvc_sponsor_v2',
+          stage: 'commit',
+          reason: 'commit_failed',
+          orderId: 'order-1',
+        },
+      };
+      throw error;
+    },
+  });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'metaapp_upload_failed');
+  assert.ok(result.data.archive);
+  assert.deepEqual(result.data.feeAssist, {
+    attempted: true,
+    used: false,
+    mode: 'mvc_sponsor_v2',
+    sponsor: 'mvc_sponsor_v2',
+    stage: 'commit',
+    reason: 'commit_failed',
+    orderId: 'order-1',
+  });
+});
+
+test('file upload failure ignores malformed feeAssist data', async () => {
+  const projectDir = await makeProject('upload-failure-bad-fee-assist');
+  const deps = createDeps({
+    async uploadFile(input) {
+      deps.calls.push({ type: 'upload', input });
+      const error = new Error('upload exploded');
+      error.data = {
+        feeAssist: ['bad-shape'],
+      };
+      throw error;
+    },
+  });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'metaapp_upload_failed');
+  assert.ok(result.data.archive);
+  assert.equal('feeAssist' in result.data, false);
 });
 
 test('chain write failure returns metaapp_publish_failed and preserves upload evidence', async () => {
