@@ -248,6 +248,9 @@ function normalizeUserInputIndexes(value: unknown): number[] {
   }
   const result: number[] = [];
   for (const item of value) {
+    if (typeof item === 'string' && !item.trim()) {
+      throw new Error('invalid');
+    }
     const numeric = Number(item);
     if (!Number.isFinite(numeric) || !Number.isInteger(numeric) || numeric < 0) {
       throw new Error('invalid');
