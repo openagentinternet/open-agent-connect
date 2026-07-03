@@ -69,6 +69,7 @@ test('createConfigStore defaults to the active runtime config and persists updat
     assert.deepEqual(defaults, {
       chain: {
         defaultWriteNetwork: 'mvc',
+        mvcSponsorUploadEnabled: true,
       },
       a2a: {
         simplemsgListenerEnabled: true,
@@ -87,6 +88,7 @@ test('createConfigStore defaults to the active runtime config and persists updat
     const updated = {
       chain: {
         defaultWriteNetwork: 'opcat',
+        mvcSponsorUploadEnabled: false,
       },
       a2a: {
         simplemsgListenerEnabled: false,
@@ -119,6 +121,7 @@ test('read merges defaults when active config fields are missing', async () => {
     assert.deepEqual(reloaded, {
       chain: {
         defaultWriteNetwork: 'mvc',
+        mvcSponsorUploadEnabled: true,
       },
       a2a: {
         simplemsgListenerEnabled: true,
@@ -143,6 +146,7 @@ test('read ignores retired askMaster and evolution_network config fields', async
     const legacy = {
       chain: {
         defaultWriteNetwork: 'btc',
+        mvcSponsorUploadEnabled: true,
       },
       evolution_network: {
         enabled: false,
@@ -162,6 +166,7 @@ test('read ignores retired askMaster and evolution_network config fields', async
     assert.deepEqual(reloaded, {
       chain: {
         defaultWriteNetwork: 'btc',
+        mvcSponsorUploadEnabled: true,
       },
       a2a: {
         simplemsgListenerEnabled: false,
@@ -186,6 +191,7 @@ test('set drops retired askMaster and evolution_network fields from persisted co
     await store.set({
       chain: {
         defaultWriteNetwork: 'doge',
+        mvcSponsorUploadEnabled: true,
       },
       evolution_network: {
         enabled: false,
@@ -202,6 +208,7 @@ test('set drops retired askMaster and evolution_network fields from persisted co
     assert.deepEqual(persisted, {
       chain: {
         defaultWriteNetwork: 'doge',
+        mvcSponsorUploadEnabled: true,
       },
       a2a: {
         simplemsgListenerEnabled: true,
