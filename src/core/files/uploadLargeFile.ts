@@ -4,6 +4,20 @@ import type { Signer } from '../signing/signer';
 import { buildMetafileContentUrls } from './metafileUrls';
 import { verifyMetafileAvailability } from './metafileVerifier';
 import { inferUploadContentType, uploadLocalFileToChain } from './uploadFile';
+import {
+  uploadMvcSponsorDirectFile,
+  type MvcSponsorFeeAssistMetadata,
+  type MvcSponsorV2DirectUploadClient,
+} from './mvcSponsorDirectUpload';
+
+export type {
+  MvcSponsorDirectUploadResult,
+  MvcSponsorFeeAssistMetadata,
+  MvcSponsorFeeAssistMode,
+  MvcSponsorFeeAssistReason,
+  MvcSponsorFeeAssistStage,
+  MvcSponsorV2DirectUploadClient,
+} from './mvcSponsorDirectUpload';
 
 export const DIRECT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
 export const LARGE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
@@ -25,6 +39,7 @@ export interface UploadLargeFileResult {
   downloadUrl: string;
   globalMetaId: string;
   uploadMode: UploadLargeFileMode;
+  feeAssist?: MvcSponsorFeeAssistMetadata;
   verification?: {
     ok: boolean;
     url: string | null;
@@ -136,6 +151,7 @@ export async function uploadLargeFileToChain(input: {
   verifyAvailability?: (pinId: string) => Promise<UploadLargeFileResult['verification']>;
   directMaxBytes?: number;
   hardMaxBytes?: number;
+  mvcSponsorClient?: MvcSponsorV2DirectUploadClient;
 }): Promise<UploadLargeFileResult> {
   const filePath = normalizeText(input.filePath);
   if (!filePath) {
@@ -160,12 +176,23 @@ export async function uploadLargeFileToChain(input: {
   const contentType = normalizeText(input.contentType) || inferUploadContentType(resolvedPath);
 
   if (stat.size <= directMaxBytes) {
-    const directResult = await uploadLocalFileToChain({
-      filePath: resolvedPath,
-      contentType,
-      network,
-      signer: input.signer,
-    });
+    const directResult = network.toLowerCase() === 'mvc' && input.mvcSponsorClient
+      ? await uploadMvcSponsorDirectFile({
+        filePath: resolvedPath,
+        fileName: path.basename(resolvedPath),
+        contentType,
+        bytes: stat.size,
+        extension,
+        network,
+        signer: input.signer,
+        mvcSponsorClient: input.mvcSponsorClient,
+      })
+      : await uploadLocalFileToChain({
+        filePath: resolvedPath,
+        contentType,
+        network,
+        signer: input.signer,
+      });
     const result = withCanonicalUrls({
       ...directResult,
       uploadMode: 'direct' as const,

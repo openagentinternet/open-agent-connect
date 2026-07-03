@@ -6,11 +6,34 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const mvcChainAdapter = require('../../dist/core/chain/adapters/mvc.js').default;
 const {
   DIRECT_UPLOAD_MAX_BYTES,
   LARGE_UPLOAD_MAX_BYTES,
   uploadLargeFileToChain,
 } = require('../../dist/core/files/uploadLargeFile.js');
+
+const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+const FIXTURE_PATH = "m/44'/10001'/0'/0/0";
+const FIXTURE_ADDRESS = '15Lofqw6Kpa6P8WnTYXKvmPyw3UZvvQWrB';
+const FIXTURE_GLOBAL_METAID = 'idzfixtureglobalmetaid';
+const fixtureIdentity = {
+  mnemonic: FIXTURE_MNEMONIC,
+  path: FIXTURE_PATH,
+  publicKey: 'fixture-public-key',
+  chatPublicKey: '',
+  addresses: { mvc: FIXTURE_ADDRESS },
+  mvcAddress: FIXTURE_ADDRESS,
+  metaId: '',
+  globalMetaId: FIXTURE_GLOBAL_METAID,
+};
+const fixtureUtxo = {
+  txId: 'c'.repeat(64),
+  outputIndex: 0,
+  satoshis: 100_000,
+  address: FIXTURE_ADDRESS,
+  height: 1,
+};
 
 async function tempFile(name, sizeOrContent) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-large-upload-'));
@@ -38,6 +61,71 @@ function fakeSigner(calls = []) {
         globalMetaId: 'gm-direct-alice',
         mvcAddress: '1alice',
       };
+    },
+  };
+}
+
+function fakeSponsorSigner(calls = []) {
+  return {
+    getIdentity: async () => fixtureIdentity,
+    writePin: async (input) => {
+      calls.push(input);
+      return {
+        pinId: 'direct-pin-1',
+        txids: ['direct-tx-1'],
+        totalCost: 321,
+        network: input.network,
+        operation: 'create',
+        path: '/file',
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: FIXTURE_GLOBAL_METAID,
+        mvcAddress: FIXTURE_ADDRESS,
+      };
+    },
+  };
+}
+
+function patchMvcUtxos(utxos = [fixtureUtxo]) {
+  const originalFetchUtxos = mvcChainAdapter.fetchUtxos;
+  mvcChainAdapter.fetchUtxos = async () => utxos;
+  return () => {
+    mvcChainAdapter.fetchUtxos = originalFetchUtxos;
+  };
+}
+
+function createSponsorClient(calls) {
+  return {
+    async getAddressInfo(payload) {
+      calls.push(['getAddressInfo', payload]);
+      return {
+        exists: true,
+        balance: 0,
+        grantedAmount: 5000,
+        reservedAmount: 0,
+        spentAmount: 0,
+        availableAmount: 5000,
+        status: 'active',
+        raw: {},
+      };
+    },
+    async getChallenge() {
+      calls.push(['getChallenge']);
+      return { challengeId: 'challenge-1', message: 'challenge', raw: {} };
+    },
+    async preSponsor(payload) {
+      calls.push(['preSponsor', payload]);
+      return {
+        preparedTxHex: payload.txHex,
+        orderId: 'order-upload-large',
+        minerFee: 800,
+        userInputIndexes: [0],
+        raw: {},
+      };
+    },
+    async commitSponsor(payload) {
+      calls.push(['commitSponsor', payload]);
+      return { txId: 'd'.repeat(64), minerFee: 750, raw: {} };
     },
   };
 }
@@ -130,6 +218,49 @@ test('uploadLargeFileToChain uses direct upload at exactly DIRECT_UPLOAD_MAX_BYT
   assert.equal(result.globalMetaId, 'gm-direct-alice');
 });
 
+test('uploadLargeFileToChain routes direct MVC uploads through injected sponsor client', async () => {
+  const restore = patchMvcUtxos();
+  try {
+    const { filePath } = await tempFile('sponsored-route.txt', 'sponsored route');
+    const directCalls = [];
+    const sponsorCalls = [];
+
+    const result = await uploadLargeFileToChain({
+      filePath,
+      network: 'mvc',
+      signer: fakeSponsorSigner(directCalls),
+      mvcSponsorClient: createSponsorClient(sponsorCalls),
+    });
+
+    assert.equal(directCalls.length, 0);
+    assert.deepEqual(sponsorCalls.map(([name]) => name), ['getAddressInfo', 'getChallenge', 'preSponsor', 'commitSponsor']);
+    assert.equal(result.uploadMode, 'direct');
+    assert.equal(result.pinId, `${'d'.repeat(64)}i0`);
+    assert.equal(result.feeAssist.mode, 'mvc_sponsor_v2');
+    assert.equal(result.feeAssist.used, true);
+  } finally {
+    restore();
+  }
+});
+
+test('uploadLargeFileToChain omits feeAssist for non-MVC direct uploads even with sponsor client', async () => {
+  const { filePath } = await tempFile('btc-direct.txt', 'btc direct');
+  const directCalls = [];
+  const sponsorCalls = [];
+
+  const result = await uploadLargeFileToChain({
+    filePath,
+    network: 'btc',
+    signer: fakeSponsorSigner(directCalls),
+    mvcSponsorClient: createSponsorClient(sponsorCalls),
+  });
+
+  assert.equal(directCalls.length, 1);
+  assert.equal(sponsorCalls.length, 0);
+  assert.equal(result.uploadMode, 'direct');
+  assert.equal('feeAssist' in result, false);
+});
+
 test('uploadLargeFileToChain calls the injected large uploader for files above DIRECT_UPLOAD_MAX_BYTES', async () => {
   const { filePath } = await tempFile('movie.mp4', DIRECT_UPLOAD_MAX_BYTES + 1);
   const directCalls = [];
@@ -196,6 +327,46 @@ test('uploadLargeFileToChain calls the injected large uploader for files above D
       attempts: 2,
     },
   });
+});
+
+test('uploadLargeFileToChain keeps chunked uploads on largeUploader when sponsor client is present', async () => {
+  const { filePath } = await tempFile('sponsored-large.mp4', DIRECT_UPLOAD_MAX_BYTES + 1);
+  const directCalls = [];
+  const sponsorCalls = [];
+  const largeCalls = [];
+
+  const result = await uploadLargeFileToChain({
+    filePath,
+    network: 'mvc',
+    signer: fakeSponsorSigner(directCalls),
+    mvcSponsorClient: createSponsorClient(sponsorCalls),
+    largeUploader: {
+      upload: async (input) => {
+        largeCalls.push(input);
+        return {
+          pinId: 'large-sponsored-unchanged',
+          txids: ['large-sponsored-tx'],
+          totalCost: 123,
+          network: input.network,
+          fileName: input.fileName,
+          contentType: input.contentType,
+          bytes: input.bytes,
+          extension: input.extension,
+          metafileUri: 'metafile://large-sponsored-unchanged.mp4',
+          previewUrl: '',
+          downloadUrl: '',
+          globalMetaId: 'gm-large-sponsored',
+          uploadMode: 'chunked',
+        };
+      },
+    },
+  });
+
+  assert.equal(directCalls.length, 0);
+  assert.equal(sponsorCalls.length, 0);
+  assert.equal(largeCalls.length, 1);
+  assert.equal(result.uploadMode, 'chunked');
+  assert.equal('feeAssist' in result, false);
 });
 
 test('uploadLargeFileToChain uses orchestrator-owned metadata in large upload results', async () => {
