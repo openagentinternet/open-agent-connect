@@ -201,6 +201,18 @@ test('runCli supports `metabot config get chain.defaultWriteNetwork`', async () 
   });
 });
 
+test('runCli supports `metabot config get chain.mvcSponsorUploadEnabled`', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-get-mvc-sponsor-upload-');
+  const result = await runConfigCli(homeDir, ['config', 'get', 'chain.mvcSponsorUploadEnabled']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.deepEqual(result.payload.data, {
+    key: 'chain.mvcSponsorUploadEnabled',
+    value: true,
+  });
+});
+
 test('runCli supports `metabot config set chain.defaultWriteNetwork opcat`', async () => {
   const homeDir = createProfileHome('metabot-cli-config-set-default-write-network-');
   const setResult = await runConfigCli(homeDir, ['config', 'set', 'chain.defaultWriteNetwork', 'opcat']);
@@ -220,6 +232,45 @@ test('runCli supports `metabot config set chain.defaultWriteNetwork opcat`', asy
   const configPath = resolveMetabotPaths(homeDir).configPath;
   const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
   assert.equal(configFromDisk.chain.defaultWriteNetwork, 'opcat');
+});
+
+test('runCli supports `metabot config set chain.mvcSponsorUploadEnabled false`', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-set-mvc-sponsor-upload-false-');
+  const setResult = await runConfigCli(homeDir, ['config', 'set', 'chain.mvcSponsorUploadEnabled', 'false']);
+
+  assert.equal(setResult.exitCode, 0);
+  assert.equal(setResult.payload.ok, true);
+  assert.deepEqual(setResult.payload.data, {
+    key: 'chain.mvcSponsorUploadEnabled',
+    value: false,
+  });
+
+  const getResult = await runConfigCli(homeDir, ['config', 'get', 'chain.mvcSponsorUploadEnabled']);
+  assert.equal(getResult.exitCode, 0);
+  assert.equal(getResult.payload.ok, true);
+  assert.equal(getResult.payload.data.value, false);
+
+  const configPath = resolveMetabotPaths(homeDir).configPath;
+  const configFromDisk = JSON.parse(readFileSync(configPath, 'utf8'));
+  assert.equal(configFromDisk.chain.mvcSponsorUploadEnabled, false);
+});
+
+test('runCli supports `metabot config set chain.mvcSponsorUploadEnabled true`', async () => {
+  const homeDir = createProfileHome('metabot-cli-config-set-mvc-sponsor-upload-true-');
+  await runConfigCli(homeDir, ['config', 'set', 'chain.mvcSponsorUploadEnabled', 'false']);
+
+  const setResult = await runConfigCli(homeDir, ['config', 'set', 'chain.mvcSponsorUploadEnabled', 'true']);
+  assert.equal(setResult.exitCode, 0);
+  assert.equal(setResult.payload.ok, true);
+  assert.deepEqual(setResult.payload.data, {
+    key: 'chain.mvcSponsorUploadEnabled',
+    value: true,
+  });
+
+  const getResult = await runConfigCli(homeDir, ['config', 'get', 'chain.mvcSponsorUploadEnabled']);
+  assert.equal(getResult.exitCode, 0);
+  assert.equal(getResult.payload.ok, true);
+  assert.equal(getResult.payload.data.value, true);
 });
 
 test('runCli rejects unsupported chain.defaultWriteNetwork values', async () => {

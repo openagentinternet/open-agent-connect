@@ -76,6 +76,10 @@ function normalizeConfig(input: unknown): MetabotConfig {
       defaultWriteNetwork: isDefaultWriteNetwork(defaultWriteNetwork)
         ? defaultWriteNetwork
         : defaults.chain.defaultWriteNetwork,
+      mvcSponsorUploadEnabled: normalizeBoolean(
+        chainSource.mvcSponsorUploadEnabled,
+        defaults.chain.mvcSponsorUploadEnabled,
+      ),
     },
     a2a: {
       simplemsgListenerEnabled: normalizeBoolean(

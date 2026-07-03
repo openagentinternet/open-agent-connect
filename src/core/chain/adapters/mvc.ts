@@ -5,7 +5,7 @@ import {
   CoinType,
   MvcWallet,
 } from '@metalet/utxo-wallet-service';
-import { chainWritePayloadToBuffer, type ChainWriteNetwork } from '../writePin';
+import type { ChainWriteNetwork } from '../writePin';
 import { parseAddressIndexFromPath } from '../../identity/deriveIdentity';
 import {
   __clearPendingMvcUtxosForTests,
@@ -13,6 +13,8 @@ import {
   resolveSpendableMvcUtxos,
 } from '../mvcPendingUtxos';
 import { isRetryableUtxoFundingError } from '../utxoBroadcastErrors';
+import { buildMvcFileInscriptionDraft, extractOwnedOutputsFromPreparedMvcTx, signMvcPreparedUserInputs } from '../mvcFileInscriptionDraft';
+import { buildMvcSigningIdentity } from '../mvcSigningIdentity';
 import type {
   ChainAdapter,
   ChainBalance,
@@ -40,34 +42,6 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function normalizeOutpointTxid(value: string): string {
-  return normalizeText(value).toLowerCase();
-}
-
-function extractOwnedOutputs(input: {
-  txid: string;
-  address: string;
-  outputs: Array<{ satoshis?: number; script?: { toAddress?: (network?: string) => unknown } }>;
-}): ChainUtxo[] {
-  const txId = normalizeOutpointTxid(input.txid);
-  if (!txId) return [];
-  const owned: ChainUtxo[] = [];
-  input.outputs.forEach((output, outputIndex) => {
-    let outputAddress = '';
-    try {
-      const resolved = output.script?.toAddress?.(NET);
-      outputAddress = normalizeText(resolved == null ? '' : String(resolved));
-    } catch {
-      outputAddress = '';
-    }
-    const satoshis = Number(output.satoshis ?? 0);
-    if (outputAddress === normalizeText(input.address) && Number.isFinite(satoshis) && satoshis > 0) {
-      owned.push({ txId, outputIndex, satoshis, address: input.address, height: 0 });
-    }
-  });
-  return owned;
-}
-
 export function __clearPendingMvcSpentOutpointsForTests(): void {
   __clearPendingMvcUtxosForTests();
   deferredTrackers.clear();
@@ -82,21 +56,6 @@ function toFiniteNumber(value: unknown): number {
 
 async function getV3AddressType(): Promise<AddressType> {
   return AddressType.LegacyMvc;
-}
-
-// ---- private key / address ----
-
-function buildMvcPrivateKey(mnemonic: string, path: string): {
-  privateKey: unknown;
-  address: string;
-} {
-  const network = mvc.Networks.livenet;
-  const addressIndex = parseAddressIndexFromPath(path);
-  const mnemonicObject = mvc.Mnemonic.fromString(mnemonic);
-  const hdPrivateKey = mnemonicObject.toHDPrivateKey('', network as never);
-  const childPrivateKey = hdPrivateKey.deriveChild(`m/44'/10001'/0'/0/${addressIndex}`);
-  const address = childPrivateKey.publicKey.toAddress(network as never).toString();
-  return { privateKey: childPrivateKey.privateKey, address };
 }
 
 // ---- UTXO selection ----
@@ -122,36 +81,6 @@ function pickUtxos(
     if (current >= requiredAmount) return picked;
   }
   throw new Error('MetaBot balance is insufficient for this chain write.');
-}
-
-// ---- OP_RETURN ----
-
-function buildOpReturnParts(input: ChainInscriptionInput['request']): Array<string | Buffer> {
-  const parts: Array<string | Buffer> = ['metaid', input.operation];
-  if (input.operation !== 'init') {
-    parts.push(input.path.toLowerCase());
-    parts.push(input.encryption);
-    parts.push(input.version);
-    parts.push(input.contentType);
-    parts.push(chainWritePayloadToBuffer(input));
-  }
-  return parts;
-}
-
-function getOpReturnScriptSize(parts: Array<string | Buffer>): number {
-  let size = 1;
-  for (const part of parts) {
-    const length = Buffer.isBuffer(part) ? part.length : Buffer.byteLength(part, 'utf8');
-    if (length < 76) size += 1 + length;
-    else if (length <= 0xff) size += 2 + length;
-    else if (length <= 0xffff) size += 3 + length;
-    else size += 5 + length;
-  }
-  return size;
-}
-
-function getEstimatedBaseTxSize(opReturnScriptSize: number): number {
-  return 4 + 1 + 1 + 43 + (9 + opReturnScriptSize) + 4;
 }
 
 // ---- MvcChainAdapter ----
@@ -289,7 +218,10 @@ export const mvcChainAdapter: ChainAdapter = {
   async buildTransfer(input: ChainTransferInput): Promise<ChainTransferResult> {
     const feeRate = Number.isFinite(input.feeRate) && Number(input.feeRate) > 0
       ? input.feeRate! : DEFAULT_MVC_FEE_RATE;
-    const { privateKey, address } = buildMvcPrivateKey(input.mnemonic, input.path);
+    const { privateKey, address } = buildMvcSigningIdentity({
+      mnemonic: input.mnemonic,
+      path: input.path,
+    });
 
     const rawUtxos = await this.fetchUtxos(address);
     const utxos = resolveSpendableMvcUtxos({ address, utxos: rawUtxos });
@@ -322,10 +254,10 @@ export const mvcChainAdapter: ChainAdapter = {
     deferredTrackers.set(rawTx, {
       address,
       spentUtxos: picked,
-      createdUtxosFactory: (txid: string) => extractOwnedOutputs({
-        txid,
+      createdUtxosFactory: (txid: string) => extractOwnedOutputsFromPreparedMvcTx({
+        txHex: rawTx,
+        txId: txid,
         address,
-        outputs: txComposer.tx.outputs,
       }),
     });
 
@@ -336,52 +268,35 @@ export const mvcChainAdapter: ChainAdapter = {
   },
 
   async buildInscription(input: ChainInscriptionInput): Promise<ChainInscriptionResult> {
-    const { privateKey, address } = buildMvcPrivateKey(input.identity.mnemonic, input.identity.path);
-
-    const rawUtxos = await this.fetchUtxos(address);
-    const usableUtxos = resolveSpendableMvcUtxos({ address, utxos: rawUtxos });
-
-    const addressObject = new mvc.Address(address, mvc.Networks.livenet as never);
-    const opReturnParts = buildOpReturnParts(input.request);
-    const opReturnScriptSize = getOpReturnScriptSize(opReturnParts);
-    const baseTxSize = getEstimatedBaseTxSize(opReturnScriptSize);
-
-    const txComposer = new TxComposer();
-    txComposer.appendP2PKHOutput({ address: addressObject, satoshis: 1 });
-    txComposer.appendOpReturnOutput(opReturnParts);
-
-    const totalOutput = txComposer.tx.outputs.reduce((sum, output) => sum + output.satoshis, 0);
-    const pickedUtxos = pickUtxos(usableUtxos, totalOutput, 1, baseTxSize);
-
-    for (const utxo of pickedUtxos) {
-      txComposer.appendP2PKHInput({
-        address: addressObject,
-        txId: utxo.txId,
-        outputIndex: utxo.outputIndex,
-        satoshis: utxo.satoshis,
-      });
-    }
-    txComposer.appendChangeOutput(addressObject, 1);
-
-    for (let inputIndex = 0; inputIndex < txComposer.tx.inputs.length; inputIndex += 1) {
-      txComposer.unlockP2PKHInput(privateKey as never, inputIndex);
-    }
-
-    const rawTx = txComposer.getRawHex();
+    const address = await this.deriveAddress(input.identity.mnemonic, input.identity.path);
+    const draft = await buildMvcFileInscriptionDraft({
+      identity: input.identity,
+      request: input.request,
+      utxos: await this.fetchUtxos(address),
+      feeRate: 1,
+    });
+    const userInputIndexes = Array.from({ length: draft.userInputCount }, (_, index) => index);
+    const { txHex: rawTx } = await signMvcPreparedUserInputs({
+      identity: input.identity,
+      preparedTxHex: draft.unsignedTxHex,
+      userInputs: draft.userInputs,
+      userInputIndexes,
+    });
 
     // Defer pending UTXO tracking until broadcast
     deferredTrackers.set(rawTx, {
       address,
-      spentUtxos: pickedUtxos,
-      createdUtxosFactory: (txid: string) => extractOwnedOutputs({
-        txid,
+      spentUtxos: draft.selectedUtxos,
+      createdUtxosFactory: (txid: string) => extractOwnedOutputsFromPreparedMvcTx({
+        txHex: rawTx,
+        txId: txid,
         address,
-        outputs: txComposer.tx.outputs,
       }),
     });
 
-    const inputTotal = txComposer.tx.inputs.reduce((sum, current) => sum + (current.output?.satoshis || 0), 0);
-    const outputTotal = txComposer.tx.outputs.reduce((sum, output) => sum + output.satoshis, 0);
+    const tx = new mvc.Transaction(rawTx);
+    const inputTotal = draft.userInputs.reduce((sum, utxo) => sum + utxo.satoshis, 0);
+    const outputTotal = tx.outputs.reduce((sum, output) => sum + output.satoshis, 0);
 
     return {
       signedRawTxs: [rawTx],

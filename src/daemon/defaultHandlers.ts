@@ -188,7 +188,11 @@ import {
   queryWalletBalances,
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
-import { uploadLargeFileToChain, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
+import {
+  uploadLargeFileToChain,
+  type MvcSponsorV2DirectUploadClient,
+  type ProductionLargeFileUploader,
+} from '../core/files/uploadLargeFile';
 import { createMetaFsLargeUploader } from '../core/files/metaFsLargeUploader';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
@@ -321,6 +325,7 @@ import { btcChainAdapter } from '../core/chain/adapters/btc';
 import { dogeChainAdapter } from '../core/chain/adapters/doge';
 import { opcatChainAdapter } from '../core/chain/adapters/opcat';
 import { createConfigStore } from '../core/config/configStore';
+import { createMvcSponsorV2Client } from '../core/subsidy/mvcSponsorV2Client';
 import type { BrowserContextResult } from '@openagentinternet/agent-browser-core';
 import { createOacBrowserHostAdapter } from './browser/oacBrowserHostAdapter';
 import {
@@ -386,7 +391,25 @@ function readErrorCode(error: unknown, fallback: string): string {
 
 function readKnownLargeFileUploadErrorCode(error: unknown): string {
   const code = readErrorCode(error, '');
-  return KNOWN_LARGE_FILE_UPLOAD_ERROR_CODES.has(code) ? code : '';
+  return KNOWN_LARGE_FILE_UPLOAD_ERROR_CODES.has(code) || code.startsWith('mvc_fee_assist_') ? code : '';
+}
+
+function readLargeFileUploadFailureData(error: unknown): Record<string, unknown> | undefined {
+  const data = (error as { data?: unknown } | undefined)?.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return undefined;
+  }
+  const feeAssist = (data as Record<string, unknown>).feeAssist;
+  if (!feeAssist || typeof feeAssist !== 'object' || Array.isArray(feeAssist)) {
+    return undefined;
+  }
+  return {
+    feeAssist: feeAssist as Record<string, unknown>,
+  };
+}
+
+function readLargeFileUploadFailureFeeAssist(error: unknown): Record<string, unknown> | undefined {
+  return readLargeFileUploadFailureData(error)?.feeAssist as Record<string, unknown> | undefined;
 }
 
 function readErrorMessage(error: unknown, code: string, fallback: string): string {
@@ -4568,9 +4591,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
   callerOrderTextGenerator?: CallerOrderProtocolTextGenerator;
   providerOrderReplyRunner?: ChatReplyRunner;
   providerOrderTextGenerator?: ProviderOrderProtocolTextGenerator;
+  uploadLargeFile?: typeof uploadLargeFileToChain;
   providerArtifactUploadLargeFile?: typeof uploadLargeFileToChain;
   providerLargeFileUploader?: ProductionLargeFileUploader | null;
   createProviderLargeFileUploader?: () => ProductionLargeFileUploader;
+  createMvcSponsorClient?: () => MvcSponsorV2DirectUploadClient;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   onIdentityProfileRegistered?: () => Promise<void> | void;
   requestMvcGasSubsidy?: (
@@ -4596,6 +4621,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     secretStore,
     adapters,
   });
+  const uploadLargeFile = input.uploadLargeFile ?? uploadLargeFileToChain;
   const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFileToChain;
   const providerLargeFileUploader = input.providerLargeFileUploader === null
     ? undefined
@@ -4635,6 +4661,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
     return network;
   }
+  async function resolveMvcSponsorUploadClientForHome(
+    homeDir: string,
+    network: Exclude<DefaultWriteNetwork, 'doge'>,
+  ): Promise<MvcSponsorV2DirectUploadClient | undefined> {
+    if (network !== 'mvc') {
+      return undefined;
+    }
+    const config = await createConfigStore(homeDir).read();
+    if (config.chain.mvcSponsorUploadEnabled !== true) {
+      return undefined;
+    }
+    return (input.createMvcSponsorClient ?? createMvcSponsorV2Client)();
+  }
   async function updateConfigDefaultWriteNetwork(
     targetConfigStore: ReturnType<typeof createConfigStore>,
     rawInput: Record<string, unknown>,
@@ -4642,11 +4681,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const chainInput = rawInput.chain && typeof rawInput.chain === 'object' && !Array.isArray(rawInput.chain)
       ? rawInput.chain as Record<string, unknown>
       : {};
+    const hasDefaultWriteNetwork = chainInput.defaultWriteNetwork !== undefined;
     const defaultWriteNetwork = normalizeText(chainInput.defaultWriteNetwork).toLowerCase();
-    if (!isSupportedWriteNetwork(defaultWriteNetwork)) {
+    if (hasDefaultWriteNetwork && !isSupportedWriteNetwork(defaultWriteNetwork)) {
       return commandFailed(
         'invalid_argument',
         `chain.defaultWriteNetwork must be one of ${DEFAULT_WRITE_NETWORKS.join(', ')}.`,
+      );
+    }
+    if (
+      chainInput.mvcSponsorUploadEnabled !== undefined
+      && typeof chainInput.mvcSponsorUploadEnabled !== 'boolean'
+    ) {
+      return commandFailed(
+        'invalid_argument',
+        'chain.mvcSponsorUploadEnabled must be a boolean.',
       );
     }
     const current = await targetConfigStore.read();
@@ -4654,7 +4703,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ...current,
       chain: {
         ...current.chain,
-        defaultWriteNetwork,
+        defaultWriteNetwork: hasDefaultWriteNetwork
+          ? defaultWriteNetwork as DefaultWriteNetwork
+          : current.chain.defaultWriteNetwork,
+        mvcSponsorUploadEnabled: chainInput.mvcSponsorUploadEnabled === undefined
+          ? current.chain.mvcSponsorUploadEnabled
+          : chainInput.mvcSponsorUploadEnabled === true,
       },
     };
     await targetConfigStore.set(next);
@@ -8165,6 +8219,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     userTask: string;
     failureText: string;
     failureCode?: string | null;
+    feeAssist?: Record<string, unknown> | null;
     providerRuntime?: SessionTraceProviderRuntimeInput | null;
   }): Promise<void> {
     const trace = buildSessionTrace({
@@ -8242,6 +8297,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             metadata: {
               failed: true,
               refundRequired: Boolean(inputFailure.paymentTxid),
+              ...(inputFailure.feeAssist ? { feeAssist: inputFailure.feeAssist } : {}),
             },
           },
         ],
@@ -9283,6 +9339,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           signer,
           uploadLargeFile: providerArtifactUploadLargeFile,
           largeUploader: providerLargeFileUploader,
+          mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(
+            runtimeStateStore.paths.profileRoot,
+            artifactNetwork,
+          ),
         });
         responseText = normalizeText(resolvedDelivery.responseText);
         deliveryArtifacts = resolvedDelivery.artifacts;
@@ -9293,6 +9353,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           failureCode,
           'Provider artifact delivery preparation failed.',
         );
+        const data = readLargeFileUploadFailureData(error);
+        const feeAssist = readLargeFileUploadFailureFeeAssist(error);
         const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
         const failedApplied = sessionEngine.applyProviderRunnerResult({
           session: received.session,
@@ -9328,6 +9390,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               orderTxid,
               paymentTxid: paymentTxid || null,
               refundRequired: !serviceIsFree,
+              ...(feeAssist ? { feeAssist } : {}),
             },
           },
           {
@@ -9409,9 +9472,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           userTask,
           failureText,
           failureCode,
+          feeAssist,
           providerRuntime: providerRuntimeDiagnostics,
         });
-        return commandFailed(failureCode, failureText);
+        return commandFailed(failureCode, failureText, data ? { data } : undefined);
       }
     }
     const deliveryMessage = buildDeliveryMessage({
@@ -11109,12 +11173,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
             {
               uploadFile: async (uploadInput) => {
                 const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
-                const uploaded = await uploadLargeFileToChain({
+                const uploaded = await uploadLargeFile({
                   filePath: uploadInput.filePath,
                   contentType: uploadInput.contentType,
                   network,
                   signer: actor.signer,
                   largeUploader: providerLargeFileUploader,
+                  mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(actor.homeDir, network),
                 });
                 return uploaded as unknown as UploadLikeResult;
               },
@@ -11157,9 +11222,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           return result;
         } catch (error) {
+          const data = readLargeFileUploadFailureData(error);
           return commandFailed(
             'metaapp_publish_failed',
             error instanceof Error ? error.message : String(error),
+            data ? { data } : undefined,
           );
         }
       },
@@ -11186,12 +11253,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
             {
               uploadFile: async (uploadInput) => {
                 const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
-                const uploaded = await uploadLargeFileToChain({
+                const uploaded = await uploadLargeFile({
                   filePath: uploadInput.filePath,
                   contentType: uploadInput.contentType,
                   network,
                   signer: actor.signer,
                   largeUploader: providerLargeFileUploader,
+                  mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(actor.homeDir, network),
                 });
                 return uploaded as unknown as UploadLikeResult;
               },
@@ -11234,9 +11302,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           }
           return result;
         } catch (error) {
+          const data = readLargeFileUploadFailureData(error);
           return commandFailed(
             'metaapp_update_failed',
             error instanceof Error ? error.message : String(error),
+            data ? { data } : undefined,
           );
         }
       },
@@ -13568,6 +13638,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
               signer,
               uploadLargeFile: providerArtifactUploadLargeFile,
               largeUploader: providerLargeFileUploader,
+              mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(
+                runtimeStateStore.paths.profileRoot,
+                artifactNetwork,
+              ),
             });
             responseText = normalizeText(resolvedDelivery.responseText);
             deliveryArtifacts = resolvedDelivery.artifacts;
@@ -13579,6 +13653,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
               'Provider artifact delivery preparation failed.',
               [providerExecutionCwd],
             );
+            const data = readLargeFileUploadFailureData(error);
+            const feeAssist = readLargeFileUploadFailureFeeAssist(error);
             const artifactFailureResult = createServiceRunnerFailedResult(failureCode, failureText);
             const failedApplied = sessionEngine.applyProviderRunnerResult({
               session: received.session,
@@ -13601,6 +13677,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                   runnerState: 'failed',
                   paymentTxid: execution.payment.paymentTxid,
                   orderReference: execution.payment.orderReference,
+                  ...(feeAssist ? { feeAssist } : {}),
                 },
               },
             ]);
@@ -13678,6 +13755,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                       providerSessionId: failedApplied.session.sessionId,
                       providerTaskRunId: failedApplied.taskRun.runId,
                       providerEvent: failedApplied.event,
+                      ...(feeAssist ? { feeAssist } : {}),
                     },
                   },
                 ],
@@ -13724,7 +13802,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ],
               sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
             }));
-            return commandFailed(failureCode, failureText);
+            return commandFailed(failureCode, failureText, data ? { data } : undefined);
           }
         }
         const providerMessage = responseText;
@@ -14329,22 +14407,24 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
-          const result = await uploadLargeFileToChain({
+          const result = await uploadLargeFile({
             filePath: normalizeText(rawInput.filePath),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
             network,
             signer: actor.signer,
             largeUploader: providerLargeFileUploader,
             verify: rawInput.verify === true,
+            mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(actor.homeDir, network),
           });
           return commandSuccess(result);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const code = readKnownLargeFileUploadErrorCode(error);
+          const data = readLargeFileUploadFailureData(error);
           if (code) {
-            return commandFailed(code, message);
+            return commandFailed(code, message, data ? { data } : undefined);
           }
-          return commandFailed('file_upload_failed', message);
+          return commandFailed('file_upload_failed', message, data ? { data } : undefined);
         }
       },
     },
@@ -15124,24 +15204,27 @@ export function createDefaultMetabotDaemonHandlers(input: {
         try {
           const network = await resolveFileUploadNetworkForHome(body.network, current.homeDir);
           const profileSigner = createSignerForProfileHome(current.homeDir);
-          const result = await uploadLargeFileToChain({
+          const result = await uploadLargeFile({
             filePath: normalizeText(body.filePath),
             contentType: typeof body.contentType === 'string' ? body.contentType : undefined,
             network,
             signer: profileSigner,
             largeUploader: providerLargeFileUploader,
             verify: body.verify === true,
+            mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(current.homeDir, network),
           });
           return commandSuccess(result);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const code = readKnownLargeFileUploadErrorCode(error);
+          const data = readLargeFileUploadFailureData(error);
           if (code) {
-            return commandFailed(code, message);
+            return commandFailed(code, message, data ? { data } : undefined);
           }
           return commandFailed(
             'homepage_upload_failed',
-            message
+            message,
+            data ? { data } : undefined,
           );
         }
       },

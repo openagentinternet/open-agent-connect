@@ -1,7 +1,8 @@
 import { TxComposer, mvc } from 'meta-contract';
-import { parseAddressIndexFromPath, type DerivedIdentity } from '../identity/deriveIdentity';
+import type { DerivedIdentity } from '../identity/deriveIdentity';
 import type { ChainUtxo } from './adapters/types';
 import { getMvcUtxoOutpointKey } from './mvcPendingUtxos';
+import { buildMvcSigningIdentity } from './mvcSigningIdentity';
 
 const NET = 'livenet';
 const P2PKH_INPUT_SIZE = 148;
@@ -38,21 +39,6 @@ function readPositiveInteger(name: string, value: unknown): number {
     throw new Error(`${name} must be a positive integer.`);
   }
   return numeric;
-}
-
-function buildMvcSigningIdentity(mnemonic: string, path: string): {
-  privateKey: unknown;
-  address: string;
-} {
-  const network = mvc.Networks.livenet;
-  const addressIndex = parseAddressIndexFromPath(path);
-  const mnemonicObject = mvc.Mnemonic.fromString(mnemonic);
-  const hdPrivateKey = mnemonicObject.toHDPrivateKey('', network as never);
-  const childPrivateKey = hdPrivateKey.deriveChild(`m/44'/10001'/0'/0/${addressIndex}`);
-  return {
-    privateKey: childPrivateKey.privateKey,
-    address: childPrivateKey.publicKey.toAddress(network as never).toString(),
-  };
 }
 
 function isUsableFundingUtxo(utxo: ChainUtxo, fundingAddress: string): boolean {
@@ -148,7 +134,10 @@ export async function buildMvcLargeUploadFunding(input: {
   const feeRate = readPositiveNumber('feeRate', input.feeRate);
   const chunkPreTxFee = readPositiveInteger('chunkPreTxFee', input.chunkPreTxFee);
   const indexPreTxFee = readPositiveInteger('indexPreTxFee', input.indexPreTxFee);
-  const signingIdentity = buildMvcSigningIdentity(input.identity.mnemonic, input.identity.path);
+  const signingIdentity = buildMvcSigningIdentity({
+    mnemonic: input.identity.mnemonic,
+    path: input.identity.path,
+  });
   const derivedAddress = normalizeText(signingIdentity.address);
   if (!derivedAddress) {
     throw new Error('MVC funding address is required for large upload funding.');

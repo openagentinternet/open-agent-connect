@@ -1573,6 +1573,7 @@ test('local file upload uses an injected uploader with verify true', async () =>
   const workspace = await tempWorkspace();
   await writeWorkspaceFile(workspace, 'out/chart.png');
   const uploadCalls = [];
+  const mvcSponsorClient = { sponsor: 'test-client' };
 
   await resolveProviderDeliveryArtifacts({
     responseText: 'filePath: ./out/chart.png',
@@ -1587,6 +1588,7 @@ test('local file upload uses an injected uploader with verify true', async () =>
       },
     },
     verifyAvailability: okVerifier(),
+    mvcSponsorClient,
   });
 
   assert.equal(uploadCalls.length, 1);
@@ -1595,6 +1597,7 @@ test('local file upload uses an injected uploader with verify true', async () =>
   assert.equal(typeof uploadCalls[0].signer.writePin, 'function');
   assert.equal(typeof uploadCalls[0].verifyAvailability, 'function');
   assert.equal(typeof uploadCalls[0].largeUploader.upload, 'function');
+  assert.equal(uploadCalls[0].mvcSponsorClient, mvcSponsorClient);
 });
 
 test('local file upload snapshots artifact before uploader can follow a swapped symlink', async () => {
@@ -1819,6 +1822,50 @@ test('uploader failure message scrubs execution workspace descendant paths', asy
   assert.equal(error.message.includes(workspace), false);
   assert.equal(error.message.includes(debugPath), false);
   assert.equal(error.message.includes('logs/debug.log'), false);
+});
+
+test('uploader failure preserves structured feeAssist data on provider artifact errors', async () => {
+  const workspace = await tempWorkspace();
+  await writeWorkspaceFile(workspace, 'out/chart.png');
+
+  const error = await captureRejectCode(
+    resolveProviderDeliveryArtifacts({
+      responseText: 'filePath: ./out/chart.png',
+      outputType: 'image',
+      executionCwd: workspace,
+      signer: fakeSigner(),
+      uploadLargeFile: async () => {
+        const uploadError = new Error('sponsor commit rejected');
+        uploadError.code = 'mvc_fee_assist_commit_failed';
+        uploadError.data = {
+          feeAssist: {
+            attempted: true,
+            used: false,
+            mode: 'mvc_sponsor_v2',
+            sponsor: 'mvc_sponsor_v2',
+            stage: 'commit',
+            reason: 'commit_failed',
+            orderId: 'order-1',
+          },
+        };
+        throw uploadError;
+      },
+      verifyAvailability: okVerifier(),
+    }),
+    'provider_artifact_upload_failed',
+  );
+
+  assert.deepEqual(error.data, {
+    feeAssist: {
+      attempted: true,
+      used: false,
+      mode: 'mvc_sponsor_v2',
+      sponsor: 'mvc_sponsor_v2',
+      stage: 'commit',
+      reason: 'commit_failed',
+      orderId: 'order-1',
+    },
+  });
 });
 
 test('files above 50 MiB fail before upload', async () => {

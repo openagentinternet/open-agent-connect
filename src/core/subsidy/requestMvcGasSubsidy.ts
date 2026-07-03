@@ -1,11 +1,6 @@
 import '../compat/nodeLocalStorage';
-import {
-  AddressType,
-  BtcWallet,
-  CoinType,
-  type Net,
-} from '@metalet/utxo-wallet-service';
-import { DEFAULT_DERIVATION_PATH, parseAddressIndexFromPath } from '../identity/deriveIdentity';
+import { DEFAULT_DERIVATION_PATH } from '../identity/deriveIdentity';
+import { signMvcAddressMessage } from './mvcMessageSigning';
 
 const DEFAULT_ADDRESS_INIT_URL = 'https://www.metaso.network/assist-open-api/v1/assist/gas/mvc/address-init';
 const DEFAULT_ADDRESS_REWARD_URL = 'https://www.metaso.network/assist-open-api/v1/assist/gas/mvc/address-reward';
@@ -31,27 +26,6 @@ export interface RequestMvcGasSubsidyDependencies {
   fetchImpl?: typeof fetch;
   wait?: (ms: number) => Promise<void>;
   waitMs?: number;
-}
-
-function getNet(): Net {
-  return 'livenet' as Net;
-}
-
-async function getCredential(
-  mnemonic: string,
-  path: string
-): Promise<{ signature: string; publicKey: string }> {
-  const addressIndex = parseAddressIndexFromPath(path);
-  const wallet = new BtcWallet({
-    coinType: CoinType.MVC,
-    addressType: AddressType.SameAsMvc,
-    addressIndex,
-    network: getNet(),
-    mnemonic,
-  });
-  const signature = wallet.signMessage(CREDENTIAL_MESSAGE, 'base64');
-  const publicKey = wallet.getPublicKey().toString('hex');
-  return { signature, publicKey };
 }
 
 export async function requestMvcGasSubsidy(
@@ -109,7 +83,11 @@ export async function requestMvcGasSubsidy(
     }
 
     await wait(waitMs);
-    const { signature, publicKey } = await getCredential(mnemonic, derivationPath);
+    const { signature, publicKey } = await signMvcAddressMessage({
+      mnemonic,
+      path: derivationPath,
+      message: CREDENTIAL_MESSAGE,
+    });
     const step2Response = await fetchImpl(addressRewardUrl, {
       method: 'POST',
       headers: {

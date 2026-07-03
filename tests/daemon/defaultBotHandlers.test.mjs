@@ -73,11 +73,45 @@ function makeLargeUploadResult(input, overrides = {}) {
   };
 }
 
+function makeDirectUploadResult(input, overrides = {}) {
+  const pinId = overrides.pinId ?? 'direct-file-pin-1';
+  const fileName = overrides.fileName ?? path.basename(input.filePath);
+  const extension = overrides.extension ?? path.extname(fileName).toLowerCase();
+  return {
+    pinId,
+    txids: overrides.txids ?? ['direct-file-tx-1'],
+    totalCost: overrides.totalCost ?? 7,
+    network: input.network,
+    filePath: input.filePath,
+    fileName,
+    contentType: input.contentType,
+    bytes: overrides.bytes ?? 128,
+    extension,
+    metafileUri: overrides.metafileUri ?? `metafile://${pinId}${extension}`,
+    previewUrl: 'https://example.invalid/direct-preview',
+    downloadUrl: 'https://example.invalid/direct-download',
+    globalMetaId: overrides.globalMetaId ?? 'gm-direct-upload-bot',
+    uploadMode: 'direct',
+    ...(overrides.feeAssist ? { feeAssist: overrides.feeAssist } : {}),
+  };
+}
+
 function makeThrowingLargeUploader(code, message = `${code} detail`) {
   return {
     upload: async () => {
       const error = new Error(message);
       error.code = code;
+      throw error;
+    },
+  };
+}
+
+function makeThrowingLargeUploaderWithData(code, message, data) {
+  return {
+    upload: async () => {
+      const error = new Error(message);
+      error.code = code;
+      error.data = data;
       throw error;
     },
   };
@@ -254,7 +288,7 @@ test('default bot handlers create, list, and fetch MetaBot profiles', async (t) 
   assert.equal(fetched.data.profile.bio, 'Builds small tools on the Agent Internet.');
 });
 
-test('default bot config handlers persist default write network per MetaBot profile', async (t) => {
+test('default bot config handlers persist chain config per MetaBot profile', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -273,6 +307,7 @@ test('default bot config handlers persist default write network per MetaBot prof
     slug: alice.slug,
     chain: {
       defaultWriteNetwork: 'opcat',
+      mvcSponsorUploadEnabled: false,
     },
   });
   const aliceConfig = await handlers.bot.getConfig({ slug: alice.slug });
@@ -282,9 +317,42 @@ test('default bot config handlers persist default write network per MetaBot prof
 
   assert.equal(setAlice.ok, true);
   assert.equal(aliceConfig.data.chain.defaultWriteNetwork, 'opcat');
+  assert.equal(aliceConfig.data.chain.mvcSponsorUploadEnabled, false);
   assert.equal(ericConfig.data.chain.defaultWriteNetwork, 'mvc');
+  assert.equal(ericConfig.data.chain.mvcSponsorUploadEnabled, true);
   assert.equal(aliceConfigOnDisk.chain.defaultWriteNetwork, 'opcat');
+  assert.equal(aliceConfigOnDisk.chain.mvcSponsorUploadEnabled, false);
   assert.equal(ericConfigOnDisk.chain.defaultWriteNetwork, 'mvc');
+  assert.equal(ericConfigOnDisk.chain.mvcSponsorUploadEnabled, true);
+});
+
+test('default bot config handlers reject non-boolean mvc sponsor upload flags', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-config-invalid-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const alice = await createMetabotProfile(systemHomeDir, { name: 'Alice Bot' });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const before = await createConfigStore(alice.homeDir).read();
+  const result = await handlers.bot.setConfig({
+    slug: alice.slug,
+    chain: {
+      mvcSponsorUploadEnabled: 'false',
+    },
+  });
+  const after = await createConfigStore(alice.homeDir).read();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_argument');
+  assert.match(result.message, /chain\.mvcSponsorUploadEnabled must be a boolean/i);
+  assert.deepEqual(after, before);
 });
 
 test('default bot getWallet queries balances with displayed wallet addresses', async (t) => {
@@ -496,6 +564,150 @@ test('default file.uploadLarge preserves unavailable uploader failure code', asy
   assert.equal(result.ok, false);
   assert.equal(result.code, 'large_file_upload_unavailable');
   assert.match(result.message, /temporarily unavailable/);
+});
+
+test('default file.uploadLarge returns sponsor feeAssist metadata on direct MVC success when enabled', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-large-upload-sponsor-enabled-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const filePath = path.join(homeDir, 'small-upload.txt');
+  await writeFile(filePath, 'small direct upload', 'utf8');
+  await writeRuntimeIdentity(homeDir, 'Sponsor Upload Bot');
+
+  const uploadCalls = [];
+  let sponsorFactoryCalls = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    uploadLargeFile: async (input) => {
+      uploadCalls.push(input);
+      return makeDirectUploadResult(input, {
+        feeAssist: {
+          attempted: true,
+          used: true,
+          mode: 'mvc_sponsor_v2',
+          sponsor: 'mvc_sponsor_v2',
+          stage: 'done',
+        },
+      });
+    },
+    createMvcSponsorClient: () => {
+      sponsorFactoryCalls += 1;
+      return {};
+    },
+  });
+
+  const result = await handlers.file.uploadLarge({
+    filePath,
+    contentType: 'text/plain',
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.uploadMode, 'direct');
+  assert.equal(result.data.feeAssist.used, true);
+  assert.equal(result.data.feeAssist.mode, 'mvc_sponsor_v2');
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(Boolean(uploadCalls[0].mvcSponsorClient), true);
+  assert.equal(sponsorFactoryCalls, 1);
+});
+
+test('default file.uploadLarge bypasses sponsor entirely when chain.mvcSponsorUploadEnabled is false', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-large-upload-sponsor-disabled-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const filePath = path.join(homeDir, 'small-upload.txt');
+  await writeFile(filePath, 'small direct upload', 'utf8');
+  await writeRuntimeIdentity(homeDir, 'Self Paid Upload Bot');
+  const configStore = createConfigStore(homeDir);
+  const currentConfig = await configStore.read();
+  await configStore.set({
+    ...currentConfig,
+    chain: {
+      ...currentConfig.chain,
+      mvcSponsorUploadEnabled: false,
+    },
+  });
+
+  const uploadCalls = [];
+  let sponsorFactoryCalls = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    uploadLargeFile: async (input) => {
+      uploadCalls.push(input);
+      return makeDirectUploadResult(input);
+    },
+    createMvcSponsorClient: () => {
+      sponsorFactoryCalls += 1;
+      return {};
+    },
+  });
+
+  const result = await handlers.file.uploadLarge({
+    filePath,
+    contentType: 'text/plain',
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.uploadMode, 'direct');
+  assert.equal('feeAssist' in result.data, false);
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].mvcSponsorClient, undefined);
+  assert.equal(sponsorFactoryCalls, 0);
+});
+
+test('default file.uploadLarge preserves sponsor feeAssist data on commit failure', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-large-upload-sponsor-failure-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const filePath = path.join(homeDir, 'small-upload.txt');
+  await writeFile(filePath, 'small direct upload', 'utf8');
+  await writeRuntimeIdentity(homeDir, 'Failed Sponsor Upload Bot');
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    uploadLargeFile: async () => {
+      const error = new Error('sponsor commit rejected');
+      error.code = 'mvc_fee_assist_commit_failed';
+      error.data = {
+        feeAssist: {
+          attempted: true,
+          used: false,
+          mode: 'mvc_sponsor_v2',
+          sponsor: 'mvc_sponsor_v2',
+          reason: 'commit_failed',
+          stage: 'commit',
+          orderId: 'order-1',
+        },
+      };
+      throw error;
+    },
+    createMvcSponsorClient: () => ({}),
+  });
+
+  const result = await handlers.file.uploadLarge({
+    filePath,
+    contentType: 'text/plain',
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'mvc_fee_assist_commit_failed');
+  assert.equal(result.data.feeAssist.orderId, 'order-1');
+  assert.equal(result.data.feeAssist.reason, 'commit_failed');
+  assert.equal(result.data.feeAssist.stage, 'commit');
 });
 
 test('default file.uploadLarge passes the injected production large uploader', async (t) => {
@@ -853,6 +1065,52 @@ test('default metaapp.update uploads large runtime archive through the large upl
   assert.equal(writeCalls[0].network, 'mvc');
   const payload = JSON.parse(writeCalls[0].payload);
   assert.equal(payload.content, 'metafile://chunked-metaapp-update-pin.zip');
+});
+
+test('default metaapp.publishProject preserves whitelisted feeAssist data on upload failure', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-metaapp-upload-failure-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'MetaApp Upload Failure Bot');
+  const projectDir = await writeLargeMetaAppProject(homeDir, 'publish-failure-app', {
+    title: 'Publish Failure App',
+  });
+  const feeAssist = {
+    attempted: true,
+    used: false,
+    mode: 'mvc_sponsor_v2',
+    stage: 'commit',
+    reason: 'commit_failed',
+  };
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async () => {
+      throw new Error('chain write should not run after upload failure');
+    }),
+    providerLargeFileUploader: makeThrowingLargeUploaderWithData(
+      'mvc_fee_assist_commit_failed',
+      'metaapp upload failed',
+      {
+        feeAssist,
+        ignored: 'do-not-leak',
+      },
+    ),
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.metaapp.publishProject({
+    projectDir,
+    confirm: true,
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'metaapp_upload_failed');
+  assert.deepEqual(result.data.feeAssist, feeAssist);
+  assert.equal('ignored' in result.data, false);
 });
 
 test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {
@@ -2552,6 +2810,60 @@ test('default bot uploadHomepageFile preserves known large uploader failure code
     assert.equal(result.code, code);
     assert.match(result.message, new RegExp(`${code} homepage mapped message`));
   }
+});
+
+test('default bot uploadHomepageFile preserves whitelisted feeAssist data on upload failure', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-homepage-fee-assist-failure-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage FeeAssist Failure Bot',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-homepage-fee-assist-failure-bot',
+    mvcAddress: 'addr-homepage-fee-assist-failure-bot',
+  });
+  const filePath = path.join(profile.homeDir, 'homepage-video.mp4');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  const feeAssist = {
+    attempted: true,
+    used: false,
+    mode: 'mvc_sponsor_v2',
+    stage: 'commit',
+    reason: 'commit_failed',
+  };
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async () => {
+      throw new Error('direct signer should not run after upload failure');
+    }),
+    providerLargeFileUploader: makeThrowingLargeUploaderWithData(
+      'mvc_fee_assist_commit_failed',
+      'homepage upload failed',
+      {
+        feeAssist,
+        ignored: 'do-not-leak',
+      },
+    ),
+  });
+
+  const result = await handlers.bot.uploadHomepageFile({
+    slug: profile.slug,
+    filePath,
+    contentType: 'video/mp4',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'mvc_fee_assist_commit_failed');
+  assert.deepEqual(result.data.feeAssist, feeAssist);
+  assert.equal('ignored' in result.data, false);
 });
 
 test('default bot updateProfile rejects invalid homepage input without calling signer', async (t) => {

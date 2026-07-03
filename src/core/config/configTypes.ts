@@ -15,6 +15,7 @@ const DEFAULT_BLOCK_EXPLORER_BASE_URL = 'https://www.mvcscan.com/tx';
 
 export interface ChainConfig {
   defaultWriteNetwork: DefaultWriteNetwork;
+  mvcSponsorUploadEnabled: boolean;
 }
 
 export interface BrowserConfig {
@@ -49,6 +50,7 @@ export function createDefaultConfig(): MetabotConfig {
   return {
     chain: {
       defaultWriteNetwork: 'mvc',
+      mvcSponsorUploadEnabled: true,
     },
     a2a: {
       simplemsgListenerEnabled: true,
