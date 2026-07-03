@@ -85,6 +85,31 @@ test('buildMvcFileInscriptionDraft preserves the current one-sat MVC direct uplo
   assert.equal(tx.inputs.length, 1);
 });
 
+test('buildMvcFileInscriptionDraft can preserve full user change for sponsor templates', async () => {
+  const draft = await buildMvcFileInscriptionDraft({
+    identity,
+    request: {
+      operation: 'create',
+      path: '/file',
+      payload: Buffer.from('hello'),
+      contentType: 'text/plain',
+      encoding: 'binary',
+      network: 'mvc',
+      encryption: '0',
+      version: '1.0',
+    },
+    utxos: [fixtureUtxo],
+    deductMinerFeeFromChange: false,
+  });
+
+  const tx = new mvc.Transaction(draft.unsignedTxHex);
+  const userOutputTotal = tx.outputs.reduce((sum, output) => sum + Number(output.satoshis || 0), 0);
+  assert.equal(tx.outputs[0].satoshis, 1);
+  assert.equal(tx.inputs.length, 1);
+  assert.equal(userOutputTotal, fixtureUtxo.satoshis);
+  assert.equal(tx.outputs[tx.outputs.length - 1].satoshis, fixtureUtxo.satoshis - 1);
+});
+
 test('signMvcPreparedUserInputs signs the prepared user-owned input when sponsor pre places it at a non-zero index', async () => {
   const signed = await signMvcPreparedUserInputs({
     identity,

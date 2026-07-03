@@ -81,8 +81,10 @@ export async function buildMvcFileInscriptionDraft(input: {
   request: NormalizedChainWriteRequest;
   utxos: ChainUtxo[];
   feeRate?: number;
+  deductMinerFeeFromChange?: boolean;
 }): Promise<MvcFileInscriptionDraft> {
   const feeRate = Number.isFinite(input.feeRate) && Number(input.feeRate) > 0 ? Number(input.feeRate) : 1;
+  const deductMinerFeeFromChange = input.deductMinerFeeFromChange !== false;
   const { privateKey, address } = buildMvcSigningIdentity(input.identity);
   const usableUtxos = resolveSpendableMvcUtxos({ address, utxos: input.utxos });
   const opReturnParts = buildOpReturnParts(input.request);
@@ -96,7 +98,7 @@ export async function buildMvcFileInscriptionDraft(input: {
   const picked = pickUtxos(
     usableUtxos,
     totalOutput,
-    feeRate,
+    deductMinerFeeFromChange ? feeRate : 0,
     getEstimatedBaseTxSize(getOpReturnScriptSize(opReturnParts)),
   );
   for (const utxo of picked) {
@@ -107,7 +109,14 @@ export async function buildMvcFileInscriptionDraft(input: {
       satoshis: utxo.satoshis,
     });
   }
-  txComposer.appendChangeOutput(addressObject, feeRate);
+  if (deductMinerFeeFromChange) {
+    txComposer.appendChangeOutput(addressObject, feeRate);
+  } else {
+    const changeAmount = picked.reduce((sum, utxo) => sum + utxo.satoshis, 0) - totalOutput;
+    if (changeAmount > 0) {
+      txComposer.appendP2PKHOutput({ address: addressObject, satoshis: changeAmount });
+    }
+  }
 
   return {
     address,

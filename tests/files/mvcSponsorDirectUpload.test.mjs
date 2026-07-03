@@ -204,6 +204,8 @@ test('uploadMvcSponsorDirectFile uses sponsor v2 when advisory quota is sufficie
     const prePayload = sponsorClient.calls.find(([name]) => name === 'preSponsor')[1];
     const commitPayload = sponsorClient.calls.find(([name]) => name === 'commitSponsor')[1];
     const signedHash = new mvc.Transaction(commitPayload.signedTxHex).id;
+    const preTx = new mvc.Transaction(prePayload.txHex);
+    const preTxOutputTotal = preTx.outputs.reduce((sum, output) => sum + Number(output.satoshis || 0), 0);
     assert.equal(commitPayload.message, `assist-sponsor-commit:order-1:${signedHash}`);
     assert.ok(commitPayload.signature);
     assert.equal(prePayload.address, FIXTURE_ADDRESS);
@@ -211,6 +213,10 @@ test('uploadMvcSponsorDirectFile uses sponsor v2 when advisory quota is sufficie
     assert.notEqual(prePayload.publicKey, identity.publicKey);
     assert.equal(commitPayload.publicKey, helperSignature.publicKey);
     assert.equal(typeof signedHash, 'string');
+    assert.equal(preTx.inputs.length, 1);
+    assert.equal(preTx.outputs[0].satoshis, 1);
+    assert.equal(preTxOutputTotal, fixtureUtxo.satoshis);
+    assert.equal(preTx.outputs[preTx.outputs.length - 1].satoshis, fixtureUtxo.satoshis - 1);
 
     const spendable = resolveSpendableMvcUtxos({
       address: FIXTURE_ADDRESS,
@@ -323,58 +329,47 @@ test('uploadMvcSponsorDirectFile does not self-pay when MVC UTXO fetch fails for
   }
 });
 
-test('uploadMvcSponsorDirectFile falls back on insufficient quota before pre and skips sponsor writes', async () => {
+test('uploadMvcSponsorDirectFile hard-fails when pre reports insufficient quota for sponsor pricing', async () => {
   const restore = patchMvcUtxos();
   try {
     const filePath = await tempFile('quota.txt', 'quota');
-    const writes = [];
     const sponsorClient = createSponsorClient({
-      addressInfo: {
-        exists: true,
-        balance: 0,
-        grantedAmount: 1,
-        reservedAmount: 0,
-        spentAmount: 0,
-        availableAmount: 1,
-        status: 'active',
-        raw: {},
+      methods: {
+        async preSponsor(payload) {
+          this.calls.push(['preSponsor', payload]);
+          throw sponsorError('pre quota exhausted', {
+            code: 'mvc_fee_assist_pre_failed',
+            stage: 'pre',
+            reason: 'insufficient_quota',
+          });
+        },
       },
     });
 
-    const result = await uploadMvcSponsorDirectFile({
-      filePath,
-      fileName: 'quota.txt',
-      contentType: 'text/plain',
-      bytes: Buffer.byteLength('quota'),
-      extension: '.txt',
-      network: 'mvc',
-      signer: fakeSigner({
-        writePin: async (input) => {
-          writes.push(input);
-          return {
-            pinId: 'quota-self-paid-pin',
-            txids: ['quota-self-paid-tx'],
-            totalCost: 22,
-            network: input.network,
-            operation: 'create',
-            path: input.path,
-            contentType: input.contentType,
-            encoding: input.encoding,
-            globalMetaId: FIXTURE_GLOBAL_METAID,
-            mvcAddress: FIXTURE_ADDRESS,
-          };
-        },
+    await assert.rejects(
+      () => uploadMvcSponsorDirectFile({
+        filePath,
+        fileName: 'quota.txt',
+        contentType: 'text/plain',
+        bytes: Buffer.byteLength('quota'),
+        extension: '.txt',
+        network: 'mvc',
+        signer: fakeSigner({
+          writePin: async () => {
+            throw new Error('self-paid writePin should not be called');
+          },
+        }),
+        mvcSponsorClient: sponsorClient,
       }),
-      mvcSponsorClient: sponsorClient,
-    });
-
-    assert.equal(writes.length, 1);
-    assert.equal(result.feeAssist.mode, 'self_paid');
-    assert.equal(result.feeAssist.sponsor, 'mvc_sponsor_v2');
-    assert.equal(result.feeAssist.reason, 'insufficient_quota');
-    assert.equal(result.feeAssist.stage, 'address_info');
-    assert.equal(typeof result.feeAssist.advisoryFeeEstimate, 'number');
-    assert.deepEqual(sponsorClient.calls.map(([name]) => name), ['getAddressInfo']);
+      (error) => {
+        assert.equal(error.data.feeAssist.reason, 'insufficient_quota');
+        assert.equal(error.data.feeAssist.stage, 'pre');
+        assert.equal(error.data.feeAssist.used, false);
+        assert.equal(error.data.feeAssist.sponsor, 'mvc_sponsor_v2');
+        return true;
+      },
+    );
+    assert.deepEqual(sponsorClient.calls.map(([name]) => name), ['getAddressInfo', 'getChallenge', 'preSponsor']);
   } finally {
     restore();
   }

@@ -229,6 +229,7 @@ export async function uploadMvcSponsorDirectFile(input: {
       request,
       utxos,
       feeRate: 1,
+      deductMinerFeeFromChange: false,
     });
     estimatedMinerFee = estimateDraftMinerFee({
       unsignedTxHex: draft.unsignedTxHex,
@@ -256,7 +257,7 @@ export async function uploadMvcSponsorDirectFile(input: {
     });
   }
 
-  if (quotaBefore.availableAmount < estimatedMinerFee) {
+  if (estimatedMinerFee > 0 && quotaBefore.availableAmount < estimatedMinerFee) {
     return fallbackSelfPaidForSponsorError({
       error: { reason: 'insufficient_quota' },
       filePath: input.filePath,
@@ -336,6 +337,7 @@ export async function uploadMvcSponsorDirectFile(input: {
       advisoryFeeEstimate: estimatedMinerFee,
     });
   }
+  const advisoryFeeEstimate = estimatedMinerFee > 0 ? estimatedMinerFee : pre.minerFee;
 
   let signedTxHex: string;
   try {
@@ -350,12 +352,12 @@ export async function uploadMvcSponsorDirectFile(input: {
       error,
       fallbackCode: 'mvc_fee_assist_commit_failed',
       fallbackReason: 'pre_rejected',
-      stage: 'commit',
-      orderId: pre.orderId,
-      quotaBefore,
-      advisoryFeeEstimate: estimatedMinerFee,
-      sponsoredMinerFee: pre.minerFee,
-    });
+        stage: 'commit',
+        orderId: pre.orderId,
+        quotaBefore,
+        advisoryFeeEstimate: advisoryFeeEstimate,
+        sponsoredMinerFee: pre.minerFee,
+      });
   }
 
   const signedTxHash = new mvc.Transaction(signedTxHex).id;
@@ -383,7 +385,7 @@ export async function uploadMvcSponsorDirectFile(input: {
       stage: 'commit',
       orderId: pre.orderId,
       quotaBefore,
-      advisoryFeeEstimate: estimatedMinerFee,
+      advisoryFeeEstimate: advisoryFeeEstimate,
       sponsoredMinerFee: pre.minerFee,
     });
   }
@@ -427,7 +429,7 @@ export async function uploadMvcSponsorDirectFile(input: {
       orderId: pre.orderId,
       quotaBefore,
       quotaAfter,
-      advisoryFeeEstimate: estimatedMinerFee,
+      advisoryFeeEstimate: advisoryFeeEstimate,
       sponsoredMinerFee,
       savedFee: sponsoredMinerFee,
     },
