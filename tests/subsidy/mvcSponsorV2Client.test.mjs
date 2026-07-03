@@ -70,6 +70,42 @@ test('mvcSponsorV2Client normalizes v2 quota snapshots into numeric fields', asy
   });
 });
 
+test('mvcSponsorV2Client accepts permissionless address info without status', async () => {
+  const payload = {
+    exists: false,
+    address: '1BNesCuvJeW2DAF42xkyCU1ifZVuNZ61mv',
+    gasChain: 'mvc',
+    balance: 10000000,
+    rewardAmount: 10000000,
+    usedAmount: 0,
+    grantedAmount: 10000000,
+    reservedAmount: 0,
+    spentAmount: 0,
+    availableAmount: 10000000,
+    grantRequired: false,
+    sponsorMode: 'permissionless',
+  };
+  const client = createMvcSponsorV2Client({
+    fetchImpl: async () => jsonResponse({
+      code: 0,
+      data: payload,
+    }),
+  });
+
+  const snapshot = await client.getAddressInfo({ address: '1BNesCuvJeW2DAF42xkyCU1ifZVuNZ61mv' });
+
+  assert.deepEqual(snapshot, {
+    exists: false,
+    balance: 10000000,
+    grantedAmount: 10000000,
+    reservedAmount: 0,
+    spentAmount: 0,
+    availableAmount: 10000000,
+    status: 'permissionless',
+    raw: payload,
+  });
+});
+
 test('mvcSponsorV2Client posts challenge without forcing an address payload', async () => {
   const calls = [];
   const client = createMvcSponsorV2Client({
@@ -348,6 +384,33 @@ test('mvcSponsorV2Client rejects blank numeric strings in required quota fields'
         spentAmount: 0.5,
         availableAmount: '98',
         status: 'active',
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => client.getAddressInfo({ address: 'mvc-address-1' }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_address_info_failed');
+      assert.equal(error.stage, 'address_info');
+      assert.equal(error.reason, 'service_unavailable');
+      assert.match(error.serviceMessage, /missing required fields/i);
+      return true;
+    },
+  );
+});
+
+test('mvcSponsorV2Client rejects address info without status or permissionless metadata', async () => {
+  const client = createMvcSponsorV2Client({
+    fetchImpl: async () => jsonResponse({
+      code: 0,
+      data: {
+        exists: true,
+        balance: '98',
+        grantedAmount: '100',
+        reservedAmount: '1.5',
+        spentAmount: 0.5,
+        availableAmount: '98',
       },
     }),
   });

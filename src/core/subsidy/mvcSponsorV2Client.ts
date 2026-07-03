@@ -262,7 +262,10 @@ function normalizeUserInputIndexes(value: unknown): number[] {
 
 function normalizeAddressInfo(record: Record<string, unknown>): MvcSponsorAddressInfo {
   const exists = normalizeBoolean(record.exists);
-  const status = pickText(record, 'status');
+  const rawStatus = pickText(record, 'status');
+  const sponsorMode = pickText(record, 'sponsorMode', 'sponsor_mode');
+  const grantRequired = normalizeBoolean(record.grantRequired ?? record.grant_required);
+  const status = rawStatus || (sponsorMode && grantRequired !== null ? sponsorMode : '');
   if (exists === null || !status) {
     throw createSponsorError('address_info', 'Sponsor address info response is missing required fields.', {
       data: record,
