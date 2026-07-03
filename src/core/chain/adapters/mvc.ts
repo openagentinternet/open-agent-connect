@@ -279,7 +279,7 @@ export const mvcChainAdapter: ChainAdapter = {
     const { txHex: rawTx } = await signMvcPreparedUserInputs({
       identity: input.identity,
       preparedTxHex: draft.unsignedTxHex,
-      selectedUtxos: draft.selectedUtxos,
+      userInputs: draft.userInputs,
       userInputIndexes,
     });
 
@@ -295,7 +295,7 @@ export const mvcChainAdapter: ChainAdapter = {
     });
 
     const tx = new mvc.Transaction(rawTx);
-    const inputTotal = tx.inputs.reduce((sum, current) => sum + (current.output?.satoshis || 0), 0);
+    const inputTotal = draft.userInputs.reduce((sum, utxo) => sum + utxo.satoshis, 0);
     const outputTotal = tx.outputs.reduce((sum, output) => sum + output.satoshis, 0);
 
     return {

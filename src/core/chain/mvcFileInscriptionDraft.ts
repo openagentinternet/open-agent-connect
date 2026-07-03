@@ -11,6 +11,7 @@ const P2PKH_INPUT_SIZE = 148;
 export interface MvcFileInscriptionDraft {
   address: string;
   privateKey: unknown;
+  userInputs: ChainUtxo[];
   selectedUtxos: ChainUtxo[];
   userInputCount: number;
   unsignedTxHex: string;
@@ -111,6 +112,7 @@ export async function buildMvcFileInscriptionDraft(input: {
   return {
     address,
     privateKey,
+    userInputs: picked,
     selectedUtxos: picked,
     userInputCount: picked.length,
     unsignedTxHex: txComposer.getRawHex(),
@@ -120,15 +122,15 @@ export async function buildMvcFileInscriptionDraft(input: {
 export async function signMvcPreparedUserInputs(input: {
   identity: DerivedIdentity;
   preparedTxHex: string;
-  selectedUtxos: ChainUtxo[];
+  userInputs: ChainUtxo[];
   userInputIndexes: number[];
 }): Promise<{ txHex: string }> {
   const { privateKey } = buildMvcSigningIdentity(input.identity);
   const txComposer = new TxComposer(new mvc.Transaction(input.preparedTxHex));
-  for (const inputIndex of input.userInputIndexes) {
-    const utxo = input.selectedUtxos[inputIndex];
+  for (const [userInputOffset, inputIndex] of input.userInputIndexes.entries()) {
+    const utxo = input.userInputs[userInputOffset];
     if (!utxo) {
-      throw new Error(`Missing selected MVC UTXO for input index ${inputIndex}.`);
+      throw new Error(`Missing user-owned MVC UTXO descriptor for prepared input index ${inputIndex}.`);
     }
     txComposer.tx.inputs[inputIndex].output = new mvc.Transaction.Output({
       script: mvc.Script.buildPublicKeyHashOut(new mvc.Address(utxo.address, mvc.Networks.livenet as never)),

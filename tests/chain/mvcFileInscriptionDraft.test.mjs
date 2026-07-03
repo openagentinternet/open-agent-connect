@@ -13,6 +13,7 @@ const {
 const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const FIXTURE_PATH = "m/44'/10001'/0'/0/0";
 const FIXTURE_ADDRESS = '15Lofqw6Kpa6P8WnTYXKvmPyw3UZvvQWrB';
+const SPONSOR_ADDRESS = '1ARLA5cQjYsc4qUd5QgZht2apiepHmKeDi';
 const FIRST_TXID = 'a'.repeat(64);
 const SECOND_TXID = 'b'.repeat(64);
 
@@ -41,20 +42,20 @@ function buildPreparedTxHex() {
   txComposer.appendP2PKHOutput({ address: addressObject, satoshis: 1 });
   txComposer.appendP2PKHOutput({ address: addressObject, satoshis: 777 });
   txComposer.appendP2PKHOutput({
-    address: new mvc.Address('1ARLA5cQjYsc4qUd5QgZht2apiepHmKeDi', mvc.Networks.livenet),
+    address: new mvc.Address(SPONSOR_ADDRESS, mvc.Networks.livenet),
     satoshis: 888,
+  });
+  txComposer.appendP2PKHInput({
+    address: new mvc.Address(SPONSOR_ADDRESS, mvc.Networks.livenet),
+    txId: SECOND_TXID,
+    outputIndex: 1,
+    satoshis: 50_000,
   });
   txComposer.appendP2PKHInput({
     address: addressObject,
     txId: fixtureUtxo.txId,
     outputIndex: fixtureUtxo.outputIndex,
     satoshis: fixtureUtxo.satoshis,
-  });
-  txComposer.appendP2PKHInput({
-    address: addressObject,
-    txId: SECOND_TXID,
-    outputIndex: 1,
-    satoshis: 50_000,
   });
   return txComposer.getRawHex();
 }
@@ -84,17 +85,17 @@ test('buildMvcFileInscriptionDraft preserves the current one-sat MVC direct uplo
   assert.equal(tx.inputs.length, 1);
 });
 
-test('signMvcPreparedUserInputs only signs the indexes returned by sponsor pre', async () => {
+test('signMvcPreparedUserInputs signs the prepared user-owned input when sponsor pre places it at a non-zero index', async () => {
   const signed = await signMvcPreparedUserInputs({
     identity,
     preparedTxHex: buildPreparedTxHex(),
-    selectedUtxos: [fixtureUtxo],
-    userInputIndexes: [0],
+    userInputs: [fixtureUtxo],
+    userInputIndexes: [1],
   });
 
   const tx = new mvc.Transaction(signed.txHex);
-  assert.notEqual(tx.inputs[0].script.toString(), '');
-  assert.equal(tx.inputs[1].script.toString(), '');
+  assert.equal(tx.inputs[0].script.toString(), '');
+  assert.notEqual(tx.inputs[1].script.toString(), '');
 });
 
 test('extractOwnedOutputsFromPreparedMvcTx returns only user-owned outputs', async () => {
