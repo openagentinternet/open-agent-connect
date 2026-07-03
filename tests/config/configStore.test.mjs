@@ -184,6 +184,28 @@ test('read ignores retired askMaster and evolution_network config fields', async
   });
 });
 
+test('read normalizes malformed persisted mvcSponsorUploadEnabled values back to the default', async () => {
+  await withTempProfileHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify({
+      chain: {
+        defaultWriteNetwork: 'opcat',
+        mvcSponsorUploadEnabled: 'false',
+      },
+      a2a: {
+        simplemsgListenerEnabled: false,
+      },
+    }, null, 2)}\n`, 'utf8');
+
+    const reloaded = await store.read();
+    assert.equal(reloaded.chain.defaultWriteNetwork, 'opcat');
+    assert.equal(reloaded.chain.mvcSponsorUploadEnabled, true);
+    assert.equal(reloaded.a2a.simplemsgListenerEnabled, false);
+  });
+});
+
 test('set drops retired askMaster and evolution_network fields from persisted config', async () => {
   await withTempProfileHome(async () => {
     const store = createConfigStore();

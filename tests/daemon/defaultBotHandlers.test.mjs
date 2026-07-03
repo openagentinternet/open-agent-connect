@@ -106,6 +106,17 @@ function makeThrowingLargeUploader(code, message = `${code} detail`) {
   };
 }
 
+function makeThrowingLargeUploaderWithData(code, message, data) {
+  return {
+    upload: async () => {
+      const error = new Error(message);
+      error.code = code;
+      error.data = data;
+      throw error;
+    },
+  };
+}
+
 function makeChainedCreateOverrides(writeCalls = []) {
   return {
     identitySyncStepDelayMs: 0,
@@ -1054,6 +1065,52 @@ test('default metaapp.update uploads large runtime archive through the large upl
   assert.equal(writeCalls[0].network, 'mvc');
   const payload = JSON.parse(writeCalls[0].payload);
   assert.equal(payload.content, 'metafile://chunked-metaapp-update-pin.zip');
+});
+
+test('default metaapp.publishProject preserves whitelisted feeAssist data on upload failure', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-metaapp-upload-failure-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'MetaApp Upload Failure Bot');
+  const projectDir = await writeLargeMetaAppProject(homeDir, 'publish-failure-app', {
+    title: 'Publish Failure App',
+  });
+  const feeAssist = {
+    attempted: true,
+    used: false,
+    mode: 'mvc_sponsor_v2',
+    stage: 'commit',
+    reason: 'commit_failed',
+  };
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    signer: makeSigner(async () => {
+      throw new Error('chain write should not run after upload failure');
+    }),
+    providerLargeFileUploader: makeThrowingLargeUploaderWithData(
+      'mvc_fee_assist_commit_failed',
+      'metaapp upload failed',
+      {
+        feeAssist,
+        ignored: 'do-not-leak',
+      },
+    ),
+    getDaemonRecord: () => null,
+  });
+
+  const result = await handlers.metaapp.publishProject({
+    projectDir,
+    confirm: true,
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'metaapp_upload_failed');
+  assert.deepEqual(result.data.feeAssist, feeAssist);
+  assert.equal('ignored' in result.data, false);
 });
 
 test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {
@@ -2753,6 +2810,60 @@ test('default bot uploadHomepageFile preserves known large uploader failure code
     assert.equal(result.code, code);
     assert.match(result.message, new RegExp(`${code} homepage mapped message`));
   }
+});
+
+test('default bot uploadHomepageFile preserves whitelisted feeAssist data on upload failure', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-homepage-fee-assist-failure-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Homepage FeeAssist Failure Bot',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-homepage-fee-assist-failure-bot',
+    mvcAddress: 'addr-homepage-fee-assist-failure-bot',
+  });
+  const filePath = path.join(profile.homeDir, 'homepage-video.mp4');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  const feeAssist = {
+    attempted: true,
+    used: false,
+    mode: 'mvc_sponsor_v2',
+    stage: 'commit',
+    reason: 'commit_failed',
+  };
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async () => {
+      throw new Error('direct signer should not run after upload failure');
+    }),
+    providerLargeFileUploader: makeThrowingLargeUploaderWithData(
+      'mvc_fee_assist_commit_failed',
+      'homepage upload failed',
+      {
+        feeAssist,
+        ignored: 'do-not-leak',
+      },
+    ),
+  });
+
+  const result = await handlers.bot.uploadHomepageFile({
+    slug: profile.slug,
+    filePath,
+    contentType: 'video/mp4',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'mvc_fee_assist_commit_failed');
+  assert.deepEqual(result.data.feeAssist, feeAssist);
+  assert.equal('ignored' in result.data, false);
 });
 
 test('default bot updateProfile rejects invalid homepage input without calling signer', async (t) => {
