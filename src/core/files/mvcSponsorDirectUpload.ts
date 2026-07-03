@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { mvc } from 'meta-contract';
 import type { Signer } from '../signing/signer';
 import type { MvcSponsorAddressInfo, MvcSponsorCommitResult, MvcSponsorPreResult } from '../subsidy/mvcSponsorV2Client';
+import { signMvcAddressMessage } from '../subsidy/mvcMessageSigning';
 import mvcChainAdapter from '../chain/adapters/mvc';
 import { normalizeChainWriteRequest } from '../chain/writePin';
 import {
@@ -10,7 +11,6 @@ import {
   signMvcPreparedUserInputs,
 } from '../chain/mvcFileInscriptionDraft';
 import { rememberPendingMvcTransaction } from '../chain/mvcPendingUtxos';
-import { buildMvcSigningIdentity } from '../chain/mvcSigningIdentity';
 import { uploadLocalFileToChain, type UploadLocalFileToChainResult } from './uploadFile';
 
 export type MvcSponsorFeeAssistMode = 'mvc_sponsor_v2' | 'self_paid';
@@ -22,23 +22,24 @@ export type MvcSponsorFeeAssistReason =
   | 'commit_failed';
 export type MvcSponsorFeeAssistStage =
   | 'address_info'
-  | 'draft'
   | 'challenge'
   | 'pre'
-  | 'sign_prepared'
-  | 'commit';
+  | 'commit'
+  | 'done';
 
 export interface MvcSponsorFeeAssistMetadata {
   attempted: boolean;
   used: boolean;
   mode: MvcSponsorFeeAssistMode;
+  sponsor: 'mvc_sponsor_v2';
   reason?: MvcSponsorFeeAssistReason;
   stage?: MvcSponsorFeeAssistStage;
   orderId?: string;
   quotaBefore?: MvcSponsorAddressInfo;
   quotaAfter?: MvcSponsorAddressInfo;
+  advisoryFeeEstimate?: number;
   sponsoredMinerFee?: number;
-  savedMinerFee?: number;
+  savedFee?: number;
 }
 
 export interface MvcSponsorV2DirectUploadClient {
@@ -88,22 +89,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-function signMessage(input: {
-  identity: { mnemonic: string; path: string; publicKey?: string };
-  message: string;
-}): { publicKey: string; signature: string } {
-  const { privateKey } = buildMvcSigningIdentity(input.identity);
-  const hash = mvc.crypto.Hash.sha256sha256(Buffer.from(input.message, 'utf8'));
-  const signature = mvc.crypto.ECDSA.sign(hash, privateKey as never).toString();
-  const publicKey = input.identity.publicKey?.trim()
-    || (privateKey as { toPublicKey?: () => { toString: () => string } }).toPublicKey?.().toString()
-    || '';
-  if (!publicKey) {
-    throw new Error('MVC sponsor signing requires a public key.');
-  }
-  return { publicKey, signature };
-}
-
 function estimateDraftMinerFee(input: {
   unsignedTxHex: string;
   userInputTotal: number;
@@ -139,6 +124,7 @@ function attachFeeAssistError(input: {
   stage: MvcSponsorFeeAssistStage;
   orderId?: string;
   quotaBefore?: MvcSponsorAddressInfo;
+  advisoryFeeEstimate?: number;
   sponsoredMinerFee?: number;
 }): never {
   const error = input.error instanceof Error
@@ -152,14 +138,46 @@ function attachFeeAssistError(input: {
       attempted: true,
       used: false,
       mode: 'mvc_sponsor_v2',
+      sponsor: 'mvc_sponsor_v2',
       reason: normalizeSponsorReason((input.error as { reason?: unknown } | undefined)?.reason, input.fallbackReason),
       stage: input.stage,
       orderId: input.orderId,
       quotaBefore: input.quotaBefore,
+      advisoryFeeEstimate: input.advisoryFeeEstimate,
       sponsoredMinerFee: input.sponsoredMinerFee,
+      savedFee: input.sponsoredMinerFee,
     } satisfies MvcSponsorFeeAssistMetadata,
   };
   throw error;
+}
+
+async function fallbackSelfPaidForSponsorError(input: {
+  error: unknown;
+  filePath: string;
+  contentType: string;
+  network: string;
+  signer: Signer;
+  fallbackReason: MvcSponsorFeeAssistReason;
+  stage: MvcSponsorFeeAssistStage;
+  quotaBefore?: MvcSponsorAddressInfo;
+  advisoryFeeEstimate?: number;
+}): Promise<MvcSponsorDirectUploadResult> {
+  return selfPaidDirect({
+    filePath: input.filePath,
+    contentType: input.contentType,
+    network: input.network,
+    signer: input.signer,
+    feeAssist: {
+      attempted: true,
+      used: false,
+      mode: 'self_paid',
+      sponsor: 'mvc_sponsor_v2',
+      reason: normalizeSponsorReason((input.error as { reason?: unknown } | undefined)?.reason, input.fallbackReason),
+      stage: input.stage,
+      quotaBefore: input.quotaBefore,
+      advisoryFeeEstimate: input.advisoryFeeEstimate,
+    },
+  });
 }
 
 export async function uploadMvcSponsorDirectFile(input: {
@@ -187,18 +205,14 @@ export async function uploadMvcSponsorDirectFile(input: {
   try {
     quotaBefore = await input.mvcSponsorClient.getAddressInfo({ address });
   } catch (error) {
-    return selfPaidDirect({
+    return fallbackSelfPaidForSponsorError({
+      error,
       filePath: input.filePath,
       contentType: input.contentType,
       network: input.network,
       signer: input.signer,
-      feeAssist: {
-        attempted: true,
-        used: false,
-        mode: 'self_paid',
-        reason: normalizeSponsorReason((error as { reason?: unknown } | undefined)?.reason, 'service_unavailable'),
-        stage: 'address_info',
-      },
+      fallbackReason: 'service_unavailable',
+      stage: 'address_info',
     });
   }
 
@@ -217,37 +231,29 @@ export async function uploadMvcSponsorDirectFile(input: {
       userInputTotal: draft.userInputs.reduce((sum, utxo) => sum + utxo.satoshis, 0),
     });
   } catch (error) {
-    return selfPaidDirect({
+    return fallbackSelfPaidForSponsorError({
+      error,
       filePath: input.filePath,
       contentType: input.contentType,
       network: input.network,
       signer: input.signer,
-      feeAssist: {
-        attempted: true,
-        used: false,
-        mode: 'self_paid',
-        reason: normalizeSponsorReason((error as { reason?: unknown } | undefined)?.reason, 'no_user_utxo'),
-        stage: 'draft',
-        quotaBefore,
-      },
+      fallbackReason: 'no_user_utxo',
+      stage: 'address_info',
+      quotaBefore,
     });
   }
 
   if (quotaBefore.availableAmount < estimatedMinerFee) {
-    return selfPaidDirect({
+    return fallbackSelfPaidForSponsorError({
+      error: { reason: 'insufficient_quota' },
       filePath: input.filePath,
       contentType: input.contentType,
       network: input.network,
       signer: input.signer,
-      feeAssist: {
-        attempted: true,
-        used: false,
-        mode: 'self_paid',
-        reason: 'insufficient_quota',
-        stage: 'draft',
-        quotaBefore,
-        sponsoredMinerFee: estimatedMinerFee,
-      },
+      fallbackReason: 'insufficient_quota',
+      stage: 'address_info',
+      quotaBefore,
+      advisoryFeeEstimate: estimatedMinerFee,
     });
   }
 
@@ -255,17 +261,32 @@ export async function uploadMvcSponsorDirectFile(input: {
   try {
     challenge = await input.mvcSponsorClient.getChallenge();
   } catch (error) {
+    if (normalizeSponsorReason((error as { reason?: unknown } | undefined)?.reason, 'service_unavailable') === 'service_unavailable') {
+      return fallbackSelfPaidForSponsorError({
+        error,
+        filePath: input.filePath,
+        contentType: input.contentType,
+        network: input.network,
+        signer: input.signer,
+        fallbackReason: 'service_unavailable',
+        stage: 'challenge',
+        quotaBefore,
+        advisoryFeeEstimate: estimatedMinerFee,
+      });
+    }
     attachFeeAssistError({
       error,
       fallbackCode: 'mvc_fee_assist_challenge_failed',
       fallbackReason: 'service_unavailable',
       stage: 'challenge',
       quotaBefore,
+      advisoryFeeEstimate: estimatedMinerFee,
     });
   }
 
-  const challengeSignature = signMessage({
-    identity,
+  const challengeSignature = await signMvcAddressMessage({
+    mnemonic: identity.mnemonic,
+    path: identity.path,
     message: challenge.message,
   });
 
@@ -279,12 +300,27 @@ export async function uploadMvcSponsorDirectFile(input: {
       signature: challengeSignature.signature,
     });
   } catch (error) {
+    const reason = normalizeSponsorReason((error as { reason?: unknown } | undefined)?.reason, 'pre_rejected');
+    if (reason === 'service_unavailable') {
+      return fallbackSelfPaidForSponsorError({
+        error,
+        filePath: input.filePath,
+        contentType: input.contentType,
+        network: input.network,
+        signer: input.signer,
+        fallbackReason: 'service_unavailable',
+        stage: 'pre',
+        quotaBefore,
+        advisoryFeeEstimate: estimatedMinerFee,
+      });
+    }
     attachFeeAssistError({
       error,
       fallbackCode: 'mvc_fee_assist_pre_failed',
-      fallbackReason: 'pre_rejected',
+      fallbackReason: reason === 'insufficient_quota' ? 'insufficient_quota' : 'pre_rejected',
       stage: 'pre',
       quotaBefore,
+      advisoryFeeEstimate: estimatedMinerFee,
     });
   }
 
@@ -299,19 +335,21 @@ export async function uploadMvcSponsorDirectFile(input: {
   } catch (error) {
     attachFeeAssistError({
       error,
-      fallbackCode: 'mvc_fee_assist_sign_prepared_failed',
+      fallbackCode: 'mvc_fee_assist_commit_failed',
       fallbackReason: 'pre_rejected',
-      stage: 'sign_prepared',
+      stage: 'commit',
       orderId: pre.orderId,
       quotaBefore,
+      advisoryFeeEstimate: estimatedMinerFee,
       sponsoredMinerFee: pre.minerFee,
     });
   }
 
   const signedTxHash = new mvc.Transaction(signedTxHex).id;
   const commitMessage = `assist-sponsor-commit:${pre.orderId}:${signedTxHash}`;
-  const commitSignature = signMessage({
-    identity,
+  const commitSignature = await signMvcAddressMessage({
+    mnemonic: identity.mnemonic,
+    path: identity.path,
     message: commitMessage,
   });
 
@@ -332,6 +370,7 @@ export async function uploadMvcSponsorDirectFile(input: {
       stage: 'commit',
       orderId: pre.orderId,
       quotaBefore,
+      advisoryFeeEstimate: estimatedMinerFee,
       sponsoredMinerFee: pre.minerFee,
     });
   }
@@ -347,11 +386,17 @@ export async function uploadMvcSponsorDirectFile(input: {
   });
 
   const sponsoredMinerFee = commit.minerFee ?? pre.minerFee;
+  let quotaAfter: MvcSponsorAddressInfo | undefined;
+  try {
+    quotaAfter = await input.mvcSponsorClient.getAddressInfo({ address });
+  } catch {
+    quotaAfter = undefined;
+  }
   const pinId = `${commit.txId}i0`;
   return {
     pinId,
     txids: [commit.txId],
-    totalCost: 0,
+    totalCost: sponsoredMinerFee,
     network: 'mvc',
     filePath: input.filePath,
     fileName: input.fileName,
@@ -364,10 +409,14 @@ export async function uploadMvcSponsorDirectFile(input: {
       attempted: true,
       used: true,
       mode: 'mvc_sponsor_v2',
+      sponsor: 'mvc_sponsor_v2',
+      stage: 'done',
       orderId: pre.orderId,
       quotaBefore,
+      quotaAfter,
+      advisoryFeeEstimate: estimatedMinerFee,
       sponsoredMinerFee,
-      savedMinerFee: sponsoredMinerFee,
+      savedFee: sponsoredMinerFee,
     },
   };
 }

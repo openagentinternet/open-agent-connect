@@ -20,7 +20,7 @@ const FIXTURE_GLOBAL_METAID = 'idzfixtureglobalmetaid';
 const fixtureIdentity = {
   mnemonic: FIXTURE_MNEMONIC,
   path: FIXTURE_PATH,
-  publicKey: 'fixture-public-key',
+  publicKey: 'this-fixture-value-must-not-be-used-for-sponsor-signing',
   chatPublicKey: '',
   addresses: { mvc: FIXTURE_ADDRESS },
   mvcAddress: FIXTURE_ADDRESS,
@@ -95,10 +95,11 @@ function patchMvcUtxos(utxos = [fixtureUtxo]) {
 }
 
 function createSponsorClient(calls) {
+  let addressInfoCount = 0;
   return {
     async getAddressInfo(payload) {
       calls.push(['getAddressInfo', payload]);
-      return {
+      const snapshots = [{
         exists: true,
         balance: 0,
         grantedAmount: 5000,
@@ -107,7 +108,19 @@ function createSponsorClient(calls) {
         availableAmount: 5000,
         status: 'active',
         raw: {},
-      };
+      }, {
+        exists: true,
+        balance: 0,
+        grantedAmount: 5000,
+        reservedAmount: 750,
+        spentAmount: 0,
+        availableAmount: 4250,
+        status: 'active',
+        raw: {},
+      }];
+      const snapshot = snapshots[Math.min(addressInfoCount, snapshots.length - 1)];
+      addressInfoCount += 1;
+      return snapshot;
     },
     async getChallenge() {
       calls.push(['getChallenge']);
@@ -233,11 +246,17 @@ test('uploadLargeFileToChain routes direct MVC uploads through injected sponsor 
     });
 
     assert.equal(directCalls.length, 0);
-    assert.deepEqual(sponsorCalls.map(([name]) => name), ['getAddressInfo', 'getChallenge', 'preSponsor', 'commitSponsor']);
+    assert.deepEqual(sponsorCalls.map(([name]) => name), ['getAddressInfo', 'getChallenge', 'preSponsor', 'commitSponsor', 'getAddressInfo']);
     assert.equal(result.uploadMode, 'direct');
     assert.equal(result.pinId, `${'d'.repeat(64)}i0`);
+    assert.equal(result.totalCost, 750);
     assert.equal(result.feeAssist.mode, 'mvc_sponsor_v2');
+    assert.equal(result.feeAssist.sponsor, 'mvc_sponsor_v2');
     assert.equal(result.feeAssist.used, true);
+    assert.equal(result.feeAssist.stage, 'done');
+    assert.equal(result.feeAssist.savedFee, 750);
+    assert.equal(result.feeAssist.quotaAfter.availableAmount, 4250);
+    assert.equal('savedMinerFee' in result.feeAssist, false);
   } finally {
     restore();
   }
