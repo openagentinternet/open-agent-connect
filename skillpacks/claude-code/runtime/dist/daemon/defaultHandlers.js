@@ -12187,7 +12187,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         largeUploader: providerLargeFileUploader,
                         verify: rawInput.verify === true,
                         directMaxBytes: uploadLargeFile_1.FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
-                        sponsorDirectMaxBytes: uploadLargeFile_1.DIRECT_UPLOAD_MAX_BYTES,
+                        sponsorDirectMaxBytes: uploadLargeFile_1.FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
                         mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(actor.homeDir, network),
                     });
                     return (0, commandResult_1.commandSuccess)(result);

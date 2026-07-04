@@ -46,7 +46,7 @@ Never read large local files into model context. Do not paste, summarize, base64
 
 ## Default Command
 
-Use the path-first large-upload command by default for all local file uploads. For this command, the runtime chooses direct upload for files at or below the 5 MiB direct threshold and large/chunked upload for supported files above that threshold. MVC sponsor, when enabled, remains limited to eligible direct uploads at or below 2 MiB.
+Use the path-first large-upload command by default for all local file uploads. For this command, the runtime chooses direct upload for files at or below the 5 MiB direct threshold and large/chunked upload for supported files above that threshold. MVC sponsor, when enabled, follows the same direct-upload window for this command.
 
 ```bash
 {{METABOT_CLI}} file upload-large --from <bot-slug> --file /absolute/path/to/archive.zip --content-type application/zip --verify
@@ -113,7 +113,7 @@ Use `file upload-large --request-file` only for compatibility with existing auto
 - Files above 5 MiB require the large/chunked path.
 - The CLI enforces a 50 MiB hard cap for this skill flow. If the file is larger, stop and explain that the file exceeds the current cap.
 - Large/chunked uploads above 5 MiB are currently MVC-only unless the runtime grows support for additional chains. If the human explicitly requests BTC or OPCAT for a file above 5 MiB, explain the current limitation instead of inventing support.
-- MVC sponsor applies only to eligible direct uploads at or below 2 MiB. Files between 2 MiB and 5 MiB on MVC use the normal self-paid direct path.
+- MVC sponsor may apply to eligible direct MVC uploads at or below 5 MiB when the sponsor gate is enabled for the selected Bot profile.
 - DOGE is unsupported for file upload on both direct and large/chunked paths.
 
 ## Success Result
@@ -144,7 +144,7 @@ If verification was requested and the runtime reports verification unavailable, 
 ## In Scope
 
 - One local file upload lifecycle.
-- Direct upload for files up to 5 MiB when using `file upload-large`.
+- Direct upload for files up to 5 MiB when using `file upload-large`, including eligible MVC sponsor attempts inside the same window.
 - Large/chunked upload for supported files above 5 MiB and at or below 50 MiB.
 - Optional runtime verification.
 - MVC/BTC/OPCAT chain selection for supported file writes.

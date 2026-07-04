@@ -8,10 +8,10 @@ This repository already has a production sponsor integration for **direct MVC fi
 The current production path is intentionally narrow:
 
 - only for `mvc`
-- only for direct uploads at or below `2 MiB`
+- only for direct uploads at or below `5 MiB` in the daemon `file upload-large` entry
 - only for the `/file` inscription shape used by `upload-large`
 
-For non-MVC uploads, or MVC files above the sponsor direct-upload threshold, OAC does not use sponsor today. The `file upload-large` command may still use the normal self-paid direct path up to `5 MiB`, then switch to chunked MVC upload above that.
+For non-MVC uploads, or MVC files above the command's sponsor direct-upload threshold, OAC does not use sponsor today. The `file upload-large` command keeps direct upload up to `5 MiB`, then switches to chunked MVC upload above that.
 
 ---
 
@@ -107,7 +107,6 @@ If you need the exact `file upload-large` behavior from the daemon handlers, pas
 
 ```ts
 import {
-  DIRECT_UPLOAD_MAX_BYTES,
   FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
   uploadLargeFileToChain,
 } from '../core/files/uploadLargeFile';
@@ -117,12 +116,12 @@ const result = await uploadLargeFileToChain({
   network,
   signer,
   directMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
-  sponsorDirectMaxBytes: DIRECT_UPLOAD_MAX_BYTES,
+  sponsorDirectMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
   mvcSponsorClient: shouldUseSponsor ? createMvcSponsorV2Client() : undefined,
 });
 ```
 
-Other internal callers should usually keep the defaults unless they also intentionally want the `upload-large` command's wider self-paid direct window.
+Other internal callers should usually keep the defaults unless they also intentionally want the `upload-large` command's wider direct window and matching sponsor eligibility.
 
 ---
 
@@ -131,7 +130,7 @@ Other internal callers should usually keep the defaults unless they also intenti
 Sponsor is only attempted when all of the following are true:
 
 - the target network is `mvc`
-- the file size is at or below the sponsor direct limit (`2 MiB` by default)
+- the file size is at or below the caller's sponsor direct limit (`2 MiB` by default, `5 MiB` in the daemon `file upload-large` handler)
 - the caller provided `mvcSponsorClient`
 
 If any of those conditions is false:
