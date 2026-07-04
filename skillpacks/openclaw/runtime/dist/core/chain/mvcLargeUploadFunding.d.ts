@@ -1,4 +1,4 @@
-import { type DerivedIdentity } from '../identity/deriveIdentity';
+import type { DerivedIdentity } from '../identity/deriveIdentity';
 import type { ChainUtxo } from './adapters/types';
 export interface MvcLargeUploadFundingResult {
     mergeTxHex: string;

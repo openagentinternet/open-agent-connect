@@ -6,6 +6,7 @@ export type DefaultWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
 export declare const DEFAULT_WRITE_NETWORKS: DefaultWriteNetwork[];
 export interface ChainConfig {
     defaultWriteNetwork: DefaultWriteNetwork;
+    mvcSponsorUploadEnabled: boolean;
 }
 export interface BrowserConfig {
     metasoP2PBaseUrl: string;

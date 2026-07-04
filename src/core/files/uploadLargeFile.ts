@@ -20,6 +20,8 @@ export type {
 } from './mvcSponsorDirectUpload';
 
 export const DIRECT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
+export const FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES = 5 * 1024 * 1024;
+export const MVC_SPONSOR_DIRECT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
 export const LARGE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 export type UploadLargeFileMode = 'direct' | 'chunked';
@@ -150,6 +152,7 @@ export async function uploadLargeFileToChain(input: {
   verify?: boolean;
   verifyAvailability?: (pinId: string) => Promise<UploadLargeFileResult['verification']>;
   directMaxBytes?: number;
+  sponsorDirectMaxBytes?: number;
   hardMaxBytes?: number;
   mvcSponsorClient?: MvcSponsorV2DirectUploadClient;
 }): Promise<UploadLargeFileResult> {
@@ -167,6 +170,10 @@ export async function uploadLargeFileToChain(input: {
   }
 
   const directMaxBytes = normalizePositiveBytes(input.directMaxBytes, DIRECT_UPLOAD_MAX_BYTES);
+  const sponsorDirectMaxBytes = normalizePositiveBytes(
+    input.sponsorDirectMaxBytes,
+    MVC_SPONSOR_DIRECT_UPLOAD_MAX_BYTES,
+  );
   const hardMaxBytes = normalizePositiveBytes(input.hardMaxBytes, LARGE_UPLOAD_MAX_BYTES);
   if (stat.size > hardMaxBytes) {
     throw new Error(`File exceeds maximum upload size of ${hardMaxBytes} bytes.`);
@@ -176,7 +183,9 @@ export async function uploadLargeFileToChain(input: {
   const contentType = normalizeText(input.contentType) || inferUploadContentType(resolvedPath);
 
   if (stat.size <= directMaxBytes) {
-    const directResult = network.toLowerCase() === 'mvc' && input.mvcSponsorClient
+    const directResult = network.toLowerCase() === 'mvc'
+      && input.mvcSponsorClient
+      && stat.size <= sponsorDirectMaxBytes
       ? await uploadMvcSponsorDirectFile({
         filePath: resolvedPath,
         fileName: path.basename(resolvedPath),

@@ -69,6 +69,7 @@ function normalizeConfig(input) {
             defaultWriteNetwork: (0, configTypes_1.isDefaultWriteNetwork)(defaultWriteNetwork)
                 ? defaultWriteNetwork
                 : defaults.chain.defaultWriteNetwork,
+            mvcSponsorUploadEnabled: normalizeBoolean(chainSource.mvcSponsorUploadEnabled, defaults.chain.mvcSponsorUploadEnabled),
         },
         a2a: {
             simplemsgListenerEnabled: normalizeBoolean(a2aSource.simplemsgListenerEnabled, defaults.a2a.simplemsgListenerEnabled),

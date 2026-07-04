@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildMvcLargeUploadFunding = buildMvcLargeUploadFunding;
 const meta_contract_1 = require("meta-contract");
-const deriveIdentity_1 = require("../identity/deriveIdentity");
 const mvcPendingUtxos_1 = require("./mvcPendingUtxos");
+const mvcSigningIdentity_1 = require("./mvcSigningIdentity");
 const NET = 'livenet';
 const P2PKH_INPUT_SIZE = 148;
 const PRE_TX_SIGTYPE = meta_contract_1.mvc.crypto.Signature.SIGHASH_NONE | meta_contract_1.mvc.crypto.Signature.SIGHASH_FORKID;
@@ -23,17 +23,6 @@ function readPositiveInteger(name, value) {
         throw new Error(`${name} must be a positive integer.`);
     }
     return numeric;
-}
-function buildMvcSigningIdentity(mnemonic, path) {
-    const network = meta_contract_1.mvc.Networks.livenet;
-    const addressIndex = (0, deriveIdentity_1.parseAddressIndexFromPath)(path);
-    const mnemonicObject = meta_contract_1.mvc.Mnemonic.fromString(mnemonic);
-    const hdPrivateKey = mnemonicObject.toHDPrivateKey('', network);
-    const childPrivateKey = hdPrivateKey.deriveChild(`m/44'/10001'/0'/0/${addressIndex}`);
-    return {
-        privateKey: childPrivateKey.privateKey,
-        address: childPrivateKey.publicKey.toAddress(network).toString(),
-    };
 }
 function isUsableFundingUtxo(utxo, fundingAddress) {
     return (normalizeText(utxo.address) === fundingAddress &&
@@ -102,7 +91,10 @@ async function buildMvcLargeUploadFunding(input) {
     const feeRate = readPositiveNumber('feeRate', input.feeRate);
     const chunkPreTxFee = readPositiveInteger('chunkPreTxFee', input.chunkPreTxFee);
     const indexPreTxFee = readPositiveInteger('indexPreTxFee', input.indexPreTxFee);
-    const signingIdentity = buildMvcSigningIdentity(input.identity.mnemonic, input.identity.path);
+    const signingIdentity = (0, mvcSigningIdentity_1.buildMvcSigningIdentity)({
+        mnemonic: input.identity.mnemonic,
+        path: input.identity.path,
+    });
     const derivedAddress = normalizeText(signingIdentity.address);
     if (!derivedAddress) {
         throw new Error('MVC funding address is required for large upload funding.');

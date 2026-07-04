@@ -189,6 +189,8 @@ import {
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
 import {
+  DIRECT_UPLOAD_MAX_BYTES,
+  FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
   uploadLargeFileToChain,
   type MvcSponsorV2DirectUploadClient,
   type ProductionLargeFileUploader,
@@ -14414,6 +14416,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
             signer: actor.signer,
             largeUploader: providerLargeFileUploader,
             verify: rawInput.verify === true,
+            directMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
+            sponsorDirectMaxBytes: DIRECT_UPLOAD_MAX_BYTES,
             mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(actor.homeDir, network),
           });
           return commandSuccess(result);

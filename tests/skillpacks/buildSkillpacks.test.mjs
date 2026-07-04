@@ -848,7 +848,8 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   assert.match(fileContent, /single file upload skill/i);
   assert.match(fileContent, /file upload-large --from <bot-slug> --file/);
   assert.match(fileContent, /Compatibility[\s\S]*file upload --from <bot-slug> --request-file request\.json/i);
-  assert.match(fileContent, /2 MiB direct threshold/i);
+  assert.match(fileContent, /5 MiB direct threshold/i);
+  assert.match(fileContent, /eligible direct uploads at or below 2 MiB/i);
   assert.match(fileContent, /50 MiB hard cap/i);
   assert.match(fileContent, /DOGE is unsupported for file upload/i);
   assert.match(fileContent, /MVC-only unless the runtime grows support/i);

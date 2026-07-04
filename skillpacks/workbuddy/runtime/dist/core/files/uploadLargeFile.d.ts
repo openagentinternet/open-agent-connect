@@ -1,5 +1,9 @@
 import type { Signer } from '../signing/signer';
+import { type MvcSponsorFeeAssistMetadata, type MvcSponsorV2DirectUploadClient } from './mvcSponsorDirectUpload';
+export type { MvcSponsorDirectUploadResult, MvcSponsorFeeAssistMetadata, MvcSponsorFeeAssistMode, MvcSponsorFeeAssistReason, MvcSponsorFeeAssistStage, MvcSponsorV2DirectUploadClient, } from './mvcSponsorDirectUpload';
 export declare const DIRECT_UPLOAD_MAX_BYTES: number;
+export declare const FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES: number;
+export declare const MVC_SPONSOR_DIRECT_UPLOAD_MAX_BYTES: number;
 export declare const LARGE_UPLOAD_MAX_BYTES: number;
 export type UploadLargeFileMode = 'direct' | 'chunked';
 export interface UploadLargeFileResult {
@@ -17,6 +21,7 @@ export interface UploadLargeFileResult {
     downloadUrl: string;
     globalMetaId: string;
     uploadMode: UploadLargeFileMode;
+    feeAssist?: MvcSponsorFeeAssistMetadata;
     verification?: {
         ok: boolean;
         url: string | null;
@@ -44,5 +49,7 @@ export declare function uploadLargeFileToChain(input: {
     verify?: boolean;
     verifyAvailability?: (pinId: string) => Promise<UploadLargeFileResult['verification']>;
     directMaxBytes?: number;
+    sponsorDirectMaxBytes?: number;
     hardMaxBytes?: number;
+    mvcSponsorClient?: MvcSponsorV2DirectUploadClient;
 }): Promise<UploadLargeFileResult>;

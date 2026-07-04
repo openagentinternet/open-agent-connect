@@ -7,6 +7,7 @@ import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../help
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
+const { FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES } = require('../../dist/core/files/uploadLargeFile.js');
 const {
   createMetabotProfile,
   getMetabotProfile,
@@ -519,7 +520,7 @@ test('default file.uploadLarge preserves unavailable uploader failure code', asy
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const filePath = path.join(homeDir, 'large-video.mp4');
-  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeFile(filePath, Buffer.alloc(FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES + 1));
   await createRuntimeStateStore(homeDir).writeState({
     identity: {
       metabotId: 1,
@@ -717,7 +718,7 @@ test('default file.uploadLarge passes the injected production large uploader', a
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const filePath = path.join(homeDir, 'large-video.mp4');
-  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeFile(filePath, Buffer.alloc(FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES + 1));
   await createRuntimeStateStore(homeDir).writeState({
     identity: {
       metabotId: 1,
@@ -791,7 +792,7 @@ test('default file.uploadLarge uses the factory production large uploader when e
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const filePath = path.join(homeDir, 'large-video.mp4');
-  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeFile(filePath, Buffer.alloc(FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES + 1));
   await createRuntimeStateStore(homeDir).writeState({
     identity: {
       metabotId: 1,
@@ -859,7 +860,7 @@ test('default file.uploadLarge preserves known large uploader failure codes', as
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const filePath = path.join(homeDir, 'large-video.mp4');
-  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeFile(filePath, Buffer.alloc(FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES + 1));
   await createRuntimeStateStore(homeDir).writeState({
     identity: {
       metabotId: 1,
