@@ -598,6 +598,14 @@ async function startFakeChainApiServer(options = {}) {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(payload));
   });
+  const sockets = new Set();
+  let closed = false;
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => {
+      sockets.delete(socket);
+    });
+  });
 
   await new Promise((resolve, reject) => {
     server.listen(0, '127.0.0.1', (error) => {
@@ -617,6 +625,10 @@ async function startFakeChainApiServer(options = {}) {
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     async close() {
+      if (closed) {
+        return;
+      }
+      closed = true;
       await new Promise((resolve, reject) => {
         server.close((error) => {
           if (error) {
@@ -625,6 +637,16 @@ async function startFakeChainApiServer(options = {}) {
           }
           resolve();
         });
+        if (typeof server.closeIdleConnections === 'function') {
+          server.closeIdleConnections();
+        }
+        if (typeof server.closeAllConnections === 'function') {
+          server.closeAllConnections();
+        } else {
+          for (const socket of sockets) {
+            socket.destroy();
+          }
+        }
       });
     },
   };
@@ -655,6 +677,14 @@ async function startFakeSocketPresenceApiServer(options = {}) {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(payload));
   });
+  const sockets = new Set();
+  let closed = false;
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => {
+      sockets.delete(socket);
+    });
+  });
 
   await new Promise((resolve, reject) => {
     server.listen(0, '127.0.0.1', (error) => {
@@ -674,6 +704,10 @@ async function startFakeSocketPresenceApiServer(options = {}) {
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     async close() {
+      if (closed) {
+        return;
+      }
+      closed = true;
       await new Promise((resolve, reject) => {
         server.close((error) => {
           if (error) {
@@ -682,6 +716,16 @@ async function startFakeSocketPresenceApiServer(options = {}) {
           }
           resolve();
         });
+        if (typeof server.closeIdleConnections === 'function') {
+          server.closeIdleConnections();
+        }
+        if (typeof server.closeAllConnections === 'function') {
+          server.closeAllConnections();
+        } else {
+          for (const socket of sockets) {
+            socket.destroy();
+          }
+        }
       });
     },
   };
@@ -2205,6 +2249,7 @@ test('network services refreshes the global online service cache and reuses it w
     ],
   });
   t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
 
   const listed = await runCommand(
     homeDir,
@@ -3005,6 +3050,7 @@ test('services call can resolve a cached online service when the chain directory
     },
   });
   t.after(async () => stopDaemon(homeDir));
+  t.after(async () => chainApi.close());
 
   const listed = await runCommand(
     homeDir,

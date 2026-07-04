@@ -23,6 +23,19 @@ const METAAPP_RUNTIME_URI_PREVIEW = 'metafile://<uploaded-metaapp-zip-pin>.zip';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function readFeeAssistFailureData(error) {
+    const data = error?.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        return undefined;
+    }
+    const feeAssist = data.feeAssist;
+    if (!feeAssist || typeof feeAssist !== 'object' || Array.isArray(feeAssist)) {
+        return undefined;
+    }
+    return {
+        feeAssist: feeAssist,
+    };
+}
 function normalizeStringArray(value) {
     if (!Array.isArray(value)) {
         return [];
@@ -253,8 +266,12 @@ async function writePublishedMetaApp(input) {
         });
     }
     catch (error) {
+        const feeAssistData = readFeeAssistFailureData(error);
         return (0, commandResult_1.commandFailed)('metaapp_upload_failed', `Unable to upload MetaApp archive: ${errorMessage(error)}`, {
-            data: { archive },
+            data: {
+                archive,
+                ...(feeAssistData ?? {}),
+            },
         });
     }
     const artifactUri = uploadArtifactUri(upload);

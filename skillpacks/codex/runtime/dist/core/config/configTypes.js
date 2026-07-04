@@ -20,6 +20,7 @@ function createDefaultConfig() {
     return {
         chain: {
             defaultWriteNetwork: 'mvc',
+            mvcSponsorUploadEnabled: true,
         },
         a2a: {
             simplemsgListenerEnabled: true,

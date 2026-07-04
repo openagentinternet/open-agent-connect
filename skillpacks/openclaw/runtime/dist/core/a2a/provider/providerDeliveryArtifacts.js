@@ -21,18 +21,35 @@ const UNSAFE_STRUCTURED_METADATA_CHARACTER = /[\x00-\x1f\x7f]/;
 const SAFE_CONTENT_TYPE_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?: *; *[a-z0-9][a-z0-9!#$&^_.+-]*=[a-z0-9][a-z0-9!#$&^_.+:-]*)*$/i;
 class ProviderDeliveryArtifactError extends Error {
     code;
-    constructor(code, message) {
+    data;
+    constructor(code, message, data) {
         super(`${code}: ${message}`);
         this.name = 'ProviderDeliveryArtifactError';
         this.code = code;
+        if (data) {
+            this.data = data;
+        }
     }
 }
 exports.ProviderDeliveryArtifactError = ProviderDeliveryArtifactError;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
-function providerArtifactError(code, message) {
-    return new ProviderDeliveryArtifactError(code, message);
+function readUploadFailureData(error) {
+    const data = error?.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        return undefined;
+    }
+    const feeAssist = data.feeAssist;
+    if (!feeAssist || typeof feeAssist !== 'object' || Array.isArray(feeAssist)) {
+        return undefined;
+    }
+    return {
+        feeAssist: feeAssist,
+    };
+}
+function providerArtifactError(code, message, data) {
+    return new ProviderDeliveryArtifactError(code, message, data);
 }
 function classifyProviderOutputType(outputType) {
     const normalized = normalizeText(outputType).toLowerCase();
@@ -813,6 +830,7 @@ async function uploadResolvedLocalArtifact(input) {
             verify: true,
             verifyAvailability: input.verifyAvailability,
             largeUploader: input.largeUploader,
+            mvcSponsorClient: input.mvcSponsorClient,
         });
     }
     catch (error) {
@@ -823,7 +841,7 @@ async function uploadResolvedLocalArtifact(input) {
         const rawMessage = error instanceof Error ? error.message : 'Provider artifact upload failed.';
         const scrubbedMessage = await scrubExecutionWorkspacePathMentions(rawMessage, input.file.requestedExecutionCwd);
         const uploadSafeMessage = scrubLocalPathMentions(scrubbedMessage, [snapshot.filePath, snapshot.directory]);
-        throw providerArtifactError('provider_artifact_upload_failed', uploadSafeMessage);
+        throw providerArtifactError('provider_artifact_upload_failed', uploadSafeMessage, readUploadFailureData(error));
     }
     finally {
         await node_fs_1.promises.rm(snapshot.directory, { recursive: true, force: true }).catch(() => undefined);
@@ -867,6 +885,7 @@ async function resolveProviderDeliveryArtifacts(input) {
         uploadLargeFile: input.uploadLargeFile,
         verifyAvailability: input.verifyAvailability,
         largeUploader: input.largeUploader,
+        mvcSponsorClient: input.mvcSponsorClient,
     });
     const publicResponseText = stripLocalCandidateLines(responseText, localFile.lineIndexes);
     const workspaceScrubbedResponseText = await scrubExecutionWorkspacePathMentions(publicResponseText, input.executionCwd);

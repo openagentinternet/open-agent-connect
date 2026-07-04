@@ -10,6 +10,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const metafileUrls_1 = require("./metafileUrls");
 const metafileVerifier_1 = require("./metafileVerifier");
 const uploadFile_1 = require("./uploadFile");
+const mvcSponsorDirectUpload_1 = require("./mvcSponsorDirectUpload");
 exports.DIRECT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
 exports.LARGE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 function normalizeText(value) {
@@ -94,12 +95,23 @@ async function uploadLargeFileToChain(input) {
     const extension = node_path_1.default.extname(resolvedPath).toLowerCase();
     const contentType = normalizeText(input.contentType) || (0, uploadFile_1.inferUploadContentType)(resolvedPath);
     if (stat.size <= directMaxBytes) {
-        const directResult = await (0, uploadFile_1.uploadLocalFileToChain)({
-            filePath: resolvedPath,
-            contentType,
-            network,
-            signer: input.signer,
-        });
+        const directResult = network.toLowerCase() === 'mvc' && input.mvcSponsorClient
+            ? await (0, mvcSponsorDirectUpload_1.uploadMvcSponsorDirectFile)({
+                filePath: resolvedPath,
+                fileName: node_path_1.default.basename(resolvedPath),
+                contentType,
+                bytes: stat.size,
+                extension,
+                network,
+                signer: input.signer,
+                mvcSponsorClient: input.mvcSponsorClient,
+            })
+            : await (0, uploadFile_1.uploadLocalFileToChain)({
+                filePath: resolvedPath,
+                contentType,
+                network,
+                signer: input.signer,
+            });
         const result = withCanonicalUrls({
             ...directResult,
             uploadMode: 'direct',

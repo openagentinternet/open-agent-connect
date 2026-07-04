@@ -312,6 +312,7 @@ function isAddressInUseError(error) {
 const SUPPORTED_CONFIG_KEYS = new Set([
     'a2a.simplemsgListenerEnabled',
     'chain.defaultWriteNetwork',
+    'chain.mvcSponsorUploadEnabled',
 ]);
 function isRecord(value) {
     return typeof value === 'object' && value !== null;
@@ -320,7 +321,7 @@ function isSupportedConfigKey(key) {
     return SUPPORTED_CONFIG_KEYS.has(key);
 }
 function isSupportedBooleanConfigKey(key) {
-    return key === 'a2a.simplemsgListenerEnabled';
+    return key === 'a2a.simplemsgListenerEnabled' || key === 'chain.mvcSponsorUploadEnabled';
 }
 function readConfigValue(config, key) {
     if (key === 'a2a.simplemsgListenerEnabled') {
@@ -328,6 +329,9 @@ function readConfigValue(config, key) {
     }
     if (key === 'chain.defaultWriteNetwork') {
         return config.chain.defaultWriteNetwork;
+    }
+    if (key === 'chain.mvcSponsorUploadEnabled') {
+        return config.chain.mvcSponsorUploadEnabled;
     }
     return config.chain.defaultWriteNetwork;
 }
@@ -338,6 +342,15 @@ function writeConfigValue(config, key, value) {
             chain: {
                 ...config.chain,
                 defaultWriteNetwork: value,
+            },
+        };
+    }
+    if (key === 'chain.mvcSponsorUploadEnabled') {
+        return {
+            ...config,
+            chain: {
+                ...config.chain,
+                mvcSponsorUploadEnabled: value === true,
             },
         };
     }
