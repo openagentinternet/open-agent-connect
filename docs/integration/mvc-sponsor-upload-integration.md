@@ -132,6 +132,7 @@ Sponsor is only attempted when all of the following are true:
 - the target network is `mvc`
 - the file size is at or below the caller's sponsor direct limit (`2 MiB` by default, `5 MiB` in the daemon `file upload-large` handler)
 - the caller provided `mvcSponsorClient`
+- the sponsor service accepts the exact transaction at `pre`, including current quota and fee-policy checks
 
 If any of those conditions is false:
 
@@ -140,6 +141,8 @@ If any of those conditions is false:
 - `feeAssist` is omitted unless the sponsor path was actually attempted and then fell back
 
 This means "sponsor enabled by default" does not mean "all file uploads are sponsored". It only covers the eligible direct MVC path.
+
+For `file upload-large`, the local size window and the sponsor service's runtime approval are separate boundaries. A `2 MiB` to `5 MiB` direct MVC file can enter the sponsor path, but `pre` can still reject it when the address does not have enough remaining quota, the transaction exceeds the service's per-order fee policy, or the sponsor provider cannot accept the exact transaction at that moment.
 
 ---
 
@@ -286,6 +289,8 @@ But do not treat `address/info.availableAmount` as the final approval signal.
 The authoritative decision still happens at `pre`, because the real sponsor fee depends on:
 
 - the exact prepared transaction
+- the remaining quota for that MVC address
+- service-side per-order fee policy such as `max_fee_per_order`
 - current sponsor-side UTXOs
 - service-side rules at that moment
 
