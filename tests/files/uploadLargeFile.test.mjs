@@ -12,6 +12,7 @@ const {
 } = require('../../dist/core/chain/mvcPendingUtxos.js');
 const {
   DIRECT_UPLOAD_MAX_BYTES,
+  FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
   LARGE_UPLOAD_MAX_BYTES,
   uploadLargeFileToChain,
 } = require('../../dist/core/files/uploadLargeFile.js');
@@ -289,6 +290,94 @@ test('uploadLargeFileToChain omits feeAssist for non-MVC direct uploads even wit
   assert.equal(sponsorCalls.length, 0);
   assert.equal(result.uploadMode, 'direct');
   assert.equal('feeAssist' in result, false);
+});
+
+test('uploadLargeFileToChain keeps self-paid direct uploads above 2 MiB on the direct path', async () => {
+  const { filePath } = await tempFile('mid-sized-direct.bin', (2 * 1024 * 1024) + 1);
+  const directCalls = [];
+  const largeCalls = [];
+
+  const result = await uploadLargeFileToChain({
+    filePath,
+    network: 'mvc',
+    directMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
+    sponsorDirectMaxBytes: DIRECT_UPLOAD_MAX_BYTES,
+    signer: fakeSigner(directCalls),
+    largeUploader: {
+      upload: async (input) => {
+        largeCalls.push(input);
+        throw new Error('large uploader should not be called');
+      },
+    },
+  });
+
+  assert.equal(directCalls.length, 1);
+  assert.equal(largeCalls.length, 0);
+  assert.equal(result.uploadMode, 'direct');
+  assert.equal(result.bytes, (2 * 1024 * 1024) + 1);
+});
+
+test('uploadLargeFileToChain bypasses sponsor above 2 MiB even when the sponsor client is available', async () => {
+  const { filePath } = await tempFile('mid-sized-self-paid.bin', (2 * 1024 * 1024) + 1);
+  const directCalls = [];
+  const sponsorCalls = [];
+  const largeCalls = [];
+
+  const result = await uploadLargeFileToChain({
+    filePath,
+    network: 'mvc',
+    directMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
+    sponsorDirectMaxBytes: DIRECT_UPLOAD_MAX_BYTES,
+    signer: fakeSponsorSigner(directCalls),
+    mvcSponsorClient: createSponsorClient(sponsorCalls),
+    largeUploader: {
+      upload: async (input) => {
+        largeCalls.push(input);
+        throw new Error('large uploader should not be called');
+      },
+    },
+  });
+
+  assert.equal(directCalls.length, 1);
+  assert.equal(sponsorCalls.length, 0);
+  assert.equal(largeCalls.length, 0);
+  assert.equal(result.uploadMode, 'direct');
+  assert.equal('feeAssist' in result, false);
+});
+
+test('uploadLargeFileToChain routes sponsor above 2 MiB when sponsorDirectMaxBytes matches the widened direct limit', async () => {
+  const restore = patchMvcUtxos();
+  try {
+    const { filePath } = await tempFile('mid-sized-sponsored.bin', (2 * 1024 * 1024) + 1);
+    const directCalls = [];
+    const sponsorCalls = [];
+    const largeCalls = [];
+
+    const result = await uploadLargeFileToChain({
+      filePath,
+      network: 'mvc',
+      directMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
+      sponsorDirectMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
+      signer: fakeSponsorSigner(directCalls),
+      mvcSponsorClient: createSponsorClient(sponsorCalls),
+      largeUploader: {
+        upload: async (input) => {
+          largeCalls.push(input);
+          throw new Error('large uploader should not be called');
+        },
+      },
+    });
+
+    assert.equal(directCalls.length, 0);
+    assert.deepEqual(sponsorCalls.map(([name]) => name), ['getAddressInfo', 'getChallenge', 'preSponsor', 'commitSponsor', 'getAddressInfo']);
+    assert.equal(largeCalls.length, 0);
+    assert.equal(result.uploadMode, 'direct');
+    assert.equal(result.bytes, (2 * 1024 * 1024) + 1);
+    assert.equal(result.feeAssist.used, true);
+    assert.equal(result.feeAssist.mode, 'mvc_sponsor_v2');
+  } finally {
+    restore();
+  }
 });
 
 test('uploadLargeFileToChain calls the injected large uploader for files above DIRECT_UPLOAD_MAX_BYTES', async () => {

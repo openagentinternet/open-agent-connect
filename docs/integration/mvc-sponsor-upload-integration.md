@@ -8,10 +8,10 @@ This repository already has a production sponsor integration for **direct MVC fi
 The current production path is intentionally narrow:
 
 - only for `mvc`
-- only for direct uploads at or below `2 MiB`
+- only for direct uploads at or below `5 MiB` in the daemon `file upload-large` entry
 - only for the `/file` inscription shape used by `upload-large`
 
-For non-MVC uploads, or MVC files above the direct-upload threshold, OAC does not use sponsor today.
+For non-MVC uploads, or MVC files above the command's sponsor direct-upload threshold, OAC does not use sponsor today. The `file upload-large` command keeps direct upload up to `5 MiB`, then switches to chunked MVC upload above that.
 
 ---
 
@@ -103,6 +103,26 @@ const shouldUseSponsor = network === 'mvc' && config.chain.mvcSponsorUploadEnabl
 
 Do not instantiate the sponsor client when the gate is off. A disabled switch should fully bypass the sponsor service.
 
+If you need the exact `file upload-large` behavior from the daemon handlers, pass:
+
+```ts
+import {
+  FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
+  uploadLargeFileToChain,
+} from '../core/files/uploadLargeFile';
+
+const result = await uploadLargeFileToChain({
+  filePath,
+  network,
+  signer,
+  directMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
+  sponsorDirectMaxBytes: FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES,
+  mvcSponsorClient: shouldUseSponsor ? createMvcSponsorV2Client() : undefined,
+});
+```
+
+Other internal callers should usually keep the defaults unless they also intentionally want the `upload-large` command's wider direct window and matching sponsor eligibility.
+
 ---
 
 ## 4. Eligibility rules
@@ -110,8 +130,9 @@ Do not instantiate the sponsor client when the gate is off. A disabled switch sh
 Sponsor is only attempted when all of the following are true:
 
 - the target network is `mvc`
-- the file size is at or below `DIRECT_UPLOAD_MAX_BYTES` (`2 * 1024 * 1024`)
+- the file size is at or below the caller's sponsor direct limit (`2 MiB` by default, `5 MiB` in the daemon `file upload-large` handler)
 - the caller provided `mvcSponsorClient`
+- the sponsor service accepts the exact transaction at `pre`, including current quota and fee-policy checks
 
 If any of those conditions is false:
 
@@ -120,6 +141,8 @@ If any of those conditions is false:
 - `feeAssist` is omitted unless the sponsor path was actually attempted and then fell back
 
 This means "sponsor enabled by default" does not mean "all file uploads are sponsored". It only covers the eligible direct MVC path.
+
+For `file upload-large`, the local size window and the sponsor service's runtime approval are separate boundaries. A `2 MiB` to `5 MiB` direct MVC file can enter the sponsor path, but `pre` can still reject it when the address does not have enough remaining quota, the transaction exceeds the service's per-order fee policy, or the sponsor provider cannot accept the exact transaction at that moment.
 
 ---
 
@@ -266,6 +289,8 @@ But do not treat `address/info.availableAmount` as the final approval signal.
 The authoritative decision still happens at `pre`, because the real sponsor fee depends on:
 
 - the exact prepared transaction
+- the remaining quota for that MVC address
+- service-side per-order fee policy such as `max_fee_per_order`
 - current sponsor-side UTXOs
 - service-side rules at that moment
 

@@ -7,6 +7,7 @@ import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../help
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
+const { FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES } = require('../../dist/core/files/uploadLargeFile.js');
 const {
   createMetabotProfile,
   getMetabotProfile,
@@ -519,7 +520,7 @@ test('default file.uploadLarge preserves unavailable uploader failure code', asy
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const filePath = path.join(homeDir, 'large-video.mp4');
-  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeFile(filePath, Buffer.alloc(FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES + 1));
   await createRuntimeStateStore(homeDir).writeState({
     identity: {
       metabotId: 1,
@@ -613,6 +614,51 @@ test('default file.uploadLarge returns sponsor feeAssist metadata on direct MVC 
   assert.equal(uploadCalls.length, 1);
   assert.equal(Boolean(uploadCalls[0].mvcSponsorClient), true);
   assert.equal(sponsorFactoryCalls, 1);
+});
+
+test('default file.uploadLarge extends the sponsor direct limit to 5 MiB for mid-sized MVC uploads', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-large-upload-sponsor-mid-sized-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const filePath = path.join(homeDir, 'mid-sized-upload.bin');
+  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeRuntimeIdentity(homeDir, 'Sponsor Mid Sized Upload Bot');
+
+  const uploadCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    uploadLargeFile: async (input) => {
+      uploadCalls.push(input);
+      return makeDirectUploadResult(input, {
+        feeAssist: {
+          attempted: true,
+          used: true,
+          mode: 'mvc_sponsor_v2',
+          sponsor: 'mvc_sponsor_v2',
+          stage: 'done',
+        },
+      });
+    },
+    createMvcSponsorClient: () => ({}),
+  });
+
+  const result = await handlers.file.uploadLarge({
+    filePath,
+    contentType: 'application/octet-stream',
+    network: 'mvc',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.uploadMode, 'direct');
+  assert.equal(result.data.feeAssist.used, true);
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].directMaxBytes, FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES);
+  assert.equal(uploadCalls[0].sponsorDirectMaxBytes, FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES);
+  assert.equal(Boolean(uploadCalls[0].mvcSponsorClient), true);
 });
 
 test('default file.uploadLarge bypasses sponsor entirely when chain.mvcSponsorUploadEnabled is false', async (t) => {
@@ -717,7 +763,7 @@ test('default file.uploadLarge passes the injected production large uploader', a
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const filePath = path.join(homeDir, 'large-video.mp4');
-  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeFile(filePath, Buffer.alloc(FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES + 1));
   await createRuntimeStateStore(homeDir).writeState({
     identity: {
       metabotId: 1,
@@ -791,7 +837,7 @@ test('default file.uploadLarge uses the factory production large uploader when e
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const filePath = path.join(homeDir, 'large-video.mp4');
-  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeFile(filePath, Buffer.alloc(FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES + 1));
   await createRuntimeStateStore(homeDir).writeState({
     identity: {
       metabotId: 1,
@@ -859,7 +905,7 @@ test('default file.uploadLarge preserves known large uploader failure codes', as
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const filePath = path.join(homeDir, 'large-video.mp4');
-  await writeFile(filePath, Buffer.alloc((2 * 1024 * 1024) + 1));
+  await writeFile(filePath, Buffer.alloc(FILE_UPLOAD_LARGE_DIRECT_MAX_BYTES + 1));
   await createRuntimeStateStore(homeDir).writeState({
     identity: {
       metabotId: 1,
