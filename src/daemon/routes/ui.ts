@@ -31,6 +31,9 @@ const UI_ASSET_ROUTES = [
   { prefix: '/ui/assets/platforms/', directory: 'platforms', label: 'Platform' },
   { prefix: '/ui/assets/chains/', directory: 'chains', label: 'Chain' },
 ] as const;
+const BARE_BROWSER_PIN_ID_PATTERN = /^[0-9a-f]{64}i\d+$/iu;
+const BARE_BROWSER_DOMAIN_ALIAS_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/iu;
+const BARE_BROWSER_GLOBAL_META_ID_PATTERN = /^id[qpzryt]1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/iu;
 
 type LocalUiPageBuilder = (i18n: LocalUiI18nContext) => LocalUiPageDefinition;
 
@@ -183,6 +186,28 @@ function getBrowserLanguagePreference(req: Parameters<RouteHandler>[0]['req']): 
   return null;
 }
 
+function normalizeBareBrowserResourceId(value: string): string {
+  return decodeURIComponent(value).trim().toLowerCase();
+}
+
+function canonicalBareBrowserPath(url: URL): string | null {
+  const match = url.pathname.match(/^\/browser\/([^/?#]+)$/u);
+  if (!match) {
+    return null;
+  }
+  const resourceId = normalizeBareBrowserResourceId(match[1]);
+  if (!resourceId) {
+    return null;
+  }
+  if (BARE_BROWSER_PIN_ID_PATTERN.test(resourceId)) {
+    return `/browser/pin/${encodeURIComponent(resourceId)}${url.search}`;
+  }
+  if (BARE_BROWSER_DOMAIN_ALIAS_PATTERN.test(resourceId) || BARE_BROWSER_GLOBAL_META_ID_PATTERN.test(resourceId)) {
+    return `/browser/metaid/${encodeURIComponent(resourceId)}${url.search}`;
+  }
+  return null;
+}
+
 async function serveBundledUiAsset(context: Parameters<RouteHandler>[0]): Promise<boolean> {
   const { req, url } = context;
   const route = UI_ASSET_ROUTES.find((candidate) => url.pathname.startsWith(candidate.prefix));
@@ -227,6 +252,17 @@ async function serveBundledUiAsset(context: Parameters<RouteHandler>[0]): Promis
 
 export const handleUiRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
+  const canonicalBareBrowser = canonicalBareBrowserPath(url);
+
+  if (canonicalBareBrowser) {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    context.res.writeHead(302, { Location: canonicalBareBrowser });
+    context.res.end();
+    return true;
+  }
 
   if (isBrowserPagePath(url.pathname)) {
     if (req.method !== 'GET') {

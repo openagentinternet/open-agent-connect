@@ -178,17 +178,52 @@ test('Browser settings expose and persist browser base URL configuration by acti
       metasoP2PBaseUrl: 'https://so.example.test/',
       manApiBaseUrl: 'https://manapi.example.test/',
       botHomepageTemplateId: 'compact-list',
+      nameResolution: {
+        enabled: true,
+        ens: {
+          enabled: true,
+          rpcUrls: ['https://rpc-one.example.test', 'https://rpc-two.example.test'],
+          textKey: 'org.openagentinternet.uri',
+        },
+      },
     },
   });
   assert.equal(updated.ok, true);
   assert.equal(updated.data.browser.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(updated.data.browser.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(updated.data.browser.botHomepageTemplateId, 'compact-list');
+  assert.deepEqual(updated.data.browser.nameResolution, {
+    enabled: true,
+    ens: {
+      enabled: true,
+      chainId: 1,
+      rpcUrls: ['https://rpc-one.example.test', 'https://rpc-two.example.test'],
+      textKey: 'org.openagentinternet.uri',
+    },
+  });
+  assert.deepEqual(updated.data.effectiveBrowser.nameResolution, {
+    enabled: true,
+    ens: {
+      enabled: true,
+      chainId: 1,
+      rpcUrls: ['https://rpc-one.example.test', 'https://rpc-two.example.test'],
+      textKey: 'org.openagentinternet.uri',
+    },
+  });
 
   const configOnDisk = await createConfigStore(active.homeDir).read();
   assert.equal(configOnDisk.browser.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(configOnDisk.browser.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(configOnDisk.browser.botHomepageTemplateId, 'compact-list');
+  assert.deepEqual(configOnDisk.browser.nameResolution, {
+    enabled: true,
+    ens: {
+      enabled: true,
+      chainId: 1,
+      rpcUrls: ['https://rpc-one.example.test', 'https://rpc-two.example.test'],
+      textKey: 'org.openagentinternet.uri',
+    },
+  });
 });
 
 test('Browser trusted metaid-pin-write uses the selected signer after confirmation and returns sanitized bridge result', async (t) => {

@@ -50,6 +50,62 @@ function bufferResponse(buffer, status = 200) {
   };
 }
 
+function createEnsNameAliasProviderFactory(options = {}) {
+  const aliases = options.aliases ?? {};
+  const calls = options.calls ?? [];
+  const resolvedAt = options.resolvedAt ?? 1781000000000;
+
+  return (config) => {
+    calls.push({
+      phase: 'create',
+      chainId: config.chainId,
+      rpcUrls: [...config.rpcUrls],
+      textKey: config.textKey,
+    });
+    return {
+      id: 'ens',
+      supportsName(name) {
+        return String(name ?? '').toLowerCase().endsWith('.eth');
+      },
+      async resolveNameAlias(request) {
+        const normalizedName = String(request.name ?? '').trim().toLowerCase();
+        calls.push({
+          phase: 'resolve',
+          inputUri: request.inputUri,
+          inputScheme: request.inputScheme,
+          name: normalizedName,
+          rpcUrls: [...config.rpcUrls],
+          textKey: config.textKey,
+        });
+        const canonicalUri = aliases[normalizedName];
+        if (!canonicalUri) {
+          return {
+            ok: false,
+            state: 'failed',
+            code: 'name_alias_not_found',
+            message: 'ENS text record was missing or empty.',
+          };
+        }
+        return {
+          ok: true,
+          state: 'success',
+          data: {
+            provider: 'ens',
+            normalizedName,
+            textKey: config.textKey,
+            canonicalUri,
+            resolvedAt,
+            verificationState: 'partial',
+            raw: {
+              rpcUrls: [...config.rpcUrls],
+            },
+          },
+        };
+      },
+    };
+  };
+}
+
 async function createAdapter(input) {
   return createOacBrowserHostAdapter({
     homeDir: input.homeDir,
@@ -62,6 +118,8 @@ async function createAdapter(input) {
     privateChat: input.privateChat,
     serviceCall: input.serviceCall,
     writeMetaIdPin: input.writeMetaIdPin,
+    nameAliasProviders: input.nameAliasProviders,
+    ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
     resolveActorWriteContext: async (rawActor) => {
       const slug = typeof rawActor === 'string' ? rawActor.trim() : '';
       if (!slug) {
@@ -302,6 +360,14 @@ test('OAC browser host adapter persists Browser settings for the selected profil
       metasoP2PBaseUrl: 'https://so.example.test/',
       manApiBaseUrl: 'https://manapi.example.test/',
       botHomepageTemplateId: 'compact-list',
+      nameResolution: {
+        enabled: true,
+        ens: {
+          enabled: true,
+          rpcUrls: ['https://rpc-one.example.test', 'https://rpc-two.example.test'],
+          textKey: 'org.openagentinternet.uri',
+        },
+      },
     },
   });
 
@@ -309,11 +375,38 @@ test('OAC browser host adapter persists Browser settings for the selected profil
   assert.equal(updated.data.browser.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(updated.data.browser.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(updated.data.browser.botHomepageTemplateId, 'compact-list');
+  assert.deepEqual(updated.data.browser.nameResolution, {
+    enabled: true,
+    ens: {
+      enabled: true,
+      chainId: 1,
+      rpcUrls: ['https://rpc-one.example.test', 'https://rpc-two.example.test'],
+      textKey: 'org.openagentinternet.uri',
+    },
+  });
+  assert.deepEqual(updated.data.effectiveBrowser.nameResolution, {
+    enabled: true,
+    ens: {
+      enabled: true,
+      chainId: 1,
+      rpcUrls: ['https://rpc-one.example.test', 'https://rpc-two.example.test'],
+      textKey: 'org.openagentinternet.uri',
+    },
+  });
 
   const configOnDisk = await createConfigStore(active.homeDir).read();
   assert.equal(configOnDisk.browser.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(configOnDisk.browser.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(configOnDisk.browser.botHomepageTemplateId, 'compact-list');
+  assert.deepEqual(configOnDisk.browser.nameResolution, {
+    enabled: true,
+    ens: {
+      enabled: true,
+      chainId: 1,
+      rpcUrls: ['https://rpc-one.example.test', 'https://rpc-two.example.test'],
+      textKey: 'org.openagentinternet.uri',
+    },
+  });
 });
 
 test('OAC browser host adapter resolves metaid URIs with the selected profile Browser config', async (t) => {
@@ -353,6 +446,226 @@ test('OAC browser host adapter resolves metaid URIs with the selected profile Br
   assert.equal(resolved.ok, true);
   assert.equal(resolved.data.renderer.type, 'bot-page');
   assert.equal(resolved.data.renderer.templateId, 'compact-list');
+});
+
+test('OAC browser host adapter resolves bare ENS aliases with Browser nameResolution settings', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-ens-bare-alias');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const ensCalls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'ENS Bare Alias Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1ensbarealias',
+    mvcAddress: '18EnsBareAlias',
+  });
+  const fixture = JSON.parse(await readFile(new URL('../fixtures/browser/botHomepage.v1.json', import.meta.url), 'utf8'));
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ code: 0, message: '', data: fixture }),
+    }),
+    ensNameAliasProviderFactory: createEnsNameAliasProviderFactory({
+      aliases: {
+        'sunnyfung.eth': `metaid://${LOCAL_GLOBAL_META_ID}`,
+      },
+      calls: ensCalls,
+    }),
+  });
+
+  await adapter.updateSettings({
+    actorId: active.slug,
+    browser: {
+      metasoP2PBaseUrl: 'https://so.example.test',
+      botHomepageTemplateId: 'compact-list',
+      nameResolution: {
+        enabled: true,
+        ens: {
+          enabled: true,
+          rpcUrls: ['https://rpc.example'],
+          textKey: 'org.openagentinternet.uri',
+        },
+      },
+    },
+  });
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: 'sunnyfung.eth',
+  });
+
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.data.uri, 'metaid://sunnyfung.eth');
+  assert.equal(resolved.data.normalizedUri, 'metaid://sunnyfung.eth');
+  assert.equal(resolved.data.renderer.type, 'bot-page');
+  assert.equal(resolved.data.renderer.templateId, 'compact-list');
+  assert.equal(resolved.data.source.raw.nameAlias.aliasUri, 'metaid://sunnyfung.eth');
+  assert.equal(resolved.data.source.raw.nameAlias.canonicalUri, `metaid://${LOCAL_GLOBAL_META_ID}`);
+  assert.deepEqual(ensCalls, [
+    {
+      phase: 'create',
+      chainId: 1,
+      rpcUrls: ['https://rpc.example'],
+      textKey: 'org.openagentinternet.uri',
+    },
+    {
+      phase: 'resolve',
+      inputUri: 'metaid://sunnyfung.eth',
+      inputScheme: 'metaid',
+      name: 'sunnyfung.eth',
+      rpcUrls: ['https://rpc.example'],
+      textKey: 'org.openagentinternet.uri',
+    },
+  ]);
+});
+
+test('OAC browser host adapter resolves metaid ENS aliases while preserving the alias URI', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-ens-metaid-alias');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'ENS MetaID Alias Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1ensmetaidalias',
+    mvcAddress: '18EnsMetaIDAlias',
+  });
+  const fixture = JSON.parse(await readFile(new URL('../fixtures/browser/botHomepage.v1.json', import.meta.url), 'utf8'));
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ code: 0, message: '', data: fixture }),
+    }),
+    ensNameAliasProviderFactory: createEnsNameAliasProviderFactory({
+      aliases: {
+        'sunnyfung.eth': `metaid://${LOCAL_GLOBAL_META_ID}`,
+      },
+    }),
+  });
+
+  await adapter.updateSettings({
+    actorId: active.slug,
+    browser: {
+      metasoP2PBaseUrl: 'https://so.example.test',
+      nameResolution: {
+        enabled: true,
+        ens: {
+          enabled: true,
+          rpcUrls: ['https://rpc.example'],
+          textKey: 'org.openagentinternet.uri',
+        },
+      },
+    },
+  });
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: 'metaid://sunnyfung.eth',
+  });
+
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.data.uri, 'metaid://sunnyfung.eth');
+  assert.equal(resolved.data.normalizedUri, 'metaid://sunnyfung.eth');
+  assert.equal(resolved.data.actions.find((action) => action.kind === 'copy')?.uri, 'metaid://sunnyfung.eth');
+  assert.equal(resolved.data.source.raw.nameAlias.aliasUri, 'metaid://sunnyfung.eth');
+  assert.equal(resolved.data.source.raw.nameAlias.canonicalUri, `metaid://${LOCAL_GLOBAL_META_ID}`);
+});
+
+test('OAC browser host adapter returns name_resolution_unavailable when ENS resolution is disabled', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-ens-disabled');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const ensCalls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'ENS Disabled Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1ensdisabledbot',
+    mvcAddress: '18EnsDisabled',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    ensNameAliasProviderFactory: createEnsNameAliasProviderFactory({
+      aliases: {
+        'sunnyfung.eth': `metaid://${LOCAL_GLOBAL_META_ID}`,
+      },
+      calls: ensCalls,
+    }),
+  });
+
+  await adapter.updateSettings({
+    actorId: active.slug,
+    browser: {
+      nameResolution: {
+        enabled: true,
+        ens: {
+          enabled: false,
+          rpcUrls: ['https://rpc.example'],
+          textKey: 'org.openagentinternet.uri',
+        },
+      },
+    },
+  });
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: 'metaid://sunnyfung.eth',
+  });
+
+  assert.equal(resolved.ok, false);
+  assert.equal(resolved.code, 'name_resolution_unavailable');
+  assert.deepEqual(ensCalls, []);
+});
+
+test('OAC browser host adapter returns name_resolution_unavailable when ENS rpcUrls are explicitly empty', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-ens-empty-rpc');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const ensCalls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'ENS Empty RPC Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1ensemptyrpcbot',
+    mvcAddress: '18EnsEmptyRpc',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    ensNameAliasProviderFactory: createEnsNameAliasProviderFactory({
+      aliases: {
+        'sunnyfung.eth': `metaid://${LOCAL_GLOBAL_META_ID}`,
+      },
+      calls: ensCalls,
+    }),
+  });
+
+  await adapter.updateSettings({
+    actorId: active.slug,
+    browser: {
+      nameResolution: {
+        enabled: true,
+        ens: {
+          enabled: true,
+          rpcUrls: [],
+          textKey: 'org.openagentinternet.uri',
+        },
+      },
+    },
+  });
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: 'metaid://sunnyfung.eth',
+  });
+
+  assert.equal(resolved.ok, false);
+  assert.equal(resolved.code, 'name_resolution_unavailable');
+  assert.deepEqual(ensCalls, []);
 });
 
 test('OAC browser host adapter resolves zip-backed metaapp URIs to local preview assets', async (t) => {

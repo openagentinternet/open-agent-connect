@@ -26,6 +26,8 @@ import type {
 } from '@openagentinternet/agent-browser-host-contract';
 import {
   applyBrowserSettingsUpdate,
+  type BrowserConfigContainer,
+  type BrowserNameAliasProvider,
   type BrowserCommandResult as CoreBrowserCommandResult,
   createBrowserSettingsSnapshot,
   type MetaAppGalleryRecord,
@@ -33,6 +35,7 @@ import {
   resolveBrowserResource,
   resolveMetaAppPinToRecord,
 } from '@openagentinternet/agent-browser-core';
+import { createBrowserNameAliasProviders } from '@openagentinternet/agent-browser-name-resolvers';
 import {
   browserFailure,
   browserManualActionRequired,
@@ -116,6 +119,12 @@ export interface CreateOacBrowserHostAdapterInput {
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   confirmationTtlMs?: number;
+  nameAliasProviders?: BrowserNameAliasProvider[];
+  ensNameAliasProviderFactory?: (config: {
+    chainId: 1;
+    rpcUrls: string[];
+    textKey: string;
+  }) => BrowserNameAliasProvider;
 }
 
 interface PendingPinWriteConfirmation {
@@ -136,6 +145,72 @@ function normalizeText(value: unknown): string {
 function normalizePreferredCreateHost(value: unknown): string | null {
   const provider = normalizeText(value);
   return provider && provider !== 'custom' && isLlmProvider(provider) ? provider : null;
+}
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function hasExplicitEmptyEnsRpcUrls(config: BrowserConfigContainer, env: NodeJS.ProcessEnv): boolean {
+  if (normalizeStringList(env.METABOT_BROWSER_ENS_RPC_URLS).length > 0) {
+    return false;
+  }
+  const browser = browserRecord(config.browser);
+  const nameResolution = browserRecord(browser.nameResolution);
+  const ens = browserRecord(nameResolution.ens);
+  return hasOwn(ens, 'rpcUrls') && normalizeStringList(ens.rpcUrls).length === 0;
+}
+
+function resolveBrowserHostConfig(input: {
+  config: BrowserConfigContainer;
+  env: NodeJS.ProcessEnv;
+  configuredNameAliasProviders?: BrowserNameAliasProvider[];
+  ensNameAliasProviderFactory?: CreateOacBrowserHostAdapterInput['ensNameAliasProviderFactory'];
+}): {
+  browserConfig: ReturnType<typeof resolveBrowserConfig>;
+  nameAliasProviders: BrowserNameAliasProvider[];
+} {
+  const browserConfig = resolveBrowserConfig(input.config, input.env);
+  const nameAliasConfig = hasExplicitEmptyEnsRpcUrls(input.config, input.env)
+    ? {
+        ...browserConfig,
+        nameResolution: {
+          ...browserConfig.nameResolution,
+          ens: {
+            ...browserConfig.nameResolution.ens,
+            enabled: false,
+            rpcUrls: [],
+          },
+        },
+      }
+    : browserConfig;
+
+  return {
+    browserConfig,
+    nameAliasProviders: createBrowserNameAliasProviders({
+      configured: input.configuredNameAliasProviders,
+      config: nameAliasConfig,
+      ...(input.ensNameAliasProviderFactory
+        ? { ensNameAliasProviderFactory: input.ensNameAliasProviderFactory }
+        : {}),
+    }),
+  };
 }
 
 function actorSelector(input?: BrowserActorInput & { from?: string }): string {
@@ -1089,12 +1164,21 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     const actor = await resolveActor(resolveInput);
     if ('failure' in actor) return toBrowserResult(actor.failure);
     const config = await createConfigStore(actor.homeDir).read();
-    const browserConfig = resolveBrowserConfig(config, env);
+    const {
+      browserConfig,
+      nameAliasProviders,
+    } = resolveBrowserHostConfig({
+      config,
+      env,
+      configuredNameAliasProviders: input.nameAliasProviders,
+      ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
+    });
     const artifactCache = createMetaAppArtifactCacheStore(actor.homeDir);
     return resolveBrowserResource({
       uri: resolveInput.uri,
       config: browserConfig,
       fetch: fetchImpl,
+      nameAliasProviders,
       metaAppResolve: async (pinId): Promise<CoreBrowserCommandResult<MetaAppGalleryRecord>> => {
         return resolveMetaAppPinToRecord({
           pinId,

@@ -61,6 +61,7 @@
     "@opcat-labs/scrypt-ts-opcat": "^4.0.0",
     "@openagentinternet/agent-browser-core": "0.3.6",
     "@openagentinternet/agent-browser-host-contract": "0.3.6",
+    "@openagentinternet/agent-browser-name-resolvers": "0.3.6",
     "@openagentinternet/agent-browser-ui": "0.3.6",
     "@scure/bip39": "^1.6.0",
     "bitcoinjs-lib": "^6.1.6",

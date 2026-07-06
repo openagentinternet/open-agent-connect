@@ -1,7 +1,7 @@
 import {
   createDefaultBrowserConfig,
-  DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
   type BotHomepageTemplateId,
+  type BrowserNameResolutionConfig,
 } from '@openagentinternet/agent-browser-core';
 
 export interface A2AConfig {
@@ -20,8 +20,10 @@ export interface ChainConfig {
 
 export interface BrowserConfig {
   metasoP2PBaseUrl: string;
-  metafileContentBaseUrl?: string;
-  manApiBaseUrl?: string;
+  metafileContentBaseUrl: string;
+  manApiBaseUrl: string;
+  renderCustomBotPages: boolean;
+  nameResolution: BrowserNameResolutionConfig;
   blockExplorerBaseUrl?: string;
   walletApiBaseUrl?: string;
   botHomepageTemplateId: BotHomepageTemplateId;
@@ -40,12 +42,6 @@ export function isDefaultWriteNetwork(value: unknown): value is DefaultWriteNetw
 }
 
 export function createDefaultConfig(): MetabotConfig {
-  // Source Browser URL defaults from core so it remains the single source of
-  // truth. Pick fields explicitly rather than spreading: core's
-  // BrowserBaseConfig is wider than OAC's BrowserConfig (it carries
-  // renderCustomBotPages/nameResolution) and defaults localMode to false.
-  // OAC keeps its own block explorer base URL because core 0.3.5 no longer
-  // carries that field.
   const browserDefaults = createDefaultBrowserConfig();
   return {
     chain: {
@@ -56,11 +52,8 @@ export function createDefaultConfig(): MetabotConfig {
       simplemsgListenerEnabled: true,
     },
     browser: {
-      metasoP2PBaseUrl: browserDefaults.metasoP2PBaseUrl,
-      metafileContentBaseUrl: browserDefaults.metafileContentBaseUrl,
-      manApiBaseUrl: browserDefaults.manApiBaseUrl,
+      ...browserDefaults,
       blockExplorerBaseUrl: DEFAULT_BLOCK_EXPLORER_BASE_URL,
-      botHomepageTemplateId: DEFAULT_BOT_HOMEPAGE_TEMPLATE_ID,
       defaultChainName: 'mvc',
       localMode: true,
     },

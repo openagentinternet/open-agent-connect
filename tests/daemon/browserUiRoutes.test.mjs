@@ -58,6 +58,18 @@ test('GET Browser deep links serve the Agent Internet Browser shell', async (t) 
   assert.match(pinHtml, /data-browser-uri-input/);
 });
 
+test('GET bare Browser alias routes redirect to the canonical deep-link path', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${baseUrl}/browser/sunnyfung.eth`, {
+    redirect: 'manual',
+  });
+
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('location'), '/browser/metaid/sunnyfung.eth');
+});
+
 test('serves Browser shell for /browser/map/simplebuzz/pin MAP routes', async (t) => {
   const { server, baseUrl } = await startServer();
   t.after(async () => server.close());
