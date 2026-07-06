@@ -181,6 +181,16 @@ test('buildChatPrompt includes chain write actor rules when metaBotSlug is provi
   assert.match(prompt, /Never omit `--from`/);
 });
 
+test('buildChatPrompt omits private chat skill actor hints when no skills are allowed', () => {
+  const prompt = buildChatPrompt(makeInput(), emptyPrivateChatAllowedSkillScope(), {
+    metaBotSlug: 'mb-75fe8aaf',
+  });
+  assert.doesNotMatch(prompt, /private chat skill performs uploads or config reads/);
+  assert.match(prompt, /Persona Immersion \(critical\)/);
+  assert.match(prompt, /Never say you are reading skills, checking context, or preparing to send a reply/);
+  assert.match(prompt, /No private chat skills are available for this turn/);
+});
+
 test('buildChatPrompt omits chain write actor rules without metaBotSlug', () => {
   const prompt = buildChatPrompt(makeInput());
   assert.doesNotMatch(prompt, /## Chain Write Actor/);
@@ -263,6 +273,13 @@ test('parseRunnerOutput strips planning preamble before skill reply', () => {
   assert.equal(result.content, '你说得对，第三项若只是「再问一个会写代码的 bot」，大概率是伪需求。');
 });
 
+test('parseRunnerOutput strips invisible private-chat execution narration before the real reply', () => {
+  const raw = '正在读取私聊技能并查找会话上下文，以便以 `agent-internet` 身份发送回复。\n正在以 `agent-internet` 身份发送私聊回复。\n感谢你帮查地址，确认是全新起点反而更清晰了。';
+  const result = parseRunnerOutput(raw);
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, '感谢你帮查地址，确认是全新起点反而更清晰了。');
+});
+
 test('buildChatPrompt includes persona immersion rules when skills are allowed', () => {
   const prompt = buildChatPrompt(makeInput(), {
     skills: ['andrej-karpathy-perspective'],
@@ -273,6 +290,26 @@ test('buildChatPrompt includes persona immersion rules when skills are allowed',
   assert.match(prompt, /Persona Immersion \(critical\)/);
   assert.match(prompt, /Never tell the user you are reading/);
   assert.match(prompt, /Do NOT open with a plan sentence/);
+});
+
+test('buildChatPrompt strips local execution narration from outbound history before reuse', () => {
+  const prompt = buildChatPrompt(makeInput({
+    recentMessages: [
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm1',
+        direction: 'outbound',
+        senderGlobalMetaId: 'self',
+        content: '正在读取私聊技能，以便以 `agent-internet` 身份发送回复。\n正在以 `agent-internet` 身份发送私聊回复。\n这是干净回复。',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 1000,
+      },
+    ],
+  }));
+  assert.match(prompt, /Me: 这是干净回复。/);
+  assert.doesNotMatch(prompt, /Me: 正在读取私聊技能/);
+  assert.doesNotMatch(prompt, /Me: 正在以 `agent-internet` 身份发送私聊回复/);
 });
 
 function createFakeRuntimeResolver(runtime, calls = {}) {

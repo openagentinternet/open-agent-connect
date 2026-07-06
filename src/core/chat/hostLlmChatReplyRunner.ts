@@ -34,6 +34,34 @@ function isPlanningPreambleLine(line: string): boolean {
   return false;
 }
 
+function isInvisibleExecutionLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (
+    /^(?:正在|查找|读取)/u.test(trimmed)
+    && /私聊技能|会话上下文|MetaBot 信息|相关 MetaBot 命令/u.test(trimmed)
+    && /发送(?:私聊)?回复|身份回复|身份发送回复|生成 Buzz 交易数据/u.test(trimmed)
+  ) {
+    return true;
+  }
+  if (
+    /^正在以\s+`[^`]+`\s+身份/u.test(trimmed)
+    && /发送(?:私聊)?回复/u.test(trimmed)
+  ) {
+    return true;
+  }
+  if (
+    /^Looking up /i.test(trimmed)
+    && /skill|context|conversation/i.test(trimmed)
+    && /reply|respond/i.test(trimmed)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function stripPlanningPreamble(value: string): string {
   const lines = value.split(/\r?\n/u);
   while (lines.length > 0) {
@@ -42,7 +70,7 @@ function stripPlanningPreamble(value: string): string {
       lines.shift();
       continue;
     }
-    if (isPlanningPreambleLine(line)) {
+    if (isPlanningPreambleLine(line) || isInvisibleExecutionLine(line)) {
       lines.shift();
       continue;
     }
@@ -117,14 +145,19 @@ function buildChatPrompt(
   }
 
   if (metaBotSlug) {
-    sections.push([
+    const actorLines = [
       '## Chain Write Actor (critical)',
       `You are replying as local MetaBot profile \`${metaBotSlug}\`.`,
       `- Any on-chain write MUST pass \`--from ${metaBotSlug}\` on every metabot CLI command.`,
       '- This includes `buzz post`, `file upload`, `chain write`, and `chat private`.',
       '- Never omit `--from` in this private chat turn; omission uses the host active identity and publishes under the wrong MetaBot.',
-      '- When a private chat skill performs uploads or config reads, keep the same `--from` slug on every related command.',
-    ].join('\n'));
+    ];
+    if (allowedSkillScope.skills.length > 0) {
+      actorLines.push(
+        '- When a private chat skill performs uploads or config reads, keep the same `--from` slug on every related command.',
+      );
+    }
+    sections.push(actorLines.join('\n'));
   }
 
   const strategyLines = [
@@ -153,6 +186,16 @@ function buildChatPrompt(
   ];
   sections.push(exitLines.join('\n'));
 
+  sections.push([
+    '## Persona Immersion (critical)',
+    '- Stay fully in character from the very first word of your reply.',
+    '- NEVER announce plans or internal actions: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
+    '- Never say you are reading skills, checking context, or preparing to send a reply.',
+    allowedSkillScope.skills.length > 0
+      ? '- Skill reading, research, and checkpoints are invisible — output only what the persona would say.'
+      : '- No private chat skills are available for this turn unless they are explicitly listed below.',
+  ].join('\n'));
+
   if (allowedSkillScope.skills.length > 0) {
     sections.push([
       '## Available Private Chat Skills',
@@ -160,12 +203,6 @@ function buildChatPrompt(
       'Read and apply them silently when they help answer the sender request.',
       'Never tell the user you are reading, loading, or following a skill.',
       ...allowedSkillScope.skills.map((skillName) => `- ${skillName}`),
-    ].join('\n'));
-    sections.push([
-      '## Persona Immersion (critical)',
-      '- Stay fully in character from the very first word of your reply.',
-      '- NEVER announce plans or internal actions: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
-      '- Skill reading, research, and checkpoints are invisible — output only what the persona would say.',
     ].join('\n'));
   }
 
@@ -189,9 +226,15 @@ function buildChatPrompt(
 
   const selfName = 'Me';
   const peerName = conversation.peerName || 'Peer';
-  const historyLines = recentMessages.map(msg => {
+  const historyLines = recentMessages.flatMap((msg) => {
     const name = msg.direction === 'outbound' ? selfName : peerName;
-    return `${name}: ${msg.content}`;
+    const normalizedContent = msg.direction === 'outbound'
+      ? stripPlanningPreamble(msg.content)
+      : normalizeText(msg.content);
+    if (!normalizedContent) {
+      return [];
+    }
+    return `${name}: ${normalizedContent}`;
   });
 
   if (historyLines.length > 0) {
