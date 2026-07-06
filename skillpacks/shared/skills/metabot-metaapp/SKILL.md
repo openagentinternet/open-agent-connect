@@ -61,6 +61,15 @@ map://simplemsg/conversation?peer=<globalMetaId>
 
 Use `https://` only for normal external web pages, not for MetaID resources that already have an Agent Internet URI.
 
+For assets that ship inside the MetaApp package, use relative URLs only.
+
+- Good: `assets/figures/diagram.png`, `./assets/figures/diagram.png`, `../shared/app.css`
+- Bad: `/assets/figures/diagram.png`, `/css/app.css`, `/js/app.js`
+
+A leading `/` resolves against the Browser host root, not the mounted MetaApp package. MetaApps open under routes such as `/browser/metaapp/<pinId>`, so root-absolute packaged asset URLs 404 even when the files exist inside the ZIP. Apply this rule to HTML, CSS `url(...)`, Markdown-rendered images, and client-side fetches for packaged JSON or media.
+
+If an asset is not packaged locally, use a full `https://...` URL or an explicit Agent Internet URI such as `metafile://...` when the runtime supports it. Do not use site-root absolute paths as a shortcut.
+
 Static anchors are valid:
 
 ```html
@@ -233,6 +242,8 @@ public/index.html
 
 Include local assets needed by the page. Avoid absolute local filesystem paths. Avoid requiring a local development server for normal browsing. A Bot homepage project must also include `data.json`.
 
+All packaged CSS, JS, image, font, document, JSON, and Markdown asset references must stay relative to the package entry or the referencing file. Do not publish a MetaApp that depends on site-root paths such as `/assets/...`, because Browser resolves those against the host origin instead of the packaged ZIP.
+
 ## Publish Wizard
 
 Use this path by default for natural-language "publish this ZIP/project/site as a MetaApp" requests. The wizard must collect fields, upload local assets first when needed, show the final MetaAPP JSON with real `metafile://...` references, and only then run `metaapp publish` or `metaapp update`.
@@ -249,6 +260,8 @@ $HOME/.metabot/bin/metabot metaapp preview --project-dir <path>
 ```
 
 If preview finds `dist`, `build`, `out`, `public`, or project-root `index.html`, package that browser-runnable directory into a ZIP while preserving relative paths. If preview cannot find an entry point, ask which built directory or default file should be used.
+
+Before publishing, inspect entry HTML, CSS, and generated Markdown or templates for packaged asset references that start with `/`. If those files are expected to come from the ZIP, rewrite them to relative paths first.
 
 2. Ask for required publish fields.
 
@@ -417,6 +430,7 @@ $HOME/.metabot/bin/metabot metaapp comment --pin-id <pinid> --comment <text> --f
 - The page renders from local snapshot data without a dedicated backend.
 - Online refresh failure leaves snapshot content visible.
 - Agent Internet resources use `metaid://`, `pin://`, `metaapp://`, `metafile://`, or `map://` instead of invented Web2 URLs.
+- Packaged asset references in HTML, CSS, Markdown, and client-side fetches use relative URLs, not site-root absolute paths such as `/assets/...`, unless the target is intentionally an external host URL.
 - Custom iframe MetaApps include the AgentBrowser navigation helper when using Agent Internet links.
 - The app does not request wallet, private key, payment, local path, host route, or parent DOM access.
 - `content` uses `metafile://` references only.
