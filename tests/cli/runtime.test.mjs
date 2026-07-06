@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
 const {
+  buildDaemonConfigHash,
   createServiceRefundSyncLoop,
   createPrivateChatReplyRunnerForProfile,
   getDefaultDaemonPort,
@@ -462,6 +463,75 @@ async function runCommandWithEnv(cwd, args, envOverrides = {}) {
     stdout,
     stderr,
     payload: parseLastJson(stdout),
+  };
+}
+
+async function startProfileRecordingDaemon(homeDir, env, routeData = {}) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      if (url.pathname === '/api/daemon/status') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(commandSuccess({ state: 'online' })));
+        return;
+      }
+
+      requests.push({
+        method: req.method ?? 'GET',
+        pathname: url.pathname,
+        search: url.search,
+        body: chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : null,
+      });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(commandSuccess(routeData[url.pathname] ?? { ok: true })));
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected TCP daemon address');
+  }
+
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const store = createRuntimeStateStore(homeDir);
+  await store.writeDaemon({
+    ownerId: `daemon-${path.basename(homeDir)}`,
+    pid: 999_999,
+    host: '127.0.0.1',
+    port: address.port,
+    baseUrl,
+    startedAt: Date.now(),
+    configHash: buildDaemonConfigHash(env),
+  });
+
+  return {
+    baseUrl,
+    requests,
+    async close() {
+      await store.clearDaemon();
+      await new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    },
   };
 }
 
@@ -1641,6 +1711,77 @@ test('buzz post --from uses the selected actor identity and default write networ
   assert.equal(posted.payload.data.content, 'alice speaks through an explicit actor flag');
   assert.equal(posted.payload.data.globalMetaId, aliceCreated.payload.data.globalMetaId);
   assert.equal(posted.payload.data.network, 'opcat');
+});
+
+test('buzz post --from bob targets bob daemon instead of the current alice home daemon', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cross-profile-daemon-'));
+  const aliceHome = await createProfileHome(systemHome, 'alice');
+  const bobHome = await createProfileHome(systemHome, 'bob');
+
+  const env = {
+    HOME: systemHome,
+    METABOT_HOME: aliceHome,
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+  };
+
+  await ensureIndexedProfileHome(bobHome);
+  await ensureIndexedProfileHome(aliceHome);
+
+  const aliceDaemon = await startProfileRecordingDaemon(aliceHome, env);
+  const bobDaemon = await startProfileRecordingDaemon(bobHome, env, {
+    '/api/buzz/post': { pinId: 'bob-pin', ok: true },
+  });
+  t.after(async () => {
+    await aliceDaemon.close();
+    await bobDaemon.close();
+    await cleanupProfileHome(systemHome);
+  });
+
+  const requestFile = path.join(aliceHome, 'buzz.json');
+  await writeFile(requestFile, JSON.stringify({ content: 'hello from bob' }), 'utf8');
+
+  const result = await runCommandWithEnv(
+    aliceHome,
+    ['buzz', 'post', '--from', 'bob', '--request-file', requestFile],
+    env,
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(aliceDaemon.requests.filter((entry) => entry.pathname === '/api/buzz/post'), []);
+  assert.equal(bobDaemon.requests.at(-1)?.pathname, '/api/buzz/post');
+  assert.equal(bobDaemon.requests.at(-1)?.body?.from, 'bob');
+});
+
+test('metaapp view --from bob returns bob daemon localUiUrl instead of alice baseUrl', async (t) => {
+  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-metaapp-view-daemon-'));
+  const aliceHome = await createProfileHome(systemHome, 'alice');
+  const bobHome = await createProfileHome(systemHome, 'bob');
+
+  const env = {
+    HOME: systemHome,
+    METABOT_HOME: aliceHome,
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+  };
+
+  await ensureIndexedProfileHome(bobHome);
+  await ensureIndexedProfileHome(aliceHome);
+
+  const aliceDaemon = await startProfileRecordingDaemon(aliceHome, env);
+  const bobDaemon = await startProfileRecordingDaemon(bobHome, env);
+  t.after(async () => {
+    await aliceDaemon.close();
+    await bobDaemon.close();
+    await cleanupProfileHome(systemHome);
+  });
+
+  const opened = await runCommandWithEnv(aliceHome, ['metaapp', 'view', '--from', 'bob', '--mine'], env);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.data.localUiUrl, `${bobDaemon.baseUrl}/ui/apps?from=bob&mine=true`);
 });
 
 test('services publish persists a local directory entry that network services --online can read back', async (t) => {
