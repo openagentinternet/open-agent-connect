@@ -176,6 +176,58 @@ test('readPeerConversationMessages returns the latest peer timeline and older pa
   assert.equal(older.pagination.hasMoreBefore, false);
 });
 
+test('conversation projections keep mixed second and millisecond timestamps in one normalized timeline', async (t) => {
+  const homeDir = await createProfileHome('metabot-a2a-conversation-mixed-timestamps-', 'eric');
+  t.after(async () => cleanupProfileHome(homeDir));
+  await writeConversation(homeDir, {
+    messages: [
+      message(1, {
+        content: 'older local',
+        timestamp: 1_783_325_772_242,
+      }),
+      message(2, {
+        content: 'local 08:19',
+        timestamp: 1_783_325_963_021,
+      }),
+      message(3, {
+        direction: 'incoming',
+        content: 'remote 08:20',
+        timestamp: 1_783_326_031,
+      }),
+    ],
+  });
+
+  const latest = await readPeerConversationMessages({
+    homeDir,
+    localGlobalMetaId: LOCAL_GLOBAL_META_ID,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    limit: 2,
+  });
+  const older = await readPeerConversationMessages({
+    homeDir,
+    localGlobalMetaId: LOCAL_GLOBAL_META_ID,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+    before: latest.pagination.beforeCursor,
+    limit: 2,
+  });
+  const summaries = await listPeerConversationSummaries({
+    homeDir,
+    localGlobalMetaId: LOCAL_GLOBAL_META_ID,
+  });
+
+  assert.deepEqual(latest.messages.map((entry) => entry.content), [
+    'local 08:19',
+    'remote 08:20',
+  ]);
+  assert.equal(latest.messages[1].direction, 'incoming');
+  assert.equal(latest.messages[1].timestamp, 1_783_326_031_000);
+  assert.equal(latest.pagination.beforeCursor, 1_783_325_963_021);
+  assert.equal(latest.pagination.hasMoreBefore, true);
+  assert.deepEqual(older.messages.map((entry) => entry.content), ['older local']);
+  assert.equal(summaries.conversations[0].latestText, 'remote 08:20');
+  assert.equal(summaries.conversations[0].latestAt, 1_783_326_031_000);
+});
+
 test('readPeerConversationMessages unwraps simplemsg JSON content payloads for Markdown display', async (t) => {
   const homeDir = await createProfileHome('metabot-a2a-conversation-markdown-payload-', 'eric');
   t.after(async () => cleanupProfileHome(homeDir));
