@@ -33,7 +33,7 @@ function record(pinId, overrides = {}) {
     ownerGlobalMetaId: overrides.ownerGlobalMetaId ?? 'owner-meta-id',
     ownerAddress: overrides.ownerAddress ?? 'owner-address',
     network: overrides.network ?? 'mvc',
-    metawebUrl: overrides.metawebUrl ?? `https://metaweb.world/metaapp/${pinId}`,
+    metawebUrl: overrides.metawebUrl ?? `https://openagentinternet.org/browser/metaapp/${pinId}`,
     localUiUrl: overrides.localUiUrl,
     updatedAt: overrides.updatedAt ?? 1_700_000_000,
     source: overrides.source ?? 'local',

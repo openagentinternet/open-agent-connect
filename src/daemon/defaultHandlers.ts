@@ -199,7 +199,6 @@ import { createMetaFsLargeUploader } from '../core/files/metaFsLargeUploader';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
-import { createMetaAppIndexerClient } from '../core/metaapp/indexerClient';
 import { createMetaAppLocalCacheStore } from '../core/metaapp/localCache';
 import {
   deleteMetaAppPin,
@@ -218,7 +217,8 @@ import {
   type ChainLikeResult,
   type UploadLikeResult,
 } from '../core/metaapp/publish';
-import type { MetaAppGalleryRecord, MetaAppIndexerError } from '../core/metaapp/types';
+import { buildMetaAppCanonicalUrl } from '../core/metaapp/share';
+import type { MetaAppGalleryRecord } from '../core/metaapp/types';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
 import { readChainDirectoryWithFallback } from '../core/discovery/chainDirectoryReader';
 import {
@@ -10769,13 +10769,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   async function readMetaAppRecordForUpdate(actorHomeDir: string, targetPinId: string): Promise<MetaAppGalleryRecord | null> {
-    const indexer = createMetaAppIndexerClient();
     const cache = createMetaAppLocalCacheStore(actorHomeDir);
-    const indexed = await indexer.getByPinId(targetPinId).catch(() => null);
-    if (indexed?.ok && indexed.data) {
-      return indexed.data;
-    }
-
     const localRecords = await cache.listMerged().catch(() => [] as MetaAppGalleryRecord[]);
     return localRecords.find((record: MetaAppGalleryRecord) => record.pinId === targetPinId) ?? null;
   }
@@ -10829,7 +10823,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ownerGlobalMetaId: previous?.ownerGlobalMetaId || normalizeText(identity?.globalMetaId) || 'unknown',
       ownerAddress: previous?.ownerAddress || input.actor.mvcAddress,
       network,
-      metawebUrl: previous?.metawebUrl || `https://metaweb.world/metaapp/${encodeURIComponent(targetPinId)}`,
+      metawebUrl: previous?.metawebUrl || buildMetaAppCanonicalUrl(targetPinId),
       localUiUrl: buildMetaAppAppsLocalUiUrl(targetPinId),
       updatedAt: Date.now(),
       source: 'local',
@@ -10850,31 +10844,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
   }, rawInput: Record<string, unknown>): Promise<MetabotCommandResult<Record<string, unknown>>> {
     const cache = createMetaAppLocalCacheStore(actor.homeDir);
-    const indexer = createMetaAppIndexerClient();
     const state = await actor.runtimeStateStore.readState();
     const mine = rawInput.mine === true;
-    const refresh = rawInput.refresh === true;
     const mineGlobalMetaId = mine ? (normalizeText(state.identity?.globalMetaId) || '__missing__') : null;
     const pinId = typeof rawInput.pinId === 'string' ? rawInput.pinId.trim() : '';
     const firstPinId = typeof rawInput.firstPinId === 'string' ? rawInput.firstPinId.trim() : '';
-    let indexerRefreshError: MetaAppIndexerError | null = null;
-
-    if (refresh) {
-      const listResult = await indexer.list({
-        ...(mine && state.identity?.globalMetaId
-          ? { creatorGlobalMetaId: state.identity.globalMetaId }
-          : {}),
-      });
-      if (listResult.ok) {
-        await cache.writeIndexer({
-          version: 1,
-          records: listResult.data,
-          updatedAt: listResult.fetchedAt,
-        });
-      } else {
-        indexerRefreshError = listResult.error;
-      }
-    }
 
     const merged = await cache.listMerged();
     const records = merged.filter((record: MetaAppGalleryRecord) => {
@@ -10893,15 +10867,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return commandSuccess({
       from: typeof rawInput.from === 'string' ? rawInput.from : undefined,
       mine,
-      refresh,
+      refresh: rawInput.refresh === true,
       pinId: pinId || undefined,
       firstPinId: firstPinId || undefined,
       records,
-      indexerRefreshError: indexerRefreshError ? {
-        code: indexerRefreshError.code,
-        message: indexerRefreshError.message,
-        ...(typeof indexerRefreshError.status === 'number' ? { status: indexerRefreshError.status } : {}),
-      } : null,
     });
   }
 

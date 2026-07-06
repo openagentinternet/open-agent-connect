@@ -93,28 +93,3 @@ export interface MetaAppCacheState {
     records: MetaAppGalleryRecord[];
     updatedAt: number | null;
 }
-export type MetaAppIndexerErrorCode = 'indexer_fetch_error' | 'indexer_http_error' | 'indexer_api_error' | 'indexer_malformed_response';
-export interface MetaAppIndexerError {
-    code: MetaAppIndexerErrorCode;
-    message: string;
-    status?: number;
-}
-export type MetaAppIndexerResult<T> = {
-    ok: true;
-    data: T;
-    fetchedAt: number;
-} | {
-    ok: false;
-    data: T;
-    error: MetaAppIndexerError;
-    fetchedAt: number;
-};
-export interface MetaAppIndexerClient {
-    baseUrl: string;
-    list(input?: {
-        creatorGlobalMetaId?: string;
-        limit?: number;
-    }): Promise<MetaAppIndexerResult<MetaAppGalleryRecord[]>>;
-    getByPinId(pinId: string): Promise<MetaAppIndexerResult<MetaAppGalleryRecord | null>>;
-    getHistory(firstPinId: string): Promise<MetaAppIndexerResult<MetaAppGalleryRecord[]>>;
-}

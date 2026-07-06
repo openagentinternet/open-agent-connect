@@ -53,7 +53,7 @@ test('parseManMetaAppListResponse maps MAN records to Apps records', () => {
   assert.equal(parsed.records[0].disabled, false);
   assert.equal(parsed.records[0].runUrl, `/browser/metaapp/${PIN_A}`);
   assert.equal(parsed.records[0].metaappUri, `metaapp://${PIN_A}`);
-  assert.equal(parsed.records[0].metawebUrl, `https://metaweb.world/metaapp/${PIN_A}`);
+  assert.equal(parsed.records[0].metawebUrl, `https://openagentinternet.org/browser/metaapp/${PIN_A}`);
 });
 
 test('parseManMetaAppListResponse hides revoke records and keeps disabled records', () => {

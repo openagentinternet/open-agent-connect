@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildAppsPageDefinition = buildAppsPageDefinition;
 const i18n_1 = require("../../i18n");
 const appsProtocol_1 = require("../../../core/metaapp/appsProtocol");
+const share_1 = require("../../../core/metaapp/share");
 function buildAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     const tx = i18n.t;
     const runtimeText = {
@@ -187,6 +188,7 @@ function buildAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
 function buildAppsPageRuntimeSource(text, options) {
     return `(() => {
   const APPS_API_BASE = '/api/metaapp/list';
+  const METAAPP_PUBLIC_BASE_URL = ${JSON.stringify(share_1.METAAPP_PUBLIC_BASE_URL)};
   const PAGE_SIZE = 12;
   const UI_TEXT = ${JSON.stringify(text)};
   const CONTENT_TYPE_OPTIONS = ${JSON.stringify(options.contentTypeOptions)};
@@ -768,7 +770,10 @@ function buildAppsPageRuntimeSource(text, options) {
   };
 
   const metaAppUriForRecord = (record) => normalizeText(record && record.metaappUri) || 'metaapp://' + recordPinId(record);
-  const metaWebUrlForRecord = (record) => normalizeText(record && record.metawebUrl) || 'https://metaweb.world/metaapp/' + recordPinId(record);
+  const metaWebUrlForRecord = (record) => {
+    const pinId = recordPinId(record);
+    return pinId ? METAAPP_PUBLIC_BASE_URL + '/' + encodeURIComponent(pinId) : normalizeText(record && record.metawebUrl);
+  };
 
   const recordImageValue = (record, fieldNames) => {
     for (const fieldName of fieldNames) {

@@ -213,7 +213,7 @@ async function writePreviousMetaAppRecord(homeDir, record = {}) {
     ownerGlobalMetaId: record.ownerGlobalMetaId ?? 'gm-previous-metaapp-owner',
     ownerAddress: record.ownerAddress ?? 'mvc-previous-metaapp-owner',
     network: record.network ?? 'mvc',
-    metawebUrl: record.metawebUrl ?? `https://metaweb.world/metaapp/${pinId}`,
+    metawebUrl: record.metawebUrl ?? `https://openagentinternet.org/browser/metaapp/${pinId}`,
     updatedAt: record.updatedAt ?? 1_700_000_000_000,
     source: 'local',
   });

@@ -1,12 +1,14 @@
 import { assertMetaAppPinId } from './pinId';
 
+export const METAAPP_PUBLIC_BASE_URL = 'https://openagentinternet.org/browser/metaapp';
+
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
 export function buildMetaAppCanonicalUrl(pinId: string): string {
   const normalizedPinId = assertMetaAppPinId(pinId);
-  return `https://metaweb.world/metaapp/${normalizedPinId}`;
+  return `${METAAPP_PUBLIC_BASE_URL}/${normalizedPinId}`;
 }
 
 export function buildMetaAppShareBundle(pinId: string): {

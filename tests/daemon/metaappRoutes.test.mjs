@@ -99,7 +99,7 @@ function localMetaAppRecord(pinId, overrides = {}) {
     ownerGlobalMetaId: overrides.ownerGlobalMetaId ?? 'idq1alice',
     ownerAddress: overrides.ownerAddress ?? ALICE_MVC_ADDRESS,
     network: overrides.network ?? 'mvc',
-    metawebUrl: overrides.metawebUrl ?? `https://metaweb.world/metaapp/${pinId}`,
+    metawebUrl: overrides.metawebUrl ?? `https://openagentinternet.org/browser/metaapp/${pinId}`,
     updatedAt: overrides.updatedAt ?? 1_700_000_000_000,
     source: overrides.source ?? 'local',
     raw: overrides.raw,

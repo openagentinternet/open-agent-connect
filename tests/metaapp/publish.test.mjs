@@ -188,7 +188,7 @@ test('publishMetaApp uploads the ZIP before writing create payload and upserting
   assert.equal(result.state, 'success');
   assert.equal(result.data.pinId, CREATE_PIN);
   assert.equal(result.data.firstPinId, CREATE_PIN);
-  assert.equal(result.data.metawebUrl, `https://metaweb.world/metaapp/${CREATE_PIN}`);
+  assert.equal(result.data.metawebUrl, `https://openagentinternet.org/browser/metaapp/${CREATE_PIN}`);
   assert.deepEqual(deps.calls.map((call) => call.type), ['upload', 'write', 'upsert']);
   assert.equal(deps.calls[0].input.contentType, 'application/zip');
   assert.equal(deps.calls[0].input.network, 'opcat');
@@ -299,7 +299,7 @@ test('updateMetaApp writes modify path and inherits previous fields before local
         ownerGlobalMetaId: 'previous-owner',
         ownerAddress: 'previous-address',
         network: 'mvc',
-        metawebUrl: `https://metaweb.world/metaapp/${UPDATE_TARGET_PIN}`,
+        metawebUrl: `https://openagentinternet.org/browser/metaapp/${UPDATE_TARGET_PIN}`,
         updatedAt: 1,
         source: 'indexer',
       };
@@ -539,8 +539,8 @@ test('shareMetaApp returns a pinId and canonical MetaWeb URL without writing', a
 
   assert.equal(result.state, 'success');
   assert.equal(result.data.pinId, CREATE_PIN);
-  assert.equal(result.data.metawebUrl, `https://metaweb.world/metaapp/${CREATE_PIN}`);
-  assert.match(result.data.suggestedBuzz, /https:\/\/metaweb\.world\/metaapp\//);
+  assert.equal(result.data.metawebUrl, `https://openagentinternet.org/browser/metaapp/${CREATE_PIN}`);
+  assert.match(result.data.suggestedBuzz, /https:\/\/openagentinternet\.org\/browser\/metaapp\//);
   assert.deepEqual(deps.calls, []);
 });
 
@@ -554,7 +554,7 @@ test('announceMetaAppShare builds simplebuzz with quotePin', async () => {
   }, deps);
 
   assert.equal(result.state, 'success');
-  assert.equal(result.data.share.metawebUrl, `https://metaweb.world/metaapp/${CREATE_PIN}`);
+  assert.equal(result.data.share.metawebUrl, `https://openagentinternet.org/browser/metaapp/${CREATE_PIN}`);
   assert.equal(result.data.announcement.pinId, BUZZ_PIN);
   assert.deepEqual(deps.calls, [
     {

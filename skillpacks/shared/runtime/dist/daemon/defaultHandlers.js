@@ -63,11 +63,11 @@ const metaFsLargeUploader_1 = require("../core/files/metaFsLargeUploader");
 const uploadFile_1 = require("../core/files/uploadFile");
 const postBuzz_1 = require("../core/buzz/postBuzz");
 const previewSessions_1 = require("../core/metaapp/previewSessions");
-const indexerClient_1 = require("../core/metaapp/indexerClient");
 const localCache_1 = require("../core/metaapp/localCache");
 const ownerService_1 = require("../core/metaapp/ownerService");
 const manOwnerList_1 = require("../core/metaapp/manOwnerList");
 const publish_1 = require("../core/metaapp/publish");
+const share_1 = require("../core/metaapp/share");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
 const chainDirectoryReader_1 = require("../core/discovery/chainDirectoryReader");
 const onlineServiceCache_1 = require("../core/discovery/onlineServiceCache");
@@ -8858,12 +8858,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         };
     }
     async function readMetaAppRecordForUpdate(actorHomeDir, targetPinId) {
-        const indexer = (0, indexerClient_1.createMetaAppIndexerClient)();
         const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actorHomeDir);
-        const indexed = await indexer.getByPinId(targetPinId).catch(() => null);
-        if (indexed?.ok && indexed.data) {
-            return indexed.data;
-        }
         const localRecords = await cache.listMerged().catch(() => []);
         return localRecords.find((record) => record.pinId === targetPinId) ?? null;
     }
@@ -8906,7 +8901,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             ownerGlobalMetaId: previous?.ownerGlobalMetaId || normalizeText(identity?.globalMetaId) || 'unknown',
             ownerAddress: previous?.ownerAddress || input.actor.mvcAddress,
             network,
-            metawebUrl: previous?.metawebUrl || `https://metaweb.world/metaapp/${encodeURIComponent(targetPinId)}`,
+            metawebUrl: previous?.metawebUrl || (0, share_1.buildMetaAppCanonicalUrl)(targetPinId),
             localUiUrl: buildMetaAppAppsLocalUiUrl(targetPinId),
             updatedAt: Date.now(),
             source: 'local',
@@ -8923,31 +8918,11 @@ function createDefaultMetabotDaemonHandlers(input) {
     }
     async function listMetaAppsForActor(actor, rawInput) {
         const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actor.homeDir);
-        const indexer = (0, indexerClient_1.createMetaAppIndexerClient)();
         const state = await actor.runtimeStateStore.readState();
         const mine = rawInput.mine === true;
-        const refresh = rawInput.refresh === true;
         const mineGlobalMetaId = mine ? (normalizeText(state.identity?.globalMetaId) || '__missing__') : null;
         const pinId = typeof rawInput.pinId === 'string' ? rawInput.pinId.trim() : '';
         const firstPinId = typeof rawInput.firstPinId === 'string' ? rawInput.firstPinId.trim() : '';
-        let indexerRefreshError = null;
-        if (refresh) {
-            const listResult = await indexer.list({
-                ...(mine && state.identity?.globalMetaId
-                    ? { creatorGlobalMetaId: state.identity.globalMetaId }
-                    : {}),
-            });
-            if (listResult.ok) {
-                await cache.writeIndexer({
-                    version: 1,
-                    records: listResult.data,
-                    updatedAt: listResult.fetchedAt,
-                });
-            }
-            else {
-                indexerRefreshError = listResult.error;
-            }
-        }
         const merged = await cache.listMerged();
         const records = merged.filter((record) => {
             if (mineGlobalMetaId && record.ownerGlobalMetaId !== mineGlobalMetaId) {
@@ -8964,15 +8939,10 @@ function createDefaultMetabotDaemonHandlers(input) {
         return (0, commandResult_1.commandSuccess)({
             from: typeof rawInput.from === 'string' ? rawInput.from : undefined,
             mine,
-            refresh,
+            refresh: rawInput.refresh === true,
             pinId: pinId || undefined,
             firstPinId: firstPinId || undefined,
             records,
-            indexerRefreshError: indexerRefreshError ? {
-                code: indexerRefreshError.code,
-                message: indexerRefreshError.message,
-                ...(typeof indexerRefreshError.status === 'number' ? { status: indexerRefreshError.status } : {}),
-            } : null,
         });
     }
     function metaAppRecordGroupKey(record) {

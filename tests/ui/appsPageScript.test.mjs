@@ -841,7 +841,7 @@ test('apps page share modal exposes and copies MetaAPP protocol links', async ()
   await context.clickGridAction(`[data-apps-share="${PIN}"]`);
 
   const metaappUri = `metaapp://${PIN}`;
-  const metawebUrl = `https://metaweb.world/metaapp/${PIN}`;
+  const metawebUrl = `https://openagentinternet.org/browser/metaapp/${PIN}`;
   const html = context.elements['[data-apps-modal-root]'].innerHTML;
   assert.match(html, new RegExp(metaappUri.replace(/\//gu, '\\/')));
   assert.match(html, new RegExp(metawebUrl.replace(/\//gu, '\\/')));

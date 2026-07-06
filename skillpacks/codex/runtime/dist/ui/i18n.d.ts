@@ -398,7 +398,7 @@ export declare const DICTIONARIES: {
         readonly 'apps.detail.createdAt': "Created at";
         readonly 'apps.detail.updatedAt': "Updated at";
         readonly 'apps.share.title': "Share MetaAPP";
-        readonly 'apps.share.description': "Copy a MetaAPP URI or the public metaweb.world URL.";
+        readonly 'apps.share.description': "Copy a MetaAPP URI or the public Open Agent Internet URL.";
         readonly 'apps.share.metaappUri': "MetaAPP URI";
         readonly 'apps.share.webUrl': "Web URL";
         readonly 'apps.share.copyLink': "Copy";
@@ -928,7 +928,7 @@ export declare const DICTIONARIES: {
         readonly 'apps.detail.createdAt': "创建时间";
         readonly 'apps.detail.updatedAt': "更新时间";
         readonly 'apps.share.title': "分享 MetaAPP";
-        readonly 'apps.share.description': "复制 MetaAPP URI 或公开的 metaweb.world URL。";
+        readonly 'apps.share.description': "复制 MetaAPP URI 或公开的 Open Agent Internet URL。";
         readonly 'apps.share.metaappUri': "MetaAPP URI";
         readonly 'apps.share.webUrl': "Web URL";
         readonly 'apps.share.copyLink': "复制";
