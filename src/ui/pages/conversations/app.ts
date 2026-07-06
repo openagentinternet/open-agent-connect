@@ -415,6 +415,14 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
   const latestThreadMessage = () => Array.isArray(state.messages) && state.messages.length
     ? state.messages[state.messages.length - 1]
     : null;
+  const threadHasMessageId = (messageId) => {
+    const normalizedMessageId = normalizeText(messageId);
+    return Boolean(
+      normalizedMessageId
+      && Array.isArray(state.messages)
+      && state.messages.some((message) => normalizeText(message && message.messageId) === normalizedMessageId)
+    );
+  };
   const messageFingerprint = (message) => {
     if (!message || typeof message !== 'object') return '';
     return [
@@ -440,11 +448,15 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     ) {
       return false;
     }
+    if (threadHasMessageId(pending.expectedMessageId)) {
+      resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance applied. The local message is now visible.'));
+      return true;
+    }
     const latest = latestThreadMessage();
     if (!isLocalThreadMessage(latest)) return false;
     const latestFingerprint = messageFingerprint(latest);
     if (!latestFingerprint || latestFingerprint === pending.baselineMessageFingerprint) return false;
-    resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
+    resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance applied. The local message is now visible.'));
     return true;
   };
   const scheduleGuidanceMessageRefresh = (submissionToken) => {
@@ -898,7 +910,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     render();
     scheduleGuidanceMessageRefresh(submissionToken);
     try {
-      await fetchJson('/api/conversations/guidance', {
+      const guidanceResult = await fetchJson('/api/conversations/guidance', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -911,8 +923,18 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
         state.pendingGuidance
         && state.pendingGuidance.submissionToken === submissionToken
       ) {
-        resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
-        render();
+        state.guidanceDraft = '';
+        state.pendingGuidance = {
+          ...state.pendingGuidance,
+          expectedMessageId: normalizeText(guidanceResult && guidanceResult.messageId),
+        };
+        if (!maybeResolvePendingGuidanceFromMessages()) {
+          state.guidanceStatus = uiText(
+            'conversations.guidanceAwaitingMessage',
+            'Guidance accepted. Waiting for the local message...',
+          );
+          render();
+        }
       }
       if (state.selectedLocalGlobalMetaId === targetLocal && state.selectedPeerGlobalMetaId === targetPeer) {
         await loadConversations({ stickToBottom: true });

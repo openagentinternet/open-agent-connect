@@ -217,9 +217,10 @@ test('keeps peer query when list is empty or unrelated', async () => {
   assert.equal(context.window.location.search, `?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`);
 });
 
-test('submits footer guidance for the selected conversation, disables send in flight, and refreshes the thread on success', async () => {
+test('submits footer guidance, keeps a waiting status until the local message is visible, and then closes successfully', async () => {
   const requestedUrl = `http://127.0.0.1:24885/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`;
   const requests = [];
+  let messagePollCount = 0;
   let guidanceResolve;
   const guidancePromise = new Promise((resolve) => {
     guidanceResolve = resolve;
@@ -255,16 +256,34 @@ test('submits footer guidance for the selected conversation, disables send in fl
         });
       }
       if (textUrl.includes('/api/conversations/messages?')) {
+        messagePollCount += 1;
         return jsonResponse({
           ok: true,
           data: {
-            messages: [{
-              messageId: 'msg-1',
-              direction: 'incoming',
-              content: 'hello',
-              timestamp: 1776836184000,
-              sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
-            }],
+            messages: messagePollCount >= 4
+              ? [
+                  {
+                    messageId: 'msg-1',
+                    direction: 'incoming',
+                    content: 'hello',
+                    timestamp: 1776836184000,
+                    sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
+                  },
+                  {
+                    messageId: 'msg-2',
+                    direction: 'outgoing',
+                    content: 'guided reply',
+                    timestamp: 1776836185000,
+                    sender: { globalMetaId: LOCAL_GLOBAL_META_ID, name: 'Local Bot' },
+                  },
+                ]
+              : [{
+                  messageId: 'msg-1',
+                  direction: 'incoming',
+                  content: 'hello',
+                  timestamp: 1776836184000,
+                  sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
+                }],
           },
         });
       }
@@ -312,13 +331,23 @@ test('submits footer guidance for the selected conversation, disables send in fl
   guidanceResolve();
   await submitPromise;
   await waitFor(
-    () => requests.filter((entry) => entry.url.includes('/api/conversations/messages?')).length >= 2,
-    'message refresh after guidance success',
+    () => requests.filter((entry) => entry.url.includes('/api/conversations/messages?')).length >= 3,
+    'message refresh after guidance acceptance',
   );
 
   assert.equal(input.value, '');
   assert.equal(form.hidden, true);
-  assert.equal(status.textContent, 'Guidance sent for the next local turn.');
+  assert.equal(toggle.disabled, true);
+  assert.equal(send.disabled, true);
+  assert.equal(status.textContent, 'Guidance accepted. Waiting for the local message...');
+
+  await waitFor(
+    () => status.textContent === 'Guidance applied. The local message is now visible.',
+    'final guidance visibility status',
+    3500,
+  );
+
+  assert.equal(toggle.disabled, false);
 });
 
 test('keeps refreshing the active thread during guided reply generation and closes the composer once a new local message appears', async () => {
@@ -415,7 +444,7 @@ test('keeps refreshing the active thread during guided reply generation and clos
   });
 
   await waitFor(
-    () => status.textContent === 'Guidance sent for the next local turn.',
+    () => status.textContent === 'Guidance applied. The local message is now visible.',
     'guided reply refresh before guidance request resolves',
     2500,
   );

@@ -275,6 +275,57 @@ test('default conversation handlers enrich peer name and avatar from local profi
   assert.equal(messages.data.messages[0].sender.avatar, 'data:image/png;base64,remote');
 });
 
+test('default conversation handlers do not block on slow chain profile lookups', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const fetchCalls = [];
+  globalThis.fetch = async (url) => {
+    const textUrl = String(url);
+    fetchCalls.push(textUrl);
+    if (textUrl.includes('/info/globalmetaid/')) {
+      return new Promise(() => {});
+    }
+    throw new Error(`Unexpected fetch during conversation handler test: ${textUrl}`);
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const { handlers } = await createFixture(t, {
+    conversationPeerName: '',
+    conversationPeerAvatar: null,
+  });
+
+  const list = await Promise.race([
+    handlers.conversations.list({
+      local: LOCAL_GLOBAL_META_ID,
+      limit: 10,
+    }),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timed out waiting for conversation list')), 500);
+    }),
+  ]);
+  const messages = await Promise.race([
+    handlers.conversations.messages({
+      local: LOCAL_GLOBAL_META_ID,
+      peer: PEER_GLOBAL_META_ID,
+      limit: 50,
+    }),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timed out waiting for conversation messages')), 500);
+    }),
+  ]);
+
+  assert.equal(list.ok, true);
+  assert.equal(list.data.conversations.length, 1);
+  assert.equal(list.data.conversations[0].peerGlobalMetaId, PEER_GLOBAL_META_ID);
+  assert.equal(messages.ok, true);
+  assert.deepEqual(messages.data.messages.map((entry) => entry.content), [
+    'remote hello',
+    'local asks for service',
+  ]);
+  assert.ok(fetchCalls.some((entry) => entry.includes('/info/globalmetaid/')));
+});
+
 test('default conversation event stream publishes a message event after A2A persistence', async (t) => {
   const localPair = createIdentityPair();
   const peerPair = createIdentityPair();
