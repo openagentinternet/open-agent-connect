@@ -6,6 +6,7 @@ import {
   METAAPP_CONTENT_TYPE_OPTIONS,
   METAAPP_METAFILE_REFERENCE_PATTERN,
 } from '../../../core/metaapp/appsProtocol';
+import { METAAPP_PUBLIC_BASE_URL } from '../../../core/metaapp/share';
 
 interface AppsPageRuntimeText {
   appNameLabel: string;
@@ -315,6 +316,7 @@ function buildAppsPageRuntimeSource(
 ): string {
   return `(() => {
   const APPS_API_BASE = '/api/metaapp/list';
+  const METAAPP_PUBLIC_BASE_URL = ${JSON.stringify(METAAPP_PUBLIC_BASE_URL)};
   const PAGE_SIZE = 12;
   const UI_TEXT = ${JSON.stringify(text)};
   const CONTENT_TYPE_OPTIONS = ${JSON.stringify(options.contentTypeOptions)};
@@ -896,7 +898,10 @@ function buildAppsPageRuntimeSource(
   };
 
   const metaAppUriForRecord = (record) => normalizeText(record && record.metaappUri) || 'metaapp://' + recordPinId(record);
-  const metaWebUrlForRecord = (record) => normalizeText(record && record.metawebUrl) || 'https://metaweb.world/metaapp/' + recordPinId(record);
+  const metaWebUrlForRecord = (record) => {
+    const pinId = recordPinId(record);
+    return pinId ? METAAPP_PUBLIC_BASE_URL + '/' + encodeURIComponent(pinId) : normalizeText(record && record.metawebUrl);
+  };
 
   const recordImageValue = (record, fieldNames) => {
     for (const fieldName of fieldNames) {

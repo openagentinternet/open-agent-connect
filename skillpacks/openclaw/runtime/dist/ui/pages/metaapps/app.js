@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildMetaAppsPageDefinition = buildMetaAppsPageDefinition;
 const i18n_1 = require("../../i18n");
+const share_1 = require("../../../core/metaapp/share");
 function buildMetaAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
     return {
         page: 'metaapps',
@@ -34,6 +35,7 @@ function buildMetaAppsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
 function buildMetaAppsPageScript(openInBrowserLabel) {
     return `(() => {
   const queryParams = new URLSearchParams(window.location.search);
+  const METAAPP_PUBLIC_BASE_URL = ${JSON.stringify(share_1.METAAPP_PUBLIC_BASE_URL)};
   const elements = {
     list: document.querySelector('[data-metaapps-list]'),
     detail: document.querySelector('[data-metaapps-detail]'),
@@ -199,11 +201,11 @@ function buildMetaAppsPageScript(openInBrowserLabel) {
   }
 
   function primaryRunUrl(record) {
-    return safeUrl(record.runUrl) || safeUrl(record.metawebUrl) || nonGalleryUrl(record.localUiUrl);
+    return safeUrl(record.runUrl) || safeUrl(canonicalMetaAppUrl(record.pinId)) || safeUrl(record.metawebUrl) || nonGalleryUrl(record.localUiUrl);
   }
 
   function openUrl(record) {
-    return safeUrl(record.metawebUrl) || safeUrl(record.runUrl) || nonGalleryUrl(record.localUiUrl);
+    return safeUrl(canonicalMetaAppUrl(record.pinId)) || safeUrl(record.metawebUrl) || safeUrl(record.runUrl) || nonGalleryUrl(record.localUiUrl);
   }
 
   function downloadUrl(record) {
@@ -215,6 +217,10 @@ function buildMetaAppsPageScript(openInBrowserLabel) {
 
   function browserMetaAppUrl(pinId) {
     return isMetaAppPinId(pinId) ? '/browser/metaapp/' + encodeURIComponent(String(pinId).trim()) : '';
+  }
+
+  function canonicalMetaAppUrl(pinId) {
+    return isMetaAppPinId(pinId) ? METAAPP_PUBLIC_BASE_URL + '/' + encodeURIComponent(String(pinId).trim()) : '';
   }
 
   function setStatus(message, mode) {
@@ -271,7 +277,7 @@ function buildMetaAppsPageScript(openInBrowserLabel) {
     const open = openUrl(record);
     const localDetail = nonGalleryUrl(record.localUiUrl);
     const download = downloadUrl(record);
-    const safeShareTarget = safeUrl(record.metawebUrl) || localDetail;
+    const safeShareTarget = safeUrl(canonicalMetaAppUrl(record.pinId)) || safeUrl(record.metawebUrl) || localDetail;
     const validPinId = isMetaAppPinId(record.pinId) ? String(record.pinId).trim() : '';
     const browserMetaApp = browserMetaAppUrl(validPinId);
     const commentCommand = validPinId ? 'metabot metaapp comment --pin-id ' + validPinId + ' --comment ""' : '';
@@ -322,8 +328,7 @@ function buildMetaAppsPageScript(openInBrowserLabel) {
       if (!selectedPinId && records[0]?.pinId) selectedPinId = records[0].pinId;
       renderList();
       renderDetail();
-      const refreshError = payload.data?.indexerRefreshError;
-      setStatus(refreshError ? 'Loaded local cache; refresh failed: ' + refreshError.message : 'Loaded ' + records.length + ' MetaApp' + (records.length === 1 ? '' : 's') + '.', refreshError ? 'warning' : '');
+      setStatus('Loaded ' + records.length + ' MetaApp' + (records.length === 1 ? '' : 's') + '.');
     } catch (error) {
       records = [];
       if (elements.list) elements.list.innerHTML = '<div class="metaapps-empty">No MetaApps loaded.</div>';

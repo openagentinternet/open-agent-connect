@@ -1,16 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.METAAPP_PUBLIC_BASE_URL = void 0;
 exports.buildMetaAppCanonicalUrl = buildMetaAppCanonicalUrl;
 exports.buildMetaAppShareBundle = buildMetaAppShareBundle;
 exports.buildMetaAppBuzzRequest = buildMetaAppBuzzRequest;
 exports.buildMetaAppCommentWrite = buildMetaAppCommentWrite;
 const pinId_1 = require("./pinId");
+exports.METAAPP_PUBLIC_BASE_URL = 'https://openagentinternet.org/browser/metaapp';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
 function buildMetaAppCanonicalUrl(pinId) {
     const normalizedPinId = (0, pinId_1.assertMetaAppPinId)(pinId);
-    return `https://metaweb.world/metaapp/${normalizedPinId}`;
+    return `${exports.METAAPP_PUBLIC_BASE_URL}/${normalizedPinId}`;
 }
 function buildMetaAppShareBundle(pinId) {
     const normalizedPinId = (0, pinId_1.assertMetaAppPinId)(pinId);
