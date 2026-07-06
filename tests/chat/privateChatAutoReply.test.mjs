@@ -449,6 +449,37 @@ test('auto-reply persists inbound and outbound private chat messages to the unif
   ), true);
 });
 
+test('auto-reply ignores a duplicate inbound private chat message that reuses the same messagePinId', async () => {
+  const harness = await createAutoReplyHarness();
+
+  await harness.handleInbound({
+    messagePinId: 'incoming-pin-duplicate',
+    rawMessage: {
+      pinId: 'incoming-pin-duplicate',
+      txid: 'incoming-tx-duplicate',
+    },
+  });
+  await harness.handleInbound({
+    messagePinId: 'incoming-pin-duplicate',
+    rawMessage: {
+      pinId: 'incoming-pin-duplicate',
+      txid: 'incoming-tx-duplicate',
+    },
+  });
+
+  assert.equal(harness.writes.length, 1);
+  assert.equal(harness.runnerInputs.length, 1);
+
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0].messagePinId, 'incoming-pin-duplicate');
+  assert.equal(messages[1].messagePinId, 'reply-pin-1');
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.turnCount, 1);
+});
+
 test('auto-reply injects the latest 60 private chat messages into the runner', async () => {
   const harness = await createAutoReplyHarness({ now: 1_770_000_060_000 });
   const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;

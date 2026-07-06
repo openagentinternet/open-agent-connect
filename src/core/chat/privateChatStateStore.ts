@@ -482,16 +482,18 @@ export function createPrivateChatStateStore(
 
     async appendMessages(messages) {
       if (messages.length === 0) return messages;
+      let appendedMessages = messages;
       await this.updateState(state => {
         const existingIds = new Set(state.messages.map(m => m.messageId));
         const newMessages = messages.filter(m => !existingIds.has(m.messageId));
+        appendedMessages = newMessages;
         if (newMessages.length === 0) return state;
         return {
           ...state,
           messages: [...state.messages, ...newMessages].slice(-MAX_MESSAGES),
         };
       });
-      return messages;
+      return appendedMessages;
     },
 
     async getConversationByPeer(peerGlobalMetaId) {

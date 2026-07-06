@@ -450,7 +450,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         timestamp: inboundTimestamp,
       };
 
-      await deps.stateStore.appendMessages([inboundMessageRecord]);
+      const appendedInboundMessages = await deps.stateStore.appendMessages([inboundMessageRecord]);
+      if (appendedInboundMessages.length === 0) {
+        return;
+      }
 
       conversation = {
         ...conversation,
