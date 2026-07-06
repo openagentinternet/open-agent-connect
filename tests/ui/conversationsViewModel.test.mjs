@@ -11,8 +11,20 @@ const {
 
 const LOCAL_GLOBAL_META_ID = 'idq1j3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
 const PEER_GLOBAL_META_ID = 'idq1x3yu9vmwxkqdqrrt39qxl8u69vs0esjhwg6l5k';
+const FIXTURE_TIMESTAMP = 1776836184000;
+
+function formatLocalTimestamp(value) {
+  const date = new Date(value);
+  const pad = (part) => String(part).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join('-') + ' ' + [pad(date.getHours()), pad(date.getMinutes())].join(':');
+}
 
 test('buildConversationsPageViewModel maps peer conversations into local-Bot scoped summaries', () => {
+  const expectedTimestampLabel = formatLocalTimestamp(FIXTURE_TIMESTAMP);
   const model = buildConversationsPageViewModel({
     localBots: [
       {
@@ -39,7 +51,7 @@ test('buildConversationsPageViewModel maps peer conversations into local-Bot sco
         peerName: 'Bob Bot',
         peerAvatar: 'https://example.test/bob.png',
         latestText: 'Order accepted',
-        latestAt: 1776836184000,
+        latestAt: FIXTURE_TIMESTAMP,
         messageCount: 4,
         kinds: ['private_chat', 'order_protocol'],
       },
@@ -56,7 +68,7 @@ test('buildConversationsPageViewModel maps peer conversations into local-Bot sco
         contentType: 'text/markdown',
         txid: 'a'.repeat(64),
         txids: ['a'.repeat(64)],
-        timestamp: 1776836184000,
+        timestamp: FIXTURE_TIMESTAMP,
       },
       {
         messageId: 'msg-2',
@@ -68,7 +80,7 @@ test('buildConversationsPageViewModel maps peer conversations into local-Bot sco
         content: 'Order accepted',
         contentType: 'text/plain',
         pinId: `${'b'.repeat(64)}i0`,
-        timestamp: 1776836190000,
+        timestamp: FIXTURE_TIMESTAMP + 6000,
       },
     ],
   });
@@ -100,8 +112,8 @@ test('buildConversationsPageViewModel maps peer conversations into local-Bot sco
       peerGlobalMetaId: 'gm-bob',
       peerAvatar: 'https://example.test/bob.png',
       latestText: 'Order accepted',
-      latestAt: 1776836184000,
-      latestAtLabel: '2026-04-22 05:36',
+      latestAt: FIXTURE_TIMESTAMP,
+      latestAtLabel: expectedTimestampLabel,
       kinds: ['Chat', 'Service'],
       stateLabel: 'Active',
       messageCountLabel: '4 messages',
@@ -134,7 +146,7 @@ test('buildConversationsPageViewModel maps peer conversations into local-Bot sco
       txid: 'a'.repeat(64),
       txidPreview: `${'a'.repeat(8)}...${'a'.repeat(6)}`,
       isMarkdown: true,
-      timestampLabel: '2026-04-22 05:36',
+      timestampLabel: expectedTimestampLabel,
     },
     {
       messageId: 'msg-2',
@@ -147,7 +159,7 @@ test('buildConversationsPageViewModel maps peer conversations into local-Bot sco
       txid: 'b'.repeat(64),
       txidPreview: `${'b'.repeat(8)}...${'b'.repeat(6)}`,
       isMarkdown: false,
-      timestampLabel: '2026-04-22 05:36',
+      timestampLabel: formatLocalTimestamp(FIXTURE_TIMESTAMP + 6000),
     },
   ]);
 });
@@ -331,4 +343,102 @@ test('buildConversationsPageViewModelRuntimeSource executes in browser-like cont
   assert.equal(context.result.conversations[0].stateLabel, 'Active');
   assert.equal(context.result.conversations[0].latestText, 'Runtime hello');
   assert.deepEqual(context.result.conversations[0].kinds, ['Chat']);
+});
+
+test('buildConversationsPageViewModelRuntimeSource formats timestamps with local time accessors', () => {
+  class FakeDate {
+    constructor(value) {
+      this.value = Number(value);
+    }
+
+    getTime() {
+      return this.value;
+    }
+
+    getFullYear() {
+      return 2026;
+    }
+
+    getMonth() {
+      return 6;
+    }
+
+    getDate() {
+      return 6;
+    }
+
+    getHours() {
+      return 8;
+    }
+
+    getMinutes() {
+      return 19;
+    }
+
+    getUTCFullYear() {
+      return 2026;
+    }
+
+    getUTCMonth() {
+      return 6;
+    }
+
+    getUTCDate() {
+      return 6;
+    }
+
+    getUTCHours() {
+      return 0;
+    }
+
+    getUTCMinutes() {
+      return 19;
+    }
+  }
+
+  const context = {
+    Date: FakeDate,
+    Number,
+    String,
+    Array,
+    RegExp,
+    Math,
+    JSON,
+    input: {
+      conversations: [
+        {
+          conversationId: 'pc-runtime-local-time',
+          localGlobalMetaId: 'gm-local',
+          peerGlobalMetaId: 'gm-runtime-peer',
+          peerName: 'Runtime Peer',
+          latestText: 'Runtime hello',
+          latestAt: 1776836184000,
+          messageCount: 1,
+          kinds: ['private_chat'],
+        },
+      ],
+      selectedPeerGlobalMetaId: 'gm-runtime-peer',
+      messages: [
+        {
+          messageId: 'msg-runtime',
+          direction: 'incoming',
+          kind: 'private_chat',
+          sender: { globalMetaId: 'gm-runtime-peer', name: 'Runtime Peer' },
+          content: 'Hello',
+          contentType: 'text/plain',
+          txid: 'c'.repeat(64),
+          timestamp: 1776836184000,
+        },
+      ],
+    },
+    result: null,
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${buildConversationsPageViewModelRuntimeSource()}\nresult = buildConversationsPageViewModel(input);`,
+    context,
+  );
+
+  assert.equal(context.result.conversations[0].latestAtLabel, '2026-07-06 08:19');
+  assert.equal(context.result.messages[0].timestampLabel, '2026-07-06 08:19');
 });

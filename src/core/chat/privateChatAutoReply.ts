@@ -67,6 +67,14 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeTimestampMs(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  return numeric < 1_000_000_000_000 ? Math.floor(numeric * 1000) : Math.floor(numeric);
+}
+
 function buildConversationId(selfGlobalMetaId: string, peerGlobalMetaId: string): string {
   return `pc-${selfGlobalMetaId}-${peerGlobalMetaId}`;
 }
@@ -143,7 +151,34 @@ async function shouldResetIdleTurnCount(input: {
   if (!latestMessage || !Number.isFinite(latestMessage.timestamp)) {
     return false;
   }
-  return input.inboundTimestamp - latestMessage.timestamp > input.maxIdleMs;
+  return normalizeTimestampMs(input.inboundTimestamp) - normalizeTimestampMs(latestMessage.timestamp) > input.maxIdleMs;
+}
+
+async function conversationHasOutboundSince(input: {
+  stateStore: PrivateChatStateStore;
+  conversationId: string;
+  sinceTimestamp: number;
+}): Promise<boolean> {
+  const sinceTimestamp = normalizeTimestampMs(input.sinceTimestamp);
+  if (!sinceTimestamp) {
+    return false;
+  }
+  const state = await input.stateStore.readState();
+  return state.messages.some((message) =>
+    message.conversationId === input.conversationId
+    && message.direction === 'outbound'
+    && normalizeTimestampMs(message.timestamp) > sinceTimestamp,
+  );
+}
+
+async function latestConversationMessageMatches(input: {
+  stateStore: PrivateChatStateStore;
+  conversationId: string;
+  expectedMessageId: string;
+}): Promise<boolean> {
+  const latestMessages = await input.stateStore.getRecentMessages(input.conversationId, 1);
+  const latestMessage = latestMessages.at(-1) ?? null;
+  return Boolean(latestMessage && latestMessage.messageId === input.expectedMessageId);
 }
 
 function checkRateLimit(rateLimiter: RateLimiterState, now: number): boolean {
@@ -266,10 +301,27 @@ export function createPrivateChatAutoReplyOrchestrator(
     content: string;
     extensions: Record<string, unknown> | null;
     shouldClose: boolean;
+    triggerMessageId?: string | null;
     guidanceToConsume?: PrivateChatPendingGuidanceClaim | null;
   }): Promise<PrivateChatConversation | null> {
     let outboundReply: SentPrivateChatReply | null = null;
     try {
+      if (
+        input.guidanceToConsume
+        && await conversationHasOutboundSince({
+          stateStore: deps.stateStore,
+          conversationId: input.conversation.conversationId,
+          sinceTimestamp: input.guidanceToConsume.createdAt,
+        })
+      ) {
+        await deps.stateStore.clearPendingGuidanceIfMatches(
+          input.conversation.conversationId,
+          input.guidanceToConsume.guidanceText,
+          input.guidanceToConsume.createdAt,
+          input.guidanceToConsume.leaseId,
+        ).catch(() => null);
+        return null;
+      }
       if (
         input.guidanceToConsume
         && !(await pendingGuidanceClaimStillMatchesState(
@@ -282,6 +334,22 @@ export function createPrivateChatAutoReplyOrchestrator(
           input.conversation.conversationId,
           input.guidanceToConsume,
         ).catch(() => null);
+        return null;
+      }
+      if (
+        input.triggerMessageId
+        && !(await latestConversationMessageMatches({
+          stateStore: deps.stateStore,
+          conversationId: input.conversation.conversationId,
+          expectedMessageId: input.triggerMessageId,
+        }))
+      ) {
+        if (input.guidanceToConsume) {
+          await deps.stateStore.releasePendingGuidanceClaimIfMatches(
+            input.conversation.conversationId,
+            input.guidanceToConsume,
+          ).catch(() => null);
+        }
         return null;
       }
       outboundReply = await sendReplyMessage(
@@ -391,7 +459,7 @@ export function createPrivateChatAutoReplyOrchestrator(
       if (!peerGlobalMetaId) return;
 
       const conversationId = buildConversationId(selfGlobalMetaId, peerGlobalMetaId);
-      const inboundTimestamp = message.timestamp || now;
+      const inboundTimestamp = normalizeTimestampMs(message.timestamp) || now;
 
       // ---- Shared: conversation lifecycle & message storage ----
 
@@ -450,7 +518,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         timestamp: inboundTimestamp,
       };
 
-      await deps.stateStore.appendMessages([inboundMessageRecord]);
+      const appendedInboundMessages = await deps.stateStore.appendMessages([inboundMessageRecord]);
+      if (appendedInboundMessages.length === 0) {
+        return;
+      }
 
       conversation = {
         ...conversation,
@@ -572,6 +643,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         content: preparedTurn.content,
         extensions: preparedTurn.extensions,
         shouldClose: preparedTurn.shouldClose,
+        triggerMessageId: inboundMessageRecord.messageId,
         guidanceToConsume,
       });
       if (!committedConversation) return;

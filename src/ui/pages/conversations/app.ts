@@ -170,6 +170,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     error: '',
     eventSource: null,
     beforeCursor: null,
+    afterCursor: null,
     hasMoreBefore: false,
     botPickerOpen: false,
     guidanceOpen: false,
@@ -415,6 +416,14 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
   const latestThreadMessage = () => Array.isArray(state.messages) && state.messages.length
     ? state.messages[state.messages.length - 1]
     : null;
+  const threadHasMessageId = (messageId) => {
+    const normalizedMessageId = normalizeText(messageId);
+    return Boolean(
+      normalizedMessageId
+      && Array.isArray(state.messages)
+      && state.messages.some((message) => normalizeText(message && message.messageId) === normalizedMessageId)
+    );
+  };
   const messageFingerprint = (message) => {
     if (!message || typeof message !== 'object') return '';
     return [
@@ -440,11 +449,15 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     ) {
       return false;
     }
+    if (threadHasMessageId(pending.expectedMessageId)) {
+      resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance applied. The local message is now visible.'));
+      return true;
+    }
     const latest = latestThreadMessage();
     if (!isLocalThreadMessage(latest)) return false;
     const latestFingerprint = messageFingerprint(latest);
     if (!latestFingerprint || latestFingerprint === pending.baselineMessageFingerprint) return false;
-    resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
+    resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance applied. The local message is now visible.'));
     return true;
   };
   const scheduleGuidanceMessageRefresh = (submissionToken) => {
@@ -784,12 +797,33 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const first = Array.isArray(messages) && messages.length ? messages[0] : null;
     return first && Number.isFinite(Number(first.timestamp)) ? Number(first.timestamp) : state.beforeCursor;
   };
+  const readAfterCursor = (messages) => {
+    const last = Array.isArray(messages) && messages.length ? messages[messages.length - 1] : null;
+    return last && Number.isFinite(Number(last.timestamp)) ? Number(last.timestamp) : state.afterCursor;
+  };
+  const mergeMessageLists = (olderMessages, newerMessages) => {
+    const merged = [];
+    const seen = new Set();
+    [...(Array.isArray(olderMessages) ? olderMessages : []), ...(Array.isArray(newerMessages) ? newerMessages : [])].forEach((message) => {
+      if (!message || typeof message !== 'object') return;
+      const key = normalizeText(message.messageId)
+        || normalizeText(message.pinId)
+        || normalizeText(message.messagePinId)
+        || normalizeText(message.txid)
+        || messageFingerprint(message);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(message);
+    });
+    return merged;
+  };
   const loadMessages = async (options) => {
     if (!state.selectedLocalGlobalMetaId || !state.selectedPeerGlobalMetaId) return;
     const appendOlder = Boolean(options && options.appendOlder);
     const preserveScroll = Boolean(options && options.preserveScroll);
     const stickToBottom = Boolean(options && options.stickToBottom);
     const silent = Boolean(options && options.silent);
+    const appendNewer = !appendOlder && state.messages.length > 0 && state.afterCursor && !Boolean(options && options.reset);
     if (appendOlder && !state.beforeCursor) return;
     const scrollAnchor = elements.messages
       ? { height: elements.messages.scrollHeight, top: elements.messages.scrollTop }
@@ -800,17 +834,37 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
       render();
     }
     try {
-      const payload = await fetchJson(messagesUrl(appendOlder ? { before: state.beforeCursor, limit: 50 } : { limit: 50 }));
+      const payload = await fetchJson(messagesUrl(
+        appendOlder
+          ? { before: state.beforeCursor, limit: 50 }
+          : appendNewer
+            ? { after: state.afterCursor, limit: 50 }
+            : { limit: 50 }
+      ));
       const messages = Array.isArray(payload.messages) ? payload.messages : [];
       const pagination = payload.pagination || {};
-      state.messages = appendOlder ? messages.concat(state.messages) : messages;
-      state.beforeCursor = pagination.beforeCursor || readBeforeCursor(state.messages);
-      state.hasMoreBefore = pagination.hasMoreBefore === true;
+      if (appendOlder) {
+        state.messages = mergeMessageLists(messages, state.messages);
+      } else if (appendNewer) {
+        state.messages = mergeMessageLists(state.messages, messages);
+      } else {
+        state.messages = messages;
+      }
+      state.beforeCursor = readBeforeCursor(state.messages);
+      state.afterCursor = readAfterCursor(state.messages);
+      if (!appendNewer) {
+        state.hasMoreBefore = pagination.hasMoreBefore === true;
+      }
       maybeResolvePendingGuidanceFromMessages();
     } catch (error) {
       if (!silent) {
         state.error = error.message || uiText('conversations.messagesLoadFailed', 'Conversation messages failed to load.');
-        if (!appendOlder) state.messages = [];
+        if (!appendOlder) {
+          state.messages = [];
+          state.beforeCursor = null;
+          state.afterCursor = null;
+          state.hasMoreBefore = false;
+        }
       }
     } finally {
       if (appendOlder) state.loadingOlder = false;
@@ -898,7 +952,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     render();
     scheduleGuidanceMessageRefresh(submissionToken);
     try {
-      await fetchJson('/api/conversations/guidance', {
+      const guidanceResult = await fetchJson('/api/conversations/guidance', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -911,8 +965,18 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
         state.pendingGuidance
         && state.pendingGuidance.submissionToken === submissionToken
       ) {
-        resetGuidanceComposer(uiText('conversations.guidanceSent', 'Guidance sent for the next local turn.'));
-        render();
+        state.guidanceDraft = '';
+        state.pendingGuidance = {
+          ...state.pendingGuidance,
+          expectedMessageId: normalizeText(guidanceResult && guidanceResult.messageId),
+        };
+        if (!maybeResolvePendingGuidanceFromMessages()) {
+          state.guidanceStatus = uiText(
+            'conversations.guidanceAwaitingMessage',
+            'Guidance accepted. Waiting for the local message...',
+          );
+          render();
+        }
       }
       if (state.selectedLocalGlobalMetaId === targetLocal && state.selectedPeerGlobalMetaId === targetPeer) {
         await loadConversations({ stickToBottom: true });
@@ -936,6 +1000,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     state.selectedPeerGlobalMetaId = peerGlobalMetaId;
     state.messages = [];
     state.beforeCursor = null;
+    state.afterCursor = null;
     state.hasMoreBefore = false;
     resetGuidanceComposer();
     setUrlState();
@@ -948,6 +1013,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     state.selectedPeerGlobalMetaId = '';
     state.messages = [];
     state.beforeCursor = null;
+    state.afterCursor = null;
     state.hasMoreBefore = false;
     resetGuidanceComposer();
     setUrlState();

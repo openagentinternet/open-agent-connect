@@ -449,6 +449,73 @@ test('auto-reply persists inbound and outbound private chat messages to the unif
   ), true);
 });
 
+test('auto-reply ignores a duplicate inbound private chat message that reuses the same messagePinId', async () => {
+  const harness = await createAutoReplyHarness();
+
+  await harness.handleInbound({
+    messagePinId: 'incoming-pin-duplicate',
+    rawMessage: {
+      pinId: 'incoming-pin-duplicate',
+      txid: 'incoming-tx-duplicate',
+    },
+  });
+  await harness.handleInbound({
+    messagePinId: 'incoming-pin-duplicate',
+    rawMessage: {
+      pinId: 'incoming-pin-duplicate',
+      txid: 'incoming-tx-duplicate',
+    },
+  });
+
+  assert.equal(harness.writes.length, 1);
+  assert.equal(harness.runnerInputs.length, 1);
+
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0].messagePinId, 'incoming-pin-duplicate');
+  assert.equal(messages[1].messagePinId, 'reply-pin-1');
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('auto-reply skips a stale inbound-triggered turn when a newer local outbound already exists', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    replyRunner: async (input) => {
+      const latestInbound = input.recentMessages.at(-1);
+      assert.equal(latestInbound?.messageId, 'incoming-pin-stale-turn');
+      await harness.stateStore.appendMessages([{
+        conversationId: input.conversation.conversationId,
+        messageId: 'newer-local-outbound',
+        direction: 'outbound',
+        senderGlobalMetaId: harness.localGlobalMetaId,
+        content: 'another turn already replied',
+        messagePinId: 'newer-local-outbound',
+        extensions: null,
+        timestamp: now + 1,
+      }]);
+      return {
+        state: 'reply',
+        content: 'stale reply should not send',
+      };
+    },
+  });
+
+  await harness.handleInbound({
+    content: 'latest inbound',
+    messagePinId: 'incoming-pin-stale-turn',
+  });
+
+  assert.equal(harness.writes.length, 0);
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(messages.filter((message) => message.direction === 'outbound').length, 1);
+  assert.equal(messages.at(-1)?.messageId, 'newer-local-outbound');
+});
+
 test('auto-reply injects the latest 60 private chat messages into the runner', async () => {
   const harness = await createAutoReplyHarness({ now: 1_770_000_060_000 });
   const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
@@ -1146,6 +1213,46 @@ test('guided local turns are a no-op for closed conversations without pending gu
   assert.equal(conversation.turnCount, 30);
   assert.equal(conversation.pendingGuidanceText, null);
   assert.equal(conversation.pendingGuidanceCreatedAt, null);
+});
+
+test('guided local turns clear stale guidance after a newer local outbound already happened', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 4,
+    lastDirection: 'outbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'This guidance is already stale.',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+  await harness.stateStore.appendMessages([{
+    conversationId,
+    messageId: 'already-replied-outbound',
+    direction: 'outbound',
+    senderGlobalMetaId: harness.localGlobalMetaId,
+    content: 'reply already sent after guidance',
+    messagePinId: 'already-replied-outbound',
+    extensions: null,
+    timestamp: now - 100,
+  }]);
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.writes.length, 0);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.pendingGuidanceText, null);
+  assert.equal(conversation.pendingGuidanceCreatedAt, null);
+  assert.equal(conversation.pendingGuidanceLeaseId, null);
+  assert.equal(conversation.pendingGuidanceLeaseExpiresAt, null);
 });
 
 test('guided local turns still run when inbound auto-reply is disabled', async () => {

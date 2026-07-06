@@ -217,9 +217,135 @@ test('keeps peer query when list is empty or unrelated', async () => {
   assert.equal(context.window.location.search, `?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`);
 });
 
-test('submits footer guidance for the selected conversation, disables send in flight, and refreshes the thread on success', async () => {
+test('refresh keeps already loaded older messages and only appends newer thread messages', async () => {
   const requestedUrl = `http://127.0.0.1:24885/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`;
   const requests = [];
+  const context = createConversationsScriptContext({
+    locationHref: requestedUrl,
+    fetch: async (url) => {
+      const textUrl = String(url);
+      requests.push(textUrl);
+      if (textUrl === '/api/bot/profiles') {
+        return jsonResponse({
+          ok: true,
+          data: {
+            profiles: [{ name: 'Local Bot', slug: 'local-bot', globalMetaId: LOCAL_GLOBAL_META_ID }],
+          },
+        });
+      }
+      if (textUrl.includes('/api/conversations?')) {
+        return jsonResponse({
+          ok: true,
+          data: {
+            conversations: [{
+              localGlobalMetaId: LOCAL_GLOBAL_META_ID,
+              peerGlobalMetaId: PEER_GLOBAL_META_ID,
+              peerName: 'Peer Bot',
+              latestText: 'latest',
+            }],
+          },
+        });
+      }
+      if (textUrl.includes('/api/conversations/messages?') && textUrl.includes('before=2000')) {
+        return jsonResponse({
+          ok: true,
+          data: {
+            messages: [{
+              messageId: 'msg-1',
+              direction: 'incoming',
+              content: 'oldest',
+              timestamp: 1000,
+              sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
+            }],
+            pagination: {
+              beforeCursor: 1000,
+              afterCursor: 1000,
+              hasMoreBefore: false,
+            },
+          },
+        });
+      }
+      if (textUrl.includes('/api/conversations/messages?') && textUrl.includes('after=3000')) {
+        return jsonResponse({
+          ok: true,
+          data: {
+            messages: [{
+              messageId: 'msg-4',
+              direction: 'outgoing',
+              content: 'newest',
+              timestamp: 4000,
+              sender: { globalMetaId: LOCAL_GLOBAL_META_ID, name: 'Local Bot' },
+            }],
+            pagination: {
+              beforeCursor: 4000,
+              afterCursor: 4000,
+              hasMoreBefore: false,
+            },
+          },
+        });
+      }
+      if (textUrl.includes('/api/conversations/messages?')) {
+        return jsonResponse({
+          ok: true,
+          data: {
+            messages: [
+              {
+                messageId: 'msg-2',
+                direction: 'outgoing',
+                content: 'middle',
+                timestamp: 2000,
+                sender: { globalMetaId: LOCAL_GLOBAL_META_ID, name: 'Local Bot' },
+              },
+              {
+                messageId: 'msg-3',
+                direction: 'incoming',
+                content: 'latest',
+                timestamp: 3000,
+                sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
+              },
+            ],
+            pagination: {
+              beforeCursor: 2000,
+              afterCursor: 3000,
+              hasMoreBefore: true,
+            },
+          },
+        });
+      }
+      return jsonResponse({ ok: true, data: {} });
+    },
+  });
+
+  vm.runInNewContext(buildConversationsPageDefinition().script, context);
+
+  const messages = context.__elements.get('[data-conversation-messages]');
+  const refresh = context.__elements.get('[data-conversations-refresh]');
+
+  await waitFor(() => messages.innerHTML.includes('middle') && messages.innerHTML.includes('latest'), 'initial messages');
+  await waitFor(() => messages.children.some((child) => child.className === 'btn btn-sm conversation-load-older'), 'load older button');
+  const olderButton = messages.children.find((child) => child.className === 'btn btn-sm conversation-load-older');
+  olderButton.listeners.get('click')();
+
+  await waitFor(() => messages.innerHTML.includes('oldest'), 'older messages to stay visible');
+
+  messages.scrollHeight = 500;
+  messages.clientHeight = 100;
+  messages.scrollTop = 0;
+  refresh.listeners.get('click')();
+
+  await waitFor(() => requests.some((url) => url.includes('after=3000')), 'newer-only refresh request');
+  await waitFor(() => messages.innerHTML.includes('newest'), 'newer message appended');
+
+  assert.ok(messages.innerHTML.includes('oldest'));
+  assert.ok(messages.innerHTML.includes('middle'));
+  assert.ok(messages.innerHTML.includes('latest'));
+  assert.ok(messages.innerHTML.includes('newest'));
+});
+
+test('submits footer guidance, keeps a waiting status until the local message is visible, and then closes successfully', async () => {
+  const requestedUrl = `http://127.0.0.1:24885/ui/conversations?local=${LOCAL_GLOBAL_META_ID}&peer=${PEER_GLOBAL_META_ID}`;
+  const requests = [];
+  let messagePollCount = 0;
   let guidanceResolve;
   const guidancePromise = new Promise((resolve) => {
     guidanceResolve = resolve;
@@ -255,16 +381,34 @@ test('submits footer guidance for the selected conversation, disables send in fl
         });
       }
       if (textUrl.includes('/api/conversations/messages?')) {
+        messagePollCount += 1;
         return jsonResponse({
           ok: true,
           data: {
-            messages: [{
-              messageId: 'msg-1',
-              direction: 'incoming',
-              content: 'hello',
-              timestamp: 1776836184000,
-              sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
-            }],
+            messages: messagePollCount >= 4
+              ? [
+                  {
+                    messageId: 'msg-1',
+                    direction: 'incoming',
+                    content: 'hello',
+                    timestamp: 1776836184000,
+                    sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
+                  },
+                  {
+                    messageId: 'msg-2',
+                    direction: 'outgoing',
+                    content: 'guided reply',
+                    timestamp: 1776836185000,
+                    sender: { globalMetaId: LOCAL_GLOBAL_META_ID, name: 'Local Bot' },
+                  },
+                ]
+              : [{
+                  messageId: 'msg-1',
+                  direction: 'incoming',
+                  content: 'hello',
+                  timestamp: 1776836184000,
+                  sender: { globalMetaId: PEER_GLOBAL_META_ID, name: 'Peer Bot' },
+                }],
           },
         });
       }
@@ -312,13 +456,23 @@ test('submits footer guidance for the selected conversation, disables send in fl
   guidanceResolve();
   await submitPromise;
   await waitFor(
-    () => requests.filter((entry) => entry.url.includes('/api/conversations/messages?')).length >= 2,
-    'message refresh after guidance success',
+    () => requests.filter((entry) => entry.url.includes('/api/conversations/messages?')).length >= 3,
+    'message refresh after guidance acceptance',
   );
 
   assert.equal(input.value, '');
   assert.equal(form.hidden, true);
-  assert.equal(status.textContent, 'Guidance sent for the next local turn.');
+  assert.equal(toggle.disabled, true);
+  assert.equal(send.disabled, true);
+  assert.equal(status.textContent, 'Guidance accepted. Waiting for the local message...');
+
+  await waitFor(
+    () => status.textContent === 'Guidance applied. The local message is now visible.',
+    'final guidance visibility status',
+    3500,
+  );
+
+  assert.equal(toggle.disabled, false);
 });
 
 test('keeps refreshing the active thread during guided reply generation and closes the composer once a new local message appears', async () => {
@@ -415,7 +569,7 @@ test('keeps refreshing the active thread during guided reply generation and clos
   });
 
   await waitFor(
-    () => status.textContent === 'Guidance sent for the next local turn.',
+    () => status.textContent === 'Guidance applied. The local message is now visible.',
     'guided reply refresh before guidance request resolves',
     2500,
   );

@@ -160,6 +160,39 @@ test('getRecentMessages returns messages sorted by timestamp', async () => {
   assert.equal(messages[1].messageId, 'm3');
 });
 
+test('getRecentMessages normalizes second-based timestamps before sorting', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+
+  await store.appendMessages([
+    {
+      conversationId: 'c1',
+      messageId: 'old-outbound-ms',
+      direction: 'outbound',
+      senderGlobalMetaId: 'self',
+      content: 'older outbound',
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1_783_332_314_680,
+    },
+    {
+      conversationId: 'c1',
+      messageId: 'new-inbound-seconds',
+      direction: 'inbound',
+      senderGlobalMetaId: 'peer',
+      content: 'new inbound',
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1_783_341_491,
+    },
+  ]);
+
+  const messages = await store.getRecentMessages('c1', 2);
+  assert.equal(messages[0].messageId, 'old-outbound-ms');
+  assert.equal(messages[1].messageId, 'new-inbound-seconds');
+  assert.equal(messages[1].timestamp, 1_783_341_491_000);
+});
+
 test('corrupt JSON file is quarantined and empty state returned', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
