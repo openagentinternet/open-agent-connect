@@ -331,7 +331,7 @@ Show the final MetaAPP JSON and actor. Tell the human they can edit any field by
 
 7. Return the result.
 
-Surface `pinId`, `firstPinId`, txids, `metaapp://<pinId>`, the MetaWeb URL when returned, and the local Browser route `/browser/metaapp/<pinId>`. Also mention that the owner page is `/ui/apps`.
+Surface `pinId` as the latest chain-write pin, `firstPinId` as the stable view pin, and txids. When `firstPinId` is present, use it for `metaapp://...`, the MetaWeb URL, `/browser/metaapp/<pinId>`, and `/ui/apps?pinId=<pinId>`; fall back to `pinId` only when `firstPinId` is absent.
 
 ## Direct MetaAPP Protocol Publish
 
@@ -419,7 +419,7 @@ Comment on a MetaApp:
 - Final MetaAPP JSON is shown before `metaapp publish` or `metaapp update`.
 - Publish/update/delete/share announcements/comments confirm the actor before writes.
 - If the MetaApp is meant to become a Bot homepage, `/info/homepage` is set only after explicit user confirmation.
-- Results include the MetaApp pin and a Browser follow-up such as `/browser/metaapp/<pinId>`.
+- Results include the latest MetaApp pin plus stable Browser/public/local Apps follow-ups that use `firstPinId` when present.
 
 ## Handoff To
 

@@ -1,6 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.METAAPP_PUBLIC_BASE_URL = void 0;
+exports.pickMetaAppViewPinId = pickMetaAppViewPinId;
+exports.buildMetaAppUri = buildMetaAppUri;
+exports.buildMetaAppBrowserPath = buildMetaAppBrowserPath;
 exports.buildMetaAppCanonicalUrl = buildMetaAppCanonicalUrl;
 exports.buildMetaAppShareBundle = buildMetaAppShareBundle;
 exports.buildMetaAppBuzzRequest = buildMetaAppBuzzRequest;
@@ -10,9 +13,18 @@ exports.METAAPP_PUBLIC_BASE_URL = 'https://openagentinternet.org/browser/metaapp
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
-function buildMetaAppCanonicalUrl(pinId) {
+function pickMetaAppViewPinId(pinId, firstPinId) {
     const normalizedPinId = (0, pinId_1.assertMetaAppPinId)(pinId);
-    return `${exports.METAAPP_PUBLIC_BASE_URL}/${normalizedPinId}`;
+    return (0, pinId_1.normalizeMetaAppPinId)(firstPinId) ?? normalizedPinId;
+}
+function buildMetaAppUri(pinId, firstPinId) {
+    return `metaapp://${pickMetaAppViewPinId(pinId, firstPinId)}`;
+}
+function buildMetaAppBrowserPath(pinId, firstPinId) {
+    return `/browser/metaapp/${encodeURIComponent(pickMetaAppViewPinId(pinId, firstPinId))}`;
+}
+function buildMetaAppCanonicalUrl(pinId, firstPinId) {
+    return `${exports.METAAPP_PUBLIC_BASE_URL}/${pickMetaAppViewPinId(pinId, firstPinId)}`;
 }
 function buildMetaAppShareBundle(pinId) {
     const normalizedPinId = (0, pinId_1.assertMetaAppPinId)(pinId);

@@ -6,7 +6,7 @@ import {
   buildMetaAppRevokeWrite,
 } from './appsProtocol';
 import { normalizeMetaAppPinId } from './pinId';
-import { buildMetaAppCanonicalUrl } from './share';
+import { buildMetaAppCanonicalUrl, buildMetaAppUri } from './share';
 
 export interface MetaAppOwnerActor {
   from?: string;
@@ -60,8 +60,9 @@ export async function publishMetaAppPayload(
   const pinId = requirePinIdFromWrite(chainWrite);
   return commandSuccess({
     pinId,
+    firstPinId: pinId,
     chainWrite,
-    metaappUri: `metaapp://${pinId}`,
+    metaappUri: buildMetaAppUri(pinId),
     metawebUrl: buildMetaAppCanonicalUrl(pinId),
   });
 }
@@ -77,12 +78,14 @@ export async function updateMetaAppPayload(
   const write = buildMetaAppModifyWrite(targetPinId, payload);
   const chainWrite = await actor.writePin({ ...write, network: input.network });
   const pinId = requirePinIdFromWrite(chainWrite);
+  const firstPinId = normalizeMetaAppPinId(chainWrite.firstPinId) ?? targetPinId;
   return commandSuccess({
     pinId,
+    firstPinId,
     targetPinId,
     chainWrite,
-    metaappUri: `metaapp://${pinId}`,
-    metawebUrl: buildMetaAppCanonicalUrl(pinId),
+    metaappUri: buildMetaAppUri(pinId, firstPinId),
+    metawebUrl: buildMetaAppCanonicalUrl(pinId, firstPinId),
   });
 }
 

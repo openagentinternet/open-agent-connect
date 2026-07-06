@@ -132,6 +132,9 @@ test('parseManMetaAppListResponse uses later modify row for the same root pin', 
   assert.equal(parsed.records[0].title, 'Modified App');
   assert.equal(parsed.records[0].runtime, 'browser/linux');
   assert.equal(parsed.records[0].version, 'v1.1.0');
+  assert.equal(parsed.records[0].runUrl, `/browser/metaapp/${PIN_A}`);
+  assert.equal(parsed.records[0].metaappUri, `metaapp://${PIN_A}`);
+  assert.equal(parsed.records[0].metawebUrl, `https://openagentinternet.org/browser/metaapp/${PIN_A}`);
 });
 
 test('parseManMetaAppListResponse groups modify target paths under the original pin', () => {

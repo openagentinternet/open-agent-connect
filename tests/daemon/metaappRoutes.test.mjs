@@ -385,6 +385,33 @@ test('GET /api/metaapps forwards from/mine and refresh query params to metaapp.l
   assert.equal(payload.ok, true);
 });
 
+test('GET /api/metaapps pinId query matches a modified record firstPinId', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const cache = createMetaAppLocalCacheStore(fixture.homeDir);
+  const updatedPinId = `${'d'.repeat(64)}i0`;
+  await cache.upsertLocal(localMetaAppRecord(updatedPinId, {
+    firstPinId: TARGET_PIN_ID,
+    title: 'Modified Local MetaAPP',
+    metawebUrl: `https://openagentinternet.org/browser/metaapp/${TARGET_PIN_ID}`,
+  }));
+
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(),
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const { payload } = await fetchJson(server.baseUrl, `/api/metaapps?from=alice&pinId=${TARGET_PIN_ID}`);
+
+  assert.equal(payload.ok, true);
+  assert.equal(payload.data.records.length, 1);
+  assert.equal(payload.data.records[0].pinId, updatedPinId);
+  assert.equal(payload.data.records[0].firstPinId, TARGET_PIN_ID);
+});
+
 test('default metaapp owner list uses selected Bot MVC address against MAN', async (t) => {
   const fixture = await createAliceFixture(t);
   const urls = [];
@@ -571,6 +598,40 @@ test('default metaapp owner publish keeps pin id in relative localUiUrl without 
   });
 
   assert.equal(publish.payload.data.localUiUrl, '/ui/apps?pinId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0');
+});
+
+test('default metaapp owner update returns stable view links keyed by the original pin', async (t) => {
+  const fixture = await createAliceFixture(t);
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: fixture.homeDir,
+    systemHomeDir: fixture.systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: fakeSigner(),
+  });
+  const server = await startServer(handlers);
+  t.after(async () => server.close());
+
+  const update = await fetchJson(server.baseUrl, '/api/metaapp/update', {
+    method: 'POST',
+    body: {
+      from: 'alice',
+      targetPinId: TARGET_PIN_ID,
+      title: 'Updated Agent Wiki Builder',
+      appName: 'Updated Agent Wiki Builder',
+      icon: TARGET_PIN_ID,
+      coverImg: TARGET_PIN_ID,
+      runtime: ['browser'],
+      content: TARGET_PIN_ID,
+      code: TARGET_PIN_ID,
+      confirm: true,
+    },
+  });
+
+  assert.equal(update.payload.ok, true);
+  assert.equal(update.payload.data.pinId, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaai0');
+  assert.equal(update.payload.data.firstPinId, TARGET_PIN_ID);
+  assert.equal(update.payload.data.metawebUrl, `https://openagentinternet.org/browser/metaapp/${TARGET_PIN_ID}`);
+  assert.equal(update.payload.data.localUiUrl, `/ui/apps?pinId=${TARGET_PIN_ID}`);
 });
 
 test('default metaapp owner publish and update accept empty optional asset fields', async (t) => {

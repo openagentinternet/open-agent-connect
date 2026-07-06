@@ -851,6 +851,34 @@ test('apps page share modal exposes and copies MetaAPP protocol links', async ()
   assert.deepEqual(context.clipboardWrites, [metaappUri, metawebUrl]);
 });
 
+test('apps page uses firstPinId for run and share links when a record is modified', async () => {
+  const firstPinId = `${'a'.repeat(64)}i0`;
+  const context = createAppsPageContext({
+    apps: appsPayload({
+      records: [{
+        pinId: PIN,
+        firstPinId,
+        title: 'Modified Shareable App',
+        appName: 'Modified Shareable App',
+        disabled: false,
+      }],
+      total: 1,
+    }),
+  });
+
+  context.run();
+  await context.waitFor(() => context.elements['[data-apps-grid]'].innerHTML.includes('Modified Shareable App'), 'render modified shareable app');
+  await context.clickGridAction(`[data-apps-run="${PIN}"]`);
+  assert.equal(context.locationUrl.pathname, `/browser/metaapp/${firstPinId}`);
+
+  await context.clickGridAction(`[data-apps-share="${PIN}"]`);
+  const metaappUri = `metaapp://${firstPinId}`;
+  const metawebUrl = `https://openagentinternet.org/browser/metaapp/${firstPinId}`;
+  const html = context.elements['[data-apps-modal-root]'].innerHTML;
+  assert.match(html, new RegExp(metaappUri.replace(/\//gu, '\\/')));
+  assert.match(html, new RegExp(metawebUrl.replace(/\//gu, '\\/')));
+});
+
 test('apps page delete flow posts revoke request and hides the record', async () => {
   const context = createAppsPageContext({
     apps: appsPayload({

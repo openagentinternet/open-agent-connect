@@ -771,6 +771,7 @@ test('buildAgentConnectSkillpacks publishes Browser follow-ups in remote-service
 
   const metaapp = await readFile(sharedSkillFile(outputRoot, 'metabot-metaapp'), 'utf8');
   assert.match(metaapp, /\/browser\/metaapp\/<pinId>/i);
+  assert.match(metaapp, /firstPinId.*stable view pin/i);
   assert.match(metaapp, /Bot homepage/i);
 });
 

@@ -1,4 +1,4 @@
-import { buildMetaAppCanonicalUrl } from './share';
+import { buildMetaAppBrowserPath, buildMetaAppCanonicalUrl, buildMetaAppUri } from './share';
 import { normalizeMetaAppPinId } from './pinId';
 
 const DEFAULT_MAN_METAAPP_BASE_URL = 'https://manapi.metaid.io';
@@ -387,6 +387,7 @@ export function parseManMetaAppListResponse(
     }
 
     const pinId = candidate.pinId;
+    const firstPinId = pickEffectiveFirstPinId(raw, latest, pinId);
     const content = mergeContent(grouped.get(candidate.groupKey) ?? [candidate]);
     const title = normalizeText(content.title ?? content.appName) || 'MetaAPP';
     const appName = normalizeText(content.appName ?? content.title) || 'MetaAPP';
@@ -394,7 +395,7 @@ export function parseManMetaAppListResponse(
 
     records.push({
       pinId,
-      firstPinId: pickEffectiveFirstPinId(raw, latest, pinId),
+      firstPinId,
       operation,
       title,
       appName,
@@ -419,9 +420,9 @@ export function parseManMetaAppListResponse(
       summary: normalizeOptionalText(latest.summary ?? latest.contentSummaryText ?? raw.summary ?? raw.contentSummaryText ?? content.summary ?? content.intro),
       txid: normalizeOptionalText(latest.txid ?? latest.txId ?? raw.txid ?? raw.txId),
       txids,
-      metaappUri: `metaapp://${pinId}`,
-      metawebUrl: buildMetaAppCanonicalUrl(pinId),
-      runUrl: `/browser/metaapp/${pinId}`,
+      metaappUri: buildMetaAppUri(pinId, firstPinId),
+      metawebUrl: buildMetaAppCanonicalUrl(pinId, firstPinId),
+      runUrl: buildMetaAppBrowserPath(pinId, firstPinId),
       raw,
     });
   }

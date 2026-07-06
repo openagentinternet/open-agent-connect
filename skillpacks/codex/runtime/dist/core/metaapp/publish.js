@@ -123,8 +123,8 @@ function finalizeManifestForWrite(input) {
         contentHash: input.contentHash,
     };
 }
-function buildLocalUiUrl(pinId) {
-    return `/ui/metaapps?pinId=${encodeURIComponent(pinId)}`;
+function buildLocalUiUrl(pinId, firstPinId) {
+    return `/ui/metaapps?pinId=${encodeURIComponent((0, share_1.pickMetaAppViewPinId)(pinId, firstPinId))}`;
 }
 function buildGalleryRecord(input) {
     return {
@@ -149,8 +149,9 @@ function buildGalleryRecord(input) {
         ownerGlobalMetaId: normalizeText(input.chainWrite.globalMetaId ?? input.upload.globalMetaId),
         ownerAddress: normalizeText(input.chainWrite.mvcAddress),
         network: normalizeText(input.chainWrite.network ?? input.upload.network) || 'mvc',
-        metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(input.pinId),
-        localUiUrl: buildLocalUiUrl(input.pinId),
+        metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(input.pinId, input.firstPinId),
+        localUiUrl: buildLocalUiUrl(input.pinId, input.firstPinId),
+        runUrl: (0, share_1.buildMetaAppBrowserPath)(input.pinId, input.firstPinId),
         updatedAt: input.now,
         source: 'local',
         raw: {
@@ -304,7 +305,7 @@ async function writePublishedMetaApp(input) {
     }
     const pinId = (0, pinId_1.assertMetaAppPinId)(chainWrite.pinId, 'chain write pinId');
     const firstPinId = input.operation === 'modify'
-        ? normalizeText(chainWrite.firstPinId) || input.targetPinId || pinId
+        ? normalizeText(chainWrite.firstPinId) || normalizeText(input.firstPinIdFallback) || input.targetPinId || pinId
         : normalizeText(chainWrite.firstPinId) || pinId;
     const now = input.deps.now ? input.deps.now() : Date.now();
     const record = buildGalleryRecord({
@@ -329,8 +330,8 @@ async function writePublishedMetaApp(input) {
     return (0, commandResult_1.commandSuccess)({
         pinId,
         firstPinId,
-        metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId),
-        localUiUrl: buildLocalUiUrl(pinId),
+        metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId, firstPinId),
+        localUiUrl: buildLocalUiUrl(pinId, firstPinId),
         archive,
         upload,
         chainWrite,
@@ -374,11 +375,13 @@ async function updateMetaApp(input, deps) {
     const warnings = [];
     const { plan, manifest: draftManifest } = await inspectAndDraft(input);
     let manifest = draftManifest;
+    let firstPinIdFallback = targetPinId;
     if (deps.readExistingMetaApp) {
         try {
             const previous = await deps.readExistingMetaApp(targetPinId);
             if (previous) {
                 manifest = applyPreviousMetaAppInheritance(draftManifest, plan, previous);
+                firstPinIdFallback = normalizeText(previous.firstPinId) || targetPinId;
             }
         }
         catch (error) {
@@ -403,6 +406,7 @@ async function updateMetaApp(input, deps) {
         plan,
         manifest,
         targetPinId,
+        firstPinIdFallback,
         network: input.network,
         compatibilityMirrorContent: input.compatibilityMirrorContent,
         deps,

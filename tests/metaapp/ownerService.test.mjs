@@ -68,6 +68,7 @@ test('publishMetaAppPayload writes create /protocols/metaapp when confirmed', as
   const result = await publishMetaAppPayload(ctx, { ...payload(), confirm: true, network: 'mvc' });
 
   assert.equal(result.ok, true);
+  assert.equal(result.data.firstPinId, PIN);
   assert.equal(writes[0].operation, 'create');
   assert.equal(writes[0].path, '/protocols/metaapp');
   assert.equal(writes[0].contentType, 'application/json');
@@ -75,10 +76,21 @@ test('publishMetaAppPayload writes create /protocols/metaapp when confirmed', as
 });
 
 test('updateMetaAppPayload writes modify at target pin when confirmed', async () => {
-  const { ctx, writes } = actor();
+  const updatedPin = `${'e'.repeat(64)}i0`;
+  const writes = [];
+  const { ctx } = actor({
+    writePin: async (input) => {
+      writes.push(input);
+      return { pinId: updatedPin, firstPinId: PIN, txids: ['tx'], network: input.network ?? 'mvc' };
+    },
+  });
   const result = await updateMetaAppPayload(ctx, { ...payload(), targetPinId: PIN, confirm: true });
 
   assert.equal(result.ok, true);
+  assert.equal(result.data.pinId, updatedPin);
+  assert.equal(result.data.firstPinId, PIN);
+  assert.equal(result.data.metaappUri, `metaapp://${PIN}`);
+  assert.equal(result.data.metawebUrl, `https://openagentinternet.org/browser/metaapp/${PIN}`);
   assert.equal(writes[0].operation, 'modify');
   assert.equal(writes[0].path, `@${PIN}`);
 });

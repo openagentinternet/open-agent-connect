@@ -315,6 +315,8 @@ test('updateMetaApp writes modify path and inherits previous fields before local
   assert.equal(result.state, 'success');
   assert.equal(result.data.pinId, UPDATE_PIN);
   assert.equal(result.data.firstPinId, UPDATE_TARGET_PIN);
+  assert.equal(result.data.metawebUrl, `https://openagentinternet.org/browser/metaapp/${UPDATE_TARGET_PIN}`);
+  assert.equal(result.data.localUiUrl, `/ui/metaapps?pinId=${UPDATE_TARGET_PIN}`);
   assert.deepEqual(deps.calls.map((call) => call.type), ['upload', 'write', 'upsert']);
   assert.equal(deps.calls[1].input.operation, 'modify');
   assert.equal(deps.calls[1].input.path, `@${UPDATE_TARGET_PIN}`);

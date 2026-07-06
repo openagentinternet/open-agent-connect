@@ -13,9 +13,11 @@ import { buildMetaAppManifestDraft } from './manifest';
 import { assertMetaAppPinId } from './pinId';
 import { inspectMetaAppProject } from './projectInspector';
 import {
+  buildMetaAppBrowserPath,
   buildMetaAppBuzzRequest,
   buildMetaAppCanonicalUrl,
   buildMetaAppCommentWrite,
+  pickMetaAppViewPinId,
   buildMetaAppShareBundle,
 } from './share';
 import type {
@@ -239,8 +241,8 @@ function finalizeManifestForWrite(input: {
   };
 }
 
-function buildLocalUiUrl(pinId: string): string {
-  return `/ui/metaapps?pinId=${encodeURIComponent(pinId)}`;
+function buildLocalUiUrl(pinId: string, firstPinId?: string): string {
+  return `/ui/metaapps?pinId=${encodeURIComponent(pickMetaAppViewPinId(pinId, firstPinId))}`;
 }
 
 function buildGalleryRecord(input: {
@@ -274,8 +276,9 @@ function buildGalleryRecord(input: {
     ownerGlobalMetaId: normalizeText(input.chainWrite.globalMetaId ?? input.upload.globalMetaId),
     ownerAddress: normalizeText(input.chainWrite.mvcAddress),
     network: normalizeText(input.chainWrite.network ?? input.upload.network) || 'mvc',
-    metawebUrl: buildMetaAppCanonicalUrl(input.pinId),
-    localUiUrl: buildLocalUiUrl(input.pinId),
+    metawebUrl: buildMetaAppCanonicalUrl(input.pinId, input.firstPinId),
+    localUiUrl: buildLocalUiUrl(input.pinId, input.firstPinId),
+    runUrl: buildMetaAppBrowserPath(input.pinId, input.firstPinId),
     updatedAt: input.now,
     source: 'local',
     raw: {
@@ -397,6 +400,7 @@ async function writePublishedMetaApp(input: {
   plan: MetaAppPreviewPlan;
   manifest: MetaAppManifestInput;
   targetPinId?: string;
+  firstPinIdFallback?: string;
   network?: string;
   compatibilityMirrorContent?: boolean;
   deps: MetaAppPublishDependencies;
@@ -468,7 +472,7 @@ async function writePublishedMetaApp(input: {
 
   const pinId = assertMetaAppPinId(chainWrite.pinId, 'chain write pinId');
   const firstPinId = input.operation === 'modify'
-    ? normalizeText(chainWrite.firstPinId) || input.targetPinId || pinId
+    ? normalizeText(chainWrite.firstPinId) || normalizeText(input.firstPinIdFallback) || input.targetPinId || pinId
     : normalizeText(chainWrite.firstPinId) || pinId;
   const now = input.deps.now ? input.deps.now() : Date.now();
   const record = buildGalleryRecord({
@@ -494,8 +498,8 @@ async function writePublishedMetaApp(input: {
   return commandSuccess({
     pinId,
     firstPinId,
-    metawebUrl: buildMetaAppCanonicalUrl(pinId),
-    localUiUrl: buildLocalUiUrl(pinId),
+    metawebUrl: buildMetaAppCanonicalUrl(pinId, firstPinId),
+    localUiUrl: buildLocalUiUrl(pinId, firstPinId),
     archive,
     upload,
     chainWrite,
@@ -554,12 +558,14 @@ export async function updateMetaApp(
   const warnings: MetaAppWarning[] = [];
   const { plan, manifest: draftManifest } = await inspectAndDraft(input);
   let manifest = draftManifest;
+  let firstPinIdFallback = targetPinId;
 
   if (deps.readExistingMetaApp) {
     try {
       const previous = await deps.readExistingMetaApp(targetPinId);
       if (previous) {
         manifest = applyPreviousMetaAppInheritance(draftManifest, plan, previous);
+        firstPinIdFallback = normalizeText(previous.firstPinId) || targetPinId;
       }
     } catch (error) {
       warnings.push({
@@ -586,6 +592,7 @@ export async function updateMetaApp(
     plan,
     manifest,
     targetPinId,
+    firstPinIdFallback,
     network: input.network,
     compatibilityMirrorContent: input.compatibilityMirrorContent,
     deps,

@@ -278,13 +278,14 @@ function parseManMetaAppListResponse(response, input = {}) {
             continue;
         }
         const pinId = candidate.pinId;
+        const firstPinId = pickEffectiveFirstPinId(raw, latest, pinId);
         const content = mergeContent(grouped.get(candidate.groupKey) ?? [candidate]);
         const title = normalizeText(content.title ?? content.appName) || 'MetaAPP';
         const appName = normalizeText(content.appName ?? content.title) || 'MetaAPP';
         const txids = normalizeTxids(raw, latest);
         records.push({
             pinId,
-            firstPinId: pickEffectiveFirstPinId(raw, latest, pinId),
+            firstPinId,
             operation,
             title,
             appName,
@@ -309,9 +310,9 @@ function parseManMetaAppListResponse(response, input = {}) {
             summary: normalizeOptionalText(latest.summary ?? latest.contentSummaryText ?? raw.summary ?? raw.contentSummaryText ?? content.summary ?? content.intro),
             txid: normalizeOptionalText(latest.txid ?? latest.txId ?? raw.txid ?? raw.txId),
             txids,
-            metaappUri: `metaapp://${pinId}`,
-            metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId),
-            runUrl: `/browser/metaapp/${pinId}`,
+            metaappUri: (0, share_1.buildMetaAppUri)(pinId, firstPinId),
+            metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId, firstPinId),
+            runUrl: (0, share_1.buildMetaAppBrowserPath)(pinId, firstPinId),
             raw,
         });
     }

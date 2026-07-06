@@ -1,5 +1,8 @@
 export declare const METAAPP_PUBLIC_BASE_URL = "https://openagentinternet.org/browser/metaapp";
-export declare function buildMetaAppCanonicalUrl(pinId: string): string;
+export declare function pickMetaAppViewPinId(pinId: string, firstPinId?: unknown): string;
+export declare function buildMetaAppUri(pinId: string, firstPinId?: unknown): string;
+export declare function buildMetaAppBrowserPath(pinId: string, firstPinId?: unknown): string;
+export declare function buildMetaAppCanonicalUrl(pinId: string, firstPinId?: unknown): string;
 export declare function buildMetaAppShareBundle(pinId: string): {
     pinId: string;
     metawebUrl: string;

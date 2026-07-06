@@ -39,8 +39,9 @@ async function publishMetaAppPayload(actor, input) {
     const pinId = requirePinIdFromWrite(chainWrite);
     return (0, commandResult_1.commandSuccess)({
         pinId,
+        firstPinId: pinId,
         chainWrite,
-        metaappUri: `metaapp://${pinId}`,
+        metaappUri: (0, share_1.buildMetaAppUri)(pinId),
         metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId),
     });
 }
@@ -53,12 +54,14 @@ async function updateMetaAppPayload(actor, input) {
     const write = (0, appsProtocol_1.buildMetaAppModifyWrite)(targetPinId, payload);
     const chainWrite = await actor.writePin({ ...write, network: input.network });
     const pinId = requirePinIdFromWrite(chainWrite);
+    const firstPinId = (0, pinId_1.normalizeMetaAppPinId)(chainWrite.firstPinId) ?? targetPinId;
     return (0, commandResult_1.commandSuccess)({
         pinId,
+        firstPinId,
         targetPinId,
         chainWrite,
-        metaappUri: `metaapp://${pinId}`,
-        metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId),
+        metaappUri: (0, share_1.buildMetaAppUri)(pinId, firstPinId),
+        metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId, firstPinId),
     });
 }
 async function deleteMetaAppPin(actor, input) {

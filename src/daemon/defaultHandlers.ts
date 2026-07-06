@@ -5683,7 +5683,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
 
     const data = result.data as Record<string, unknown>;
-    const pinId = typeof data.pinId === 'string' ? data.pinId : '';
+    const viewPinId = typeof data.firstPinId === 'string'
+      ? data.firstPinId.trim()
+      : (typeof data.targetPinId === 'string' ? data.targetPinId.trim() : '');
+    const pinId = viewPinId || (typeof data.pinId === 'string' ? data.pinId.trim() : '');
     if (!pinId) {
       return result;
     }
@@ -10855,7 +10858,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       if (mineGlobalMetaId && record.ownerGlobalMetaId !== mineGlobalMetaId) {
         return false;
       }
-      if (pinId && record.pinId !== pinId) {
+      if (pinId && record.pinId !== pinId && record.firstPinId !== pinId) {
         return false;
       }
       if (firstPinId && record.firstPinId !== firstPinId) {
@@ -11182,7 +11185,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           if (result.ok && result.data && typeof result.data === 'object') {
             const data = result.data as Record<string, unknown>;
-            const pinId = typeof data.pinId === 'string' ? data.pinId : '';
+            const pinId = typeof data.firstPinId === 'string' && data.firstPinId.trim()
+              ? data.firstPinId.trim()
+              : (typeof data.pinId === 'string' ? data.pinId.trim() : '');
             if (pinId) {
               const localUiUrl = buildMetaAppAppsLocalUiUrl(pinId);
               return commandSuccess({
@@ -11262,7 +11267,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
           if (result.ok && result.data && typeof result.data === 'object') {
             const data = result.data as Record<string, unknown>;
-            const pinId = typeof data.pinId === 'string' ? data.pinId : '';
+            const pinId = typeof data.firstPinId === 'string' && data.firstPinId.trim()
+              ? data.firstPinId.trim()
+              : (typeof data.pinId === 'string' ? data.pinId.trim() : '');
             if (pinId) {
               const localUiUrl = buildMetaAppAppsLocalUiUrl(pinId);
               return commandSuccess({

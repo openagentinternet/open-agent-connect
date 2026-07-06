@@ -227,6 +227,8 @@ function buildAppsPageRuntimeSource(text, options) {
   const normalizeText = (value) => typeof value === 'string' ? value.trim() : '';
   const profileSlug = (profile) => normalizeText(profile && profile.slug);
   const recordPinId = (record) => normalizeText(record && record.pinId);
+  const recordFirstPinId = (record) => normalizeText(record && record.firstPinId);
+  const recordViewPinId = (record) => recordFirstPinId(record) || recordPinId(record);
   const selectedProfile = () => state.profiles.find((profile) => profileSlug(profile) === state.selectedSlug) || null;
   const fromQuery = () => new URLSearchParams(window.location.search || '').get('from') || '';
 
@@ -769,9 +771,9 @@ function buildAppsPageRuntimeSource(text, options) {
     return Number.isNaN(date.getTime()) ? '-' : date.toISOString();
   };
 
-  const metaAppUriForRecord = (record) => normalizeText(record && record.metaappUri) || 'metaapp://' + recordPinId(record);
+  const metaAppUriForRecord = (record) => normalizeText(record && record.metaappUri) || 'metaapp://' + recordViewPinId(record);
   const metaWebUrlForRecord = (record) => {
-    const pinId = recordPinId(record);
+    const pinId = recordViewPinId(record);
     return pinId ? METAAPP_PUBLIC_BASE_URL + '/' + encodeURIComponent(pinId) : normalizeText(record && record.metawebUrl);
   };
 
@@ -1461,7 +1463,7 @@ function buildAppsPageRuntimeSource(text, options) {
       const pinId = target.getAttribute('data-apps-run') || '';
       const record = findRecordByPinId(pinId);
       if (pinId && record && record.disabled !== true && !target.disabled) {
-        const runPath = '/browser/metaapp/' + encodeURIComponent(pinId);
+        const runPath = '/browser/metaapp/' + encodeURIComponent(recordViewPinId(record));
         window.location.href = (window.location && window.location.origin ? window.location.origin : '') + runPath;
       }
       return;
