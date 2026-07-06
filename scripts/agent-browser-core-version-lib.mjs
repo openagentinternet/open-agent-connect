@@ -5,6 +5,7 @@ import path from 'node:path';
 export const AGENT_BROWSER_RUNTIME_PACKAGES = [
   '@openagentinternet/agent-browser-host-contract',
   '@openagentinternet/agent-browser-core',
+  '@openagentinternet/agent-browser-name-resolvers',
   '@openagentinternet/agent-browser-ui',
 ];
 

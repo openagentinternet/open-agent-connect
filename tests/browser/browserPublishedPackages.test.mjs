@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const AGENT_BROWSER_RUNTIME_PACKAGES = [
   '@openagentinternet/agent-browser-host-contract',
   '@openagentinternet/agent-browser-core',
+  '@openagentinternet/agent-browser-name-resolvers',
   '@openagentinternet/agent-browser-ui',
 ];
 const AGENT_BROWSER_DEV_PACKAGES = ['@openagentinternet/agent-browser-test-harness'];
@@ -33,6 +34,7 @@ function assertExactSharedBrowserPins(rootPackage) {
 test('OAC can import published Agent Browser packages', () => {
   const contract = require('@openagentinternet/agent-browser-host-contract');
   const core = require('@openagentinternet/agent-browser-core');
+  const resolvers = require('@openagentinternet/agent-browser-name-resolvers');
   const ui = require('@openagentinternet/agent-browser-ui/browser');
   const harness = require('@openagentinternet/agent-browser-test-harness');
 
@@ -41,6 +43,7 @@ test('OAC can import published Agent Browser packages', () => {
   assert.equal(typeof contract.browserManualActionRequired, 'function');
   assert.equal(typeof core.parseBrowserUri, 'function');
   assert.equal(typeof core.normalizeResourceSections, 'function');
+  assert.equal(typeof resolvers.createBrowserNameAliasProviders, 'function');
   assert.equal(typeof ui.buildBrowserPageDefinition, 'function');
   assert.equal(typeof ui.renderBrowserPageHtml, 'function');
   assert.equal(typeof harness.assertBrowserHostConformance, 'function');

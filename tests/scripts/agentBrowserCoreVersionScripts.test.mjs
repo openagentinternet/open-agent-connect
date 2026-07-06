@@ -13,6 +13,7 @@ const BUMP_SCRIPT = path.join(REPO_ROOT, 'scripts', 'bump-agent-browser-core-ver
 const AGENT_BROWSER_RUNTIME_PACKAGES = [
   '@openagentinternet/agent-browser-host-contract',
   '@openagentinternet/agent-browser-core',
+  '@openagentinternet/agent-browser-name-resolvers',
   '@openagentinternet/agent-browser-ui',
 ];
 const AGENT_BROWSER_DEV_PACKAGES = ['@openagentinternet/agent-browser-test-harness'];
@@ -151,6 +152,7 @@ test('ABC bump script dry-run prints the exact npm install commands without muta
   assert.match(result.stdout, /npm install --save-exact/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-host-contract@0\.4\.0/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-core@0\.4\.0/);
+  assert.match(result.stdout, /@openagentinternet\/agent-browser-name-resolvers@0\.4\.0/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-ui@0\.4\.0/);
   assert.match(result.stdout, /npm install --save-dev --save-exact/);
   assert.match(result.stdout, /@openagentinternet\/agent-browser-test-harness@0\.4\.0/);

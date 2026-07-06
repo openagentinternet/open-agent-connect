@@ -32,6 +32,7 @@ const PACKAGE_SKILL_FILE_PATTERN = /^SKILLs\/([^/]+)\/SKILL\.md$/;
 const AGENT_BROWSER_RUNTIME_PACKAGES = [
   '@openagentinternet/agent-browser-host-contract',
   '@openagentinternet/agent-browser-core',
+  '@openagentinternet/agent-browser-name-resolvers',
   '@openagentinternet/agent-browser-ui',
 ];
 const AGENT_BROWSER_DEV_PACKAGES = ['@openagentinternet/agent-browser-test-harness'];
