@@ -183,6 +183,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
   let nextGuidanceSubmissionToken = 0;
   let guidanceRefreshTimer = 0;
   let guidanceRefreshInFlight = false;
+  const GUIDANCE_REFRESH_INTERVAL_MS = 250;
 
   const AVATAR_CONTENT_PATH_PREFIXES = [
     '/content/',
@@ -506,7 +507,7 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
           scheduleGuidanceMessageRefresh(submissionToken);
         }
       }
-    }, 1000);
+    }, GUIDANCE_REFRESH_INTERVAL_MS);
   };
   const renderList = (model) => {
     if (!elements.list) return;
