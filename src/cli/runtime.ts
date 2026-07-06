@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
+import { collectDaemonStartupDiagnostics, formatDaemonStartupTimeoutMessage } from './daemonStartupDiagnostics';
 import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import {
@@ -679,6 +680,23 @@ async function resolveActorHomeDir(
   return { homeDir: resolved.match.homeDir };
 }
 
+async function resolveDaemonTargetHome(
+  context: CliRuntimeContext,
+  from?: string,
+  options: { allowUnindexedExplicitHome?: boolean } = {},
+): Promise<string | MetabotCommandResult<never>> {
+  const requestedFrom = normalizeEnvText(from);
+  if (!requestedFrom) {
+    return normalizeHomeDir(context.env, context.cwd, options);
+  }
+
+  const actor = await resolveActorHomeDir(context, requestedFrom);
+  if (!('homeDir' in actor)) {
+    return actor;
+  }
+  return path.resolve(actor.homeDir);
+}
+
 function normalizeReadOnlyIdentityProfile(value: unknown): IdentityProfileRecord | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -1045,11 +1063,27 @@ async function isDaemonReachable(baseUrl: string): Promise<boolean> {
   }
 }
 
+interface DaemonRouteOptions {
+  allowUnindexedExplicitHome?: boolean;
+  targetHomeDir?: string;
+}
+
+function resolveDaemonHomeDir(
+  context: CliRuntimeContext,
+  options: DaemonRouteOptions = {},
+): string {
+  const targetHomeDir = normalizeEnvText(options.targetHomeDir);
+  if (targetHomeDir) {
+    return path.resolve(targetHomeDir);
+  }
+  return normalizeHomeDir(context.env, context.cwd, options);
+}
+
 async function resolveDaemonRecord(
   context: CliRuntimeContext,
-  options: { allowUnindexedExplicitHome?: boolean } = {},
+  options: DaemonRouteOptions = {},
 ): Promise<RuntimeDaemonRecord | null> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd, options);
+  const homeDir = resolveDaemonHomeDir(context, options);
   const store = createRuntimeStateStore(homeDir);
   return store.readDaemon();
 }
@@ -1094,7 +1128,7 @@ async function stopRunningDaemon(daemonRecord: RuntimeDaemonRecord): Promise<voi
 
 async function ensureDaemonBaseUrl(
   context: CliRuntimeContext,
-  options: { allowUnindexedExplicitHome?: boolean } = {},
+  options: DaemonRouteOptions = {},
 ): Promise<string> {
   const explicitBaseUrl = typeof context.env.METABOT_DAEMON_BASE_URL === 'string'
     ? context.env.METABOT_DAEMON_BASE_URL.trim()
@@ -1118,14 +1152,17 @@ async function ensureDaemonBaseUrl(
 async function startDetachedDaemon(
   context: CliRuntimeContext,
   preferredRecord?: RuntimeDaemonRecord | null,
-  options: { allowUnindexedExplicitHome?: boolean } = {},
+  options: DaemonRouteOptions = {},
 ): Promise<string> {
-  const homeDir = normalizeHomeDir(context.env, context.cwd, options);
+  const homeDir = resolveDaemonHomeDir(context, options);
   const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
   const store = createRuntimeStateStore(homeDir);
   const expectedConfigHash = buildDaemonConfigHash(context.env);
   const persistedRecord = await store.readDaemon();
   const staleRecord = persistedRecord ?? preferredRecord ?? null;
+  const preferredPort = parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
+    ?? staleRecord?.port
+    ?? getDefaultDaemonPort(homeDir);
   if (persistedRecord?.baseUrl && await isDaemonReachable(persistedRecord.baseUrl)) {
     if (daemonConfigMatchesContext(persistedRecord, context)) {
       return persistedRecord.baseUrl;
@@ -1146,11 +1183,7 @@ async function startDetachedDaemon(
         HOME: systemHomeDir,
         METABOT_HOME: homeDir,
         ...(options.allowUnindexedExplicitHome ? { [ALLOW_UNINDEXED_HOME_ENV]: '1' } : {}),
-        [DAEMON_PREFERRED_PORT_ENV]: String(
-          parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
-          ?? staleRecord?.port
-          ?? getDefaultDaemonPort(homeDir)
-        ),
+        [DAEMON_PREFERRED_PORT_ENV]: String(preferredPort),
       },
     }
   );
@@ -1169,7 +1202,11 @@ async function startDetachedDaemon(
     await sleep(DAEMON_START_POLL_INTERVAL_MS);
   }
 
-  throw new Error('Timed out while starting the local MetaBot daemon.');
+  const diagnostics = await collectDaemonStartupDiagnostics({
+    homeDir,
+    preferredPort,
+  });
+  throw new Error(formatDaemonStartupTimeoutMessage(diagnostics));
 }
 
 async function requestJson<T>(
@@ -1177,7 +1214,7 @@ async function requestJson<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   routePath: string,
   body?: Record<string, unknown>,
-  options: { allowUnindexedExplicitHome?: boolean } = {},
+  options: DaemonRouteOptions = {},
 ): Promise<MetabotCommandResult<T>> {
   const baseUrl = await ensureDaemonBaseUrl(context, options);
   const response = await fetch(`${baseUrl}${routePath}`, {
@@ -1192,8 +1229,9 @@ async function requestText(
   context: CliRuntimeContext,
   method: 'GET',
   routePath: string,
+  options: DaemonRouteOptions = {},
 ): Promise<string> {
-  const baseUrl = await ensureDaemonBaseUrl(context);
+  const baseUrl = await ensureDaemonBaseUrl(context, options);
   const response = await fetch(`${baseUrl}${routePath}`, {
     method,
   });
@@ -1959,6 +1997,39 @@ async function runWalletTransferRuntime(
 }
 
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
+  async function requestJsonForSelectedActor<T>(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    routePath: string,
+    from?: string,
+    body?: Record<string, unknown>,
+    options: Omit<DaemonRouteOptions, 'targetHomeDir'> = {},
+  ): Promise<MetabotCommandResult<T>> {
+    const targetHomeDir = await resolveDaemonTargetHome(context, from, options);
+    if (typeof targetHomeDir !== 'string') {
+      return targetHomeDir;
+    }
+    return requestJson(context, method, routePath, body, {
+      ...options,
+      targetHomeDir,
+    });
+  }
+
+  async function requestTextForSelectedActor(
+    method: 'GET',
+    routePath: string,
+    from?: string,
+    options: Omit<DaemonRouteOptions, 'targetHomeDir'> = {},
+  ): Promise<string> {
+    const targetHomeDir = await resolveDaemonTargetHome(context, from, options);
+    if (typeof targetHomeDir !== 'string') {
+      throw new Error(targetHomeDir.message || 'Failed to resolve the selected MetaBot profile.');
+    }
+    return requestText(context, method, routePath, {
+      ...options,
+      targetHomeDir,
+    });
+  }
+
   async function openLocalUiPage(input: {
     page: string;
     from?: string;
@@ -1969,7 +2040,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     firstPinId?: string;
     mine?: boolean;
   }): Promise<MetabotCommandResult<unknown>> {
-    const baseUrl = await ensureDaemonBaseUrl(context);
+    const targetHomeDir = await resolveDaemonTargetHome(context, input.from);
+    if (typeof targetHomeDir !== 'string') {
+      return targetHomeDir;
+    }
+    const baseUrl = await ensureDaemonBaseUrl(context, { targetHomeDir });
     const query = new URLSearchParams();
     if (input.from) query.set('from', input.from);
     if (input.traceId) query.set('traceId', input.traceId);
@@ -2052,14 +2127,34 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       },
     },
     metaapp: {
-      preview: async (input) => requestJson(context, 'POST', '/api/metaapp/preview', {
-        ...input,
-        projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
-        manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
-      }),
-      publish: async (input) => requestJson(context, 'POST', '/api/metaapp/publish', input),
-      update: async (input) => requestJson(context, 'POST', '/api/metaapp/update', input),
-      delete: async (input) => requestJson(context, 'POST', '/api/metaapp/delete', input),
+      preview: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/metaapp/preview',
+        typeof input.from === 'string' ? input.from : undefined,
+        {
+          ...input,
+          projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
+          manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
+        },
+      ),
+      publish: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/metaapp/publish',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      update: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/metaapp/update',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      delete: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/metaapp/delete',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
       list: async (input) => {
         const query = new URLSearchParams();
         if (typeof input.from === 'string') {
@@ -2075,19 +2170,38 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           query.set('refresh', 'true');
         }
         const suffix = query.size ? `?${query.toString()}` : '';
-        return requestJson(context, 'GET', `/api/metaapp/list${suffix}`);
+        return requestJsonForSelectedActor(
+          'GET',
+          `/api/metaapp/list${suffix}`,
+          typeof input.from === 'string' ? input.from : undefined,
+        );
       },
-      publishProject: async (input) => requestJson(context, 'POST', '/api/metaapp/publish-project', {
-        ...input,
-        projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
-        manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
-      }),
-      updateProject: async (input) => requestJson(context, 'POST', '/api/metaapp/update-project', {
-        ...input,
-        projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
-        manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
-      }),
-      share: async (input) => requestJson(context, 'POST', '/api/metaapp/share', input),
+      publishProject: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/metaapp/publish-project',
+        typeof input.from === 'string' ? input.from : undefined,
+        {
+          ...input,
+          projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
+          manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
+        },
+      ),
+      updateProject: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/metaapp/update-project',
+        typeof input.from === 'string' ? input.from : undefined,
+        {
+          ...input,
+          projectDir: typeof input.projectDir === 'string' ? resolveRuntimeInputPath(context, input.projectDir) : input.projectDir,
+          manifestFile: typeof input.manifestFile === 'string' ? resolveRuntimeInputPath(context, input.manifestFile) : input.manifestFile,
+        },
+      ),
+      share: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/metaapp/share',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
       view: async (input) => openLocalUiPage({
         page: 'apps',
         ...(typeof input.from === 'string' ? { from: input.from } : {}),
@@ -2095,16 +2209,31 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         ...(typeof input.firstPinId === 'string' ? { firstPinId: input.firstPinId } : {}),
         ...(input.mine === true ? { mine: true } : {}),
       }),
-      comment: async (input) => requestJson(context, 'POST', '/api/metaapp/comment', input),
+      comment: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/metaapp/comment',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
     },
     buzz: {
-      post: async (input) => requestJson(context, 'POST', '/api/buzz/post', input),
+      post: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/buzz/post',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
     },
     browser: {
       open: async (input) => openLocalBrowserPage(input),
     },
     chain: {
-      write: async (input) => requestJson(context, 'POST', '/api/chain/write', input),
+      write: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/chain/write',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
     },
     daemon: {
       start: async () => {
@@ -2297,7 +2426,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       removeSource: async (input) => requestJson(context, 'DELETE', '/api/network/sources', input),
     },
     services: {
-      publish: async (input) => requestJson(context, 'POST', '/api/services/publish', input),
+      publish: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/services/publish',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
       listPublishSkills: async (input = {}) => {
         let homeDir = normalizeHomeDir(context.env, context.cwd);
         const requestedFrom = normalizeEnvText(input.from);
@@ -2352,8 +2486,18 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           rootDiagnostics: result.rootDiagnostics,
         });
       },
-      call: async (input) => requestJson(context, 'POST', '/api/services/call', input),
-      rate: async (input) => requestJson(context, 'POST', '/api/services/rate', input),
+      call: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/services/call',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      rate: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/services/rate',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
       listOwned: async (input) => {
         const query = new URLSearchParams({
           page: String(input.page),
@@ -2364,7 +2508,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (input.from) {
           query.set('from', input.from);
         }
-        return requestJson(context, 'GET', `/api/services/owned?${query.toString()}`);
+        return requestJsonForSelectedActor(
+          'GET',
+          `/api/services/owned?${query.toString()}`,
+          input.from,
+        );
       },
       listOwnedOrders: async (input) => {
         const query = new URLSearchParams({
@@ -2377,10 +2525,24 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (input.from) {
           query.set('from', input.from);
         }
-        return requestJson(context, 'GET', `/api/services/owned/orders?${query.toString()}`);
+        return requestJsonForSelectedActor(
+          'GET',
+          `/api/services/owned/orders?${query.toString()}`,
+          input.from,
+        );
       },
-      modifyOwned: async (input) => requestJson(context, 'POST', '/api/services/owned/modify', input),
-      revokeOwned: async (input) => requestJson(context, 'POST', '/api/services/owned/revoke', input),
+      modifyOwned: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/services/owned/modify',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      revokeOwned: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/services/owned/revoke',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
       listRefunds: async (input) => {
         const query = new URLSearchParams();
         if (input.from) {
@@ -2388,10 +2550,24 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
         query.set('all', input.all ? 'true' : 'false');
         query.set('kind', input.kind);
-        return requestJson(context, 'GET', `/api/services/refunds?${query.toString()}`);
+        return requestJsonForSelectedActor(
+          'GET',
+          `/api/services/refunds?${query.toString()}`,
+          input.from,
+        );
       },
-      syncRefunds: async (input) => requestJson(context, 'POST', '/api/services/refunds/sync', input),
-      settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
+      syncRefunds: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/services/refunds/sync',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      settleRefund: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/services/refunds/settle',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
       inspectOrder: async (input) => {
         const query = new URLSearchParams();
         if (input.orderId) {
@@ -2404,7 +2580,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           query.set('from', input.from);
         }
         const suffix = query.size ? `?${query.toString()}` : '';
-        return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
+        return requestJsonForSelectedActor(
+          'GET',
+          `/api/services/orders/inspect${suffix}`,
+          input.from,
+        );
       },
     },
     provider: {
@@ -2420,35 +2600,64 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           query.set('from', input.from);
         }
         const suffix = query.size ? `?${query.toString()}` : '';
-        return requestJson(context, 'GET', `/api/services/orders/inspect${suffix}`);
+        return requestJsonForSelectedActor(
+          'GET',
+          `/api/services/orders/inspect${suffix}`,
+          input.from,
+        );
       },
-      settleRefund: async (input) => requestJson(context, 'POST', '/api/services/refunds/settle', input),
+      settleRefund: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/services/refunds/settle',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
     },
     chat: {
-      private: async (input) => requestJson(context, 'POST', '/api/chat/private', input),
+      private: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/chat/private',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
       conversations: async (input = {}) => {
         const params = new URLSearchParams();
         if (input.from) params.set('from', input.from);
         const suffix = params.size ? `?${params.toString()}` : '';
-        return requestJson(context, 'GET', `/api/chat/private/conversations${suffix}`);
+        return requestJsonForSelectedActor('GET', `/api/chat/private/conversations${suffix}`, input.from);
       },
       messages: async (input) => {
         const params = new URLSearchParams({ conversationId: input.conversationId });
         if (input.limit != null) params.set('limit', String(input.limit));
         if (input.from) params.set('from', input.from);
-        return requestJson(context, 'GET', `/api/chat/private/messages?${params.toString()}`);
+        return requestJsonForSelectedActor('GET', `/api/chat/private/messages?${params.toString()}`, input.from);
       },
       autoReplyStatus: async (input = {}) => {
         const params = new URLSearchParams();
         if (input.from) params.set('from', input.from);
         const suffix = params.size ? `?${params.toString()}` : '';
-        return requestJson(context, 'GET', `/api/chat/auto-reply/status${suffix}`);
+        return requestJsonForSelectedActor('GET', `/api/chat/auto-reply/status${suffix}`, input.from);
       },
-      setAutoReply: async (input) => requestJson(context, 'POST', '/api/chat/auto-reply/config', input),
+      setAutoReply: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/chat/auto-reply/config',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
     },
     file: {
-      upload: async (input) => requestJson(context, 'POST', '/api/file/upload', input),
-      uploadLarge: async (input) => requestJson(context, 'POST', '/api/file/upload-large', input),
+      upload: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/file/upload',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+      uploadLarge: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/file/upload-large',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
     },
     wallet: {
       balance: async (input) => {
@@ -2483,14 +2692,14 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (input.from) query.set('from', input.from);
         const suffix = query.size ? `?${query.toString()}` : '';
         return input.sessionId
-          ? requestJson(context, 'GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}${suffix}`)
-          : requestJson(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId || '')}${suffix}`);
+          ? requestJsonForSelectedActor('GET', `/api/trace/sessions/${encodeURIComponent(input.sessionId)}${suffix}`, input.from)
+          : requestJsonForSelectedActor('GET', `/api/trace/${encodeURIComponent(input.traceId || '')}${suffix}`, input.from);
       },
       watch: async (input) => {
         const query = new URLSearchParams();
         if (input.from) query.set('from', input.from);
         const suffix = query.size ? `?${query.toString()}` : '';
-        return requestText(context, 'GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch${suffix}`);
+        return requestTextForSelectedActor('GET', `/api/trace/${encodeURIComponent(input.traceId)}/watch${suffix}`, input.from);
       },
       listSessions: async (input) => {
         const query = new URLSearchParams({
@@ -2498,7 +2707,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           limit: String(input.limit),
         });
         if (input.from) query.set('from', input.from);
-        return requestJson(context, 'GET', `/api/trace/sessions?${query.toString()}`);
+        return requestJsonForSelectedActor('GET', `/api/trace/sessions?${query.toString()}`, input.from);
       },
     },
     ui: {
@@ -2608,7 +2817,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       listBindings: async (input = {}) => {
         const actor = await resolveActorProfileSlug(context, input);
         if (!('slug' in actor)) return actor;
-        return requestJson(context, 'GET', `/api/llm/bindings/${encodeURIComponent(actor.slug)}`);
+        return requestJsonForSelectedActor('GET', `/api/llm/bindings/${encodeURIComponent(actor.slug)}`, input.from);
       },
       upsertBindings: async (input) => {
         const actor = await resolveActorProfileSlug(context, input);
@@ -2624,23 +2833,37 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             metaBotSlug: actor.slug,
           };
         });
-        return requestJson(context, 'PUT', `/api/llm/bindings/${encodeURIComponent(actor.slug)}`, { bindings });
+        return requestJsonForSelectedActor(
+          'PUT',
+          `/api/llm/bindings/${encodeURIComponent(actor.slug)}`,
+          input.from,
+          { bindings },
+        );
       },
       removeBinding: async (input) => {
         const actor = await resolveActorProfileSlug(context, { from: input.from });
         if (!('slug' in actor)) return actor;
         const query = new URLSearchParams({ from: actor.slug });
-        return requestJson(context, 'DELETE', `/api/llm/bindings/${encodeURIComponent(input.bindingId)}/delete?${query.toString()}`);
+        return requestJsonForSelectedActor(
+          'DELETE',
+          `/api/llm/bindings/${encodeURIComponent(input.bindingId)}/delete?${query.toString()}`,
+          input.from,
+        );
       },
       getPreferredRuntime: async (input = {}) => {
         const actor = await resolveActorProfileSlug(context, input);
         if (!('slug' in actor)) return actor;
-        return requestJson(context, 'GET', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`);
+        return requestJsonForSelectedActor('GET', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`, input.from);
       },
       setPreferredRuntime: async (input) => {
         const actor = await resolveActorProfileSlug(context, input);
         if (!('slug' in actor)) return actor;
-        return requestJson(context, 'PUT', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`, { runtimeId: input.runtimeId });
+        return requestJsonForSelectedActor(
+          'PUT',
+          `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`,
+          input.from,
+          { runtimeId: input.runtimeId },
+        );
       },
     },
     loom: {
@@ -3139,13 +3362,13 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const query = new URLSearchParams();
         if (input.from) query.set('from', input.from);
         const suffix = query.size ? `?${query.toString()}` : '';
-        return requestJson(context, 'GET', `/api/bot/runtimes${suffix}`);
+        return requestJsonForSelectedActor('GET', `/api/bot/runtimes${suffix}`, input.from);
       },
       discoverRuntimes: async (input = {}) => {
         const query = new URLSearchParams();
         if (input.from) query.set('from', input.from);
         const suffix = query.size ? `?${query.toString()}` : '';
-        return requestJson(context, 'POST', `/api/bot/runtimes/discover${suffix}`);
+        return requestJsonForSelectedActor('POST', `/api/bot/runtimes/discover${suffix}`, input.from);
       },
       listSessions: async (input) => {
         const query = new URLSearchParams({ limit: String(input.limit) });
