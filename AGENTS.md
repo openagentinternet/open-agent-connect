@@ -1,186 +1,84 @@
 # Agent Instructions
 
-## Project
+## Scope
 
-Open Agent Connect (OAC) — an open-source connector that gives local AI agents a blockchain-backed network layer (identity, discovery, encrypted messaging, remote service calls, traces, payments). Two runtime entrypoints:
+- Work only in this workspace unless the user explicitly says otherwise.
+- Keep every branch based directly on `main`. Do not stack feature branches.
+- Publish releases and production updates only from `main`.
 
-- `metabot` (CLI + daemon) — the full Bot runtime: `dist/cli/main.js`
-- `oac` — the installer CLI: `dist/oac/main.js`
+## Runtime Facts
 
-Node.js `>=20 <25`, CommonJS source compiled via TypeScript strict mode (`strict: true`, target ES2022). Compiled output lands in `dist/`. There is no separate lint command — TypeScript strict is the lint.
+- Project: Open Agent Connect (OAC).
+- Runtime entrypoints: `metabot` -> `dist/cli/main.js`, `oac` -> `dist/oac/main.js`.
+- Supported Node.js: `>=20 <25`.
+- TypeScript strict mode is the lint. Build output goes to `dist/`.
+- For deeper architecture, read `CLAUDE.md`. Do not duplicate it here.
 
-## Build & Test
+## Non-Negotiable Rules
+
+- Do not guess. Read the relevant code, spec, or test first. If a boundary is still unclear, stop and ask.
+- Keep changes surgical. No unrelated refactors, formatting churn, or drive-by fixes.
+- Every changed line must trace back to the current task.
+- All documentation, SKILL documents, and code comments must be in English.
+- Route local UI copy through i18n and keep English plus Simplified Chinese coverage in sync.
+- Do not introduce new code or docs that depend on the legacy `.metabot/hot` layout.
+- MetaBot storage changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
+- When merging completed work back to `main`, use `git merge --no-ff`.
+
+## Build And Test
 
 ```bash
-npm run build              # rimraf dist && tsc (always required before tests)
-npm run build:skillpacks   # regenerate host-specific skillpacks into skillpacks/
-npm run test               # build + all tests (concurrency=1, runtime.test.mjs last)
-npm run verify             # build + build:skillpacks + full test suite
-npm run test:contracts     # build + only contract tests
+npm run build
+npm run build:skillpacks
+npm run test
+npm run verify
+npm run test:contracts
 ```
 
-Run a single test file:
+Single test file:
+
 ```bash
 npm run build && node --test tests/<dir>/<name>.test.mjs
 ```
 
-Key test rules:
-- Test files are ESM (`.test.mjs`), source is CommonJS-compiled. Must build first.
-- All tests run with `--test-concurrency=1` (shared daemon/module state).
-- `tests/cli/runtime.test.mjs` must always run last (the npm scripts enforce this).
-- `tests/helpers/profileHome.mjs` provides `createProfileHome()` for isolated test profile homes under `~/.metabot/profiles/<slug>/`.
+Test rules:
 
-## Architecture
+- Build before running tests.
+- Tests run with `--test-concurrency=1`.
+- `tests/cli/runtime.test.mjs` must run last; the npm scripts already enforce that.
+- If your shell defaults to an unsupported Node version, switch to a supported Node 20-24 runtime explicitly for verification.
 
-### Source layout (`src/`)
+## Verification Policy
 
-| Dir | Role |
-|---|---|
-| `src/cli/` | `metabot` binary, commands in `commands/` (one file per domain: identity, chat, network, services, loom, metaapp, browser, etc.) |
-| `src/core/` | Domain logic modules: `bootstrap/`, `identity/`, `discovery/`, `a2a/`, `delegation/`, `secrets/`, `signing/`, `buzz/`, `chat/`, `files/`, `orders/`, `ratings/`, `contracts/`, `state/`, `loom/`, `metaapp/`, `llm/`, `bot/`, `wallet/`, `payments/`, `chain/`, `subsidy/`, `provider/`, `services/`, `skills/`, `host/`, `system/`, `platform/`, `compat/`, `config/`, etc. |
-| `src/daemon/` | HTTP server (REST + SSE), one route file per domain, file-lock guarded (one instance per `~/.metabot`); `browser/` contains the OAC Browser host adapter and route glue |
-| `src/browser/` | Agent Internet Browser app — HTTP handlers and menu model |
-| `src/oac/` | `oac` installer CLI entrypoint |
-| `src/ui/` | Local HTML inspection pages (hub, trace, services, my-services, publish, refund, metaapps, bot, browser, conversations, loom, settings) and i18n |
+- Start with the smallest meaningful verification set for the files you changed.
+- Do not run full `npm test` by default.
+- Full `npm test` is required for shared runtime behavior, wallet or chain writes, persistence format changes, release artifacts, package or build plumbing, broad skillpack output, or when the user explicitly asks for it.
+- For narrow docs, prompts, SKILLs, scripts, or UI copy changes, scoped checks plus `git diff --check` are usually enough.
 
-### Storage layout (v2)
+## Definition Of Done
 
-All paths resolved centrally by `resolveMetabotPaths()` in `src/core/state/paths.ts`. Profile home must live under `~/.metabot/profiles/<slug>/`. The legacy `.metabot/hot` layout must not be used in new code.
+A change round is not done until all of these are true:
 
-Key paths from a profile home (`~/.metabot/profiles/<slug>/`):
-- `.runtime/` — runtime state (config, secrets, daemon, sessions, A2A, exports, locks)
-- `.runtime/state/` — domain state JSON files (provider-presence, rating-detail, private-chat, directory-seeds, homepage, etc.)
-- `.runtime/runtime.sqlite` — runtime DB
-- `~/.metabot/skills/` — installed host skills
-- `~/.metabot/services/` — global services directory + online `services.json` cache
-- `~/.metabot/LLM/` — LLM runtimes, secrets, and executor (sessions/transcripts)
-- `~/.metabot/manager/` — identity profiles, active home pointer
-- profile persona files: `BIO.md`, `SOUL.md`, `GOAL.md`, `ROLE.md`, `llmbindings.json`, `preferred-llm-runtime.json`
+1. The scoped verification commands passed.
+2. `git diff --check` passed for the scoped files.
+3. A scoped commit exists for this round.
+4. An `eric` development-journal buzz exists for this round, with a real pinId.
 
-### Key patterns
+Use the default closeout path:
 
-- All CLI commands return `MetabotCommandResult<T>` (`success | awaiting_confirmation | waiting | manual_action_required | failed`) — see `src/core/contracts/commandResult.ts`.
-- Daemon uses a file lock (`locks/daemon.lock`) to ensure one instance per home.
-- Bootstrap flow: create identity → request subsidy → sync to chain.
-- A2A session engine manages the full delegation lifecycle with persistent state.
-- Skills source lives in `SKILLs/` (each has a `SKILL.md`), built per-host into `skillpacks/` (codex, claude-code, openclaw, common, shared).
-
-### Major reference docs
-
-- `CLAUDE.md` — deeper architecture, source layout, behavioral guidelines
-- `DACT.md` — remote service discovery → delegation → trace/watch → rating closure
-- `docs/metaid_protocols/` — on-chain MetaID protocols (social, content, group, chat, loom, bot-info)
-- `docs/hosts/` — per-host (codex, claude-code, openclaw) install, update, and runbooks
-- `docs/acceptance/` — manual acceptance runbooks
-- `docs/superpowers/specs/` — design docs
-- `docs/superpowers/plans/` — implementation plans
-
-## Behavioral Guidelines
-
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
-
-### 1. Think Before Coding
-
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-### 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-### 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it — don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-### 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
+```bash
+npm run closeout:eric -- --message "type: summary" --journal "What changed and why." --verify "<scoped verification command>" --stage <file> --stage <file>
 ```
 
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+The script runs verification, stages only the files you name, commits them, posts the `eric` buzz, and prints the commit hash plus pinId.
 
-### 5. No Guessing, No Drive-By Fixes
+## Release Rules
 
-**Verify boundaries before acting. Don't fix bugs you didn't create.**
-
-- Never guess. When writing a plan or code, if anything is unclear or any scope boundary is ambiguous, either read the relevant code or discuss with the user — keep going until every boundary is clear.
-- Don't opportunistically fix pre-existing bugs that fall outside the current task. Surface them to the user and let them decide; never silently change behavior you weren't asked to change.
-
-## Communication
-
-- Communicate concisely, directly, and with focus.
-- Develop carefully — quality is more important than speed. Don't push the user forward; just clearly state what you did.
-
-## Conventions
-
-- Commit once for every round of modifications.
-- For every commit, use the `metabot-post-buzz` skill without an additional confirmation prompt to post a detailed development diary of that round's changes on-chain with the `eric` Bot slug.
-- All documentation, SKILL documents, and code comments must be written in English.
-- When spawning review or test subagents, default to model `gpt-5.5`.
-- Prefer small, frequent commits. Commit each independent, verifiable unit of work as soon as it is complete.
-- For every modification or newly added feature, create one commit.
-- Before committing, make sure the relevant local verification steps pass for your changes. Prefer the smallest meaningful verification set instead of defaulting to the full suite.
-- When adding or changing local UI copy, route user-visible strings through the i18n dictionaries and verify English plus Simplified Chinese coverage; keep proper nouns and protocol terms such as MetaID, MetaBot, Bot, Trace, Session, txid, and GlobalMetaID untranslated unless product copy explicitly says otherwise.
-- When merging completed work into `main`, use `git merge --no-ff` to preserve the feature merge point.
-- MetaBot storage and directory layout changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
-- Do not introduce new code or documentation that depends on the legacy `.metabot/hot` layout unless you are explicitly documenting historical behavior.
-
-## Local Verification Policy
-
-- When creating a new branch or worktree, do not run the full `npm test` as a baseline by default. Use lightweight baseline checks such as `git status`, dependency availability, and only the task-relevant smoke/build command if the next change needs it.
-- For focused documentation, prompt, SKILL, UI copy, or narrowly scoped code changes, targeted tests plus `npm run build` or an equivalent static check are sufficient before committing.
-- Run the full `npm test` locally only when the change touches shared runtime behavior, wallet/chain writes, persistence formats, release artifacts, package/build plumbing, broad cross-host skillpack output, or when the user explicitly asks for full verification.
-- After merging a completed branch into `main`, do not automatically run the full `npm test` for every low-risk branch. Re-run the same targeted checks on the merged result unless the merge combines high-risk areas, resolves conflicts, or changes release/build artifacts.
-- Treat CI as the default full-suite gate for ordinary development merges. Local full-suite runs are still required before releases and when CI is unavailable or unsuitable for the risk involved.
-
-## Releasing a New Version
-
-Releases are automated via GitHub Actions. Do not run `npm run build:packs`, `gh release create`, or `npm publish` manually unless you are explicitly recovering a failed release.
-
-The release workflow also publishes the npm package through npm Trusted Publisher. The npm package settings must trust `openagentinternet/open-agent-connect` with workflow file `release.yml`, and `.github/workflows/release.yml` must keep `id-token: write`.
-
-To cut a release:
-1. Bump `"version"` in `package.json` and all fields in `release/compatibility.json` to the new version.
-2. Run `npm run build && npm run build:skillpacks` to rebuild all artifacts.
-3. Run `npm test` and confirm it passes.
-4. Run `node scripts/verify-release-version.mjs v{version}` and confirm it passes.
-5. Commit the version bump and regenerated artifacts, push to `main`.
-6. Push the version tag from the same commit: `git tag v{version} && git push origin v{version}`.
-
-Pushing the tag triggers CI (`.github/workflows/release.yml`) which verifies the tag matches `package.json` and `release/compatibility.json`, builds `release/packs/oac-{host}.tar.gz`, publishes the GitHub Release, and publishes the same version to npm. The install guide at `docs/install/open-agent-connect.md` always points to `releases/latest/download/`, so no doc update is needed for version bumps.
+- Releases are automated by GitHub Actions. Do not run manual `npm publish`, `gh release create`, or release-pack commands unless you are explicitly recovering a failed release.
+- To cut a release:
+  1. Bump `package.json` and `release/compatibility.json`.
+  2. Run `npm run build && npm run build:skillpacks`.
+  3. Run `npm test`.
+  4. Run `node scripts/verify-release-version.mjs v{version}`.
+  5. Commit and push the release commit to `main`.
+  6. Tag the same commit and push the tag.

@@ -46,6 +46,7 @@
   ],
   "scripts": {
     "build": "npx rimraf dist && tsc -p tsconfig.json",
+    "closeout:eric": "bash scripts/closeout-eric.sh",
     "dev:daemon": "bash scripts/dev-daemon.sh",
     "dev:mode": "bash scripts/oac-dev-mode.sh",
     "check:agent-browser-core": "node scripts/check-agent-browser-core-version.mjs",
