@@ -93,4 +93,4 @@ rating closure end to end.
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Bundled shared installer: `runtime/shared-install.sh`
 - Host pack id: `zcode`
-- Package version: `0.2.30`
+- Package version: `0.2.32`
