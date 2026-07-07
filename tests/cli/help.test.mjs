@@ -5,6 +5,18 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 
+async function readHelpJson(args) {
+  const stdout = [];
+  const exitCode = await runCli([...args, '--help', '--json'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  return {
+    exitCode,
+    payload: JSON.parse(stdout.join('')),
+  };
+}
+
 test('runCli prints top-level help text for `metabot --help` without a JSON envelope', async () => {
   const stdout = [];
 
@@ -406,6 +418,62 @@ test('runCli prints bot sessions help with actor and limit selectors', async () 
   assert.match(output, /^Usage:\s+metabot bot sessions \[--from <bot-slug>\] \[--limit <n>\]/m);
   assert.match(output, /--from <bot-slug>/);
   assert.match(output, /--limit <n>\s+Maximum session count\. Defaults to 50\./);
+});
+
+test('runCli prints machine-readable help for bot profile/config/runtime leaf commands', async () => {
+  const leafCommands = [
+    ['bot', 'list'],
+    ['bot', 'show'],
+    ['bot', 'create'],
+    ['bot', 'update'],
+    ['bot', 'delete'],
+    ['bot', 'config', 'get'],
+    ['bot', 'config', 'set'],
+    ['bot', 'wallet'],
+    ['bot', 'backup'],
+    ['bot', 'runtimes', 'list'],
+    ['bot', 'runtimes', 'discover'],
+    ['bot', 'sessions'],
+  ];
+
+  for (const commandPath of leafCommands) {
+    const { exitCode, payload } = await readHelpJson(commandPath);
+    assert.equal(exitCode, 0, commandPath.join(' '));
+    assert.deepEqual(payload.commandPath, commandPath, commandPath.join(' '));
+  }
+
+  const updateHelp = await readHelpJson(['bot', 'update']);
+  assert.deepEqual(updateHelp.payload.requestShape, {
+    name: 'optional updated public display name',
+    bio: 'optional updated public bio markdown',
+    role: 'optional updated ROLE.md contents',
+    soul: 'optional updated SOUL.md contents',
+    goal: 'optional updated GOAL.md contents',
+    avatarDataUrl: 'optional data URL avatar, empty string clears the avatar',
+    primaryProvider: 'optional primary LLM provider id or null',
+    fallbackProvider: 'optional fallback LLM provider id or null',
+    allowChatSkills: ['optional allowed private chat skill ids'],
+    homepage: {
+      uri: 'optional metafile://... or metaapp://... homepage target',
+      renderer: 'optional renderer hint such as auto',
+      contentType: 'optional content type for metafile homepages',
+    },
+  });
+  assert.ok(updateHelp.payload.successFields.includes('profile'));
+  assert.ok(updateHelp.payload.successFields.includes('chainWrites'));
+
+  const configSetHelp = await readHelpJson(['bot', 'config', 'set']);
+  assert.deepEqual(configSetHelp.payload.requestShape, {
+    chain: {
+      defaultWriteNetwork: 'mvc|btc|doge|opcat',
+    },
+  });
+
+  const runtimesListHelp = await readHelpJson(['bot', 'runtimes', 'list']);
+  assert.equal(runtimesListHelp.payload.usage, 'metabot bot runtimes list [--from <bot-slug>]');
+
+  const runtimesDiscoverHelp = await readHelpJson(['bot', 'runtimes', 'discover']);
+  assert.equal(runtimesDiscoverHelp.payload.usage, 'metabot bot runtimes discover [--from <bot-slug>]');
 });
 
 test('runCli prints config group help with get and set subcommands', async () => {
@@ -1322,5 +1390,121 @@ test('runCli prints LLM leaf JSON help for actor-scoped binding commands', async
     assert.deepEqual(payload.commandPath, ['llm', subcommand]);
     assert.equal(payload.usage, usage);
     assert.ok(payload.optionalFlags.some((entry) => entry.flag === '--from'));
+  }
+});
+
+test('runCli prints machine-readable LLM discovery help for runtime inventory commands', async () => {
+  for (const commandPath of [
+    ['llm', 'list-runtimes'],
+    ['llm', 'discover'],
+  ]) {
+    const { exitCode, payload } = await readHelpJson(commandPath);
+    assert.equal(exitCode, 0, commandPath.join(' '));
+    assert.deepEqual(payload.commandPath, commandPath, commandPath.join(' '));
+    assert.equal(payload.command, `metabot ${commandPath.join(' ')}`);
+  }
+});
+
+test('runCli machine-readable help resolves every public leaf command to its exact commandPath', async () => {
+  const publicLeafCommands = [
+    ['doctor'],
+    ['daemon', 'start'],
+    ['daemon', 'stop'],
+    ['identity', 'create'],
+    ['identity', 'who'],
+    ['identity', 'list'],
+    ['identity', 'assign'],
+    ['bot', 'list'],
+    ['bot', 'show'],
+    ['bot', 'create'],
+    ['bot', 'update'],
+    ['bot', 'delete'],
+    ['bot', 'config', 'get'],
+    ['bot', 'config', 'set'],
+    ['bot', 'wallet'],
+    ['bot', 'backup'],
+    ['bot', 'runtimes', 'list'],
+    ['bot', 'runtimes', 'discover'],
+    ['bot', 'sessions'],
+    ['config', 'get'],
+    ['config', 'set'],
+    ['host', 'bind-skills'],
+    ['skills', 'resolve'],
+    ['file', 'upload'],
+    ['file', 'upload-large'],
+    ['buzz', 'post'],
+    ['metaapp', 'list'],
+    ['metaapp', 'preview'],
+    ['metaapp', 'publish'],
+    ['metaapp', 'update'],
+    ['metaapp', 'delete'],
+    ['metaapp', 'publish-project'],
+    ['metaapp', 'update-project'],
+    ['metaapp', 'share'],
+    ['metaapp', 'view'],
+    ['metaapp', 'comment'],
+    ['chain', 'write'],
+    ['wallet', 'transfer'],
+    ['wallet', 'balance'],
+    ['network', 'services'],
+    ['network', 'bots'],
+    ['network', 'sources', 'list'],
+    ['network', 'sources', 'add'],
+    ['network', 'sources', 'remove'],
+    ['services', 'publish'],
+    ['services', 'skills'],
+    ['services', 'publish-skills'],
+    ['services', 'owned', 'list'],
+    ['services', 'owned', 'orders'],
+    ['services', 'owned', 'modify'],
+    ['services', 'owned', 'revoke'],
+    ['services', 'orders', 'inspect'],
+    ['services', 'refunds', 'list'],
+    ['services', 'refunds', 'sync'],
+    ['services', 'refunds', 'settle'],
+    ['services', 'call'],
+    ['services', 'rate'],
+    ['provider', 'order', 'inspect'],
+    ['provider', 'refund', 'settle'],
+    ['chat', 'private'],
+    ['chat', 'conversations'],
+    ['chat', 'messages'],
+    ['chat', 'auto-reply', 'status'],
+    ['chat', 'auto-reply', 'enable'],
+    ['chat', 'auto-reply', 'disable'],
+    ['trace', 'sessions'],
+    ['trace', 'watch'],
+    ['trace', 'get'],
+    ['system', 'update'],
+    ['system', 'uninstall'],
+    ['browser', 'open'],
+    ['ui', 'open'],
+    ['llm', 'list-runtimes'],
+    ['llm', 'discover'],
+    ['llm', 'bindings'],
+    ['llm', 'bind'],
+    ['llm', 'unbind'],
+    ['llm', 'set-preferred'],
+    ['llm', 'get-preferred'],
+    ['loom', 'validate'],
+    ['loom', 'export-chain-request'],
+    ['loom', 'draft-task'],
+    ['loom', 'sync'],
+    ['loom', 'post-task'],
+    ['loom', 'claim-and-start'],
+    ['loom', 'run-dev-round'],
+    ['loom', 'deliver'],
+    ['loom', 'accept-and-pay'],
+    ['loom', 'review-delivery'],
+    ['loom', 'state'],
+    ['loom', 'list'],
+    ['loom', 'show'],
+    ['loom', 'dashboard'],
+  ];
+
+  for (const commandPath of publicLeafCommands) {
+    const { exitCode, payload } = await readHelpJson(commandPath);
+    assert.equal(exitCode, 0, commandPath.join(' '));
+    assert.deepEqual(payload.commandPath, commandPath, commandPath.join(' '));
   }
 });
