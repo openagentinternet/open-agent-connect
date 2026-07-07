@@ -2673,7 +2673,7 @@ test('GET /browser ignores lang query for Browser routes', async (t) => {
   assert.doesNotMatch(html, /创建你的第一个 Bot/);
 });
 
-test('GET /browser uses Accept-Language chrome selection without a lang query', async (t) => {
+test('GET /browser keeps Browser chrome in English even when Accept-Language prefers zh-CN', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
@@ -2685,12 +2685,15 @@ test('GET /browser uses Accept-Language chrome selection without a lang query', 
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /<html lang="zh-CN">/);
-  assert.match(html, /创建你的第一个 Bot/);
-  assert.match(html, /访问主页/);
-  assert.match(html, /发送信息/);
-  assert.match(html, /书签 \/ 最近/);
-  assert.match(html, /复制 GlobalMetaId/);
+  assert.match(html, /<html lang="en">/);
+  assert.match(html, /Visit home/);
+  assert.match(html, /Send message/);
+  assert.match(html, /Bookmarks \/ Recent/);
+  assert.match(html, /Copy GlobalMetaId/);
+  assert.match(html, /Message sent/);
+  assert.match(html, /View conversation/);
+  assert.match(html, /Close/);
+  assert.doesNotMatch(html, /创建你的第一个 Bot|访问主页|发送信息|书签 \/ 最近|复制 GlobalMetaId|消息已发送|查看对话|关闭/);
 });
 
 test('GET /ui/shared.css keeps active status visible and the topbar narrow-safe', async (t) => {

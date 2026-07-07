@@ -244,7 +244,7 @@ test('private-chat sends only after modal confirmation with Browser action contr
   assert.equal(Object.prototype.hasOwnProperty.call(requests[0].body.payload, 'message'), false);
 });
 
-test('browser renders the no-Bot state and owner panel launch chrome in Simplified Chinese', () => {
+test('browser keeps no-Bot state and owner panel launch chrome in English even for zh-CN documents', () => {
   const empty = createContext({ language: 'zh-CN' });
   empty.context.state.runtime = {
     host: { kind: 'oac', name: 'Open Agent Connect', localMode: true },
@@ -268,9 +268,10 @@ test('browser renders the no-Bot state and owner panel launch chrome in Simplifi
 
   empty.context.renderNoLocalBot();
 
-  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /创建你的第一个 Bot/);
-  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /本地 Agent 需要先拥有一个 Bot 身份/);
-  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /创建 Bot/);
+  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /Create your first Bot/);
+  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /Your local Agent needs a Bot identity before it can appear on the Agent Internet\./);
+  assert.match(empty.nodes['[data-browser-viewport]'].innerHTML, /Create Bot/);
+  assert.doesNotMatch(empty.nodes['[data-browser-viewport]'].innerHTML, /创建你的第一个 Bot|本地 Agent 需要先拥有一个 Bot 身份|创建 Bot/);
 
   const owner = createContext({ language: 'zh-CN' });
   owner.context.state.current.owner.globalMetaId = LOCAL_GLOBAL_META_ID;
@@ -282,10 +283,11 @@ test('browser renders the no-Bot state and owner panel launch chrome in Simplifi
 
   assert.equal(owner.nodes['[data-browser-owner-panel]'].hidden, false);
   assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /Worker Bot/);
-  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /访问主页/);
-  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /发送信息/);
+  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /Visit home/);
+  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /Send message/);
   assert.doesNotMatch(owner.nodes['[data-browser-owner-panel]'].innerHTML, /关注该 Bot/);
-  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /复制 GlobalMetaId/);
+  assert.match(owner.nodes['[data-browser-owner-panel]'].innerHTML, /Copy GlobalMetaId/);
+  assert.doesNotMatch(owner.nodes['[data-browser-owner-panel]'].innerHTML, /访问主页|发送信息|复制 GlobalMetaId/);
 });
 
 test('service-call sends only after modal confirmation with Browser action contract', async () => {

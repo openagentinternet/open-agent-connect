@@ -5,6 +5,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const browserModule = require('../../dist/browser/index.js');
+const browserPageApp = require('../../dist/browser/app.js');
 const { browserSuccess } = require('@openagentinternet/agent-browser-host-contract');
 
 async function callBrowserRoute({ method = 'GET', path, body = {}, handlers }) {
@@ -40,6 +41,20 @@ test('Browser page renders template preview images with browser-safe URLs', asyn
   assert.doesNotMatch(html, /builtin:\/\/bot-homepage\//);
   assert.match(html, /browser-template-preview/);
   assert.match(html, /data:image\/svg\+xml/);
+});
+
+test('Browser module keeps exported page script English-only even for zh-CN callers', async () => {
+  const definition = browserPageApp.buildBrowserPageDefinition();
+  const html = await browserModule.renderBrowserPageHtml(undefined, 'zh-CN');
+
+  assert.doesNotMatch(definition.script, /zh-CN/);
+  assert.doesNotMatch(definition.script, /消息已发送|查看对话|关闭|访问主页|发送信息|复制 GlobalMetaId/);
+  assert.match(definition.script, /Message sent/);
+  assert.match(definition.script, /View conversation/);
+  assert.match(definition.script, /Close/);
+
+  assert.match(html, /<html lang="en">/);
+  assert.doesNotMatch(html, /消息已发送|查看对话|关闭|访问主页|发送信息|复制 GlobalMetaId|创建你的第一个 Bot/);
 });
 
 test('Browser page modules consume the published ABC UI package', () => {
