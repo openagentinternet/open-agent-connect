@@ -3634,7 +3634,10 @@ function createDefaultMetabotDaemonHandlers(input) {
     // Avatars rarely change, so a 30-minute TTL eliminates repeated chain fetches
     // when switching between UI tabs within a session.
     const CHAIN_PROFILE_CACHE_TTL_MS = 30 * 60 * 1000;
+    const CHAIN_PROFILE_MISS_CACHE_TTL_MS = 30 * 1000;
+    const CHAIN_PROFILE_FETCH_TIMEOUT_MS = 1500;
     const chainProfileCache = new Map();
+    const chainProfileInflight = new Map();
     async function* streamConversationEventsForLocalBot(localGlobalMetaId, signal) {
         const normalizedLocal = normalizeText(localGlobalMetaId);
         const queue = [{
@@ -3740,31 +3743,63 @@ function createDefaultMetabotDaemonHandlers(input) {
     // so the client can load it lazily via /api/file/avatar without blocking list
     // rendering. Results are cached per process with a TTL to avoid repeated
     // chain fetches when switching UI tabs.
+    function readChainProfileCacheEntry(globalMetaId) {
+        const gmid = normalizeText(globalMetaId);
+        if (!gmid)
+            return null;
+        const cached = chainProfileCache.get(gmid) ?? null;
+        if (!cached) {
+            return null;
+        }
+        if (cached.expiresAt <= Date.now()) {
+            chainProfileCache.delete(gmid);
+            return null;
+        }
+        return cached;
+    }
     async function resolveChainProfile(globalMetaId) {
         const gmid = normalizeText(globalMetaId);
         if (!gmid)
             return null;
-        const cached = chainProfileCache.get(gmid);
-        if (cached && cached.expiresAt > Date.now()) {
+        const cached = readChainProfileCacheEntry(gmid);
+        if (cached) {
             return cached.projection;
         }
-        let projection = null;
-        try {
-            const resp = await fetch(`https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(gmid)}`);
-            if (resp.ok) {
-                const data = readChainProfileData(await resp.json());
-                const avatar = readChainProfileAvatarReference(data);
-                const name = readChainProfileName(data);
-                if (name || avatar) {
-                    projection = { globalMetaId: gmid, name, avatar };
+        const existing = chainProfileInflight.get(gmid);
+        if (existing) {
+            return existing;
+        }
+        const pending = (async () => {
+            let projection = null;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), CHAIN_PROFILE_FETCH_TIMEOUT_MS);
+            try {
+                const resp = await fetch(`https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(gmid)}`, { signal: controller.signal });
+                if (resp.ok) {
+                    const data = readChainProfileData(await resp.json());
+                    const avatar = readChainProfileAvatarReference(data);
+                    const name = readChainProfileName(data);
+                    if (name || avatar) {
+                        projection = { globalMetaId: gmid, name, avatar };
+                    }
                 }
             }
-        }
-        catch {
-            projection = null;
-        }
-        chainProfileCache.set(gmid, { projection, expiresAt: Date.now() + CHAIN_PROFILE_CACHE_TTL_MS });
-        return projection;
+            catch {
+                projection = null;
+            }
+            finally {
+                clearTimeout(timeout);
+            }
+            chainProfileCache.set(gmid, {
+                projection,
+                expiresAt: Date.now() + (projection ? CHAIN_PROFILE_CACHE_TTL_MS : CHAIN_PROFILE_MISS_CACHE_TTL_MS),
+            });
+            return projection;
+        })();
+        chainProfileInflight.set(gmid, pending);
+        return pending.finally(() => {
+            chainProfileInflight.delete(gmid);
+        });
     }
     // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
     const pendingCallerReplyContinuations = new Map();
@@ -4187,26 +4222,28 @@ function createDefaultMetabotDaemonHandlers(input) {
         const normalized = normalizeText(name);
         return normalized && normalized !== normalizeText(globalMetaId) ? normalized : '';
     }
-    async function resolveConversationProfileProjection(inputProfile) {
+    function resolveConversationProfileProjection(inputProfile) {
         const globalMetaId = normalizeText(inputProfile.globalMetaId);
         if (!globalMetaId)
             return null;
         const indexed = inputProfile.profileIndex.get(globalMetaId) ?? null;
+        const cachedChainProfile = readChainProfileCacheEntry(globalMetaId)?.projection ?? null;
         const hasName = Boolean(meaningfulConversationName(inputProfile.currentName, globalMetaId) || indexed?.name);
         const hasAvatar = Boolean(normalizeText(inputProfile.currentAvatar) || indexed?.avatar);
-        if (hasName && hasAvatar) {
+        if (hasName && hasAvatar && !cachedChainProfile) {
             return indexed;
         }
-        if (!inputProfile.chainProfileCache.has(globalMetaId)) {
-            inputProfile.chainProfileCache.set(globalMetaId, resolveChainProfile(globalMetaId));
+        if ((!hasName || !hasAvatar) && !readChainProfileCacheEntry(globalMetaId)) {
+            // Keep conversation reads fast. Missing chain profile data warms in the
+            // background instead of blocking the thread view on a remote fetch.
+            void resolveChainProfile(globalMetaId);
         }
-        const chainProfile = await inputProfile.chainProfileCache.get(globalMetaId) ?? null;
-        if (!indexed && !chainProfile)
+        if (!indexed && !cachedChainProfile)
             return null;
         return {
             globalMetaId,
-            name: indexed?.name || chainProfile?.name || '',
-            avatar: indexed?.avatar || chainProfile?.avatar || '',
+            name: indexed?.name || cachedChainProfile?.name || '',
+            avatar: indexed?.avatar || cachedChainProfile?.avatar || '',
         };
     }
     function mergeConversationName(currentName, globalMetaId, profile) {
@@ -4227,14 +4264,12 @@ function createDefaultMetabotDaemonHandlers(input) {
     }
     async function enrichConversationListResult(result, selectedProfile) {
         const profileIndex = await loadConversationProfileIndex(selectedProfile);
-        const chainProfileCache = new Map();
         const localGlobalMetaId = normalizeText(result.localBot.globalMetaId) || normalizeText(selectedProfile.globalMetaId);
-        const localProfile = await resolveConversationProfileProjection({
+        const localProfile = resolveConversationProfileProjection({
             globalMetaId: localGlobalMetaId,
             currentName: result.localBot.name || selectedProfile.name,
             currentAvatar: result.localBot.avatar || selectedProfile.avatarDataUrl,
             profileIndex,
-            chainProfileCache,
         });
         const localBot = {
             ...result.localBot,
@@ -4242,20 +4277,18 @@ function createDefaultMetabotDaemonHandlers(input) {
             name: mergeConversationName(result.localBot.name || selectedProfile.name, localGlobalMetaId, localProfile),
             avatar: mergeConversationAvatar(result.localBot.avatar || selectedProfile.avatarDataUrl, localProfile),
         };
-        const conversations = await Promise.all(result.conversations.map(async (summary) => {
-            const summaryLocalProfile = await resolveConversationProfileProjection({
+        const conversations = result.conversations.map((summary) => {
+            const summaryLocalProfile = resolveConversationProfileProjection({
                 globalMetaId: summary.localGlobalMetaId,
                 currentName: summary.localName,
                 currentAvatar: summary.localAvatar,
                 profileIndex,
-                chainProfileCache,
             });
-            const peerProfile = await resolveConversationProfileProjection({
+            const peerProfile = resolveConversationProfileProjection({
                 globalMetaId: summary.peerGlobalMetaId,
                 currentName: summary.peerName,
                 currentAvatar: summary.peerAvatar,
                 profileIndex,
-                chainProfileCache,
             });
             return {
                 ...summary,
@@ -4264,7 +4297,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 peerName: mergeConversationName(summary.peerName, summary.peerGlobalMetaId, peerProfile),
                 peerAvatar: mergeConversationAvatar(summary.peerAvatar, peerProfile),
             };
-        }));
+        });
         return {
             ...result,
             localBot,
@@ -4273,22 +4306,19 @@ function createDefaultMetabotDaemonHandlers(input) {
     }
     async function enrichConversationMessagesResult(result, selectedProfile) {
         const profileIndex = await loadConversationProfileIndex(selectedProfile);
-        const chainProfileCache = new Map();
         const localGlobalMetaId = normalizeText(result.localBot.globalMetaId) || normalizeText(selectedProfile.globalMetaId);
         const peerGlobalMetaId = normalizeText(result.peerBot.globalMetaId);
-        const localProfile = await resolveConversationProfileProjection({
+        const localProfile = resolveConversationProfileProjection({
             globalMetaId: localGlobalMetaId,
             currentName: result.localBot.name || selectedProfile.name,
             currentAvatar: result.localBot.avatar || selectedProfile.avatarDataUrl,
             profileIndex,
-            chainProfileCache,
         });
-        const peerProfile = await resolveConversationProfileProjection({
+        const peerProfile = resolveConversationProfileProjection({
             globalMetaId: peerGlobalMetaId,
             currentName: result.peerBot.name,
             currentAvatar: result.peerBot.avatar,
             profileIndex,
-            chainProfileCache,
         });
         const localBot = {
             ...result.localBot,

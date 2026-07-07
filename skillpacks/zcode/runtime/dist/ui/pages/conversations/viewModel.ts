@@ -106,10 +106,10 @@ function formatTimestamp(value: number): string {
   if (Number.isNaN(date.getTime())) return '-';
   const pad = (part: number) => String(part).padStart(2, '0');
   return [
-    date.getUTCFullYear(),
-    pad(date.getUTCMonth() + 1),
-    pad(date.getUTCDate()),
-  ].join('-') + ' ' + [pad(date.getUTCHours()), pad(date.getUTCMinutes())].join(':');
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join('-') + ' ' + [pad(date.getHours()), pad(date.getMinutes())].join(':');
 }
 
 function titleCase(value: string): string {

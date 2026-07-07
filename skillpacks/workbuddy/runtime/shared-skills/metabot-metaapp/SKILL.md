@@ -70,6 +70,78 @@ A leading `/` resolves against the Browser host root, not the mounted MetaApp pa
 
 If an asset is not packaged locally, use a full `https://...` URL or an explicit Agent Internet URI such as `metafile://...` when the runtime supports it. Do not use site-root absolute paths as a shortcut.
 
+When the app renders remote image fields, resolve MetaFile references to a browser-fetchable image URL before assigning them to `<img src>` unless the host runtime explicitly documents native `metafile://` image support.
+
+Keep MetaFile image resolution configurable:
+
+- If the system already provides `metafileContentBaseUrl` or `manApiBaseUrl`, treat those configured values as authoritative.
+- The public URLs below are fallback bases only. Do not hard-code them over system settings.
+- Use the generic MetaFile fallback base `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content` for normal `metafile://...` image content.
+- Use the avatar fallback base `https://file.metaid.io/metafile-indexer/content` for Bot or profile avatar pins when no system `manApiBaseUrl` is available.
+
+Use this resolution order for remote image fields such as Bot homepage avatars, MetaApp icons, covers, gallery images, or section thumbnails:
+
+1. If the value is already `data:`, `blob:`, or `http(s):`, use it as-is.
+2. If the value is `metafile://<pinId>[.<ext>]`, a bare pin id, or a known content path, extract the pin id first.
+3. If the image is an avatar and the system provides `manApiBaseUrl`, build `<manApiBaseUrl>/content/<pinId>`.
+4. Otherwise, if the system provides a dedicated MetaFile image base, use that configured base.
+5. Otherwise, fall back to `https://file.metaid.io/metafile-indexer/content/<pinId>` for avatars or `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/<pinId>` for other MetaFile-backed images.
+
+Example helper:
+
+```html
+<script>
+  function normalizeText(value) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function extractMetafilePinId(value) {
+    var raw = normalizeText(value);
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        raw = new URL(raw).pathname || '';
+      } catch {
+        return '';
+      }
+    } else if (/^metafile:\/\//i.test(raw)) {
+      raw = raw.slice('metafile://'.length);
+    }
+    raw = decodeURIComponent((raw.split(/[?#]/, 1)[0] || '').replace(/^\/+/, ''));
+    raw = raw
+      .replace(/^content\//i, '')
+      .replace(/^metafile-indexer\/content\//i, '')
+      .replace(/^metafile-indexer\/thumbnail\//i, '')
+      .replace(/^metafile-indexer\/api\/v1\/files\/content\//i, '')
+      .replace(/^metafile-indexer\/api\/v1\/files\/accelerate\/content\//i, '')
+      .replace(/^metafile-indexer\/api\/v1\/users\/avatar\/accelerate\//i, '');
+    var match = raw.match(/^([0-9a-f]{64}i0)(?:\.[a-z0-9][a-z0-9+.-]{0,31})?$/i);
+    return match && match[1] ? match[1] : '';
+  }
+
+  function trimTrailingSlash(value) {
+    return normalizeText(value).replace(/\/+$/, '');
+  }
+
+  function resolveMetaFileImageUrl(reference, options) {
+    var raw = normalizeText(reference);
+    if (!raw) return '';
+    if (/^(data:|blob:|https?:)/i.test(raw)) return raw;
+    var pinId = extractMetafilePinId(raw);
+    if (!pinId) return '';
+    var config = options || {};
+    var fallbackMetafileBase = 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content';
+    var fallbackAvatarBase = 'https://file.metaid.io/metafile-indexer/content';
+    if (config.kind === 'avatar') {
+      var avatarBase = trimTrailingSlash(config.manApiBaseUrl);
+      return (avatarBase ? avatarBase + '/content' : fallbackAvatarBase) + '/' + encodeURIComponent(pinId);
+    }
+    var metafileBase = trimTrailingSlash(config.metafileContentBaseUrl) || fallbackMetafileBase;
+    return metafileBase + '/' + encodeURIComponent(pinId);
+  }
+</script>
+```
+
 Static anchors are valid:
 
 ```html
@@ -201,6 +273,8 @@ Render from these v3 groups when present:
 - `sections.chats`: recent outgoing chat peers, not chat history.
 - `sections.buzzes`: recent public buzz content.
 - `warnings`: low-priority non-fatal aggregation hints.
+
+For `profile.avatar` and similar remote image fields, use the MetaFile image resolution rules above. If the v3 payload already contains a display-ready `http(s)` URL, render it directly. Only synthesize a fallback URL when the field is still a `metafile://...` reference, a bare pin id, or another recognized MetaFile content reference.
 
 Treat `profile.homepage.payload.uri` as the selected custom homepage entry. Do not infer the selected homepage from `sections.metaapps`.
 
@@ -430,6 +504,8 @@ $HOME/.metabot/bin/metabot metaapp comment --pin-id <pinid> --comment <text> --f
 - The page renders from local snapshot data without a dedicated backend.
 - Online refresh failure leaves snapshot content visible.
 - Agent Internet resources use `metaid://`, `pin://`, `metaapp://`, `metafile://`, or `map://` instead of invented Web2 URLs.
+- Remote image fields do not leave unresolved `metafile://...` values in plain `<img src>` unless the runtime explicitly supports that natively.
+- When the system provides `metafileContentBaseUrl` or `manApiBaseUrl`, the app prefers those configured values over the public fallback bases.
 - Packaged asset references in HTML, CSS, Markdown, and client-side fetches use relative URLs, not site-root absolute paths such as `/assets/...`, unless the target is intentionally an external host URL.
 - Custom iframe MetaApps include the AgentBrowser navigation helper when using Agent Internet links.
 - The app does not request wallet, private key, payment, local path, host route, or parent DOM access.

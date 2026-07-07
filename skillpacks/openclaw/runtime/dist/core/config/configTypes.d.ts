@@ -1,4 +1,4 @@
-import { type BotHomepageTemplateId } from '@openagentinternet/agent-browser-core';
+import { type BotHomepageTemplateId, type BrowserNameResolutionConfig } from '@openagentinternet/agent-browser-core';
 export interface A2AConfig {
     simplemsgListenerEnabled: boolean;
 }
@@ -10,8 +10,10 @@ export interface ChainConfig {
 }
 export interface BrowserConfig {
     metasoP2PBaseUrl: string;
-    metafileContentBaseUrl?: string;
-    manApiBaseUrl?: string;
+    metafileContentBaseUrl: string;
+    manApiBaseUrl: string;
+    renderCustomBotPages: boolean;
+    nameResolution: BrowserNameResolutionConfig;
     blockExplorerBaseUrl?: string;
     walletApiBaseUrl?: string;
     botHomepageTemplateId: BotHomepageTemplateId;

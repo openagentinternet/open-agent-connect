@@ -15,6 +15,13 @@ const MAX_REPLIES_PER_HOUR = 100;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function normalizeTimestampMs(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return 0;
+    }
+    return numeric < 1_000_000_000_000 ? Math.floor(numeric * 1000) : Math.floor(numeric);
+}
 function buildConversationId(selfGlobalMetaId, peerGlobalMetaId) {
     return `pc-${selfGlobalMetaId}-${peerGlobalMetaId}`;
 }
@@ -74,7 +81,22 @@ async function shouldResetIdleTurnCount(input) {
     if (!latestMessage || !Number.isFinite(latestMessage.timestamp)) {
         return false;
     }
-    return input.inboundTimestamp - latestMessage.timestamp > input.maxIdleMs;
+    return normalizeTimestampMs(input.inboundTimestamp) - normalizeTimestampMs(latestMessage.timestamp) > input.maxIdleMs;
+}
+async function conversationHasOutboundSince(input) {
+    const sinceTimestamp = normalizeTimestampMs(input.sinceTimestamp);
+    if (!sinceTimestamp) {
+        return false;
+    }
+    const state = await input.stateStore.readState();
+    return state.messages.some((message) => message.conversationId === input.conversationId
+        && message.direction === 'outbound'
+        && normalizeTimestampMs(message.timestamp) > sinceTimestamp);
+}
+async function latestConversationMessageMatches(input) {
+    const latestMessages = await input.stateStore.getRecentMessages(input.conversationId, 1);
+    const latestMessage = latestMessages.at(-1) ?? null;
+    return Boolean(latestMessage && latestMessage.messageId === input.expectedMessageId);
 }
 function checkRateLimit(rateLimiter, now) {
     const oneMinuteAgo = now - 60_000;
@@ -169,8 +191,28 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
         let outboundReply = null;
         try {
             if (input.guidanceToConsume
+                && await conversationHasOutboundSince({
+                    stateStore: deps.stateStore,
+                    conversationId: input.conversation.conversationId,
+                    sinceTimestamp: input.guidanceToConsume.createdAt,
+                })) {
+                await deps.stateStore.clearPendingGuidanceIfMatches(input.conversation.conversationId, input.guidanceToConsume.guidanceText, input.guidanceToConsume.createdAt, input.guidanceToConsume.leaseId).catch(() => null);
+                return null;
+            }
+            if (input.guidanceToConsume
                 && !(await pendingGuidanceClaimStillMatchesState(deps.stateStore, input.conversation.conversationId, input.guidanceToConsume))) {
                 await deps.stateStore.releasePendingGuidanceClaimIfMatches(input.conversation.conversationId, input.guidanceToConsume).catch(() => null);
+                return null;
+            }
+            if (input.triggerMessageId
+                && !(await latestConversationMessageMatches({
+                    stateStore: deps.stateStore,
+                    conversationId: input.conversation.conversationId,
+                    expectedMessageId: input.triggerMessageId,
+                }))) {
+                if (input.guidanceToConsume) {
+                    await deps.stateStore.releasePendingGuidanceClaimIfMatches(input.conversation.conversationId, input.guidanceToConsume).catch(() => null);
+                }
                 return null;
             }
             outboundReply = await sendReplyMessage(input.selfGlobalMetaId, input.peerGlobalMetaId, input.content, input.extensions);
@@ -252,7 +294,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             if (!peerGlobalMetaId)
                 return;
             const conversationId = buildConversationId(selfGlobalMetaId, peerGlobalMetaId);
-            const inboundTimestamp = message.timestamp || now;
+            const inboundTimestamp = normalizeTimestampMs(message.timestamp) || now;
             // ---- Shared: conversation lifecycle & message storage ----
             let conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId) ?? {
                 conversationId,
@@ -305,7 +347,10 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 extensions: parseExtensions(message.content),
                 timestamp: inboundTimestamp,
             };
-            await deps.stateStore.appendMessages([inboundMessageRecord]);
+            const appendedInboundMessages = await deps.stateStore.appendMessages([inboundMessageRecord]);
+            if (appendedInboundMessages.length === 0) {
+                return;
+            }
             conversation = {
                 ...conversation,
                 lastDirection: 'inbound',
@@ -404,6 +449,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 content: preparedTurn.content,
                 extensions: preparedTurn.extensions,
                 shouldClose: preparedTurn.shouldClose,
+                triggerMessageId: inboundMessageRecord.messageId,
                 guidanceToConsume,
             });
             if (!committedConversation)

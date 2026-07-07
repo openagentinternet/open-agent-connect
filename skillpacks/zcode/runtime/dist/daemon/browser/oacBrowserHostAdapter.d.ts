@@ -1,4 +1,5 @@
 import type { BrowserHostAdapter } from '@openagentinternet/agent-browser-host-contract';
+import { type BrowserNameAliasProvider } from '@openagentinternet/agent-browser-core';
 import { type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
@@ -52,6 +53,12 @@ export interface CreateOacBrowserHostAdapterInput {
     env?: NodeJS.ProcessEnv;
     now?: () => number;
     confirmationTtlMs?: number;
+    nameAliasProviders?: BrowserNameAliasProvider[];
+    ensNameAliasProviderFactory?: (config: {
+        chainId: 1;
+        rpcUrls: string[];
+        textKey: string;
+    }) => BrowserNameAliasProvider;
 }
 export declare function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterInput): BrowserHostAdapter;
 export {};

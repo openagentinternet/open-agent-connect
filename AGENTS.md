@@ -75,10 +75,12 @@ The script runs verification, stages only the files you name, commits them, post
 ## Release Rules
 
 - Releases are automated by GitHub Actions. Do not run manual `npm publish`, `gh release create`, or release-pack commands unless you are explicitly recovering a failed release.
+- The canonical release workflow is [`.github/workflows/release.yml`](./.github/workflows/release.yml) for `openagentinternet/open-agent-connect`. It uses GitHub Trusted Publisher and publishes the same version to npm from the same Git tag.
 - To cut a release:
   1. Bump `package.json` and `release/compatibility.json`.
   2. Run `npm run build && npm run build:skillpacks`.
   3. Run `npm test`.
   4. Run `node scripts/verify-release-version.mjs v{version}`.
   5. Commit and push the release commit to `main`.
-  6. Tag the same commit and push the tag.
+  6. Run `git tag v{version}`.
+  7. Run `git push origin v{version}`.

@@ -33,6 +33,9 @@ const UI_ASSET_ROUTES = [
     { prefix: '/ui/assets/platforms/', directory: 'platforms', label: 'Platform' },
     { prefix: '/ui/assets/chains/', directory: 'chains', label: 'Chain' },
 ];
+const BARE_BROWSER_PIN_ID_PATTERN = /^[0-9a-f]{64}i\d+$/iu;
+const BARE_BROWSER_DOMAIN_ALIAS_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/iu;
+const BARE_BROWSER_GLOBAL_META_ID_PATTERN = /^id[qpzryt]1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/iu;
 const PAGE_BUILDERS = {
     'hub': () => (0, app_1.buildHubPageDefinition)(),
     'publish': () => (0, app_3.buildPublishPageDefinition)(),
@@ -161,6 +164,26 @@ function getBrowserLanguagePreference(req) {
     }
     return null;
 }
+function normalizeBareBrowserResourceId(value) {
+    return decodeURIComponent(value).trim().toLowerCase();
+}
+function canonicalBareBrowserPath(url) {
+    const match = url.pathname.match(/^\/browser\/([^/?#]+)$/u);
+    if (!match) {
+        return null;
+    }
+    const resourceId = normalizeBareBrowserResourceId(match[1]);
+    if (!resourceId) {
+        return null;
+    }
+    if (BARE_BROWSER_PIN_ID_PATTERN.test(resourceId)) {
+        return `/browser/pin/${encodeURIComponent(resourceId)}${url.search}`;
+    }
+    if (BARE_BROWSER_DOMAIN_ALIAS_PATTERN.test(resourceId) || BARE_BROWSER_GLOBAL_META_ID_PATTERN.test(resourceId)) {
+        return `/browser/metaid/${encodeURIComponent(resourceId)}${url.search}`;
+    }
+    return null;
+}
 async function serveBundledUiAsset(context) {
     const { req, url } = context;
     const route = UI_ASSET_ROUTES.find((candidate) => url.pathname.startsWith(candidate.prefix));
@@ -200,6 +223,16 @@ async function serveBundledUiAsset(context) {
 }
 const handleUiRoutes = async (context) => {
     const { req, url, handlers } = context;
+    const canonicalBareBrowser = canonicalBareBrowserPath(url);
+    if (canonicalBareBrowser) {
+        if (req.method !== 'GET') {
+            context.sendMethodNotAllowed(['GET']);
+            return true;
+        }
+        context.res.writeHead(302, { Location: canonicalBareBrowser });
+        context.res.end();
+        return true;
+    }
     if (isBrowserPagePath(url.pathname)) {
         if (req.method !== 'GET') {
             context.sendMethodNotAllowed(['GET']);

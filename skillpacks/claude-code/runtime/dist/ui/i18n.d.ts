@@ -494,7 +494,8 @@ export declare const DICTIONARIES: {
         readonly 'conversations.guidanceSend': "Send";
         readonly 'conversations.guidanceCancel': "Cancel";
         readonly 'conversations.guidanceSending': "Guiding the next local turn...";
-        readonly 'conversations.guidanceSent': "Guidance sent for the next local turn.";
+        readonly 'conversations.guidanceAwaitingMessage': "Guidance accepted. Waiting for the local message...";
+        readonly 'conversations.guidanceSent': "Guidance applied. The local message is now visible.";
         readonly 'conversations.guidanceFailed': "Guidance failed.";
         readonly 'conversations.guidanceInvalid': "Guidance is invalid.";
         readonly 'conversations.guidanceConversationNotFound': "Select an existing conversation before sending guidance.";
@@ -1024,7 +1025,8 @@ export declare const DICTIONARIES: {
         readonly 'conversations.guidanceSend': "发送";
         readonly 'conversations.guidanceCancel': "取消";
         readonly 'conversations.guidanceSending': "正在引导下一轮本地回复...";
-        readonly 'conversations.guidanceSent': "已为下一轮本地回复发送引导。";
+        readonly 'conversations.guidanceAwaitingMessage': "引导已提交，等待本地消息出现...";
+        readonly 'conversations.guidanceSent': "引导已生效，本地消息已显示。";
         readonly 'conversations.guidanceFailed': "引导发送失败。";
         readonly 'conversations.guidanceInvalid': "引导内容无效。";
         readonly 'conversations.guidanceConversationNotFound': "请先选择一个已有对话再发送引导。";

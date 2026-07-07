@@ -42,6 +42,44 @@ function normalizeBoolean(value, fallback) {
 function normalizeString(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function normalizeStringList(value) {
+    if (Array.isArray(value)) {
+        return value
+            .filter((item) => typeof item === 'string')
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+    if (typeof value === 'string') {
+        return value
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+    return null;
+}
+function hasOwn(value, key) {
+    return Object.prototype.hasOwnProperty.call(value, key);
+}
+function normalizeNameResolutionConfig(input, fallback) {
+    const source = input && typeof input === 'object' && !Array.isArray(input)
+        ? input
+        : {};
+    const ensSource = source.ens && typeof source.ens === 'object' && !Array.isArray(source.ens)
+        ? source.ens
+        : {};
+    const normalizedRpcUrls = hasOwn(ensSource, 'rpcUrls')
+        ? normalizeStringList(ensSource.rpcUrls)
+        : null;
+    return {
+        enabled: normalizeBoolean(source.enabled, fallback.enabled),
+        ens: {
+            enabled: normalizeBoolean(ensSource.enabled, fallback.ens.enabled),
+            chainId: 1,
+            rpcUrls: normalizedRpcUrls ?? [...fallback.ens.rpcUrls],
+            textKey: normalizeString(ensSource.textKey) || fallback.ens.textKey,
+        },
+    };
+}
 function normalizeConfig(input) {
     const defaults = (0, configTypes_1.createDefaultConfig)();
     if (!input || typeof input !== 'object') {
@@ -80,6 +118,8 @@ function normalizeConfig(input) {
             manApiBaseUrl,
             blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,
             botHomepageTemplateId: (0, agent_browser_core_1.normalizeBotHomepageTemplateId)(browserSource.botHomepageTemplateId, defaults.browser.botHomepageTemplateId),
+            renderCustomBotPages: normalizeBoolean(browserSource.renderCustomBotPages, defaults.browser.renderCustomBotPages),
+            nameResolution: normalizeNameResolutionConfig(browserSource.nameResolution, defaults.browser.nameResolution),
             defaultChainName: (0, configTypes_1.isDefaultWriteNetwork)(browserDefaultChainName)
                 ? browserDefaultChainName
                 : defaults.chain.defaultWriteNetwork,

@@ -15,7 +15,11 @@ function normalizeText(value) {
 }
 function normalizeTimestamp(value, fallback = 0) {
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+    const normalized = parsed < 1_000_000_000_000 ? parsed * 1000 : parsed;
+    return Math.trunc(normalized);
 }
 function normalizeLimit(value, fallback = 50) {
     const parsed = Number(value);

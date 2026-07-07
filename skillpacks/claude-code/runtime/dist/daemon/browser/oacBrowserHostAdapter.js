@@ -8,6 +8,7 @@ const node_crypto_1 = require("node:crypto");
 const node_path_1 = __importDefault(require("node:path"));
 const metabotProfileManager_1 = require("../../core/bot/metabotProfileManager");
 const agent_browser_core_1 = require("@openagentinternet/agent-browser-core");
+const agent_browser_name_resolvers_1 = require("@openagentinternet/agent-browser-name-resolvers");
 const agent_browser_host_contract_1 = require("@openagentinternet/agent-browser-host-contract");
 const configStore_1 = require("../../core/config/configStore");
 const metafileUrls_1 = require("../../core/files/metafileUrls");
@@ -21,6 +22,59 @@ function normalizeText(value) {
 function normalizePreferredCreateHost(value) {
     const provider = normalizeText(value);
     return provider && provider !== 'custom' && (0, llmTypes_1.isLlmProvider)(provider) ? provider : null;
+}
+function hasOwn(value, key) {
+    return Object.prototype.hasOwnProperty.call(value, key);
+}
+function normalizeStringList(value) {
+    if (Array.isArray(value)) {
+        return value
+            .filter((item) => typeof item === 'string')
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+    if (typeof value === 'string') {
+        return value
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+    return [];
+}
+function hasExplicitEmptyEnsRpcUrls(config, env) {
+    if (normalizeStringList(env.METABOT_BROWSER_ENS_RPC_URLS).length > 0) {
+        return false;
+    }
+    const browser = browserRecord(config.browser);
+    const nameResolution = browserRecord(browser.nameResolution);
+    const ens = browserRecord(nameResolution.ens);
+    return hasOwn(ens, 'rpcUrls') && normalizeStringList(ens.rpcUrls).length === 0;
+}
+function resolveBrowserHostConfig(input) {
+    const browserConfig = (0, agent_browser_core_1.resolveBrowserConfig)(input.config, input.env);
+    const nameAliasConfig = hasExplicitEmptyEnsRpcUrls(input.config, input.env)
+        ? {
+            ...browserConfig,
+            nameResolution: {
+                ...browserConfig.nameResolution,
+                ens: {
+                    ...browserConfig.nameResolution.ens,
+                    enabled: false,
+                    rpcUrls: [],
+                },
+            },
+        }
+        : browserConfig;
+    return {
+        browserConfig,
+        nameAliasProviders: (0, agent_browser_name_resolvers_1.createBrowserNameAliasProviders)({
+            configured: input.configuredNameAliasProviders,
+            config: nameAliasConfig,
+            ...(input.ensNameAliasProviderFactory
+                ? { ensNameAliasProviderFactory: input.ensNameAliasProviderFactory }
+                : {}),
+        }),
+    };
 }
 function actorSelector(input) {
     return normalizeText(input?.actorId) || normalizeText(input?.from);
@@ -845,12 +899,18 @@ function createOacBrowserHostAdapter(input) {
         if ('failure' in actor)
             return toBrowserResult(actor.failure);
         const config = await (0, configStore_1.createConfigStore)(actor.homeDir).read();
-        const browserConfig = (0, agent_browser_core_1.resolveBrowserConfig)(config, env);
+        const { browserConfig, nameAliasProviders, } = resolveBrowserHostConfig({
+            config,
+            env,
+            configuredNameAliasProviders: input.nameAliasProviders,
+            ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
+        });
         const artifactCache = (0, artifactCache_1.createMetaAppArtifactCacheStore)(actor.homeDir);
         return (0, agent_browser_core_1.resolveBrowserResource)({
             uri: resolveInput.uri,
             config: browserConfig,
             fetch: fetchImpl,
+            nameAliasProviders,
             metaAppResolve: async (pinId) => {
                 return (0, agent_browser_core_1.resolveMetaAppPinToRecord)({
                     pinId,

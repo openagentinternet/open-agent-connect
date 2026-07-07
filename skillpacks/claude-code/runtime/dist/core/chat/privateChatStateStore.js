@@ -26,6 +26,13 @@ function cloneEmptyState() {
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
+function normalizeTimestampMs(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return 0;
+    }
+    return numeric < 1_000_000_000_000 ? Math.floor(numeric * 1000) : Math.floor(numeric);
+}
 function normalizeConversation(conversation) {
     const source = conversation;
     const pendingGuidanceText = normalizeText(source.pendingGuidanceText);
@@ -192,7 +199,12 @@ function normalizeState(value) {
                 .map(normalizeConversation)
             : [],
         messages: Array.isArray(source.messages)
-            ? source.messages.slice(-MAX_MESSAGES)
+            ? source.messages
+                .slice(-MAX_MESSAGES)
+                .map((message) => ({
+                ...message,
+                timestamp: normalizeTimestampMs(message.timestamp),
+            }))
             : [],
     };
 }
@@ -388,9 +400,15 @@ function createPrivateChatStateStore(homeDirOrPaths) {
         async appendMessages(messages) {
             if (messages.length === 0)
                 return messages;
+            let appendedMessages = messages;
             await this.updateState(state => {
+                const normalizedMessages = messages.map(message => ({
+                    ...message,
+                    timestamp: normalizeTimestampMs(message.timestamp),
+                }));
                 const existingIds = new Set(state.messages.map(m => m.messageId));
-                const newMessages = messages.filter(m => !existingIds.has(m.messageId));
+                const newMessages = normalizedMessages.filter(m => !existingIds.has(m.messageId));
+                appendedMessages = newMessages;
                 if (newMessages.length === 0)
                     return state;
                 return {
@@ -398,7 +416,7 @@ function createPrivateChatStateStore(homeDirOrPaths) {
                     messages: [...state.messages, ...newMessages].slice(-MAX_MESSAGES),
                 };
             });
-            return messages;
+            return appendedMessages;
         },
         async getConversationByPeer(peerGlobalMetaId) {
             const state = await this.readState();

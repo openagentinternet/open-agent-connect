@@ -8,6 +8,37 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 
+const DEFAULT_BROWSER_CONFIG = {
+  metasoP2PBaseUrl: 'https://so.metaid.io',
+  metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
+  manApiBaseUrl: 'https://manapi.metaid.io',
+  blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
+  botHomepageTemplateId: 'document',
+  renderCustomBotPages: true,
+  nameResolution: {
+    enabled: true,
+    ens: {
+      enabled: true,
+      chainId: 1,
+      rpcUrls: ['https://ethereum-rpc.publicnode.com'],
+      textKey: 'org.openagentinternet.uri',
+    },
+  },
+  defaultChainName: 'mvc',
+  localMode: true,
+};
+
+const DEFAULT_CONFIG = {
+  chain: {
+    defaultWriteNetwork: 'mvc',
+    mvcSponsorUploadEnabled: true,
+  },
+  a2a: {
+    simplemsgListenerEnabled: true,
+  },
+  browser: DEFAULT_BROWSER_CONFIG,
+};
+
 async function withTempProfileHome(action) {
   const systemHome = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-config-'));
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'test-profile');
@@ -66,24 +97,7 @@ test('createConfigStore defaults to the active runtime config and persists updat
     const defaults = await store.read();
     assert.equal(store.paths.configPath, path.join(homeDir, '.runtime', 'config.json'));
     assert.deepEqual(JSON.parse(await fs.readFile(store.paths.configPath, 'utf8')), defaults);
-    assert.deepEqual(defaults, {
-      chain: {
-        defaultWriteNetwork: 'mvc',
-        mvcSponsorUploadEnabled: true,
-      },
-      a2a: {
-        simplemsgListenerEnabled: true,
-      },
-      browser: {
-        metasoP2PBaseUrl: 'https://so.metaid.io',
-        metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
-        manApiBaseUrl: 'https://manapi.metaid.io',
-        blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
-        botHomepageTemplateId: 'document',
-        defaultChainName: 'mvc',
-        localMode: true,
-      },
-    });
+    assert.deepEqual(defaults, DEFAULT_CONFIG);
 
     const updated = {
       chain: {
@@ -100,6 +114,8 @@ test('createConfigStore defaults to the active runtime config and persists updat
         blockExplorerBaseUrl: 'https://explorer.example.test/tx',
         walletApiBaseUrl: 'https://wallet.example.test',
         botHomepageTemplateId: 'compact-list',
+        renderCustomBotPages: true,
+        nameResolution: DEFAULT_BROWSER_CONFIG.nameResolution,
         defaultChainName: 'opcat',
         localMode: false,
       },
@@ -118,24 +134,7 @@ test('read merges defaults when active config fields are missing', async () => {
 
     await fs.writeFile(store.paths.configPath, `${JSON.stringify({ chain: {} }, null, 2)}\n`, 'utf8');
     const reloaded = await store.read();
-    assert.deepEqual(reloaded, {
-      chain: {
-        defaultWriteNetwork: 'mvc',
-        mvcSponsorUploadEnabled: true,
-      },
-      a2a: {
-        simplemsgListenerEnabled: true,
-      },
-      browser: {
-        metasoP2PBaseUrl: 'https://so.metaid.io',
-        metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
-        manApiBaseUrl: 'https://manapi.metaid.io',
-        blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
-        botHomepageTemplateId: 'document',
-        defaultChainName: 'mvc',
-        localMode: true,
-      },
-    });
+    assert.deepEqual(reloaded, DEFAULT_CONFIG);
   });
 });
 
@@ -171,15 +170,7 @@ test('read ignores retired askMaster and evolution_network config fields', async
       a2a: {
         simplemsgListenerEnabled: false,
       },
-      browser: {
-        metasoP2PBaseUrl: 'https://so.metaid.io',
-        metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
-        manApiBaseUrl: 'https://manapi.metaid.io',
-        blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
-        botHomepageTemplateId: 'document',
-        defaultChainName: 'mvc',
-        localMode: true,
-      },
+      browser: DEFAULT_BROWSER_CONFIG,
     });
   });
 });
@@ -235,15 +226,7 @@ test('set drops retired askMaster and evolution_network fields from persisted co
       a2a: {
         simplemsgListenerEnabled: true,
       },
-      browser: {
-        metasoP2PBaseUrl: 'https://so.metaid.io',
-        metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
-        manApiBaseUrl: 'https://manapi.metaid.io',
-        blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
-        botHomepageTemplateId: 'document',
-        defaultChainName: 'mvc',
-        localMode: true,
-      },
+      browser: DEFAULT_BROWSER_CONFIG,
     });
   });
 });
