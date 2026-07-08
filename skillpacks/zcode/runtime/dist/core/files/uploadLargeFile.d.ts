@@ -17,6 +17,7 @@ export interface UploadLargeFileResult {
     bytes: number;
     extension: string;
     metafileUri: string;
+    metawebUrl: string;
     previewUrl: string;
     downloadUrl: string;
     globalMetaId: string;
@@ -38,7 +39,7 @@ export interface ProductionLargeFileUploader {
         extension: string;
         network: string;
         signer: Signer;
-    }): Promise<Omit<UploadLargeFileResult, 'verification'>>;
+    }): Promise<Omit<UploadLargeFileResult, 'metawebUrl' | 'verification'>>;
 }
 export declare function uploadLargeFileToChain(input: {
     filePath: string;

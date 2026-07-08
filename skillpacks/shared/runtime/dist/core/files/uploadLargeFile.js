@@ -74,6 +74,7 @@ function withCanonicalUrls(result) {
     const urls = (0, metafileUrls_1.buildMetafileContentUrls)(result.pinId);
     return {
         ...result,
+        metawebUrl: (0, metafileUrls_1.buildMetafileBrowserUrl)(result.pinId),
         previewUrl: urls.previewUrl,
         downloadUrl: urls.downloadUrl,
     };

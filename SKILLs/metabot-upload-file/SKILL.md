@@ -122,12 +122,21 @@ Surface these fields when present:
 
 - `pinId`
 - `metafileUri`
+- `metawebUrl`
 - `previewUrl`
 - `downloadUrl`
 - byte size
 - content type
 - upload mode, such as direct or chunked
 - verification status
+
+When `pinId` is present and the human asks to view or share the uploaded file, surface the MetaFile Browser URL:
+
+```text
+https://openagentinternet.org/browser/metafile/<pinId>
+```
+
+Use this MetaFile Browser URL for viewing and sharing uploaded files. Do not use `https://openagentinternet.org/browser/pin/<pinId>` for uploaded file view/share links; `/browser/pin` is the generic pin inspector, not the file-focused viewer.
 
 If verification was requested and the runtime reports verification unavailable, failed, or skipped, say that clearly. Do not invent a verification result.
 
@@ -140,6 +149,7 @@ If verification was requested and the runtime reports verification unavailable, 
 - Pass `--chain mvc`, `--chain btc`, or `--chain opcat` only when explicitly requested by the human.
 - Stop on CLI or runtime errors and report the structured error details.
 - Return the resulting `metafile://...` URI and URLs for later references. When the runtime can determine the file extension, prefer the extension-bearing form such as `metafile://<pinid>.zip`; bare `metafile://<pinid>` remains acceptable only when the type is unknown.
+- When returning a public view/share link for an uploaded file, use `metawebUrl` when present. If only `pinId` is present, derive `https://openagentinternet.org/browser/metafile/<pinId>` and label it as the MetaFile Browser link.
 
 ## In Scope
 

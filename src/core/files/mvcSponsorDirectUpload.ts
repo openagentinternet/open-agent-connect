@@ -11,6 +11,7 @@ import {
   signMvcPreparedUserInputs,
 } from '../chain/mvcFileInscriptionDraft';
 import { rememberPendingMvcTransaction } from '../chain/mvcPendingUtxos';
+import { buildMetafileBrowserUrl } from './metafileUrls';
 import { uploadLocalFileToChain, type UploadLocalFileToChainResult } from './uploadFile';
 
 export type MvcSponsorFeeAssistMode = 'mvc_sponsor_v2' | 'self_paid';
@@ -419,6 +420,7 @@ export async function uploadMvcSponsorDirectFile(input: {
     bytes: input.bytes,
     extension: input.extension,
     metafileUri: `metafile://${pinId}${input.extension}`,
+    metawebUrl: buildMetafileBrowserUrl(pinId),
     globalMetaId: identity.globalMetaId,
     feeAssist: {
       attempted: true,

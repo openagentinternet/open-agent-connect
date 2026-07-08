@@ -11,6 +11,7 @@ export interface UploadLocalFileToChainResult {
     bytes: number;
     extension: string;
     metafileUri: string;
+    metawebUrl: string;
     globalMetaId: string;
 }
 export interface UploadFileBufferToChainResult extends UploadLocalFileToChainResult {

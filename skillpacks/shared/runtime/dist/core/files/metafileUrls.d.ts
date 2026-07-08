@@ -6,3 +6,4 @@ export interface MetafileContentUrls {
     downloadUrl: string;
 }
 export declare function buildMetafileContentUrls(pinId: string): MetafileContentUrls;
+export declare function buildMetafileBrowserUrl(pinId: string): string;

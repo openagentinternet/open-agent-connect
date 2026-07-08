@@ -11,6 +11,7 @@ const mvc_1 = __importDefault(require("../chain/adapters/mvc"));
 const writePin_1 = require("../chain/writePin");
 const mvcFileInscriptionDraft_1 = require("../chain/mvcFileInscriptionDraft");
 const mvcPendingUtxos_1 = require("../chain/mvcPendingUtxos");
+const metafileUrls_1 = require("./metafileUrls");
 const uploadFile_1 = require("./uploadFile");
 function normalizeSponsorReason(value, fallback) {
     return value === 'insufficient_quota'
@@ -312,6 +313,7 @@ async function uploadMvcSponsorDirectFile(input) {
         bytes: input.bytes,
         extension: input.extension,
         metafileUri: `metafile://${pinId}${input.extension}`,
+        metawebUrl: (0, metafileUrls_1.buildMetafileBrowserUrl)(pinId),
         globalMetaId: identity.globalMetaId,
         feeAssist: {
             attempted: true,

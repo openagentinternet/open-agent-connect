@@ -63,6 +63,7 @@ test('uploadLocalFileToChain reads the local file, writes /file to chain, and re
     bytes: 18,
     extension: '.png',
     metafileUri: 'metafile://file-pin-1.png',
+    metawebUrl: 'https://openagentinternet.org/browser/metafile/file-pin-1',
     globalMetaId: 'gm-local-alice',
   });
 });
@@ -94,6 +95,7 @@ test('uploadLocalFileToChain appends a content type extension when the file name
   assert.equal(result.extension, '.html');
   assert.equal(result.contentType, 'text/html');
   assert.equal(result.metafileUri, 'metafile://html-pin-1.html');
+  assert.equal(result.metawebUrl, 'https://openagentinternet.org/browser/metafile/html-pin-1');
 });
 
 test('uploadFileBufferToChain appends a content type extension when the file name has none', async () => {
@@ -120,6 +122,7 @@ test('uploadFileBufferToChain appends a content type extension when the file nam
   assert.equal(result.extension, '.png');
   assert.equal(result.contentType, 'image/png');
   assert.equal(result.metafileUri, 'metafile://buffer-pin-1.png');
+  assert.equal(result.metawebUrl, 'https://openagentinternet.org/browser/metafile/buffer-pin-1');
 });
 
 test('uploadLocalFileToChain rejects DOGE file uploads before writing to chain', async () => {

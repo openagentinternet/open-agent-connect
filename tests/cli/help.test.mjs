@@ -656,6 +656,7 @@ test('runCli prints file upload-large help with request shape and MVC large-uplo
   assert.match(output, /"filePath": "\/absolute\/or\/relative\/path\/to\/file"/);
   assert.match(output, /"verify": "optional availability verification boolean"/);
   assert.match(output, /metafileUri/);
+  assert.match(output, /https:\/\/openagentinternet\.org\/browser\/metafile\/<pinId>/);
   assert.match(output, /verification/);
   assert.match(output, /DOGE is not supported for file upload/i);
   assert.match(output, /Large uploads above the direct threshold currently require MVC/i);
@@ -685,6 +686,7 @@ test('runCli prints machine-readable file upload-large help', async () => {
   assert.ok(output.optionalFlags.some((flag) => flag.flag === '--request-file'));
   assert.ok(output.optionalFlags.some((flag) => flag.flag === '--content-type'));
   assert.ok(output.optionalFlags.some((flag) => flag.flag === '--verify'));
+  assert.ok(output.successFields.some((field) => /https:\/\/openagentinternet\.org\/browser\/metafile\/<pinId>/.test(field)));
 });
 
 test('runCli prints system group help with update and uninstall subcommands', async () => {

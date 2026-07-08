@@ -8,6 +8,7 @@ exports.uploadFileBufferToChain = uploadFileBufferToChain;
 exports.uploadLocalFileToChain = uploadLocalFileToChain;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const metafileUrls_1 = require("./metafileUrls");
 const metafileUri_1 = require("./metafileUri");
 const MIME_MAP = {
     '.png': 'image/png',
@@ -75,6 +76,7 @@ async function uploadFileBufferToChain(input) {
         bytes: input.data.byteLength,
         extension,
         metafileUri: `metafile://${chainWrite.pinId}${extension}`,
+        metawebUrl: (0, metafileUrls_1.buildMetafileBrowserUrl)(chainWrite.pinId),
         globalMetaId: chainWrite.globalMetaId,
     };
 }
@@ -109,6 +111,7 @@ async function uploadLocalFileToChain(input) {
         bytes: buffer.byteLength,
         extension,
         metafileUri: `metafile://${chainWrite.pinId}${extension}`,
+        metawebUrl: (0, metafileUrls_1.buildMetafileBrowserUrl)(chainWrite.pinId),
         globalMetaId: chainWrite.globalMetaId,
     };
 }

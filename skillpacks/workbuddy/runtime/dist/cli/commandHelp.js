@@ -1036,6 +1036,7 @@ const COMMAND_HELP_SPECS = [
             'fileName',
             'pinId',
             'metafileUri',
+            'metawebUrl: https://openagentinternet.org/browser/metafile/<pinId> for viewing or sharing the uploaded MetaFile',
             'txids',
         ],
         failureSemantics: [
@@ -1066,6 +1067,7 @@ const COMMAND_HELP_SPECS = [
             'fileName',
             'pinId',
             'metafileUri',
+            'metawebUrl: https://openagentinternet.org/browser/metafile/<pinId> for viewing or sharing the uploaded MetaFile',
             'txids',
             'uploadMode',
             'verification',

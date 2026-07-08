@@ -286,6 +286,7 @@ test('createMetaFsLargeUploader performs successful chunked MVC upload in reques
   assert.equal(result.bytes, buffer.length);
   assert.equal(result.extension, '.zip');
   assert.equal(result.metafileUri, 'metafile://index-tx-1i0.zip');
+  assert.equal(result.metawebUrl, 'https://openagentinternet.org/browser/metafile/index-tx-1i0');
   assert.equal(result.globalMetaId, DEFAULT_IDENTITY.globalMetaId);
   assert.equal(result.uploadMode, 'chunked');
 
@@ -332,6 +333,7 @@ test('createMetaFsLargeUploader appends a content type extension when upload inp
 
   assert.equal(result.extension, '.html');
   assert.equal(result.metafileUri, 'metafile://index-tx-1i0.html');
+  assert.equal(result.metawebUrl, 'https://openagentinternet.org/browser/metafile/index-tx-1i0');
   __clearPendingMvcUtxosForTests();
 });
 

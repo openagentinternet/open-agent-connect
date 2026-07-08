@@ -4,7 +4,7 @@ import { rememberPendingMvcTransaction } from '../chain/mvcPendingUtxos';
 import { isRetryableUtxoFundingError } from '../chain/utxoBroadcastErrors';
 import type { ChainUtxo } from '../chain/adapters/types';
 import { withWalletSpendQueue, resolveWalletSpendQueueKey } from '../wallet/spendQueue';
-import { buildMetafileContentUrls } from './metafileUrls';
+import { buildMetafileBrowserUrl, buildMetafileContentUrls } from './metafileUrls';
 import { extensionFromContentType, safeMetafileExtension } from './metafileUri';
 import { LARGE_UPLOAD_MAX_BYTES, type ProductionLargeFileUploader, type UploadLargeFileResult } from './uploadLargeFile';
 
@@ -371,6 +371,7 @@ function buildResult(input: {
     bytes: input.uploadInput.bytes,
     extension,
     metafileUri: `metafile://${pinId}${extension}`,
+    metawebUrl: buildMetafileBrowserUrl(pinId),
     previewUrl: urls.previewUrl,
     downloadUrl: urls.downloadUrl,
     globalMetaId: input.globalMetaId,

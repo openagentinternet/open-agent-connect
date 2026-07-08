@@ -238,6 +238,7 @@ function buildResult(input) {
         bytes: input.uploadInput.bytes,
         extension,
         metafileUri: `metafile://${pinId}${extension}`,
+        metawebUrl: (0, metafileUrls_1.buildMetafileBrowserUrl)(pinId),
         previewUrl: urls.previewUrl,
         downloadUrl: urls.downloadUrl,
         globalMetaId: input.globalMetaId,

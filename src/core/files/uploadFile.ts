@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Signer } from '../signing/signer';
+import { buildMetafileBrowserUrl } from './metafileUrls';
 import { extensionFromContentType, safeMetafileExtension } from './metafileUri';
 
 const MIME_MAP: Record<string, string> = {
@@ -55,6 +56,7 @@ export interface UploadLocalFileToChainResult {
   bytes: number;
   extension: string;
   metafileUri: string;
+  metawebUrl: string;
   globalMetaId: string;
 }
 
@@ -97,6 +99,7 @@ export async function uploadFileBufferToChain(input: {
     bytes: input.data.byteLength,
     extension,
     metafileUri: `metafile://${chainWrite.pinId}${extension}`,
+    metawebUrl: buildMetafileBrowserUrl(chainWrite.pinId),
     globalMetaId: chainWrite.globalMetaId,
   };
 }
@@ -140,6 +143,7 @@ export async function uploadLocalFileToChain(input: {
     bytes: buffer.byteLength,
     extension,
     metafileUri: `metafile://${chainWrite.pinId}${extension}`,
+    metawebUrl: buildMetafileBrowserUrl(chainWrite.pinId),
     globalMetaId: chainWrite.globalMetaId,
   };
 }

@@ -234,6 +234,7 @@ test('uploadLargeFileToChain uses direct upload at exactly DIRECT_UPLOAD_MAX_BYT
   assert.equal(result.fileName, 'exact.png');
   assert.equal(result.filePath, filePath);
   assert.equal(result.metafileUri, 'metafile://direct-pin-1.png');
+  assert.equal(result.metawebUrl, 'https://openagentinternet.org/browser/metafile/direct-pin-1');
   assert.equal(result.previewUrl, 'https://file.metaid.io/metafile-indexer/api/v1/files/content/direct-pin-1');
   assert.equal(result.downloadUrl, 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/direct-pin-1');
   assert.equal(result.pinId, 'direct-pin-1');
@@ -436,6 +437,7 @@ test('uploadLargeFileToChain calls the injected large uploader for files above D
     bytes: DIRECT_UPLOAD_MAX_BYTES + 1,
     extension: '.mp4',
     metafileUri: 'metafile://large-pin-1.mp4',
+    metawebUrl: 'https://openagentinternet.org/browser/metafile/large-pin-1',
     previewUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/content/large-pin-1',
     downloadUrl: 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/large-pin-1',
     globalMetaId: 'gm-large-alice',
@@ -524,6 +526,7 @@ test('uploadLargeFileToChain uses orchestrator-owned metadata in large upload re
   assert.equal(result.extension, '.md');
   assert.equal(result.pinId, 'large-pin-metadata');
   assert.equal(result.metafileUri, 'metafile://large-pin-metadata.secret');
+  assert.equal(result.metawebUrl, 'https://openagentinternet.org/browser/metafile/large-pin-metadata');
   assert.equal(result.globalMetaId, 'gm-large-metadata');
   assert.equal(result.previewUrl, 'https://file.metaid.io/metafile-indexer/api/v1/files/content/large-pin-metadata');
   assert.equal(result.downloadUrl, 'https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/large-pin-metadata');

@@ -859,6 +859,8 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   assert.match(fileContent, /metafileUri/);
   assert.match(fileContent, /previewUrl/);
   assert.match(fileContent, /downloadUrl/);
+  assert.match(fileContent, /https:\/\/openagentinternet\.org\/browser\/metafile\/<pinId>/);
+  assert.match(fileContent, /Do not use `https:\/\/openagentinternet\.org\/browser\/pin\/<pinId>`/);
   assert.match(fileContent, /\/file/);
   assert.match(fileContent, /Bot, bot, and MetaBot as equivalent user wording/i);
 });

@@ -82,6 +82,7 @@ test('postBuzzToChain uploads attachments first and then writes a simplebuzz pay
         bytes: 11,
         extension: '.png',
         metafileUri: 'metafile://file-pin-1.png',
+        metawebUrl: 'https://openagentinternet.org/browser/metafile/file-pin-1',
         globalMetaId: 'gm-local-alice',
       },
     ],

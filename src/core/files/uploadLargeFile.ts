@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Signer } from '../signing/signer';
-import { buildMetafileContentUrls } from './metafileUrls';
+import { buildMetafileBrowserUrl, buildMetafileContentUrls } from './metafileUrls';
 import { verifyMetafileAvailability } from './metafileVerifier';
 import { inferUploadContentType, uploadLocalFileToChain } from './uploadFile';
 import {
@@ -37,6 +37,7 @@ export interface UploadLargeFileResult {
   bytes: number;
   extension: string;
   metafileUri: string;
+  metawebUrl: string;
   previewUrl: string;
   downloadUrl: string;
   globalMetaId: string;
@@ -59,7 +60,7 @@ export interface ProductionLargeFileUploader {
     extension: string;
     network: string;
     signer: Signer;
-  }): Promise<Omit<UploadLargeFileResult, 'verification'>>;
+  }): Promise<Omit<UploadLargeFileResult, 'metawebUrl' | 'verification'>>;
 }
 
 function normalizeText(value: unknown): string {
@@ -132,12 +133,13 @@ async function maybeVerify(
   return undefined;
 }
 
-function withCanonicalUrls<T extends Omit<UploadLargeFileResult, 'previewUrl' | 'downloadUrl'>>(
+function withCanonicalUrls<T extends Omit<UploadLargeFileResult, 'metawebUrl' | 'previewUrl' | 'downloadUrl'>>(
   result: T,
-): T & Pick<UploadLargeFileResult, 'previewUrl' | 'downloadUrl'> {
+): T & Pick<UploadLargeFileResult, 'metawebUrl' | 'previewUrl' | 'downloadUrl'> {
   const urls = buildMetafileContentUrls(result.pinId);
   return {
     ...result,
+    metawebUrl: buildMetafileBrowserUrl(result.pinId),
     previewUrl: urls.previewUrl,
     downloadUrl: urls.downloadUrl,
   };
