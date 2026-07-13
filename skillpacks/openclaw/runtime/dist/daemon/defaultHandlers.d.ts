@@ -135,5 +135,6 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
     conversationGuidanceReplyRunner?: ChatReplyRunner;
     metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
+    env?: NodeJS.ProcessEnv;
 }): MetabotDaemonHttpHandlers;
 export {};

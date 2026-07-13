@@ -1,6 +1,6 @@
 ---
 name: metabot-identity-manage
-description: Use when a human or agent needs local Bot/MetaBot identity create/list/assign/who workflows, including first-time bootstrap creation plus doctor verification. Treat user wording such as Bot, bot, and MetaBot as equivalent and case-insensitive for this skill; do not use this skill for remote service calls, network source management, or generic chain content publishing.
+description: Use when a human or agent needs local Bot/MetaBot identity create/list/assign/who workflows, persona setup or updates, including first-time bootstrap creation plus doctor verification. Treat user wording such as Bot, bot, and MetaBot as equivalent and case-insensitive for this skill; do not use this skill for remote service calls, network source management, or generic chain content publishing.
 ---
 
 # Bot Identity Manage
@@ -25,6 +25,7 @@ Should trigger when:
 - The user asks to create the first local Bot, bot, or MetaBot identity.
 - The user asks to switch identity by name.
 - The user asks which identity is currently active.
+- The user asks to set or update a Bot's role, personality, style, or goal.
 - The user asks to set/update the local avatar under `/info/avatar`.
 
 Should not trigger when:
@@ -105,6 +106,22 @@ Verify and report the active identity at the end:
 ```bash
 {{METABOT_CLI}} identity who
 ```
+
+## Persona Updates
+
+When the user asks to set or update a Bot persona, write only the fields they
+actually specified to a temporary JSON payload and update the selected Bot:
+
+```bash
+{{METABOT_CLI}} bot update --from <bot-slug> --payload-file <persona-payload.json>
+```
+
+Supported persona fields are `role`, `soul`, and `goal`. Do not invent missing
+persona fields. A successful persona save automatically creates or refreshes
+the Bot's Codex custom agent projection. Clearing all three fields automatically
+removes the OAC-owned Codex projection. Inspect `hostPersonaProjection` in the
+command result and report any projection failure explicitly; the profile save
+may still have succeeded.
 
 Open the Bot management page and keep the returned `localUiUrl`:
 
@@ -210,6 +227,7 @@ If the human explicitly asks to write avatar on BTC, DOGE, or OPCAT, pass the ma
 ## In Scope
 
 - `identity create/list/assign/who` for deterministic local profile ownership.
+- Persona setup and updates through `bot update`.
 - First-time bootstrap completion checks via `doctor` after create.
 - Identity-safe avatar write flow for `/info/avatar`.
 

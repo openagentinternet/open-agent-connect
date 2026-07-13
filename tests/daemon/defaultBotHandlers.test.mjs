@@ -2357,6 +2357,123 @@ test('default bot updateProfile returns chain write txids after saving a chained
   assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['save-tx-1', 'save-tx-2', 'save-tx-3', 'save-tx-4']);
 });
 
+test('default bot updateProfile syncs and removes the Codex persona projection with persona saves', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const codexHome = path.join(systemHomeDir, 'codex-home');
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Projected Bot',
+    role: 'Build maintainable interfaces.',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-projected-bot',
+    mvcAddress: 'addr-projected-bot',
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    identitySyncStepDelayMs: 0,
+    env: { CODEX_HOME: codexHome },
+    signer: makeSigner(async (input) => ({
+      txids: ['persona-sync-tx'],
+      pinId: 'persona-sync-pin',
+      totalCost: 1,
+      network: 'mvc',
+      operation: input.operation,
+      path: input.path,
+      contentType: input.contentType,
+      encoding: input.encoding ?? 'utf-8',
+      globalMetaId: 'gm-projected-bot',
+      mvcAddress: 'addr-projected-bot',
+    })),
+  });
+
+  const updated = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    soul: 'Be direct and visually exact.',
+  });
+  const agentFilePath = path.join(codexHome, 'agents', `metabot-${profile.slug}.toml`);
+  const agentFile = await readFile(agentFilePath, 'utf8');
+
+  assert.equal(updated.ok, true);
+  assert.equal(updated.data.hostPersonaProjection.ok, true);
+  assert.equal(updated.data.hostPersonaProjection.operation, 'bind');
+  assert.equal(updated.data.hostPersonaProjection.action, 'created');
+  assert.match(agentFile, /Build maintainable interfaces\./);
+  assert.match(agentFile, /Be direct and visually exact\./);
+
+  const cleared = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    role: '',
+    soul: '',
+    goal: '',
+  });
+
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.data.hostPersonaProjection.ok, true);
+  assert.equal(cleared.data.hostPersonaProjection.operation, 'unbind');
+  assert.equal(cleared.data.hostPersonaProjection.removed, true);
+  await assert.rejects(() => access(agentFilePath), /ENOENT/);
+});
+
+test('default bot updateProfile keeps a successful persona save when Codex projection conflicts', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const codexHome = path.join(systemHomeDir, 'codex-home');
+  const profile = await createMetabotProfile(systemHomeDir, { name: 'Conflict Bot' });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-conflict-bot',
+    mvcAddress: 'addr-conflict-bot',
+  });
+  const agentFilePath = path.join(codexHome, 'agents', `metabot-${profile.slug}.toml`);
+  await mkdir(path.dirname(agentFilePath), { recursive: true });
+  await writeFile(agentFilePath, 'name = "User owned"\n', 'utf8');
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    identitySyncStepDelayMs: 0,
+    env: { CODEX_HOME: codexHome },
+    signer: makeSigner(async (input) => ({
+      txids: ['persona-conflict-tx'],
+      pinId: 'persona-conflict-pin',
+      totalCost: 1,
+      network: 'mvc',
+      operation: input.operation,
+      path: input.path,
+      contentType: input.contentType,
+      encoding: input.encoding ?? 'utf-8',
+      globalMetaId: 'gm-conflict-bot',
+      mvcAddress: 'addr-conflict-bot',
+    })),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    role: 'Persist this role.',
+  });
+  const saved = await getMetabotProfile(systemHomeDir, profile.slug);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.hostPersonaProjection.ok, false);
+  assert.equal(result.data.hostPersonaProjection.code, 'host_persona_conflict');
+  assert.equal(saved.role, 'Persist this role.');
+  assert.equal(await readFile(agentFilePath, 'utf8'), 'name = "User owned"\n');
+});
+
 test('default bot updateProfile backfills missing LLM info when saving only bio', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {

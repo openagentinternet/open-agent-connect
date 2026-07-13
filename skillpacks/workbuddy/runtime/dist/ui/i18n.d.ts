@@ -159,6 +159,9 @@ export declare const DICTIONARIES: {
         readonly 'bot.saving': "Saving...";
         readonly 'bot.saved': "Saved";
         readonly 'bot.onChainUpdateConfirmed': "On-chain update confirmed.";
+        readonly 'bot.personaSavedProjectionSynced': "Persona saved and synced to Codex.";
+        readonly 'bot.personaSavedProjectionRemoved': "Persona saved. The empty persona was removed from Codex.";
+        readonly 'bot.personaSavedProjectionFailed': "Persona saved, but Codex sync failed: {message}";
         readonly 'bot.profileUpdatedOnChain': "Profile Updated On-Chain";
         readonly 'bot.profileChangesWrittenOnChain': "Profile changes were written on-chain before local data was saved.";
         readonly 'bot.onChainOperationConfirmed': "The on-chain operation has been confirmed.";
@@ -690,6 +693,9 @@ export declare const DICTIONARIES: {
         readonly 'bot.saving': "正在保存...";
         readonly 'bot.saved': "已保存";
         readonly 'bot.onChainUpdateConfirmed': "链上更新已确认。";
+        readonly 'bot.personaSavedProjectionSynced': "人格已保存并同步到 Codex。";
+        readonly 'bot.personaSavedProjectionRemoved': "人格已保存，空人格已从 Codex 中移除。";
+        readonly 'bot.personaSavedProjectionFailed': "人格已保存，但同步到 Codex 失败：{message}";
         readonly 'bot.profileUpdatedOnChain': "资料已写入链上";
         readonly 'bot.profileChangesWrittenOnChain': "资料变更已先写入链上，然后保存到本地。";
         readonly 'bot.onChainOperationConfirmed': "链上操作已确认。";

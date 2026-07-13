@@ -32,6 +32,7 @@ const platformSkillCatalog_1 = require("../core/services/platformSkillCatalog");
 const servicePublishValidation_1 = require("../core/services/servicePublishValidation");
 const skillServiceProtocol_1 = require("../core/services/skillServiceProtocol");
 const chatSkillPolicy_1 = require("../core/services/chatSkillPolicy");
+const hostPersonaProjection_1 = require("../core/host/hostPersonaProjection");
 const providerServiceRunner_1 = require("../core/a2a/provider/providerServiceRunner");
 const providerConsole_1 = require("../core/provider/providerConsole");
 const providerOperations_1 = require("../core/provider/providerOperations");
@@ -3483,6 +3484,7 @@ async function withRefundMutationLock(homeDir, operation) {
     }
 }
 function createDefaultMetabotDaemonHandlers(input) {
+    const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
     const secretStore = input.secretStore ?? (0, fileSecretStore_1.createFileSecretStore)(input.homeDir);
     // Create default adapter registry if none provided (backward compat)
     const adapters = input.adapters ?? (0, registry_1.createChainAdapterRegistry)([
@@ -3503,6 +3505,40 @@ function createDefaultMetabotDaemonHandlers(input) {
             ?? input.createProviderLargeFileUploader?.()
             ?? (0, metaFsLargeUploader_1.createMetaFsLargeUploader)();
     const configStore = (0, configStore_1.createConfigStore)(input.homeDir);
+    async function syncCodexPersonaProjection(profile) {
+        try {
+            const personaConfigured = Boolean(profile.role.trim() || profile.soul.trim() || profile.goal.trim());
+            const projection = personaConfigured
+                ? await (0, hostPersonaProjection_1.bindHostPersonaProjection)({
+                    systemHomeDir: normalizedSystemHomeDir,
+                    host: 'codex',
+                    from: profile.slug,
+                    env: input.env ?? process.env,
+                })
+                : await (0, hostPersonaProjection_1.unbindHostPersonaProjection)({
+                    systemHomeDir: normalizedSystemHomeDir,
+                    host: 'codex',
+                    from: profile.slug,
+                    env: input.env ?? process.env,
+                });
+            return {
+                ok: true,
+                ...projection,
+                operation: personaConfigured ? 'bind' : 'unbind',
+            };
+        }
+        catch (error) {
+            return {
+                ok: false,
+                host: 'codex',
+                code: error instanceof hostPersonaProjection_1.HostPersonaProjectionError
+                    ? error.code
+                    : 'host_persona_projection_failed',
+                message: error instanceof Error ? error.message : String(error),
+                ...(error instanceof hostPersonaProjection_1.HostPersonaProjectionError ? { data: error.data } : {}),
+            };
+        }
+    }
     function isSupportedWriteNetwork(value) {
         return configTypes_1.DEFAULT_WRITE_NETWORKS.includes(value);
     }
@@ -3625,7 +3661,6 @@ function createDefaultMetabotDaemonHandlers(input) {
     const callerOrderTextGenerator = input.callerOrderTextGenerator ?? null;
     const providerOrderReplyRunner = input.providerOrderReplyRunner ?? null;
     const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
-    const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
     const getDaemonRecord = input.getDaemonRecord;
     const metaAppManClient = (0, manOwnerList_1.createMetaAppManOwnerClient)({
         fetchFn: input.metaAppManFetch ?? fetch,
@@ -12807,11 +12842,15 @@ function createDefaultMetabotDaemonHandlers(input) {
                     });
                     await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, profileInfoTargets, profileChainWrites);
                     await notifyIdentityProfileRegistered();
+                    const hostPersonaProjection = (profile.role.trim() || profile.soul.trim() || profile.goal.trim())
+                        ? await syncCodexPersonaProjection(profile)
+                        : undefined;
                     return (0, commandResult_1.commandSuccess)({
                         profile,
                         identity,
                         chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
                         subsidy: bootstrap.subsidy,
+                        ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
                     });
                 }
                 catch (error) {
@@ -12902,7 +12941,16 @@ function createDefaultMetabotDaemonHandlers(input) {
                 try {
                     const profile = await (0, metabotProfileManager_1.updateMetabotProfile)(normalizedSystemHomeDir, slug, update);
                     await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, updateInfoTargets, chainWrites);
-                    return (0, commandResult_1.commandSuccess)({ profile, chainWrites });
+                    const projectionFields = ['name', 'bio', 'role', 'soul', 'goal'];
+                    const shouldSyncHostPersona = projectionFields.some((field) => changedFields.includes(field));
+                    const hostPersonaProjection = shouldSyncHostPersona
+                        ? await syncCodexPersonaProjection(profile)
+                        : undefined;
+                    return (0, commandResult_1.commandSuccess)({
+                        profile,
+                        chainWrites,
+                        ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
+                    });
                 }
                 catch (error) {
                     const message = error instanceof Error ? error.message : String(error);

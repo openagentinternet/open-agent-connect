@@ -689,10 +689,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
         contentType: 'optional content type for metafile homepages',
       },
     },
-    successFields: ['profile', 'chainWrites'],
+    successFields: ['profile', 'chainWrites', 'hostPersonaProjection'],
     failureSemantics: [
       'Fails when the profile is missing, the payload is invalid, or a chain-backed public identity update cannot be written safely.',
       'Public identity writes return chainWrites before the local profile is updated.',
+      'Persona saves return hostPersonaProjection separately; projection failure does not roll back an already successful profile save.',
     ],
   },
   {

@@ -2,9 +2,16 @@
 
 ## Decision
 
-Open Agent Connect will add an explicit, additive host-persona projection for Codex. It compiles one local MetaBot profile into a Codex custom agent file without changing the MetaBot profile, A2A chat behavior, skill policy, or the host's installed capabilities.
+Open Agent Connect will add an additive host-persona projection for Codex. It compiles one local MetaBot profile into a Codex custom agent file without changing the MetaBot profile, A2A chat behavior, skill policy, or the host's installed capabilities.
 
 The first host is Codex only. Other host adapters can be added after the Codex behavior is proven stable.
+
+Persona projection is automatic when a profile create or update successfully
+saves non-empty `role`, `soul`, or `goal` values through the shared daemon
+profile workflow. This covers both `/ui/bot` and host Skills that use
+`metabot bot update`. Clearing all three values removes the OAC-owned Codex
+projection. Projection errors are reported separately and do not roll back a
+profile or chain write that has already succeeded.
 
 ## Command Surface
 
@@ -15,6 +22,8 @@ metabot host persona unbind --host codex [--from <bot-slug>]
 ```
 
 When `--from` is omitted, the active local MetaBot identity is used.
+These commands remain available for diagnostics and manual lifecycle control;
+normal persona editing does not require the user to run them.
 
 ## Projection Contract
 

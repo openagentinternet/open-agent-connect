@@ -106,6 +106,11 @@ import {
   normalizeAllowChatSkills,
   validateAllowChatSkills,
 } from '../core/services/chatSkillPolicy';
+import {
+  bindHostPersonaProjection,
+  HostPersonaProjectionError,
+  unbindHostPersonaProjection,
+} from '../core/host/hostPersonaProjection';
 import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
@@ -4610,7 +4615,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
   testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
   conversationGuidanceReplyRunner?: ChatReplyRunner;
   metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
+  env?: NodeJS.ProcessEnv;
 }): MetabotDaemonHttpHandlers {
+  const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   // Create default adapter registry if none provided (backward compat)
   const adapters = input.adapters ?? createChainAdapterRegistry([
@@ -4631,6 +4638,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ?? input.createProviderLargeFileUploader?.()
       ?? createMetaFsLargeUploader();
   const configStore = createConfigStore(input.homeDir);
+  async function syncCodexPersonaProjection(profile: MetabotProfileFull): Promise<Record<string, unknown>> {
+    try {
+      const personaConfigured = Boolean(profile.role.trim() || profile.soul.trim() || profile.goal.trim());
+      const projection = personaConfigured
+        ? await bindHostPersonaProjection({
+            systemHomeDir: normalizedSystemHomeDir,
+            host: 'codex',
+            from: profile.slug,
+            env: input.env ?? process.env,
+          })
+        : await unbindHostPersonaProjection({
+            systemHomeDir: normalizedSystemHomeDir,
+            host: 'codex',
+            from: profile.slug,
+            env: input.env ?? process.env,
+          });
+      return {
+        ok: true,
+        ...projection,
+        operation: personaConfigured ? 'bind' : 'unbind',
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        host: 'codex',
+        code: error instanceof HostPersonaProjectionError
+          ? error.code
+          : 'host_persona_projection_failed',
+        message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof HostPersonaProjectionError ? { data: error.data } : {}),
+      };
+    }
+  }
   function isSupportedWriteNetwork(value: string): value is DefaultWriteNetwork {
     return DEFAULT_WRITE_NETWORKS.includes(value as DefaultWriteNetwork);
   }
@@ -4773,7 +4813,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const callerOrderTextGenerator = input.callerOrderTextGenerator ?? null;
   const providerOrderReplyRunner = input.providerOrderReplyRunner ?? null;
   const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
-  const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const getDaemonRecord = input.getDaemonRecord;
   const metaAppManClient = createMetaAppManOwnerClient({
     fetchFn: input.metaAppManFetch ?? fetch,
@@ -15085,11 +15124,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
           await recordMetabotInfoPublishResults(profile, profileInfoTargets, profileChainWrites);
           await notifyIdentityProfileRegistered();
+          const hostPersonaProjection = (profile.role.trim() || profile.soul.trim() || profile.goal.trim())
+            ? await syncCodexPersonaProjection(profile)
+            : undefined;
           return commandSuccess({
             profile,
             identity,
             chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
             subsidy: bootstrap.subsidy,
+            ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
           });
         } catch (error) {
           await deleteMetabotProfile(normalizedSystemHomeDir, resolvedHome.slug)
@@ -15190,7 +15233,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
         try {
           const profile = await updateMetabotProfile(normalizedSystemHomeDir, slug, update);
           await recordMetabotInfoPublishResults(profile, updateInfoTargets, chainWrites);
-          return commandSuccess({ profile, chainWrites });
+          const projectionFields = ['name', 'bio', 'role', 'soul', 'goal'] as const;
+          const shouldSyncHostPersona = projectionFields.some((field) => changedFields.includes(field));
+          const hostPersonaProjection = shouldSyncHostPersona
+            ? await syncCodexPersonaProjection(profile)
+            : undefined;
+          return commandSuccess({
+            profile,
+            chainWrites,
+            ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (/not found/i.test(message)) {

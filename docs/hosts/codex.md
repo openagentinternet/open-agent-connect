@@ -26,9 +26,15 @@ metabot host bind-skills --host codex
 After bind, Codex should see host-native `metabot-*` entries while the canonical shared content still lives in `~/.metabot/skills/`.
 If the current Codex session does not immediately pick up the new skills, start a fresh session.
 
-## Optional MetaBot Persona
+## MetaBot Persona
 
-Project a local MetaBot's `ROLE.md`, `SOUL.md`, and `GOAL.md` into a Codex custom agent:
+Saving a non-empty Role, Soul, or Goal in `/ui/bot` automatically creates or
+refreshes that Bot's Codex custom agent. Persona updates made through the Bot
+identity management Skill use the same profile-save path and receive the same
+automatic projection. Clearing all three persona fields removes the OAC-owned
+projection.
+
+The CLI lifecycle remains available for diagnostics or manual repair:
 
 ```bash
 metabot host persona bind --host codex --from eric
