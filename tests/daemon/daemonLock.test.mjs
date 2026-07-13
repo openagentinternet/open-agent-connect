@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,17 @@ function createHome(prefix) {
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'test-profile');
   mkdirSync(homeDir, { recursive: true });
   return homeDir;
+}
+
+async function httpGet(url, agent) {
+  await new Promise((resolve, reject) => {
+    const request = http.get(url, { agent }, (response) => {
+      response.resume();
+      response.on('end', resolve);
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+  });
 }
 
 test('daemon startup recovers from a stale legacy lock without pid metadata', async () => {
@@ -38,4 +50,25 @@ test('daemon startup recovers from a stale legacy lock without pid metadata', as
   assert.equal(lock.pid, process.pid);
 
   await daemon.close();
+});
+
+test('daemon close resolves even when the caller keeps an idle keep-alive socket open', async () => {
+  const homeDir = createHome('metabot-daemon-keepalive-close-');
+  const daemon = createMetabotDaemon({
+    homeDirOrPaths: resolveMetabotPaths(homeDir),
+    ownerId: 'daemon-close-keepalive-test',
+  });
+  const address = await daemon.start(0);
+  const keepAliveAgent = new http.Agent({ keepAlive: true });
+
+  try {
+    await httpGet(`${address.baseUrl}/api/daemon/status`, keepAliveAgent);
+    const closeResult = await Promise.race([
+      daemon.close().then(() => 'closed'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 1_000)),
+    ]);
+    assert.equal(closeResult, 'closed');
+  } finally {
+    keepAliveAgent.destroy();
+  }
 });

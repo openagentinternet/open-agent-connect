@@ -84,6 +84,12 @@ async function closeServer(server) {
             }
             resolve();
         });
+        if (typeof server.closeIdleConnections === 'function') {
+            server.closeIdleConnections();
+        }
+        if (typeof server.closeAllConnections === 'function') {
+            server.closeAllConnections();
+        }
     });
 }
 function createMetabotDaemon(options) {

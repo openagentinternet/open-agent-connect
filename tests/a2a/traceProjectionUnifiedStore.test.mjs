@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
+const Module = require('node:module');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { persistA2AConversationMessage } = require('../../dist/core/a2a/conversationPersistence.js');
 const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
@@ -20,6 +21,16 @@ const {
   upsertIdentityProfile,
 } = require('../../dist/core/identity/identityProfiles.js');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
+
+const DEFAULT_HANDLERS_MODULE_PATH = require.resolve('../../dist/daemon/defaultHandlers.js');
+
+function loadFreshCreateDefaultMetabotDaemonHandlers() {
+  const freshModule = new Module(DEFAULT_HANDLERS_MODULE_PATH);
+  freshModule.filename = DEFAULT_HANDLERS_MODULE_PATH;
+  freshModule.paths = Module._nodeModulePaths(path.dirname(DEFAULT_HANDLERS_MODULE_PATH));
+  freshModule.load(DEFAULT_HANDLERS_MODULE_PATH);
+  return freshModule.exports.createDefaultMetabotDaemonHandlers;
+}
 
 const LOCAL_GLOBAL_META_ID = 'idq14hmvlocal000000000000000000000000';
 const PEER_GLOBAL_META_ID = 'idq1g35dpeer0000000000000000000000000';
@@ -1465,8 +1476,9 @@ test('parallel inbound NeedsRating handlers publish only one skill-service-rate 
       },
     },
   });
-  const handlersA = createHandlers();
-  const handlersB = createHandlers();
+  const handlersA = createHandlers(loadFreshCreateDefaultMetabotDaemonHandlers());
+  const handlersB = createHandlers(loadFreshCreateDefaultMetabotDaemonHandlers());
+  const handlersC = createHandlers(loadFreshCreateDefaultMetabotDaemonHandlers());
 
   const ratingBody = `[NeedsRating:${ORDER_TXID}] Please rate this service.`;
   await Promise.all([
@@ -1482,7 +1494,7 @@ test('parallel inbound NeedsRating handlers publish only one skill-service-rate 
       messagePinId: 'needs-rating-parallel-b',
       timestamp: BASE_TIME + 81,
     }),
-    handlersA.services.handleInboundOrderProtocolMessage({
+    handlersC.services.handleInboundOrderProtocolMessage({
       fromGlobalMetaId: PEER_GLOBAL_META_ID,
       content: ratingBody,
       messagePinId: 'needs-rating-parallel-c',

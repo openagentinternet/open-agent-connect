@@ -110,6 +110,12 @@ async function closeServer(server: http.Server | null): Promise<void> {
       }
       resolve();
     });
+    if (typeof server.closeIdleConnections === 'function') {
+      server.closeIdleConnections();
+    }
+    if (typeof server.closeAllConnections === 'function') {
+      server.closeAllConnections();
+    }
   });
 }
 

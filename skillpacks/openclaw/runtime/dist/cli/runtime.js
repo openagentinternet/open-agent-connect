@@ -3093,8 +3093,24 @@ async function serveCliDaemonProcess(context) {
         chatAutoReplyBackfill.stop();
         clearInterval(onlineServiceCacheInterval);
         serviceRefundSyncLoop.stop();
-        await runtimeStore.clearDaemon(process.pid);
-        await daemon.close();
+        let shutdownFailure = null;
+        try {
+            await daemon.close();
+        }
+        catch (error) {
+            shutdownFailure = error;
+        }
+        try {
+            await runtimeStore.clearDaemon(process.pid);
+        }
+        catch (error) {
+            shutdownFailure ??= error;
+        }
+        if (shutdownFailure) {
+            console.error(shutdownFailure);
+            process.exit(1);
+            return;
+        }
         process.exit(exitCode);
     };
     process.on('SIGTERM', () => { void shutdown(0); });

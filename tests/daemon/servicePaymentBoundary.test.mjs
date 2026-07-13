@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createECDH } from 'node:crypto';
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -9,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
+const Module = require('node:module');
 const { TxComposer, mvc } = require('meta-contract');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { receivePrivateChat } = require('../../dist/core/chat/privateChat.js');
@@ -28,6 +30,16 @@ const { parseDeliveryMessage, parseNeedsRatingMessage } = require('../../dist/co
 const { buildA2ASimplemsgInboundDispatcher } = require('../../dist/cli/runtime.js');
 const { upsertIdentityProfile, setActiveMetabotHome } = require('../../dist/core/identity/identityProfiles.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
+
+const DEFAULT_HANDLERS_MODULE_PATH = require.resolve('../../dist/daemon/defaultHandlers.js');
+
+function loadFreshCreateDefaultMetabotDaemonHandlers() {
+  const freshModule = new Module(DEFAULT_HANDLERS_MODULE_PATH);
+  freshModule.filename = DEFAULT_HANDLERS_MODULE_PATH;
+  freshModule.paths = Module._nodeModulePaths(path.dirname(DEFAULT_HANDLERS_MODULE_PATH));
+  freshModule.load(DEFAULT_HANDLERS_MODULE_PATH);
+  return freshModule.exports.createDefaultMetabotDaemonHandlers;
+}
 
 const MVC_PAYMENT_ADDRESS = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
 const MVC_OTHER_ADDRESS = '1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp';
@@ -400,7 +412,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
   const paymentUtxos = options.paymentUtxos ?? [];
   const fetchRawTxCalls = [];
   const fetchUtxosCalls = [];
-  const handlers = createDefaultMetabotDaemonHandlers({
+  const createHandlers = (factory = createDefaultMetabotDaemonHandlers) => factory({
     homeDir,
     systemHomeDir: options.systemHomeDir ?? deriveSystemHome(homeDir),
     chainApiBaseUrl: options.chainApiBaseUrl ?? 'http://127.0.0.1:9',
@@ -536,6 +548,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     providerArtifactUploadLargeFile: options.providerArtifactUploadLargeFile,
     providerLargeFileUploader: options.providerLargeFileUploader,
   });
+  const handlers = createHandlers();
 
   function makeOrderContent(overrides = {}) {
     return buildDelegationOrderPayload({
@@ -579,6 +592,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
     buyerPair,
     runtimeStateStore,
     handlers,
+    createHandlers,
     writes,
     llmCalls,
     rawTxs,
@@ -826,6 +840,135 @@ function decryptSimplemsgFromProviderToBuyer(write, input) {
       rawData: write.payload,
     },
   }).plaintext;
+}
+
+async function runMultiprocessServiceRatingWorker(input) {
+  const distModulePath = path.join(process.cwd(), 'dist/daemon/defaultHandlers.js');
+  const script = `
+    const { promises: fs } = require('node:fs');
+    const path = require('node:path');
+    const { createDefaultMetabotDaemonHandlers } = require(${JSON.stringify(distModulePath)});
+
+    async function sleep(ms) {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function waitForStartBarrier(dir, label, expectedPeers, timeoutMs) {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, label), String(Date.now()), 'utf8');
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const entries = await fs.readdir(dir).catch(() => []);
+        if (entries.length >= expectedPeers) {
+          return;
+        }
+        await sleep(25);
+      }
+      throw new Error('Timed out waiting for service rating start barrier.');
+    }
+
+    (async () => {
+      const label = ${JSON.stringify(input.label)};
+      await waitForStartBarrier(
+        ${JSON.stringify(input.startBarrierDir)},
+        label,
+        2,
+        4000,
+      );
+      const handlers = createDefaultMetabotDaemonHandlers({
+        homeDir: ${JSON.stringify(input.homeDir)},
+        systemHomeDir: ${JSON.stringify(input.systemHomeDir)},
+        chainApiBaseUrl: 'http://127.0.0.1:9',
+        socketPresenceApiBaseUrl: 'http://127.0.0.1:9',
+        socketPresenceFailureMode: 'assume_service_providers_online',
+        getDaemonRecord: () => ({ baseUrl: 'http://127.0.0.1:38245' }),
+        fetchPeerChatPublicKey: async () => ${JSON.stringify(input.providerChatPublicKeyHex)},
+        signer: {
+          async getIdentity() {
+            return {
+              name: 'Caller Bot',
+              publicKey: 'caller-public-key',
+              chatPublicKey: ${JSON.stringify(input.callerChatPublicKeyHex)},
+              mvcAddress: 'mvc-caller-address',
+              btcAddress: 'btc-caller-address',
+              dogeAddress: 'doge-caller-address',
+              metaId: 'metaid-caller',
+              globalMetaId: 'idq1caller',
+            };
+          },
+          async getPrivateChatIdentity() {
+            return {
+              globalMetaId: 'idq1caller',
+              privateKeyHex: ${JSON.stringify(input.callerPrivateKeyHex)},
+              chatPublicKey: ${JSON.stringify(input.callerChatPublicKeyHex)},
+            };
+          },
+          async writePin(request) {
+            if (String(request.path || '').includes('skill-service-rate')) {
+              await sleep(100);
+            }
+            await fs.appendFile(
+              ${JSON.stringify(input.writesPath)},
+              JSON.stringify({ label, path: request.path }) + '\\n',
+              'utf8',
+            );
+            const pathPart = String(request.path || '').includes('skill-service-rate')
+              ? 'skill-service-rate'
+              : 'simplemsg';
+            const suffix = label + '-' + Date.now().toString(36);
+            return {
+              txids: [pathPart + '-tx-' + suffix],
+              pinId: pathPart + '-pin-' + suffix,
+              totalCost: 0,
+              network: 'mvc',
+              operation: request.operation,
+              path: request.path,
+              contentType: request.contentType,
+              encoding: request.encoding || 'utf-8',
+              globalMetaId: 'idq1caller',
+              mvcAddress: 'mvc-caller-address',
+            };
+          },
+        },
+      });
+      const result = await handlers.services.rate({
+        traceId: 'trace-rating-retry',
+        rate: 5,
+        comment: 'Great weather report.',
+      });
+      process.stdout.write(JSON.stringify(result));
+    })().catch((error) => {
+      console.error(error && error.stack ? error.stack : String(error));
+      process.exit(1);
+    });
+  `;
+
+  return await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', script], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        try {
+          resolve(JSON.parse(stdout || '{}'));
+        } catch (error) {
+          reject(error);
+        }
+        return;
+      }
+      reject(new Error(stderr || `service rating worker ${input.label} exited with code ${code}`));
+    });
+  });
 }
 
 test('services call --from pays with the selected profile wallet instead of the active profile executor', async (t) => {
@@ -1293,6 +1436,48 @@ test('service rating retries skill-service-rate publish after a mempool conflict
   );
   assert.ok(published);
   assert.match(published.metadata.ratingPinId, /\/protocols\/skill-service-rate-pin-/);
+});
+
+test('concurrent buyer service ratings across processes publish only one rating pin and one follow-up message', async (t) => {
+  const harness = await createServiceCallHarness(t);
+  await seedBuyerTraceForRating(harness);
+  const writesPath = path.join(harness.homeDir, 'service-rating-multiprocess-writes.jsonl');
+  const startBarrierDir = path.join(harness.homeDir, 'service-rating-multiprocess-barrier');
+  await writeFile(writesPath, '', 'utf8');
+  await mkdir(startBarrierDir, { recursive: true });
+
+  const [first, second] = await Promise.all([
+    runMultiprocessServiceRatingWorker({
+      label: 'one',
+      homeDir: harness.homeDir,
+      systemHomeDir: deriveSystemHome(harness.homeDir),
+      writesPath,
+      startBarrierDir,
+      callerPrivateKeyHex: harness.callerPair.privateKeyHex,
+      callerChatPublicKeyHex: harness.callerPair.publicKeyHex,
+      providerChatPublicKeyHex: harness.providerPair.publicKeyHex,
+    }),
+    runMultiprocessServiceRatingWorker({
+      label: 'two',
+      homeDir: harness.homeDir,
+      systemHomeDir: deriveSystemHome(harness.homeDir),
+      writesPath,
+      startBarrierDir,
+      callerPrivateKeyHex: harness.callerPair.privateKeyHex,
+      callerChatPublicKeyHex: harness.callerPair.publicKeyHex,
+      providerChatPublicKeyHex: harness.providerPair.publicKeyHex,
+    }),
+  ]);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  const writes = (await readFile(writesPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  assert.equal(writes.filter((entry) => entry.path === '/protocols/skill-service-rate').length, 1);
+  assert.equal(writes.filter((entry) => entry.path === '/protocols/simplemsg').length, 1);
 });
 
 test('service rating publishes service order id, service skills, and legacy paid tx fallback', async (t) => {
@@ -4666,6 +4851,40 @@ test('concurrent duplicate inbound provider ORDER sends only one delivery and ra
   const contents = harness.writes
     .filter((entry) => entry.path === '/protocols/simplemsg')
     .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.filter((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)).length, 1);
+  assert.equal(contents.filter((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)).length, 1);
+});
+
+test('concurrent duplicate inbound provider ORDER across isolated handlers sends only one acknowledgement, delivery, and rating request', async (t) => {
+  const orderTxid = '7'.repeat(64);
+  const paymentTxid = '8'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    llmDelayMs: 50,
+  });
+  const handlersA = harness.createHandlers(loadFreshCreateDefaultMetabotDaemonHandlers());
+  const handlersB = harness.createHandlers(loadFreshCreateDefaultMetabotDaemonHandlers());
+  const order = {
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_500,
+  };
+
+  const [first, second] = await Promise.all([
+    handlersA.services.handleInboundOrderProtocolMessage(order),
+    handlersB.services.handleInboundOrderProtocolMessage(order),
+  ]);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(harness.llmCalls.length, 1);
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.filter((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`)).length, 1);
   assert.equal(contents.filter((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)).length, 1);
   assert.equal(contents.filter((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)).length, 1);
 });

@@ -10,6 +10,7 @@ exports.fetchPeerChatPublicKey = fetchPeerChatPublicKey;
 exports.rebuildTraceArtifactsFromSessionState = rebuildTraceArtifactsFromSessionState;
 exports.createDefaultMetabotDaemonHandlers = createDefaultMetabotDaemonHandlers;
 const node_fs_1 = require("node:fs");
+const node_crypto_1 = require("node:crypto");
 const node_path_1 = __importDefault(require("node:path"));
 const agent_browser_host_contract_1 = require("@openagentinternet/agent-browser-host-contract");
 const commandResult_1 = require("../core/contracts/commandResult");
@@ -183,9 +184,120 @@ function readProviderArtifactFailureText(error, code, fallback, localPaths = [])
 }
 const buyerAutoRatingPublishChainsByTrace = new Map();
 const pendingBuyerRatingPublishesByTrace = new Map();
+const RUNTIME_LOCKFILE_BASE_DELAY_MS = 25;
+const RUNTIME_LOCKFILE_MAX_ATTEMPTS = 200;
+const RUNTIME_LOCKFILE_STALE_WITH_PID_MS = 5 * 60 * 1000;
+const RUNTIME_LOCKFILE_STALE_WITHOUT_PID_MS = 30_000;
 function buildBuyerRatingPublishKey(profileRoot, traceId) {
     const normalizedTraceId = normalizeText(traceId);
     return normalizedTraceId ? `${node_path_1.default.resolve(profileRoot)}:${normalizedTraceId}` : '';
+}
+function buildProviderOrderExecutionKey(input) {
+    const buyerGlobalMetaId = normalizeText(input.buyerGlobalMetaId).toLowerCase();
+    const orderTxid = (0, metawebReplyWaiter_1.normalizeOrderProtocolReference)(input.orderTxid);
+    const paymentTxid = normalizeText(input.paymentTxid);
+    const orderReference = normalizeText(input.orderReference);
+    if (paymentTxid) {
+        return `payment:${paymentTxid}`;
+    }
+    if (orderReference) {
+        return `buyer:${buyerGlobalMetaId || 'unknown-buyer'}:reference:${orderReference}`;
+    }
+    if (orderTxid) {
+        return `buyer:${buyerGlobalMetaId || 'unknown-buyer'}:order:${orderTxid}`;
+    }
+    return '';
+}
+function isProcessAlive(pid) {
+    if (!Number.isInteger(pid) || pid <= 0) {
+        return false;
+    }
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch (error) {
+        const code = error.code;
+        return code !== 'ESRCH';
+    }
+}
+async function readRuntimeLockInfo(lockPath) {
+    try {
+        const raw = await node_fs_1.promises.readFile(lockPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        return {
+            pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
+            acquiredAt: typeof parsed.acquiredAt === 'number' ? parsed.acquiredAt : undefined,
+        };
+    }
+    catch {
+        return null;
+    }
+}
+function buildScopedRuntimeLockPath(paths, scope, key) {
+    const normalizedScope = normalizeText(scope).replace(/[^a-z0-9-]+/giu, '-').replace(/^-+|-+$/gu, '') || 'runtime';
+    const normalizedKey = normalizeText(key);
+    const digest = (0, node_crypto_1.createHash)('sha256')
+        .update(`${node_path_1.default.resolve(paths.profileRoot)}:${normalizedScope}:${normalizedKey}`)
+        .digest('hex');
+    return node_path_1.default.join(paths.locksRoot, `${normalizedScope}-${digest}.lock`);
+}
+async function withScopedRuntimeLock(paths, scope, key, operation) {
+    const normalizedKey = normalizeText(key);
+    if (!normalizedKey) {
+        return operation();
+    }
+    const lockPath = buildScopedRuntimeLockPath(paths, scope, normalizedKey);
+    await node_fs_1.promises.mkdir(paths.locksRoot, { recursive: true });
+    for (let attempt = 0; attempt < RUNTIME_LOCKFILE_MAX_ATTEMPTS; attempt += 1) {
+        try {
+            const handle = await node_fs_1.promises.open(lockPath, 'wx');
+            try {
+                await handle.writeFile(`${JSON.stringify({ pid: process.pid, acquiredAt: Date.now() })}\n`, 'utf8');
+                return await operation();
+            }
+            finally {
+                await handle.close();
+                try {
+                    await node_fs_1.promises.rm(lockPath, { force: true });
+                }
+                catch {
+                    // Best effort cleanup; stale lock recovery handles leftovers.
+                }
+            }
+        }
+        catch (error) {
+            const code = error.code;
+            if (code !== 'EEXIST') {
+                throw error;
+            }
+            try {
+                const lockInfo = await readRuntimeLockInfo(lockPath);
+                const stat = await node_fs_1.promises.stat(lockPath);
+                const lockPid = typeof lockInfo?.pid === 'number' ? lockInfo.pid : null;
+                const acquiredAt = typeof lockInfo?.acquiredAt === 'number'
+                    ? lockInfo.acquiredAt
+                    : stat.mtimeMs;
+                const ownerAlive = lockPid ? isProcessAlive(lockPid) : false;
+                if (lockPid && !ownerAlive) {
+                    await node_fs_1.promises.rm(lockPath, { force: true });
+                    continue;
+                }
+                const staleThreshold = lockPid
+                    ? RUNTIME_LOCKFILE_STALE_WITH_PID_MS
+                    : RUNTIME_LOCKFILE_STALE_WITHOUT_PID_MS;
+                if (!lockPid && Date.now() - acquiredAt > staleThreshold) {
+                    await node_fs_1.promises.rm(lockPath, { force: true });
+                    continue;
+                }
+            }
+            catch {
+                // Another worker may have released the lock between stat/remove attempts.
+            }
+            await sleep(Math.min(RUNTIME_LOCKFILE_BASE_DELAY_MS * (attempt + 1), 250));
+        }
+    }
+    throw new Error(`Timed out acquiring runtime lock: ${lockPath}`);
 }
 function compactInlineText(value, maxChars) {
     const text = normalizeText(value).replace(/\s+/gu, ' ');
@@ -4997,7 +5109,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         if (pending) {
             return pending;
         }
-        const publish = publishBuyerServiceRatingUnlocked({ ...request, traceId });
+        const publish = withScopedRuntimeLock(runtimeStateStore.paths, 'buyer-rating', publishKey, () => publishBuyerServiceRatingUnlocked({ ...request, traceId }));
         pendingBuyerRatingPublishesByTrace.set(publishKey, publish);
         try {
             return await publish;
@@ -8165,10 +8277,14 @@ function createDefaultMetabotDaemonHandlers(input) {
                 || '';
             const paymentTxid = normalizeText(extractOrderLineValue(content, 'txid'));
             const orderReference = extractOrderReferenceLineValue(content);
-            const pendingOrderReference = paymentTxid || orderReference || orderTxid || normalizeText(inputMessage.messagePinId);
-            const pendingKey = [
+            const pendingKey = buildProviderOrderExecutionKey({
+                buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+                orderTxid,
+                paymentTxid,
+                orderReference,
+            }) || [
                 paymentTxid ? 'payment' : 'order',
-                pendingOrderReference,
+                paymentTxid || orderReference || orderTxid || normalizeText(inputMessage.messagePinId),
             ].filter(Boolean).join(':');
             if (!pendingKey) {
                 return handleInboundProviderOrderMessage(inputMessage);
@@ -8182,7 +8298,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     })
                     : result));
             }
-            const pending = handleInboundProviderOrderMessage(inputMessage);
+            const pending = withScopedRuntimeLock(runtimeStateStore.paths, 'provider-order', pendingKey, () => handleInboundProviderOrderMessage(inputMessage));
             pendingProviderOrderExecutions.set(pendingKey, pending);
             try {
                 return await pending;
