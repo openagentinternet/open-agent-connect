@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -96,4 +97,26 @@ test('createRuntimeStateStore keeps daemon state in .runtime/daemon.json', async
   assert.equal(await store.readDaemon(), null);
   assert.equal(store.paths.daemonStatePath.startsWith(store.paths.runtimeRoot), true);
   assert.equal(store.paths.daemonStatePath.startsWith(store.paths.locksRoot), false);
+});
+
+test('createRuntimeStateStore retries transient partial daemon.json reads until the file becomes valid', async () => {
+  const homeDir = createProfileHome('metabot-daemon-state-retry-');
+  const store = createRuntimeStateStore(homeDir);
+  await store.ensureLayout();
+
+  const expected = {
+    ownerId: 'metabot-daemon-retry',
+    pid: 54321,
+    host: '127.0.0.1',
+    port: 4830,
+    baseUrl: 'http://127.0.0.1:4830',
+    startedAt: 1_744_444_555_000,
+  };
+
+  await writeFile(store.paths.daemonStatePath, '{', 'utf8');
+  setTimeout(() => {
+    void writeFile(store.paths.daemonStatePath, `${JSON.stringify(expected, null, 2)}\n`, 'utf8');
+  }, 5);
+
+  assert.deepEqual(await store.readDaemon(), expected);
 });

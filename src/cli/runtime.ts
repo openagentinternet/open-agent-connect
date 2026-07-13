@@ -3783,8 +3783,22 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     chatAutoReplyBackfill.stop();
     clearInterval(onlineServiceCacheInterval);
     serviceRefundSyncLoop.stop();
-    await runtimeStore.clearDaemon(process.pid);
-    await daemon.close();
+    let shutdownFailure: unknown = null;
+    try {
+      await daemon.close();
+    } catch (error) {
+      shutdownFailure = error;
+    }
+    try {
+      await runtimeStore.clearDaemon(process.pid);
+    } catch (error) {
+      shutdownFailure ??= error;
+    }
+    if (shutdownFailure) {
+      console.error(shutdownFailure);
+      process.exit(1);
+      return;
+    }
     process.exit(exitCode);
   };
 

@@ -4,6 +4,11 @@ import type { SessionTraceRecord } from '../chat/sessionTrace';
 import { createSellerOrderRecord, type SellerOrderRecord } from '../orders/sellerOrderState';
 import { resolveMetabotPaths, type MetabotPaths } from './paths';
 
+const TRANSIENT_JSON_READ_RETRIES = 5;
+const TRANSIENT_JSON_READ_DELAY_MS = 10;
+
+let atomicWriteSequence = 0;
+
 export type RuntimeIdentitySubsidyState = 'pending' | 'claimed' | 'failed';
 export type RuntimeIdentitySyncState = 'pending' | 'synced' | 'partial' | 'failed';
 
@@ -79,14 +84,37 @@ export async function ensureRuntimeLayout(paths: MetabotPaths): Promise<void> {
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
-      return null;
+  for (let attempt = 0; attempt <= TRANSIENT_JSON_READ_RETRIES; attempt += 1) {
+    try {
+      const raw = await fs.readFile(filePath, 'utf8');
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        return null;
+      }
+      if (error instanceof SyntaxError && attempt < TRANSIENT_JSON_READ_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, TRANSIENT_JSON_READ_DELAY_MS));
+        continue;
+      }
+      throw error;
     }
+  }
+  return null;
+}
+
+function createAtomicWriteTempPath(filePath: string): string {
+  atomicWriteSequence += 1;
+  return `${filePath}.${process.pid}.${Date.now()}.${atomicWriteSequence}.tmp`;
+}
+
+async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+  const tempPath = createAtomicWriteTempPath(filePath);
+  try {
+    await fs.writeFile(tempPath, content, 'utf8');
+    await fs.rename(tempPath, filePath);
+  } catch (error) {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
 }
@@ -188,7 +216,7 @@ export function createRuntimeStateStore(homeDirOrPaths: string | MetabotPaths): 
     async writeState(nextState) {
       await ensureRuntimeLayout(paths);
       const normalized = normalizeRuntimeState(nextState);
-      await fs.writeFile(paths.runtimeStatePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+      await writeFileAtomic(paths.runtimeStatePath, `${JSON.stringify(normalized, null, 2)}\n`);
       return normalized;
     },
     async updateState(updater) {
@@ -202,7 +230,7 @@ export function createRuntimeStateStore(homeDirOrPaths: string | MetabotPaths): 
     },
     async writeDaemon(record) {
       await ensureRuntimeLayout(paths);
-      await fs.writeFile(paths.daemonStatePath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+      await writeFileAtomic(paths.daemonStatePath, `${JSON.stringify(record, null, 2)}\n`);
       return record;
     },
     async clearDaemon(pid) {

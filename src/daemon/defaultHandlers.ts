@@ -455,10 +455,135 @@ function readProviderArtifactFailureText(
 
 const buyerAutoRatingPublishChainsByTrace = new Map<string, Promise<void>>();
 const pendingBuyerRatingPublishesByTrace = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
+const RUNTIME_LOCKFILE_BASE_DELAY_MS = 25;
+const RUNTIME_LOCKFILE_MAX_ATTEMPTS = 200;
+const RUNTIME_LOCKFILE_STALE_WITH_PID_MS = 5 * 60 * 1000;
+const RUNTIME_LOCKFILE_STALE_WITHOUT_PID_MS = 30_000;
 
 function buildBuyerRatingPublishKey(profileRoot: string, traceId: string): string {
   const normalizedTraceId = normalizeText(traceId);
   return normalizedTraceId ? `${path.resolve(profileRoot)}:${normalizedTraceId}` : '';
+}
+
+function buildProviderOrderExecutionKey(input: {
+  buyerGlobalMetaId?: string | null;
+  orderTxid?: string | null;
+  paymentTxid?: string | null;
+  orderReference?: string | null;
+}): string {
+  const buyerGlobalMetaId = normalizeText(input.buyerGlobalMetaId).toLowerCase();
+  const orderTxid = normalizeOrderProtocolReference(input.orderTxid);
+  const paymentTxid = normalizeText(input.paymentTxid);
+  const orderReference = normalizeText(input.orderReference);
+
+  if (paymentTxid) {
+    return `payment:${paymentTxid}`;
+  }
+  if (orderReference) {
+    return `buyer:${buyerGlobalMetaId || 'unknown-buyer'}:reference:${orderReference}`;
+  }
+  if (orderTxid) {
+    return `buyer:${buyerGlobalMetaId || 'unknown-buyer'}:order:${orderTxid}`;
+  }
+  return '';
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== 'ESRCH';
+  }
+}
+
+async function readRuntimeLockInfo(lockPath: string): Promise<{ pid?: number; acquiredAt?: number } | null> {
+  try {
+    const raw = await fs.readFile(lockPath, 'utf8');
+    const parsed = JSON.parse(raw) as { pid?: unknown; acquiredAt?: unknown };
+    return {
+      pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
+      acquiredAt: typeof parsed.acquiredAt === 'number' ? parsed.acquiredAt : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildScopedRuntimeLockPath(paths: MetabotPaths, scope: string, key: string): string {
+  const normalizedScope = normalizeText(scope).replace(/[^a-z0-9-]+/giu, '-').replace(/^-+|-+$/gu, '') || 'runtime';
+  const normalizedKey = normalizeText(key);
+  const digest = createHash('sha256')
+    .update(`${path.resolve(paths.profileRoot)}:${normalizedScope}:${normalizedKey}`)
+    .digest('hex');
+  return path.join(paths.locksRoot, `${normalizedScope}-${digest}.lock`);
+}
+
+async function withScopedRuntimeLock<T>(
+  paths: MetabotPaths,
+  scope: string,
+  key: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const normalizedKey = normalizeText(key);
+  if (!normalizedKey) {
+    return operation();
+  }
+
+  const lockPath = buildScopedRuntimeLockPath(paths, scope, normalizedKey);
+  await fs.mkdir(paths.locksRoot, { recursive: true });
+
+  for (let attempt = 0; attempt < RUNTIME_LOCKFILE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const handle = await fs.open(lockPath, 'wx');
+      try {
+        await handle.writeFile(`${JSON.stringify({ pid: process.pid, acquiredAt: Date.now() })}\n`, 'utf8');
+        return await operation();
+      } finally {
+        await handle.close();
+        try {
+          await fs.rm(lockPath, { force: true });
+        } catch {
+          // Best effort cleanup; stale lock recovery handles leftovers.
+        }
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') {
+        throw error;
+      }
+      try {
+        const lockInfo = await readRuntimeLockInfo(lockPath);
+        const stat = await fs.stat(lockPath);
+        const lockPid = typeof lockInfo?.pid === 'number' ? lockInfo.pid : null;
+        const acquiredAt = typeof lockInfo?.acquiredAt === 'number'
+          ? lockInfo.acquiredAt
+          : stat.mtimeMs;
+        const ownerAlive = lockPid ? isProcessAlive(lockPid) : false;
+        if (lockPid && !ownerAlive) {
+          await fs.rm(lockPath, { force: true });
+          continue;
+        }
+        const staleThreshold = lockPid
+          ? RUNTIME_LOCKFILE_STALE_WITH_PID_MS
+          : RUNTIME_LOCKFILE_STALE_WITHOUT_PID_MS;
+        if (!lockPid && Date.now() - acquiredAt > staleThreshold) {
+          await fs.rm(lockPath, { force: true });
+          continue;
+        }
+      } catch {
+        // Another worker may have released the lock between stat/remove attempts.
+      }
+      await sleep(Math.min(RUNTIME_LOCKFILE_BASE_DELAY_MS * (attempt + 1), 250));
+    }
+  }
+
+  throw new Error(`Timed out acquiring runtime lock: ${lockPath}`);
 }
 
 type ProviderOrderProtocolReplyStage = 'acknowledgement' | 'rating_request';
@@ -6435,7 +6560,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return pending;
     }
 
-    const publish = publishBuyerServiceRatingUnlocked({ ...request, traceId });
+    const publish = withScopedRuntimeLock(
+      runtimeStateStore.paths,
+      'buyer-rating',
+      publishKey,
+      () => publishBuyerServiceRatingUnlocked({ ...request, traceId }),
+    );
     pendingBuyerRatingPublishesByTrace.set(publishKey, publish);
     try {
       return await publish;
@@ -9968,10 +10098,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         || '';
       const paymentTxid = normalizeText(extractOrderLineValue(content, 'txid'));
       const orderReference = extractOrderReferenceLineValue(content);
-      const pendingOrderReference = paymentTxid || orderReference || orderTxid || normalizeText(inputMessage.messagePinId);
-      const pendingKey = [
+      const pendingKey = buildProviderOrderExecutionKey({
+        buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+        orderTxid,
+        paymentTxid,
+        orderReference,
+      }) || [
         paymentTxid ? 'payment' : 'order',
-        pendingOrderReference,
+        paymentTxid || orderReference || orderTxid || normalizeText(inputMessage.messagePinId),
       ].filter(Boolean).join(':');
       if (!pendingKey) {
         return handleInboundProviderOrderMessage(inputMessage);
@@ -9987,7 +10121,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
             : result
         ));
       }
-      const pending = handleInboundProviderOrderMessage(inputMessage);
+      const pending = withScopedRuntimeLock(
+        runtimeStateStore.paths,
+        'provider-order',
+        pendingKey,
+        () => handleInboundProviderOrderMessage(inputMessage),
+      );
       pendingProviderOrderExecutions.set(pendingKey, pending);
       try {
         return await pending;

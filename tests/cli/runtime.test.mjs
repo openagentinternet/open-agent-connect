@@ -223,11 +223,13 @@ async function runCommand(homeDir, args, envOverrides = {}) {
     stderr: { write: (chunk) => { stderr.push(String(chunk)); return true; } },
   });
 
+  const payload = parseLastJson(stdout);
+
   return {
     exitCode,
     stdout,
     stderr,
-    payload: parseLastJson(stdout),
+    payload,
   };
 }
 
@@ -815,9 +817,11 @@ async function stopDaemon(homeDir) {
     throw error;
   }
 
-  if (Number.isFinite(daemonState.pid)) {
+  const pid = Number.isFinite(daemonState.pid) ? Number(daemonState.pid) : null;
+
+  if (pid != null) {
     try {
-      process.kill(Number(daemonState.pid), 'SIGTERM');
+      process.kill(pid, 'SIGTERM');
     } catch (error) {
       const code = error?.code;
       if (code !== 'ESRCH') {
@@ -827,19 +831,39 @@ async function stopDaemon(homeDir) {
   }
 
   for (let attempt = 0; attempt < 50; attempt += 1) {
+    let daemonStateExists = true;
     try {
       await readFile(daemonStatePath, 'utf8');
     } catch (error) {
       const code = error?.code;
       if (code === 'ENOENT') {
-        return;
+        daemonStateExists = false;
+      } else {
+        throw error;
       }
-      throw error;
+    }
+    if (!daemonStateExists && (pid == null || !isProcessAlive(pid))) {
+      return;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
+  if (pid != null && isProcessAlive(pid)) {
+    throw new Error(`Timed out stopping daemon process ${pid}.`);
+  }
   await rm(daemonStatePath, { force: true });
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== 'ESRCH';
+  }
 }
 
 async function writeDirectorySeeds(homeDir, providers) {

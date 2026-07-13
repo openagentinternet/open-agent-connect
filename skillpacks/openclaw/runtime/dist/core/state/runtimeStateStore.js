@@ -5,6 +5,9 @@ exports.createRuntimeStateStore = createRuntimeStateStore;
 const node_fs_1 = require("node:fs");
 const sellerOrderState_1 = require("../orders/sellerOrderState");
 const paths_1 = require("./paths");
+const TRANSIENT_JSON_READ_RETRIES = 5;
+const TRANSIENT_JSON_READ_DELAY_MS = 10;
+let atomicWriteSequence = 0;
 function cloneEmptyState() {
     return {
         identity: null,
@@ -24,15 +27,37 @@ async function ensureRuntimeLayout(paths) {
     ]);
 }
 async function readJsonFile(filePath) {
+    for (let attempt = 0; attempt <= TRANSIENT_JSON_READ_RETRIES; attempt += 1) {
+        try {
+            const raw = await node_fs_1.promises.readFile(filePath, 'utf8');
+            return JSON.parse(raw);
+        }
+        catch (error) {
+            const code = error.code;
+            if (code === 'ENOENT') {
+                return null;
+            }
+            if (error instanceof SyntaxError && attempt < TRANSIENT_JSON_READ_RETRIES) {
+                await new Promise((resolve) => setTimeout(resolve, TRANSIENT_JSON_READ_DELAY_MS));
+                continue;
+            }
+            throw error;
+        }
+    }
+    return null;
+}
+function createAtomicWriteTempPath(filePath) {
+    atomicWriteSequence += 1;
+    return `${filePath}.${process.pid}.${Date.now()}.${atomicWriteSequence}.tmp`;
+}
+async function writeFileAtomic(filePath, content) {
+    const tempPath = createAtomicWriteTempPath(filePath);
     try {
-        const raw = await node_fs_1.promises.readFile(filePath, 'utf8');
-        return JSON.parse(raw);
+        await node_fs_1.promises.writeFile(tempPath, content, 'utf8');
+        await node_fs_1.promises.rename(tempPath, filePath);
     }
     catch (error) {
-        const code = error.code;
-        if (code === 'ENOENT') {
-            return null;
-        }
+        await node_fs_1.promises.rm(tempPath, { force: true }).catch(() => undefined);
         throw error;
     }
 }
@@ -121,7 +146,7 @@ function createRuntimeStateStore(homeDirOrPaths) {
         async writeState(nextState) {
             await ensureRuntimeLayout(paths);
             const normalized = normalizeRuntimeState(nextState);
-            await node_fs_1.promises.writeFile(paths.runtimeStatePath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+            await writeFileAtomic(paths.runtimeStatePath, `${JSON.stringify(normalized, null, 2)}\n`);
             return normalized;
         },
         async updateState(updater) {
@@ -135,7 +160,7 @@ function createRuntimeStateStore(homeDirOrPaths) {
         },
         async writeDaemon(record) {
             await ensureRuntimeLayout(paths);
-            await node_fs_1.promises.writeFile(paths.daemonStatePath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+            await writeFileAtomic(paths.daemonStatePath, `${JSON.stringify(record, null, 2)}\n`);
             return record;
         },
         async clearDaemon(pid) {
