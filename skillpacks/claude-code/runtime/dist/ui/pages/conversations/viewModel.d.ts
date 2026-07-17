@@ -13,6 +13,8 @@ export interface ConversationSummaryViewModel {
     peerLabel: string;
     peerGlobalMetaId: string;
     peerAvatar: string;
+    peerLlmPrimaryProvider: string;
+    peerLlmPrimaryProviderLabel: string;
     latestText: string;
     latestAt: number;
     latestAtLabel: string;

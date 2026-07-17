@@ -14,6 +14,8 @@ export interface ConversationSummaryViewModel {
   peerLabel: string;
   peerGlobalMetaId: string;
   peerAvatar: string;
+  peerLlmPrimaryProvider: string;
+  peerLlmPrimaryProviderLabel: string;
   latestText: string;
   latestAt: number;
   latestAtLabel: string;
@@ -241,6 +243,8 @@ function buildSyntheticConversationSummary(
     peerLabel: peerGlobalMetaId,
     peerGlobalMetaId,
     peerAvatar: '',
+    peerLlmPrimaryProvider: '',
+    peerLlmPrimaryProviderLabel: '',
     latestText: `Conversation with ${peerGlobalMetaId}`,
     latestAt: 0,
     latestAtLabel: '-',
@@ -269,6 +273,7 @@ function buildConversationSummary(
   const latestAt = normalizeTimestampMs(record.latestAt || record.updatedAt || record.lastMessageAt || record.createdAt);
   const count = Number(record.messageCount ?? record.turnCount ?? 0);
   const messageCount = Number.isFinite(count) && count >= 0 ? Math.trunc(count) : 0;
+  const peerLlmPrimaryProvider = normalizeText(record.peerLlmPrimaryProvider);
   return {
     conversationId,
     conversationIdPreview: formatConversationIdPreview(conversationId),
@@ -282,6 +287,8 @@ function buildConversationSummary(
       || normalizeText(record.avatar)
       || normalizeText(record.peerAvatarUrl)
       || normalizeText(record.peerAvatarImage),
+    peerLlmPrimaryProvider,
+    peerLlmPrimaryProviderLabel: peerLlmPrimaryProvider ? titleCase(peerLlmPrimaryProvider) : '',
     latestText: normalizeText(record.latestText)
       || normalizeText(record.lastMessage)
       || normalizeText(record.preview)

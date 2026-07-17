@@ -11,6 +11,12 @@ import {
   type DefaultWriteNetwork,
 } from '../core/config/configTypes';
 import { bindHostSkills, HostSkillBindingError } from '../core/host/hostSkillBinding';
+import {
+  bindHostPersonaProjection,
+  getHostPersonaProjectionStatus,
+  HostPersonaProjectionError,
+  unbindHostPersonaProjection,
+} from '../core/host/hostPersonaProjection';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
 import {
   listIdentityProfiles,
@@ -1996,6 +2002,28 @@ async function runWalletTransferRuntime(
   });
 }
 
+async function runHostPersonaProjection(
+  operation: () => Promise<unknown>,
+): Promise<MetabotCommandResult<unknown>> {
+  try {
+    return commandSuccess(await operation());
+  } catch (error) {
+    if (error instanceof HostPersonaProjectionError) {
+      return {
+        ok: false,
+        state: 'failed',
+        code: error.code,
+        message: error.message,
+        data: error.data,
+      } as MetabotCommandResult<unknown>;
+    }
+    return commandFailed(
+      'host_persona_projection_failed',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   async function requestJsonForSelectedActor<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
@@ -2761,6 +2789,24 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           );
         }
       },
+      bindPersona: async (input) => runHostPersonaProjection(() => bindHostPersonaProjection({
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        host: input.host,
+        from: input.from,
+        env: context.env,
+      })),
+      personaStatus: async (input) => runHostPersonaProjection(() => getHostPersonaProjectionStatus({
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        host: input.host,
+        from: input.from,
+        env: context.env,
+      })),
+      unbindPersona: async (input) => runHostPersonaProjection(() => unbindHostPersonaProjection({
+        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        host: input.host,
+        from: input.from,
+        env: context.env,
+      })),
     },
     system: {
       update: async (input) => {

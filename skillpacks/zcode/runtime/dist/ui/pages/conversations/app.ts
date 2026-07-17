@@ -712,8 +712,11 @@ export function buildConversationsPageDefinition(i18n: LocalUiI18nContext = crea
     const local = model.localBots.find((bot) => bot.globalMetaId === model.selectedLocalGlobalMetaId) || null;
     const localLabel = selected.localBotLabel || (local && local.label) || uiText('conversations.localBotRole', 'Local Bot');
     const localAvatar = (local && local.avatar) || selected.localAvatar;
+    const peerLlm = selected.peerLlmPrimaryProviderLabel
+      ? '<span class="thread-participant-llm">' + escapeHtml(uiText('conversations.remoteLlm', 'LLM · {provider}', { provider: selected.peerLlmPrimaryProviderLabel })) + '</span>'
+      : '';
     elements.detailHeader.innerHTML = '<div class="conversation-thread-participants">' +
-      '<div class="thread-participant">' + botBrowserAvatarLink(selected.peerGlobalMetaId, selected.peerAvatar, selected.peerLabel, 'thread-avatar') + '<div><strong>' + escapeHtml(selected.peerLabel) + '</strong><span>' + escapeHtml(uiText('conversations.remoteBotRole', 'Remote Bot')) + '</span></div></div>' +
+      '<div class="thread-participant">' + botBrowserAvatarLink(selected.peerGlobalMetaId, selected.peerAvatar, selected.peerLabel, 'thread-avatar') + '<div><strong>' + escapeHtml(selected.peerLabel) + '</strong><span>' + escapeHtml(uiText('conversations.remoteBotRole', 'Remote Bot')) + '</span>' + peerLlm + '</div></div>' +
       '<span class="conversation-id-chip"><span class="conversation-id-text">id: ' + escapeHtml(selected.conversationIdPreview || selected.conversationId) + '</span>' + copyButton(selected.conversationId, uiText('conversations.copyConversationId', 'Copy conversation id'), 'copy-conversation-id', uiText('conversations.conversationIdCopied', 'Conversation ID copied'), ' data-conversation-id-copy') + '</span>' +
       '<div class="thread-participant thread-participant-local"><div><strong>' + escapeHtml(localLabel) + '</strong><span>' + escapeHtml(uiText('conversations.localBotRole', 'Local Bot')) + '</span></div>' + avatarImg(localAvatar, localLabel, 'thread-avatar') + '</div>' +
     '</div>';

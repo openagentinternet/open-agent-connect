@@ -54,6 +54,12 @@ function api(url,opts){return fetch(url,opts).then(function(r){return r.json().c
 function fmtTime(t){if(!t)return'-';var d=new Date(t);if(Number.isNaN(d.getTime()))return'-';return d.toLocaleString()}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){if(c==='&')return'&amp;';if(c==='<')return'&lt;';if(c==='>')return'&gt;';if(c==='"')return'&quot;';return'&#39;'})}
 function uiText(key,fallback,replacements){try{if(typeof window!=='undefined'&&window.__oacLocalUiI18n&&typeof window.__oacLocalUiI18n.t==='function'){var text=window.__oacLocalUiI18n.t(key,replacements||{});if(text&&text!==key)return text}}catch(error){}var out=String(fallback==null?'':fallback);Object.keys(replacements||{}).forEach(function(name){out=out.split('{'+name+'}').join(String(replacements[name]))});return out}
+function personaProjectionStatus(projection){
+  if(!projection)return{text:uiText('bot.onChainUpdateConfirmed','On-chain update confirmed.'),className:'save-status success'};
+  if(projection.ok===false)return{text:uiText('bot.personaSavedProjectionFailed','Persona saved, but Codex sync failed: {message}',{message:projection.message||projection.code||'Unknown error'}),className:'save-status error'};
+  if(projection.operation==='unbind')return{text:uiText('bot.personaSavedProjectionRemoved','Persona saved. The empty persona was removed from Codex.'),className:'save-status success'};
+  return{text:uiText('bot.personaSavedProjectionSynced','Persona saved and synced to Codex.'),className:'save-status success'};
+}
 function statusPill(s){var m={completed:'online',running:'active',starting:'active',failed:'offline',timeout:'offline',cancelled:'offline'};var c=m[s]||'offline';return'<span class="status-pill status-'+c+'"><span class="status-dot"></span>'+esc(s||'unknown')+'</span>'}
 function shortText(v,n){n=n||120;v=String(v==null?'':v).replace(/\s+/g,' ').trim();if(!v)return'-';return v.length>n?v.slice(0,Math.max(0,n-3))+'...':v}
 function clampBlock(v){v=String(v==null?'':v).trim();if(!v)return'-';return v.length>700?v.slice(0,700)+'...':v}
@@ -1485,7 +1491,7 @@ function saveBehavior(){
     renderMetabotList();
     renderDetailHeader(updated);
     renderBehaviorTab({preserveDraft:false});
-    panel=behaviorPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){status.textContent=uiText('bot.onChainUpdateConfirmed','On-chain update confirmed.');status.className='save-status success'}
+    panel=behaviorPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){var projectionStatus=personaProjectionStatus(r.data&&r.data.hostPersonaProjection);status.textContent=projectionStatus.text;status.className=projectionStatus.className}
     showChainSuccessModal({
       title:uiText('bot.profileUpdatedOnChain','Profile Updated On-Chain'),
       message:uiText('bot.profileChangesWrittenOnChain','Profile changes were written on-chain before local data was saved.'),

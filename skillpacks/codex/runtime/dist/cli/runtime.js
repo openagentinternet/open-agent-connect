@@ -28,6 +28,7 @@ const commandResult_1 = require("../core/contracts/commandResult");
 const configStore_1 = require("../core/config/configStore");
 const configTypes_1 = require("../core/config/configTypes");
 const hostSkillBinding_1 = require("../core/host/hostSkillBinding");
+const hostPersonaProjection_1 = require("../core/host/hostPersonaProjection");
 const uploadFile_1 = require("../core/files/uploadFile");
 const identityProfiles_1 = require("../core/identity/identityProfiles");
 const profileWorkspace_1 = require("../core/identity/profileWorkspace");
@@ -1529,6 +1530,23 @@ async function runWalletTransferRuntime(context, input) {
         secretStore: (0, fileSecretStore_1.createFileSecretStore)(homeDir),
     });
 }
+async function runHostPersonaProjection(operation) {
+    try {
+        return (0, commandResult_1.commandSuccess)(await operation());
+    }
+    catch (error) {
+        if (error instanceof hostPersonaProjection_1.HostPersonaProjectionError) {
+            return {
+                ok: false,
+                state: 'failed',
+                code: error.code,
+                message: error.message,
+                data: error.data,
+            };
+        }
+        return (0, commandResult_1.commandFailed)('host_persona_projection_failed', error instanceof Error ? error.message : String(error));
+    }
+}
 function createDefaultCliDependencies(context) {
     async function requestJsonForSelectedActor(method, routePath, from, body, options = {}) {
         const targetHomeDir = await resolveDaemonTargetHome(context, from, options);
@@ -2107,6 +2125,24 @@ function createDefaultCliDependencies(context) {
                     return (0, commandResult_1.commandFailed)('host_skill_bind_failed', error instanceof Error ? error.message : String(error));
                 }
             },
+            bindPersona: async (input) => runHostPersonaProjection(() => (0, hostPersonaProjection_1.bindHostPersonaProjection)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                host: input.host,
+                from: input.from,
+                env: context.env,
+            })),
+            personaStatus: async (input) => runHostPersonaProjection(() => (0, hostPersonaProjection_1.getHostPersonaProjectionStatus)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                host: input.host,
+                from: input.from,
+                env: context.env,
+            })),
+            unbindPersona: async (input) => runHostPersonaProjection(() => (0, hostPersonaProjection_1.unbindHostPersonaProjection)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                host: input.host,
+                from: input.from,
+                env: context.env,
+            })),
         },
         system: {
             update: async (input) => {

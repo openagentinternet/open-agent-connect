@@ -138,6 +138,9 @@ export interface CliDependencies {
   };
   host?: {
     bindSkills?: (input: { host: ConcreteSkillHost }) => Awaitable<MetabotCommandResult<unknown>>;
+    bindPersona?: (input: { host: 'codex'; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    personaStatus?: (input: { host: 'codex'; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    unbindPersona?: (input: { host: 'codex'; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   system?: {
     update?: (input: {

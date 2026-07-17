@@ -7,6 +7,8 @@ export interface PeerConversationSummary {
     peerGlobalMetaId: string;
     peerName: string | null;
     peerAvatar: string | null;
+    peerLlmPrimaryProvider?: string | null;
+    peerLlmFallbackProvider?: string | null;
     latestText: string;
     latestAt: number;
     messageCount: number;

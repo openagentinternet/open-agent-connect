@@ -764,6 +764,79 @@ test('bot page saveBehavior sends only persona field changes', () => {
   assert.deepEqual(requestBody, { role: 'New role' });
 });
 
+test('bot page saveBehavior reports automatic Codex persona projection', async () => {
+  const status = field();
+  const behaviorFields = {
+    '[data-save-status]': status,
+    '[data-act="save-behavior"]': field(),
+    '[data-field="role"]': field('Projected role'),
+    '[data-field="soul"]': field('Original soul'),
+    '[data-field="goal"]': field('Original goal'),
+  };
+  const behaviorPanel = panelElement('data-behavior-profile-slug', 'alice-bot', behaviorFields);
+  const context = createBotScriptContext({
+    elements: {
+      '[data-behavior-profile-slug]': behaviorPanel,
+    },
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          profile: {
+            slug: 'alice-bot',
+            name: 'Alice',
+            role: 'Projected role',
+            soul: 'Original soul',
+            goal: 'Original goal',
+          },
+          hostPersonaProjection: {
+            ok: true,
+            host: 'codex',
+            operation: 'bind',
+            action: 'updated',
+          },
+        },
+      }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice' }];
+  context.state.originalProfile = {
+    slug: 'alice-bot',
+    name: 'Alice',
+    role: 'Original role',
+    soul: 'Original soul',
+    goal: 'Original goal',
+  };
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderBehaviorTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  await context.saveBehavior();
+
+  assert.equal(status.textContent, 'Persona saved and synced to Codex.');
+  assert.equal(status.className, 'save-status success');
+});
+
+test('bot page distinguishes a saved persona from a failed Codex projection', () => {
+  const context = createBotScriptContext();
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  const status = context.personaProjectionStatus({
+    ok: false,
+    host: 'codex',
+    code: 'host_persona_conflict',
+    message: 'The Codex agent file is user-owned.',
+  });
+
+  assert.equal(status.text, 'Persona saved, but Codex sync failed: The Codex agent file is user-owned.');
+  assert.equal(status.className, 'save-status error');
+});
+
 test('bot page saveBehavior does not submit placeholders as persona content', () => {
   const status = field();
   const behaviorFields = {

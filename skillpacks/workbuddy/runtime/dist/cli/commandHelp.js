@@ -635,10 +635,11 @@ const COMMAND_HELP_SPECS = [
                 contentType: 'optional content type for metafile homepages',
             },
         },
-        successFields: ['profile', 'chainWrites'],
+        successFields: ['profile', 'chainWrites', 'hostPersonaProjection'],
         failureSemantics: [
             'Fails when the profile is missing, the payload is invalid, or a chain-backed public identity update cannot be written safely.',
             'Public identity writes return chainWrites before the local profile is updated.',
+            'Persona saves return hostPersonaProjection separately; projection failure does not roll back an already successful profile save.',
         ],
     },
     {
@@ -740,17 +741,77 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['host'],
-        summary: 'Host projection commands for binding shared MetaBot skills into one host-native skills root.',
+        summary: 'Project shared MetaBot capabilities and personas into supported development hosts.',
         usage: 'metabot host <subcommand>',
         subcommands: [
             { name: 'bind-skills', summary: 'Project shared MetaBot skills into one host-native skills root.' },
+            { name: 'persona', summary: 'Manage host-native persona projections for a local MetaBot.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
         examples: [
             'metabot host bind-skills --host codex',
             'metabot host bind-skills --host claude-code',
             'metabot host bind-skills --host openclaw',
+            'metabot host persona bind --host codex --from eric',
         ],
+    },
+    {
+        commandPath: ['host', 'persona'],
+        summary: 'Manage a local MetaBot persona projection in a supported development host.',
+        usage: 'metabot host persona <bind|status|unbind> --host codex [--from <bot-slug>]',
+        subcommands: [
+            { name: 'bind', summary: 'Create or refresh a Codex custom agent from a MetaBot persona.' },
+            { name: 'status', summary: 'Inspect the current Codex persona projection without modifying it.' },
+            { name: 'unbind', summary: 'Remove the OAC-owned Codex persona projection.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        examples: [
+            'metabot host persona bind --host codex --from eric',
+            'metabot host persona status --host codex --from eric',
+            'metabot host persona unbind --host codex --from eric',
+        ],
+    },
+    {
+        commandPath: ['host', 'persona', 'bind'],
+        summary: 'Create or refresh a Codex custom agent from ROLE.md, SOUL.md, and GOAL.md.',
+        usage: 'metabot host persona bind --host codex [--from <bot-slug>]',
+        requiredFlags: [
+            { flag: '--host', value: '<codex>', description: 'Target host for the persona projection.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['host', 'profile', 'agentName', 'agentFilePath', 'sourceFiles', 'state', 'action'],
+        failureSemantics: [
+            'Fails with invalid_argument when --host is not codex.',
+            'Fails when the selected or active identity cannot be resolved.',
+            'Fails with host_persona_source_missing when ROLE.md, SOUL.md, and GOAL.md are all empty or missing.',
+            'Fails with host_persona_conflict rather than overwriting a file not owned by OAC.',
+        ],
+        examples: ['metabot host persona bind --host codex --from eric'],
+    },
+    {
+        commandPath: ['host', 'persona', 'status'],
+        summary: 'Inspect a Codex persona projection without changing host state.',
+        usage: 'metabot host persona status --host codex [--from <bot-slug>]',
+        requiredFlags: [
+            { flag: '--host', value: '<codex>', description: 'Target host for the persona projection.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['host', 'profile', 'agentName', 'agentFilePath', 'sourceFiles', 'state'],
+        examples: ['metabot host persona status --host codex --from eric'],
+    },
+    {
+        commandPath: ['host', 'persona', 'unbind'],
+        summary: 'Remove an OAC-owned Codex persona projection.',
+        usage: 'metabot host persona unbind --host codex [--from <bot-slug>]',
+        requiredFlags: [
+            { flag: '--host', value: '<codex>', description: 'Target host for the persona projection.' },
+        ],
+        optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+        successFields: ['host', 'profile', 'agentName', 'agentFilePath', 'sourceFiles', 'state', 'removed'],
+        failureSemantics: [
+            'Fails with host_persona_conflict rather than removing a file not owned by OAC.',
+        ],
+        examples: ['metabot host persona unbind --host codex --from eric'],
     },
     {
         commandPath: ['host', 'bind-skills'],

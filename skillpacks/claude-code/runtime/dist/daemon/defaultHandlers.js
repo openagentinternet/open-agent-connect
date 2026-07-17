@@ -33,6 +33,7 @@ const platformSkillCatalog_1 = require("../core/services/platformSkillCatalog");
 const servicePublishValidation_1 = require("../core/services/servicePublishValidation");
 const skillServiceProtocol_1 = require("../core/services/skillServiceProtocol");
 const chatSkillPolicy_1 = require("../core/services/chatSkillPolicy");
+const hostPersonaProjection_1 = require("../core/host/hostPersonaProjection");
 const providerServiceRunner_1 = require("../core/a2a/provider/providerServiceRunner");
 const providerConsole_1 = require("../core/provider/providerConsole");
 const providerOperations_1 = require("../core/provider/providerOperations");
@@ -3595,6 +3596,7 @@ async function withRefundMutationLock(homeDir, operation) {
     }
 }
 function createDefaultMetabotDaemonHandlers(input) {
+    const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
     const secretStore = input.secretStore ?? (0, fileSecretStore_1.createFileSecretStore)(input.homeDir);
     // Create default adapter registry if none provided (backward compat)
     const adapters = input.adapters ?? (0, registry_1.createChainAdapterRegistry)([
@@ -3615,6 +3617,40 @@ function createDefaultMetabotDaemonHandlers(input) {
             ?? input.createProviderLargeFileUploader?.()
             ?? (0, metaFsLargeUploader_1.createMetaFsLargeUploader)();
     const configStore = (0, configStore_1.createConfigStore)(input.homeDir);
+    async function syncCodexPersonaProjection(profile) {
+        try {
+            const personaConfigured = Boolean(profile.role.trim() || profile.soul.trim() || profile.goal.trim());
+            const projection = personaConfigured
+                ? await (0, hostPersonaProjection_1.bindHostPersonaProjection)({
+                    systemHomeDir: normalizedSystemHomeDir,
+                    host: 'codex',
+                    from: profile.slug,
+                    env: input.env ?? process.env,
+                })
+                : await (0, hostPersonaProjection_1.unbindHostPersonaProjection)({
+                    systemHomeDir: normalizedSystemHomeDir,
+                    host: 'codex',
+                    from: profile.slug,
+                    env: input.env ?? process.env,
+                });
+            return {
+                ok: true,
+                ...projection,
+                operation: personaConfigured ? 'bind' : 'unbind',
+            };
+        }
+        catch (error) {
+            return {
+                ok: false,
+                host: 'codex',
+                code: error instanceof hostPersonaProjection_1.HostPersonaProjectionError
+                    ? error.code
+                    : 'host_persona_projection_failed',
+                message: error instanceof Error ? error.message : String(error),
+                ...(error instanceof hostPersonaProjection_1.HostPersonaProjectionError ? { data: error.data } : {}),
+            };
+        }
+    }
     function isSupportedWriteNetwork(value) {
         return configTypes_1.DEFAULT_WRITE_NETWORKS.includes(value);
     }
@@ -3737,19 +3773,42 @@ function createDefaultMetabotDaemonHandlers(input) {
     const callerOrderTextGenerator = input.callerOrderTextGenerator ?? null;
     const providerOrderReplyRunner = input.providerOrderReplyRunner ?? null;
     const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
-    const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
     const getDaemonRecord = input.getDaemonRecord;
     const metaAppManClient = (0, manOwnerList_1.createMetaAppManOwnerClient)({
         fetchFn: input.metaAppManFetch ?? fetch,
     });
-    // Process-level cache for chain profile projections (name + avatar reference).
-    // Avatars rarely change, so a 30-minute TTL eliminates repeated chain fetches
-    // when switching between UI tabs within a session.
+    const conversationProfileFetch = input.conversationProfileFetch ?? fetch;
+    // Process-level cache for public profile projections. Public profile fields
+    // rarely change, so a 30-minute TTL eliminates repeated remote fetches when
+    // switching between UI tabs within a session.
     const CHAIN_PROFILE_CACHE_TTL_MS = 30 * 60 * 1000;
     const CHAIN_PROFILE_MISS_CACHE_TTL_MS = 30 * 1000;
     const CHAIN_PROFILE_FETCH_TIMEOUT_MS = 1500;
     const chainProfileCache = new Map();
     const chainProfileInflight = new Map();
+    const conversationProfileWarmupLocals = new Map();
+    const conversationProfileUpdateListeners = new Map();
+    function subscribeConversationProfileUpdates(localGlobalMetaId, listener) {
+        const listeners = conversationProfileUpdateListeners.get(localGlobalMetaId) ?? new Set();
+        listeners.add(listener);
+        conversationProfileUpdateListeners.set(localGlobalMetaId, listeners);
+        return () => {
+            listeners.delete(listener);
+            if (!listeners.size) {
+                conversationProfileUpdateListeners.delete(localGlobalMetaId);
+            }
+        };
+    }
+    function publishConversationProfileUpdate(localGlobalMetaId) {
+        const event = {
+            type: 'conversation-update',
+            localGlobalMetaId,
+            timestamp: Date.now(),
+        };
+        for (const listener of conversationProfileUpdateListeners.get(localGlobalMetaId) ?? []) {
+            listener(event);
+        }
+    }
     async function* streamConversationEventsForLocalBot(localGlobalMetaId, signal) {
         const normalizedLocal = normalizeText(localGlobalMetaId);
         const queue = [{
@@ -3774,6 +3833,10 @@ function createDefaultMetabotDaemonHandlers(input) {
             }
         };
         const unsubscribe = (0, conversationPersistence_1.subscribeA2AConversationPersistenceEvents)(normalizedLocal, (event) => {
+            queue.push(event);
+            wake();
+        });
+        const unsubscribeProfileUpdates = subscribeConversationProfileUpdates(normalizedLocal, (event) => {
             queue.push(event);
             wake();
         });
@@ -3807,6 +3870,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         finally {
             removeAbortListener();
             unsubscribe();
+            unsubscribeProfileUpdates();
         }
     }
     const a2aConversationPersister = async (persistInput) => {
@@ -3850,11 +3914,25 @@ function createDefaultMetabotDaemonHandlers(input) {
             || normalizeText(data.avatarUri)
             || normalizeText(data.avatar_uri);
     }
-    // Resolves a chain profile projection (name + avatar reference, not the image
-    // bytes). The avatar is returned as a reference (pin id / metafile:// / URL)
-    // so the client can load it lazily via /api/file/avatar without blocking list
-    // rendering. Results are cached per process with a TTL to avoid repeated
-    // chain fetches when switching UI tabs.
+    function readChainProfileLlm(data) {
+        const rawLlm = data.llm;
+        let llm = readObject(rawLlm) ?? {};
+        if (!Object.keys(llm).length && typeof rawLlm === 'string') {
+            try {
+                llm = readObject(JSON.parse(rawLlm)) ?? {};
+            }
+            catch {
+                llm = {};
+            }
+        }
+        return {
+            primaryProvider: normalizeText(llm.primaryProvider),
+            fallbackProvider: normalizeText(llm.fallbackProvider),
+        };
+    }
+    // Resolves a public profile projection. The avatar remains a reference (pin
+    // id / metafile:// / URL), while LLM data comes from the published /info/llm
+    // payload exposed by so.metaid.io.
     function readChainProfileCacheEntry(globalMetaId) {
         const gmid = normalizeText(globalMetaId);
         if (!gmid)
@@ -3886,13 +3964,20 @@ function createDefaultMetabotDaemonHandlers(input) {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), CHAIN_PROFILE_FETCH_TIMEOUT_MS);
             try {
-                const resp = await fetch(`https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(gmid)}`, { signal: controller.signal });
+                const resp = await conversationProfileFetch(`https://so.metaid.io/api/info/globalmetaid/${encodeURIComponent(gmid)}`, { signal: controller.signal });
                 if (resp.ok) {
                     const data = readChainProfileData(await resp.json());
                     const avatar = readChainProfileAvatarReference(data);
                     const name = readChainProfileName(data);
-                    if (name || avatar) {
-                        projection = { globalMetaId: gmid, name, avatar };
+                    const llm = readChainProfileLlm(data);
+                    if (name || avatar || llm.primaryProvider || llm.fallbackProvider) {
+                        projection = {
+                            globalMetaId: gmid,
+                            name,
+                            avatar,
+                            llmPrimaryProvider: llm.primaryProvider,
+                            llmFallbackProvider: llm.fallbackProvider,
+                        };
                     }
                 }
             }
@@ -3911,6 +3996,25 @@ function createDefaultMetabotDaemonHandlers(input) {
         chainProfileInflight.set(gmid, pending);
         return pending.finally(() => {
             chainProfileInflight.delete(gmid);
+        });
+    }
+    function warmConversationProfile(globalMetaId, localGlobalMetaId) {
+        const gmid = normalizeText(globalMetaId);
+        const local = normalizeText(localGlobalMetaId);
+        if (!gmid || !local || readChainProfileCacheEntry(gmid)) {
+            return;
+        }
+        const waitingLocals = conversationProfileWarmupLocals.get(gmid) ?? new Set();
+        waitingLocals.add(local);
+        conversationProfileWarmupLocals.set(gmid, waitingLocals);
+        if (chainProfileInflight.has(gmid))
+            return;
+        void resolveChainProfile(gmid).then(() => {
+            const resolvedLocals = conversationProfileWarmupLocals.get(gmid) ?? [];
+            conversationProfileWarmupLocals.delete(gmid);
+            for (const resolvedLocal of resolvedLocals) {
+                publishConversationProfileUpdate(resolvedLocal);
+            }
         });
     }
     // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
@@ -4316,6 +4420,8 @@ function createDefaultMetabotDaemonHandlers(input) {
             globalMetaId,
             name: normalizeText(profile.name),
             avatar: normalizeText(profile.avatarDataUrl),
+            llmPrimaryProvider: '',
+            llmFallbackProvider: '',
         };
     }
     async function loadConversationProfileIndex(selectedProfile) {
@@ -4345,17 +4451,14 @@ function createDefaultMetabotDaemonHandlers(input) {
         if (hasName && hasAvatar && !cachedChainProfile) {
             return indexed;
         }
-        if ((!hasName || !hasAvatar) && !readChainProfileCacheEntry(globalMetaId)) {
-            // Keep conversation reads fast. Missing chain profile data warms in the
-            // background instead of blocking the thread view on a remote fetch.
-            void resolveChainProfile(globalMetaId);
-        }
         if (!indexed && !cachedChainProfile)
             return null;
         return {
             globalMetaId,
             name: indexed?.name || cachedChainProfile?.name || '',
             avatar: indexed?.avatar || cachedChainProfile?.avatar || '',
+            llmPrimaryProvider: cachedChainProfile?.llmPrimaryProvider || indexed?.llmPrimaryProvider || '',
+            llmFallbackProvider: cachedChainProfile?.llmFallbackProvider || indexed?.llmFallbackProvider || '',
         };
     }
     function mergeConversationName(currentName, globalMetaId, profile) {
@@ -4390,6 +4493,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             avatar: mergeConversationAvatar(result.localBot.avatar || selectedProfile.avatarDataUrl, localProfile),
         };
         const conversations = result.conversations.map((summary) => {
+            warmConversationProfile(summary.peerGlobalMetaId, localGlobalMetaId);
             const summaryLocalProfile = resolveConversationProfileProjection({
                 globalMetaId: summary.localGlobalMetaId,
                 currentName: summary.localName,
@@ -4408,6 +4512,8 @@ function createDefaultMetabotDaemonHandlers(input) {
                 localAvatar: mergeConversationAvatar(summary.localAvatar, summaryLocalProfile) ?? localBot.avatar,
                 peerName: mergeConversationName(summary.peerName, summary.peerGlobalMetaId, peerProfile),
                 peerAvatar: mergeConversationAvatar(summary.peerAvatar, peerProfile),
+                peerLlmPrimaryProvider: peerProfile?.llmPrimaryProvider || null,
+                peerLlmFallbackProvider: peerProfile?.llmFallbackProvider || null,
             };
         });
         return {
@@ -4420,6 +4526,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         const profileIndex = await loadConversationProfileIndex(selectedProfile);
         const localGlobalMetaId = normalizeText(result.localBot.globalMetaId) || normalizeText(selectedProfile.globalMetaId);
         const peerGlobalMetaId = normalizeText(result.peerBot.globalMetaId);
+        warmConversationProfile(peerGlobalMetaId, localGlobalMetaId);
         const localProfile = resolveConversationProfileProjection({
             globalMetaId: localGlobalMetaId,
             currentName: result.localBot.name || selectedProfile.name,
@@ -12923,11 +13030,15 @@ function createDefaultMetabotDaemonHandlers(input) {
                     });
                     await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, profileInfoTargets, profileChainWrites);
                     await notifyIdentityProfileRegistered();
+                    const hostPersonaProjection = (profile.role.trim() || profile.soul.trim() || profile.goal.trim())
+                        ? await syncCodexPersonaProjection(profile)
+                        : undefined;
                     return (0, commandResult_1.commandSuccess)({
                         profile,
                         identity,
                         chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
                         subsidy: bootstrap.subsidy,
+                        ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
                     });
                 }
                 catch (error) {
@@ -13018,7 +13129,16 @@ function createDefaultMetabotDaemonHandlers(input) {
                 try {
                     const profile = await (0, metabotProfileManager_1.updateMetabotProfile)(normalizedSystemHomeDir, slug, update);
                     await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, updateInfoTargets, chainWrites);
-                    return (0, commandResult_1.commandSuccess)({ profile, chainWrites });
+                    const projectionFields = ['name', 'bio', 'role', 'soul', 'goal'];
+                    const shouldSyncHostPersona = projectionFields.some((field) => changedFields.includes(field));
+                    const hostPersonaProjection = shouldSyncHostPersona
+                        ? await syncCodexPersonaProjection(profile)
+                        : undefined;
+                    return (0, commandResult_1.commandSuccess)({
+                        profile,
+                        chainWrites,
+                        ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
+                    });
                 }
                 catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
