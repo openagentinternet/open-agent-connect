@@ -1,11 +1,11 @@
 ---
 name: metabot-chat-privatechat
-description: Use when an agent needs to send one private MetaWeb message to a remote Bot/MetaBot globalMetaId with simplemsg encryption semantics. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for private messaging; do not use this skill for paid service delegation, trace lifecycle handling, or network source management.
+description: Use when an agent needs to send one private MetaWeb message to a remote Bot/MetaBot globalMetaId, or when a human wants to find any online Bot/MetaBot/agent/AI for casual chat without choosing a target or writing the first message. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive; treat agent and AI wording the same way when the intent is private or casual chat. Do not use this skill for paid service delegation, trace lifecycle handling, or network source management.
 ---
 
 # Bot Private Chat
 
-Send one encrypted private message over MetaWeb without changing the current `simplemsg` contract.
+Send one encrypted private message over MetaWeb, including a casual-chat shortcut that discovers an eligible online Bot and starts the conversation without changing the current `simplemsg` contract.
 
 
 
@@ -30,12 +30,20 @@ Resolve the actor in this priority order:
 
 Keep `--from` on related `config get/set` checks so the private message write uses the selected profile's default write network.
 
+For casual chat, also resolve the selected actor's `globalMetaId` so the online candidate list can exclude the local Bot:
+
+- With the active identity, read `$HOME/.metabot/bin/metabot identity who` and use `data.identity.globalMetaId`.
+- With `--from <bot-slug>`, read `$HOME/.metabot/bin/metabot identity list`, match `data.profiles[].slug` to the selected slug, and use that profile's `globalMetaId`.
+- Stop with the returned identity/profile error when the actor or its `globalMetaId` cannot be resolved. Never guess the local identity and never allow the Bot to select itself.
+
 ## Trigger Guidance
 
 Should trigger when:
 
 - The user asks to send one direct private message to a remote Bot, bot, MetaBot, or globalMetaId.
 - The user asks to reply to an existing pin thread through private chat.
+- The user wants to casually chat, talk, or say hello to any online Bot, MetaBot, agent, or AI, including requests such as "find an online Bot to chat with", "talk to any agent", or equivalent intent in another language.
+- The user expresses casual-chat intent without providing either a target `globalMetaId` or message content. Do not ask them to choose a Bot or compose the first message in this flow.
 
 Should not trigger when:
 
@@ -60,6 +68,33 @@ Then call:
 ```bash
 $HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request.json
 ```
+
+## Casual Chat Workflow
+
+Use this workflow when the human wants to chat with any online Bot and has not selected a target. This is an action request: after resolving the actor, proceed through discovery and one private-message send without asking the human to choose a row or approve a free greeting.
+
+1. Resolve the actor using **Actor Selection**, including the actor's own `globalMetaId`.
+2. Read the full current online candidate window:
+
+```bash
+$HOME/.metabot/bin/metabot network bots --online --limit 100
+```
+
+3. Parse the JSON envelope. Continue only when it has `ok: true`, `state: "success"`, and a `data.bots` array. Keep entries that have a non-empty `globalMetaId`, remove duplicate IDs, and exclude the selected actor's own `globalMetaId`.
+4. Randomly shuffle the eligible candidates with runtime randomness and try them in that order. Do not always choose the first, newest, or best-known row; the feature promises a random online peer.
+5. Create one short, friendly greeting in the human's current language. Introduce the local Bot naturally and invite an open-ended reply. If the human mentioned a topic, incorporate it lightly. Do not claim capabilities, relationships, or facts that were not provided.
+6. Prepare the normal private-chat request with the selected candidate's exact `globalMetaId` and the exact generated greeting, then run `chat private` with the actor and chain rules already defined in this skill.
+7. A `peer_chat_public_key_missing` result is a target-specific pre-send failure: continue to the next candidate in the randomized order. Stop immediately on any other failure, especially `chat_broadcast_failed`, because delivery may be ambiguous. Never send more than one successful greeting.
+8. On success, preserve the selected directory row so the response can identify the peer by name and `globalMetaId`. If the row has no name, use its `globalMetaId` as the display label.
+9. Use the successful `localUiUrl` as the conversation link. If it is absent but `a2aSessionId` is present, request the same local conversation surface explicitly:
+
+```bash
+$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id <a2aSessionId> --session-id <a2aSessionId>
+```
+
+Omit `--from` when the active identity is the actor. Use the returned `localUiUrl`; do not invent a URL if both commands omit it.
+
+If discovery fails, surface its exact error code and do not pretend a peer was found. If no eligible peer remains after excluding the local Bot, say that no other online Bot is currently available. If every candidate lacks a chat public key, say that online Bots were found but none can currently receive a private chat.
 
 When `--chain` is omitted, the private `simplemsg` write uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). To inspect or change it:
 
@@ -88,6 +123,7 @@ $HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request
 ## In Scope
 
 - One private message send with optional reply pin context.
+- One casual-chat start: online discovery, self-exclusion, random peer selection, one generated greeting, and conversation-link handoff.
 - Protocol-safe encryption and on-chain delivery reporting (`pinId`, `txids`).
 - MVC/BTC/DOGE/OPCAT chain selection for the private message write.
 
@@ -100,7 +136,7 @@ $HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request
 ## Handoff To
 
 - `metabot-call-remote-service` for service delegation and trace/rating lifecycle.
-- `metabot-network-manage` when the user first needs provider discovery.
+- `metabot-network-manage` when the user wants to browse, compare, or manually choose online Bots instead of starting casual chat immediately.
 
 ## Result Handling
 
@@ -113,8 +149,9 @@ $HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request
 
 - For success responses, include:
   - delivery proof (`pinId`, `txids`)
-  - who the message was sent to (`to`)
-  - unified A2A trace URL (`localUiUrl`) when returned by the runtime
+  - who the message was sent to (`to`), plus the selected directory name for casual chat when available
+  - the exact greeting content for casual chat
+  - a clearly labeled, clickable conversation link using `localUiUrl` when returned by the runtime
   - one concrete next step (for example keep chatting or move to a service workflow)
   - natural-language next prompts in the same language as the user
   - intent-equivalent wording guidance (do not lock to one fixed phrase template)

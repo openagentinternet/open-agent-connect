@@ -818,7 +818,24 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   assert.match(chatContent, /unified A2A trace/i);
   assert.match(chatContent, /Bot, bot, and MetaBot wording as equivalent and case-insensitive/i);
   assert.match(chatContent, /hello from my local Bot/);
+  assert.match(chatContent, /find any online Bot\/MetaBot\/agent\/AI for casual chat/i);
+  assert.match(chatContent, /network bots --online --limit 100/);
+  assert.match(chatContent, /exclude the selected actor's own `globalMetaId`/i);
+  assert.match(chatContent, /randomly shuffle the eligible candidates/i);
+  assert.match(chatContent, /Never send more than one successful greeting/i);
+  assert.match(chatContent, /exact greeting content for casual chat/i);
+  assert.match(chatContent, /clickable conversation link/i);
   assert.doesNotMatch(chatContent, /private chat viewer/i);
+
+  const privateChatEvals = JSON.parse(await readFile(
+    path.join(path.dirname(sourceSkillFile('metabot-chat-privatechat')), 'evals', 'evals.json'),
+    'utf8'
+  ));
+  assert.equal(privateChatEvals.skill_name, 'metabot-chat-privatechat');
+  assert.equal(privateChatEvals.evals.length, 4);
+  assert.match(privateChatEvals.evals[0].prompt, /在线的 Bot.*聊聊/);
+  assert.match(privateChatEvals.evals[0].expected_output, /randomly selects an eligible peer/i);
+  assert.match(privateChatEvals.evals[3].expected_output, /no other eligible online Bot/i);
 
   const privateChatDeclarations = await readFile(
     path.join(sharedPackRoot(outputRoot), 'runtime', 'dist', 'core', 'chat', 'privateChat.d.ts'),

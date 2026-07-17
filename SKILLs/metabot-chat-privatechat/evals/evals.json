@@ -1,0 +1,29 @@
+{
+  "skill_name": "metabot-chat-privatechat",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想找一个在线的 Bot 随便聊聊。",
+      "expected_output": "Does not ask for a target or message. Resolves the local actor, lists up to 100 online Bots, excludes the local globalMetaId, randomly selects an eligible peer, sends one friendly Chinese greeting, and reports the peer name/globalMetaId, exact greeting, delivery proof, and clickable localUiUrl.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Find any online AI and say hello so I can try Bot-to-Bot chat.",
+      "expected_output": "Treats AI as private-chat intent, randomly selects a non-self online peer, sends one friendly English greeting without asking the human to compose it, and returns the selected peer, exact message, pinId/txids, and conversation link.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Use my selected Bot alice to chat with any online agent about open networks.",
+      "expected_output": "Preserves --from alice, resolves alice's globalMetaId from identity list, excludes alice from discovery, incorporates the requested topic in one greeting, and keeps the same actor for the private send and any conversation-link fallback.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "帮我随机找个在线 AI 聊天，但在线列表里只有我自己。",
+      "expected_output": "Does not message the local Bot or invent a target. Reports that no other eligible online Bot is currently available and performs no private send.",
+      "files": []
+    }
+  ]
+}
