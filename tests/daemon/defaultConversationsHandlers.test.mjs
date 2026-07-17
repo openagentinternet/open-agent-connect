@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createECDH } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
 
 const require = createRequire(import.meta.url);
@@ -16,6 +18,8 @@ const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.j
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+
+const execFileAsync = promisify(execFile);
 
 const LOCAL_GLOBAL_META_ID = 'idq1localhandler000000000000000000000000';
 const PEER_GLOBAL_META_ID = 'idq1peerhandler0000000000000000000000000';
@@ -462,6 +466,63 @@ test('default conversation event stream publishes a message event after external
   assert.equal(event.value.peerGlobalMetaId, PEER_GLOBAL_META_ID);
   assert.equal(event.value.messageId, 'listener-msg-1');
   assert.equal(event.value.kind, 'private_chat');
+});
+
+test('default conversation event stream publishes an update after cross-process A2A persistence', async (t) => {
+  const { homeDir, handlers } = await createFixture(t);
+
+  const stream = await handlers.conversations.streamEvents({
+    local: LOCAL_GLOBAL_META_ID,
+  });
+  const iterator = stream[Symbol.asyncIterator]();
+  const initial = await iterator.next();
+  const nextEvent = iterator.next();
+  const persistenceModulePath = path.resolve('dist/core/a2a/conversationPersistence.js');
+  const pathsModulePath = path.resolve('dist/core/state/paths.js');
+
+  await execFileAsync(process.execPath, ['-e', `
+    const { persistA2AConversationMessage } = require(${JSON.stringify(persistenceModulePath)});
+    const { resolveMetabotPaths } = require(${JSON.stringify(pathsModulePath)});
+    persistA2AConversationMessage({
+      paths: resolveMetabotPaths(${JSON.stringify(homeDir)}),
+      local: ${JSON.stringify(actor(LOCAL_GLOBAL_META_ID, 'Eric'))},
+      peer: ${JSON.stringify(actor(PEER_GLOBAL_META_ID, 'Remote Bot'))},
+      message: {
+        messageId: 'cross-process-msg-1',
+        direction: 'incoming',
+        content: 'message persisted by another daemon',
+        contentType: 'text/plain',
+        pinId: 'cross-process-pin-1',
+        txid: 'cross-process-tx-1',
+        txids: ['cross-process-tx-1'],
+        timestamp: ${BASE_TIME + 4},
+        raw: { source: 'separate-node-process' },
+      },
+    }).catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+  `]);
+
+  const event = await Promise.race([
+    nextEvent,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timed out waiting for cross-process conversation SSE event')), 2000);
+    }),
+  ]);
+  await iterator.return?.();
+
+  assert.equal(initial.value.type, 'conversation-update');
+  assert.equal(event.value.type, 'conversation-update');
+  assert.equal(event.value.localGlobalMetaId, LOCAL_GLOBAL_META_ID);
+
+  const messages = await handlers.conversations.messages({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    limit: 50,
+  });
+  assert.equal(messages.ok, true);
+  assert.equal(messages.data.messages.at(-1)?.messageId, 'cross-process-msg-1');
 });
 
 test('default conversation guidance reopens a closed conversation, sends one guided turn, and clears pending guidance', async (t) => {

@@ -1,5 +1,5 @@
-import { promises as fs } from 'node:fs';
-import type { Dirent } from 'node:fs';
+import { promises as fs, watch as watchFileSystem } from 'node:fs';
+import type { Dirent, FSWatcher } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { browserFailure, browserSuccess } from '@openagentinternet/agent-browser-host-contract';
@@ -5006,6 +5006,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
   async function* streamConversationEventsForLocalBot(
     localGlobalMetaId: string,
+    profileHomeDir?: string,
     signal?: AbortSignal,
   ): AsyncGenerator<ConversationEvent, void, unknown> {
     const normalizedLocal = normalizeText(localGlobalMetaId);
@@ -5016,6 +5017,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }];
     let notify: (() => void) | null = null;
     let clearAbortListener: (() => void) | null = null;
+    let conversationWatcher: FSWatcher | null = null;
+    let conversationWatchTimer: ReturnType<typeof setTimeout> | null = null;
     const removeAbortListener = () => {
       const listener = clearAbortListener;
       clearAbortListener = null;
@@ -5031,6 +5034,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
       }
     };
     const unsubscribe = subscribeA2AConversationPersistenceEvents(normalizedLocal, (event) => {
+      if (conversationWatchTimer) {
+        clearTimeout(conversationWatchTimer);
+        conversationWatchTimer = null;
+      }
       queue.push(event);
       wake();
     });
@@ -5038,6 +5045,46 @@ export function createDefaultMetabotDaemonHandlers(input: {
       queue.push(event);
       wake();
     });
+    const normalizedProfileHome = normalizeText(profileHomeDir);
+    if (normalizedProfileHome && normalizedLocal.length >= 8) {
+      const a2aRoot = resolveMetabotPaths(normalizedProfileHome).a2aRoot;
+      const conversationFilePrefix = `chat-${normalizedLocal.toLowerCase().slice(0, 8)}-`;
+      try {
+        await fs.mkdir(a2aRoot, { recursive: true });
+        conversationWatcher = watchFileSystem(
+          a2aRoot,
+          { encoding: 'utf8', persistent: false },
+          (_eventType, filename) => {
+            if (
+              !filename
+              || !filename.startsWith(conversationFilePrefix)
+              || !filename.endsWith('.json')
+            ) {
+              return;
+            }
+            if (conversationWatchTimer) {
+              clearTimeout(conversationWatchTimer);
+            }
+            conversationWatchTimer = setTimeout(() => {
+              conversationWatchTimer = null;
+              queue.push({
+                type: 'conversation-update',
+                localGlobalMetaId: normalizedLocal,
+                timestamp: Date.now(),
+              });
+              wake();
+            }, 25);
+          },
+        );
+        conversationWatcher.on('error', () => {
+          const failedWatcher = conversationWatcher;
+          conversationWatcher = null;
+          failedWatcher?.close();
+        });
+      } catch {
+        // In-process persistence events remain available when file watching is unavailable.
+      }
+    }
     try {
       while (!signal?.aborted) {
         while (queue.length) {
@@ -5066,6 +5113,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
       }
     } finally {
       removeAbortListener();
+      if (conversationWatchTimer) {
+        clearTimeout(conversationWatchTimer);
+      }
+      conversationWatcher?.close();
       unsubscribe();
       unsubscribeProfileUpdates();
     }
@@ -14322,7 +14373,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       streamEvents: async (rawInput) => {
         const profile = await resolveMetabotProfileBySelector(rawInput.local);
         const localGlobalMetaId = profile?.globalMetaId ?? normalizeText(rawInput.local);
-        return streamConversationEventsForLocalBot(localGlobalMetaId, rawInput.signal);
+        return streamConversationEventsForLocalBot(localGlobalMetaId, profile?.homeDir, rawInput.signal);
       },
     },
     chat: {
