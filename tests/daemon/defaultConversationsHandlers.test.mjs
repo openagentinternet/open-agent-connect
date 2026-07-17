@@ -208,6 +208,7 @@ async function createFixture(t, options = {}) {
       fetchPeerChatPublicKey: options.fetchPeerChatPublicKey,
       llmExecutor: options.llmExecutor,
       conversationGuidanceReplyRunner: options.conversationGuidanceReplyRunner,
+      conversationProfileFetch: options.conversationProfileFetch,
       getDaemonRecord: () => null,
     }),
   };
@@ -273,6 +274,59 @@ test('default conversation handlers enrich peer name and avatar from local profi
   assert.equal(messages.data.peerBot.avatar, 'data:image/png;base64,remote');
   assert.equal(messages.data.messages[0].sender.name, 'Known Remote Bot');
   assert.equal(messages.data.messages[0].sender.avatar, 'data:image/png;base64,remote');
+});
+
+test('default conversation handlers enrich remote LLM providers from the public profile API', async (t) => {
+  const fetchCalls = [];
+  const { handlers } = await createFixture(t, {
+    conversationProfileFetch: async (url) => {
+      fetchCalls.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            name: 'Remote Bot',
+            avatar: 'remote-avatar-pin',
+            llm: JSON.stringify({
+              primaryProvider: 'codex',
+              fallbackProvider: 'cursor',
+            }),
+          },
+        }),
+      };
+    },
+  });
+  const stream = await handlers.conversations.streamEvents({
+    local: LOCAL_GLOBAL_META_ID,
+  });
+  const iterator = stream[Symbol.asyncIterator]();
+  await iterator.next();
+
+  const initial = await handlers.conversations.list({
+    local: LOCAL_GLOBAL_META_ID,
+    limit: 10,
+  });
+  const profileUpdate = await Promise.race([
+    iterator.next(),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timed out waiting for public profile enrichment')), 500);
+    }),
+  ]);
+  const enriched = await handlers.conversations.list({
+    local: LOCAL_GLOBAL_META_ID,
+    limit: 10,
+  });
+  await iterator.return();
+
+  assert.equal(initial.ok, true);
+  assert.equal(initial.data.conversations[0].peerLlmPrimaryProvider, null);
+  assert.equal(profileUpdate.value.type, 'conversation-update');
+  assert.equal(enriched.ok, true);
+  assert.equal(enriched.data.conversations[0].peerLlmPrimaryProvider, 'codex');
+  assert.equal(enriched.data.conversations[0].peerLlmFallbackProvider, 'cursor');
+  assert.deepEqual(fetchCalls, [
+    `https://so.metaid.io/api/info/globalmetaid/${encodeURIComponent(PEER_GLOBAL_META_ID)}`,
+  ]);
 });
 
 test('default conversation handlers do not block on slow chain profile lookups', async (t) => {

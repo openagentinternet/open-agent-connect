@@ -775,6 +775,7 @@ test('conversation detail links only remote Bot avatars to Browser Bot Pages in 
               peerGlobalMetaId: PEER_GLOBAL_META_ID,
               peerName: 'Remote Bot',
               peerAvatar: 'https://example.test/remote.png',
+              peerLlmPrimaryProvider: 'codex',
               latestText: 'hello',
             }],
           },
@@ -820,6 +821,7 @@ test('conversation detail links only remote Bot avatars to Browser Bot Pages in 
   await waitFor(() => /Remote Bot/.test(detailHeader.innerHTML) && /msg-row/.test(messages.innerHTML), 'conversation detail render');
 
   const peerHref = `/browser/metaid/${encodeURIComponent(PEER_GLOBAL_META_ID)}`;
+  assert.match(detailHeader.innerHTML, /LLM · Codex/);
   assert.match(detailHeader.innerHTML, new RegExp(`href="${peerHref}"[^>]*target="_blank"`));
   assert.match(messages.innerHTML, new RegExp(`href="${peerHref}"[^>]*target="_blank"`));
   assert.doesNotMatch(detailHeader.innerHTML, new RegExp(`/browser/metaid/${encodeURIComponent(LOCAL_GLOBAL_META_ID)}`));
