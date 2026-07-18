@@ -10,7 +10,8 @@ Open Agent Connect will use one daemon for one normal local installation.
 The production daemon will:
 
 - listen only on `127.0.0.1`;
-- use the fixed default address `http://127.0.0.1:10001`;
+- use `http://127.0.0.1:10001` by default, or one persistently selected
+  loopback address when first-install port fallback is required;
 - serve all local MetaBot profiles indexed under the same MetaBot root;
 - resolve the acting profile from `--from`, an equivalent request actor field,
   or the active-profile pointer when no actor is supplied;
@@ -25,7 +26,8 @@ Host agents / CLI / local UI
              |
              | one local endpoint
              v
-  http://127.0.0.1:10001
+  selected local endpoint
+  (http://127.0.0.1:10001 by default)
              |
              v
      one production daemon
@@ -119,7 +121,8 @@ A normal user installation has exactly one production runtime instance:
 ```text
 instance: default
 MetaBot root: ~/.metabot
-daemon URL: http://127.0.0.1:10001
+preferred daemon URL: http://127.0.0.1:10001
+selected daemon URL: the persisted installation endpoint
 ```
 
 All supported hosts on that operating-system account use the same installed
@@ -155,20 +158,44 @@ base URL: http://127.0.0.1:10001
 Bot management URL: http://127.0.0.1:10001/ui/bot
 ```
 
-The port contract is strict:
+### One-time port selection and stable fallback
 
-1. If port `10001` is owned by the healthy daemon for the same runtime instance,
-   clients attach to it.
-2. If the recorded daemon is unhealthy and ownership is proven, recovery stops
-   it and restarts on `10001`.
-3. If another process owns `10001`, startup fails with an actionable
-   `daemon_port_in_use` error.
-4. The production daemon must not silently fall back to a random port.
+`10001` is the preferred default, not an assertion that every operating-system
+account can reserve it. A normal installation has one selected daemon port.
+The selected port is recorded in `~/.metabot/runtime/installation.json` and is
+used by the CLI, local UI, supervisor, daemon record, and every supported host.
+
+The selection contract is:
+
+1. On a new installation or topology migration, attempt `10001` first.
+2. If `10001` is owned by the healthy daemon for the same runtime instance,
+   clients attach to it. If its owned daemon is unhealthy, verified recovery
+   stops it and restarts on `10001`.
+3. If an unrelated process owns `10001`, never terminate that process. Select
+   the first free port in the bounded installation fallback range
+   `10002` through `10020`, persist that port before starting the daemon, and
+   clearly report the resulting management URL.
+4. If every port in that range is unavailable, fail with an actionable
+   `daemon_port_unavailable` error and identify the range and conflicting
+   ports. Do not use an unbounded search or an ephemeral random port.
+5. After a port has been persisted, every normal start, restart, recovery, and
+   supervisor launch must use that exact port. A later collision with that port
+   fails with `daemon_port_in_use`; it must not cause another automatic move.
+6. Moving a completed installation to another port, including moving back to
+   `10001`, is an explicit port migration: stop the verified owned daemon,
+   update `installation.json` and the supervisor configuration atomically,
+   restart, and verify the new endpoint.
+
+Fallback selection happens only while creating or migrating an installation.
+It is deterministic within the configured range and permanently recorded; it
+is not runtime port drift. An installation on fallback port `10002`, for
+example, has the stable management URL
+`http://127.0.0.1:10002/ui/bot` until an explicit port migration changes it.
 
 An advanced port override may remain available for constrained environments,
-but it must be stored as installation-level daemon configuration. It must not
-be selected independently by individual profile commands or inherited
-accidentally from one host process.
+but it must update the same installation-level configuration through the
+explicit port-migration path. It must not be selected independently by
+individual profile commands or inherited accidentally from one host process.
 
 The first migration remains HTTP-only. Loopback binding, host validation, and
 same-origin write protection remain required. Local HTTPS requires a trusted
@@ -186,6 +213,7 @@ layer:
     active-home.json
 
   runtime/
+    installation.json
     daemon.json
     locks/
       daemon.lock
@@ -211,6 +239,22 @@ layer:
 
 `~/.metabot/manager/` remains limited to the profile index and active-profile
 pointer. Global daemon files must not be added to `manager/`.
+
+`runtime/installation.json` is durable installation-level configuration. It is
+not an active-process record and must survive daemon restarts. Its first
+required daemon setting is the selected loopback port.
+
+### Installation record
+
+The installation record must include at least:
+
+- schema version;
+- selected daemon host and port;
+- selection origin: `default`, `fallback`, or explicit port migration; and
+- the timestamp of the most recent explicit configuration change.
+
+It must not contain PIDs, locks, secrets, profile selectors, or transient
+daemon health. Those belong in the daemon record, profile state, or logs.
 
 ### Global daemon record
 
@@ -427,7 +471,7 @@ A successful stop means all of the following are true:
 
 - the owned daemon received graceful termination;
 - the process exited;
-- port `10001` was released;
+- the selected daemon port was released;
 - the global lock was removed or safely quarantined; and
 - the matching daemon record was removed.
 
@@ -516,8 +560,9 @@ Before migration, the updater must:
 3. enumerate the indexed profiles' legacy `daemon.json` and
    `locks/daemon.lock` files;
 4. inspect live daemon processes, entrypoints, ports, and HTTP owner IDs;
-5. verify that port `10001` is available or already owned by the target global
-   daemon; and
+5. select `10001` or, only when it is owned by an unrelated process, persist
+   the first free port in the defined fallback range before starting a daemon;
+   and
 6. record a sanitized migration snapshot under
    `~/.metabot/runtime/recovery/migration.json`.
 
@@ -544,13 +589,13 @@ After all verified legacy daemons have stopped:
 1. create the global runtime directories;
 2. install or update the stable production CLI shim;
 3. install the supervisor configuration;
-4. start one daemon on `127.0.0.1:10001`;
+4. start one daemon on the selected loopback port;
 5. verify daemon identity and version;
 6. verify that all indexed profiles are visible;
 7. verify that each eligible profile has exactly one background worker set; and
 8. remove or quarantine legacy per-profile daemon records and daemon locks.
 
-The migration is not complete merely because port `10001` is listening.
+The migration is not complete merely because the selected port is listening.
 
 ### Interrupted migration
 
@@ -596,6 +641,7 @@ migration.
 ### Phase 2: Global path and actor foundations
 
 - Extend the central path model with `~/.metabot/runtime/` paths.
+- Add durable installation-level daemon endpoint configuration and discovery.
 - Add the global daemon record and lock types.
 - Centralize resolved profile context creation.
 - Classify every daemon route as global or actor-scoped.
@@ -603,7 +649,7 @@ migration.
 
 ### Phase 3: Single daemon and background coordinator
 
-- Start one daemon on the fixed production port.
+- Start one daemon on the selected production port.
 - Make actor fallback read the active-home pointer at request time.
 - Convert startup-home-bound handlers to resolved actor contexts.
 - Introduce one background coordinator with per-profile worker ownership.
@@ -612,6 +658,8 @@ migration.
 ### Phase 4: Migration and development isolation
 
 - Implement idempotent legacy daemon discovery and shutdown.
+- Implement the one-time bounded port fallback and explicit port-migration
+  path.
 - Quarantine old per-profile daemon metadata.
 - Change development mode to use an isolated system home and port.
 - Stop development mode from rewriting the installed production shim.
@@ -656,7 +704,10 @@ Required automated coverage includes:
 - healthy daemon attachment;
 - dead, stale, alive-but-not-listening, and HTTP-hung recovery;
 - unrelated process ownership refusal;
-- strict fixed-port behavior with no random fallback;
+- default-port selection, bounded first-install fallback, and persistent
+  endpoint discovery;
+- refusal to move a configured installation port automatically at runtime;
+- explicit port migration, including a move back to `10001`;
 - reliable graceful and forced stop behavior;
 - idempotent migration and interrupted migration;
 - development and production instance isolation;
@@ -672,8 +723,7 @@ Acceptance must prove:
 
 1. only one production `daemon serve` process targets the production MetaBot
    root;
-2. `http://127.0.0.1:10001/ui/bot` remains valid while switching the selected
-   Bot;
+2. the selected management URL remains valid while switching the selected Bot;
 3. CLI commands for two profiles return the same daemon base URL;
 4. each command reads and writes only its selected profile state;
 5. changing the active profile changes no-`--from` behavior without restarting
@@ -682,9 +732,15 @@ Acceptance must prove:
 7. killing the daemon causes supervised restart on the same port;
 8. an induced unhealthy endpoint is recovered without leaving stale lock or
    daemon state;
-9. a development instance can run on its isolated port without changing the
+9. with an unrelated process occupying `10001`, first installation selects a
+   free bounded fallback port, reports it, and preserves it after restart;
+10. with an unrelated process occupying the persisted fallback port, daemon
+    restart fails without selecting another port;
+11. an explicit port migration can return an installation to `10001` after it
+    becomes free; and
+12. a development instance can run on its isolated port without changing the
    production process, shim, profiles, or URL; and
-10. uninstall removes the supervisor and global daemon runtime metadata without
+13. uninstall removes the supervisor and global daemon runtime metadata without
     deleting profile data.
 
 ## Release and Compatibility Policy
@@ -705,8 +761,9 @@ as one coordinated release:
 This design is implemented only when all of the following are true:
 
 1. A normal installation runs one production daemon for all indexed profiles.
-2. The default management URL is strictly
-   `http://127.0.0.1:10001/ui/bot`.
+2. A new installation uses `http://127.0.0.1:10001/ui/bot` when that port is
+   available; otherwise it selects and permanently records one bounded
+   fallback port.
 3. `--from` selects only an actor and never a daemon or port.
 4. Omitting `--from` uses the active profile at request time.
 5. Machine-wide listeners and watchdogs run once.
@@ -716,7 +773,8 @@ This design is implemented only when all of the following are true:
    mutation.
 9. Development and production runtimes cannot replace or supervise each other.
 10. Stop, recovery, logging, and OS supervision meet the lifecycle contract.
-11. No production startup silently falls back to a random port.
+11. No production startup silently changes its selected port or falls back to
+    a random port.
 12. Full automated and manual acceptance requirements pass before release.
 
 ## Review Checklist
@@ -724,7 +782,9 @@ This design is implemented only when all of the following are true:
 Before implementation planning starts, reviewers should explicitly confirm:
 
 - one normal installed daemon is the intended product topology;
-- `10001` is the intended fixed production port;
+- `10001` is the preferred production port and a one-time bounded fallback is
+  acceptable when it is already occupied;
+- selected-port persistence and explicit port migration are acceptable;
 - HTTP loopback is sufficient for the first migration;
 - `~/.metabot/runtime/` is the correct global process-state boundary;
 - active-profile fallback is evaluated per request;
