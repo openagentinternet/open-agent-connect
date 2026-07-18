@@ -192,6 +192,8 @@ export interface CliDependencies {
             traceId?: string;
             sessionId?: string;
             serviceId?: string;
+            mode?: string;
+            host?: string;
             pinId?: string;
             firstPinId?: string;
             mine?: boolean;

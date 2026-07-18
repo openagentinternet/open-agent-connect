@@ -355,6 +355,16 @@ test('runCli dispatches `metabot ui open --page` and returns the local UI URL', 
   });
 });
 
+test('runCli forwards Bot creation host context through `metabot ui open`', async () => {
+  const harness = createHarness();
+  const exitCode = await runCli([
+    'ui', 'open', '--page', 'bot', '--mode', 'create', '--host', 'codex',
+  ], harness.context);
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(harness.calls.ui, [{ page: 'bot', mode: 'create', host: 'codex' }]);
+});
+
 test('runCli dispatches `metabot browser open` and returns the browser url', async () => {
   const harness = createHarness();
   const exitCode = await runCli(['browser', 'open'], harness.context);

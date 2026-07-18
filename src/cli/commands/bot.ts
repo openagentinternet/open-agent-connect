@@ -41,11 +41,12 @@ export async function runBotCommand(args: string[], context: CliRuntimeContext):
   if (subcommand === 'create') {
     const name = readFlagValue(args, '--name');
     if (!name) return commandMissingFlag('--name');
+    const host = readFlagValue(args, '--host');
     const handler = context.dependencies.bot?.createProfile;
     if (!handler) {
       return commandFailed('not_implemented', 'Bot profile create handler is not configured.');
     }
-    return handler({ name });
+    return handler({ name, ...(host ? { host } : {}) });
   }
 
   if (subcommand === 'update') {

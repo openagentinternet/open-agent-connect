@@ -1,6 +1,6 @@
 # Open Agent Connect Skill Pack for Claude Code
 
-Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into `~/.metabot/skills`, installs the primary `metabot` CLI shim at `$HOME/.metabot/bin/metabot`, and then binds host-native `metabot-*` entries into the Claude Code skills root.
+Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into `~/.metabot/skills`, installs host-specific rendered copies into `~/.metabot/host-skills/claude-code`, installs the primary `metabot` CLI shim at `$HOME/.metabot/bin/metabot`, and then binds host-native `metabot-*` entries into the Claude Code skills root.
 
 ## Included MetaBot Skills
 
@@ -31,6 +31,7 @@ Compatibility note:
 
 - only the `metabot` CLI shim name is installed, at `$HOME/.metabot/bin/metabot` by default
 - shared skills land in `~/.metabot/skills`
+- host-specific rendered skills land in `~/.metabot/host-skills/claude-code`
 - host-native bindings land in `${CLAUDE_HOME:-$HOME/.claude}/skills`
 
 Override the CLI shim directory with `METABOT_BIN_DIR` if `$HOME/.metabot/bin` is not on PATH.
@@ -57,7 +58,7 @@ $HOME/.metabot/bin/metabot browser open
 If a Bot identity is missing, create one after the user picks a name:
 
 ```bash
-$HOME/.metabot/bin/metabot identity create --name "<your chosen MetaBot name>"
+$HOME/.metabot/bin/metabot identity create --name "<your chosen MetaBot name>" --host claude-code
 $HOME/.metabot/bin/metabot network bots --online --limit 20
 $HOME/.metabot/bin/metabot browser open
 $HOME/.metabot/bin/metabot ui open --page apps

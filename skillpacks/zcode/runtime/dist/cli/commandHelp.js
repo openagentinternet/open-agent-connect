@@ -604,12 +604,16 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['bot', 'create'],
-        summary: 'Create one local MetaBot profile.',
-        usage: 'metabot bot create --name <name>',
+        summary: 'Create one local MetaBot profile, optionally preferring the current host LLM provider.',
+        usage: 'metabot bot create --name <name> [--host <provider>]',
         requiredFlags: [
             { flag: '--name', value: '<name>', description: 'Human-facing name for the new local MetaBot profile.' },
         ],
-        examples: ['metabot bot create --name "Alice"'],
+        optionalFlags: [
+            { flag: '--host', value: '<provider>', description: 'Current host provider id. It becomes primary when its healthy local runtime is available; the fallback remains activity-based.' },
+            HELP_JSON_FLAG,
+        ],
+        examples: ['metabot bot create --name "Alice" --host codex'],
     },
     {
         commandPath: ['bot', 'update'],
@@ -948,9 +952,13 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['identity', 'create'],
         summary: 'Create one local MetaBot identity and complete the validated bootstrap flow for the current active home.',
-        usage: 'metabot identity create --name <display-name>',
+        usage: 'metabot identity create --name <display-name> [--host <provider>]',
         requiredFlags: [
             { flag: '--name', value: '<display-name>', description: 'Human-facing name for the new local MetaBot identity.' },
+        ],
+        optionalFlags: [
+            { flag: '--host', value: '<provider>', description: 'Current host provider id. It becomes primary when its healthy local runtime is available; the fallback remains activity-based.' },
+            HELP_JSON_FLAG,
         ],
         successFields: [
             'metabotId',
@@ -966,9 +974,8 @@ const COMMAND_HELP_SPECS = [
             'Fails when the bootstrap flow cannot derive keys, claim subsidy, or persist identity state.',
         ],
         examples: [
-            'metabot identity create --name "<your chosen MetaBot name>"',
+            'metabot identity create --name "<your chosen MetaBot name>" --host codex',
         ],
-        optionalFlags: [HELP_JSON_FLAG],
     },
     {
         commandPath: ['identity', 'who'],
@@ -2546,7 +2553,7 @@ const COMMAND_HELP_SPECS = [
     {
         commandPath: ['ui', 'open'],
         summary: 'Open one local MetaBot runtime HTML page such as bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, or refund.',
-        usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>]',
+        usage: 'metabot ui open --page <page> [--from <bot-slug>] [--trace-id <trace-id>] [--session-id <session-id>] [--service-id <service-pin-id>] [--mode <mode>] [--host <provider>]',
         requiredFlags: [
             { flag: '--page', value: '<page>', description: 'Built-in page name: bot, conversations, services, apps, settings, hub, buzz, chat, publish, my-services, trace, or refund.' },
         ],
@@ -2555,6 +2562,8 @@ const COMMAND_HELP_SPECS = [
             { flag: '--trace-id', value: '<trace-id>', description: 'Optional trace identifier for trace page deep links.' },
             { flag: '--session-id', value: '<session-id>', description: 'A2A session identifier for trace page deep links.' },
             { flag: '--service-id', value: '<service-pin-id>', description: 'Owned service selector for my-services pages.' },
+            { flag: '--mode', value: '<mode>', description: 'Optional page mode. Use create with --page bot to open the Create Bot dialog.' },
+            { flag: '--host', value: '<provider>', description: 'Current host provider id forwarded to the page, such as codex or cursor.' },
             HELP_JSON_FLAG,
         ],
         successFields: [
@@ -2575,6 +2584,7 @@ const COMMAND_HELP_SPECS = [
             'metabot ui open --page trace --from alice --trace-id trace-123',
             'metabot ui open --page publish --from alice',
             'metabot ui open --page my-services --service-id <service-pin-id>',
+            'metabot ui open --page bot --mode create --host codex',
         ],
     },
     {

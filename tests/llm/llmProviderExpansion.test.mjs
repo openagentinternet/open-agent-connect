@@ -405,6 +405,30 @@ test('runtime discovery keeps WorkBuddy independent from CodeBuddy path aliases'
   });
 });
 
+test('runtime discovery limits a requested host probe to that host provider', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-targeted-discovery-'));
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const codexPath = path.join(binDir, 'codex');
+    const claudePath = path.join(binDir, 'claude');
+    await writeFile(codexPath, '#!/bin/sh\necho "codex 1.0.0"\n', 'utf8');
+    await writeFile(claudePath, '#!/bin/sh\necho "claude 1.0.0"\n', 'utf8');
+    await chmod(codexPath, 0o755);
+    await chmod(claudePath, 0o755);
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      providers: ['codex'],
+      now: () => '2026-07-18T00:00:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['codex']);
+  });
+});
+
 test('runtime discovery uses login-shell resolved executables when daemon PATH misses a provider', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-shell-path-'));

@@ -2833,6 +2833,59 @@ test('bot page create flow sends only the minimal identity fields', async () => 
   });
 });
 
+test('bot page create flow starts only from the Create button', async () => {
+  const nameListeners = new Map();
+  const confirmListeners = new Map();
+  const name = field();
+  const confirm = field();
+  name.addEventListener = (eventName, handler) => nameListeners.set(eventName, handler);
+  confirm.addEventListener = (eventName, handler) => confirmListeners.set(eventName, handler);
+  const modalClasses = new Set(['hidden']);
+  const modal = {
+    innerHTML: '',
+    classList: {
+      add: (name) => modalClasses.add(name),
+      remove: (name) => modalClasses.delete(name),
+    },
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-modal="add-metabot"]': modal,
+      '[data-field="new-name"]': name,
+      '[data-add-status]': field(),
+      '[data-act="cancel-add"]': field(),
+      '[data-act="confirm-add"]': confirm,
+    },
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: { profile: { slug: 'alice', name: 'Alice' } },
+      }),
+    }),
+  });
+  let createRequests = 0;
+  const originalFetch = context.fetch;
+  context.fetch = (...args) => {
+    createRequests += 1;
+    return originalFetch(...args);
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.loadProfiles = () => Promise.resolve();
+  context.openAddModal();
+  name.value = 'Alice';
+
+  nameListeners.get('keydown')({ key: 'Enter' });
+
+  assert.equal(createRequests, 0);
+  assert.equal(modalClasses.has('hidden'), false);
+
+  await confirmListeners.get('click')();
+
+  assert.equal(createRequests, 1);
+});
+
 test('bot page keeps subsidy failure visible after creation and retries setup', async () => {
   const fields = {
     '[data-field="new-name"]': field('Fanny'),

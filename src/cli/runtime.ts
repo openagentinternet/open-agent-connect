@@ -2064,6 +2064,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     traceId?: string;
     sessionId?: string;
     serviceId?: string;
+    mode?: string;
+    host?: string;
     pinId?: string;
     firstPinId?: string;
     mine?: boolean;
@@ -2078,6 +2080,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     if (input.traceId) query.set('traceId', input.traceId);
     if (input.sessionId) query.set('sessionId', input.sessionId);
     if (input.serviceId) query.set('serviceId', input.serviceId);
+    if (input.mode) query.set('mode', input.mode);
+    if (input.host) query.set('host', input.host);
     if (input.pinId) query.set('pinId', input.pinId);
     if (input.firstPinId) query.set('firstPinId', input.firstPinId);
     if (input.mine) query.set('mine', 'true');

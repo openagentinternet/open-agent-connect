@@ -34,6 +34,8 @@ async function runUiCommand(args, context) {
     const traceId = (0, helpers_1.readFlagValue)(args, '--trace-id') || undefined;
     const sessionId = (0, helpers_1.readFlagValue)(args, '--session-id') || undefined;
     const serviceId = (0, helpers_1.readFlagValue)(args, '--service-id') || undefined;
+    const mode = (0, helpers_1.readFlagValue)(args, '--mode') || undefined;
+    const host = (0, helpers_1.readFlagValue)(args, '--host') || undefined;
     const handler = context.dependencies.ui?.open;
     if (!handler) {
         return (0, commandResult_1.commandFailed)('not_implemented', 'UI open handler is not configured.');
@@ -44,5 +46,7 @@ async function runUiCommand(args, context) {
         ...(traceId ? { traceId } : {}),
         ...(sessionId ? { sessionId } : {}),
         ...(serviceId ? { serviceId } : {}),
+        ...(mode ? { mode } : {}),
+        ...(host ? { host } : {}),
     });
 }

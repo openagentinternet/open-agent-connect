@@ -1,6 +1,7 @@
 import type { LlmRuntime, LlmProvider } from './llmTypes';
 export interface DiscoveryInput {
     env?: NodeJS.ProcessEnv;
+    providers?: LlmProvider[];
     createId?: () => string;
     now?: () => string;
     readinessProbe?: RuntimeReadinessProbe;

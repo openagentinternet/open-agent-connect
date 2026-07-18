@@ -547,9 +547,13 @@ async function discoverLlmRuntimes(input) {
     const pathDirs = splitPath(getPathEnv(env));
     const runtimes = [];
     const errors = [];
-    const shellResolvedExecutables = input?.shellResolvedExecutables ?? await resolveExecutablesViaLoginShell((0, platformRegistry_1.getRuntimePlatforms)().flatMap((platform) => platform.runtime.binaryNames), env);
+    const requestedProviders = new Set((input?.providers ?? []).filter((provider) => (0, platformRegistry_1.isRuntimePlatformId)(provider)));
+    const platforms = requestedProviders.size > 0
+        ? (0, platformRegistry_1.getRuntimePlatforms)().filter((platform) => requestedProviders.has(platform.id))
+        : (0, platformRegistry_1.getRuntimePlatforms)();
+    const shellResolvedExecutables = input?.shellResolvedExecutables ?? await resolveExecutablesViaLoginShell(platforms.flatMap((platform) => platform.runtime.binaryNames), env);
     const knownRuntimesById = new Map((input?.knownRuntimes ?? []).map((runtime) => [runtime.id, runtime]));
-    const discoveryResults = await mapWithConcurrency((0, platformRegistry_1.getRuntimePlatforms)(), normalizeProviderDiscoveryConcurrency(input?.providerConcurrency), async (platform) => {
+    const discoveryResults = await mapWithConcurrency(platforms, normalizeProviderDiscoveryConcurrency(input?.providerConcurrency), async (platform) => {
         try {
             const runtime = await discoverProvider(platform.id, pathDirs, {
                 createId: input?.createId,

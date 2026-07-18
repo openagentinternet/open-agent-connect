@@ -68,33 +68,14 @@ If target name does not exist, create it and let the CLI resolve the canonical p
 
 ```bash
 TARGET_NAME="David"
-$HOME/.metabot/bin/metabot identity create --name "$TARGET_NAME" --host <platform>
+$HOME/.metabot/bin/metabot identity create --name "$TARGET_NAME" --host <host>
 ```
 
-Use the host-aware create form whenever the current host platform can be
-reliably identified as one of the supported platform ids:
-
-- `claude-code`
-- `codex`
-- `copilot`
-- `opencode`
-- `openclaw`
-- `hermes`
-- `gemini`
-- `pi`
-- `cursor`
-- `kimi`
-- `kiro`
-- `codebuddy`
-
-For example, when this skill is running from Cursor, pass Cursor explicitly:
-
-```bash
-$HOME/.metabot/bin/metabot identity create --name "$TARGET_NAME" --host cursor
-```
-
-If the current host platform cannot be identified reliably, omit `--host` and
-let the runtime fall back to the most recently active healthy LLM:
+When installed for a specific host, this command already contains that host's
+canonical id. Do not replace it. The shared host-neutral copy contains
+`<host>` instead: substitute it only when the current host is reliably
+known; otherwise omit `--host` and let the runtime use the most recently active
+healthy LLM:
 
 ```bash
 $HOME/.metabot/bin/metabot identity create --name "$TARGET_NAME"
