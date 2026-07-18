@@ -36,6 +36,9 @@ const DEFAULT_CONFIG = {
   a2a: {
     simplemsgListenerEnabled: true,
   },
+  autoReply: {
+    enabled: true,
+  },
   browser: DEFAULT_BROWSER_CONFIG,
 };
 
@@ -107,6 +110,9 @@ test('createConfigStore defaults to the active runtime config and persists updat
       a2a: {
         simplemsgListenerEnabled: false,
       },
+      autoReply: {
+        enabled: false,
+      },
       browser: {
         metasoP2PBaseUrl: 'https://so.example.test',
         metafileContentBaseUrl: 'https://so.example.test/content',
@@ -170,6 +176,9 @@ test('read ignores retired askMaster and evolution_network config fields', async
       a2a: {
         simplemsgListenerEnabled: false,
       },
+      autoReply: {
+        enabled: true,
+      },
       browser: DEFAULT_BROWSER_CONFIG,
     });
   });
@@ -226,7 +235,43 @@ test('set drops retired askMaster and evolution_network fields from persisted co
       a2a: {
         simplemsgListenerEnabled: true,
       },
+      autoReply: {
+        enabled: true,
+      },
       browser: DEFAULT_BROWSER_CONFIG,
     });
+  });
+});
+
+test('read normalizes malformed persisted autoReply.enabled values back to the default', async () => {
+  await withTempProfileHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify({
+      chain: { defaultWriteNetwork: 'mvc', mvcSponsorUploadEnabled: true },
+      a2a: { simplemsgListenerEnabled: true },
+      autoReply: { enabled: 'false' },
+    }, null, 2)}\n`, 'utf8');
+
+    const reloaded = await store.read();
+    assert.equal(reloaded.autoReply.enabled, true);
+  });
+});
+
+test('set persists the auto-reply enabled flag and round-trips it through disk', async () => {
+  await withTempProfileHome(async () => {
+    const store = createConfigStore();
+    const initial = await store.read();
+    assert.equal(initial.autoReply.enabled, true);
+
+    const disabled = { ...initial, autoReply: { enabled: false } };
+    await store.set(disabled);
+
+    const persisted = JSON.parse(await fs.readFile(store.paths.configPath, 'utf8'));
+    assert.deepEqual(persisted.autoReply, { enabled: false });
+
+    const reloaded = await store.read();
+    assert.equal(reloaded.autoReply.enabled, false);
   });
 });

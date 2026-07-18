@@ -25,7 +25,7 @@ function buildBotPageScript(): string {
 var qq=function(s){return document.querySelectorAll(s)};
 var HOMEPAGE_UPLOAD_MAX_BYTES=50*1024*1024;
 var PERSONA_PRESET_CATALOG=${inlineScriptJson(PERSONA_PRESET_CATALOG)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
 var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
@@ -620,6 +620,53 @@ function loadChatSkillOptions(slug){
     return [];
   });
 }
+function loadAutoReplyStatus(slug){
+  slug=String(slug||'').trim();
+  if(!slug)return Promise.resolve();
+  state.autoReplyStatusBySlug[slug]='loading';
+  rerenderChatSkillsTabForLoad(slug);
+  return api('/api/chat/auto-reply/status?from='+encodeURIComponent(slug)).then(function(r){
+    var data=r&&r.data?r.data:r;
+    var enabled=Boolean(data&&data.enabled);
+    var previous=state.autoReplyBySlug[slug];
+    state.autoReplyBySlug[slug]=enabled;
+    state.autoReplyStatusBySlug[slug]='ready';
+    // Only re-render if the value actually changed, to avoid clobbering an in-flight toggle click.
+    if(previous!==undefined&&previous!==enabled){rerenderChatSkillsTabForLoad(slug)}
+    else{var note=q('[data-auto-reply-status]');if(note)note.textContent='';var toggle=q('[data-auto-reply-toggle]');if(toggle)toggle.classList.toggle('loading',false)}
+    return enabled;
+  }).catch(function(error){
+    state.autoReplyStatusBySlug[slug]='error';
+    var note=q('[data-auto-reply-status]');if(note)note.textContent=error&&error.message?error.message:uiText('bot.autoReplyLoadFailed','Failed to load auto-reply status.');
+    var toggle=q('[data-auto-reply-toggle]');if(toggle)toggle.classList.toggle('loading',false);
+    return null;
+  });
+}
+function autoReplyToggleMarkup(profile){
+  var slug=profile&&profile.slug||'';
+  var status=state.autoReplyStatusBySlug[slug]||'';
+  var enabled=Boolean(state.autoReplyBySlug[slug]);
+  // While loading and no cached value yet, optimistically render as ON (the default).
+  if(status==='loading'&&!Object.prototype.hasOwnProperty.call(state.autoReplyBySlug,slug)){enabled=true}
+  var onLabel=uiText('bot.autoReplyOn','On');
+  var offLabel=uiText('bot.autoReplyOff','Off');
+  var note=status==='loading'&&!Object.prototype.hasOwnProperty.call(state.autoReplyBySlug,slug)
+    ? '<span class="save-status saving" data-auto-reply-status>'+esc(uiText('bot.loadingAutoReply','Loading...'))+'</span>'
+    : (status==='error'?'<span class="save-status error" data-auto-reply-status>'+esc(uiText('bot.autoReplyLoadFailed','Failed to load auto-reply status.'))+'</span>':'<span class="save-status" data-auto-reply-status></span>');
+  return '<div class="field field-full auto-reply-field">'+
+    '<div class="auto-reply-row">'+
+      '<div class="auto-reply-label">'+
+        '<span class="auto-reply-title">'+esc(uiText('bot.autoReplyToggle','Auto-Reply'))+'</span>'+
+        '<span class="auto-reply-hint">'+esc(uiText('bot.autoReplyHint','When on, this Bot replies to incoming private messages using its local LLM. Turn off to stay online without auto-replying.'))+'</span>'+
+      '</div>'+
+      '<button type="button" class="toggle-switch'+(enabled?' on':'')+'" data-auto-reply-toggle data-auto-reply-slug="'+esc(slug)+'" role="switch" aria-checked="'+(enabled?'true':'false')+'" aria-label="'+esc(uiText('bot.autoReplyToggle','Auto-Reply'))+'"'+(status==='loading'?' disabled':'')+'>'+
+        '<span class="toggle-track"><span class="toggle-thumb"></span></span>'+
+        '<span class="toggle-text">'+esc(enabled?onLabel:offLabel)+'</span>'+
+      '</button>'+
+    '</div>'+
+    note+
+  '</div>';
+}
 function chatAllowedSkillsMarkup(profile){
   var slug=profile&&profile.slug||'';
   var selected=ensureSelectedChatSkills(profile);
@@ -659,6 +706,54 @@ function wireChatSkillControls(){
       state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(selectedChatSkills(profile).filter(function(item){return item!==skill}));
       if(state.selectedTab==='chatSkills')renderChatSkillsTab();else renderInfoTab();
     });
+  });
+}
+function wireAutoReplyToggle(){
+  qq('[data-auto-reply-toggle]').forEach(function(el){
+    el.addEventListener('click',function(event){
+      event.preventDefault();
+      var slug=el.getAttribute('data-auto-reply-slug')||'';
+      var profile=selectedProfile();
+      if(!slug||!profile||profile.slug!==slug)return;
+      if(el.classList.contains('loading'))return;
+      var next=!el.classList.contains('on');
+      // Optimistically flip the UI and mark loading; POST persists locally (no on-chain write).
+      el.classList.toggle('on',next);
+      el.classList.toggle('loading',true);
+      el.setAttribute('aria-checked',next?'true':'false');
+      var onLabel=uiText('bot.autoReplyOn','On');
+      var offLabel=uiText('bot.autoReplyOff','Off');
+      var labelEl=queryWithin(el,'.toggle-text');if(labelEl)labelEl.textContent=next?onLabel:offLabel;
+      toggleAutoReply(profile,next);
+    });
+  });
+}
+function toggleAutoReply(profile,nextEnabled){
+  if(!profile||!profile.slug)return;
+  var slug=profile.slug;
+  var note=q('[data-auto-reply-status]');
+  if(note){note.textContent=uiText('bot.autoReplySaving','Saving...');note.className='save-status saving'}
+  return api('/api/chat/auto-reply/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({from:slug,enabled:nextEnabled})}).then(function(r){
+    var data=r&&r.data?r.data:r;
+    var enabled=Boolean(data&&data.enabled);
+    state.autoReplyBySlug[slug]=enabled;
+    state.autoReplyStatusBySlug[slug]='ready';
+    if(state.selectedTab==='chatSkills'&&state.selectedSlug===slug){
+      var panel=chatSkillsPanelForProfile(profile);
+      var toggle=queryWithin(panel,'[data-auto-reply-toggle]');
+      if(toggle){toggle.classList.toggle('on',enabled);toggle.classList.toggle('loading',false);toggle.setAttribute('aria-checked',enabled?'true':'false');var labelEl=queryWithin(toggle,'.toggle-text');if(labelEl)labelEl.textContent=enabled?uiText('bot.autoReplyOn','On'):uiText('bot.autoReplyOff','Off')}
+      var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=uiText('bot.autoReplySaved','Auto-reply setting saved.');status.className='save-status success'}
+    }
+    return enabled;
+  }).catch(function(error){
+    // Revert the optimistic flip on failure.
+    state.autoReplyStatusBySlug[slug]='ready';
+    if(state.selectedTab==='chatSkills'&&state.selectedSlug===slug){
+      var panel=chatSkillsPanelForProfile(profile);
+      var toggle=queryWithin(panel,'[data-auto-reply-toggle]');
+      if(toggle){toggle.classList.toggle('loading',false)}
+      var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=error&&error.message?error.message:String(error||'Failed to save.');status.className='save-status error'}
+    }
   });
 }
 function infoFieldValue(field,fallback){
@@ -994,12 +1089,15 @@ function renderChatSkillsTab(){
   if(!profile){root.innerHTML='';return}
   state.originalProfile=profile;
   root.innerHTML='<div class="info-edit-panel" data-chat-skills-profile-slug="'+esc(profile.slug)+'">'+
+    autoReplyToggleMarkup(profile)+
     '<div class="info-form-grid">'+
       chatAllowedSkillsMarkup(profile)+
     '</div>'+
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-chat-skills">'+esc(uiText('bot.saveChatSkills','Save Chat Skills'))+'</button><span class="save-status" data-save-status></span></div></div>';
   wireChatSkillControls();
+  wireAutoReplyToggle();
   if(!state.chatSkillOptionsStatusBySlug[profile.slug])loadChatSkillOptions(profile.slug);
+  if(!state.autoReplyStatusBySlug[profile.slug])loadAutoReplyStatus(profile.slug);
   var panel=chatSkillsPanelForProfile(profile);
   var save=queryWithin(panel,'[data-act="save-chat-skills"]');if(save)save.addEventListener('click',saveChatSkills);
   focusBotManagementTarget();

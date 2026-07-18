@@ -6194,6 +6194,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return created;
   }
 
+  async function persistAutoReplyEnabled(homeDir: string, enabled: boolean): Promise<void> {
+    const store = createConfigStore(homeDir);
+    const config = await store.read();
+    if (config.autoReply.enabled === enabled) {
+      return;
+    }
+    await store.set({
+      ...config,
+      autoReply: { enabled },
+    });
+  }
+
   async function resolveActorChatContext(rawActor: unknown): Promise<
     | {
       homeDir: string;
@@ -14805,6 +14817,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (autoReplyInput.defaultStrategyId !== undefined) {
           actor.autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
         }
+        await persistAutoReplyEnabled(actor.homeDir, actor.autoReplyConfig.enabled).catch((error) => {
+          console.warn('[chat] failed to persist auto-reply enabled flag', error);
+        });
         return commandSuccess({
           enabled: actor.autoReplyConfig.enabled,
           defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,

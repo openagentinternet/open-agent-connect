@@ -8,6 +8,10 @@ export interface A2AConfig {
   simplemsgListenerEnabled: boolean;
 }
 
+export interface AutoReplyConfig {
+  enabled: boolean;
+}
+
 export type DefaultWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
 
 export const DEFAULT_WRITE_NETWORKS: DefaultWriteNetwork[] = ['mvc', 'btc', 'doge', 'opcat'];
@@ -34,6 +38,7 @@ export interface BrowserConfig {
 export interface MetabotConfig {
   chain: ChainConfig;
   a2a: A2AConfig;
+  autoReply: AutoReplyConfig;
   browser: BrowserConfig;
 }
 
@@ -50,6 +55,9 @@ export function createDefaultConfig(): MetabotConfig {
     },
     a2a: {
       simplemsgListenerEnabled: true,
+    },
+    autoReply: {
+      enabled: true,
     },
     browser: {
       ...browserDefaults,

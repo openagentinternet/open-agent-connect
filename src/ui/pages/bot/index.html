@@ -1026,6 +1026,85 @@
         font-size: 11px;
       }
 
+      .auto-reply-field {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface2);
+        padding: 12px 14px;
+      }
+      .auto-reply-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .auto-reply-label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+      .auto-reply-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .auto-reply-hint {
+        font-size: 12px;
+        color: var(--text-muted);
+        line-height: 1.5;
+      }
+      .toggle-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+        padding: 0;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        color: var(--text);
+        font: inherit;
+      }
+      .toggle-switch:disabled,
+      .toggle-switch.loading {
+        cursor: default;
+        opacity: 0.7;
+      }
+      .toggle-track {
+        position: relative;
+        display: inline-block;
+        width: 38px;
+        height: 22px;
+        border-radius: 999px;
+        background: var(--border);
+        transition: background 0.15s ease;
+        flex-shrink: 0;
+      }
+      .toggle-switch.on .toggle-track {
+        background: var(--primary);
+      }
+      .toggle-thumb {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        transition: transform 0.15s ease;
+      }
+      .toggle-switch.on .toggle-thumb {
+        transform: translateX(16px);
+      }
+      .toggle-text {
+        font-size: 12px;
+        font-weight: 600;
+        min-width: 24px;
+        text-align: left;
+      }
+
       .settings-form {
         max-width: 520px;
         display: grid;
