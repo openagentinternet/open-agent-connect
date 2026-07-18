@@ -470,6 +470,7 @@ async function runCommandWithEnv(cwd, args, envOverrides = {}) {
 
 async function startProfileRecordingDaemon(homeDir, env, routeData = {}) {
   const requests = [];
+  let daemonStatus = null;
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const chunks = [];
@@ -477,7 +478,11 @@ async function startProfileRecordingDaemon(homeDir, env, routeData = {}) {
     req.on('end', () => {
       if (url.pathname === '/api/daemon/status') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(commandSuccess({ state: 'online' })));
+        res.end(JSON.stringify(commandSuccess({
+          state: 'online',
+          daemonId: daemonStatus?.ownerId ?? null,
+          pid: daemonStatus?.pid ?? null,
+        })));
         return;
       }
 
@@ -509,7 +514,7 @@ async function startProfileRecordingDaemon(homeDir, env, routeData = {}) {
 
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const store = createRuntimeStateStore(homeDir);
-  await store.writeDaemon({
+  daemonStatus = {
     ownerId: `daemon-${path.basename(homeDir)}`,
     pid: 999_999,
     host: '127.0.0.1',
@@ -517,7 +522,8 @@ async function startProfileRecordingDaemon(homeDir, env, routeData = {}) {
     baseUrl,
     startedAt: Date.now(),
     configHash: buildDaemonConfigHash(env),
-  });
+  };
+  await store.writeDaemon(daemonStatus);
 
   return {
     baseUrl,

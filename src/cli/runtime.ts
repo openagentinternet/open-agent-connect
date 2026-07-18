@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import net from 'node:net';
 import { collectDaemonStartupDiagnostics, formatDaemonStartupTimeoutMessage } from './daemonStartupDiagnostics';
 import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
@@ -135,6 +135,7 @@ const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
 const DEFAULT_DAEMON_HOST = '127.0.0.1';
 const DEFAULT_DAEMON_START_TIMEOUT_MS = 30_000;
 const DAEMON_START_POLL_INTERVAL_MS = 100;
+const DAEMON_HEALTH_TIMEOUT_MS = 1_500;
 const DAEMON_PREFERRED_PORT_ENV = 'METABOT_DAEMON_PREFERRED_PORT';
 const DEFAULT_DAEMON_PORT_BASE = 24_000;
 const DEFAULT_DAEMON_PORT_SPAN = 20_000;
@@ -441,15 +442,6 @@ export function getDefaultDaemonPort(homeDir?: string): number {
   } catch {
     return getLegacyDefaultDaemonPort();
   }
-}
-
-function isAddressInUseError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === 'object'
-    && 'code' in error
-    && (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
-  );
 }
 
 type SupportedBooleanConfigKey = 'a2a.simplemsgListenerEnabled' | 'chain.mvcSponsorUploadEnabled';
@@ -1046,27 +1038,130 @@ async function isPortBindable(host: string, port: number): Promise<boolean> {
   });
 }
 
-async function waitForPortRelease(host: string, port: number, timeoutMs: number): Promise<void> {
-  if (!Number.isInteger(port) || port <= 0) {
-    return;
-  }
+export interface DaemonStatusProbe {
+  reachable: boolean;
+  ownerId: string | null;
+  pid: number | null;
+}
 
-  const startedAt = Date.now();
-  while ((Date.now() - startedAt) < timeoutMs) {
-    if (await isPortBindable(host, port)) {
-      return;
+export async function probeDaemonStatus(
+  baseUrl: string,
+  timeoutMs = DAEMON_HEALTH_TIMEOUT_MS,
+): Promise<DaemonStatusProbe> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/daemon/status`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return { reachable: false, ownerId: null, pid: null };
     }
-    await sleep(DAEMON_START_POLL_INTERVAL_MS);
+    const payload = await response.json() as {
+      ok?: unknown;
+      data?: { daemonId?: unknown; pid?: unknown };
+    };
+    if (payload.ok !== true) {
+      return { reachable: false, ownerId: null, pid: null };
+    }
+    return {
+      reachable: true,
+      ownerId: typeof payload.data?.daemonId === 'string'
+        ? normalizeEnvText(payload.data.daemonId) || null
+        : null,
+      pid: typeof payload.data?.pid === 'number' && Number.isInteger(payload.data.pid)
+        ? payload.data.pid
+        : null,
+    };
+  } catch {
+    return { reachable: false, ownerId: null, pid: null };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-async function isDaemonReachable(baseUrl: string): Promise<boolean> {
-  try {
-    const response = await fetch(`${baseUrl}/api/daemon/status`);
-    return response.ok;
-  } catch {
+async function isDaemonReachable(baseUrl: string, expectedOwnerId?: string): Promise<boolean> {
+  const status = await probeDaemonStatus(baseUrl);
+  return status.reachable
+    && (!expectedOwnerId || status.ownerId === expectedOwnerId);
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
     return false;
   }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== 'ESRCH';
+  }
+}
+
+async function readDaemonLockInfo(lockPath: string): Promise<{ ownerId: string | null; pid: number | null }> {
+  try {
+    const raw = await fs.promises.readFile(lockPath, 'utf8');
+    const parsed = JSON.parse(raw) as { ownerId?: unknown; pid?: unknown };
+    return {
+      ownerId: typeof parsed.ownerId === 'string'
+        ? normalizeEnvText(parsed.ownerId) || null
+        : null,
+      pid: typeof parsed.pid === 'number' && Number.isInteger(parsed.pid) ? parsed.pid : null,
+    };
+  } catch {
+    return { ownerId: null, pid: null };
+  }
+}
+
+async function readProcessCommand(pid: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile('ps', ['-p', String(pid), '-o', 'command='], (error, stdout) => {
+      if (error) {
+        resolve(null);
+        return;
+      }
+      const command = stdout.trim();
+      resolve(command || null);
+    });
+  });
+}
+
+class DaemonOwnershipVerificationError extends Error {
+  constructor(pid: number, lockPath: string) {
+    super(
+      `Unable to verify ownership of daemon process ${pid}. It was not stopped. Inspect ${lockPath} and the daemon record before retrying.`,
+    );
+    this.name = 'DaemonOwnershipVerificationError';
+  }
+}
+
+async function verifyDaemonProcessOwnership(input: {
+  daemonRecord: RuntimeDaemonRecord;
+  lockPath: string;
+}): Promise<'dead' | 'verified' | 'unverified'> {
+  const { daemonRecord, lockPath } = input;
+  if (!isProcessAlive(daemonRecord.pid)) {
+    return 'dead';
+  }
+
+  const status = await probeDaemonStatus(daemonRecord.baseUrl);
+  if (
+    status.reachable
+    && status.ownerId === daemonRecord.ownerId
+    && status.pid === daemonRecord.pid
+  ) {
+    return 'verified';
+  }
+
+  const lock = await readDaemonLockInfo(lockPath);
+  if (lock.ownerId !== daemonRecord.ownerId || lock.pid !== daemonRecord.pid) {
+    return 'unverified';
+  }
+
+  const command = await readProcessCommand(daemonRecord.pid);
+  return command?.includes('daemon serve') ? 'verified' : 'unverified';
 }
 
 interface DaemonRouteOptions {
@@ -1104,9 +1199,30 @@ function daemonConfigMatchesContext(
   return normalizeEnvText(daemonRecord.configHash) === buildDaemonConfigHash(context.env);
 }
 
-async function stopRunningDaemon(daemonRecord: RuntimeDaemonRecord): Promise<void> {
+async function stopRunningDaemon(input: {
+  daemonRecord: RuntimeDaemonRecord;
+  lockPath: string;
+}): Promise<'already_stopped' | 'stopped'> {
+  const { daemonRecord, lockPath } = input;
   if (!Number.isFinite(daemonRecord.pid) || daemonRecord.pid <= 0) {
-    return;
+    return 'already_stopped';
+  }
+
+  const ownership = await verifyDaemonProcessOwnership({ daemonRecord, lockPath });
+  if (ownership === 'dead') {
+    const portReleased = await isPortBindable(
+      daemonRecord.host || DEFAULT_DAEMON_HOST,
+      daemonRecord.port,
+    );
+    if (!portReleased) {
+      throw new Error(
+        `Daemon process ${daemonRecord.pid} is already gone, but ${daemonRecord.host || DEFAULT_DAEMON_HOST}:${daemonRecord.port} is still occupied.`,
+      );
+    }
+    return 'already_stopped';
+  }
+  if (ownership !== 'verified') {
+    throw new DaemonOwnershipVerificationError(daemonRecord.pid, lockPath);
   }
 
   try {
@@ -1114,22 +1230,42 @@ async function stopRunningDaemon(daemonRecord: RuntimeDaemonRecord): Promise<voi
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ESRCH') {
-      return;
+      return 'already_stopped';
     }
     throw error;
   }
 
-  const startedAt = Date.now();
-  while ((Date.now() - startedAt) < DAEMON_CONFIG_RESTART_TIMEOUT_MS) {
-    if (!await isDaemonReachable(daemonRecord.baseUrl)) {
-      await waitForPortRelease(daemonRecord.host || DEFAULT_DAEMON_HOST, daemonRecord.port, DAEMON_CONFIG_RESTART_TIMEOUT_MS)
-        .catch(() => {});
-      return;
+  const waitForStop = async (): Promise<boolean> => {
+    const startedAt = Date.now();
+    while ((Date.now() - startedAt) < DAEMON_CONFIG_RESTART_TIMEOUT_MS) {
+      if (
+        !isProcessAlive(daemonRecord.pid)
+        && await isPortBindable(daemonRecord.host || DEFAULT_DAEMON_HOST, daemonRecord.port)
+      ) {
+        return true;
+      }
+      await sleep(DAEMON_START_POLL_INTERVAL_MS);
     }
-    await sleep(DAEMON_START_POLL_INTERVAL_MS);
+    return false;
+  };
+
+  if (await waitForStop()) {
+    return 'stopped';
   }
 
-  throw new Error('Timed out while restarting the local MetaBot daemon with updated configuration.');
+  try {
+    process.kill(daemonRecord.pid, 'SIGKILL');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ESRCH') {
+      throw error;
+    }
+  }
+  if (await waitForStop()) {
+    return 'stopped';
+  }
+
+  throw new Error(`Timed out while stopping the verified local MetaBot daemon process ${daemonRecord.pid}.`);
 }
 
 async function ensureDaemonBaseUrl(
@@ -1144,11 +1280,17 @@ async function ensureDaemonBaseUrl(
   }
 
   const daemonRecord = await resolveDaemonRecord(context, options);
-  if (daemonRecord?.baseUrl && await isDaemonReachable(daemonRecord.baseUrl)) {
-    if (daemonConfigMatchesContext(daemonRecord, context)) {
-      return daemonRecord.baseUrl;
+  if (daemonRecord) {
+    const paths = resolveMetabotPaths(resolveDaemonHomeDir(context, options));
+    if (
+      daemonRecord.baseUrl
+      && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)
+    ) {
+      if (daemonConfigMatchesContext(daemonRecord, context)) {
+        return daemonRecord.baseUrl;
+      }
     }
-    await stopRunningDaemon(daemonRecord);
+    await stopRunningDaemon({ daemonRecord, lockPath: paths.daemonLockPath });
     return startDetachedDaemon(context, daemonRecord, options);
   }
 
@@ -1169,11 +1311,17 @@ async function startDetachedDaemon(
   const preferredPort = parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
     ?? staleRecord?.port
     ?? getDefaultDaemonPort(homeDir);
-  if (persistedRecord?.baseUrl && await isDaemonReachable(persistedRecord.baseUrl)) {
-    if (daemonConfigMatchesContext(persistedRecord, context)) {
-      return persistedRecord.baseUrl;
+  if (persistedRecord) {
+    const paths = resolveMetabotPaths(homeDir);
+    if (
+      persistedRecord.baseUrl
+      && await isDaemonReachable(persistedRecord.baseUrl, persistedRecord.ownerId)
+    ) {
+      if (daemonConfigMatchesContext(persistedRecord, context)) {
+        return persistedRecord.baseUrl;
+      }
     }
-    await stopRunningDaemon(persistedRecord);
+    await stopRunningDaemon({ daemonRecord: persistedRecord, lockPath: paths.daemonLockPath });
   }
   await store.clearDaemon();
 
@@ -1201,7 +1349,7 @@ async function startDetachedDaemon(
     if (
       daemonRecord?.baseUrl
       && normalizeEnvText(daemonRecord.configHash) === expectedConfigHash
-      && await isDaemonReachable(daemonRecord.baseUrl)
+      && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)
     ) {
       return daemonRecord.baseUrl;
     }
@@ -2288,15 +2436,23 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
         const pid = daemonRecord.pid;
         try {
-          process.kill(pid, 'SIGTERM');
+          const stopped = await stopRunningDaemon({
+            daemonRecord,
+            lockPath: resolveMetabotPaths(homeDir).daemonLockPath,
+          });
+          await runtimeStore.clearDaemon(pid);
+          return commandSuccess({
+            pid,
+            stopped: stopped === 'stopped',
+            alreadyStopped: stopped === 'already_stopped',
+          });
         } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code !== 'ESRCH') {
-            return commandFailed('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
+          if (error instanceof DaemonOwnershipVerificationError) {
+            return commandFailed('daemon_ownership_unverified', error.message);
           }
+          const code = (error as NodeJS.ErrnoException).code;
+          return commandFailed('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
         }
-        await runtimeStore.clearDaemon(pid);
-        return commandSuccess({ pid, stopped: true });
       },
     },
     doctor: {
@@ -3596,15 +3752,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const preferredPort = explicitPort
     ?? parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
     ?? getDefaultDaemonPort(homeDir);
-  let started;
-  try {
-    started = await daemon.start(preferredPort, host);
-  } catch (error) {
-    if (explicitPort != null || !isAddressInUseError(error)) {
-      throw error;
-    }
-    started = await daemon.start(0, host);
-  }
+  const started = await daemon.start(preferredPort, host);
 
   const runtimeStore = createRuntimeStateStore(paths);
   const providerPresenceStore = createProviderPresenceStateStore(paths);
