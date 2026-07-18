@@ -165,6 +165,37 @@ async function getBuiltSkillpacks() {
   return builtSkillpacksPromise;
 }
 
+function assertMetaAppPrivateChatComposerContract(content, label) {
+  assert.match(content, /browser\.privateChat\.compose/, `${label} should document the composer bridge`);
+  assert.match(content, /Browser-owned private-chat composer/, `${label} should preserve composer ownership`);
+  assert.match(content, /no recipient or message-content parameters/, `${label} should forbid iframe-controlled recipients and content`);
+  assert.match(
+    content,
+    /`\{ opened: true \}` result means only that the Browser composer opened; it does not mean the message was sent/,
+    `${label} should distinguish opening the composer from sending`,
+  );
+  assert.match(
+    content,
+    /`map:\/\/simplemsg\/conversation` is used only for conversation navigation/,
+    `${label} should restrict simplemsg conversation URIs to navigation`,
+  );
+  assert.match(content, /`metaid\.pin\.write` is not the private-chat API/, `${label} should forbid PIN-write private chat`);
+  assert.match(content, /unsupported_method/, `${label} should document unsupported hosts`);
+
+  const standardMessageExample = content.match(
+    /<button type="button" id="message-button">Message<\/button>\s*<script>([\s\S]*?)<\/script>/,
+  );
+  assert.ok(standardMessageExample, `${label} should include the standard Message button example`);
+  assert.match(
+    standardMessageExample[0],
+    /window\.AgentBrowser\.request\(\{\s*method: 'browser\.privateChat\.compose'\s*\}\);/,
+    `${label} should use the parameter-free compose request in its standard Message example`,
+  );
+  assert.doesNotMatch(standardMessageExample[0], /params\s*:/, `${label} should not pass params in its standard Message example`);
+  assert.doesNotMatch(standardMessageExample[0], /\bto\s*:/, `${label} should not pass a recipient in its standard Message example`);
+  assert.doesNotMatch(standardMessageExample[0], /\bcontent\s*:/, `${label} should not pass message content in its standard Message example`);
+}
+
 test('source MetaBot skills keep valid frontmatter and actor selection guidance', async () => {
   for (const skillName of EXPECTED_METABOT_SKILLS) {
     const content = await readFile(sourceSkillFile(skillName), 'utf8');
@@ -319,6 +350,12 @@ test('buildAgentConnectSkillpacks includes the unified MetaApp workflow skill', 
   assert.doesNotMatch(content, /ui open --page metaapps/);
   assert.doesNotMatch(content, /metabot-homepage-guide/);
   assert.doesNotMatch(content, /metabot-metaapp-publish/);
+
+  assertMetaAppPrivateChatComposerContract(content, 'shared MetaApp skill');
+  for (const host of HOSTS) {
+    const hostContent = await readFile(hostWrapperSharedSkillFile(outputRoot, host, 'metabot-metaapp'), 'utf8');
+    assertMetaAppPrivateChatComposerContract(hostContent, `${host} MetaApp skill`);
+  }
 });
 
 test('buildAgentConnectSkillpacks updates generated ui-open help to recommend apps instead of metaapps', async () => {
