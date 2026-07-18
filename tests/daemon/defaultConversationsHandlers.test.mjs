@@ -333,6 +333,56 @@ test('default conversation handlers enrich remote LLM providers from the public 
   ]);
 });
 
+test('default conversation handlers fall back to the chain avatar when the stored peer avatar is a truncated content reference', async (t) => {
+  const CHAIN_AVATAR = '/content/b170790801cf9fc2ea243ee2da4e9ab1d49fdbbb16b99d6d6b3bd5c488a3d724i0';
+  const { handlers } = await createFixture(t, {
+    conversationPeerAvatar: '/content/',
+    conversationProfileFetch: async () => ({
+      ok: true,
+      json: async () => ({
+        data: {
+          name: 'Remote Bot',
+          avatar: CHAIN_AVATAR,
+        },
+      }),
+    }),
+  });
+  const stream = await handlers.conversations.streamEvents({
+    local: LOCAL_GLOBAL_META_ID,
+  });
+  const iterator = stream[Symbol.asyncIterator]();
+  await iterator.next();
+
+  const initial = await handlers.conversations.list({
+    local: LOCAL_GLOBAL_META_ID,
+    limit: 10,
+  });
+  await Promise.race([
+    iterator.next(),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timed out waiting for public profile enrichment')), 500);
+    }),
+  ]);
+  const enriched = await handlers.conversations.list({
+    local: LOCAL_GLOBAL_META_ID,
+    limit: 10,
+  });
+  const messages = await handlers.conversations.messages({
+    local: LOCAL_GLOBAL_META_ID,
+    peer: PEER_GLOBAL_META_ID,
+    limit: 50,
+  });
+  await iterator.return();
+
+  assert.equal(initial.ok, true);
+  assert.equal(initial.data.conversations[0].peerAvatar, null);
+  assert.equal(enriched.ok, true);
+  assert.equal(enriched.data.conversations[0].peerAvatar, CHAIN_AVATAR);
+  assert.equal(messages.ok, true);
+  assert.equal(messages.data.peerBot.avatar, CHAIN_AVATAR);
+  assert.equal(messages.data.messages[0].sender.avatar, CHAIN_AVATAR);
+});
+
 test('default conversation handlers do not block on slow chain profile lookups', async (t) => {
   const originalFetch = globalThis.fetch;
   const fetchCalls = [];
