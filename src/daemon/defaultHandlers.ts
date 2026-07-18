@@ -15,6 +15,7 @@ import {
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import {
   listIdentityProfiles,
+  readActiveMetabotHome,
   setActiveMetabotHome,
   upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
@@ -5767,11 +5768,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
     ];
   }
 
-  async function registerActiveIdentityProfile(identity: RuntimeIdentityRecord): Promise<void> {
+  async function registerActiveIdentityProfile(
+    identity: RuntimeIdentityRecord,
+    profileHomeDir = input.homeDir,
+  ): Promise<void> {
     const profile = await upsertIdentityProfile({
       systemHomeDir: normalizedSystemHomeDir,
       name: identity.name,
-      homeDir: input.homeDir,
+      homeDir: profileHomeDir,
       globalMetaId: identity.globalMetaId,
       mvcAddress: identity.mvcAddress,
     });
@@ -6080,7 +6084,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     | { failure: MetabotCommandResult<never> }
   > {
     const requestedSlug = normalizeText(rawActor);
-    let profileHomeDir = input.homeDir;
+    let profileHomeDir = await readActiveMetabotHome(normalizedSystemHomeDir) ?? input.homeDir;
     if (requestedSlug) {
       const selectedProfile = await resolveMetabotProfileBySelector(requestedSlug);
       if (!selectedProfile) {
@@ -12011,53 +12015,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
     identity: {
-      create: async ({ name, host }) => {
+      create: async ({ name, host, profileSlug }) => {
         const normalizedName = normalizeText(name);
         if (!normalizedName) {
           return commandFailed('missing_name', 'MetaBot identity name is required.');
         }
 
-        const state = await runtimeStateStore.readState();
-        const existingName = normalizeText(state.identity?.name);
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir);
-        const duplicateMatch = resolveProfileNameConflict(normalizedName, profiles);
-        if (
-          duplicateMatch.status === 'matched'
-          && duplicateMatch.matchType !== 'ranked'
-          && path.resolve(duplicateMatch.match.homeDir) !== path.resolve(input.homeDir)
-        ) {
+        const requestedProfileSlug = normalizeText(profileSlug);
+        const selectedProfile = requestedProfileSlug
+          ? profiles.find((profile) => profile.slug === requestedProfileSlug) ?? null
+          : null;
+        if (requestedProfileSlug && !selectedProfile) {
           return commandFailed(
-            'identity_name_taken',
-            `Local MetaBot name "${normalizedName}" already exists. Use metabot identity assign --name "${duplicateMatch.match.name}".`
+            'profile_not_found',
+            `MetaBot profile not found: ${requestedProfileSlug}`,
           );
         }
-        if (
-          duplicateMatch.status === 'ambiguous'
-          && duplicateMatch.candidates.some((profile) => path.resolve(profile.homeDir) !== path.resolve(input.homeDir))
-        ) {
-          return commandFailed(
-            'identity_name_taken',
-            duplicateMatch.message
-          );
-        }
-
-        if (state.identity && existingName && existingName !== normalizedName) {
-          return commandFailed(
-            'identity_name_conflict',
-            `Current active local identity is "${existingName}". Switch profile first or choose the same name.`
-          );
-        }
-        const existingIdentity = state.identity;
-        if (existingIdentity && isIdentityBootstrapReady(existingIdentity)) {
-          await ensureProfileWorkspace({
-            homeDir: input.homeDir,
-            name: existingIdentity.name,
-          });
-          await registerActiveIdentityProfile(existingIdentity);
-          await notifyIdentityProfileRegistered();
-          return commandSuccess(existingIdentity);
-        }
-
         const resolvedHome = resolveIdentityCreateProfileHome({
           systemHomeDir: normalizedSystemHomeDir,
           requestedName: normalizedName,
@@ -12070,9 +12044,36 @@ export function createDefaultMetabotDaemonHandlers(input: {
           );
         }
 
+        const profileHomeDir = path.resolve(selectedProfile?.homeDir ?? resolvedHome.homeDir);
+        const targetRuntimeStateStore = profileHomeDir === path.resolve(input.homeDir)
+          ? runtimeStateStore
+          : createRuntimeStateStore(profileHomeDir);
+        const targetSecretStore = profileHomeDir === path.resolve(input.homeDir)
+          ? secretStore
+          : createFileSecretStore(profileHomeDir);
+        const targetSigner = createSignerForProfileHome(profileHomeDir);
+        const state = await targetRuntimeStateStore.readState();
+        const existingName = normalizeText(state.identity?.name);
+        if (state.identity && existingName && existingName !== normalizedName) {
+          return commandFailed(
+            'identity_name_conflict',
+            `The local identity in profile "${path.basename(profileHomeDir)}" is "${existingName}". Choose the same name or repair the profile before creating another identity.`,
+          );
+        }
+        const existingIdentity = state.identity;
+        if (existingIdentity && isIdentityBootstrapReady(existingIdentity)) {
+          await ensureProfileWorkspace({
+            homeDir: profileHomeDir,
+            name: existingIdentity.name,
+          });
+          await registerActiveIdentityProfile(existingIdentity, profileHomeDir);
+          await notifyIdentityProfileRegistered();
+          return commandSuccess(existingIdentity);
+        }
+
         const requestName = state.identity?.name || normalizedName;
         await ensureProfileWorkspace({
-          homeDir: input.homeDir,
+          homeDir: profileHomeDir,
           name: requestName,
         });
         const preferredProvider = normalizePreferredCreateProvider(host)
@@ -12081,7 +12082,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         let defaultProviders: { primaryProvider?: LlmProvider | null; fallbackProvider?: LlmProvider | null };
         try {
           defaultProviders = await resolveDefaultMetabotCreateProviders({
-            homeDir: input.homeDir,
+            homeDir: profileHomeDir,
             preferredProvider,
           });
         } catch (error) {
@@ -12098,30 +12099,30 @@ export function createDefaultMetabotDaemonHandlers(input: {
             name: requestName,
           },
           createMetabot: createLocalMetabotStep({
-            runtimeStateStore,
-            secretStore,
+            runtimeStateStore: targetRuntimeStateStore,
+            secretStore: targetSecretStore,
           }),
           requestSubsidy: createMetabotSubsidyStep({
-            runtimeStateStore,
+            runtimeStateStore: targetRuntimeStateStore,
             requestMvcGasSubsidy: input.requestMvcGasSubsidy,
           }),
           syncIdentityToChain: createLocalIdentitySyncStep({
-            runtimeStateStore,
-            signer,
+            runtimeStateStore: targetRuntimeStateStore,
+            signer: targetSigner,
             stepDelayMs: input.identitySyncStepDelayMs,
           }),
         });
 
-        const nextState = await runtimeStateStore.readState();
+        const nextState = await targetRuntimeStateStore.readState();
         if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
-          await registerActiveIdentityProfile(nextState.identity);
+          await registerActiveIdentityProfile(nextState.identity, profileHomeDir);
           await notifyIdentityProfileRegistered();
-          await ensureEmptyPersonaFiles(runtimeStateStore.paths, normalizedName);
+          await ensureEmptyPersonaFiles(targetRuntimeStateStore.paths, normalizedName);
 
           try {
             const profile = await createMetabotProfileFromIdentity(normalizedSystemHomeDir, {
               name: nextState.identity.name,
-              homeDir: input.homeDir,
+              homeDir: profileHomeDir,
               globalMetaId: nextState.identity.globalMetaId,
               mvcAddress: nextState.identity.mvcAddress,
               ...(defaultProviders.primaryProvider !== undefined
@@ -12132,7 +12133,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
                 : {}),
             });
             const profileInfoTargets = buildMetabotInfoPublishTargets(profile, ['primaryProvider']);
-            const profileChainWrites = await syncMetabotInfoToChain(signer, profile, profileInfoTargets, {
+            const profileChainWrites = await syncMetabotInfoToChain(targetSigner, profile, profileInfoTargets, {
               delayMs: input.identitySyncStepDelayMs,
               operation: 'create',
               deferPublishStateWrite: true,

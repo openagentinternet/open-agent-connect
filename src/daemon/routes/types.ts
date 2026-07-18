@@ -74,7 +74,7 @@ export interface MetabotDaemonHttpHandlers {
     doctor?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
   identity?: {
-    create?: (input: { name: string; host?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    create?: (input: { name: string; host?: string; profileSlug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
   loom?: {

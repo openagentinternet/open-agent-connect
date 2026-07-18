@@ -23,7 +23,11 @@ const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.j
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createLlmRuntimeResolver } = require('../../dist/core/llm/llmRuntimeResolver.js');
 const { resolveMetabotHomeSelection } = require('../../dist/core/state/homeSelection.js');
-const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const {
+  resolveMetabotDaemonPaths,
+  resolveMetabotPaths,
+} = require('../../dist/core/state/paths.js');
+const { createDaemonStateStore } = require('../../dist/core/state/daemonStateStore.js');
 const { createProviderPresenceStateStore } = require('../../dist/core/provider/providerPresenceState.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createSellerOrderRecord } = require('../../dist/core/orders/sellerOrderState.js');
@@ -69,6 +73,10 @@ async function createProfileHomeTemp(prefix, slug = 'test-profile') {
 
 function runtimePath(homeDir, ...segments) {
   return path.join(homeDir, '.runtime', ...segments);
+}
+
+function daemonStatePath(homeDir) {
+  return resolveMetabotDaemonPaths(deriveSystemHome(homeDir)).daemonStatePath;
 }
 
 function metabotPaths(homeDir) {
@@ -513,8 +521,10 @@ async function startProfileRecordingDaemon(homeDir, env, routeData = {}) {
   }
 
   const baseUrl = `http://127.0.0.1:${address.port}`;
-  const store = createRuntimeStateStore(homeDir);
+  const store = createDaemonStateStore(deriveSystemHome(homeDir));
   daemonStatus = {
+    schemaVersion: 1,
+    instanceId: 'default',
     ownerId: `daemon-${path.basename(homeDir)}`,
     pid: 999_999,
     host: '127.0.0.1',
@@ -522,6 +532,9 @@ async function startProfileRecordingDaemon(homeDir, env, routeData = {}) {
     baseUrl,
     startedAt: Date.now(),
     configHash: buildDaemonConfigHash(env),
+    oacVersion: '0.2.32',
+    runtimeFingerprint: 'test-runtime',
+    supervisor: { kind: 'none', serviceId: null },
   };
   await store.writeDaemon(daemonStatus);
 
@@ -810,11 +823,11 @@ async function startFakeSocketPresenceApiServer(options = {}) {
 }
 
 async function stopDaemon(homeDir) {
-  const daemonStatePath = runtimePath(homeDir, 'daemon.json');
+  const statePath = daemonStatePath(homeDir);
 
   let daemonState;
   try {
-    daemonState = JSON.parse(await readFile(daemonStatePath, 'utf8'));
+    daemonState = JSON.parse(await readFile(statePath, 'utf8'));
   } catch (error) {
     const code = error?.code;
     if (code === 'ENOENT') {
@@ -839,7 +852,7 @@ async function stopDaemon(homeDir) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     let daemonStateExists = true;
     try {
-      await readFile(daemonStatePath, 'utf8');
+      await readFile(statePath, 'utf8');
     } catch (error) {
       const code = error?.code;
       if (code === 'ENOENT') {
@@ -857,7 +870,7 @@ async function stopDaemon(homeDir) {
   if (pid != null && isProcessAlive(pid)) {
     throw new Error(`Timed out stopping daemon process ${pid}.`);
   }
-  await rm(daemonStatePath, { force: true });
+  await rm(statePath, { force: true });
 }
 
 function isProcessAlive(pid) {
@@ -1015,7 +1028,7 @@ test('identity create auto-creates the slugged profile workspace and doctor repo
     true
   );
 
-  const daemonState = JSON.parse(await readFile(runtimePath(homeDir, 'daemon.json'), 'utf8'));
+  const daemonState = JSON.parse(await readFile(daemonStatePath(homeDir), 'utf8'));
   assert.match(daemonState.baseUrl, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.equal(Number.isInteger(daemonState.pid), true);
 });
@@ -1367,9 +1380,7 @@ test('daemon config restarts keep the previous port so local inspector URLs stay
   });
   assert.equal(created.exitCode, 0);
 
-  const firstDaemonState = JSON.parse(
-    await readFile(runtimePath(homeDir, 'daemon.json'), 'utf8')
-  );
+  const firstDaemonState = JSON.parse(await readFile(daemonStatePath(homeDir), 'utf8'));
   const firstPort = new URL(firstDaemonState.baseUrl).port;
 
   const doctor = await runCommand(homeDir, ['doctor'], {
@@ -1378,16 +1389,14 @@ test('daemon config restarts keep the previous port so local inspector URLs stay
   assert.equal(doctor.exitCode, 0);
   assert.equal(doctor.payload.ok, true);
 
-  const secondDaemonState = JSON.parse(
-    await readFile(runtimePath(homeDir, 'daemon.json'), 'utf8')
-  );
+  const secondDaemonState = JSON.parse(await readFile(daemonStatePath(homeDir), 'utf8'));
   const secondPort = new URL(secondDaemonState.baseUrl).port;
 
   assert.equal(secondPort, firstPort);
   assert.notEqual(secondDaemonState.configHash, firstDaemonState.configHash);
 });
 
-test('getDefaultDaemonPort is stable per home and avoids a single shared default port', () => {
+test('getDefaultDaemonPort is the single installation default', () => {
   const firstHome = '/tmp/metabot-home-a';
   const secondHome = '/tmp/metabot-home-b';
 
@@ -1396,12 +1405,11 @@ test('getDefaultDaemonPort is stable per home and avoids a single shared default
   const secondPort = getDefaultDaemonPort(secondHome);
 
   assert.equal(firstPort, repeatedFirstPort);
-  assert.notEqual(firstPort, secondPort);
-  assert.equal(firstPort >= 24000 && firstPort < 44000, true);
-  assert.equal(secondPort >= 24000 && secondPort < 44000, true);
+  assert.equal(firstPort, secondPort);
+  assert.equal(firstPort, 10001);
 });
 
-test('fresh daemon starts for the same home reuse the home-derived port', async (t) => {
+test('fresh daemon starts for the same installation reuse the persisted port', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));
 
@@ -1419,7 +1427,7 @@ test('fresh daemon starts for the same home reuse the home-derived port', async 
   const secondPort = new URL(secondStart.payload.data.baseUrl).port;
 
   assert.equal(firstPort, secondPort);
-  assert.equal(firstPort, String(getDefaultDaemonPort(homeDir)));
+  assert.ok(Number(firstPort) >= 10_001 && Number(firstPort) <= 10_020);
 });
 
 test('daemon start does not write legacy provider presence pins when presence is enabled', async (t) => {
@@ -1762,7 +1770,7 @@ test('buzz post --from uses the selected actor identity and default write networ
   assert.equal(posted.payload.data.network, 'opcat');
 });
 
-test('buzz post --from bob targets bob daemon instead of the current alice home daemon', async (t) => {
+test('buzz post --from bob uses the shared daemon and forwards bob as the actor', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cross-profile-daemon-'));
   const aliceHome = await createProfileHome(systemHome, 'alice');
   const bobHome = await createProfileHome(systemHome, 'bob');
@@ -1778,13 +1786,11 @@ test('buzz post --from bob targets bob daemon instead of the current alice home 
   await ensureIndexedProfileHome(bobHome);
   await ensureIndexedProfileHome(aliceHome);
 
-  const aliceDaemon = await startProfileRecordingDaemon(aliceHome, env);
-  const bobDaemon = await startProfileRecordingDaemon(bobHome, env, {
+  const daemon = await startProfileRecordingDaemon(aliceHome, env, {
     '/api/buzz/post': { pinId: 'bob-pin', ok: true },
   });
   t.after(async () => {
-    await aliceDaemon.close();
-    await bobDaemon.close();
+    await daemon.close();
     await cleanupProfileHome(systemHome);
   });
 
@@ -1798,12 +1804,11 @@ test('buzz post --from bob targets bob daemon instead of the current alice home 
   );
 
   assert.equal(result.exitCode, 0);
-  assert.deepEqual(aliceDaemon.requests.filter((entry) => entry.pathname === '/api/buzz/post'), []);
-  assert.equal(bobDaemon.requests.at(-1)?.pathname, '/api/buzz/post');
-  assert.equal(bobDaemon.requests.at(-1)?.body?.from, 'bob');
+  assert.equal(daemon.requests.at(-1)?.pathname, '/api/buzz/post');
+  assert.equal(daemon.requests.at(-1)?.body?.from, 'bob');
 });
 
-test('metaapp view --from bob returns bob daemon localUiUrl instead of alice baseUrl', async (t) => {
+test('metaapp view --from bob keeps the selected actor in the shared daemon localUiUrl', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-metaapp-view-daemon-'));
   const aliceHome = await createProfileHome(systemHome, 'alice');
   const bobHome = await createProfileHome(systemHome, 'bob');
@@ -1819,18 +1824,16 @@ test('metaapp view --from bob returns bob daemon localUiUrl instead of alice bas
   await ensureIndexedProfileHome(bobHome);
   await ensureIndexedProfileHome(aliceHome);
 
-  const aliceDaemon = await startProfileRecordingDaemon(aliceHome, env);
-  const bobDaemon = await startProfileRecordingDaemon(bobHome, env);
+  const daemon = await startProfileRecordingDaemon(aliceHome, env);
   t.after(async () => {
-    await aliceDaemon.close();
-    await bobDaemon.close();
+    await daemon.close();
     await cleanupProfileHome(systemHome);
   });
 
   const opened = await runCommandWithEnv(aliceHome, ['metaapp', 'view', '--from', 'bob', '--mine'], env);
 
   assert.equal(opened.exitCode, 0);
-  assert.equal(opened.payload.data.localUiUrl, `${bobDaemon.baseUrl}/ui/apps?from=bob&mine=true`);
+  assert.equal(opened.payload.data.localUiUrl, `${daemon.baseUrl}/ui/apps?from=bob&mine=true`);
 });
 
 test('services publish persists a local directory entry that network services --online can read back', async (t) => {

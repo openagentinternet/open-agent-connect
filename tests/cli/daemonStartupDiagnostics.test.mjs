@@ -10,24 +10,19 @@ const {
   collectDaemonStartupDiagnostics,
   formatDaemonStartupTimeoutMessage,
 } = require('../../dist/cli/daemonStartupDiagnostics.js');
-const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
-const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { resolveMetabotDaemonPaths } = require('../../dist/core/state/paths.js');
+const { createDaemonStateStore } = require('../../dist/core/state/daemonStateStore.js');
 
-async function createProfileHome(systemHome, slug = 'test-profile') {
-  const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
-  await mkdir(homeDir, { recursive: true });
-  return homeDir;
-}
-
-test('collectDaemonStartupDiagnostics reads daemon.json and daemon.lock for the selected profile home', async (t) => {
+test('collectDaemonStartupDiagnostics reads global daemon.json and daemon.lock for the installation', async (t) => {
   const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-daemon-diagnostics-'));
-  const homeDir = await createProfileHome(systemHome, 'alice');
-  const paths = resolveMetabotPaths(homeDir);
+  const paths = resolveMetabotDaemonPaths(systemHome);
   t.after(async () => {
     await rm(systemHome, { recursive: true, force: true });
   });
 
-  await createRuntimeStateStore(homeDir).writeDaemon({
+  await createDaemonStateStore(systemHome).writeDaemon({
+    schemaVersion: 1,
+    instanceId: 'default',
     ownerId: 'daemon-alice',
     pid: 1111,
     host: '127.0.0.1',
@@ -35,6 +30,9 @@ test('collectDaemonStartupDiagnostics reads daemon.json and daemon.lock for the 
     baseUrl: 'http://127.0.0.1:32390',
     startedAt: 123456,
     configHash: 'config-hash-1',
+    oacVersion: '0.2.32',
+    runtimeFingerprint: 'runtime-fingerprint',
+    supervisor: { kind: 'none', serviceId: null },
   });
   await mkdir(path.dirname(paths.daemonLockPath), { recursive: true });
   await writeFile(paths.daemonLockPath, `${JSON.stringify({
@@ -44,11 +42,11 @@ test('collectDaemonStartupDiagnostics reads daemon.json and daemon.lock for the 
   }, null, 2)}\n`, 'utf8');
 
   const snapshot = await collectDaemonStartupDiagnostics({
-    homeDir,
+    systemHomeDir: systemHome,
     preferredPort: 32390,
   });
 
-  assert.equal(snapshot.homeDir, path.resolve(homeDir));
+  assert.equal(snapshot.systemHomeDir, path.resolve(systemHome));
   assert.equal(snapshot.preferredPort, 32390);
   assert.equal(snapshot.daemonStatePath, paths.daemonStatePath);
   assert.equal(snapshot.lockPath, paths.daemonLockPath);
@@ -59,13 +57,15 @@ test('collectDaemonStartupDiagnostics reads daemon.json and daemon.lock for the 
   assert.equal(snapshot.lockOwnerAlive, false);
 });
 
-test('formatDaemonStartupTimeoutMessage includes the selected home, preferred port, daemon.json, and daemon.lock evidence', async () => {
+test('formatDaemonStartupTimeoutMessage includes the installation, preferred port, daemon.json, and daemon.lock evidence', async () => {
   const message = formatDaemonStartupTimeoutMessage({
-    homeDir: '/tmp/.metabot/profiles/alice',
+    systemHomeDir: '/tmp/system-home',
     preferredPort: 32390,
-    daemonStatePath: '/tmp/.metabot/profiles/alice/.runtime/daemon.json',
-    lockPath: '/tmp/.metabot/profiles/alice/.runtime/locks/daemon.lock',
+    daemonStatePath: '/tmp/system-home/.metabot/runtime/daemon.json',
+    lockPath: '/tmp/system-home/.metabot/runtime/locks/daemon.lock',
     daemonRecord: {
+      schemaVersion: 1,
+      instanceId: 'default',
       ownerId: 'daemon-alice',
       pid: 1111,
       host: '127.0.0.1',
@@ -73,6 +73,9 @@ test('formatDaemonStartupTimeoutMessage includes the selected home, preferred po
       baseUrl: 'http://127.0.0.1:32390',
       startedAt: 123456,
       configHash: 'config-hash-1',
+      oacVersion: '0.2.32',
+      runtimeFingerprint: 'runtime-fingerprint',
+      supervisor: { kind: 'none', serviceId: null },
     },
     lockInfo: {
       ownerId: 'lock-alice',
@@ -83,10 +86,10 @@ test('formatDaemonStartupTimeoutMessage includes the selected home, preferred po
   });
 
   assert.ok(message.includes('Timed out while starting the local MetaBot daemon.'));
-  assert.ok(message.includes('Selected profile home: /tmp/.metabot/profiles/alice'));
+  assert.ok(message.includes('System home: /tmp/system-home'));
   assert.ok(message.includes('Preferred port: 32390'));
-  assert.ok(message.includes('daemon.json: /tmp/.metabot/profiles/alice/.runtime/daemon.json'));
-  assert.ok(message.includes('daemon.lock: /tmp/.metabot/profiles/alice/.runtime/locks/daemon.lock'));
+  assert.ok(message.includes('daemon.json: /tmp/system-home/.metabot/runtime/daemon.json'));
+  assert.ok(message.includes('daemon.lock: /tmp/system-home/.metabot/runtime/locks/daemon.lock'));
   assert.ok(message.includes('pid=999999'));
   assert.ok(message.includes('ownerAlive=no'));
 });

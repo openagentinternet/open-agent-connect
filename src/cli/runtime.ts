@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import net from 'node:net';
 import { collectDaemonStartupDiagnostics, formatDaemonStartupTimeoutMessage } from './daemonStartupDiagnostics';
+import { CLI_VERSION } from './version';
 import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import {
@@ -28,7 +29,11 @@ import { resolveIdentityCreateProfileHome } from '../core/identity/profileWorksp
 import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
-import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
+import {
+  resolveMetabotDaemonPaths,
+  resolveMetabotPaths,
+  type MetabotPaths,
+} from '../core/state/paths';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
   resolveMetabotManagerLayout,
@@ -38,6 +43,11 @@ import {
   createRuntimeStateStore,
   type RuntimeDaemonRecord,
 } from '../core/state/runtimeStateStore';
+import {
+  createDaemonStateStore,
+  type DaemonInstallationRecord,
+  type GlobalDaemonRecord,
+} from '../core/state/daemonStateStore';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createOnlineServiceCacheStore, DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS } from '../core/discovery/onlineServiceCache';
 import { refreshOnlineServiceCacheFromChain } from '../core/discovery/onlineServiceCacheSync';
@@ -131,14 +141,15 @@ import { runSystemUpdate } from '../core/system/update';
 import { runSystemUninstall } from '../core/system/uninstall';
 import type { CliDependencies, CliRuntimeContext } from './types';
 
-const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
+const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:10001';
 const DEFAULT_DAEMON_HOST = '127.0.0.1';
 const DEFAULT_DAEMON_START_TIMEOUT_MS = 30_000;
 const DAEMON_START_POLL_INTERVAL_MS = 100;
 const DAEMON_HEALTH_TIMEOUT_MS = 1_500;
 const DAEMON_PREFERRED_PORT_ENV = 'METABOT_DAEMON_PREFERRED_PORT';
-const DEFAULT_DAEMON_PORT_BASE = 24_000;
-const DEFAULT_DAEMON_PORT_SPAN = 20_000;
+const DEFAULT_DAEMON_PORT = 10_001;
+const DAEMON_FALLBACK_PORT_START = 10_002;
+const DAEMON_FALLBACK_PORT_END = 10_020;
 const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
@@ -414,34 +425,8 @@ function parseDaemonPort(value: string | undefined): number | null {
   return parsed;
 }
 
-function getLegacyDefaultDaemonPort(): number {
-  try {
-    const parsed = new URL(DEFAULT_DAEMON_BASE_URL);
-    const port = Number.parseInt(parsed.port, 10);
-    if (Number.isInteger(port) && port > 0) {
-      return port;
-    }
-  } catch {
-    // Ignore malformed defaults and fall back below.
-  }
-  return 4827;
-}
-
-export function getDefaultDaemonPort(homeDir?: string): number {
-  const normalizedHomeDir = typeof homeDir === 'string' ? homeDir.trim() : '';
-  if (!normalizedHomeDir) {
-    return getLegacyDefaultDaemonPort();
-  }
-
-  try {
-    const digest = createHash('sha256')
-      .update(path.resolve(normalizedHomeDir))
-      .digest();
-    const offset = digest.readUInt32BE(0) % DEFAULT_DAEMON_PORT_SPAN;
-    return DEFAULT_DAEMON_PORT_BASE + offset;
-  } catch {
-    return getLegacyDefaultDaemonPort();
-  }
+export function getDefaultDaemonPort(_systemHomeDir?: string): number {
+  return DEFAULT_DAEMON_PORT;
 }
 
 type SupportedBooleanConfigKey = 'a2a.simplemsgListenerEnabled' | 'chain.mvcSponsorUploadEnabled';
@@ -676,23 +661,6 @@ async function resolveActorHomeDir(
     return commandFailed('identity_profile_ambiguous', resolved.message);
   }
   return { homeDir: resolved.match.homeDir };
-}
-
-async function resolveDaemonTargetHome(
-  context: CliRuntimeContext,
-  from?: string,
-  options: { allowUnindexedExplicitHome?: boolean } = {},
-): Promise<string | MetabotCommandResult<never>> {
-  const requestedFrom = normalizeEnvText(from);
-  if (!requestedFrom) {
-    return normalizeHomeDir(context.env, context.cwd, options);
-  }
-
-  const actor = await resolveActorHomeDir(context, requestedFrom);
-  if (!('homeDir' in actor)) {
-    return actor;
-  }
-  return path.resolve(actor.homeDir);
 }
 
 function normalizeReadOnlyIdentityProfile(value: unknown): IdentityProfileRecord | null {
@@ -1038,6 +1006,54 @@ async function isPortBindable(host: string, port: number): Promise<boolean> {
   });
 }
 
+async function selectDaemonInstallation(
+  context: Pick<CliRuntimeContext, 'env' | 'cwd'>,
+): Promise<DaemonInstallationRecord> {
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+  const store = createDaemonStateStore(systemHomeDir);
+  const existing = await store.readInstallation();
+  if (existing) {
+    return existing;
+  }
+
+  const explicitPort = parseDaemonPort(context.env.METABOT_DAEMON_PORT)
+    ?? parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV]);
+  const candidates = explicitPort
+    ? [explicitPort]
+    : [
+      DEFAULT_DAEMON_PORT,
+      ...Array.from(
+        { length: DAEMON_FALLBACK_PORT_END - DAEMON_FALLBACK_PORT_START + 1 },
+        (_value, index) => DAEMON_FALLBACK_PORT_START + index,
+      ),
+    ];
+
+  for (const port of candidates) {
+    if (!await isPortBindable(DEFAULT_DAEMON_HOST, port)) {
+      continue;
+    }
+    const record: DaemonInstallationRecord = {
+      schemaVersion: 1,
+      host: DEFAULT_DAEMON_HOST,
+      port,
+      selectionOrigin: explicitPort
+        ? 'explicit_migration'
+        : port === DEFAULT_DAEMON_PORT
+          ? 'default'
+          : 'fallback',
+      updatedAt: Date.now(),
+    };
+    return store.writeInstallation(record);
+  }
+
+  if (explicitPort) {
+    throw new Error(`daemon_port_unavailable: ${DEFAULT_DAEMON_HOST}:${explicitPort} is unavailable.`);
+  }
+  throw new Error(
+    `daemon_port_unavailable: no free loopback port in ${DEFAULT_DAEMON_PORT} or ${DAEMON_FALLBACK_PORT_START}-${DAEMON_FALLBACK_PORT_END}.`,
+  );
+}
+
 export interface DaemonStatusProbe {
   reachable: boolean;
   ownerId: string | null;
@@ -1164,28 +1180,11 @@ async function verifyDaemonProcessOwnership(input: {
   return command?.includes('daemon serve') ? 'verified' : 'unverified';
 }
 
-interface DaemonRouteOptions {
-  allowUnindexedExplicitHome?: boolean;
-  targetHomeDir?: string;
-}
-
-function resolveDaemonHomeDir(
-  context: CliRuntimeContext,
-  options: DaemonRouteOptions = {},
-): string {
-  const targetHomeDir = normalizeEnvText(options.targetHomeDir);
-  if (targetHomeDir) {
-    return path.resolve(targetHomeDir);
-  }
-  return normalizeHomeDir(context.env, context.cwd, options);
-}
-
 async function resolveDaemonRecord(
   context: CliRuntimeContext,
-  options: DaemonRouteOptions = {},
-): Promise<RuntimeDaemonRecord | null> {
-  const homeDir = resolveDaemonHomeDir(context, options);
-  const store = createRuntimeStateStore(homeDir);
+): Promise<GlobalDaemonRecord | null> {
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+  const store = createDaemonStateStore(systemHomeDir);
   return store.readDaemon();
 }
 
@@ -1268,9 +1267,92 @@ async function stopRunningDaemon(input: {
   throw new Error(`Timed out while stopping the verified local MetaBot daemon process ${daemonRecord.pid}.`);
 }
 
+async function quarantineLegacyDaemonPath(filePath: string): Promise<void> {
+  try {
+    await fs.promises.rename(filePath, `${filePath}.migrated-${Date.now()}`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw error;
+    }
+  }
+}
+
+async function writeDaemonMigrationSnapshot(input: {
+  systemHomeDir: string;
+  entries: Array<Record<string, unknown>>;
+}): Promise<void> {
+  const paths = resolveMetabotDaemonPaths(input.systemHomeDir);
+  await fs.promises.mkdir(paths.recoveryRoot, { recursive: true });
+  const content = `${JSON.stringify({
+    schemaVersion: 1,
+    updatedAt: Date.now(),
+    entries: input.entries,
+  }, null, 2)}\n`;
+  const temporaryPath = `${paths.migrationStatePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fs.promises.writeFile(temporaryPath, content, 'utf8');
+    await fs.promises.rename(temporaryPath, paths.migrationStatePath);
+  } catch (error) {
+    await fs.promises.rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function migrateLegacyProfileDaemons(systemHomeDir: string): Promise<void> {
+  const profiles = await listIdentityProfiles(systemHomeDir);
+  const entries: Array<Record<string, unknown>> = [];
+
+  for (const profile of profiles) {
+    const paths = resolveMetabotPaths(profile.homeDir);
+    const legacyStore = createRuntimeStateStore(paths);
+    const daemonRecord = await legacyStore.readDaemon();
+    const lock = await readDaemonLockInfo(paths.daemonLockPath);
+
+    if (!daemonRecord) {
+      if (lock.pid && isProcessAlive(lock.pid)) {
+        throw new Error(
+          `daemon_migration_blocked: legacy daemon lock for profile ${profile.slug} belongs to live process ${lock.pid}; ownership cannot be proven.`,
+        );
+      }
+      if (lock.pid || lock.ownerId) {
+        await quarantineLegacyDaemonPath(paths.daemonLockPath);
+        entries.push({ profile: profile.slug, state: 'quarantined_lock_without_record' });
+      }
+      continue;
+    }
+
+    const ownership = await verifyDaemonProcessOwnership({
+      daemonRecord,
+      lockPath: paths.daemonLockPath,
+    });
+    if (ownership === 'unverified') {
+      throw new Error(
+        `daemon_migration_blocked: unable to verify legacy daemon ownership for profile ${profile.slug}, pid ${daemonRecord.pid}.`,
+      );
+    }
+    if (ownership === 'verified') {
+      await stopRunningDaemon({ daemonRecord, lockPath: paths.daemonLockPath });
+    }
+
+    await quarantineLegacyDaemonPath(paths.daemonStatePath);
+    await quarantineLegacyDaemonPath(paths.daemonLockPath);
+    entries.push({
+      profile: profile.slug,
+      state: ownership === 'verified' ? 'stopped_and_quarantined' : 'quarantined_stale_record',
+      pid: daemonRecord.pid,
+      port: daemonRecord.port,
+    });
+  }
+
+  if (entries.length > 0) {
+    await writeDaemonMigrationSnapshot({ systemHomeDir, entries });
+  }
+}
+
 async function ensureDaemonBaseUrl(
   context: CliRuntimeContext,
-  options: DaemonRouteOptions = {},
+  options: { allowUnindexedExplicitHome?: boolean } = {},
 ): Promise<string> {
   const explicitBaseUrl = typeof context.env.METABOT_DAEMON_BASE_URL === 'string'
     ? context.env.METABOT_DAEMON_BASE_URL.trim()
@@ -1279,9 +1361,9 @@ async function ensureDaemonBaseUrl(
     return normalizeBaseUrl(explicitBaseUrl);
   }
 
-  const daemonRecord = await resolveDaemonRecord(context, options);
+  const daemonRecord = await resolveDaemonRecord(context);
   if (daemonRecord) {
-    const paths = resolveMetabotPaths(resolveDaemonHomeDir(context, options));
+    const daemonPaths = resolveMetabotDaemonPaths(normalizeSystemHomeDir(context.env, context.cwd));
     if (
       daemonRecord.baseUrl
       && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)
@@ -1290,29 +1372,29 @@ async function ensureDaemonBaseUrl(
         return daemonRecord.baseUrl;
       }
     }
-    await stopRunningDaemon({ daemonRecord, lockPath: paths.daemonLockPath });
-    return startDetachedDaemon(context, daemonRecord, options);
+    await stopRunningDaemon({ daemonRecord, lockPath: daemonPaths.daemonLockPath });
+    return startDetachedDaemon(context, options);
   }
 
-  return startDetachedDaemon(context, undefined, options);
+  return startDetachedDaemon(context, options);
 }
 
 async function startDetachedDaemon(
   context: CliRuntimeContext,
-  preferredRecord?: RuntimeDaemonRecord | null,
-  options: DaemonRouteOptions = {},
+  options: { allowUnindexedExplicitHome?: boolean } = {},
 ): Promise<string> {
-  const homeDir = resolveDaemonHomeDir(context, options);
+  const homeDir = normalizeHomeDir(context.env, context.cwd, options);
   const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-  const store = createRuntimeStateStore(homeDir);
+  const store = createDaemonStateStore(systemHomeDir);
   const expectedConfigHash = buildDaemonConfigHash(context.env);
   const persistedRecord = await store.readDaemon();
-  const staleRecord = persistedRecord ?? preferredRecord ?? null;
-  const preferredPort = parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
-    ?? staleRecord?.port
-    ?? getDefaultDaemonPort(homeDir);
+  if (!persistedRecord) {
+    await migrateLegacyProfileDaemons(systemHomeDir);
+  }
+  const installation = await selectDaemonInstallation(context);
+  const preferredPort = installation.port;
   if (persistedRecord) {
-    const paths = resolveMetabotPaths(homeDir);
+    const daemonPaths = resolveMetabotDaemonPaths(systemHomeDir);
     if (
       persistedRecord.baseUrl
       && await isDaemonReachable(persistedRecord.baseUrl, persistedRecord.ownerId)
@@ -1321,7 +1403,12 @@ async function startDetachedDaemon(
         return persistedRecord.baseUrl;
       }
     }
-    await stopRunningDaemon({ daemonRecord: persistedRecord, lockPath: paths.daemonLockPath });
+    await stopRunningDaemon({ daemonRecord: persistedRecord, lockPath: daemonPaths.daemonLockPath });
+  }
+  if (!persistedRecord && !await isPortBindable(installation.host, installation.port)) {
+    throw new Error(
+      `daemon_port_in_use: the configured daemon endpoint ${installation.host}:${installation.port} is occupied. Use an explicit port migration to change it.`,
+    );
   }
   await store.clearDaemon();
 
@@ -1329,7 +1416,7 @@ async function startDetachedDaemon(
     process.execPath,
     [resolveCliEntrypoint(), 'daemon', 'serve'],
     {
-      cwd: homeDir,
+      cwd: systemHomeDir,
       detached: true,
       stdio: 'ignore',
       env: {
@@ -1357,7 +1444,7 @@ async function startDetachedDaemon(
   }
 
   const diagnostics = await collectDaemonStartupDiagnostics({
-    homeDir,
+    systemHomeDir,
     preferredPort,
   });
   throw new Error(formatDaemonStartupTimeoutMessage(diagnostics));
@@ -1368,7 +1455,7 @@ async function requestJson<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   routePath: string,
   body?: Record<string, unknown>,
-  options: DaemonRouteOptions = {},
+  options: { allowUnindexedExplicitHome?: boolean } = {},
 ): Promise<MetabotCommandResult<T>> {
   const baseUrl = await ensureDaemonBaseUrl(context, options);
   const response = await fetch(`${baseUrl}${routePath}`, {
@@ -1383,9 +1470,8 @@ async function requestText(
   context: CliRuntimeContext,
   method: 'GET',
   routePath: string,
-  options: DaemonRouteOptions = {},
 ): Promise<string> {
-  const baseUrl = await ensureDaemonBaseUrl(context, options);
+  const baseUrl = await ensureDaemonBaseUrl(context);
   const response = await fetch(`${baseUrl}${routePath}`, {
     method,
   });
@@ -2178,32 +2264,22 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     routePath: string,
     from?: string,
     body?: Record<string, unknown>,
-    options: Omit<DaemonRouteOptions, 'targetHomeDir'> = {},
   ): Promise<MetabotCommandResult<T>> {
-    const targetHomeDir = await resolveDaemonTargetHome(context, from, options);
-    if (typeof targetHomeDir !== 'string') {
-      return targetHomeDir;
-    }
-    return requestJson(context, method, routePath, body, {
-      ...options,
-      targetHomeDir,
-    });
+    const requestedFrom = normalizeEnvText(from);
+    return requestJson(
+      context,
+      method,
+      routePath,
+      body && requestedFrom ? { ...body, from: requestedFrom } : body,
+    );
   }
 
   async function requestTextForSelectedActor(
     method: 'GET',
     routePath: string,
     from?: string,
-    options: Omit<DaemonRouteOptions, 'targetHomeDir'> = {},
   ): Promise<string> {
-    const targetHomeDir = await resolveDaemonTargetHome(context, from, options);
-    if (typeof targetHomeDir !== 'string') {
-      throw new Error(targetHomeDir.message || 'Failed to resolve the selected MetaBot profile.');
-    }
-    return requestText(context, method, routePath, {
-      ...options,
-      targetHomeDir,
-    });
+    return requestText(context, method, routePath);
   }
 
   async function openLocalUiPage(input: {
@@ -2218,11 +2294,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     firstPinId?: string;
     mine?: boolean;
   }): Promise<MetabotCommandResult<unknown>> {
-    const targetHomeDir = await resolveDaemonTargetHome(context, input.from);
-    if (typeof targetHomeDir !== 'string') {
-      return targetHomeDir;
-    }
-    const baseUrl = await ensureDaemonBaseUrl(context, { targetHomeDir });
+    const baseUrl = await ensureDaemonBaseUrl(context);
     const query = new URLSearchParams();
     if (input.from) query.set('from', input.from);
     if (input.traceId) query.set('traceId', input.traceId);
@@ -2428,9 +2500,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
       },
       stop: async () => {
-        const homeDir = normalizeHomeDir(context.env, context.cwd);
-        const runtimeStore = createRuntimeStateStore(homeDir);
-        const daemonRecord = await runtimeStore.readDaemon();
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const daemonStore = createDaemonStateStore(systemHomeDir);
+        const daemonRecord = await daemonStore.readDaemon();
         if (!daemonRecord || !daemonRecord.pid) {
           return commandFailed('daemon_not_running', 'No local daemon process is currently tracked.');
         }
@@ -2438,9 +2510,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         try {
           const stopped = await stopRunningDaemon({
             daemonRecord,
-            lockPath: resolveMetabotPaths(homeDir).daemonLockPath,
+            lockPath: resolveMetabotDaemonPaths(systemHomeDir).daemonLockPath,
           });
-          await runtimeStore.clearDaemon(pid);
+          await daemonStore.clearDaemon(pid);
           return commandSuccess({
             pid,
             stopped: stopped === 'stopped',
@@ -2475,6 +2547,13 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         let targetHomeDir: string | null = null;
         if (explicitHomeDir) {
           const explicitState = await createRuntimeStateStore(explicitHomeDir).readState();
+          const explicitName = normalizeEnvText(explicitState.identity?.name);
+          if (explicitName && explicitName !== normalizedName) {
+            return commandFailed(
+              'identity_name_conflict',
+              `Current local identity is "${explicitName}". Switch profile first or choose the same name.`,
+            );
+          }
           if (explicitState.identity || explicitHomeDir === activeHomeDir) {
             targetHomeDir = explicitHomeDir;
           }
@@ -2496,6 +2575,15 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         const createInput: Record<string, unknown> = { name: input.name };
         if (input.host) {
           createInput.host = input.host;
+        }
+        if (targetHomeDir) {
+          const profiles = await listIdentityProfiles(systemHomeDir);
+          const selectedProfile = profiles.find((profile) => (
+            path.resolve(profile.homeDir) === path.resolve(targetHomeDir)
+          ));
+          if (selectedProfile) {
+            createInput.profileSlug = selectedProfile.slug;
+          }
         }
         return requestJson(
           cloneContextWithHomeDir(context, targetHomeDir),
@@ -3615,11 +3703,14 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
 }
 
 export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'env' | 'cwd'>): Promise<never> {
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
   const homeDir = normalizeHomeDir(context.env, context.cwd, {
     allowUnindexedExplicitHome: context.env[ALLOW_UNINDEXED_HOME_ENV] === '1',
   });
   const paths = resolveMetabotPaths(homeDir);
-  let daemonRecord: RuntimeDaemonRecord | null = null;
+  const daemonPaths = resolveMetabotDaemonPaths(systemHomeDir);
+  const daemonStore = createDaemonStateStore(daemonPaths);
+  let daemonRecord: GlobalDaemonRecord | null = null;
   const secretStore = createFileSecretStore(homeDir);
   const adapters = createDefaultChainAdapterRegistry();
   const baseSigner = createLocalMnemonicSigner({ secretStore, adapters });
@@ -3707,7 +3798,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
 
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
-    systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+    systemHomeDir,
     getDaemonRecord: () => daemonRecord,
     secretStore,
     signer,
@@ -3744,24 +3835,29 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
 
   const daemon = createMetabotDaemon({
     homeDirOrPaths: paths,
+    daemonPaths,
     handlers,
   });
 
-  const host = DEFAULT_DAEMON_HOST;
-  const explicitPort = parseDaemonPort(context.env.METABOT_DAEMON_PORT);
-  const preferredPort = explicitPort
-    ?? parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
-    ?? getDefaultDaemonPort(homeDir);
-  const started = await daemon.start(preferredPort, host);
+  const installation = await selectDaemonInstallation(context);
+  const started = await daemon.start(installation.port, installation.host);
 
   const runtimeStore = createRuntimeStateStore(paths);
   const providerPresenceStore = createProviderPresenceStateStore(paths);
-  daemonRecord = await runtimeStore.writeDaemon({
+  daemonRecord = await daemonStore.writeDaemon({
+    schemaVersion: 1,
+    instanceId: 'default',
     ownerId: daemon.ownerId,
     pid: process.pid,
     host: started.host,
     port: started.port,
     baseUrl: started.baseUrl,
+    oacVersion: CLI_VERSION,
+    runtimeFingerprint: getDaemonRuntimeFingerprint(),
+    supervisor: {
+      kind: 'none',
+      serviceId: null,
+    },
     startedAt: Date.now(),
     configHash: buildDaemonConfigHash(context.env),
   });
@@ -3988,7 +4084,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       shutdownFailure = error;
     }
     try {
-      await runtimeStore.clearDaemon(process.pid);
+      await daemonStore.clearDaemon(process.pid);
     } catch (error) {
       shutdownFailure ??= error;
     }

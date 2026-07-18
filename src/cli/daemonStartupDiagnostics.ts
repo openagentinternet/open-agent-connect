@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { resolveMetabotPaths } from '../core/state/paths';
-import { createRuntimeStateStore, type RuntimeDaemonRecord } from '../core/state/runtimeStateStore';
+import { resolveMetabotDaemonPaths } from '../core/state/paths';
+import { createDaemonStateStore, type GlobalDaemonRecord } from '../core/state/daemonStateStore';
 
 export interface DaemonLockInfo {
   ownerId?: string;
@@ -10,11 +10,11 @@ export interface DaemonLockInfo {
 }
 
 export interface DaemonStartupDiagnosticsSnapshot {
-  homeDir: string;
+  systemHomeDir: string;
   preferredPort: number;
   daemonStatePath: string;
   lockPath: string;
-  daemonRecord: RuntimeDaemonRecord | null;
+  daemonRecord: GlobalDaemonRecord | null;
   lockInfo: DaemonLockInfo | null;
   lockOwnerAlive: boolean | null;
 }
@@ -47,7 +47,7 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function formatDaemonRecord(record: RuntimeDaemonRecord | null): string {
+function formatDaemonRecord(record: GlobalDaemonRecord | null): string {
   if (!record) {
     return 'missing';
   }
@@ -66,19 +66,19 @@ function formatLockInfo(lockInfo: DaemonLockInfo | null, lockOwnerAlive: boolean
 }
 
 export async function collectDaemonStartupDiagnostics(input: {
-  homeDir: string;
+  systemHomeDir: string;
   preferredPort: number;
 }): Promise<DaemonStartupDiagnosticsSnapshot> {
-  const homeDir = path.resolve(input.homeDir);
-  const paths = resolveMetabotPaths(homeDir);
-  const daemonRecord = await createRuntimeStateStore(paths).readDaemon();
+  const systemHomeDir = path.resolve(input.systemHomeDir);
+  const paths = resolveMetabotDaemonPaths(systemHomeDir);
+  const daemonRecord = await createDaemonStateStore(paths).readDaemon();
   const lockInfo = await readDaemonLockInfo(paths.daemonLockPath);
   const lockOwnerAlive = typeof lockInfo?.pid === 'number'
     ? isProcessAlive(lockInfo.pid)
     : null;
 
   return {
-    homeDir,
+    systemHomeDir,
     preferredPort: input.preferredPort,
     daemonStatePath: paths.daemonStatePath,
     lockPath: paths.daemonLockPath,
@@ -93,7 +93,7 @@ export function formatDaemonStartupTimeoutMessage(
 ): string {
   return [
     'Timed out while starting the local MetaBot daemon.',
-    `Selected profile home: ${snapshot.homeDir}`,
+    `System home: ${snapshot.systemHomeDir}`,
     `Preferred port: ${snapshot.preferredPort}`,
     `daemon.json: ${snapshot.daemonStatePath} (${formatDaemonRecord(snapshot.daemonRecord)})`,
     `daemon.lock: ${snapshot.lockPath} (${formatLockInfo(snapshot.lockInfo, snapshot.lockOwnerAlive)})`,

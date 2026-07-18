@@ -6,6 +6,7 @@ import {
   type SystemUninstallResult,
 } from './types';
 import { getInstallSkillRoots, resolvePlatformSkillRootPath } from '../platform/platformRegistry';
+import { createDaemonStateStore } from '../state/daemonStateStore';
 
 const FULL_ERASE_TOKEN = 'DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS';
 
@@ -15,22 +16,6 @@ function normalizeText(value: unknown): string {
 
 function isNotFound(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT');
-}
-
-async function readJsonFile(filePath: string): Promise<Record<string, unknown> | null> {
-  try {
-    const raw = await fs.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch (error) {
-    if (isNotFound(error)) {
-      return null;
-    }
-    throw error;
-  }
 }
 
 function resolveBuiltInHostRoots(systemHomeDir: string, env: NodeJS.ProcessEnv): string[] {
@@ -69,18 +54,34 @@ async function removeGuardedHostSymlinks(hostSkillRoot: string, sharedSkillRoot:
 }
 
 async function stopDaemonBestEffort(systemHomeDir: string): Promise<{ attempted: boolean; stopped: boolean }> {
-  const activeHomePath = path.join(systemHomeDir, '.metabot', 'manager', 'active-home.json');
-  const activeState = await readJsonFile(activeHomePath);
-  const activeHomeDir = normalizeText(activeState?.homeDir);
-  if (!activeHomeDir) {
-    return { attempted: false, stopped: false };
-  }
-
-  const daemonStatePath = path.join(activeHomeDir, '.runtime', 'daemon.json');
-  const daemonState = await readJsonFile(daemonStatePath);
+  const daemonState = await createDaemonStateStore(systemHomeDir).readDaemon();
   const pid = Number(daemonState?.pid);
   if (!Number.isInteger(pid) || pid <= 0) {
     return { attempted: false, stopped: false };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1_500);
+  try {
+    const response = await fetch(`${normalizeText(daemonState?.baseUrl)}/api/daemon/status`, {
+      signal: controller.signal,
+    });
+    const payload = await response.json() as {
+      ok?: unknown;
+      data?: { daemonId?: unknown; pid?: unknown };
+    };
+    if (
+      response.ok !== true
+      || payload.ok !== true
+      || payload.data?.daemonId !== daemonState?.ownerId
+      || payload.data?.pid !== pid
+    ) {
+      return { attempted: false, stopped: false };
+    }
+  } catch {
+    return { attempted: false, stopped: false };
+  } finally {
+    clearTimeout(timeout);
   }
 
   try {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +9,11 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { probeDaemonStatus } = require('../../dist/cli/runtime.js');
-const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const {
+  resolveMetabotDaemonPaths,
+  resolveMetabotPaths,
+} = require('../../dist/core/state/paths.js');
+const { createDaemonStateStore } = require('../../dist/core/state/daemonStateStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
 function parseLastJson(chunks) {
@@ -43,7 +47,29 @@ async function createIndexedProfileHome() {
     `${JSON.stringify({ homeDir, updatedAt: 1 }, null, 2)}\n`,
     'utf8',
   );
-  return { systemHomeDir, homeDir, paths };
+  return {
+    systemHomeDir,
+    homeDir,
+    paths,
+    daemonPaths: resolveMetabotDaemonPaths(systemHomeDir),
+  };
+}
+
+function globalDaemonRecord(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    instanceId: 'default',
+    ownerId: 'metabot-daemon-test',
+    pid: 12345,
+    host: '127.0.0.1',
+    port: 32123,
+    baseUrl: 'http://127.0.0.1:32123',
+    oacVersion: '0.2.32',
+    runtimeFingerprint: 'test-runtime',
+    supervisor: { kind: 'none', serviceId: null },
+    startedAt: Date.now(),
+    ...overrides,
+  };
 }
 
 test('probeDaemonStatus times out when a local endpoint accepts but never answers', async (t) => {
@@ -77,20 +103,19 @@ test('probeDaemonStatus times out when a local endpoint accepts but never answer
 });
 
 test('daemon stop refuses an unverified live pid and preserves its record', async (t) => {
-  const { systemHomeDir, homeDir, paths } = await createIndexedProfileHome();
-  const store = createRuntimeStateStore(homeDir);
+  const { systemHomeDir, homeDir } = await createIndexedProfileHome();
+  const store = createDaemonStateStore(systemHomeDir);
   t.after(async () => {
     await rm(systemHomeDir, { recursive: true, force: true });
   });
 
-  await store.writeDaemon({
+  await store.writeDaemon(globalDaemonRecord({
     ownerId: 'stale-owner',
     pid: process.pid,
     host: '127.0.0.1',
     port: 32123,
     baseUrl: 'http://127.0.0.1:9',
-    startedAt: Date.now(),
-  });
+  }));
 
   const stdout = [];
   const exitCode = await runCli(['daemon', 'stop'], {
@@ -111,7 +136,7 @@ test('daemon stop refuses an unverified live pid and preserves its record', asyn
 
 test('daemon stop keeps a dead daemon record when its recorded port is still occupied', async (t) => {
   const { systemHomeDir, homeDir } = await createIndexedProfileHome();
-  const store = createRuntimeStateStore(homeDir);
+  const store = createDaemonStateStore(systemHomeDir);
   const server = http.createServer();
   await new Promise((resolve, reject) => {
     server.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve());
@@ -127,14 +152,13 @@ test('daemon stop keeps a dead daemon record when its recorded port is still occ
     await rm(systemHomeDir, { recursive: true, force: true });
   });
 
-  await store.writeDaemon({
+  await store.writeDaemon(globalDaemonRecord({
     ownerId: 'dead-owner',
     pid: 999_999,
     host: '127.0.0.1',
     port: address.port,
     baseUrl: `http://127.0.0.1:${address.port}`,
-    startedAt: Date.now(),
-  });
+  }));
 
   const stdout = [];
   const exitCode = await runCli(['daemon', 'stop'], {
@@ -155,7 +179,7 @@ test('daemon stop keeps a dead daemon record when its recorded port is still occ
 
 test('daemon stop waits for a verified daemon to exit before clearing its record', async (t) => {
   const { systemHomeDir, homeDir } = await createIndexedProfileHome();
-  const store = createRuntimeStateStore(homeDir);
+  const store = createDaemonStateStore(systemHomeDir);
   const env = {
     ...process.env,
     HOME: systemHomeDir,
@@ -199,4 +223,143 @@ test('daemon stop waits for a verified daemon to exit before clearing its record
   assert.equal(stopExitCode, 0, stopOutput.join(''));
   assert.equal(parseLastJson(stopOutput).data.stopped, true);
   assert.equal(await store.readDaemon(), null);
+});
+
+test('first installation persists the bounded fallback port and never drifts after it is configured', async (t) => {
+  const { systemHomeDir, homeDir } = await createIndexedProfileHome();
+  const daemonStore = createDaemonStateStore(systemHomeDir);
+  const defaultPortBlocker = http.createServer();
+  await new Promise((resolve, reject) => {
+    defaultPortBlocker.listen(10001, '127.0.0.1', (error) => error ? reject(error) : resolve());
+  });
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      defaultPortBlocker.close((error) => error ? reject(error) : resolve());
+    }).catch(() => undefined);
+    const daemon = await daemonStore.readDaemon();
+    if (daemon?.pid) {
+      try {
+        process.kill(daemon.pid, 'SIGTERM');
+      } catch {
+        // The daemon already exited.
+      }
+    }
+    await rm(systemHomeDir, { recursive: true, force: true });
+  });
+
+  const env = {
+    ...process.env,
+    HOME: systemHomeDir,
+    METABOT_HOME: homeDir,
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+  };
+  const startOutput = [];
+  const startExitCode = await runCli(['daemon', 'start'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { startOutput.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(startExitCode, 0, startOutput.join(''));
+
+  const installation = await daemonStore.readInstallation();
+  assert.deepEqual(installation && {
+    host: installation.host,
+    port: installation.port,
+    selectionOrigin: installation.selectionOrigin,
+  }, {
+    host: '127.0.0.1',
+    port: 10002,
+    selectionOrigin: 'fallback',
+  });
+
+  const stopOutput = [];
+  const stopExitCode = await runCli(['daemon', 'stop'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { stopOutput.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(stopExitCode, 0, stopOutput.join(''));
+
+  const fallbackPortBlocker = http.createServer();
+  await new Promise((resolve, reject) => {
+    fallbackPortBlocker.listen(10002, '127.0.0.1', (error) => error ? reject(error) : resolve());
+  });
+  t.after(async () => {
+    await new Promise((resolve, reject) => {
+      fallbackPortBlocker.close((error) => error ? reject(error) : resolve());
+    }).catch(() => undefined);
+  });
+
+  const restartOutput = [];
+  const restartExitCode = await runCli(['daemon', 'start'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { restartOutput.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(restartExitCode, 1);
+  assert.match(parseLastJson(restartOutput).message, /daemon_port_in_use/);
+  assert.equal((await daemonStore.readInstallation())?.port, 10002);
+});
+
+test('first global start quarantines stale profile daemon metadata without touching profile state', async (t) => {
+  const { systemHomeDir, homeDir, paths } = await createIndexedProfileHome();
+  const daemonStore = createDaemonStateStore(systemHomeDir);
+  await createRuntimeStateStore(homeDir).writeDaemon({
+    ownerId: 'legacy-daemon',
+    pid: 999_999,
+    host: '127.0.0.1',
+    port: 32145,
+    baseUrl: 'http://127.0.0.1:32145',
+    startedAt: 1,
+  });
+  t.after(async () => {
+    const daemon = await daemonStore.readDaemon();
+    if (daemon?.pid) {
+      try {
+        process.kill(daemon.pid, 'SIGTERM');
+      } catch {
+        // The daemon already exited.
+      }
+    }
+    await rm(systemHomeDir, { recursive: true, force: true });
+  });
+
+  const env = {
+    ...process.env,
+    HOME: systemHomeDir,
+    METABOT_HOME: homeDir,
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+  };
+  const output = [];
+  const exitCode = await runCli(['daemon', 'start'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { output.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(exitCode, 0, output.join(''));
+  assert.equal(await createRuntimeStateStore(homeDir).readDaemon(), null);
+  assert.equal(
+    (await readdir(paths.runtimeRoot)).some((entry) => entry.startsWith('daemon.json.migrated-')),
+    true,
+  );
+  assert.equal((await daemonStore.readDaemon())?.instanceId, 'default');
+  assert.equal((await daemonStore.readInstallation())?.host, '127.0.0.1');
+  assert.equal((await daemonStore.readInstallation())?.port, 10001);
+
+  const stopOutput = [];
+  const stopExitCode = await runCli(['daemon', 'stop'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { stopOutput.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(stopExitCode, 0, stopOutput.join(''));
 });

@@ -2,7 +2,11 @@ import { promises as fs } from 'node:fs';
 import type http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createHttpServer } from './httpServer';
-import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
+import {
+  resolveMetabotPaths,
+  type MetabotDaemonPaths,
+  type MetabotPaths,
+} from '../core/state/paths';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 
 const DAEMON_LOCK_BASE_DELAY_MS = 50;
@@ -24,6 +28,7 @@ export interface MetabotDaemonInstance {
 
 export interface CreateMetabotDaemonOptions {
   homeDirOrPaths: string | MetabotPaths;
+  daemonPaths?: MetabotDaemonPaths;
   handlers?: MetabotDaemonHttpHandlers;
   ownerId?: string;
 }
@@ -122,7 +127,9 @@ async function closeServer(server: http.Server | null): Promise<void> {
 export function createMetabotDaemon(options: CreateMetabotDaemonOptions): MetabotDaemonInstance {
   const paths = resolvePaths(options.homeDirOrPaths);
   const ownerId = options.ownerId?.trim() || `metabot-daemon-${randomUUID()}`;
-  const lockPath = paths.daemonLockPath;
+  const daemonPaths = options.daemonPaths;
+  const locksRoot = daemonPaths?.locksRoot ?? paths.locksRoot;
+  const lockPath = daemonPaths?.daemonLockPath ?? paths.daemonLockPath;
   const handlers = options.handlers ?? {};
 
   let server: http.Server | null = null;
@@ -130,7 +137,7 @@ export function createMetabotDaemon(options: CreateMetabotDaemonOptions): Metabo
   let lockHeld = false;
 
   async function acquireLock(): Promise<void> {
-    await fs.mkdir(paths.locksRoot, { recursive: true });
+    await fs.mkdir(locksRoot, { recursive: true });
     for (let attempt = 0; attempt < DAEMON_LOCK_MAX_ATTEMPTS; attempt += 1) {
       try {
         await fs.writeFile(lockPath, `${JSON.stringify({
