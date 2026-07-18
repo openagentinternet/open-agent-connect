@@ -98,11 +98,15 @@ function normalizeConfig(input: unknown): MetabotConfig {
 
   const root = input as Record<string, unknown>;
   const maybeA2A = root['a2a'];
+  const maybeAutoReply = root['autoReply'];
   const maybeBrowser = root['browser'];
   const maybeChain = root['chain'];
 
   const a2aSource = maybeA2A && typeof maybeA2A === 'object'
     ? maybeA2A as Record<string, unknown>
+    : {};
+  const autoReplySource = maybeAutoReply && typeof maybeAutoReply === 'object'
+    ? maybeAutoReply as Record<string, unknown>
     : {};
   const browserSource = maybeBrowser && typeof maybeBrowser === 'object'
     ? maybeBrowser as Record<string, unknown>
@@ -130,6 +134,12 @@ function normalizeConfig(input: unknown): MetabotConfig {
       simplemsgListenerEnabled: normalizeBoolean(
         a2aSource.simplemsgListenerEnabled,
         defaults.a2a.simplemsgListenerEnabled,
+      ),
+    },
+    autoReply: {
+      enabled: normalizeBoolean(
+        autoReplySource.enabled,
+        defaults.autoReply.enabled,
       ),
     },
     browser: {
