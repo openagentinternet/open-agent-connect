@@ -351,7 +351,8 @@ test('Browser owner panel renders current Bot owner actions from ABC contract', 
   assert.equal(ownerPanel.hidden, false);
   assert.match(ownerPanel.textContent, /Alice/);
   assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="visit-home"/);
-  assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="send-message" disabled/);
+  assert.match(ownerPanel.innerHTML, /data-browser-owner-panel-action="send-message"/);
+  assert.doesNotMatch(ownerPanel.innerHTML, /data-browser-owner-panel-action="send-message" disabled/);
   assert.doesNotMatch(ownerPanel.innerHTML, /data-browser-owner-panel-action="follow"/);
   assert.match(ownerPanel.innerHTML, /data-browser-owner-copy-meta="idq1alice"/);
 });
