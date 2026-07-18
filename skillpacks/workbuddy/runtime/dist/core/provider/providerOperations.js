@@ -5,6 +5,7 @@ exports.findSellerOrdersBySelector = findSellerOrdersBySelector;
 exports.findSellerOrderBySelector = findSellerOrderBySelector;
 exports.buildProviderSellerOrderInspection = buildProviderSellerOrderInspection;
 exports.buildSellerReceivedRefundItems = buildSellerReceivedRefundItems;
+const conversationUrl_1 = require("../a2a/conversationUrl");
 function normalizeText(value) {
     if (typeof value === 'string')
         return value.trim();
@@ -97,7 +98,7 @@ function buildProviderSellerOrderInspection(order) {
         },
         trace: {
             id: traceId || null,
-            href: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : null,
+            href: (0, conversationUrl_1.buildConversationHref)(normalizeText(order.providerGlobalMetaId), normalizeText(order.buyerGlobalMetaId)),
         },
         payment: {
             txid: normalizeText(order.paymentTxid) || null,
@@ -175,7 +176,7 @@ function buildSellerReceivedRefundItems(state) {
             counterpartyName: null,
             localMetabotSlug: normalizeText(order.localMetabotSlug) || null,
             traceId: traceId || null,
-            traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : null,
+            traceHref: (0, conversationUrl_1.buildConversationHref)(normalizeText(order.providerGlobalMetaId), normalizeText(order.buyerGlobalMetaId)),
             runtimeSessionId: normalizeText(order.llmSessionId) || null,
             manualActionRequired: sellerOrderRequiresManualAction(order),
             createdAt,

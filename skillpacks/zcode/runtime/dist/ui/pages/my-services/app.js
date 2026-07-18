@@ -339,6 +339,7 @@ function buildMyServicesPageDefinition(options = {}) {
     selectedServiceId: state.selectedServiceId,
     mutationResult: state.mutationResult,
     error: state.error,
+    localGlobalMetaId: normalizeTextClient(selectedBotProfile() && selectedBotProfile().globalMetaId),
   });
   const findModelService = (model, serviceId) => model.services.find((service) => (
     service.currentPinId === serviceId || service.id === serviceId || service.sourceServicePinId === serviceId

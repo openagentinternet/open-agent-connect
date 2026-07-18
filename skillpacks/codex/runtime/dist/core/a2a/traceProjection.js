@@ -11,6 +11,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const paths_1 = require("../state/paths");
 const orderProtocol_1 = require("./protocol/orderProtocol");
 const deliveryArtifacts_1 = require("./deliveryArtifacts");
+const conversationUrl_1 = require("./conversationUrl");
 const CHAT_FILE_RE = /^chat-[a-z0-9]{8}-[a-z0-9]{8}\.json$/i;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -206,15 +207,8 @@ function deriveProjectedSessionState(input) {
     }
     return mapStoredOrderState(session.state);
 }
-function buildLocalUiUrl(daemon, traceId, sessionId) {
-    const baseUrl = normalizeText(daemon?.baseUrl);
-    if (!baseUrl) {
-        return undefined;
-    }
-    const url = new URL('/ui/trace', baseUrl);
-    url.searchParams.set('traceId', traceId);
-    url.searchParams.set('sessionId', sessionId);
-    return url.toString();
+function buildLocalUiUrl(daemon, localGlobalMetaId, peerGlobalMetaId) {
+    return (0, conversationUrl_1.buildConversationLocalUiUrl)(daemon, localGlobalMetaId, peerGlobalMetaId);
 }
 function projectListSession(input) {
     const { profile, daemon, conversation, session } = input;
@@ -250,7 +244,7 @@ function projectListSession(input) {
         outputType: session.type === 'service_order' ? normalizeText(session.outputType) || null : null,
         orderTxid: session.type === 'service_order' ? normalizeText(session.orderTxid) || null : null,
         paymentTxid: session.type === 'service_order' ? normalizeText(session.paymentTxid) || null : null,
-        localUiUrl: buildLocalUiUrl(daemon, traceId, sessionId),
+        localUiUrl: buildLocalUiUrl(daemon, localMetabotGlobalMetaId, peerGlobalMetaId),
     };
 }
 function messageBelongsToSession(message, session) {
@@ -544,7 +538,7 @@ function projectDetailSession(input) {
         orderTxid,
         orderTxids: orderTxid ? [orderTxid] : [],
         paymentTxid,
-        localUiUrl: buildLocalUiUrl(input.daemon, listItem.traceId, listItem.sessionId),
+        localUiUrl: buildLocalUiUrl(input.daemon, listItem.localMetabotGlobalMetaId, listItem.peerGlobalMetaId),
         a2a: {
             sessionId: listItem.sessionId,
             taskRunId: null,

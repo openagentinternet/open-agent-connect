@@ -73,7 +73,7 @@ function buildSettingsPageDefinition(i18n = (0, i18n_1.createI18nContext)()) {
               <p data-i18n-key="settings.diagnostics.body">${i18n.t('settings.diagnostics.body')}</p>
             </div>
             <div class="settings-links">
-              <a href="/ui/trace">Trace</a>
+              <a href="/ui/conversations">Trace</a>
               <a href="/ui/refund">Refund</a>
               <a href="/ui/hub">Hub</a>
             </div>

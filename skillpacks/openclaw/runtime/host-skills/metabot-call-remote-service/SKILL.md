@@ -1,6 +1,6 @@
 ---
 name: metabot-call-remote-service
-description: Use when a user asks to use, run, delegate, or fulfill a task through a capability that may exist as an online Bot/MetaBot skill-service, especially when no local specialized skill matches. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for remote service requests; select from the local cached online service list first, then call the remote service and continue through trace get/watch, optional trace UI opening, and rating closure. Do not use for browse-only service discovery, network source registry management, identity creation/switching, or private chat-only requests.
+description: Use when a user asks to use, run, delegate, or fulfill a task through a capability that may exist as an online Bot/MetaBot skill-service, especially when no local specialized skill matches. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for remote service requests; select from the local cached online service list first, then call the remote service and continue through trace get/watch, optional conversation view opening, and rating closure. Do not use for browse-only service discovery, network source registry management, identity creation/switching, or private chat-only requests.
 ---
 
 # Bot Call Remote Service
@@ -26,8 +26,8 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 
 ## Actor Selection
 
-`services call`, `trace watch`, `trace get`, `ui open --page trace`, and `services rate` accept optional `--from <bot-slug>`.
-Use the same `--from` value across the whole buyer lifecycle: call, trace follow-up, trace UI opening, and rating. If `--from` is omitted, the CLI uses the active identity. Do not switch actors mid-trace unless the human explicitly asks, because payment provenance, local trace state, and rating closure belong to the buyer Bot that started the call.
+`services call`, `trace watch`, `trace get`, `ui open --page conversations`, and `services rate` accept optional `--from <bot-slug>`.
+Use the same `--from` value across the whole buyer lifecycle: call, trace follow-up, conversation view opening, and rating. If `--from` is omitted, the CLI uses the active identity. Do not switch actors mid-trace unless the human explicitly asks, because payment provenance, local trace state, and rating closure belong to the buyer Bot that started the call.
 
 ## Trigger Guidance
 
@@ -95,10 +95,10 @@ $HOME/.metabot/bin/metabot trace watch --from <bot-slug> --trace-id trace-123
 $HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id trace-123
 ```
 
-When a finished trace should be inspectable in the browser:
+When a finished call should be inspectable in the browser:
 
 ```bash
-$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id trace-123
+$HOME/.metabot/bin/metabot ui open --page conversations --from <bot-slug> --peer <providerGlobalMetaId>
 ```
 
 If the remote Bot explicitly requests a rating after delivery, publish one buyer-side rating with:
@@ -167,16 +167,16 @@ Free services (`price` explicitly equal to numeric `0`) may be delegated directl
 - `trace watch` can legally show `timeout` and later `remote_received` / `completed` in the same follow-up. Do not stop at the first `timeout` line if the command is still running.
 - When `trace watch` ends with `completed`, immediately call `$HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id ...`.
 - If `trace get` returns `resultText`, surface that remote result verbatim before any rating closure. Do not paraphrase, summarize, or rewrite it unless the human explicitly asks.
-- When the call result includes `localUiUrl`, always surface it as a clickable link immediately after presenting the result — e.g., `[查看完整 Trace 详情](localUiUrl)` — so the human can inspect the trace without typing any command. Do not hide this link behind a "do you want to view?" question.
+- When the call result includes `localUiUrl`, always surface it as a clickable link immediately after presenting the result — e.g., `[查看对话与执行详情](localUiUrl)` — so the human can inspect the conversation and live execution without typing any command. Do not hide this link behind a "do you want to view?" question.
 - To offer a hub browsing link, replace the path portion of `localUiUrl` with `/ui/hub` (e.g., `http://127.0.0.1:52488/ui/hub`).
-- Recommend `$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id ...` only when `localUiUrl` is absent and timeout appears, clarification is requested, or manual action is required.
+- Recommend `$HOME/.metabot/bin/metabot ui open --page conversations --from <bot-slug> --peer <providerGlobalMetaId>` only when `localUiUrl` is absent and timeout appears, clarification is requested, or manual action is required.
 - If `trace get` returns `ratingRequestText`, treat it as the remote Bot explicitly asking for DACT T-stage closure.
 - Unless the human asked to skip follow-up, publish one concise buyer-side rating with `$HOME/.metabot/bin/metabot services rate --from <bot-slug> --request-file ...`.
 - If the human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`) for that rating write, use `$HOME/.metabot/bin/metabot services rate --from <bot-slug> --request-file ... --chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies to the rating pin.
 - If the rating command returns `ratingMessageSent: true`, it is safe to tell the human the rating was also delivered back to the remote Bot.
 - If the rating command returns `ratingMessageSent: false`, do not claim full closure. Say that rating was published on-chain but provider follow-up message did not deliver, and surface `ratingMessageError` when present.
 - `failed`: stop and surface the failure code without pretending remote completion.
-- `manual_action_required`: pause automation, surface the returned local UI URL, and suggest trace page follow-up.
+- `manual_action_required`: pause automation, surface the returned local UI URL, and suggest the conversation page follow-up.
 
 ## After Delivery
 
@@ -195,7 +195,7 @@ Free services (`price` explicitly equal to numeric `0`) may be delegated directl
 ## In Scope
 
 - `services call` lifecycle from confirmed request to result handoff.
-- `trace watch` + `trace get` + `ui open --page trace` evidence workflow.
+- `trace watch` + `trace get` + `ui open --page conversations` evidence workflow.
 - Buyer-side rating closure via `services rate`.
 
 ## Out of Scope

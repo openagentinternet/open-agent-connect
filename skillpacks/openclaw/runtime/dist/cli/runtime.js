@@ -1758,6 +1758,10 @@ function createDefaultCliDependencies(context) {
             query.set('firstPinId', input.firstPinId);
         if (input.mine)
             query.set('mine', 'true');
+        if (input.local)
+            query.set('local', input.local);
+        if (input.peer)
+            query.set('peer', input.peer);
         const suffix = query.size ? `?${query.toString()}` : '';
         return (0, commandResult_1.commandSuccess)({
             page: input.page,

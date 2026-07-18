@@ -646,10 +646,11 @@ test('Browser menu is data-driven and opens cache management settings', async ()
   await waitFor(() => fetchCalls.length === 2, 'initial Browser load');
 
   assert.ok(Array.isArray(context.browserMenuSections));
-  assert.equal(context.browserMenuSections[0].items[0].id, 'settings');
-  assert.equal(context.browserMenuSections[0].items[1].id, 'name-resolution');
-  assert.equal(context.browserMenuSections[0].items[2].id, 'templates');
-  assert.equal(context.browserMenuSections[0].items[3].id, 'cache');
+  const mainMenu = context.browserMenuSections.find((section) => section.id === 'main');
+  assert.deepEqual(
+    Array.from(mainMenu?.items ?? [], (item) => item.id),
+    ['settings', 'name-resolution', 'templates', 'cache'],
+  );
 
   elements['[data-browser-menu-trigger]'].click();
   assert.equal(elements['[data-browser-menu]'].hidden, false);

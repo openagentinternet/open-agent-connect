@@ -9,6 +9,23 @@ function normalizeText(value) {
         return String(value);
     return '';
 }
+/**
+ * Build a browser-relative Conversations href for a local↔peer bot pair.
+ * Self-contained (no imports, no URLSearchParams/encodeURIComponent) so it
+ * serializes into the in-browser runtime source via `fn.toString()` alongside
+ * the other helpers below. Global Meta IDs are alphanumeric (`id...`), so no
+ * URL-encoding is required.
+ */
+function buildConversationHref(localGlobalMetaId, peerGlobalMetaId) {
+    const local = normalizeText(localGlobalMetaId);
+    const peer = normalizeText(peerGlobalMetaId);
+    const parts = [];
+    if (local)
+        parts.push(`local=${local}`);
+    if (peer)
+        parts.push(`peer=${peer}`);
+    return parts.length ? `/ui/conversations?${parts.join('&')}` : '/ui/conversations';
+}
 function normalizeNumber(value) {
     if (typeof value === 'number' && Number.isFinite(value))
         return value;
@@ -285,7 +302,7 @@ function buildServiceEntry(entry) {
         blockedReason: normalizeText(record.blockedReason),
     };
 }
-function buildOrderEntry(entry) {
+function buildOrderEntry(entry, localGlobalMetaId) {
     const record = readObject(entry);
     const id = normalizeText(record.id);
     if (!id)
@@ -300,6 +317,8 @@ function buildOrderEntry(entry) {
         normalizeText(record.runtimeId),
         normalizeText(record.llmSessionId),
     ].filter(Boolean).join(' · ') || 'Runtime unavailable';
+    const peerGlobalMetaId = normalizeText(record.counterpartyGlobalMetaid);
+    const conversationHref = buildConversationHref(localGlobalMetaId, peerGlobalMetaId);
     return {
         key: id,
         statusLabel: formatStatusLabel(record.status),
@@ -312,9 +331,9 @@ function buildOrderEntry(entry) {
         ratingLabel: rating.label,
         ratingComment: rating.comment,
         ratingPinId: rating.pinId,
-        traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
+        traceHref: conversationHref,
         traceLabel: traceId || 'Trace unavailable',
-        sessionHref: sessionId ? `/ui/trace?sessionId=${encodeURIComponent(sessionId)}` : '',
+        sessionHref: conversationHref,
         sessionLabel: sessionId || 'No session',
         runtimeLabel,
     };
@@ -400,7 +419,7 @@ function buildMyServicesPageViewModel(input) {
             : null;
     const ordersPage = readObject(input.ordersPage);
     const orders = readArray(ordersPage.items)
-        .map((entry) => buildOrderEntry(entry))
+        .map((entry) => buildOrderEntry(entry, input.localGlobalMetaId))
         .filter((entry) => Boolean(entry));
     return {
         services,
@@ -456,6 +475,7 @@ function buildMyServicesPageViewModelRuntimeSource() {
         buildPagination,
         buildServiceEntry,
         buildOrderEntry,
+        buildConversationHref,
         buildEditForm,
         buildNotice,
         buildMyServicesPageViewModel,

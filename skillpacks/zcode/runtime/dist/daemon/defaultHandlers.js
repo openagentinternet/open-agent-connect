@@ -86,6 +86,7 @@ const conversationStore_1 = require("../core/a2a/conversationStore");
 const conversationPersistence_1 = require("../core/a2a/conversationPersistence");
 const conversationProjection_1 = require("../core/a2a/conversationProjection");
 const traceProjection_1 = require("../core/a2a/traceProjection");
+const conversationUrl_1 = require("../core/a2a/conversationUrl");
 const localIdentityBootstrap_1 = require("../core/bootstrap/localIdentityBootstrap");
 const loom_1 = require("../core/loom");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
@@ -1441,6 +1442,47 @@ function buildDaemonLocalUiUrl(daemon, pathname, query = {}) {
         }
     }
     return url.toString();
+}
+/**
+ * Resolve the Conversations href that an old `/ui/trace` URL should redirect to.
+ *
+ * The Conversations page deep-links via `?local=<globalMetaId>&peer=<globalMetaId>`.
+ * Legacy trace URLs carried `traceId`/`sessionId` instead, so when those are
+ * present we look up the unified session across identity profiles to recover
+ * the local↔peer pair. Returns a bare `/ui/conversations` path when no
+ * resolution is possible.
+ */
+async function resolveTraceRedirectTarget(input) {
+    const local = normalizeText(input.local);
+    const peer = normalizeText(input.peer);
+    if (local && peer) {
+        return (0, conversationUrl_1.buildConversationHref)(local, peer);
+    }
+    const referenceId = normalizeText(input.sessionId) || normalizeText(input.traceId);
+    if (!referenceId) {
+        return (0, conversationUrl_1.buildConversationHref)(local, peer);
+    }
+    const profiles = await (0, identityProfiles_1.listIdentityProfiles)(input.systemHomeDir).catch(() => []);
+    for (const profile of profiles) {
+        try {
+            const session = await (0, traceProjection_1.getUnifiedA2ATraceSessionForProfile)({
+                profile,
+                sessionId: referenceId,
+                daemon: null,
+            });
+            if (session) {
+                const resolvedLocal = local || normalizeText(session.localMetabotGlobalMetaId);
+                const resolvedPeer = peer || normalizeText(session.peerGlobalMetaId);
+                if (resolvedLocal && resolvedPeer) {
+                    return (0, conversationUrl_1.buildConversationHref)(resolvedLocal, resolvedPeer);
+                }
+            }
+        }
+        catch {
+            // Try the next profile.
+        }
+    }
+    return (0, conversationUrl_1.buildConversationHref)(local, peer);
 }
 function buildMetaAppPreviewAssetUrl(previewId, assetPath) {
     const previewSegments = encodeURIComponent(previewId);
@@ -3062,6 +3104,9 @@ async function buildTraceInspectorPayload(input) {
             ? selectedSession.providerGlobalMetaId
             : selectedSession?.callerGlobalMetaId)
         ?? null;
+    const localGlobalMetaId = selectedSession?.role === 'caller'
+        ? normalizeText(selectedSession.callerGlobalMetaId)
+        : normalizeText(selectedSession?.providerGlobalMetaId);
     return {
         ...input.trace,
         a2a: derivedA2A,
@@ -3070,10 +3115,11 @@ async function buildTraceInspectorPayload(input) {
         orderTxid: order?.orderTxid ?? null,
         orderTxids: order?.orderTxids ?? [],
         paymentTxid: order?.paymentTxid ?? null,
-        localUiUrl: buildDaemonLocalUiUrl(input.daemon, '/ui/trace', {
-            traceId: input.traceId,
-            sessionId: selectedSessionId,
-        }),
+        localUiUrl: (0, conversationUrl_1.buildConversationLocalUiUrl)(input.daemon, localGlobalMetaId, peerGlobalMetaId)
+            ?? buildDaemonLocalUiUrl(input.daemon, '/ui/trace', {
+                traceId: input.traceId,
+                sessionId: selectedSessionId,
+            }),
         session: {
             ...input.trace.session,
             ...(selectedSession ?? {}),
@@ -11478,10 +11524,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                     // Return immediately — CLI will poll trace API for completion
                     const daemon = input.getDaemonRecord();
                     return (0, commandResult_1.commandWaiting)('order_sent_awaiting_provider', 'Order sent to provider. Waiting for response...', 3000, {
-                        localUiUrl: buildDaemonLocalUiUrl(daemon, '/ui/trace', {
-                            traceId: trace.traceId,
-                            sessionId: started.session.sessionId,
-                        }),
+                        localUiUrl: (0, conversationUrl_1.buildConversationLocalUiUrl)(daemon, state.identity?.globalMetaId, plan.service.providerGlobalMetaId)
+                            ?? buildDaemonLocalUiUrl(daemon, '/ui/trace', {
+                                traceId: trace.traceId,
+                                sessionId: started.session.sessionId,
+                            }),
                         data: {
                             traceId: trace.traceId,
                             servicePinId: plan.service.servicePinId,
@@ -11551,10 +11598,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                     traceJsonPath: responseArtifacts.traceJsonPath,
                     traceMarkdownPath: responseArtifacts.traceMarkdownPath,
                     transcriptMarkdownPath: responseArtifacts.transcriptMarkdownPath,
-                    localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
-                        traceId: responseTrace.traceId,
-                        sessionId: responseSession.sessionId,
-                    }),
+                    localUiUrl: (0, conversationUrl_1.buildConversationLocalUiUrl)(input.getDaemonRecord(), state.identity?.globalMetaId, plan.service.providerGlobalMetaId)
+                        ?? buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+                            traceId: responseTrace.traceId,
+                            sessionId: responseSession.sessionId,
+                        }),
                 });
             },
             handleInboundOrderProtocolMessage,
@@ -11892,7 +11940,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     if (runnerResult.state === 'failed') {
                         return (0, commandResult_1.commandFailed)(runnerResult.code, runnerResult.message);
                     }
-                    return (0, commandResult_1.commandManualActionRequired)('clarification_needed', runnerResult.question, `/ui/trace?traceId=${encodeURIComponent(traceId)}`);
+                    return (0, commandResult_1.commandManualActionRequired)('clarification_needed', runnerResult.question, (0, conversationUrl_1.buildConversationHref)(execution.providerGlobalMetaId, execution.buyer?.globalMetaId));
                 }
                 const baseResponseText = normalizeText(runnerResult.responseText);
                 let responseText = baseResponseText;
@@ -12518,9 +12566,10 @@ function createDefaultMetabotDaemonHandlers(input) {
                     a2aStoreError: chatA2AStoreResult.errorMessage,
                     a2aSessionId,
                     traceId: trace.traceId,
-                    localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', a2aSessionId
-                        ? { traceId: a2aSessionId, sessionId: a2aSessionId }
-                        : { traceId: trace.traceId }),
+                    localUiUrl: (0, conversationUrl_1.buildConversationLocalUiUrl)(input.getDaemonRecord(), state.identity?.globalMetaId, request.to)
+                        ?? buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', a2aSessionId
+                            ? { traceId: a2aSessionId, sessionId: a2aSessionId }
+                            : { traceId: trace.traceId }),
                     transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
                     traceMarkdownPath: artifacts.traceMarkdownPath,
                     traceJsonPath: artifacts.traceJsonPath,
@@ -13058,10 +13107,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                             orderTxid: null,
                             orderTxids: [],
                             paymentTxid: null,
-                            localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
-                                traceId,
-                                sessionId: normalizedSessionId,
-                            }),
+                            localUiUrl: (0, conversationUrl_1.buildConversationLocalUiUrl)(input.getDaemonRecord(), profile.globalMetaId, peerGlobalMetaId)
+                                ?? buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+                                    traceId,
+                                    sessionId: normalizedSessionId,
+                                }),
                             a2a: {
                                 sessionId: normalizedSessionId,
                                 taskRunId: session.currentTaskRunId,
@@ -13100,6 +13150,15 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 return (0, commandResult_1.commandFailed)('session_not_found', `A2A session not found: ${normalizedSessionId}`);
             },
+        },
+        ui: {
+            resolveTraceTarget: async ({ traceId, sessionId, local, peer }) => resolveTraceRedirectTarget({
+                systemHomeDir: normalizedSystemHomeDir,
+                traceId,
+                sessionId,
+                local,
+                peer,
+            }),
         },
         bot: {
             getStats: async () => {

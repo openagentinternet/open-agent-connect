@@ -36,6 +36,8 @@ async function runUiCommand(args, context) {
     const serviceId = (0, helpers_1.readFlagValue)(args, '--service-id') || undefined;
     const mode = (0, helpers_1.readFlagValue)(args, '--mode') || undefined;
     const host = (0, helpers_1.readFlagValue)(args, '--host') || undefined;
+    const local = (0, helpers_1.readFlagValue)(args, '--local') || undefined;
+    const peer = (0, helpers_1.readFlagValue)(args, '--peer') || undefined;
     const handler = context.dependencies.ui?.open;
     if (!handler) {
         return (0, commandResult_1.commandFailed)('not_implemented', 'UI open handler is not configured.');
@@ -48,5 +50,7 @@ async function runUiCommand(args, context) {
         ...(serviceId ? { serviceId } : {}),
         ...(mode ? { mode } : {}),
         ...(host ? { host } : {}),
+        ...(local ? { local } : {}),
+        ...(peer ? { peer } : {}),
     });
 }

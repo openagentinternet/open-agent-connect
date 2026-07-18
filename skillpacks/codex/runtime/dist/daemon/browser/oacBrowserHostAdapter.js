@@ -7,6 +7,7 @@ exports.createOacBrowserHostAdapter = createOacBrowserHostAdapter;
 const node_crypto_1 = require("node:crypto");
 const node_path_1 = __importDefault(require("node:path"));
 const metabotProfileManager_1 = require("../../core/bot/metabotProfileManager");
+const conversationUrl_1 = require("../../core/a2a/conversationUrl");
 const agent_browser_core_1 = require("@openagentinternet/agent-browser-core");
 const agent_browser_name_resolvers_1 = require("@openagentinternet/agent-browser-name-resolvers");
 const agent_browser_host_contract_1 = require("@openagentinternet/agent-browser-host-contract");
@@ -387,8 +388,20 @@ function pinWriteRequestHash(input) {
 function followUpActionFromOac(result) {
     const resultData = browserRecord(result.data);
     const href = normalizeText(result.localUiUrl);
-    const traceId = normalizeText(resultData.traceId);
-    const route = href ? '' : traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '';
+    // When the producer did not hand back a Conversations localUiUrl, try to
+    // build one from the local+peer ids commonly present on OAC results so the
+    // follow-up card still lands on the right conversation thread. Only emit a
+    // follow-up when there is something to link to.
+    const fallbackLocal = normalizeText(resultData.localGlobalMetaId)
+        || normalizeText(resultData.callerGlobalMetaId);
+    const fallbackPeer = normalizeText(resultData.peerGlobalMetaId)
+        || normalizeText(resultData.providerGlobalMetaId)
+        || normalizeText(resultData.counterpartyGlobalMetaId)
+        || normalizeText(resultData.to)
+        || normalizeText(resultData.toGlobalMetaId);
+    const route = href || (!fallbackLocal && !fallbackPeer)
+        ? ''
+        : (0, conversationUrl_1.buildConversationHref)(fallbackLocal, fallbackPeer);
     if (!href && !route)
         return undefined;
     const action = {
@@ -549,11 +562,7 @@ function findProfileByHomeDir(profiles, homeDir) {
     return profiles.find((profile) => node_path_1.default.resolve(profile.homeDir) === resolvedHomeDir) ?? null;
 }
 function conversationHref(localGlobalMetaId, peerGlobalMetaId) {
-    const query = new URLSearchParams({
-        local: localGlobalMetaId,
-        peer: peerGlobalMetaId,
-    });
-    return `/ui/conversations?${query.toString()}`;
+    return (0, conversationUrl_1.buildConversationHref)(localGlobalMetaId, peerGlobalMetaId);
 }
 function createBotHref(env) {
     const query = new URLSearchParams({ mode: 'create' });

@@ -99,5 +99,6 @@ export declare function buildMyServicesPageViewModel(input: {
     selectedServiceId?: string | null;
     mutationResult?: Record<string, unknown> | null;
     error?: Record<string, unknown> | null;
+    localGlobalMetaId?: string | null;
 }): MyServicesPageViewModel;
 export declare function buildMyServicesPageViewModelRuntimeSource(): string;
