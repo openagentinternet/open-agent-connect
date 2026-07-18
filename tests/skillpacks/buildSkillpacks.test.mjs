@@ -153,6 +153,10 @@ let builtSkillpacksPromise;
 async function getBuiltSkillpacks() {
   if (!builtSkillpacksPromise) {
     builtSkillpacksPromise = (async () => {
+      await execFile('npm', ['run', 'build'], {
+        cwd: REPO_ROOT,
+        maxBuffer: 100 * 1024 * 1024,
+      });
       const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
       const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
       const result = await buildAgentConnectSkillpacks({
