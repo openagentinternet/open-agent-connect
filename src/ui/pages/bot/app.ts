@@ -1,4 +1,12 @@
 import type { LocalUiPageDefinition } from '../types';
+import { PERSONA_PRESET_CATALOG } from '../../../core/bot/personaPresets';
+
+function inlineScriptJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
 
 export function buildBotPageDefinition(): LocalUiPageDefinition {
   return {
@@ -16,7 +24,8 @@ function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
 var HOMEPAGE_UPLOAD_MAX_BYTES=50*1024*1024;
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null};
+var PERSONA_PRESET_CATALOG=${inlineScriptJson(PERSONA_PRESET_CATALOG)};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
 var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
@@ -95,7 +104,7 @@ function setSelectedSlug(slug,options){
   var next=String(slug||'');
   var changed=state.selectedSlug!==next;
   state.selectedSlug=next;
-  if(changed||options.clearDrafts)clearSelectedProfileDrafts();
+  if(changed||options.clearDrafts){clearSelectedProfileDrafts();state._personaPresetApplied=false}
   state.originalProfile=selectedProfile();
 }
 function normalizeHomepage(value){
@@ -881,15 +890,87 @@ function renderBehaviorTab(options){
   var soulValue=draft?draft.soul:persona.soul;
   var goalValue=draft?draft.goal:persona.goal;
   root.innerHTML='<div class="info-edit-panel" data-behavior-profile-slug="'+esc(profile.slug)+'">'+
+    '<div class="persona-preset-entry">'+
+      '<div><div class="persona-preset-entry-title">'+esc(uiText('bot.personaPresetIntro','Choose what kind of partner this Bot should become.'))+'</div>'+
+      '<div class="persona-preset-entry-copy">'+esc(uiText('bot.personaPresetIntroDetail','Start with a preset, then adjust Role, Soul, and Goal to make it your own.'))+'</div></div>'+
+      '<button class="btn" data-act="open-persona-presets">'+esc(uiText('bot.choosePersona','Choose a Persona'))+'</button>'+
+    '</div>'+
     '<div class="info-form-grid">'+
       '<div class="field field-full"><label for="bot-role">'+esc(uiText('bot.role','Role'))+'</label><textarea id="bot-role" data-field="role" placeholder="'+esc(uiText('bot.rolePlaceholder','Describe what this Bot should be or specialize in.'))+'">'+esc(roleValue)+'</textarea></div>'+
       '<div class="field field-full"><label for="bot-soul">'+esc(uiText('bot.soul','Soul'))+'</label><textarea id="bot-soul" data-field="soul" placeholder="'+esc(uiText('bot.soulPlaceholder','Describe the tone, style, and boundaries.'))+'">'+esc(soulValue)+'</textarea></div>'+
       '<div class="field field-full"><label for="bot-goal">'+esc(uiText('bot.goal','Goal'))+'</label><textarea id="bot-goal" data-field="goal" placeholder="'+esc(uiText('bot.goalPlaceholder','Describe what this Bot should help users accomplish.'))+'">'+esc(goalValue)+'</textarea></div>'+
     '</div>'+
-    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-behavior">'+esc(uiText('bot.saveBehavior','Save Behavior'))+'</button><span class="save-status" data-save-status></span></div></div>';
+    '<div class="info-save-row"><button class="btn btn-primary" data-act="save-behavior">'+esc(uiText('bot.saveBehavior','Save Behavior'))+'</button><span class="save-status'+(state._personaPresetApplied?' success':'')+'" data-save-status>'+(state._personaPresetApplied?esc(uiText('bot.personaPresetApplied','Preset applied. Review the fields, then save when ready.')):'')+'</span></div></div>';
   var panel=behaviorPanelForProfile(profile);
+  var choose=queryWithin(panel,'[data-act="open-persona-presets"]');if(choose)choose.addEventListener('click',openPersonaPresetModal);
   var save=queryWithin(panel,'[data-act="save-behavior"]');if(save)save.addEventListener('click',saveBehavior);
   focusBotManagementTarget();
+}
+
+function personaPresetLanguage(){
+  try{if(window.__oacLocalUiI18n&&window.__oacLocalUiI18n.getLanguage&&window.__oacLocalUiI18n.getLanguage()==='zh-CN')return'zh-CN'}catch(error){}
+  return'en';
+}
+function personaPresetCopy(preset){return preset.locales[personaPresetLanguage()]||preset.locales.en}
+function personaPresetById(id){return PERSONA_PRESET_CATALOG.presets.find(function(preset){return preset.id===id})||null}
+function personaPresetCategoryLabel(category){
+  var labels={all:['bot.personaPresetAll','All'],relationship:['bot.personaPresetRelationship','Companions'],everyday:['bot.personaPresetEveryday','Everyday'],learning:['bot.personaPresetLearning','Learning'],creative:['bot.personaPresetCreative','Creative'],professional:['bot.personaPresetProfessional','Professional']};
+  var label=labels[category]||labels.all;return uiText(label[0],label[1]);
+}
+function filteredPersonaPresets(){
+  var query=String(state._personaPresetQuery||'').trim().toLowerCase();
+  return PERSONA_PRESET_CATALOG.presets.filter(function(preset){
+    if(state._personaPresetCategory!=='all'&&preset.category!==state._personaPresetCategory)return false;
+    if(!query)return true;
+    var local=personaPresetCopy(preset);var english=preset.locales.en;
+    return [local.name,local.summary,english.name,english.summary].join(' ').toLowerCase().indexOf(query)>=0;
+  });
+}
+function personaPresetCardMarkup(preset){
+  var copy=personaPresetCopy(preset);var selected=preset.id===state._personaPresetSelectedId;
+  return '<button class="persona-preset-card'+(selected?' selected':'')+'" data-persona-id="'+esc(preset.id)+'" role="option" aria-selected="'+(selected?'true':'false')+'">'+
+    '<span class="persona-preset-emoji" aria-hidden="true">'+esc(preset.emoji)+'</span><span><strong>'+esc(copy.name)+'</strong><small>'+esc(copy.summary)+'</small></span></button>';
+}
+function personaPresetPreviewMarkup(preset){
+  if(!preset)return '<div class="persona-preset-empty">'+esc(uiText('bot.personaPresetSelectPrompt','Select a Persona to preview it.'))+'</div>';
+  var copy=personaPresetCopy(preset);var warning=state._personaPresetPendingId===preset.id;
+  return '<div class="persona-preset-preview-head"><span class="persona-preset-preview-emoji" aria-hidden="true">'+esc(preset.emoji)+'</span><div><h3>'+esc(copy.name)+'</h3><p>'+esc(copy.summary)+'</p></div></div>'+
+    '<div class="persona-preset-field"><span>'+esc(uiText('bot.role','Role'))+'</span><p>'+esc(copy.role)+'</p></div>'+
+    '<div class="persona-preset-field"><span>'+esc(uiText('bot.soul','Soul'))+'</span><p>'+esc(copy.soul)+'</p></div>'+
+    '<div class="persona-preset-field"><span>'+esc(uiText('bot.goal','Goal'))+'</span><p>'+esc(copy.goal)+'</p></div>'+
+    (warning?'<div class="persona-preset-warning"><strong>'+esc(uiText('bot.personaPresetReplaceTitle','Replace the current Persona?'))+'</strong><p>'+esc(uiText('bot.personaPresetReplaceMessage','This will replace the current Role, Soul, and Goal drafts. Nothing is saved yet.'))+'</p><div><button class="btn" data-act="cancel-persona-replace">'+esc(uiText('bot.personaPresetKeepEditing','Keep current fields'))+'</button><button class="btn btn-primary" data-act="confirm-persona-replace">'+esc(uiText('bot.personaPresetReplace','Replace fields'))+'</button></div></div>':'<button class="btn btn-primary persona-preset-apply" data-act="apply-persona-preset">'+esc(uiText('bot.personaPresetApply','Apply to fields'))+'</button>');
+}
+function renderPersonaPresetModal(){
+  var presets=filteredPersonaPresets();
+  if(presets.length&&!presets.some(function(preset){return preset.id===state._personaPresetSelectedId}))state._personaPresetSelectedId=presets[0].id;
+  var selected=presets.find(function(preset){return preset.id===state._personaPresetSelectedId})||null;
+  var categories=['all'].concat(PERSONA_PRESET_CATALOG.presets.map(function(preset){return preset.category}).filter(function(value,index,list){return list.indexOf(value)===index}));
+  var body='<div class="persona-preset-modal-body"><p class="persona-preset-modal-copy">'+esc(uiText('bot.personaPresetModalDescription','Choose a starting point. Applying a preset only fills the three fields; you can edit them before saving.'))+'</p>'+
+    '<div class="persona-preset-toolbar"><label class="persona-preset-search"><span>'+esc(uiText('bot.personaPresetSearch','Search'))+'</span><input data-persona-search value="'+esc(state._personaPresetQuery)+'" placeholder="'+esc(uiText('bot.personaPresetSearchPlaceholder','Search Personas'))+'" /></label>'+
+    '<div class="persona-preset-categories">'+categories.map(function(category){return'<button class="persona-preset-category'+(state._personaPresetCategory===category?' selected':'')+'" data-persona-category="'+esc(category)+'">'+esc(personaPresetCategoryLabel(category))+'</button>'}).join('')+'</div></div>'+
+    '<div class="persona-preset-layout"><div class="persona-preset-list" role="listbox">'+(presets.length?presets.map(personaPresetCardMarkup).join(''):'<div class="persona-preset-empty">'+esc(uiText('bot.personaPresetNoResults','No matching Personas.'))+'</div>')+'</div><div class="persona-preset-preview">'+personaPresetPreviewMarkup(selected)+'</div></div></div>';
+  openDynamicModal(uiText('bot.personaPresetModalTitle','Persona Presets'),body,{boxClass:'persona-preset-modal-box',onClose:function(){state._personaPresetModalOpen=false;state._personaPresetPendingId=''}});
+  state._personaPresetModalOpen=true;
+  var search=q('[data-persona-search]');if(search)search.addEventListener('input',function(){state._personaPresetQuery=this.value;state._personaPresetPendingId='';renderPersonaPresetModal();var nextSearch=q('[data-persona-search]');if(nextSearch&&nextSearch.focus){nextSearch.focus();if(nextSearch.setSelectionRange)nextSearch.setSelectionRange(nextSearch.value.length,nextSearch.value.length)}});
+  qq('[data-persona-category]').forEach(function(button){button.addEventListener('click',function(){state._personaPresetCategory=this.getAttribute('data-persona-category')||'all';state._personaPresetPendingId='';renderPersonaPresetModal()})});
+  qq('[data-persona-id]').forEach(function(button){button.addEventListener('click',function(){state._personaPresetSelectedId=this.getAttribute('data-persona-id')||'';state._personaPresetPendingId='';renderPersonaPresetModal()})});
+  var apply=q('[data-act="apply-persona-preset"]');if(apply)apply.addEventListener('click',function(){applyPersonaPresetById(state._personaPresetSelectedId,false)});
+  var cancel=q('[data-act="cancel-persona-replace"]');if(cancel)cancel.addEventListener('click',function(){state._personaPresetPendingId='';renderPersonaPresetModal()});
+  var replace=q('[data-act="confirm-persona-replace"]');if(replace)replace.addEventListener('click',function(){applyPersonaPresetById(state._personaPresetSelectedId,true)});
+}
+function openPersonaPresetModal(){
+  state._personaPresetCategory='all';state._personaPresetQuery='';state._personaPresetPendingId='';
+  if(!personaPresetById(state._personaPresetSelectedId))state._personaPresetSelectedId=PERSONA_PRESET_CATALOG.presets[0].id;
+  renderPersonaPresetModal();
+}
+function applyPersonaPresetById(id,replaceExisting){
+  var preset=personaPresetById(id);var profile=selectedProfile();var panel=behaviorPanelForProfile(profile);if(!preset||!panel)return false;
+  var copy=personaPresetCopy(preset);var role=queryWithin(panel,'[data-field="role"]');var soul=queryWithin(panel,'[data-field="soul"]');var goal=queryWithin(panel,'[data-field="goal"]');if(!role||!soul||!goal)return false;
+  var hasDifferentDraft=[role,soul,goal].some(function(field,index){var expected=[copy.role,copy.soul,copy.goal][index];return String(field.value||'').trim()&&field.value!==expected});
+  if(hasDifferentDraft&&!replaceExisting){state._personaPresetSelectedId=id;state._personaPresetPendingId=id;renderPersonaPresetModal();return false}
+  role.value=copy.role;soul.value=copy.soul;goal.value=copy.goal;state._personaPresetApplied=true;state._personaPresetPendingId='';closeDynamicModal();
+  var status=queryWithin(panel,'[data-save-status]');if(status){status.textContent=uiText('bot.personaPresetApplied','Preset applied. Review the fields, then save when ready.');status.className='save-status success'}
+  return true;
 }
 
 function renderChatSkillsTab(){
@@ -1488,6 +1569,7 @@ function saveBehavior(){
     state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
     if(state.selectedSlug!==profileSlug)return;
     state.originalProfile=updated;
+    state._personaPresetApplied=false;
     renderMetabotList();
     renderDetailHeader(updated);
     renderBehaviorTab({preserveDraft:false});
@@ -1935,6 +2017,7 @@ function rerenderLocalizedBotPage(){
   else if(state.selectedTab==='behavior')renderBehaviorTab();
   else if(state.selectedTab==='chatSkills')renderChatSkillsTab();
   if(state._runtimeModalOpen)renderRuntimeModal();
+  else if(state._personaPresetModalOpen)renderPersonaPresetModal();
 }
 if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
   window.addEventListener('oac:i18n-changed',rerenderLocalizedBotPage);

@@ -112,7 +112,7 @@ function createBotScriptContext(overrides = {}) {
   return {
     document: {
       querySelector: (selector) => elements[selector] ?? null,
-      querySelectorAll: () => [],
+      querySelectorAll: overrides.querySelectorAll ?? (() => []),
       addEventListener: () => {},
     },
     fetch: overrides.fetch ?? (() => Promise.resolve({
@@ -1573,6 +1573,8 @@ test('bot page renders behavior tab with only behavior controls', () => {
   assert.match(root.innerHTML, /Role/);
   assert.match(root.innerHTML, /Soul/);
   assert.match(root.innerHTML, /Goal/);
+  assert.match(root.innerHTML, /Choose a Persona/);
+  assert.match(root.innerHTML, /data-act="open-persona-presets"/);
   assert.doesNotMatch(root.innerHTML, /Primary LLM Provider/);
   assert.doesNotMatch(root.innerHTML, /Fallback LLM Provider/);
   assert.doesNotMatch(root.innerHTML, /data-field="primaryProvider"/);
@@ -1586,6 +1588,107 @@ test('bot page renders behavior tab with only behavior controls', () => {
   assert.doesNotMatch(root.innerHTML, /Homepage/);
   assert.doesNotMatch(root.innerHTML, /data-act="upload-homepage"/);
   assert.doesNotMatch(root.innerHTML, /Publish Service/);
+});
+
+test('bot page offers all 32 Persona presets without saving automatically', () => {
+  const modalRoot = {
+    innerHTML: '',
+    onclick: null,
+    classList: { add: () => {}, remove: () => {} },
+  };
+  const context = createBotScriptContext({
+    elements: { '[data-modal-root]': modalRoot },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.openPersonaPresetModal();
+
+  assert.equal((modalRoot.innerHTML.match(/data-persona-id=/g) ?? []).length, 32);
+  assert.match(modalRoot.innerHTML, /Gentle Listener/);
+  assert.match(modalRoot.innerHTML, /Software &amp; AI Development Partner/);
+  assert.match(modalRoot.innerHTML, /Applying a preset only fills the three fields/);
+});
+
+test('applying a Persona preset fills Role, Soul, and Goal as an unsaved draft', () => {
+  const role = field();
+  const soul = field();
+  const goal = field();
+  const status = field();
+  const panel = panelElement('data-behavior-profile-slug', 'alice', {
+    '[data-field="role"]': role,
+    '[data-field="soul"]': soul,
+    '[data-field="goal"]': goal,
+    '[data-save-status]': status,
+  });
+  let fetchCalls = 0;
+  const context = createBotScriptContext({
+    elements: { '[data-behavior-profile-slug]': panel },
+    fetch: () => { fetchCalls += 1; return Promise.reject(new Error('unexpected save')); },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice' }];
+
+  assert.equal(context.applyPersonaPresetById('gentle-listener', false), true);
+  assert.match(role.value, /patient listening companion/);
+  assert.match(soul.value, /non-judgmental/);
+  assert.match(goal.value, /feel heard/);
+  assert.equal(status.textContent, 'Preset applied. Review the fields, then save when ready.');
+  assert.equal(fetchCalls, 0);
+});
+
+test('applying a Persona preset asks before replacing existing drafts', () => {
+  const role = field('My existing role');
+  const soul = field('My existing soul');
+  const goal = field('My existing goal');
+  const panel = panelElement('data-behavior-profile-slug', 'alice', {
+    '[data-field="role"]': role,
+    '[data-field="soul"]': soul,
+    '[data-field="goal"]': goal,
+  });
+  const modalRoot = {
+    innerHTML: '',
+    onclick: null,
+    classList: { add: () => {}, remove: () => {} },
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-behavior-profile-slug]': panel,
+      '[data-modal-root]': modalRoot,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  context.state.profiles = [{ slug: 'alice', name: 'Alice' }];
+
+  assert.equal(context.applyPersonaPresetById('candid-partner', false), false);
+  assert.equal(role.value, 'My existing role');
+  assert.match(modalRoot.innerHTML, /Replace the current Persona/);
+  assert.match(modalRoot.innerHTML, /Nothing is saved yet/);
+
+  assert.equal(context.applyPersonaPresetById('candid-partner', true), true);
+  assert.match(role.value, /candid thinking partner/);
+});
+
+test('Persona presets follow the Simplified Chinese UI language', () => {
+  const modalRoot = {
+    innerHTML: '',
+    onclick: null,
+    classList: { add: () => {}, remove: () => {} },
+  };
+  const context = createBotScriptContext({
+    elements: { '[data-modal-root]': modalRoot },
+    window: zhI18nWindow(),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.openPersonaPresetModal();
+
+  assert.match(modalRoot.innerHTML, /温柔倾听者/);
+  assert.match(modalRoot.innerHTML, /软件与 AI 开发伙伴/);
+  assert.match(modalRoot.innerHTML, /应用预设只会填入三个字段/);
 });
 
 test('bot page public identity tab is not replaced when chat skill options load', async () => {
