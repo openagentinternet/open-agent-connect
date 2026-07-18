@@ -13,6 +13,7 @@ const BUNDLED_COMPATIBILITY_MANIFEST = 'runtime/compatibility.json';
 const SHARED_BUNDLED_CLI = 'runtime/dist/cli/main.js';
 const HOST_WRAPPER_SHARED_INSTALL = 'runtime/shared-install.sh';
 const HOST_WRAPPER_SHARED_SKILLS_ROOT = 'runtime/shared-skills';
+const HOST_WRAPPER_HOST_SKILLS_ROOT = 'runtime/host-skills';
 const METABOT_SKILLS = [
   'metabot-help',
   'metabot-identity-manage',
@@ -115,7 +116,7 @@ If you already have a bundled CLI entry, set \`METABOT_CLI_ENTRY\` directly.
 function buildHostReadme({ hostKey, host, packageVersion }) {
   return `# Open Agent Connect Skill Pack for ${host.displayName}
 
-Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into \`~/.metabot/skills\`, installs the primary \`${PRIMARY_CLI_NAME}\` CLI shim at \`${PRIMARY_CLI_PATH}\`, and then binds host-native \`metabot-*\` entries into the ${host.displayName} skills root.
+Thin host wrapper for Open Agent Connect, the host-facing runtime for Open Agent Internet. This wrapper installs the shared MetaBot skills into \`~/.metabot/skills\`, installs host-specific rendered copies into \`~/.metabot/host-skills/${hostKey}\`, installs the primary \`${PRIMARY_CLI_NAME}\` CLI shim at \`${PRIMARY_CLI_PATH}\`, and then binds host-native \`metabot-*\` entries into the ${host.displayName} skills root.
 
 ## Included MetaBot Skills
 
@@ -134,6 +135,7 @@ Compatibility note:
 
 - only the \`${PRIMARY_CLI_NAME}\` CLI shim name is installed, at \`${PRIMARY_CLI_PATH}\` by default
 - shared skills land in \`~/.metabot/skills\`
+- host-specific rendered skills land in \`~/.metabot/host-skills/${hostKey}\`
 - host-native bindings land in \`${host.defaultSkillRoot}\`
 
 Override the CLI shim directory with \`METABOT_BIN_DIR\` if \`$HOME/.metabot/bin\` is not on PATH.
@@ -160,7 +162,7 @@ $HOME/.metabot/bin/metabot browser open
 If a Bot identity is missing, create one after the user picks a name:
 
 \`\`\`bash
-$HOME/.metabot/bin/metabot identity create --name "<your chosen MetaBot name>"
+$HOME/.metabot/bin/metabot identity create --name "<your chosen MetaBot name>" --host ${hostKey}
 $HOME/.metabot/bin/metabot network bots --online --limit 20
 $HOME/.metabot/bin/metabot browser open
 $HOME/.metabot/bin/metabot ui open --page apps
@@ -371,6 +373,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="\${METABOT_BIN_DIR:-$HOME/.metabot/bin}"
 SHARED_INSTALL="$SCRIPT_DIR/${HOST_WRAPPER_SHARED_INSTALL}"
+HOST_SKILLS_SOURCE="$SCRIPT_DIR/${HOST_WRAPPER_HOST_SKILLS_ROOT}"
+HOST_SKILLS_DEST="\${METABOT_HOST_SKILL_DEST:-$HOME/.metabot/host-skills/${hostKey}}"
 
 [ -f "$SHARED_INSTALL" ] || {
   echo "Bundled shared installer not found at $SHARED_INSTALL" >&2
@@ -378,6 +382,21 @@ SHARED_INSTALL="$SCRIPT_DIR/${HOST_WRAPPER_SHARED_INSTALL}"
 }
 
 "$SHARED_INSTALL"
+
+[ -d "$HOST_SKILLS_SOURCE" ] || {
+  echo "Host-specific MetaBot skills not found at $HOST_SKILLS_SOURCE" >&2
+  exit 1
+}
+
+mkdir -p "$HOST_SKILLS_DEST"
+for skill_dir in "$HOST_SKILLS_SOURCE"/*; do
+  [ -d "$skill_dir" ] || continue
+  skill_name="$(basename "$skill_dir")"
+  target_dir="$HOST_SKILLS_DEST/$skill_name"
+  rm -rf "$target_dir"
+  mkdir -p "$target_dir"
+  cp -R "$skill_dir"/. "$target_dir"/
+done
 
 METABOT_BIN="$BIN_DIR/${PRIMARY_CLI_NAME}"
 [ -x "$METABOT_BIN" ] || {
@@ -387,7 +406,7 @@ METABOT_BIN="$BIN_DIR/${PRIMARY_CLI_NAME}"
 
 "$METABOT_BIN" host bind-skills --host ${hostKey}
 
-echo "Bound shared MetaBot skills into the ${hostKey} host root"
+echo "Bound host-specific MetaBot skills into the ${hostKey} host root"
 `;
 }
 
@@ -425,6 +444,7 @@ function renderSourceSkill(source, { mode, hostKey, host, templates }) {
     '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
     '{{COMPATIBILITY_MANIFEST}}': SHARED_COMPATIBILITY_MANIFEST,
     '{{HOST_ADAPTER_SECTION}}': hostAdapterSection,
+    '{{CURRENT_HOST}}': mode === 'host' && hostKey ? hostKey : '<host>',
     '{{SYSTEM_ROUTING}}': renderedTemplates.systemRouting,
     '{{CONFIRMATION_CONTRACT}}': renderedTemplates.confirmationContract,
   });
@@ -736,11 +756,24 @@ export async function buildAgentConnectSkillpacks(options = {}) {
     );
 
     for (const legacySkillName of METABOT_SKILLS) {
-      const hostSkillDir = path.join(hostRoot, HOST_WRAPPER_SHARED_SKILLS_ROOT, legacySkillName);
+      const sharedSkillDir = path.join(hostRoot, HOST_WRAPPER_SHARED_SKILLS_ROOT, legacySkillName);
+      await copySkillDirectory(repoRoot, legacySkillName, sharedSkillDir);
+      await writeFile(
+        path.join(sharedSkillDir, 'SKILL.md'),
+        sharedRenderedSkills.get(legacySkillName)
+      );
+
+      const hostSkillDir = path.join(hostRoot, HOST_WRAPPER_HOST_SKILLS_ROOT, legacySkillName);
       await copySkillDirectory(repoRoot, legacySkillName, hostSkillDir);
       await writeFile(
         path.join(hostSkillDir, 'SKILL.md'),
-        sharedRenderedSkills.get(legacySkillName)
+        await renderHostSkill({
+          repoRoot,
+          legacySkillName,
+          hostKey,
+          host,
+          templates,
+        }),
       );
     }
 

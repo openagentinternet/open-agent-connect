@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.HostSkillBindingError = void 0;
 exports.resolveHostSkillSymlinkType = resolveHostSkillSymlinkType;
 exports.resolveHostSkillSymlinkTarget = resolveHostSkillSymlinkTarget;
+exports.resolveHostSpecificSkillRoot = resolveHostSpecificSkillRoot;
+exports.resolvePlatformSkillSourceRoot = resolvePlatformSkillSourceRoot;
 exports.bindPlatformSkills = bindPlatformSkills;
 exports.bindHostSkills = bindHostSkills;
 const node_fs_1 = require("node:fs");
@@ -53,9 +55,9 @@ async function ensureHostSkillRoot(input) {
         });
     }
 }
-async function listSharedMetabotSkills(sharedSkillRoot) {
+async function listMetabotSkills(skillRoot) {
     try {
-        const entries = await node_fs_1.promises.readdir(sharedSkillRoot, { withFileTypes: true });
+        const entries = await node_fs_1.promises.readdir(skillRoot, { withFileTypes: true });
         return entries
             .filter((entry) => entry.isDirectory() && entry.name.startsWith('metabot-'))
             .map((entry) => entry.name)
@@ -66,12 +68,26 @@ async function listSharedMetabotSkills(sharedSkillRoot) {
         if (code === 'ENOENT') {
             return [];
         }
-        throw new HostSkillBindingError('host_skill_bind_failed', `Unable to list shared MetaBot skills under ${sharedSkillRoot}.`, {
-            sharedSkillRoot,
-            failedPath: sharedSkillRoot,
+        throw new HostSkillBindingError('host_skill_bind_failed', `Unable to list MetaBot skills under ${skillRoot}.`, {
+            sharedSkillRoot: skillRoot,
+            failedPath: skillRoot,
             reason: error instanceof Error ? error.message : String(error),
         });
     }
+}
+function resolveHostSpecificSkillRoot(systemHomeDir, host) {
+    return node_path_1.default.join(node_path_1.default.resolve(systemHomeDir), '.metabot', 'host-skills', host);
+}
+async function resolvePlatformSkillSourceRoot(input) {
+    const systemHomeDir = node_path_1.default.resolve(input.systemHomeDir);
+    const sharedSkillRoot = node_path_1.default.join(systemHomeDir, '.metabot', 'skills');
+    if (input.mode !== 'force-platform' || !input.host || !(0, platformRegistry_1.isPlatformId)(input.host)) {
+        return sharedSkillRoot;
+    }
+    const hostSpecificSkillRoot = resolveHostSpecificSkillRoot(systemHomeDir, input.host);
+    return (await listMetabotSkills(hostSpecificSkillRoot)).length > 0
+        ? hostSpecificSkillRoot
+        : sharedSkillRoot;
 }
 async function inspectDestinationHostPath(input) {
     const { skillName, sourceSharedSkillPath, destinationHostPath } = input;
@@ -252,8 +268,11 @@ function getRootsForInput(input) {
 }
 async function bindPlatformSkills(input) {
     const systemHomeDir = node_path_1.default.resolve(input.systemHomeDir);
-    const sharedSkillRoot = node_path_1.default.join(systemHomeDir, '.metabot', 'skills');
-    const boundSkills = await listSharedMetabotSkills(sharedSkillRoot);
+    const sharedSkillRoot = await resolvePlatformSkillSourceRoot({
+        ...input,
+        systemHomeDir,
+    });
+    const boundSkills = await listMetabotSkills(sharedSkillRoot);
     if (boundSkills.length === 0) {
         throw new HostSkillBindingError('shared_skills_missing', `No shared metabot-* skills were found under ${sharedSkillRoot}.`, {
             sharedSkillRoot,

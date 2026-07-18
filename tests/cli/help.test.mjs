@@ -1035,6 +1035,8 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.match(output.usage, /\[--from <bot-slug>\]/);
   assert.match(output.usage, /\[--session-id <session-id>\]/);
   assert.match(output.usage, /\[--service-id <service-pin-id>\]/);
+  assert.match(output.usage, /\[--mode <mode>\]/);
+  assert.match(output.usage, /\[--host <provider>\]/);
   assert.match(output.requiredFlags[0].description, /apps/);
   assert.match(output.requiredFlags[0].description, /conversations/);
   assert.match(output.requiredFlags[0].description, /services/);
@@ -1050,6 +1052,8 @@ test('runCli documents ui open selectors for page-specific handoffs', async () =
   assert.ok(sessionFlag);
   assert.doesNotMatch(sessionFlag.description, /chat-viewer/);
   assert.ok(output.optionalFlags.some((entry) => entry.flag === '--service-id'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--mode'));
+  assert.ok(output.optionalFlags.some((entry) => entry.flag === '--host'));
   assert.ok(output.successFields.includes('localUiUrl'));
   assert.ok(output.examples.includes('metabot ui open --page publish --from alice'));
   assert.ok(output.examples.includes('metabot ui open --page services'));
@@ -1355,6 +1359,7 @@ test('runCli prints identity create help with MetaBot terminology', async () => 
   assert.match(output, /Create one local MetaBot identity/i);
   assert.match(output, /Human-facing name for the new local MetaBot identity\./i);
   assert.match(output, /metabot identity create --name "<your chosen MetaBot name>"/);
+  assert.match(output, /--host <provider>/);
   assert.doesNotMatch(output, /metabot identity create --name "Alice"/);
   assert.doesNotMatch(output, /connected-agent/i);
 });

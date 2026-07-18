@@ -35,6 +35,8 @@ export async function runUiCommand(args: string[], context: CliRuntimeContext): 
   const traceId = readFlagValue(args, '--trace-id') || undefined;
   const sessionId = readFlagValue(args, '--session-id') || undefined;
   const serviceId = readFlagValue(args, '--service-id') || undefined;
+  const mode = readFlagValue(args, '--mode') || undefined;
+  const host = readFlagValue(args, '--host') || undefined;
 
   const handler = context.dependencies.ui?.open;
   if (!handler) {
@@ -46,5 +48,7 @@ export async function runUiCommand(args: string[], context: CliRuntimeContext): 
     ...(traceId ? { traceId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(serviceId ? { serviceId } : {}),
+    ...(mode ? { mode } : {}),
+    ...(host ? { host } : {}),
   });
 }

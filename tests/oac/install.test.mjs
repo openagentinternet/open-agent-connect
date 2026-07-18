@@ -95,6 +95,8 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
   const sharedSkillPath = path.join(systemHome, '.metabot', 'skills', 'metabot-help');
   const sharedSkillFile = path.join(sharedSkillPath, 'SKILL.md');
   const wikiCreatorSkillPath = path.join(systemHome, '.metabot', 'skills', 'metabot-create-wiki');
+  const hostSpecificSkillPath = path.join(systemHome, '.metabot', 'host-skills', 'codex', 'metabot-help');
+  const wikiCreatorHostSpecificSkillPath = path.join(systemHome, '.metabot', 'host-skills', 'codex', 'metabot-create-wiki');
   const metabotShimPath = path.join(systemHome, '.metabot', 'bin', 'metabot');
   const hostSkillPath = path.join(systemHome, '.codex', 'skills', 'metabot-help');
   const wikiCreatorHostSkillPath = path.join(systemHome, '.codex', 'skills', 'metabot-create-wiki');
@@ -141,8 +143,8 @@ test('runOac installs shared skills, metabot shim, and codex host bindings for a
   assert.doesNotMatch(shim, /exec node /);
   await fs.stat(path.join(wikiCreatorSkillPath, 'scripts', 'scaffold-wiki-skill.js'));
   await fs.stat(path.join(wikiCreatorSkillPath, 'assets', 'metabot-llm-wiki-runtime', 'scripts', 'index.js'));
-  await assertSymlinkPointsTo(hostSkillPath, sharedSkillPath);
-  await assertSymlinkPointsTo(wikiCreatorHostSkillPath, wikiCreatorSkillPath);
+  await assertSymlinkPointsTo(hostSkillPath, hostSpecificSkillPath);
+  await assertSymlinkPointsTo(wikiCreatorHostSkillPath, wikiCreatorHostSpecificSkillPath);
   await assert.rejects(fs.stat(evalsPath), { code: 'ENOENT' });
 });
 
@@ -283,8 +285,13 @@ test('runOac install --host openclaw force-creates platform-native bindings', as
   assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'openclaw' && root.status === 'bound'));
   await assertSymlinkPointsTo(
     path.join(systemHome, '.openclaw', 'skills', 'metabot-help'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'host-skills', 'openclaw', 'metabot-help'),
   );
+  const identitySkill = await fs.readFile(
+    path.join(systemHome, '.metabot', 'host-skills', 'openclaw', 'metabot-identity-manage', 'SKILL.md'),
+    'utf8',
+  );
+  assert.match(identitySkill, /identity create --name "\$TARGET_NAME" --host openclaw/);
 });
 
 test('runOac install can force-bind CodeBuddy skill roots', async (t) => {
@@ -298,7 +305,7 @@ test('runOac install can force-bind CodeBuddy skill roots', async (t) => {
   assert.ok(codebuddy.payload.data.boundRoots.some((root) => root.platformId === 'codebuddy' && root.rootId === 'codebuddy-home'));
   await assertSymlinkPointsTo(
     path.join(systemHome, '.codebuddy', 'skills', 'metabot-help'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'host-skills', 'codebuddy', 'metabot-help'),
   );
 });
 
@@ -313,7 +320,7 @@ test('runOac install can force-bind ZCode skill roots', async (t) => {
   assert.ok(zcode.payload.data.boundRoots.some((root) => root.platformId === 'zcode' && root.rootId === 'zcode-home'));
   await assertSymlinkPointsTo(
     path.join(systemHome, '.zcode', 'skills', 'metabot-help'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'host-skills', 'zcode', 'metabot-help'),
   );
 });
 
@@ -329,11 +336,11 @@ test('runOac install can force-bind WorkBuddy and CodeBuddy-compatible skill roo
   assert.ok(workbuddy.payload.data.boundRoots.some((root) => root.platformId === 'workbuddy' && root.rootId === 'workbuddy-codebuddy-home'));
   await assertSymlinkPointsTo(
     path.join(systemHome, '.workbuddy', 'skills', 'metabot-help'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'host-skills', 'workbuddy', 'metabot-help'),
   );
   await assertSymlinkPointsTo(
     path.join(systemHome, '.codebuddy', 'skills', 'metabot-help'),
-    path.join(systemHome, '.metabot', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'host-skills', 'workbuddy', 'metabot-help'),
   );
 });
 

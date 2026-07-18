@@ -39,11 +39,12 @@ async function runBotCommand(args, context) {
         const name = (0, helpers_1.readFlagValue)(args, '--name');
         if (!name)
             return (0, helpers_1.commandMissingFlag)('--name');
+        const host = (0, helpers_1.readFlagValue)(args, '--host');
         const handler = context.dependencies.bot?.createProfile;
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Bot profile create handler is not configured.');
         }
-        return handler({ name });
+        return handler({ name, ...(host ? { host } : {}) });
     }
     if (subcommand === 'update') {
         const slug = readFromSlug(args);

@@ -1742,6 +1742,91 @@ test('default bot createProfile prefers the requested host provider and falls ba
   }]);
 });
 
+test('default bot createProfile carries active host runtimes into a new profile before selecting providers', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [
+      {
+        ...runtime('codex', 'runtime-source-codex', 'healthy'),
+        lastSeenAt: '2026-05-06T00:01:00.000Z',
+        updatedAt: '2026-05-06T00:01:00.000Z',
+      },
+      {
+        ...runtime('claude-code', 'runtime-source-claude', 'healthy'),
+        lastSeenAt: '2026-05-06T00:05:00.000Z',
+        updatedAt: '2026-05-06T00:05:00.000Z',
+      },
+    ],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Source Runtime Bot',
+    host: 'codex',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.primaryProvider, 'codex');
+  assert.equal(result.data.profile.fallbackProvider, 'claude-code');
+  const targetRuntimeState = await createLlmRuntimeStore(result.data.profile.homeDir).read();
+  assert.deepEqual(
+    targetRuntimeState.runtimes.map((entry) => entry.id).sort(),
+    ['runtime-source-claude', 'runtime-source-codex'],
+  );
+  const bindings = await createLlmBindingStore(result.data.profile.homeDir).read();
+  assert.deepEqual(
+    bindings.bindings.map((binding) => [binding.role, binding.llmRuntimeId]).sort(),
+    [
+      ['fallback', 'runtime-source-claude'],
+      ['primary', 'runtime-source-codex'],
+    ],
+  );
+});
+
+test('default bot createProfile rejects an unavailable requested host instead of selecting a different provider', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const originalPath = process.env.PATH;
+  process.env.PATH = '';
+  t.after(() => {
+    process.env.PATH = originalPath;
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [runtime('claude-code', 'runtime-source-claude', 'healthy')],
+  });
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(writeCalls),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Unavailable Host Bot',
+    host: 'gemini',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'requested_host_unavailable');
+  assert.match(result.message, /gemini/);
+  assert.deepEqual(writeCalls, []);
+});
+
 test('default bot createProfile from UI defaults providers by recent runtime activity', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
@@ -2008,6 +2093,7 @@ test('default identity create prefers the requested Cursor host provider over ne
       },
     ],
   });
+  const writePaths = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
@@ -2018,18 +2104,21 @@ test('default identity create prefers the requested Cursor host provider over ne
       step1: { address: input.mvcAddress },
       step2: { txid: 'subsidy-tx-1' },
     }),
-    signer: makeSigner(async (input) => ({
-      txids: ['identity-cursor-tx'],
-      pinId: 'identity-cursor-pin',
-      totalCost: 1,
-      network: 'mvc',
-      operation: input.operation,
-      path: input.path,
-      contentType: input.contentType,
-      encoding: input.encoding ?? 'utf-8',
-      globalMetaId: 'gm-identity-cursor',
-      mvcAddress: 'mvc-identity-cursor',
-    })),
+    signer: makeSigner(async (input) => {
+      writePaths.push(input.path);
+      return {
+        txids: ['identity-cursor-tx'],
+        pinId: 'identity-cursor-pin',
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-identity-cursor',
+        mvcAddress: 'mvc-identity-cursor',
+      };
+    }),
   });
 
   const result = await handlers.identity.create({
@@ -2048,6 +2137,7 @@ test('default identity create prefers the requested Cursor host provider over ne
       ['primary', 'cursor'],
     ],
   );
+  assert.ok(writePaths.includes('/info/llm'));
 });
 
 test('default bot createProfile removes pending local files when subsidy or chain bootstrap fails', async (t) => {

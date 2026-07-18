@@ -43,5 +43,7 @@ export declare function resolveHostSkillSymlinkTarget(input: {
     destinationPath: string;
     sourcePath: string;
 }): string;
+export declare function resolveHostSpecificSkillRoot(systemHomeDir: string, host: PlatformId): string;
+export declare function resolvePlatformSkillSourceRoot(input: BindPlatformSkillsInput): Promise<string>;
 export declare function bindPlatformSkills(input: BindPlatformSkillsInput): Promise<BoundPlatformSkillRootResult[]>;
 export declare function bindHostSkills(input: BindHostSkillsInput): Promise<BoundHostSkillsResult>;

@@ -1457,6 +1457,25 @@ test('ui open trace returns a local trace inspector url with the requested trace
   assert.match(opened.payload.data.localUiUrl, /\/ui\/trace\?traceId=trace-123$/);
 });
 
+test('ui open bot create forwards the current host in the local UI URL', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, [
+    'ui', 'open', '--page', 'bot', '--mode', 'create', '--host', 'codex',
+  ]);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  const uiUrl = new URL(opened.payload.data.localUiUrl);
+  assert.equal(uiUrl.pathname, '/ui/bot');
+  assert.equal(uiUrl.searchParams.get('mode'), 'create');
+  assert.equal(uiUrl.searchParams.get('host'), 'codex');
+});
+
 test('ui open buzz returns the bundled Buzz entry html url', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));

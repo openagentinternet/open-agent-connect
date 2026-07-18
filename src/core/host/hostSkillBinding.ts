@@ -107,9 +107,9 @@ async function ensureHostSkillRoot(input: {
   }
 }
 
-async function listSharedMetabotSkills(sharedSkillRoot: string): Promise<string[]> {
+async function listMetabotSkills(skillRoot: string): Promise<string[]> {
   try {
-    const entries = await fs.readdir(sharedSkillRoot, { withFileTypes: true });
+    const entries = await fs.readdir(skillRoot, { withFileTypes: true });
     return entries
       .filter((entry) => entry.isDirectory() && entry.name.startsWith('metabot-'))
       .map((entry) => entry.name)
@@ -121,14 +121,31 @@ async function listSharedMetabotSkills(sharedSkillRoot: string): Promise<string[
     }
     throw new HostSkillBindingError(
       'host_skill_bind_failed',
-      `Unable to list shared MetaBot skills under ${sharedSkillRoot}.`,
+      `Unable to list MetaBot skills under ${skillRoot}.`,
       {
-        sharedSkillRoot,
-        failedPath: sharedSkillRoot,
+        sharedSkillRoot: skillRoot,
+        failedPath: skillRoot,
         reason: error instanceof Error ? error.message : String(error),
       },
     );
   }
+}
+
+export function resolveHostSpecificSkillRoot(systemHomeDir: string, host: PlatformId): string {
+  return path.join(path.resolve(systemHomeDir), '.metabot', 'host-skills', host);
+}
+
+export async function resolvePlatformSkillSourceRoot(input: BindPlatformSkillsInput): Promise<string> {
+  const systemHomeDir = path.resolve(input.systemHomeDir);
+  const sharedSkillRoot = path.join(systemHomeDir, '.metabot', 'skills');
+  if (input.mode !== 'force-platform' || !input.host || !isPlatformId(input.host)) {
+    return sharedSkillRoot;
+  }
+
+  const hostSpecificSkillRoot = resolveHostSpecificSkillRoot(systemHomeDir, input.host);
+  return (await listMetabotSkills(hostSpecificSkillRoot)).length > 0
+    ? hostSpecificSkillRoot
+    : sharedSkillRoot;
 }
 
 type ExistingDestination =
@@ -395,8 +412,11 @@ function getRootsForInput(input: BindPlatformSkillsInput): InstallSkillRoot[] {
 
 export async function bindPlatformSkills(input: BindPlatformSkillsInput): Promise<BoundPlatformSkillRootResult[]> {
   const systemHomeDir = path.resolve(input.systemHomeDir);
-  const sharedSkillRoot = path.join(systemHomeDir, '.metabot', 'skills');
-  const boundSkills = await listSharedMetabotSkills(sharedSkillRoot);
+  const sharedSkillRoot = await resolvePlatformSkillSourceRoot({
+    ...input,
+    systemHomeDir,
+  });
+  const boundSkills = await listMetabotSkills(sharedSkillRoot);
   if (boundSkills.length === 0) {
     throw new HostSkillBindingError(
       'shared_skills_missing',

@@ -1583,6 +1583,10 @@ function createDefaultCliDependencies(context) {
             query.set('sessionId', input.sessionId);
         if (input.serviceId)
             query.set('serviceId', input.serviceId);
+        if (input.mode)
+            query.set('mode', input.mode);
+        if (input.host)
+            query.set('host', input.host);
         if (input.pinId)
             query.set('pinId', input.pinId);
         if (input.firstPinId)

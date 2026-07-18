@@ -50,7 +50,7 @@ test('runCli dispatches bot profile mutations with actor selectors', async () =>
   await writeFile(payloadFile, JSON.stringify({ displayName: 'Alice Bot' }), 'utf8');
 
   const calls = [];
-  const createExitCode = await runCli(['bot', 'create', '--name', 'Alice'], {
+  const createExitCode = await runCli(['bot', 'create', '--name', 'Alice', '--host', 'codex'], {
     stdout: { write: () => true },
     stderr: { write: () => true },
     dependencies: {
@@ -91,7 +91,7 @@ test('runCli dispatches bot profile mutations with actor selectors', async () =>
   assert.equal(updateExitCode, 0);
   assert.equal(deleteExitCode, 0);
   assert.deepEqual(calls, [
-    ['create', { name: 'Alice' }],
+    ['create', { name: 'Alice', host: 'codex' }],
     ['update', { slug: 'alice', displayName: 'Alice Bot' }],
     ['delete', { slug: 'alice', confirm: true }],
   ]);
@@ -164,4 +164,3 @@ test('runCli dispatches bot config, wallet, backup, runtime, and session command
     ['sessions', { slug: 'alice', limit: 50 }],
   ]);
 });
-

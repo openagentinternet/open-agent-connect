@@ -1,7 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { commandFailed, commandSuccess, type MetabotCommandResult } from '../contracts/commandResult';
-import { bindPlatformSkills, type BoundPlatformSkillRootResult } from '../host/hostSkillBinding';
+import {
+  bindPlatformSkills,
+  resolveHostSpecificSkillRoot,
+  resolvePlatformSkillSourceRoot,
+  type BoundPlatformSkillRootResult,
+} from '../host/hostSkillBinding';
 import { CLI_VERSION } from '../../cli/version';
 import { SUPPORTED_PLATFORM_IDS, isPlatformId, resolvePlatformSkillRootPath } from '../platform/platformRegistry';
 import { getInstallSkillRoots, getPlatformSkillRoots } from '../platform/platformRegistry';
@@ -83,7 +88,11 @@ function replaceAll(source: string, replacements: Record<string, string>): strin
   );
 }
 
-async function renderSharedSkill(packageRoot: string, skillName: string): Promise<string> {
+async function renderSharedSkill(
+  packageRoot: string,
+  skillName: string,
+  host?: PlatformId,
+): Promise<string> {
   const source = await fs.readFile(path.join(packageRoot, 'SKILLs', skillName, 'SKILL.md'), 'utf8');
   const systemRouting = await fs.readFile(
     path.join(packageRoot, 'skillpacks', 'common', 'templates', 'system-routing.md'),
@@ -98,6 +107,7 @@ async function renderSharedSkill(packageRoot: string, skillName: string): Promis
     '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
     '{{COMPATIBILITY_MANIFEST}}': 'release/compatibility.json',
     '{{HOST_ADAPTER_SECTION}}': '',
+    '{{CURRENT_HOST}}': host ?? '<host>',
     '{{SYSTEM_ROUTING}}': replaceAll(systemRouting, {
       '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
     }),
@@ -107,17 +117,17 @@ async function renderSharedSkill(packageRoot: string, skillName: string): Promis
   });
 }
 
-async function copySharedSkills(input: {
+async function copyRenderedSkills(input: {
   packageRoot: string;
-  systemHomeDir: string;
-}): Promise<{ sharedSkillRoot: string; installedSkills: string[] }> {
+  skillRoot: string;
+  host?: PlatformId;
+}): Promise<{ skillRoot: string; installedSkills: string[] }> {
   const sourceRoot = path.join(input.packageRoot, 'SKILLs');
-  const sharedSkillRoot = path.join(input.systemHomeDir, '.metabot', 'skills');
   const installedSkills = await listSourceSkills(input.packageRoot);
-  await fs.mkdir(sharedSkillRoot, { recursive: true });
+  await fs.mkdir(input.skillRoot, { recursive: true });
 
   for (const skillName of installedSkills) {
-    const targetSkillRoot = path.join(sharedSkillRoot, skillName);
+    const targetSkillRoot = path.join(input.skillRoot, skillName);
     const sourceSkillRoot = path.join(sourceRoot, skillName);
     await fs.rm(targetSkillRoot, { recursive: true, force: true });
     await fs.mkdir(targetSkillRoot, { recursive: true });
@@ -130,12 +140,38 @@ async function copySharedSkills(input: {
     });
     await fs.writeFile(
       path.join(targetSkillRoot, 'SKILL.md'),
-      await renderSharedSkill(input.packageRoot, skillName),
+      await renderSharedSkill(input.packageRoot, skillName, input.host),
       'utf8',
     );
   }
 
+  return { skillRoot: input.skillRoot, installedSkills };
+}
+
+async function copySharedSkills(input: {
+  packageRoot: string;
+  systemHomeDir: string;
+}): Promise<{ sharedSkillRoot: string; installedSkills: string[] }> {
+  const sharedSkillRoot = path.join(input.systemHomeDir, '.metabot', 'skills');
+  const { installedSkills } = await copyRenderedSkills({
+    packageRoot: input.packageRoot,
+    skillRoot: sharedSkillRoot,
+  });
   return { sharedSkillRoot, installedSkills };
+}
+
+async function copyHostSpecificSkills(input: {
+  packageRoot: string;
+  systemHomeDir: string;
+  host: PlatformId;
+}): Promise<string> {
+  const hostSkillRoot = resolveHostSpecificSkillRoot(input.systemHomeDir, input.host);
+  await copyRenderedSkills({
+    packageRoot: input.packageRoot,
+    skillRoot: hostSkillRoot,
+    host: input.host,
+  });
+  return hostSkillRoot;
 }
 
 function renderNodeResolverShellLines(): string[] {
@@ -311,6 +347,12 @@ async function verifyInstalledState(input: {
 }): Promise<NpmInstallResult> {
   const installedSkills = await listSourceSkills(input.packageRoot);
   const sharedSkillRoot = path.join(input.systemHomeDir, '.metabot', 'skills');
+  const sourceSkillRoot = await resolvePlatformSkillSourceRoot({
+    systemHomeDir: input.systemHomeDir,
+    host: input.host,
+    env: input.env,
+    mode: input.host ? 'force-platform' : 'auto',
+  });
   const metabotShimPath = path.join(input.systemHomeDir, '.metabot', 'bin', 'metabot');
 
   for (const skillName of installedSkills) {
@@ -340,7 +382,7 @@ async function verifyInstalledState(input: {
     }
     verifiedRoots.push(await verifyRootBindings({
       root,
-      sharedSkillRoot,
+      sharedSkillRoot: sourceSkillRoot,
       installedSkills,
       forced: Boolean(input.host) || root.platformId === 'shared-agents',
     }));
@@ -389,6 +431,13 @@ export async function runNpmInstall(
       packageRoot,
       systemHomeDir,
     });
+    if (host) {
+      await copyHostSpecificSkills({
+        packageRoot,
+        systemHomeDir,
+        host,
+      });
+    }
     const metabotShimPath = await writeMetabotShim({
       packageRoot,
       systemHomeDir,

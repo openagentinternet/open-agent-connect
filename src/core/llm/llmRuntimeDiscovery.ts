@@ -13,6 +13,7 @@ import type { LlmExecutionEvent } from './executor/types';
 
 export interface DiscoveryInput {
   env?: NodeJS.ProcessEnv;
+  providers?: LlmProvider[];
   createId?: () => string;
   now?: () => string;
   readinessProbe?: RuntimeReadinessProbe;
@@ -696,14 +697,20 @@ export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<Disco
   const pathDirs = splitPath(getPathEnv(env));
   const runtimes: LlmRuntime[] = [];
   const errors: Array<{ provider: string; message: string }> = [];
+  const requestedProviders = new Set(
+    (input?.providers ?? []).filter((provider) => isRuntimePlatformId(provider)),
+  );
+  const platforms = requestedProviders.size > 0
+    ? getRuntimePlatforms().filter((platform) => requestedProviders.has(platform.id))
+    : getRuntimePlatforms();
   const shellResolvedExecutables = input?.shellResolvedExecutables ?? await resolveExecutablesViaLoginShell(
-    getRuntimePlatforms().flatMap((platform) => platform.runtime.binaryNames),
+    platforms.flatMap((platform) => platform.runtime.binaryNames),
     env,
   );
   const knownRuntimesById = new Map((input?.knownRuntimes ?? []).map((runtime) => [runtime.id, runtime]));
 
   const discoveryResults = await mapWithConcurrency(
-    getRuntimePlatforms(),
+    platforms,
     normalizeProviderDiscoveryConcurrency(input?.providerConcurrency),
     async (platform) => {
       try {

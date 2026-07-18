@@ -996,10 +996,78 @@ function resolveMetabotCreatePreferredProvider(input) {
         ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
         ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
 }
-async function applyDefaultMetabotCreateProviders(input) {
-    const runtimeState = await (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(input.homeDir)).read();
+class RequestedMetabotHostUnavailableError extends Error {
+    provider;
+    constructor(provider) {
+        super(`The requested host provider "${provider}" is not available. Make sure its local runtime is installed and signed in, then try again.`);
+        this.name = 'RequestedMetabotHostUnavailableError';
+        this.provider = provider;
+    }
+}
+function mergeMetabotCreateRuntimeCandidates(...groups) {
+    const runtimeById = new Map();
+    for (const group of groups) {
+        for (const runtime of group) {
+            runtimeById.set(runtime.id, runtime);
+        }
+    }
+    return [...runtimeById.values()];
+}
+function hasHealthyMetabotCreateProvider(runtimes, provider) {
+    return runtimes.some((runtime) => runtime.provider === provider && runtime.health === 'healthy');
+}
+async function resolveDefaultMetabotCreateProviders(input) {
+    const targetRuntimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(input.homeDir));
+    const targetRuntimeState = await targetRuntimeStore.read();
+    const sourceHomeDir = input.sourceHomeDir ? node_path_1.default.resolve(input.sourceHomeDir) : node_path_1.default.resolve(input.homeDir);
+    const sourceRuntimeState = sourceHomeDir === node_path_1.default.resolve(input.homeDir)
+        ? targetRuntimeState
+        : await (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(sourceHomeDir)).read();
+    let candidateRuntimes = mergeMetabotCreateRuntimeCandidates(targetRuntimeState.runtimes, sourceRuntimeState.runtimes);
+    const preferredProvider = input.preferredProvider && input.preferredProvider !== 'custom'
+        ? input.preferredProvider
+        : null;
+    if (preferredProvider
+        && input.primaryProvider === undefined
+        && !hasHealthyMetabotCreateProvider(candidateRuntimes, preferredProvider)) {
+        const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({
+            env: process.env,
+            providers: [preferredProvider],
+            knownRuntimes: candidateRuntimes,
+        });
+        candidateRuntimes = mergeMetabotCreateRuntimeCandidates(candidateRuntimes, discoveryResult.runtimes);
+    }
     const defaults = (0, metabotProfileManager_1.selectDefaultMetabotProviders)({
-        runtimes: runtimeState.runtimes,
+        runtimes: candidateRuntimes,
+        preferredProvider,
+        primaryProvider: input.primaryProvider,
+        fallbackProvider: input.fallbackProvider,
+    });
+    if (preferredProvider
+        && input.primaryProvider === undefined
+        && defaults.primaryProvider !== preferredProvider) {
+        throw new RequestedMetabotHostUnavailableError(preferredProvider);
+    }
+    for (const provider of [defaults.primaryProvider, defaults.fallbackProvider]) {
+        if (!provider || provider === 'custom')
+            continue;
+        try {
+            const runtime = (0, metabotProfileManager_1.selectRuntimeForProvider)(candidateRuntimes, provider);
+            await targetRuntimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
+        }
+        catch (error) {
+            if (input.primaryProvider === provider || input.fallbackProvider === provider) {
+                continue;
+            }
+            throw error;
+        }
+    }
+    return defaults;
+}
+async function applyDefaultMetabotCreateProviders(input) {
+    const defaults = await resolveDefaultMetabotCreateProviders({
+        homeDir: input.homeDir,
+        sourceHomeDir: input.sourceHomeDir,
         preferredProvider: input.preferredProvider,
         primaryProvider: input.createInput.primaryProvider,
         fallbackProvider: input.createInput.fallbackProvider,
@@ -9820,6 +9888,22 @@ function createDefaultMetabotDaemonHandlers(input) {
                     homeDir: input.homeDir,
                     name: requestName,
                 });
+                const preferredProvider = normalizePreferredCreateProvider(host)
+                    ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
+                    ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
+                let defaultProviders;
+                try {
+                    defaultProviders = await resolveDefaultMetabotCreateProviders({
+                        homeDir: input.homeDir,
+                        preferredProvider,
+                    });
+                }
+                catch (error) {
+                    if (error instanceof RequestedMetabotHostUnavailableError) {
+                        return (0, commandResult_1.commandFailed)('requested_host_unavailable', error.message);
+                    }
+                    return (0, commandResult_1.commandFailed)('metabot_provider_selection_failed', error instanceof Error ? error.message : String(error));
+                }
                 const bootstrap = await (0, bootstrapFlow_1.runBootstrapFlow)({
                     request: {
                         name: requestName,
@@ -9844,52 +9928,40 @@ function createDefaultMetabotDaemonHandlers(input) {
                     await notifyIdentityProfileRegistered();
                     await ensureEmptyPersonaFiles(runtimeStateStore.paths, normalizedName);
                     try {
-                        const preferredProvider = normalizePreferredCreateProvider(host)
-                            ?? normalizePreferredCreateProvider(process.env.METABOT_HOST)
-                            ?? normalizePreferredCreateProvider(process.env.OAC_HOST);
-                        const runtimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(input.homeDir);
-                        const previous = await runtimeStore.read();
-                        if (preferredProvider) {
-                            const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({ env: process.env, knownRuntimes: previous.runtimes });
-                            for (const runtime of discoveryResult.runtimes) {
-                                await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
-                            }
-                        }
-                        const runtimeState = await runtimeStore.read();
-                        const previousRuntimeIds = new Set(previous.runtimes.map((runtime) => runtime.id));
-                        const defaultCandidateRuntimes = preferredProvider
-                            ? runtimeState.runtimes.filter((runtime) => (previousRuntimeIds.has(runtime.id) || runtime.provider === preferredProvider))
-                            : runtimeState.runtimes;
-                        const defaults = (0, metabotProfileManager_1.selectDefaultMetabotProviders)({
-                            runtimes: defaultCandidateRuntimes,
-                            preferredProvider,
+                        const profile = await (0, metabotProfileManager_1.createMetabotProfileFromIdentity)(normalizedSystemHomeDir, {
+                            name: nextState.identity.name,
+                            homeDir: input.homeDir,
+                            globalMetaId: nextState.identity.globalMetaId,
+                            mvcAddress: nextState.identity.mvcAddress,
+                            ...(defaultProviders.primaryProvider !== undefined
+                                ? { primaryProvider: defaultProviders.primaryProvider }
+                                : {}),
+                            ...(defaultProviders.fallbackProvider !== undefined
+                                ? { fallbackProvider: defaultProviders.fallbackProvider }
+                                : {}),
                         });
-                        const resolvedSlug = node_path_1.default.basename(input.homeDir);
-                        const bindingStore = (0, llmBindingStore_1.createLlmBindingStore)(input.homeDir);
-                        const now = new Date().toISOString();
-                        for (const entry of [
-                            { role: 'primary', provider: defaults.primaryProvider },
-                            { role: 'fallback', provider: defaults.fallbackProvider },
-                        ]) {
-                            if (entry.provider) {
-                                const matchedRuntime = (0, metabotProfileManager_1.selectRuntimeForProvider)(runtimeState.runtimes, entry.provider);
-                                await bindingStore.upsertBinding({
-                                    id: buildDefaultBindingId(resolvedSlug, matchedRuntime.id, entry.role),
-                                    metaBotSlug: resolvedSlug,
-                                    llmRuntimeId: matchedRuntime.id,
-                                    role: entry.role,
-                                    priority: 0,
-                                    enabled: true,
-                                    createdAt: now,
-                                    updatedAt: now,
-                                });
-                            }
-                        }
+                        const profileInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(profile, ['primaryProvider']);
+                        const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(signer, profile, profileInfoTargets, {
+                            delayMs: input.identitySyncStepDelayMs,
+                            operation: 'create',
+                            deferPublishStateWrite: true,
+                        });
+                        await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, profileInfoTargets, profileChainWrites);
+                        return (0, commandResult_1.commandSuccess)({
+                            ...nextState.identity,
+                            chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
+                        });
                     }
-                    catch {
-                        // Auto-binding is best-effort; never fail identity creation.
+                    catch (error) {
+                        return (0, commandResult_1.commandSuccess)({
+                            ...nextState.identity,
+                            chainWrites: bootstrap.sync?.chainWrites ?? [],
+                            llmSync: {
+                                ok: false,
+                                message: error instanceof Error ? error.message : String(error),
+                            },
+                        });
                     }
-                    return (0, commandResult_1.commandSuccess)(nextState.identity);
                 }
                 return (0, commandResult_1.commandFailed)('identity_bootstrap_failed', bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.');
             },
@@ -12955,11 +13027,20 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('name_taken', resolvedHome.message);
                 }
                 const profileHomeDir = resolvedHome.homeDir;
-                createInput = await applyDefaultMetabotCreateProviders({
-                    createInput,
-                    homeDir: profileHomeDir,
-                    preferredProvider: resolveMetabotCreatePreferredProvider(body),
-                });
+                try {
+                    createInput = await applyDefaultMetabotCreateProviders({
+                        createInput,
+                        homeDir: profileHomeDir,
+                        sourceHomeDir: input.homeDir,
+                        preferredProvider: resolveMetabotCreatePreferredProvider(body),
+                    });
+                }
+                catch (error) {
+                    if (error instanceof RequestedMetabotHostUnavailableError) {
+                        return (0, commandResult_1.commandFailed)('requested_host_unavailable', error.message);
+                    }
+                    return (0, commandResult_1.commandFailed)('metabot_provider_selection_failed', error instanceof Error ? error.message : String(error));
+                }
                 const profileRuntimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(profileHomeDir);
                 const profileSecretStore = (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir);
                 const profileSigner = createSignerForProfileHome(profileHomeDir);

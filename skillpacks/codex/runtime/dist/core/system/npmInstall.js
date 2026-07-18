@@ -50,7 +50,7 @@ async function listSourceSkills(packageRoot) {
 function replaceAll(source, replacements) {
     return Object.entries(replacements).reduce((text, [token, value]) => text.split(token).join(value), source);
 }
-async function renderSharedSkill(packageRoot, skillName) {
+async function renderSharedSkill(packageRoot, skillName, host) {
     const source = await node_fs_1.promises.readFile(node_path_1.default.join(packageRoot, 'SKILLs', skillName, 'SKILL.md'), 'utf8');
     const systemRouting = await node_fs_1.promises.readFile(node_path_1.default.join(packageRoot, 'skillpacks', 'common', 'templates', 'system-routing.md'), 'utf8');
     const confirmationContract = await node_fs_1.promises.readFile(node_path_1.default.join(packageRoot, 'skillpacks', 'common', 'templates', 'confirmation-contract.md'), 'utf8');
@@ -58,6 +58,7 @@ async function renderSharedSkill(packageRoot, skillName) {
         '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
         '{{COMPATIBILITY_MANIFEST}}': 'release/compatibility.json',
         '{{HOST_ADAPTER_SECTION}}': '',
+        '{{CURRENT_HOST}}': host ?? '<host>',
         '{{SYSTEM_ROUTING}}': replaceAll(systemRouting, {
             '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
         }),
@@ -66,13 +67,12 @@ async function renderSharedSkill(packageRoot, skillName) {
         }),
     });
 }
-async function copySharedSkills(input) {
+async function copyRenderedSkills(input) {
     const sourceRoot = node_path_1.default.join(input.packageRoot, 'SKILLs');
-    const sharedSkillRoot = node_path_1.default.join(input.systemHomeDir, '.metabot', 'skills');
     const installedSkills = await listSourceSkills(input.packageRoot);
-    await node_fs_1.promises.mkdir(sharedSkillRoot, { recursive: true });
+    await node_fs_1.promises.mkdir(input.skillRoot, { recursive: true });
     for (const skillName of installedSkills) {
-        const targetSkillRoot = node_path_1.default.join(sharedSkillRoot, skillName);
+        const targetSkillRoot = node_path_1.default.join(input.skillRoot, skillName);
         const sourceSkillRoot = node_path_1.default.join(sourceRoot, skillName);
         await node_fs_1.promises.rm(targetSkillRoot, { recursive: true, force: true });
         await node_fs_1.promises.mkdir(targetSkillRoot, { recursive: true });
@@ -83,9 +83,26 @@ async function copySharedSkills(input) {
                 return !segments.includes('evals') && node_path_1.default.basename(sourcePath) !== '.DS_Store';
             },
         });
-        await node_fs_1.promises.writeFile(node_path_1.default.join(targetSkillRoot, 'SKILL.md'), await renderSharedSkill(input.packageRoot, skillName), 'utf8');
+        await node_fs_1.promises.writeFile(node_path_1.default.join(targetSkillRoot, 'SKILL.md'), await renderSharedSkill(input.packageRoot, skillName, input.host), 'utf8');
     }
+    return { skillRoot: input.skillRoot, installedSkills };
+}
+async function copySharedSkills(input) {
+    const sharedSkillRoot = node_path_1.default.join(input.systemHomeDir, '.metabot', 'skills');
+    const { installedSkills } = await copyRenderedSkills({
+        packageRoot: input.packageRoot,
+        skillRoot: sharedSkillRoot,
+    });
     return { sharedSkillRoot, installedSkills };
+}
+async function copyHostSpecificSkills(input) {
+    const hostSkillRoot = (0, hostSkillBinding_1.resolveHostSpecificSkillRoot)(input.systemHomeDir, input.host);
+    await copyRenderedSkills({
+        packageRoot: input.packageRoot,
+        skillRoot: hostSkillRoot,
+        host: input.host,
+    });
+    return hostSkillRoot;
 }
 function renderNodeResolverShellLines() {
     return [
@@ -228,6 +245,12 @@ async function expectedDoctorRoots(input) {
 async function verifyInstalledState(input) {
     const installedSkills = await listSourceSkills(input.packageRoot);
     const sharedSkillRoot = node_path_1.default.join(input.systemHomeDir, '.metabot', 'skills');
+    const sourceSkillRoot = await (0, hostSkillBinding_1.resolvePlatformSkillSourceRoot)({
+        systemHomeDir: input.systemHomeDir,
+        host: input.host,
+        env: input.env,
+        mode: input.host ? 'force-platform' : 'auto',
+    });
     const metabotShimPath = node_path_1.default.join(input.systemHomeDir, '.metabot', 'bin', 'metabot');
     for (const skillName of installedSkills) {
         await assertFileExists(node_path_1.default.join(sharedSkillRoot, skillName, 'SKILL.md'), 'doctor_shared_skills_missing', `Missing shared skill ${skillName} under ${sharedSkillRoot}. Run oac install.`);
@@ -246,7 +269,7 @@ async function verifyInstalledState(input) {
         }
         verifiedRoots.push(await verifyRootBindings({
             root,
-            sharedSkillRoot,
+            sharedSkillRoot: sourceSkillRoot,
             installedSkills,
             forced: Boolean(input.host) || root.platformId === 'shared-agents',
         }));
@@ -284,6 +307,13 @@ async function runNpmInstall(input, context) {
             packageRoot,
             systemHomeDir,
         });
+        if (host) {
+            await copyHostSpecificSkills({
+                packageRoot,
+                systemHomeDir,
+                host,
+            });
+        }
         const metabotShimPath = await writeMetabotShim({
             packageRoot,
             systemHomeDir,

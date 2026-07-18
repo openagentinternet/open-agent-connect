@@ -729,8 +729,8 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-identity-manage'), 'utf8');
   assert.match(content, /^name:\s*metabot-identity-manage$/m);
   assert.match(content, /identity create --name/);
-  assert.match(content, /identity create --name "\$TARGET_NAME" --host <platform>/);
-  assert.match(content, /Cursor[\s\S]*--host cursor/i);
+  assert.match(content, /identity create --name "\$TARGET_NAME" --host <host>/);
+  assert.match(content, /shared host-neutral copy contains\s+`<host>`/i);
   assert.match(content, /identity list/);
   assert.match(content, /identity assign --name/);
   assert.match(content, /identity who/);
@@ -761,6 +761,19 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /## Handoff To/);
   assert.doesNotMatch(content, /PROFILE_SLUG/);
   assert.doesNotMatch(content, /\.metabot\/hot/);
+});
+
+test('buildAgentConnectSkillpacks renders host-specific identity creation commands', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  for (const host of HOSTS) {
+    const content = await readFile(
+      path.join(outputRoot, host, 'runtime', 'host-skills', 'metabot-identity-manage', 'SKILL.md'),
+      'utf8',
+    );
+    assert.match(content, new RegExp(`identity create --name "\\$TARGET_NAME" --host ${host}`));
+    assert.doesNotMatch(content, /--host <host>/);
+  }
 });
 
 test('buildAgentConnectSkillpacks publishes Browser follow-ups in remote-service and MetaApp shared skills', async () => {
@@ -953,6 +966,7 @@ test('host wrapper install.sh runs the packaged shared install flow and binds ho
     });
 
     const sharedSkillRoot = path.join(fakeHome, '.metabot', 'skills');
+    const hostSpecificSkillRoot = path.join(fakeHome, '.metabot', 'host-skills', host);
     await assertFileMissing(path.join(sharedSkillRoot, 'metabot-ask-master', 'SKILL.md'));
 
     for (const skillName of EXPECTED_METABOT_SKILLS) {
@@ -963,9 +977,15 @@ test('host wrapper install.sh runs the packaged shared install flow and binds ho
       const boundSkillTarget = await readlink(boundSkillPath);
       assert.equal(
         path.resolve(path.dirname(boundSkillPath), boundSkillTarget),
-        path.join(sharedSkillRoot, skillName),
+        path.join(hostSpecificSkillRoot, skillName),
       );
     }
+
+    const identitySkill = await readFile(
+      path.join(hostSpecificSkillRoot, 'metabot-identity-manage', 'SKILL.md'),
+      'utf8',
+    );
+    assert.match(identitySkill, new RegExp(`--host ${host}`));
   }
 });
 
