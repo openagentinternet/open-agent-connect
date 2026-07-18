@@ -962,6 +962,54 @@ function calculateMetabotCreateInfoFields(input) {
         fields.push('allowChatSkills');
     return fields;
 }
+function calculateMetabotStoredInfoFields(profile) {
+    const fields = [];
+    if (normalizeText(profile.bio))
+        fields.push('bio');
+    if (normalizeText(profile.role))
+        fields.push('role');
+    if (normalizeText(profile.soul))
+        fields.push('soul');
+    if (normalizeText(profile.goal))
+        fields.push('goal');
+    if (normalizeText(profile.avatarDataUrl))
+        fields.push('avatar');
+    if (profile.primaryProvider || profile.fallbackProvider)
+        fields.push('primaryProvider');
+    if (profile.allowChatSkills.length > 0)
+        fields.push('allowChatSkills');
+    if (profile.homepage)
+        fields.push('homepage');
+    return fields;
+}
+function buildMetabotSetupStatus(identity) {
+    if (!identity || (!identity.subsidyState && !identity.syncState)) {
+        return {
+            state: 'ready',
+            retryable: false,
+            error: null,
+        };
+    }
+    if (identity.subsidyState !== 'claimed') {
+        return {
+            state: identity.subsidyState === 'failed' ? 'subsidy_failed' : 'pending',
+            retryable: identity.subsidyState === 'failed',
+            error: normalizeText(identity.subsidyError) || null,
+        };
+    }
+    if (identity.syncState !== 'synced' && identity.syncState !== 'partial') {
+        return {
+            state: identity.syncState === 'failed' ? 'sync_failed' : 'pending',
+            retryable: true,
+            error: normalizeText(identity.syncError) || null,
+        };
+    }
+    return {
+        state: 'ready',
+        retryable: false,
+        error: null,
+    };
+}
 function buildBootstrapInfoPublishTargets(input) {
     const targets = [
         {
@@ -3877,7 +3925,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             listener(event);
         }
     }
-    async function* streamConversationEventsForLocalBot(localGlobalMetaId, signal) {
+    async function* streamConversationEventsForLocalBot(localGlobalMetaId, profileHomeDir, signal) {
         const normalizedLocal = normalizeText(localGlobalMetaId);
         const queue = [{
                 type: 'conversation-update',
@@ -3886,6 +3934,8 @@ function createDefaultMetabotDaemonHandlers(input) {
             }];
         let notify = null;
         let clearAbortListener = null;
+        let conversationWatcher = null;
+        let conversationWatchTimer = null;
         const removeAbortListener = () => {
             const listener = clearAbortListener;
             clearAbortListener = null;
@@ -3901,6 +3951,10 @@ function createDefaultMetabotDaemonHandlers(input) {
             }
         };
         const unsubscribe = (0, conversationPersistence_1.subscribeA2AConversationPersistenceEvents)(normalizedLocal, (event) => {
+            if (conversationWatchTimer) {
+                clearTimeout(conversationWatchTimer);
+                conversationWatchTimer = null;
+            }
             queue.push(event);
             wake();
         });
@@ -3908,6 +3962,41 @@ function createDefaultMetabotDaemonHandlers(input) {
             queue.push(event);
             wake();
         });
+        const normalizedProfileHome = normalizeText(profileHomeDir);
+        if (normalizedProfileHome && normalizedLocal.length >= 8) {
+            const a2aRoot = (0, paths_1.resolveMetabotPaths)(normalizedProfileHome).a2aRoot;
+            const conversationFilePrefix = `chat-${normalizedLocal.toLowerCase().slice(0, 8)}-`;
+            try {
+                await node_fs_1.promises.mkdir(a2aRoot, { recursive: true });
+                conversationWatcher = (0, node_fs_1.watch)(a2aRoot, { encoding: 'utf8', persistent: false }, (_eventType, filename) => {
+                    if (!filename
+                        || !filename.startsWith(conversationFilePrefix)
+                        || !filename.endsWith('.json')) {
+                        return;
+                    }
+                    if (conversationWatchTimer) {
+                        clearTimeout(conversationWatchTimer);
+                    }
+                    conversationWatchTimer = setTimeout(() => {
+                        conversationWatchTimer = null;
+                        queue.push({
+                            type: 'conversation-update',
+                            localGlobalMetaId: normalizedLocal,
+                            timestamp: Date.now(),
+                        });
+                        wake();
+                    }, 25);
+                });
+                conversationWatcher.on('error', () => {
+                    const failedWatcher = conversationWatcher;
+                    conversationWatcher = null;
+                    failedWatcher?.close();
+                });
+            }
+            catch {
+                // In-process persistence events remain available when file watching is unavailable.
+            }
+        }
         try {
             while (!signal?.aborted) {
                 while (queue.length) {
@@ -3937,6 +4026,10 @@ function createDefaultMetabotDaemonHandlers(input) {
         }
         finally {
             removeAbortListener();
+            if (conversationWatchTimer) {
+                clearTimeout(conversationWatchTimer);
+            }
+            conversationWatcher?.close();
             unsubscribe();
             unsubscribeProfileUpdates();
         }
@@ -4377,11 +4470,11 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         ];
     }
-    async function registerActiveIdentityProfile(identity) {
+    async function registerActiveIdentityProfile(identity, profileHomeDir = input.homeDir) {
         const profile = await (0, identityProfiles_1.upsertIdentityProfile)({
             systemHomeDir: normalizedSystemHomeDir,
             name: identity.name,
-            homeDir: input.homeDir,
+            homeDir: profileHomeDir,
             globalMetaId: identity.globalMetaId,
             mvcAddress: identity.mvcAddress,
         });
@@ -4504,6 +4597,39 @@ function createDefaultMetabotDaemonHandlers(input) {
         }
         return index;
     }
+    // Mirrors the client-side content-path prefixes in src/ui/pages/conversations/app.ts.
+    // An avatar reference that is only the prefix with nothing after it (e.g. "/content/")
+    // is structurally incomplete and cannot resolve to an image, so treat it as missing
+    // and let the chain profile supply a usable reference instead.
+    const AVATAR_CONTENT_PATH_PREFIXES = [
+        '/content/',
+        '/metafile-indexer/content/',
+        '/metafile-indexer/thumbnail/',
+        '/metafile-indexer/api/v1/files/content/',
+        '/metafile-indexer/api/v1/files/accelerate/content/',
+        '/metafile-indexer/api/v1/users/avatar/accelerate/',
+    ];
+    function isUsableAvatarReference(value) {
+        const raw = normalizeText(value);
+        if (!raw)
+            return false;
+        let path = raw;
+        if (/^https?:\/\//iu.test(raw)) {
+            try {
+                path = new URL(raw).pathname;
+            }
+            catch {
+                path = '';
+            }
+        }
+        const lower = path.toLowerCase();
+        for (const prefix of AVATAR_CONTENT_PATH_PREFIXES) {
+            if (lower.indexOf(prefix) === 0) {
+                return normalizeText(path.slice(prefix.length).split(/[?#]/)[0]).length > 0;
+            }
+        }
+        return true;
+    }
     function meaningfulConversationName(name, globalMetaId) {
         const normalized = normalizeText(name);
         return normalized && normalized !== normalizeText(globalMetaId) ? normalized : '';
@@ -4515,7 +4641,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         const indexed = inputProfile.profileIndex.get(globalMetaId) ?? null;
         const cachedChainProfile = readChainProfileCacheEntry(globalMetaId)?.projection ?? null;
         const hasName = Boolean(meaningfulConversationName(inputProfile.currentName, globalMetaId) || indexed?.name);
-        const hasAvatar = Boolean(normalizeText(inputProfile.currentAvatar) || indexed?.avatar);
+        const hasAvatar = isUsableAvatarReference(inputProfile.currentAvatar) || isUsableAvatarReference(indexed?.avatar);
         if (hasName && hasAvatar && !cachedChainProfile) {
             return indexed;
         }
@@ -4536,7 +4662,9 @@ function createDefaultMetabotDaemonHandlers(input) {
             || null;
     }
     function mergeConversationAvatar(currentAvatar, profile) {
-        return normalizeText(currentAvatar) || profile?.avatar || null;
+        return (isUsableAvatarReference(currentAvatar) ? normalizeText(currentAvatar) : '')
+            || (isUsableAvatarReference(profile?.avatar) ? normalizeText(profile?.avatar) : '')
+            || null;
     }
     function enrichConversationActor(actor, profile) {
         return {
@@ -4640,7 +4768,7 @@ function createDefaultMetabotDaemonHandlers(input) {
     }
     async function resolveActorWriteContext(rawActor) {
         const requestedSlug = normalizeText(rawActor);
-        let profileHomeDir = input.homeDir;
+        let profileHomeDir = await (0, identityProfiles_1.readActiveMetabotHome)(normalizedSystemHomeDir) ?? input.homeDir;
         if (requestedSlug) {
             const selectedProfile = await resolveMetabotProfileBySelector(requestedSlug);
             if (!selectedProfile) {
@@ -4727,6 +4855,17 @@ function createDefaultMetabotDaemonHandlers(input) {
         };
         scopedAutoReplyConfigs.set(normalizedProfileHomeDir, created);
         return created;
+    }
+    async function persistAutoReplyEnabled(homeDir, enabled) {
+        const store = (0, configStore_1.createConfigStore)(homeDir);
+        const config = await store.read();
+        if (config.autoReply.enabled === enabled) {
+            return;
+        }
+        await store.set({
+            ...config,
+            autoReply: { enabled },
+        });
     }
     async function resolveActorChatContext(rawActor) {
         const actor = await resolveActorWriteContext(rawActor);
@@ -9844,36 +9983,18 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         },
         identity: {
-            create: async ({ name, host }) => {
+            create: async ({ name, host, profileSlug }) => {
                 const normalizedName = normalizeText(name);
                 if (!normalizedName) {
                     return (0, commandResult_1.commandFailed)('missing_name', 'MetaBot identity name is required.');
                 }
-                const state = await runtimeStateStore.readState();
-                const existingName = normalizeText(state.identity?.name);
                 const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir);
-                const duplicateMatch = (0, profileNameResolution_1.resolveProfileNameConflict)(normalizedName, profiles);
-                if (duplicateMatch.status === 'matched'
-                    && duplicateMatch.matchType !== 'ranked'
-                    && node_path_1.default.resolve(duplicateMatch.match.homeDir) !== node_path_1.default.resolve(input.homeDir)) {
-                    return (0, commandResult_1.commandFailed)('identity_name_taken', `Local MetaBot name "${normalizedName}" already exists. Use metabot identity assign --name "${duplicateMatch.match.name}".`);
-                }
-                if (duplicateMatch.status === 'ambiguous'
-                    && duplicateMatch.candidates.some((profile) => node_path_1.default.resolve(profile.homeDir) !== node_path_1.default.resolve(input.homeDir))) {
-                    return (0, commandResult_1.commandFailed)('identity_name_taken', duplicateMatch.message);
-                }
-                if (state.identity && existingName && existingName !== normalizedName) {
-                    return (0, commandResult_1.commandFailed)('identity_name_conflict', `Current active local identity is "${existingName}". Switch profile first or choose the same name.`);
-                }
-                const existingIdentity = state.identity;
-                if (existingIdentity && (0, localIdentityBootstrap_1.isIdentityBootstrapReady)(existingIdentity)) {
-                    await (0, profileWorkspace_1.ensureProfileWorkspace)({
-                        homeDir: input.homeDir,
-                        name: existingIdentity.name,
-                    });
-                    await registerActiveIdentityProfile(existingIdentity);
-                    await notifyIdentityProfileRegistered();
-                    return (0, commandResult_1.commandSuccess)(existingIdentity);
+                const requestedProfileSlug = normalizeText(profileSlug);
+                const selectedProfile = requestedProfileSlug
+                    ? profiles.find((profile) => profile.slug === requestedProfileSlug) ?? null
+                    : null;
+                if (requestedProfileSlug && !selectedProfile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${requestedProfileSlug}`);
                 }
                 const resolvedHome = (0, profileWorkspace_1.resolveIdentityCreateProfileHome)({
                     systemHomeDir: normalizedSystemHomeDir,
@@ -9883,9 +10004,32 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if (resolvedHome.status === 'duplicate') {
                     return (0, commandResult_1.commandFailed)('identity_name_taken', resolvedHome.message);
                 }
+                const profileHomeDir = node_path_1.default.resolve(selectedProfile?.homeDir ?? resolvedHome.homeDir);
+                const targetRuntimeStateStore = profileHomeDir === node_path_1.default.resolve(input.homeDir)
+                    ? runtimeStateStore
+                    : (0, runtimeStateStore_1.createRuntimeStateStore)(profileHomeDir);
+                const targetSecretStore = profileHomeDir === node_path_1.default.resolve(input.homeDir)
+                    ? secretStore
+                    : (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir);
+                const targetSigner = createSignerForProfileHome(profileHomeDir);
+                const state = await targetRuntimeStateStore.readState();
+                const existingName = normalizeText(state.identity?.name);
+                if (state.identity && existingName && existingName !== normalizedName) {
+                    return (0, commandResult_1.commandFailed)('identity_name_conflict', `The local identity in profile "${node_path_1.default.basename(profileHomeDir)}" is "${existingName}". Choose the same name or repair the profile before creating another identity.`);
+                }
+                const existingIdentity = state.identity;
+                if (existingIdentity && (0, localIdentityBootstrap_1.isIdentityBootstrapReady)(existingIdentity)) {
+                    await (0, profileWorkspace_1.ensureProfileWorkspace)({
+                        homeDir: profileHomeDir,
+                        name: existingIdentity.name,
+                    });
+                    await registerActiveIdentityProfile(existingIdentity, profileHomeDir);
+                    await notifyIdentityProfileRegistered();
+                    return (0, commandResult_1.commandSuccess)(existingIdentity);
+                }
                 const requestName = state.identity?.name || normalizedName;
                 await (0, profileWorkspace_1.ensureProfileWorkspace)({
-                    homeDir: input.homeDir,
+                    homeDir: profileHomeDir,
                     name: requestName,
                 });
                 const preferredProvider = normalizePreferredCreateProvider(host)
@@ -9894,7 +10038,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 let defaultProviders;
                 try {
                     defaultProviders = await resolveDefaultMetabotCreateProviders({
-                        homeDir: input.homeDir,
+                        homeDir: profileHomeDir,
                         preferredProvider,
                     });
                 }
@@ -9909,28 +10053,28 @@ function createDefaultMetabotDaemonHandlers(input) {
                         name: requestName,
                     },
                     createMetabot: (0, localIdentityBootstrap_1.createLocalMetabotStep)({
-                        runtimeStateStore,
-                        secretStore,
+                        runtimeStateStore: targetRuntimeStateStore,
+                        secretStore: targetSecretStore,
                     }),
                     requestSubsidy: (0, localIdentityBootstrap_1.createMetabotSubsidyStep)({
-                        runtimeStateStore,
+                        runtimeStateStore: targetRuntimeStateStore,
                         requestMvcGasSubsidy: input.requestMvcGasSubsidy,
                     }),
                     syncIdentityToChain: (0, localIdentityBootstrap_1.createLocalIdentitySyncStep)({
-                        runtimeStateStore,
-                        signer,
+                        runtimeStateStore: targetRuntimeStateStore,
+                        signer: targetSigner,
                         stepDelayMs: input.identitySyncStepDelayMs,
                     }),
                 });
-                const nextState = await runtimeStateStore.readState();
+                const nextState = await targetRuntimeStateStore.readState();
                 if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
-                    await registerActiveIdentityProfile(nextState.identity);
+                    await registerActiveIdentityProfile(nextState.identity, profileHomeDir);
                     await notifyIdentityProfileRegistered();
-                    await ensureEmptyPersonaFiles(runtimeStateStore.paths, normalizedName);
+                    await ensureEmptyPersonaFiles(targetRuntimeStateStore.paths, normalizedName);
                     try {
                         const profile = await (0, metabotProfileManager_1.createMetabotProfileFromIdentity)(normalizedSystemHomeDir, {
                             name: nextState.identity.name,
-                            homeDir: input.homeDir,
+                            homeDir: profileHomeDir,
                             globalMetaId: nextState.identity.globalMetaId,
                             mvcAddress: nextState.identity.mvcAddress,
                             ...(defaultProviders.primaryProvider !== undefined
@@ -9941,7 +10085,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                                 : {}),
                         });
                         const profileInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(profile, ['primaryProvider']);
-                        const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(signer, profile, profileInfoTargets, {
+                        const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(targetSigner, profile, profileInfoTargets, {
                             delayMs: input.identitySyncStepDelayMs,
                             operation: 'create',
                             deferPublishStateWrite: true,
@@ -12162,7 +12306,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             streamEvents: async (rawInput) => {
                 const profile = await resolveMetabotProfileBySelector(rawInput.local);
                 const localGlobalMetaId = profile?.globalMetaId ?? normalizeText(rawInput.local);
-                return streamConversationEventsForLocalBot(localGlobalMetaId, rawInput.signal);
+                return streamConversationEventsForLocalBot(localGlobalMetaId, profile?.homeDir, rawInput.signal);
             },
         },
         chat: {
@@ -12420,6 +12564,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if (autoReplyInput.defaultStrategyId !== undefined) {
                     actor.autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
                 }
+                await persistAutoReplyEnabled(actor.homeDir, actor.autoReplyConfig.enabled).catch((error) => {
+                    console.warn('[chat] failed to persist auto-reply enabled flag', error);
+                });
                 return (0, commandResult_1.commandSuccess)({
                     enabled: actor.autoReplyConfig.enabled,
                     defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
@@ -12976,11 +13123,16 @@ function createDefaultMetabotDaemonHandlers(input) {
             listProfiles: async () => {
                 const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(normalizedSystemHomeDir);
                 const activeHomeDir = node_path_1.default.resolve(input.homeDir);
-                return (0, commandResult_1.commandSuccess)({
-                    profiles: profiles.map((profile) => ({
+                const profilesWithSetup = await Promise.all(profiles.map(async (profile) => {
+                    const runtimeState = await (0, runtimeStateStore_1.createRuntimeStateStore)(profile.homeDir).readState().catch(() => null);
+                    return {
                         ...profile,
                         isActive: node_path_1.default.resolve(profile.homeDir) === activeHomeDir,
-                    })),
+                        setup: buildMetabotSetupStatus(runtimeState?.identity ?? null),
+                    };
+                }));
+                return (0, commandResult_1.commandSuccess)({
+                    profiles: profilesWithSetup,
                 });
             },
             getProfile: async ({ slug }) => {
@@ -13082,27 +13234,31 @@ function createDefaultMetabotDaemonHandlers(input) {
                     });
                     const nextState = await profileRuntimeStateStore.readState();
                     const identity = nextState.identity;
-                    if (!bootstrap.success || !identity) {
+                    if (!identity) {
                         await node_fs_1.promises.rm(profileHomeDir, { recursive: true, force: true });
                         return (0, commandResult_1.commandFailed)('identity_bootstrap_failed', bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.');
                     }
-                    const bootstrapInfoTargets = buildBootstrapInfoPublishTargets({
-                        name,
-                        chatPublicKey: identity.chatPublicKey,
-                    });
-                    await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)({ homeDir: profileHomeDir }, bootstrapInfoTargets, bootstrap.sync?.chainWrites ?? []);
                     const chainProfile = (0, metabotProfileManager_1.buildMetabotProfileDraftFromIdentity)({
                         ...createInput,
                         homeDir: profileHomeDir,
                         globalMetaId: identity.globalMetaId,
                         mvcAddress: identity.mvcAddress,
                     });
-                    const profileInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(chainProfile, calculateMetabotCreateInfoFields(createInput));
-                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, profileInfoTargets, {
-                        delayMs: input.identitySyncStepDelayMs,
-                        operation: 'create',
-                        deferPublishStateWrite: true,
-                    });
+                    let profileInfoTargets = [];
+                    let profileChainWrites = [];
+                    if (bootstrap.success) {
+                        const bootstrapInfoTargets = buildBootstrapInfoPublishTargets({
+                            name,
+                            chatPublicKey: identity.chatPublicKey,
+                        });
+                        await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)({ homeDir: profileHomeDir }, bootstrapInfoTargets, bootstrap.sync?.chainWrites ?? []);
+                        profileInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(chainProfile, calculateMetabotCreateInfoFields(createInput));
+                        profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(profileSigner, chainProfile, profileInfoTargets, {
+                            delayMs: input.identitySyncStepDelayMs,
+                            operation: 'create',
+                            deferPublishStateWrite: true,
+                        });
+                    }
                     const profile = await (0, metabotProfileManager_1.createMetabotProfileFromIdentity)(normalizedSystemHomeDir, {
                         ...createInput,
                         homeDir: profileHomeDir,
@@ -13119,6 +13275,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         identity,
                         chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
                         subsidy: bootstrap.subsidy,
+                        setup: buildMetabotSetupStatus(identity),
                         ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
                     });
                 }
@@ -13131,6 +13288,76 @@ function createDefaultMetabotDaemonHandlers(input) {
                         return (0, commandResult_1.commandFailed)('name_taken', message);
                     }
                     return (0, commandResult_1.commandFailed)('metabot_profile_create_failed', message);
+                }
+            },
+            retryProfileSetup: async ({ slug }) => {
+                const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+                }
+                const runtimeStateStore = (0, runtimeStateStore_1.createRuntimeStateStore)(profile.homeDir);
+                const secretStore = (0, fileSecretStore_1.createFileSecretStore)(profile.homeDir);
+                const signer = createSignerForProfileHome(profile.homeDir);
+                try {
+                    const bootstrap = await (0, bootstrapFlow_1.runBootstrapFlow)({
+                        request: { name: profile.name },
+                        createMetabot: (0, localIdentityBootstrap_1.createLocalMetabotStep)({
+                            runtimeStateStore,
+                            secretStore,
+                        }),
+                        requestSubsidy: (0, localIdentityBootstrap_1.createMetabotSubsidyStep)({
+                            runtimeStateStore,
+                            requestMvcGasSubsidy: input.requestMvcGasSubsidy,
+                        }),
+                        syncIdentityToChain: (0, localIdentityBootstrap_1.createLocalIdentitySyncStep)({
+                            runtimeStateStore,
+                            signer,
+                            stepDelayMs: input.identitySyncStepDelayMs,
+                        }),
+                    });
+                    const runtimeState = await runtimeStateStore.readState();
+                    const identity = runtimeState.identity;
+                    if (!identity) {
+                        return (0, commandResult_1.commandFailed)('identity_bootstrap_failed', 'Local MetaBot identity is missing.');
+                    }
+                    const bootstrapInfoTargets = buildBootstrapInfoPublishTargets({
+                        name: profile.name,
+                        chatPublicKey: identity.chatPublicKey,
+                    });
+                    await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, bootstrapInfoTargets, bootstrap.sync?.chainWrites ?? []);
+                    if (!bootstrap.success) {
+                        return (0, commandResult_1.commandFailed)('metabot_setup_retry_failed', bootstrap.error ?? 'MetaBot setup retry failed.', {
+                            data: {
+                                profile,
+                                subsidy: bootstrap.subsidy,
+                                setup: buildMetabotSetupStatus(identity),
+                            },
+                        });
+                    }
+                    const profileInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(profile, calculateMetabotStoredInfoFields(profile));
+                    const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(signer, profile, profileInfoTargets, {
+                        delayMs: input.identitySyncStepDelayMs,
+                        operation: 'create',
+                        deferPublishStateWrite: true,
+                    });
+                    await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, profileInfoTargets, profileChainWrites);
+                    return (0, commandResult_1.commandSuccess)({
+                        profile,
+                        identity,
+                        chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
+                        subsidy: bootstrap.subsidy,
+                        setup: buildMetabotSetupStatus(identity),
+                    });
+                }
+                catch (error) {
+                    const runtimeState = await runtimeStateStore.readState().catch(() => null);
+                    const message = error instanceof Error ? error.message : String(error);
+                    return (0, commandResult_1.commandFailed)('metabot_setup_retry_failed', message, {
+                        data: {
+                            profile,
+                            setup: buildMetabotSetupStatus(runtimeState?.identity ?? null),
+                        },
+                    });
                 }
             },
             updateProfile: async (body) => {

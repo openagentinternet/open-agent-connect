@@ -1,4 +1,4 @@
-import { type MetabotPaths } from '../core/state/paths';
+import { type MetabotDaemonPaths, type MetabotPaths } from '../core/state/paths';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 export interface MetabotDaemonAddress {
     host: string;
@@ -13,6 +13,7 @@ export interface MetabotDaemonInstance {
 }
 export interface CreateMetabotDaemonOptions {
     homeDirOrPaths: string | MetabotPaths;
+    daemonPaths?: MetabotDaemonPaths;
     handlers?: MetabotDaemonHttpHandlers;
     ownerId?: string;
 }

@@ -69,6 +69,16 @@ const handleBotRoutes = async (context) => {
         context.sendJson(result.ok ? 201 : 400, result);
         return true;
     }
+    const setupRetryMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/setup\/retry$/);
+    if (setupRetryMatch && req.method === 'POST') {
+        const slug = normalizeSlug(setupRetryMatch[1]);
+        const result = handlers.bot?.retryProfileSetup
+            ? await handlers.bot.retryProfileSetup({ slug })
+            : (0, commandResult_1.commandFailed)('not_implemented', 'MetaBot setup retry handler not configured.');
+        const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
+        context.sendJson(status, result);
+        return true;
+    }
     const walletMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/wallet$/);
     if (walletMatch && req.method === 'GET') {
         const slug = normalizeSlug(walletMatch[1]);

@@ -8,7 +8,7 @@ exports.formatDaemonStartupTimeoutMessage = formatDaemonStartupTimeoutMessage;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const paths_1 = require("../core/state/paths");
-const runtimeStateStore_1 = require("../core/state/runtimeStateStore");
+const daemonStateStore_1 = require("../core/state/daemonStateStore");
 async function readDaemonLockInfo(lockPath) {
     try {
         const raw = await node_fs_1.promises.readFile(lockPath, 'utf8');
@@ -52,15 +52,15 @@ function formatLockInfo(lockInfo, lockOwnerAlive) {
     return `present (ownerId=${lockInfo.ownerId ?? 'unknown'}, pid=${pidText}, acquiredAt=${acquiredAtText}, ownerAlive=${ownerAliveText})`;
 }
 async function collectDaemonStartupDiagnostics(input) {
-    const homeDir = node_path_1.default.resolve(input.homeDir);
-    const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
-    const daemonRecord = await (0, runtimeStateStore_1.createRuntimeStateStore)(paths).readDaemon();
+    const systemHomeDir = node_path_1.default.resolve(input.systemHomeDir);
+    const paths = (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir);
+    const daemonRecord = await (0, daemonStateStore_1.createDaemonStateStore)(paths).readDaemon();
     const lockInfo = await readDaemonLockInfo(paths.daemonLockPath);
     const lockOwnerAlive = typeof lockInfo?.pid === 'number'
         ? isProcessAlive(lockInfo.pid)
         : null;
     return {
-        homeDir,
+        systemHomeDir,
         preferredPort: input.preferredPort,
         daemonStatePath: paths.daemonStatePath,
         lockPath: paths.daemonLockPath,
@@ -72,7 +72,7 @@ async function collectDaemonStartupDiagnostics(input) {
 function formatDaemonStartupTimeoutMessage(snapshot) {
     return [
         'Timed out while starting the local MetaBot daemon.',
-        `Selected profile home: ${snapshot.homeDir}`,
+        `System home: ${snapshot.systemHomeDir}`,
         `Preferred port: ${snapshot.preferredPort}`,
         `daemon.json: ${snapshot.daemonStatePath} (${formatDaemonRecord(snapshot.daemonRecord)})`,
         `daemon.lock: ${snapshot.lockPath} (${formatLockInfo(snapshot.lockInfo, snapshot.lockOwnerAlive)})`,

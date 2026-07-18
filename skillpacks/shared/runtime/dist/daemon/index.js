@@ -95,13 +95,15 @@ async function closeServer(server) {
 function createMetabotDaemon(options) {
     const paths = resolvePaths(options.homeDirOrPaths);
     const ownerId = options.ownerId?.trim() || `metabot-daemon-${(0, node_crypto_1.randomUUID)()}`;
-    const lockPath = paths.daemonLockPath;
+    const daemonPaths = options.daemonPaths;
+    const locksRoot = daemonPaths?.locksRoot ?? paths.locksRoot;
+    const lockPath = daemonPaths?.daemonLockPath ?? paths.daemonLockPath;
     const handlers = options.handlers ?? {};
     let server = null;
     let startedAddress = null;
     let lockHeld = false;
     async function acquireLock() {
-        await node_fs_1.promises.mkdir(paths.locksRoot, { recursive: true });
+        await node_fs_1.promises.mkdir(locksRoot, { recursive: true });
         for (let attempt = 0; attempt < DAEMON_LOCK_MAX_ATTEMPTS; attempt += 1) {
             try {
                 await node_fs_1.promises.writeFile(lockPath, `${JSON.stringify({

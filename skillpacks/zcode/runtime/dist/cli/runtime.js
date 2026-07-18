@@ -10,6 +10,7 @@ exports.createServiceRefundSyncLoop = createServiceRefundSyncLoop;
 exports.getDefaultDaemonPort = getDefaultDaemonPort;
 exports.getDaemonRuntimeFingerprint = getDaemonRuntimeFingerprint;
 exports.buildDaemonConfigHash = buildDaemonConfigHash;
+exports.probeDaemonStatus = probeDaemonStatus;
 exports.createPrivateChatReplyRunnerForProfile = createPrivateChatReplyRunnerForProfile;
 exports.replayUnhandledA2AOrderMessagesForProfiles = replayUnhandledA2AOrderMessagesForProfiles;
 exports.createPrivateChatAutoReplyProfileDispatcher = createPrivateChatAutoReplyProfileDispatcher;
@@ -24,6 +25,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const node_child_process_1 = require("node:child_process");
 const node_net_1 = __importDefault(require("node:net"));
 const daemonStartupDiagnostics_1 = require("./daemonStartupDiagnostics");
+const version_1 = require("./version");
 const commandResult_1 = require("../core/contracts/commandResult");
 const configStore_1 = require("../core/config/configStore");
 const configTypes_1 = require("../core/config/configTypes");
@@ -37,6 +39,7 @@ const skillResolver_1 = require("../core/skills/skillResolver");
 const paths_1 = require("../core/state/paths");
 const homeSelection_1 = require("../core/state/homeSelection");
 const runtimeStateStore_1 = require("../core/state/runtimeStateStore");
+const daemonStateStore_1 = require("../core/state/daemonStateStore");
 const providerPresenceState_1 = require("../core/provider/providerPresenceState");
 const onlineServiceCache_1 = require("../core/discovery/onlineServiceCache");
 const onlineServiceCacheSync_1 = require("../core/discovery/onlineServiceCacheSync");
@@ -70,13 +73,15 @@ const executor_1 = require("../core/llm/executor");
 const llmRuntimeExecution_1 = require("../core/llm/llmRuntimeExecution");
 const update_1 = require("../core/system/update");
 const uninstall_1 = require("../core/system/uninstall");
-const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:4827';
+const DEFAULT_DAEMON_BASE_URL = 'http://127.0.0.1:10001';
 const DEFAULT_DAEMON_HOST = '127.0.0.1';
 const DEFAULT_DAEMON_START_TIMEOUT_MS = 30_000;
 const DAEMON_START_POLL_INTERVAL_MS = 100;
+const DAEMON_HEALTH_TIMEOUT_MS = 1_500;
 const DAEMON_PREFERRED_PORT_ENV = 'METABOT_DAEMON_PREFERRED_PORT';
-const DEFAULT_DAEMON_PORT_BASE = 24_000;
-const DEFAULT_DAEMON_PORT_SPAN = 20_000;
+const DEFAULT_DAEMON_PORT = 10_001;
+const DAEMON_FALLBACK_PORT_START = 10_002;
+const DAEMON_FALLBACK_PORT_END = 10_020;
 const TEST_FAKE_CHAIN_WRITE_ENV = 'METABOT_TEST_FAKE_CHAIN_WRITE';
 const TEST_FAKE_SUBSIDY_ENV = 'METABOT_TEST_FAKE_SUBSIDY';
 const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY';
@@ -276,40 +281,8 @@ function parseDaemonPort(value) {
     }
     return parsed;
 }
-function getLegacyDefaultDaemonPort() {
-    try {
-        const parsed = new URL(DEFAULT_DAEMON_BASE_URL);
-        const port = Number.parseInt(parsed.port, 10);
-        if (Number.isInteger(port) && port > 0) {
-            return port;
-        }
-    }
-    catch {
-        // Ignore malformed defaults and fall back below.
-    }
-    return 4827;
-}
-function getDefaultDaemonPort(homeDir) {
-    const normalizedHomeDir = typeof homeDir === 'string' ? homeDir.trim() : '';
-    if (!normalizedHomeDir) {
-        return getLegacyDefaultDaemonPort();
-    }
-    try {
-        const digest = (0, node_crypto_1.createHash)('sha256')
-            .update(node_path_1.default.resolve(normalizedHomeDir))
-            .digest();
-        const offset = digest.readUInt32BE(0) % DEFAULT_DAEMON_PORT_SPAN;
-        return DEFAULT_DAEMON_PORT_BASE + offset;
-    }
-    catch {
-        return getLegacyDefaultDaemonPort();
-    }
-}
-function isAddressInUseError(error) {
-    return Boolean(error
-        && typeof error === 'object'
-        && 'code' in error
-        && error.code === 'EADDRINUSE');
+function getDefaultDaemonPort(_systemHomeDir) {
+    return DEFAULT_DAEMON_PORT;
 }
 const SUPPORTED_CONFIG_KEYS = new Set([
     'a2a.simplemsgListenerEnabled',
@@ -495,17 +468,6 @@ async function resolveActorHomeDir(context, from) {
         return (0, commandResult_1.commandFailed)('identity_profile_ambiguous', resolved.message);
     }
     return { homeDir: resolved.match.homeDir };
-}
-async function resolveDaemonTargetHome(context, from, options = {}) {
-    const requestedFrom = normalizeEnvText(from);
-    if (!requestedFrom) {
-        return normalizeHomeDir(context.env, context.cwd, options);
-    }
-    const actor = await resolveActorHomeDir(context, requestedFrom);
-    if (!('homeDir' in actor)) {
-        return actor;
-    }
-    return node_path_1.default.resolve(actor.homeDir);
 }
 function normalizeReadOnlyIdentityProfile(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -801,37 +763,146 @@ async function isPortBindable(host, port) {
         });
     });
 }
-async function waitForPortRelease(host, port, timeoutMs) {
-    if (!Number.isInteger(port) || port <= 0) {
-        return;
+async function selectDaemonInstallation(context) {
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+    const store = (0, daemonStateStore_1.createDaemonStateStore)(systemHomeDir);
+    const existing = await store.readInstallation();
+    if (existing) {
+        return existing;
     }
-    const startedAt = Date.now();
-    while ((Date.now() - startedAt) < timeoutMs) {
-        if (await isPortBindable(host, port)) {
-            return;
+    const explicitPort = parseDaemonPort(context.env.METABOT_DAEMON_PORT)
+        ?? parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV]);
+    const candidates = explicitPort
+        ? [explicitPort]
+        : [
+            DEFAULT_DAEMON_PORT,
+            ...Array.from({ length: DAEMON_FALLBACK_PORT_END - DAEMON_FALLBACK_PORT_START + 1 }, (_value, index) => DAEMON_FALLBACK_PORT_START + index),
+        ];
+    for (const port of candidates) {
+        if (!await isPortBindable(DEFAULT_DAEMON_HOST, port)) {
+            continue;
         }
-        await sleep(DAEMON_START_POLL_INTERVAL_MS);
+        const record = {
+            schemaVersion: 1,
+            host: DEFAULT_DAEMON_HOST,
+            port,
+            selectionOrigin: explicitPort
+                ? 'explicit_migration'
+                : port === DEFAULT_DAEMON_PORT
+                    ? 'default'
+                    : 'fallback',
+            updatedAt: Date.now(),
+        };
+        return store.writeInstallation(record);
     }
+    if (explicitPort) {
+        throw new Error(`daemon_port_unavailable: ${DEFAULT_DAEMON_HOST}:${explicitPort} is unavailable.`);
+    }
+    throw new Error(`daemon_port_unavailable: no free loopback port in ${DEFAULT_DAEMON_PORT} or ${DAEMON_FALLBACK_PORT_START}-${DAEMON_FALLBACK_PORT_END}.`);
 }
-async function isDaemonReachable(baseUrl) {
+async function probeDaemonStatus(baseUrl, timeoutMs = DAEMON_HEALTH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const response = await fetch(`${baseUrl}/api/daemon/status`);
-        return response.ok;
+        const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/daemon/status`, {
+            signal: controller.signal,
+        });
+        if (!response.ok) {
+            return { reachable: false, ownerId: null, pid: null };
+        }
+        const payload = await response.json();
+        if (payload.ok !== true) {
+            return { reachable: false, ownerId: null, pid: null };
+        }
+        return {
+            reachable: true,
+            ownerId: typeof payload.data?.daemonId === 'string'
+                ? normalizeEnvText(payload.data.daemonId) || null
+                : null,
+            pid: typeof payload.data?.pid === 'number' && Number.isInteger(payload.data.pid)
+                ? payload.data.pid
+                : null,
+        };
     }
     catch {
+        return { reachable: false, ownerId: null, pid: null };
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+}
+async function isDaemonReachable(baseUrl, expectedOwnerId) {
+    const status = await probeDaemonStatus(baseUrl);
+    return status.reachable
+        && (!expectedOwnerId || status.ownerId === expectedOwnerId);
+}
+function isProcessAlive(pid) {
+    if (!Number.isInteger(pid) || pid <= 0) {
         return false;
     }
-}
-function resolveDaemonHomeDir(context, options = {}) {
-    const targetHomeDir = normalizeEnvText(options.targetHomeDir);
-    if (targetHomeDir) {
-        return node_path_1.default.resolve(targetHomeDir);
+    try {
+        process.kill(pid, 0);
+        return true;
     }
-    return normalizeHomeDir(context.env, context.cwd, options);
+    catch (error) {
+        const code = error.code;
+        return code !== 'ESRCH';
+    }
 }
-async function resolveDaemonRecord(context, options = {}) {
-    const homeDir = resolveDaemonHomeDir(context, options);
-    const store = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
+async function readDaemonLockInfo(lockPath) {
+    try {
+        const raw = await node_fs_1.default.promises.readFile(lockPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        return {
+            ownerId: typeof parsed.ownerId === 'string'
+                ? normalizeEnvText(parsed.ownerId) || null
+                : null,
+            pid: typeof parsed.pid === 'number' && Number.isInteger(parsed.pid) ? parsed.pid : null,
+        };
+    }
+    catch {
+        return { ownerId: null, pid: null };
+    }
+}
+async function readProcessCommand(pid) {
+    return new Promise((resolve) => {
+        (0, node_child_process_1.execFile)('ps', ['-p', String(pid), '-o', 'command='], (error, stdout) => {
+            if (error) {
+                resolve(null);
+                return;
+            }
+            const command = stdout.trim();
+            resolve(command || null);
+        });
+    });
+}
+class DaemonOwnershipVerificationError extends Error {
+    constructor(pid, lockPath) {
+        super(`Unable to verify ownership of daemon process ${pid}. It was not stopped. Inspect ${lockPath} and the daemon record before retrying.`);
+        this.name = 'DaemonOwnershipVerificationError';
+    }
+}
+async function verifyDaemonProcessOwnership(input) {
+    const { daemonRecord, lockPath } = input;
+    if (!isProcessAlive(daemonRecord.pid)) {
+        return 'dead';
+    }
+    const status = await probeDaemonStatus(daemonRecord.baseUrl);
+    if (status.reachable
+        && status.ownerId === daemonRecord.ownerId
+        && status.pid === daemonRecord.pid) {
+        return 'verified';
+    }
+    const lock = await readDaemonLockInfo(lockPath);
+    if (lock.ownerId !== daemonRecord.ownerId || lock.pid !== daemonRecord.pid) {
+        return 'unverified';
+    }
+    const command = await readProcessCommand(daemonRecord.pid);
+    return command?.includes('daemon serve') ? 'verified' : 'unverified';
+}
+async function resolveDaemonRecord(context) {
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+    const store = (0, daemonStateStore_1.createDaemonStateStore)(systemHomeDir);
     return store.readDaemon();
 }
 function daemonConfigMatchesContext(daemonRecord, context) {
@@ -840,9 +911,21 @@ function daemonConfigMatchesContext(daemonRecord, context) {
     }
     return normalizeEnvText(daemonRecord.configHash) === buildDaemonConfigHash(context.env);
 }
-async function stopRunningDaemon(daemonRecord) {
+async function stopRunningDaemon(input) {
+    const { daemonRecord, lockPath } = input;
     if (!Number.isFinite(daemonRecord.pid) || daemonRecord.pid <= 0) {
-        return;
+        return 'already_stopped';
+    }
+    const ownership = await verifyDaemonProcessOwnership({ daemonRecord, lockPath });
+    if (ownership === 'dead') {
+        const portReleased = await isPortBindable(daemonRecord.host || DEFAULT_DAEMON_HOST, daemonRecord.port);
+        if (!portReleased) {
+            throw new Error(`Daemon process ${daemonRecord.pid} is already gone, but ${daemonRecord.host || DEFAULT_DAEMON_HOST}:${daemonRecord.port} is still occupied.`);
+        }
+        return 'already_stopped';
+    }
+    if (ownership !== 'verified') {
+        throw new DaemonOwnershipVerificationError(daemonRecord.pid, lockPath);
     }
     try {
         process.kill(daemonRecord.pid, 'SIGTERM');
@@ -850,20 +933,107 @@ async function stopRunningDaemon(daemonRecord) {
     catch (error) {
         const code = error.code;
         if (code === 'ESRCH') {
-            return;
+            return 'already_stopped';
         }
         throw error;
     }
-    const startedAt = Date.now();
-    while ((Date.now() - startedAt) < DAEMON_CONFIG_RESTART_TIMEOUT_MS) {
-        if (!await isDaemonReachable(daemonRecord.baseUrl)) {
-            await waitForPortRelease(daemonRecord.host || DEFAULT_DAEMON_HOST, daemonRecord.port, DAEMON_CONFIG_RESTART_TIMEOUT_MS)
-                .catch(() => { });
-            return;
+    const waitForStop = async () => {
+        const startedAt = Date.now();
+        while ((Date.now() - startedAt) < DAEMON_CONFIG_RESTART_TIMEOUT_MS) {
+            if (!isProcessAlive(daemonRecord.pid)
+                && await isPortBindable(daemonRecord.host || DEFAULT_DAEMON_HOST, daemonRecord.port)) {
+                return true;
+            }
+            await sleep(DAEMON_START_POLL_INTERVAL_MS);
         }
-        await sleep(DAEMON_START_POLL_INTERVAL_MS);
+        return false;
+    };
+    if (await waitForStop()) {
+        return 'stopped';
     }
-    throw new Error('Timed out while restarting the local MetaBot daemon with updated configuration.');
+    try {
+        process.kill(daemonRecord.pid, 'SIGKILL');
+    }
+    catch (error) {
+        const code = error.code;
+        if (code !== 'ESRCH') {
+            throw error;
+        }
+    }
+    if (await waitForStop()) {
+        return 'stopped';
+    }
+    throw new Error(`Timed out while stopping the verified local MetaBot daemon process ${daemonRecord.pid}.`);
+}
+async function quarantineLegacyDaemonPath(filePath) {
+    try {
+        await node_fs_1.default.promises.rename(filePath, `${filePath}.migrated-${Date.now()}`);
+    }
+    catch (error) {
+        const code = error.code;
+        if (code !== 'ENOENT') {
+            throw error;
+        }
+    }
+}
+async function writeDaemonMigrationSnapshot(input) {
+    const paths = (0, paths_1.resolveMetabotDaemonPaths)(input.systemHomeDir);
+    await node_fs_1.default.promises.mkdir(paths.recoveryRoot, { recursive: true });
+    const content = `${JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: Date.now(),
+        entries: input.entries,
+    }, null, 2)}\n`;
+    const temporaryPath = `${paths.migrationStatePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+        await node_fs_1.default.promises.writeFile(temporaryPath, content, 'utf8');
+        await node_fs_1.default.promises.rename(temporaryPath, paths.migrationStatePath);
+    }
+    catch (error) {
+        await node_fs_1.default.promises.rm(temporaryPath, { force: true }).catch(() => undefined);
+        throw error;
+    }
+}
+async function migrateLegacyProfileDaemons(systemHomeDir) {
+    const profiles = await (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir);
+    const entries = [];
+    for (const profile of profiles) {
+        const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
+        const legacyStore = (0, runtimeStateStore_1.createRuntimeStateStore)(paths);
+        const daemonRecord = await legacyStore.readDaemon();
+        const lock = await readDaemonLockInfo(paths.daemonLockPath);
+        if (!daemonRecord) {
+            if (lock.pid && isProcessAlive(lock.pid)) {
+                throw new Error(`daemon_migration_blocked: legacy daemon lock for profile ${profile.slug} belongs to live process ${lock.pid}; ownership cannot be proven.`);
+            }
+            if (lock.pid || lock.ownerId) {
+                await quarantineLegacyDaemonPath(paths.daemonLockPath);
+                entries.push({ profile: profile.slug, state: 'quarantined_lock_without_record' });
+            }
+            continue;
+        }
+        const ownership = await verifyDaemonProcessOwnership({
+            daemonRecord,
+            lockPath: paths.daemonLockPath,
+        });
+        if (ownership === 'unverified') {
+            throw new Error(`daemon_migration_blocked: unable to verify legacy daemon ownership for profile ${profile.slug}, pid ${daemonRecord.pid}.`);
+        }
+        if (ownership === 'verified') {
+            await stopRunningDaemon({ daemonRecord, lockPath: paths.daemonLockPath });
+        }
+        await quarantineLegacyDaemonPath(paths.daemonStatePath);
+        await quarantineLegacyDaemonPath(paths.daemonLockPath);
+        entries.push({
+            profile: profile.slug,
+            state: ownership === 'verified' ? 'stopped_and_quarantined' : 'quarantined_stale_record',
+            pid: daemonRecord.pid,
+            port: daemonRecord.port,
+        });
+    }
+    if (entries.length > 0) {
+        await writeDaemonMigrationSnapshot({ systemHomeDir, entries });
+    }
 }
 async function ensureDaemonBaseUrl(context, options = {}) {
     const explicitBaseUrl = typeof context.env.METABOT_DAEMON_BASE_URL === 'string'
@@ -872,35 +1042,47 @@ async function ensureDaemonBaseUrl(context, options = {}) {
     if (explicitBaseUrl) {
         return normalizeBaseUrl(explicitBaseUrl);
     }
-    const daemonRecord = await resolveDaemonRecord(context, options);
-    if (daemonRecord?.baseUrl && await isDaemonReachable(daemonRecord.baseUrl)) {
-        if (daemonConfigMatchesContext(daemonRecord, context)) {
-            return daemonRecord.baseUrl;
+    const daemonRecord = await resolveDaemonRecord(context);
+    if (daemonRecord) {
+        const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(normalizeSystemHomeDir(context.env, context.cwd));
+        if (daemonRecord.baseUrl
+            && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)) {
+            if (daemonConfigMatchesContext(daemonRecord, context)) {
+                return daemonRecord.baseUrl;
+            }
         }
-        await stopRunningDaemon(daemonRecord);
-        return startDetachedDaemon(context, daemonRecord, options);
+        await stopRunningDaemon({ daemonRecord, lockPath: daemonPaths.daemonLockPath });
+        return startDetachedDaemon(context, options);
     }
-    return startDetachedDaemon(context, undefined, options);
+    return startDetachedDaemon(context, options);
 }
-async function startDetachedDaemon(context, preferredRecord, options = {}) {
-    const homeDir = resolveDaemonHomeDir(context, options);
+async function startDetachedDaemon(context, options = {}) {
+    const homeDir = normalizeHomeDir(context.env, context.cwd, options);
     const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-    const store = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
+    const store = (0, daemonStateStore_1.createDaemonStateStore)(systemHomeDir);
     const expectedConfigHash = buildDaemonConfigHash(context.env);
     const persistedRecord = await store.readDaemon();
-    const staleRecord = persistedRecord ?? preferredRecord ?? null;
-    const preferredPort = parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
-        ?? staleRecord?.port
-        ?? getDefaultDaemonPort(homeDir);
-    if (persistedRecord?.baseUrl && await isDaemonReachable(persistedRecord.baseUrl)) {
-        if (daemonConfigMatchesContext(persistedRecord, context)) {
-            return persistedRecord.baseUrl;
+    if (!persistedRecord) {
+        await migrateLegacyProfileDaemons(systemHomeDir);
+    }
+    const installation = await selectDaemonInstallation(context);
+    const preferredPort = installation.port;
+    if (persistedRecord) {
+        const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir);
+        if (persistedRecord.baseUrl
+            && await isDaemonReachable(persistedRecord.baseUrl, persistedRecord.ownerId)) {
+            if (daemonConfigMatchesContext(persistedRecord, context)) {
+                return persistedRecord.baseUrl;
+            }
         }
-        await stopRunningDaemon(persistedRecord);
+        await stopRunningDaemon({ daemonRecord: persistedRecord, lockPath: daemonPaths.daemonLockPath });
+    }
+    if (!persistedRecord && !await isPortBindable(installation.host, installation.port)) {
+        throw new Error(`daemon_port_in_use: the configured daemon endpoint ${installation.host}:${installation.port} is occupied. Use an explicit port migration to change it.`);
     }
     await store.clearDaemon();
     const child = (0, node_child_process_1.spawn)(process.execPath, [resolveCliEntrypoint(), 'daemon', 'serve'], {
-        cwd: homeDir,
+        cwd: systemHomeDir,
         detached: true,
         stdio: 'ignore',
         env: {
@@ -917,13 +1099,13 @@ async function startDetachedDaemon(context, preferredRecord, options = {}) {
         const daemonRecord = await store.readDaemon();
         if (daemonRecord?.baseUrl
             && normalizeEnvText(daemonRecord.configHash) === expectedConfigHash
-            && await isDaemonReachable(daemonRecord.baseUrl)) {
+            && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)) {
             return daemonRecord.baseUrl;
         }
         await sleep(DAEMON_START_POLL_INTERVAL_MS);
     }
     const diagnostics = await (0, daemonStartupDiagnostics_1.collectDaemonStartupDiagnostics)({
-        homeDir,
+        systemHomeDir,
         preferredPort,
     });
     throw new Error((0, daemonStartupDiagnostics_1.formatDaemonStartupTimeoutMessage)(diagnostics));
@@ -937,8 +1119,8 @@ async function requestJson(context, method, routePath, body, options = {}) {
     });
     return response.json();
 }
-async function requestText(context, method, routePath, options = {}) {
-    const baseUrl = await ensureDaemonBaseUrl(context, options);
+async function requestText(context, method, routePath) {
+    const baseUrl = await ensureDaemonBaseUrl(context);
     const response = await fetch(`${baseUrl}${routePath}`, {
         method,
     });
@@ -1548,32 +1730,15 @@ async function runHostPersonaProjection(operation) {
     }
 }
 function createDefaultCliDependencies(context) {
-    async function requestJsonForSelectedActor(method, routePath, from, body, options = {}) {
-        const targetHomeDir = await resolveDaemonTargetHome(context, from, options);
-        if (typeof targetHomeDir !== 'string') {
-            return targetHomeDir;
-        }
-        return requestJson(context, method, routePath, body, {
-            ...options,
-            targetHomeDir,
-        });
+    async function requestJsonForSelectedActor(method, routePath, from, body) {
+        const requestedFrom = normalizeEnvText(from);
+        return requestJson(context, method, routePath, body && requestedFrom ? { ...body, from: requestedFrom } : body);
     }
-    async function requestTextForSelectedActor(method, routePath, from, options = {}) {
-        const targetHomeDir = await resolveDaemonTargetHome(context, from, options);
-        if (typeof targetHomeDir !== 'string') {
-            throw new Error(targetHomeDir.message || 'Failed to resolve the selected MetaBot profile.');
-        }
-        return requestText(context, method, routePath, {
-            ...options,
-            targetHomeDir,
-        });
+    async function requestTextForSelectedActor(method, routePath, from) {
+        return requestText(context, method, routePath);
     }
     async function openLocalUiPage(input) {
-        const targetHomeDir = await resolveDaemonTargetHome(context, input.from);
-        if (typeof targetHomeDir !== 'string') {
-            return targetHomeDir;
-        }
-        const baseUrl = await ensureDaemonBaseUrl(context, { targetHomeDir });
+        const baseUrl = await ensureDaemonBaseUrl(context);
         const query = new URLSearchParams();
         if (input.from)
             query.set('from', input.from);
@@ -1721,24 +1886,32 @@ function createDefaultCliDependencies(context) {
                 });
             },
             stop: async () => {
-                const homeDir = normalizeHomeDir(context.env, context.cwd);
-                const runtimeStore = (0, runtimeStateStore_1.createRuntimeStateStore)(homeDir);
-                const daemonRecord = await runtimeStore.readDaemon();
+                const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+                const daemonStore = (0, daemonStateStore_1.createDaemonStateStore)(systemHomeDir);
+                const daemonRecord = await daemonStore.readDaemon();
                 if (!daemonRecord || !daemonRecord.pid) {
                     return (0, commandResult_1.commandFailed)('daemon_not_running', 'No local daemon process is currently tracked.');
                 }
                 const pid = daemonRecord.pid;
                 try {
-                    process.kill(pid, 'SIGTERM');
+                    const stopped = await stopRunningDaemon({
+                        daemonRecord,
+                        lockPath: (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir).daemonLockPath,
+                    });
+                    await daemonStore.clearDaemon(pid);
+                    return (0, commandResult_1.commandSuccess)({
+                        pid,
+                        stopped: stopped === 'stopped',
+                        alreadyStopped: stopped === 'already_stopped',
+                    });
                 }
                 catch (error) {
-                    const code = error.code;
-                    if (code !== 'ESRCH') {
-                        return (0, commandResult_1.commandFailed)('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
+                    if (error instanceof DaemonOwnershipVerificationError) {
+                        return (0, commandResult_1.commandFailed)('daemon_ownership_unverified', error.message);
                     }
+                    const code = error.code;
+                    return (0, commandResult_1.commandFailed)('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
                 }
-                await runtimeStore.clearDaemon(pid);
-                return (0, commandResult_1.commandSuccess)({ pid, stopped: true });
             },
         },
         doctor: {
@@ -1760,6 +1933,10 @@ function createDefaultCliDependencies(context) {
                 let targetHomeDir = null;
                 if (explicitHomeDir) {
                     const explicitState = await (0, runtimeStateStore_1.createRuntimeStateStore)(explicitHomeDir).readState();
+                    const explicitName = normalizeEnvText(explicitState.identity?.name);
+                    if (explicitName && explicitName !== normalizedName) {
+                        return (0, commandResult_1.commandFailed)('identity_name_conflict', `Current local identity is "${explicitName}". Switch profile first or choose the same name.`);
+                    }
                     if (explicitState.identity || explicitHomeDir === activeHomeDir) {
                         targetHomeDir = explicitHomeDir;
                     }
@@ -1779,6 +1956,13 @@ function createDefaultCliDependencies(context) {
                 const createInput = { name: input.name };
                 if (input.host) {
                     createInput.host = input.host;
+                }
+                if (targetHomeDir) {
+                    const profiles = await (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir);
+                    const selectedProfile = profiles.find((profile) => (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(targetHomeDir)));
+                    if (selectedProfile) {
+                        createInput.profileSlug = selectedProfile.slug;
+                    }
                 }
                 return requestJson(cloneContextWithHomeDir(context, targetHomeDir), 'POST', '/api/identity/create', createInput, {
                     allowUnindexedExplicitHome: true,
@@ -2766,10 +2950,13 @@ function mergeCliDependencies(context) {
     };
 }
 async function serveCliDaemonProcess(context) {
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
     const homeDir = normalizeHomeDir(context.env, context.cwd, {
         allowUnindexedExplicitHome: context.env[ALLOW_UNINDEXED_HOME_ENV] === '1',
     });
     const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
+    const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir);
+    const daemonStore = (0, daemonStateStore_1.createDaemonStateStore)(daemonPaths);
     let daemonRecord = null;
     const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
     const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
@@ -2792,8 +2979,9 @@ async function serveCliDaemonProcess(context) {
         : undefined;
     const socketPresenceApiBaseUrl = context.env.METABOT_SOCKET_PRESENCE_API_BASE_URL
         || (context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1' ? 'http://127.0.0.1:9' : undefined);
+    const persistedAutoReplyConfig = await (0, configStore_1.createConfigStore)(paths).read().then((config) => config.autoReply, () => null);
     const sharedAutoReplyConfig = {
-        enabled: true,
+        enabled: persistedAutoReplyConfig ? persistedAutoReplyConfig.enabled : true,
         acceptPolicy: 'accept_all',
         defaultStrategyId: null,
     };
@@ -2856,7 +3044,7 @@ async function serveCliDaemonProcess(context) {
     let onProviderPresenceChanged = async () => { };
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
-        systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+        systemHomeDir,
         getDaemonRecord: () => daemonRecord,
         secretStore,
         signer,
@@ -2892,31 +3080,27 @@ async function serveCliDaemonProcess(context) {
     });
     const daemon = (0, daemon_1.createMetabotDaemon)({
         homeDirOrPaths: paths,
+        daemonPaths,
         handlers,
     });
-    const host = DEFAULT_DAEMON_HOST;
-    const explicitPort = parseDaemonPort(context.env.METABOT_DAEMON_PORT);
-    const preferredPort = explicitPort
-        ?? parseDaemonPort(context.env[DAEMON_PREFERRED_PORT_ENV])
-        ?? getDefaultDaemonPort(homeDir);
-    let started;
-    try {
-        started = await daemon.start(preferredPort, host);
-    }
-    catch (error) {
-        if (explicitPort != null || !isAddressInUseError(error)) {
-            throw error;
-        }
-        started = await daemon.start(0, host);
-    }
+    const installation = await selectDaemonInstallation(context);
+    const started = await daemon.start(installation.port, installation.host);
     const runtimeStore = (0, runtimeStateStore_1.createRuntimeStateStore)(paths);
     const providerPresenceStore = (0, providerPresenceState_1.createProviderPresenceStateStore)(paths);
-    daemonRecord = await runtimeStore.writeDaemon({
+    daemonRecord = await daemonStore.writeDaemon({
+        schemaVersion: 1,
+        instanceId: 'default',
         ownerId: daemon.ownerId,
         pid: process.pid,
         host: started.host,
         port: started.port,
         baseUrl: started.baseUrl,
+        oacVersion: version_1.CLI_VERSION,
+        runtimeFingerprint: getDaemonRuntimeFingerprint(),
+        supervisor: {
+            kind: 'none',
+            serviceId: null,
+        },
         startedAt: Date.now(),
         configHash: buildDaemonConfigHash(context.env),
     });
@@ -3141,7 +3325,7 @@ async function serveCliDaemonProcess(context) {
             shutdownFailure = error;
         }
         try {
-            await runtimeStore.clearDaemon(process.pid);
+            await daemonStore.clearDaemon(process.pid);
         }
         catch (error) {
             shutdownFailure ??= error;

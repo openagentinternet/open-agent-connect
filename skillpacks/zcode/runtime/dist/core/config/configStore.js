@@ -87,10 +87,14 @@ function normalizeConfig(input) {
     }
     const root = input;
     const maybeA2A = root['a2a'];
+    const maybeAutoReply = root['autoReply'];
     const maybeBrowser = root['browser'];
     const maybeChain = root['chain'];
     const a2aSource = maybeA2A && typeof maybeA2A === 'object'
         ? maybeA2A
+        : {};
+    const autoReplySource = maybeAutoReply && typeof maybeAutoReply === 'object'
+        ? maybeAutoReply
         : {};
     const browserSource = maybeBrowser && typeof maybeBrowser === 'object'
         ? maybeBrowser
@@ -111,6 +115,9 @@ function normalizeConfig(input) {
         },
         a2a: {
             simplemsgListenerEnabled: normalizeBoolean(a2aSource.simplemsgListenerEnabled, defaults.a2a.simplemsgListenerEnabled),
+        },
+        autoReply: {
+            enabled: normalizeBoolean(autoReplySource.enabled, defaults.autoReply.enabled),
         },
         browser: {
             metasoP2PBaseUrl: normalizeString(browserSource.metasoP2PBaseUrl) || defaults.browser.metasoP2PBaseUrl,

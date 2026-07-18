@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveMetabotPaths = resolveMetabotPaths;
+exports.resolveMetabotDaemonPaths = resolveMetabotDaemonPaths;
 const node_path_1 = __importDefault(require("node:path"));
 function normalizeInputHomeDir(homeDir) {
     const normalizedHomeDir = typeof homeDir === 'string' ? homeDir.trim() : '';
@@ -130,4 +131,25 @@ function resolveMetabotPaths(homeDir) {
         llmExecutorSessionsRoot: node_path_1.default.join(llmExecutorRoot, 'sessions'),
         llmExecutorTranscriptsRoot: node_path_1.default.join(llmExecutorRoot, 'transcripts'),
     });
+}
+function resolveMetabotDaemonPaths(systemHomeDir) {
+    const normalizedSystemHomeDir = normalizeInputHomeDir(systemHomeDir);
+    const metabotRoot = node_path_1.default.join(normalizedSystemHomeDir, '.metabot');
+    const runtimeRoot = node_path_1.default.join(metabotRoot, 'runtime');
+    const locksRoot = node_path_1.default.join(runtimeRoot, 'locks');
+    const logsRoot = node_path_1.default.join(runtimeRoot, 'logs');
+    const recoveryRoot = node_path_1.default.join(runtimeRoot, 'recovery');
+    return {
+        systemHomeDir: normalizedSystemHomeDir,
+        metabotRoot,
+        runtimeRoot,
+        locksRoot,
+        logsRoot,
+        recoveryRoot,
+        installationPath: node_path_1.default.join(runtimeRoot, 'installation.json'),
+        daemonStatePath: node_path_1.default.join(runtimeRoot, 'daemon.json'),
+        daemonLockPath: node_path_1.default.join(locksRoot, 'daemon.lock'),
+        daemonLogPath: node_path_1.default.join(logsRoot, 'daemon.log'),
+        migrationStatePath: node_path_1.default.join(recoveryRoot, 'migration.json'),
+    };
 }

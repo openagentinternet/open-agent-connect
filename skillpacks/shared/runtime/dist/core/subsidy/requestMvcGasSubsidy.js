@@ -8,6 +8,45 @@ const DEFAULT_ADDRESS_INIT_URL = 'https://www.metaso.network/assist-open-api/v1/
 const DEFAULT_ADDRESS_REWARD_URL = 'https://www.metaso.network/assist-open-api/v1/assist/gas/mvc/address-reward';
 const DEFAULT_SUBSIDY_WAIT_MS = 5_000;
 const CREDENTIAL_MESSAGE = 'metaso.network';
+function readServiceResponse(value) {
+    return value && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : null;
+}
+function readServiceCode(value) {
+    const response = readServiceResponse(value);
+    const code = typeof response?.code === 'number'
+        ? response.code
+        : typeof response?.code === 'string' && response.code.trim()
+            ? Number(response.code)
+            : Number.NaN;
+    return Number.isFinite(code) ? code : null;
+}
+function readServiceMessage(value) {
+    const response = readServiceResponse(value);
+    for (const key of ['message', 'msg', 'error']) {
+        const message = response?.[key];
+        if (typeof message === 'string' && message.trim()) {
+            return message.trim();
+        }
+    }
+    return '';
+}
+function isAcceptedServiceResult(value, acceptedDuplicate) {
+    const code = readServiceCode(value);
+    if (code === 0)
+        return true;
+    return code !== null && acceptedDuplicate.test(readServiceMessage(value));
+}
+function formatServiceFailure(stage, value) {
+    const message = readServiceMessage(value);
+    if (message)
+        return `${stage} failed: ${message}`;
+    const code = readServiceCode(value);
+    if (code !== null)
+        return `${stage} failed: service code ${code}`;
+    return `${stage} failed: invalid service response`;
+}
 async function requestMvcGasSubsidy(options, dependencies = {}) {
     const mvcAddress = typeof options.mvcAddress === 'string' ? options.mvcAddress.trim() : '';
     const mnemonic = typeof options.mnemonic === 'string' ? options.mnemonic.trim() : '';
@@ -44,7 +83,14 @@ async function requestMvcGasSubsidy(options, dependencies = {}) {
             return {
                 success: false,
                 step1,
-                error: `address-init failed: ${step1Response.status} ${step1Response.statusText}`,
+                error: `${formatServiceFailure('address-init', step1)} (HTTP ${step1Response.status} ${step1Response.statusText})`,
+            };
+        }
+        if (!isAcceptedServiceResult(step1, /^address already init(?:ialized)?$/i)) {
+            return {
+                success: false,
+                step1,
+                error: formatServiceFailure('address-init', step1),
             };
         }
         if (!mnemonic) {
@@ -74,7 +120,15 @@ async function requestMvcGasSubsidy(options, dependencies = {}) {
                 success: false,
                 step1,
                 step2,
-                error: `address-reward failed: ${step2Response.status} ${step2Response.statusText}`,
+                error: `${formatServiceFailure('address-reward', step2)} (HTTP ${step2Response.status} ${step2Response.statusText})`,
+            };
+        }
+        if (!isAcceptedServiceResult(step2, /^address already rewarded$/i)) {
+            return {
+                success: false,
+                step1,
+                step2,
+                error: formatServiceFailure('address-reward', step2),
             };
         }
         return {

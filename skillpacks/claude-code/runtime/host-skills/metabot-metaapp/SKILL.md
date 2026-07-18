@@ -48,6 +48,8 @@ Classify the request first.
 
 Do not use this skill for raw hosting, unrelated file upload, paid skill service publishing, identity creation, network source management, wallet transfer, or private chat.
 
+The private-chat boundary means this skill does not send private messages for the user. It must still guide MetaApp developers to create Message, Chat, or Contact Bot buttons that only open the Browser-owned private-chat composer through `browser.privateChat.compose`.
+
 ## MetaApp Development Rules
 
 Build a static, browser-runnable app. It may be a pure HTML app, but prefer Agent Internet resource links for ecosystem resources.
@@ -64,6 +66,8 @@ map://<protocol>/pin/<pinId>
 map://<protocol>/pin/<pinId>?version=<historyIndex>
 map://simplemsg/conversation?peer=<globalMetaId>
 ```
+
+`map://simplemsg/conversation?peer=<globalMetaId>` is a navigation URI for an existing conversation resource. It does not send a message and does not open the Browser-owned private-chat composer. Use it only for an intentional “Open conversation” or “View conversation” action, never as the implementation of a Bot homepage’s top-level Message button.
 
 Use `https://` only for normal external web pages, not for MetaID resources that already have an Agent Internet URI.
 
@@ -234,10 +238,50 @@ Inside a custom MetaApp iframe, add an `AgentBrowser` helper once near the end o
 Use `window.AgentBrowser.request` only for host-mediated Browser capabilities:
 
 - `browser.actor.current` to read the selected actor snapshot.
+- `browser.privateChat.compose` with no parameters to open the Browser-owned private-chat composer.
 - `metaid.pin.write` for create, modify, or revoke of MetaID PIN records.
 - `metafile.upload` before writing app records that reference files.
 
 Do not request wallet APIs, private keys, payment APIs, host routes, local file paths, parent DOM access, or Web2 avatar access from inside the MetaApp.
+
+## Browser-Owned Private Chat Composer
+
+For a custom Bot homepage MetaApp, Message, Chat, Contact Bot, and Send Message CTAs must only ask Agent Browser Core (ABC) to open its Browser-owned private-chat composer:
+
+```html
+<button type="button" id="message-button">Message</button>
+<script>
+  document.getElementById('message-button').addEventListener('click', async function () {
+    try {
+      await window.AgentBrowser.request({
+        method: 'browser.privateChat.compose'
+      });
+    } catch (error) {
+      console.error(error);
+    }
+  });
+</script>
+```
+
+The request has no recipient or message-content parameters. Do not generate code like this:
+
+```js
+window.AgentBrowser.request({
+  method: 'browser.privateChat.compose',
+  params: {
+    to: someGlobalMetaId,
+    content: someMessage
+  }
+});
+```
+
+ABC resolves the recipient from the current resolved Bot Page owner and ignores iframe-supplied `params`. A MetaApp cannot choose or forge the recipient, prefill the message, encrypt it, sign it, or send private chat directly.
+
+A successful `{ opened: true }` result means only that the Browser composer opened; it does not mean the message was sent. The user must enter the message in the Browser-owned modal and explicitly click the Browser-owned Send button. Only then does the existing `private-chat` trusted action enter the OAC/IDBots host path.
+
+`metaid.pin.write` is not the private-chat API. A MetaApp must not construct private messages through `/protocols/simplemsg`, bypass the Browser input field, or call a host send path directly. Private chat requires host-owned peer-key resolution, encryption, signing, and broadcast.
+
+Hosts that do not support this capability return `unsupported_method`. Show ordinary unavailable or error feedback, including for other bridge errors, and do not attempt a direct-send fallback. For example, a UI may map `error.code === 'unsupported_method'` to “Messaging is unavailable in this Browser.”
 
 ## Bot Homepage MetaApp Rules
 
@@ -287,6 +331,8 @@ Treat `profile.homepage.payload.uri` as the selected custom homepage entry. Do n
 Do not depend on v1/v2-only fields such as top-level `services`, `actions`, `proofs`, `source`, `chainName`, or address fields. If a legacy homepage response must be consumed, handle it as a compatibility fallback only.
 
 Bot homepage MetaApps should still follow MetaApp Development Rules: use `metaid://`, `pin://`, `metaapp://`, `metafile://`, and `map://` links, and include the AgentBrowser helper when iframe navigation is needed.
+
+If a Bot homepage has a Message, Chat, Contact Bot, or Send Message CTA, it must call `browser.privateChat.compose` without recipient or message-content parameters. Use `map://simplemsg/conversation?peer=<globalMetaId>` only when the UI intent is to view or open an existing conversation resource.
 
 After publishing a homepage MetaApp, ask whether to set it as the selected homepage for a local Bot. Only do this when the human explicitly wants the MetaApp to become that Bot homepage. Write through the existing Bot profile command:
 
@@ -514,6 +560,12 @@ $HOME/.metabot/bin/metabot metaapp comment --pin-id <pinid> --comment <text> --f
 - When the system provides `metafileContentBaseUrl` or `manApiBaseUrl`, the app prefers those configured values over the public fallback bases.
 - Packaged asset references in HTML, CSS, Markdown, and client-side fetches use relative URLs, not site-root absolute paths such as `/assets/...`, unless the target is intentionally an external host URL.
 - Custom iframe MetaApps include the AgentBrowser navigation helper when using Agent Internet links.
+- Message, Chat, Contact Bot, and Send Message CTAs use `browser.privateChat.compose`.
+- The `browser.privateChat.compose` request does not contain recipient or message-content parameters.
+- The MetaApp does not use `metaid.pin.write` or `/protocols/simplemsg` to send private chat.
+- `map://simplemsg/conversation` is used only for conversation navigation.
+- `unsupported_method` produces ordinary unavailable or error feedback without a direct-send fallback.
+- The user still types and confirms the message in the Browser-owned composer.
 - The app does not request wallet, private key, payment, local path, host route, or parent DOM access.
 - `content` uses `metafile://` references only.
 - Local image paths are uploaded or replaced before final JSON.

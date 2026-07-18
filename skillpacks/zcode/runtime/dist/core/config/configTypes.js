@@ -19,6 +19,9 @@ function createDefaultConfig() {
         a2a: {
             simplemsgListenerEnabled: true,
         },
+        autoReply: {
+            enabled: true,
+        },
         browser: {
             ...browserDefaults,
             blockExplorerBaseUrl: DEFAULT_BLOCK_EXPLORER_BASE_URL,

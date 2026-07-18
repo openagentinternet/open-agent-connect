@@ -47,4 +47,24 @@ export interface MetabotPaths {
     baseRoot: string;
     exportRoot: string;
 }
+/**
+ * Machine-wide paths for the one local daemon instance. These intentionally
+ * live outside profile runtimes: profile state remains private to its profile,
+ * while process ownership and the selected local endpoint are installation
+ * concerns.
+ */
+export interface MetabotDaemonPaths {
+    systemHomeDir: string;
+    metabotRoot: string;
+    runtimeRoot: string;
+    locksRoot: string;
+    logsRoot: string;
+    recoveryRoot: string;
+    installationPath: string;
+    daemonStatePath: string;
+    daemonLockPath: string;
+    daemonLogPath: string;
+    migrationStatePath: string;
+}
 export declare function resolveMetabotPaths(homeDir: string): MetabotPaths;
+export declare function resolveMetabotDaemonPaths(systemHomeDir: string): MetabotDaemonPaths;

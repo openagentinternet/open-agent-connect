@@ -2,6 +2,9 @@ import { type BotHomepageTemplateId, type BrowserNameResolutionConfig } from '@o
 export interface A2AConfig {
     simplemsgListenerEnabled: boolean;
 }
+export interface AutoReplyConfig {
+    enabled: boolean;
+}
 export type DefaultWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
 export declare const DEFAULT_WRITE_NETWORKS: DefaultWriteNetwork[];
 export interface ChainConfig {
@@ -23,6 +26,7 @@ export interface BrowserConfig {
 export interface MetabotConfig {
     chain: ChainConfig;
     a2a: A2AConfig;
+    autoReply: AutoReplyConfig;
     browser: BrowserConfig;
 }
 export declare function isDefaultWriteNetwork(value: unknown): value is DefaultWriteNetwork;

@@ -8,28 +8,13 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const types_1 = require("./types");
 const platformRegistry_1 = require("../platform/platformRegistry");
+const daemonStateStore_1 = require("../state/daemonStateStore");
 const FULL_ERASE_TOKEN = 'DELETE_OPEN_AGENT_CONNECT_IDENTITY_AND_SECRETS';
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
 function isNotFound(error) {
     return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
-}
-async function readJsonFile(filePath) {
-    try {
-        const raw = await node_fs_1.promises.readFile(filePath, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-            return null;
-        }
-        return parsed;
-    }
-    catch (error) {
-        if (isNotFound(error)) {
-            return null;
-        }
-        throw error;
-    }
 }
 function resolveBuiltInHostRoots(systemHomeDir, env) {
     return (0, platformRegistry_1.getInstallSkillRoots)().map((root) => (0, platformRegistry_1.resolvePlatformSkillRootPath)(root, systemHomeDir, env));
@@ -67,17 +52,30 @@ async function removeGuardedHostSymlinks(hostSkillRoot, sharedSkillRoot) {
     }
 }
 async function stopDaemonBestEffort(systemHomeDir) {
-    const activeHomePath = node_path_1.default.join(systemHomeDir, '.metabot', 'manager', 'active-home.json');
-    const activeState = await readJsonFile(activeHomePath);
-    const activeHomeDir = normalizeText(activeState?.homeDir);
-    if (!activeHomeDir) {
-        return { attempted: false, stopped: false };
-    }
-    const daemonStatePath = node_path_1.default.join(activeHomeDir, '.runtime', 'daemon.json');
-    const daemonState = await readJsonFile(daemonStatePath);
+    const daemonState = await (0, daemonStateStore_1.createDaemonStateStore)(systemHomeDir).readDaemon();
     const pid = Number(daemonState?.pid);
     if (!Number.isInteger(pid) || pid <= 0) {
         return { attempted: false, stopped: false };
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1_500);
+    try {
+        const response = await fetch(`${normalizeText(daemonState?.baseUrl)}/api/daemon/status`, {
+            signal: controller.signal,
+        });
+        const payload = await response.json();
+        if (response.ok !== true
+            || payload.ok !== true
+            || payload.data?.daemonId !== daemonState?.ownerId
+            || payload.data?.pid !== pid) {
+            return { attempted: false, stopped: false };
+        }
+    }
+    catch {
+        return { attempted: false, stopped: false };
+    }
+    finally {
+        clearTimeout(timeout);
     }
     try {
         process.kill(pid, 'SIGTERM');

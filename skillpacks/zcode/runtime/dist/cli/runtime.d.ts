@@ -41,11 +41,17 @@ export declare function createServiceRefundSyncLoop(input: {
     clearIntervalFn?: (handle: ServiceRefundSyncIntervalHandle) => void;
     logWarning?: (message: string) => void;
 }): ServiceRefundSyncLoop;
-export declare function getDefaultDaemonPort(homeDir?: string): number;
+export declare function getDefaultDaemonPort(_systemHomeDir?: string): number;
 export declare function getDaemonRuntimeFingerprint(rootDir?: string): string;
 export declare function buildDaemonConfigHash(env: NodeJS.ProcessEnv, options?: {
     runtimeFingerprint?: string;
 }): string;
+export interface DaemonStatusProbe {
+    reachable: boolean;
+    ownerId: string | null;
+    pid: number | null;
+}
+export declare function probeDaemonStatus(baseUrl: string, timeoutMs?: number): Promise<DaemonStatusProbe>;
 export interface PrivateChatAutoReplyProfileDispatcher {
     handleInboundMessage(profile: IdentityProfileRecord, message: PrivateChatInboundMessage): Promise<void>;
 }
