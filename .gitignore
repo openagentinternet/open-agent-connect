@@ -9,6 +9,7 @@ coverage/
 .worktrees/
 .playwright-mcp/
 .codex_tmp/
+.zcode/
 .playwright-cli/
 .superpowers/
 generated/*
