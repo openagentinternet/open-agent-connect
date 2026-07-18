@@ -5922,6 +5922,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return index;
   }
 
+  // Mirrors the client-side content-path prefixes in src/ui/pages/conversations/app.ts.
+  // An avatar reference that is only the prefix with nothing after it (e.g. "/content/")
+  // is structurally incomplete and cannot resolve to an image, so treat it as missing
+  // and let the chain profile supply a usable reference instead.
+  const AVATAR_CONTENT_PATH_PREFIXES = [
+    '/content/',
+    '/metafile-indexer/content/',
+    '/metafile-indexer/thumbnail/',
+    '/metafile-indexer/api/v1/files/content/',
+    '/metafile-indexer/api/v1/files/accelerate/content/',
+    '/metafile-indexer/api/v1/users/avatar/accelerate/',
+  ];
+
+  function isUsableAvatarReference(value: unknown): boolean {
+    const raw = normalizeText(value);
+    if (!raw) return false;
+    let path = raw;
+    if (/^https?:\/\//iu.test(raw)) {
+      try {
+        path = new URL(raw).pathname;
+      } catch {
+        path = '';
+      }
+    }
+    const lower = path.toLowerCase();
+    for (const prefix of AVATAR_CONTENT_PATH_PREFIXES) {
+      if (lower.indexOf(prefix) === 0) {
+        return normalizeText(path.slice(prefix.length).split(/[?#]/)[0]).length > 0;
+      }
+    }
+    return true;
+  }
+
   function meaningfulConversationName(name: unknown, globalMetaId: string): string {
     const normalized = normalizeText(name);
     return normalized && normalized !== normalizeText(globalMetaId) ? normalized : '';
@@ -5938,7 +5971,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const indexed = inputProfile.profileIndex.get(globalMetaId) ?? null;
     const cachedChainProfile = readChainProfileCacheEntry(globalMetaId)?.projection ?? null;
     const hasName = Boolean(meaningfulConversationName(inputProfile.currentName, globalMetaId) || indexed?.name);
-    const hasAvatar = Boolean(normalizeText(inputProfile.currentAvatar) || indexed?.avatar);
+    const hasAvatar = isUsableAvatarReference(inputProfile.currentAvatar) || isUsableAvatarReference(indexed?.avatar);
     if (hasName && hasAvatar && !cachedChainProfile) {
       return indexed;
     }
@@ -5960,7 +5993,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   function mergeConversationAvatar(currentAvatar: unknown, profile: ConversationProfileProjection | null): string | null {
-    return normalizeText(currentAvatar) || profile?.avatar || null;
+    return (isUsableAvatarReference(currentAvatar) ? normalizeText(currentAvatar) : '')
+      || (isUsableAvatarReference(profile?.avatar) ? normalizeText(profile?.avatar) : '')
+      || null;
   }
 
   function enrichConversationActor(
