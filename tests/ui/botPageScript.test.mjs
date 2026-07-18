@@ -1249,6 +1249,12 @@ test('bot page renders chat skills tab for private conversation replies only', a
       '[data-chat-skills-profile-slug]': activeChatSkillsPanel,
     },
     fetch: (url) => {
+      if (url === '/api/chat/auto-reply/status?from=alice-bot') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { enabled: true, defaultStrategyId: null } }),
+        });
+      }
       assert.equal(url, '/api/services/skills?from=alice-bot&allowFallbackRuntime=true');
       return Promise.resolve({
         ok: true,
@@ -3656,6 +3662,12 @@ test('bot page deep link maps legacy info chat links to chat skills', async () =
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
+        });
+      }
+      if (url === '/api/chat/auto-reply/status?from=alice') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { enabled: true, defaultStrategyId: null } }),
         });
       }
       throw new Error(`Unexpected fetch ${url}`);
