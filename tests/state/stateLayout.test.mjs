@@ -3,7 +3,10 @@ import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
-const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const {
+  resolveMetabotDaemonPaths,
+  resolveMetabotPaths,
+} = require('../../dist/core/state/paths.js');
 
 test('resolveMetabotPaths returns the v2 manager and runtime graph for a profile home', () => {
   const paths = resolveMetabotPaths('/tmp/system-home/.metabot/profiles/charles-zhang');
@@ -82,4 +85,22 @@ test('resolveMetabotPaths rejects direct workspace roots outside ~/.metabot/prof
     () => resolveMetabotPaths('/tmp/direct-workspace'),
     /Profile home must live under ~\/\.metabot\/profiles\/<slug>/
   );
+});
+
+test('resolveMetabotDaemonPaths keeps machine daemon process state outside profiles', () => {
+  const paths = resolveMetabotDaemonPaths('/tmp/system-home');
+
+  assert.deepEqual(paths, {
+    systemHomeDir: '/tmp/system-home',
+    metabotRoot: '/tmp/system-home/.metabot',
+    runtimeRoot: '/tmp/system-home/.metabot/runtime',
+    locksRoot: '/tmp/system-home/.metabot/runtime/locks',
+    logsRoot: '/tmp/system-home/.metabot/runtime/logs',
+    recoveryRoot: '/tmp/system-home/.metabot/runtime/recovery',
+    installationPath: '/tmp/system-home/.metabot/runtime/installation.json',
+    daemonStatePath: '/tmp/system-home/.metabot/runtime/daemon.json',
+    daemonLockPath: '/tmp/system-home/.metabot/runtime/locks/daemon.lock',
+    daemonLogPath: '/tmp/system-home/.metabot/runtime/logs/daemon.log',
+    migrationStatePath: '/tmp/system-home/.metabot/runtime/recovery/migration.json',
+  });
 });

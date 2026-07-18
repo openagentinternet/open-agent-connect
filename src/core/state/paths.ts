@@ -54,6 +54,26 @@ export interface MetabotPaths {
   exportRoot: string;
 }
 
+/**
+ * Machine-wide paths for the one local daemon instance. These intentionally
+ * live outside profile runtimes: profile state remains private to its profile,
+ * while process ownership and the selected local endpoint are installation
+ * concerns.
+ */
+export interface MetabotDaemonPaths {
+  systemHomeDir: string;
+  metabotRoot: string;
+  runtimeRoot: string;
+  locksRoot: string;
+  logsRoot: string;
+  recoveryRoot: string;
+  installationPath: string;
+  daemonStatePath: string;
+  daemonLockPath: string;
+  daemonLogPath: string;
+  migrationStatePath: string;
+}
+
 function normalizeInputHomeDir(homeDir: string): string {
   const normalizedHomeDir = typeof homeDir === 'string' ? homeDir.trim() : '';
   if (!normalizedHomeDir) {
@@ -239,4 +259,27 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     llmExecutorSessionsRoot: path.join(llmExecutorRoot, 'sessions'),
     llmExecutorTranscriptsRoot: path.join(llmExecutorRoot, 'transcripts'),
   });
+}
+
+export function resolveMetabotDaemonPaths(systemHomeDir: string): MetabotDaemonPaths {
+  const normalizedSystemHomeDir = normalizeInputHomeDir(systemHomeDir);
+  const metabotRoot = path.join(normalizedSystemHomeDir, '.metabot');
+  const runtimeRoot = path.join(metabotRoot, 'runtime');
+  const locksRoot = path.join(runtimeRoot, 'locks');
+  const logsRoot = path.join(runtimeRoot, 'logs');
+  const recoveryRoot = path.join(runtimeRoot, 'recovery');
+
+  return {
+    systemHomeDir: normalizedSystemHomeDir,
+    metabotRoot,
+    runtimeRoot,
+    locksRoot,
+    logsRoot,
+    recoveryRoot,
+    installationPath: path.join(runtimeRoot, 'installation.json'),
+    daemonStatePath: path.join(runtimeRoot, 'daemon.json'),
+    daemonLockPath: path.join(locksRoot, 'daemon.lock'),
+    daemonLogPath: path.join(logsRoot, 'daemon.log'),
+    migrationStatePath: path.join(recoveryRoot, 'migration.json'),
+  };
 }
