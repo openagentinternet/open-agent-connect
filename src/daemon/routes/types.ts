@@ -193,6 +193,12 @@ export interface MetabotDaemonHttpHandlers {
   };
   ui?: {
     renderPage?: (page: MetabotUiPageName) => Awaitable<string>;
+    resolveTraceTarget?: (input: {
+      traceId?: string | null;
+      sessionId?: string | null;
+      local?: string | null;
+      peer?: string | null;
+    }) => Awaitable<string>;
   };
   llm?: {
     listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;

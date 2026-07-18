@@ -208,6 +208,34 @@ function canonicalBareBrowserPath(url: URL): string | null {
   return null;
 }
 
+async function resolveTraceRedirectLocation(context: Parameters<RouteHandler>[0], url: URL): Promise<string> {
+  const local = url.searchParams.get('local');
+  const peer = url.searchParams.get('peer');
+  // local+peer is the Conversations page's native deep-link shape, so pass it
+  // straight through without needing the daemon resolver. Only legacy
+  // traceId/sessionId params require the resolver (to translate them into a
+  // local+peer pair via the unified session store).
+  let baseTarget: string;
+  if (local && peer) {
+    baseTarget = `/ui/conversations?local=${encodeURIComponent(local)}&peer=${encodeURIComponent(peer)}`;
+  } else if (context.handlers.ui?.resolveTraceTarget) {
+    baseTarget = await context.handlers.ui.resolveTraceTarget({
+      traceId: url.searchParams.get('traceId'),
+      sessionId: url.searchParams.get('sessionId'),
+      local,
+      peer,
+    });
+  } else {
+    baseTarget = '/ui/conversations';
+  }
+  const parsed = new URL(baseTarget, 'http://placeholder.local');
+  const language = url.searchParams.get('lang');
+  if (language) {
+    parsed.searchParams.set('lang', language);
+  }
+  return `${parsed.pathname}${parsed.search}`;
+}
+
 async function serveBundledUiAsset(context: Parameters<RouteHandler>[0]): Promise<boolean> {
   const { req, url } = context;
   const route = UI_ASSET_ROUTES.find((candidate) => url.pathname.startsWith(candidate.prefix));
@@ -309,6 +337,24 @@ export const handleUiRoutes: RouteHandler = async (context) => {
   if (url.pathname === '/ui/metaapps') {
     context.res.writeHead(302, {
       'Location': `/ui/apps${url.search}`,
+      'Cache-Control': 'no-store',
+    });
+    context.res.end();
+    return true;
+  }
+
+  // The Conversations page is the canonical surface for watching two bots
+  // interact. The legacy `/ui/trace` route is kept only as a permanent
+  // redirect so existing bookmarks and persisted links keep working: trace
+  // params are translated into the conversations `local`+`peer` deep-link.
+  if (url.pathname === '/ui/trace') {
+    if (req.method !== 'GET') {
+      context.sendMethodNotAllowed(['GET']);
+      return true;
+    }
+    const location = await resolveTraceRedirectLocation(context, url);
+    context.res.writeHead(302, {
+      'Location': location,
       'Cache-Control': 'no-store',
     });
     context.res.end();

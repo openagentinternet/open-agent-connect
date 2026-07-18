@@ -17,7 +17,7 @@ test('returns completed when trace shows completed on first poll', async () => {
   const stderr = createMockStderr();
   const result = await pollTraceUntilComplete({
     traceId: 'trace-1',
-    localUiUrl: 'http://localhost:5555/ui/trace?traceId=trace-1',
+    localUiUrl: 'http://localhost:5555/ui/conversations?local=idlocal1&peer=idpeer1',
     requestFn: async (_method, _path) => ({
       ok: true,
       state: 'success',
@@ -38,7 +38,7 @@ test('returns not completed after timeout', async () => {
   const stderr = createMockStderr();
   const result = await pollTraceUntilComplete({
     traceId: 'trace-2',
-    localUiUrl: 'http://localhost:5555/ui/trace?traceId=trace-2',
+    localUiUrl: 'http://localhost:5555/ui/conversations?local=idlocal2&peer=idpeer2',
     requestFn: async (_method, _path) => ({
       ok: true,
       state: 'success',
@@ -58,7 +58,7 @@ test('prints initial status and trace URL to stderr', async () => {
   const stderr = createMockStderr();
   await pollTraceUntilComplete({
     traceId: 'trace-3',
-    localUiUrl: 'http://localhost:5555/ui/trace?traceId=trace-3',
+    localUiUrl: 'http://localhost:5555/ui/conversations?local=idlocal3&peer=idpeer3',
     requestFn: async () => ({
       ok: true,
       state: 'success',
@@ -70,7 +70,7 @@ test('prints initial status and trace URL to stderr', async () => {
   });
   const output = stderr.lines.join('');
   assert.ok(output.includes('Waiting for response'), 'should print waiting message');
-  assert.ok(output.includes('http://localhost:5555/ui/trace'), 'should print trace URL');
+  assert.ok(output.includes('http://localhost:5555/ui/conversations'), 'should print conversation URL');
 });
 
 test('handles request errors gracefully', async () => {
@@ -78,7 +78,7 @@ test('handles request errors gracefully', async () => {
   let callCount = 0;
   const result = await pollTraceUntilComplete({
     traceId: 'trace-err',
-    localUiUrl: 'http://localhost:5555/ui/trace?traceId=trace-err',
+    localUiUrl: 'http://localhost:5555/ui/conversations?local=idlocalerr&peer=idpeererr',
     requestFn: async () => {
       callCount++;
       if (callCount <= 2) throw new Error('connection refused');

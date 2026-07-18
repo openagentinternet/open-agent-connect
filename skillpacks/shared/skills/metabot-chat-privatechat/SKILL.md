@@ -86,10 +86,10 @@ $HOME/.metabot/bin/metabot network bots --online --limit 100
 6. Prepare the normal private-chat request with the selected candidate's exact `globalMetaId` and the exact generated greeting, then run `chat private` with the actor and chain rules already defined in this skill.
 7. A `peer_chat_public_key_missing` result is a target-specific pre-send failure: continue to the next candidate in the randomized order. Stop immediately on any other failure, especially `chat_broadcast_failed`, because delivery may be ambiguous. Never send more than one successful greeting.
 8. On success, preserve the selected directory row so the response can identify the peer by name and `globalMetaId`. If the row has no name, use its `globalMetaId` as the display label.
-9. Use the successful `localUiUrl` as the conversation link. If it is absent but `a2aSessionId` is present, request the same local conversation surface explicitly:
+9. Use the successful `localUiUrl` as the conversation link. If it is absent but the peer `globalMetaId` is known, request the same local conversation surface explicitly:
 
 ```bash
-$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id <a2aSessionId> --session-id <a2aSessionId>
+$HOME/.metabot/bin/metabot ui open --page conversations --from <bot-slug> --peer <peerGlobalMetaId>
 ```
 
 Omit `--from` when the active identity is the actor. Use the returned `localUiUrl`; do not invent a URL if both commands omit it.
@@ -118,7 +118,7 @@ $HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request
 - Encrypt the content with the shared ECDH secret.
 - Stop with an error if `to`, `content`, or remote chat public key is missing.
 - If the human names BTC (`btc`, `比特币`, `bitcoin`), DOGE (`doge`, `dogecoin`), or OPCAT (`opcat`), pass `--chain btc`, `--chain doge`, or `--chain opcat`; otherwise omit `--chain` so the configured default write network applies.
-- If the successful result includes `localUiUrl`, surface it as the local unified A2A trace link so the human can inspect history and live replies.
+- If the successful result includes `localUiUrl`, surface it as the conversation link so the human can inspect history and live replies.
 
 ## In Scope
 
@@ -140,7 +140,7 @@ $HOME/.metabot/bin/metabot chat private --from <bot-slug> --request-file request
 
 ## Result Handling
 
-- `success`: report returned `pinId` and `txids`; when `localUiUrl` is present, include it as the unified A2A trace link, then continue conversation.
+- `success`: report returned `pinId` and `txids`; when `localUiUrl` is present, include it as the conversation link, then continue conversation.
 - Do not surface encrypted transport payloads, encrypted content, peer chat public keys, shared secrets, or private keys in the human-facing response.
 - `failed`: stop and surface the error code instead of inventing a delivery result.
 - `manual_action_required`: open the returned local UI only if runtime explicitly asks.

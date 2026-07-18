@@ -81,13 +81,13 @@ export async function pollTraceUntilComplete(input: PollTraceInput): Promise<Pol
 
       if (status === 'completed' || status === 'timeout' || status === 'manual_action_required' || status === 'failed') {
         const data = (result as { data: unknown }).data as Record<string, unknown>;
-        input.stderr.write(`Trace reached terminal status (${status}). View full trace: ${input.localUiUrl}\n`);
+        input.stderr.write(`Trace reached terminal status (${status}). View conversation: ${input.localUiUrl}\n`);
         return { completed: true, terminalStatus: status, trace: data };
       }
     } catch {
       consecutiveErrors++;
       if (consecutiveErrors > 10) {
-        input.stderr.write(`Unable to reach daemon. View trace in browser: ${input.localUiUrl}\n`);
+        input.stderr.write(`Unable to reach daemon. View conversation in browser: ${input.localUiUrl}\n`);
         return { completed: false, terminalStatus: null };
       }
     }

@@ -44,7 +44,7 @@ const EXPECTED_CONFIRMATION_CONTRACT_LINE =
   'Before any paid remote call, show the provider, service, price, currency, and wait for explicit confirmation.';
 const EXPECTED_TRACE_WATCH_LINE = '$HOME/.metabot/bin/metabot trace watch --from <bot-slug> --trace-id trace-123';
 const EXPECTED_TRACE_GET_LINE = '$HOME/.metabot/bin/metabot trace get --from <bot-slug> --trace-id trace-123';
-const EXPECTED_TRACE_UI_LINE = '$HOME/.metabot/bin/metabot ui open --page trace --from <bot-slug> --trace-id trace-123';
+const EXPECTED_TRACE_UI_LINE = '$HOME/.metabot/bin/metabot ui open --page conversations --from <bot-slug> --peer <providerGlobalMetaId>';
 const BARE_METABOT_COMMAND_PATTERN =
   /(?<![\w.$/~-])metabot\s+(?:services|trace|network|identity|doctor|wallet|chat|ui|buzz|file|master|skills|config|chain|llm|evolution|browser|metaapp)\b/;
 
@@ -869,7 +869,7 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
   assert.match(chatContent, /same language as the user/i);
   assert.match(chatContent, /do not lock to one fixed phrase template/i);
   assert.match(chatContent, /localUiUrl/);
-  assert.match(chatContent, /unified A2A trace/i);
+  assert.match(chatContent, /conversation link/i);
   assert.match(chatContent, /Bot, bot, and MetaBot wording as equivalent and case-insensitive/i);
   assert.match(chatContent, /hello from my local Bot/);
   assert.match(chatContent, /find any online Bot\/MetaBot\/agent\/AI for casual chat/i);

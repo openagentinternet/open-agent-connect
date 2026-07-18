@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { listMetabotProfiles, type MetabotProfileFull } from '../../core/bot/metabotProfileManager';
+import { buildConversationHref } from '../../core/a2a/conversationUrl';
 import type {
   BrowserActor,
   BrowserActorCapability,
@@ -566,8 +567,20 @@ function pinWriteRequestHash(input: {
 function followUpActionFromOac(result: MetabotCommandResult<unknown>): BrowserFollowUpAction | undefined {
   const resultData = browserRecord(result.data);
   const href = normalizeText((result as { localUiUrl?: unknown }).localUiUrl);
-  const traceId = normalizeText(resultData.traceId);
-  const route = href ? '' : traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '';
+  // When the producer did not hand back a Conversations localUiUrl, try to
+  // build one from the local+peer ids commonly present on OAC results so the
+  // follow-up card still lands on the right conversation thread. Only emit a
+  // follow-up when there is something to link to.
+  const fallbackLocal = normalizeText(resultData.localGlobalMetaId)
+    || normalizeText(resultData.callerGlobalMetaId);
+  const fallbackPeer = normalizeText(resultData.peerGlobalMetaId)
+    || normalizeText(resultData.providerGlobalMetaId)
+    || normalizeText(resultData.counterpartyGlobalMetaId)
+    || normalizeText(resultData.to)
+    || normalizeText(resultData.toGlobalMetaId);
+  const route = href || (!fallbackLocal && !fallbackPeer)
+    ? ''
+    : buildConversationHref(fallbackLocal, fallbackPeer);
   if (!href && !route) return undefined;
   const action: BrowserFollowUpAction = {
     label: normalizeText((result as { actionLabel?: unknown }).actionLabel) || 'Open details',
@@ -753,11 +766,7 @@ function findProfileByHomeDir(profiles: MetabotProfileFull[], homeDir: string): 
 }
 
 function conversationHref(localGlobalMetaId: string, peerGlobalMetaId: string): string {
-  const query = new URLSearchParams({
-    local: localGlobalMetaId,
-    peer: peerGlobalMetaId,
-  });
-  return `/ui/conversations?${query.toString()}`;
+  return buildConversationHref(localGlobalMetaId, peerGlobalMetaId);
 }
 
 function createBotHref(env: NodeJS.ProcessEnv): string {

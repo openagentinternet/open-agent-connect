@@ -73,7 +73,7 @@ export function buildSettingsPageDefinition(i18n: LocalUiI18nContext = createI18
               <p data-i18n-key="settings.diagnostics.body">${i18n.t('settings.diagnostics.body')}</p>
             </div>
             <div class="settings-links">
-              <a href="/ui/trace">Trace</a>
+              <a href="/ui/conversations">Trace</a>
               <a href="/ui/refund">Refund</a>
               <a href="/ui/hub">Hub</a>
             </div>

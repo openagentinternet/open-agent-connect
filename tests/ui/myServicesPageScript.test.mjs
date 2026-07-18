@@ -407,7 +407,7 @@ test('my-services detail modal keeps order pagination and trace actions in modal
 
   const detailHtml = elements['[data-my-service-detail-modal-body]'].innerHTML;
   assert.match(detailHtml, /Service B/);
-  assert.match(detailHtml, /\/ui\/trace\?/);
+  assert.match(detailHtml, /\/ui\/conversations\?/);
   assert.match(detailHtml, /Trace/);
   assert.match(detailHtml, /Session/);
   assert.equal(elements['[data-orders-page-next]'].disabled, false);

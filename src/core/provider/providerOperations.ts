@@ -1,5 +1,6 @@
 import type { RuntimeState } from '../state/runtimeStateStore';
 import type { SellerOrderRecord } from '../orders/sellerOrderState';
+import { buildConversationHref } from '../a2a/conversationUrl';
 
 export interface SellerOrderSelector {
   orderId?: string | null;
@@ -201,7 +202,7 @@ export function buildProviderSellerOrderInspection(order: SellerOrderRecord): Pr
     },
     trace: {
       id: traceId || null,
-      href: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : null,
+      href: buildConversationHref(normalizeText(order.providerGlobalMetaId), normalizeText(order.buyerGlobalMetaId)),
     },
     payment: {
       txid: normalizeText(order.paymentTxid) || null,
@@ -282,7 +283,7 @@ export function buildSellerReceivedRefundItems(state: RuntimeState): SellerRecei
         counterpartyName: null,
         localMetabotSlug: normalizeText(order.localMetabotSlug) || null,
         traceId: traceId || null,
-        traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : null,
+        traceHref: buildConversationHref(normalizeText(order.providerGlobalMetaId), normalizeText(order.buyerGlobalMetaId)),
         runtimeSessionId: normalizeText(order.llmSessionId) || null,
         manualActionRequired: sellerOrderRequiresManualAction(order),
         createdAt,

@@ -107,6 +107,25 @@ function normalizeText(value: unknown): string {
   return '';
 }
 
+/**
+ * Build a browser-relative Conversations href for a local↔peer bot pair.
+ * Self-contained (no imports, no URLSearchParams/encodeURIComponent) so it
+ * serializes into the in-browser runtime source via `fn.toString()` alongside
+ * the other helpers below. Global Meta IDs are alphanumeric (`id...`), so no
+ * URL-encoding is required.
+ */
+function buildConversationHref(
+  localGlobalMetaId: string | null | undefined,
+  peerGlobalMetaId: string | null | undefined,
+): string {
+  const local = normalizeText(localGlobalMetaId);
+  const peer = normalizeText(peerGlobalMetaId);
+  const parts: string[] = [];
+  if (local) parts.push(`local=${local}`);
+  if (peer) parts.push(`peer=${peer}`);
+  return parts.length ? `/ui/conversations?${parts.join('&')}` : '/ui/conversations';
+}
+
 function normalizeNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(value);
@@ -395,7 +414,7 @@ function buildServiceEntry(entry: unknown): MyServiceListEntryViewModel | null {
   };
 }
 
-function buildOrderEntry(entry: unknown): MyServiceOrderEntryViewModel | null {
+function buildOrderEntry(entry: unknown, localGlobalMetaId?: string | null): MyServiceOrderEntryViewModel | null {
   const record = readObject(entry);
   const id = normalizeText(record.id);
   if (!id) return null;
@@ -409,6 +428,8 @@ function buildOrderEntry(entry: unknown): MyServiceOrderEntryViewModel | null {
     normalizeText(record.runtimeId),
     normalizeText(record.llmSessionId),
   ].filter(Boolean).join(' · ') || 'Runtime unavailable';
+  const peerGlobalMetaId = normalizeText(record.counterpartyGlobalMetaid);
+  const conversationHref = buildConversationHref(localGlobalMetaId, peerGlobalMetaId);
   return {
     key: id,
     statusLabel: formatStatusLabel(record.status),
@@ -421,9 +442,9 @@ function buildOrderEntry(entry: unknown): MyServiceOrderEntryViewModel | null {
     ratingLabel: rating.label,
     ratingComment: rating.comment,
     ratingPinId: rating.pinId,
-    traceHref: traceId ? `/ui/trace?traceId=${encodeURIComponent(traceId)}` : '/ui/trace',
+    traceHref: conversationHref,
     traceLabel: traceId || 'Trace unavailable',
-    sessionHref: sessionId ? `/ui/trace?sessionId=${encodeURIComponent(sessionId)}` : '',
+    sessionHref: conversationHref,
     sessionLabel: sessionId || 'No session',
     runtimeLabel,
   };
@@ -503,6 +524,7 @@ export function buildMyServicesPageViewModel(input: {
   selectedServiceId?: string | null;
   mutationResult?: Record<string, unknown> | null;
   error?: Record<string, unknown> | null;
+  localGlobalMetaId?: string | null;
 }): MyServicesPageViewModel {
   const servicesPage = readObject(input.servicesPage);
   const rawServices = readArray(servicesPage.items);
@@ -521,7 +543,7 @@ export function buildMyServicesPageViewModel(input: {
       : null;
   const ordersPage = readObject(input.ordersPage);
   const orders = readArray(ordersPage.items)
-    .map((entry) => buildOrderEntry(entry))
+    .map((entry) => buildOrderEntry(entry, input.localGlobalMetaId))
     .filter((entry): entry is MyServiceOrderEntryViewModel => Boolean(entry));
 
   return {
@@ -579,6 +601,7 @@ export function buildMyServicesPageViewModelRuntimeSource(): string {
     buildPagination,
     buildServiceEntry,
     buildOrderEntry,
+    buildConversationHref,
     buildEditForm,
     buildNotice,
     buildMyServicesPageViewModel,
