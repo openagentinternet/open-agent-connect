@@ -2958,9 +2958,9 @@ test('services call returns an A2A start contract while provider execution flows
   assert.equal(called.payload.data.providerGlobalMetaId, providerIdentity.payload.data.globalMetaId);
   assert.equal(called.payload.data.serviceName, 'Weather Oracle');
   const providerDaemonTraceUrl = new URL(called.payload.data.localUiUrl);
-  assert.equal(providerDaemonTraceUrl.pathname, '/ui/trace');
-  assert.equal(providerDaemonTraceUrl.searchParams.get('traceId'), called.payload.data.traceId);
-  assert.equal(providerDaemonTraceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
+  assert.equal(providerDaemonTraceUrl.pathname, '/ui/conversations');
+  assert.equal(providerDaemonTraceUrl.searchParams.get('peer'), providerIdentity.payload.data.globalMetaId);
+  assert.ok(providerDaemonTraceUrl.searchParams.get('local'));
   assert.equal('responseText' in called.payload.data, false);
   assert.equal('providerTraceJsonPath' in called.payload.data, false);
   assert.equal('providerTraceMarkdownPath' in called.payload.data, false);
@@ -3134,9 +3134,9 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.match(called.payload.data.orderTxid, /^\/protocols\/simplemsg-tx-/);
   assert.deepEqual(called.payload.data.orderTxids, [called.payload.data.orderTxid]);
   const traceUrl = new URL(called.payload.localUiUrl);
-  assert.equal(traceUrl.pathname, '/ui/trace');
-  assert.equal(traceUrl.searchParams.get('traceId'), called.payload.data.traceId);
-  assert.equal(traceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
+  assert.equal(traceUrl.pathname, '/ui/conversations');
+  assert.equal(traceUrl.searchParams.get('peer'), 'idq1provider');
+  assert.equal(traceUrl.searchParams.get('local'), created.payload.data.globalMetaId);
   const orderConversation = await createA2AConversationStore({
     homeDir,
     local: {
@@ -3203,9 +3203,9 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.equal(trace.payload.data.order.orderTxid, called.payload.data.orderTxid);
   assert.deepEqual(trace.payload.data.order.orderTxids, called.payload.data.orderTxids);
   const traceGetUrl = new URL(trace.payload.data.localUiUrl);
-  assert.equal(traceGetUrl.pathname, '/ui/trace');
-  assert.equal(traceGetUrl.searchParams.get('traceId'), called.payload.data.traceId);
-  assert.equal(traceGetUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
+  assert.equal(traceGetUrl.pathname, '/ui/conversations');
+  assert.ok(traceGetUrl.searchParams.get('local'));
+  assert.ok(traceGetUrl.searchParams.get('peer'));
 
   const sessionDetail = await runCommand(homeDir, [
     'trace',
@@ -3225,9 +3225,9 @@ test('services call resolves a chain-discovered online service into a real MetaW
   assert.deepEqual(sessionDetail.payload.data.order.orderTxids, called.payload.data.orderTxids);
   assert.equal(sessionDetail.payload.data.order.paymentTxid, expectedPayment.paymentTxid);
   const sessionTraceUrl = new URL(sessionDetail.payload.data.localUiUrl);
-  assert.equal(sessionTraceUrl.pathname, '/ui/trace');
-  assert.equal(sessionTraceUrl.searchParams.get('traceId'), called.payload.data.traceId);
-  assert.equal(sessionTraceUrl.searchParams.get('sessionId'), called.payload.data.session.sessionId);
+  assert.equal(sessionTraceUrl.pathname, '/ui/conversations');
+  assert.ok(sessionTraceUrl.searchParams.get('local'));
+  assert.ok(sessionTraceUrl.searchParams.get('peer'));
 
   const transcriptMarkdown = await readFile(called.payload.data.transcriptMarkdownPath, 'utf8');
   assert.match(transcriptMarkdown, /Tomorrow will be bright with a light wind/);
@@ -4044,9 +4044,9 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
   assert.ok(sent.payload.data.a2aSessionId.length > 0);
   assert.doesNotMatch(sent.payload.data.localUiUrl, /\/ui\/chat-viewer/);
   const viewerUrl = new URL(sent.payload.data.localUiUrl);
-  assert.equal(viewerUrl.pathname, '/ui/trace');
-  assert.equal(viewerUrl.searchParams.get('traceId'), sent.payload.data.a2aSessionId);
-  assert.equal(viewerUrl.searchParams.get('sessionId'), sent.payload.data.a2aSessionId);
+  assert.equal(viewerUrl.pathname, '/ui/conversations');
+  assert.equal(viewerUrl.searchParams.get('local'), created.payload.data.globalMetaId);
+  assert.equal(viewerUrl.searchParams.get('peer'), created.payload.data.globalMetaId);
 
   const trace = await runCommand(homeDir, ['trace', 'get', '--trace-id', sent.payload.data.traceId]);
 

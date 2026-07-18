@@ -2293,6 +2293,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     pinId?: string;
     firstPinId?: string;
     mine?: boolean;
+    local?: string;
+    peer?: string;
   }): Promise<MetabotCommandResult<unknown>> {
     const baseUrl = await ensureDaemonBaseUrl(context);
     const query = new URLSearchParams();
@@ -2305,6 +2307,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     if (input.pinId) query.set('pinId', input.pinId);
     if (input.firstPinId) query.set('firstPinId', input.firstPinId);
     if (input.mine) query.set('mine', 'true');
+    if (input.local) query.set('local', input.local);
+    if (input.peer) query.set('peer', input.peer);
     const suffix = query.size ? `?${query.toString()}` : '';
     return commandSuccess({
       page: input.page,

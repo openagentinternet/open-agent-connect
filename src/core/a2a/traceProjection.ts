@@ -17,6 +17,7 @@ import {
   normalizeDeliveryArtifacts,
   type A2ADeliveryArtifact,
 } from './deliveryArtifacts';
+import { buildConversationLocalUiUrl } from './conversationUrl';
 
 export interface A2ATraceProjectionProfile {
   name?: string | null;
@@ -373,17 +374,10 @@ function deriveProjectedSessionState(input: {
 
 function buildLocalUiUrl(
   daemon: A2ATraceProjectionDaemon | null | undefined,
-  traceId: string,
-  sessionId: string,
+  localGlobalMetaId: string | null | undefined,
+  peerGlobalMetaId: string | null | undefined,
 ): string | undefined {
-  const baseUrl = normalizeText(daemon?.baseUrl);
-  if (!baseUrl) {
-    return undefined;
-  }
-  const url = new URL('/ui/trace', baseUrl);
-  url.searchParams.set('traceId', traceId);
-  url.searchParams.set('sessionId', sessionId);
-  return url.toString();
+  return buildConversationLocalUiUrl(daemon, localGlobalMetaId, peerGlobalMetaId);
 }
 
 function projectListSession(input: {
@@ -426,7 +420,7 @@ function projectListSession(input: {
     outputType: session.type === 'service_order' ? normalizeText(session.outputType) || null : null,
     orderTxid: session.type === 'service_order' ? normalizeText(session.orderTxid) || null : null,
     paymentTxid: session.type === 'service_order' ? normalizeText(session.paymentTxid) || null : null,
-    localUiUrl: buildLocalUiUrl(daemon, traceId, sessionId),
+    localUiUrl: buildLocalUiUrl(daemon, localMetabotGlobalMetaId, peerGlobalMetaId),
   };
 }
 
@@ -780,7 +774,7 @@ function projectDetailSession(input: {
     orderTxid,
     orderTxids: orderTxid ? [orderTxid] : [],
     paymentTxid,
-    localUiUrl: buildLocalUiUrl(input.daemon, listItem.traceId, listItem.sessionId),
+    localUiUrl: buildLocalUiUrl(input.daemon, listItem.localMetabotGlobalMetaId, listItem.peerGlobalMetaId),
     a2a: {
       sessionId: listItem.sessionId,
       taskRunId: null,

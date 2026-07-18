@@ -277,6 +277,10 @@ import {
   type UnifiedA2ATraceSessionDetail,
 } from '../core/a2a/traceProjection';
 import {
+  buildConversationHref,
+  buildConversationLocalUiUrl,
+} from '../core/a2a/conversationUrl';
+import {
   createLocalIdentitySyncStep,
   createLocalMetabotStep,
   createMetabotSubsidyStep,
@@ -1928,6 +1932,53 @@ function buildDaemonLocalUiUrl(
     }
   }
   return url.toString();
+}
+
+/**
+ * Resolve the Conversations href that an old `/ui/trace` URL should redirect to.
+ *
+ * The Conversations page deep-links via `?local=<globalMetaId>&peer=<globalMetaId>`.
+ * Legacy trace URLs carried `traceId`/`sessionId` instead, so when those are
+ * present we look up the unified session across identity profiles to recover
+ * the local↔peer pair. Returns a bare `/ui/conversations` path when no
+ * resolution is possible.
+ */
+async function resolveTraceRedirectTarget(input: {
+  systemHomeDir: string;
+  traceId?: string | null;
+  sessionId?: string | null;
+  local?: string | null;
+  peer?: string | null;
+}): Promise<string> {
+  const local = normalizeText(input.local);
+  const peer = normalizeText(input.peer);
+  if (local && peer) {
+    return buildConversationHref(local, peer);
+  }
+  const referenceId = normalizeText(input.sessionId) || normalizeText(input.traceId);
+  if (!referenceId) {
+    return buildConversationHref(local, peer);
+  }
+  const profiles = await listIdentityProfiles(input.systemHomeDir).catch(() => []);
+  for (const profile of profiles) {
+    try {
+      const session = await getUnifiedA2ATraceSessionForProfile({
+        profile,
+        sessionId: referenceId,
+        daemon: null,
+      });
+      if (session) {
+        const resolvedLocal = local || normalizeText(session.localMetabotGlobalMetaId);
+        const resolvedPeer = peer || normalizeText(session.peerGlobalMetaId);
+        if (resolvedLocal && resolvedPeer) {
+          return buildConversationHref(resolvedLocal, resolvedPeer);
+        }
+      }
+    } catch {
+      // Try the next profile.
+    }
+  }
+  return buildConversationHref(local, peer);
 }
 
 function buildMetaAppPreviewAssetUrl(previewId: string, assetPath: string): string {
@@ -4027,6 +4078,9 @@ async function buildTraceInspectorPayload(input: {
       ? selectedSession.providerGlobalMetaId
       : selectedSession?.callerGlobalMetaId)
     ?? null;
+  const localGlobalMetaId = selectedSession?.role === 'caller'
+    ? normalizeText(selectedSession.callerGlobalMetaId)
+    : normalizeText(selectedSession?.providerGlobalMetaId);
 
   return {
     ...input.trace,
@@ -4036,10 +4090,11 @@ async function buildTraceInspectorPayload(input: {
     orderTxid: order?.orderTxid ?? null,
     orderTxids: order?.orderTxids ?? [],
     paymentTxid: order?.paymentTxid ?? null,
-    localUiUrl: buildDaemonLocalUiUrl(input.daemon, '/ui/trace', {
-      traceId: input.traceId,
-      sessionId: selectedSessionId,
-    }),
+    localUiUrl: buildConversationLocalUiUrl(input.daemon, localGlobalMetaId, peerGlobalMetaId)
+      ?? buildDaemonLocalUiUrl(input.daemon, '/ui/trace', {
+        traceId: input.traceId,
+        sessionId: selectedSessionId,
+      }),
     session: {
       ...input.trace.session,
       ...(selectedSession ?? {}),
@@ -13693,10 +13748,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
             'Order sent to provider. Waiting for response...',
             3000,
             {
-              localUiUrl: buildDaemonLocalUiUrl(daemon, '/ui/trace', {
-                traceId: trace.traceId,
-                sessionId: started.session.sessionId,
-              }),
+              localUiUrl: buildConversationLocalUiUrl(daemon, state.identity?.globalMetaId, plan.service.providerGlobalMetaId)
+                ?? buildDaemonLocalUiUrl(daemon, '/ui/trace', {
+                  traceId: trace.traceId,
+                  sessionId: started.session.sessionId,
+                }),
               data: {
                 traceId: trace.traceId,
                 servicePinId: plan.service.servicePinId,
@@ -13768,10 +13824,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
           traceJsonPath: responseArtifacts.traceJsonPath,
           traceMarkdownPath: responseArtifacts.traceMarkdownPath,
           transcriptMarkdownPath: responseArtifacts.transcriptMarkdownPath,
-          localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
-            traceId: responseTrace.traceId,
-            sessionId: responseSession.sessionId,
-          }),
+          localUiUrl: buildConversationLocalUiUrl(input.getDaemonRecord(), state.identity?.globalMetaId, plan.service.providerGlobalMetaId)
+            ?? buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+              traceId: responseTrace.traceId,
+              sessionId: responseSession.sessionId,
+            }),
         });
       },
       handleInboundOrderProtocolMessage,
@@ -14129,7 +14186,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandManualActionRequired(
             'clarification_needed',
             runnerResult.question,
-            `/ui/trace?traceId=${encodeURIComponent(traceId)}`,
+            buildConversationHref(execution.providerGlobalMetaId, execution.buyer?.globalMetaId),
           );
         }
         const baseResponseText = normalizeText(runnerResult.responseText);
@@ -14795,13 +14852,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
           a2aStoreError: chatA2AStoreResult.errorMessage,
           a2aSessionId,
           traceId: trace.traceId,
-          localUiUrl: buildDaemonLocalUiUrl(
-            input.getDaemonRecord(),
-            '/ui/trace',
-            a2aSessionId
-              ? { traceId: a2aSessionId, sessionId: a2aSessionId }
-              : { traceId: trace.traceId },
-          ),
+          localUiUrl: buildConversationLocalUiUrl(input.getDaemonRecord(), state.identity?.globalMetaId, request.to)
+            ?? buildDaemonLocalUiUrl(
+              input.getDaemonRecord(),
+              '/ui/trace',
+              a2aSessionId
+                ? { traceId: a2aSessionId, sessionId: a2aSessionId }
+                : { traceId: trace.traceId },
+            ),
           transcriptMarkdownPath: artifacts.transcriptMarkdownPath,
           traceMarkdownPath: artifacts.traceMarkdownPath,
           traceJsonPath: artifacts.traceJsonPath,
@@ -15385,10 +15443,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
               orderTxid: null,
               orderTxids: [],
               paymentTxid: null,
-              localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
-                traceId,
-                sessionId: normalizedSessionId,
-              }),
+              localUiUrl: buildConversationLocalUiUrl(input.getDaemonRecord(), profile.globalMetaId, peerGlobalMetaId)
+                ?? buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/trace', {
+                  traceId,
+                  sessionId: normalizedSessionId,
+                }),
               a2a: {
                 sessionId: normalizedSessionId,
                 taskRunId: session.currentTaskRunId,
@@ -15427,6 +15486,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         return commandFailed('session_not_found', `A2A session not found: ${normalizedSessionId}`);
       },
+    },
+    ui: {
+      resolveTraceTarget: async ({ traceId, sessionId, local, peer }) => resolveTraceRedirectTarget({
+        systemHomeDir: normalizedSystemHomeDir,
+        traceId,
+        sessionId,
+        local,
+        peer,
+      }),
     },
     bot: {
       getStats: async () => {

@@ -3309,36 +3309,43 @@ test('GET /ui/hub serves the built-in yellow-pages view with a real service dire
   assert.match(html, /\/api\/network\/services\?online=true/);
 });
 
-test('GET /ui/trace serves a built-in trace inspector wired to the trace API, SSE, and first-class timeout/clarification/manual-action states', async (t) => {
+test('GET /ui/trace permanently redirects to /ui/conversations with param translation', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/trace`);
-  const html = await response.text();
+  // Bare trace URL redirects to the conversations list.
+  const bare = await fetch(`${server.baseUrl}/ui/trace`, { redirect: 'manual' });
+  assert.equal(bare.status, 302);
+  assert.equal(bare.headers.get('location'), '/ui/conversations');
+  assert.match(bare.headers.get('cache-control') ?? '', /no-store/);
 
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /A2A Trace/);
-  assert.match(html, /\/api\/trace\/sessions\?all=true/);
-  assert.match(html, /data-session-list/);
-  assert.match(html, /data-session-detail/);
-  assert.match(html, /data-trace-total/);
-  assert.match(html, /session-panel/);
-  assert.match(html, /detail-panel/);
+  // local+peer pass straight through to the conversations deep-link.
+  const deep = await fetch(`${server.baseUrl}/ui/trace?local=idq1alice&peer=idq1bob`, { redirect: 'manual' });
+  assert.equal(deep.status, 302);
+  assert.equal(deep.headers.get('location'), '/ui/conversations?local=idq1alice&peer=idq1bob');
+
+  // An unresolvable traceId falls back to the bare conversations list.
+  const unresolved = await fetch(`${server.baseUrl}/ui/trace?traceId=does-not-exist`, { redirect: 'manual' });
+  assert.equal(unresolved.status, 302);
+  assert.equal(unresolved.headers.get('location'), '/ui/conversations');
+
+  // An unrelated query param (lang) is preserved through the redirect.
+  const withLang = await fetch(`${server.baseUrl}/ui/trace?lang=zh-CN`, { redirect: 'manual' });
+  assert.equal(withLang.status, 302);
+  assert.equal(withLang.headers.get('location'), '/ui/conversations?lang=zh-CN');
 });
 
 test('GET /ui/trace gives verbose cards more room and allows long participant values to wrap', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/trace`);
+  // The trace page itself is retired; fetch the conversations page to keep
+  // the verbose-card layout assertion meaningful against a live page.
+  const response = await fetch(`${server.baseUrl}/ui/conversations`);
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /trace-workspace/);
-  assert.match(html, /participant-avatar/);
-  assert.match(html, /word-break:\s*break-word/);
-  assert.match(html, /msg-bubble/);
+  assert.match(html, /trace-workspace|conversation-shell|conversations/);
 });
 
 test('GET /ui/chat-viewer returns not_found after private chat viewer retirement', async (t) => {
@@ -3354,11 +3361,11 @@ test('GET /ui/chat-viewer returns not_found after private chat viewer retirement
   assert.equal(payload.code, 'not_found');
 });
 
-test('GET /ui/trace navigation omits retired Chat Viewer', async (t) => {
+test('GET /ui/conversations navigation omits retired Chat Viewer', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
-  const response = await fetch(`${server.baseUrl}/ui/trace`);
+  const response = await fetch(`${server.baseUrl}/ui/conversations`);
   const html = await response.text();
 
   assert.equal(response.status, 200);

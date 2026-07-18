@@ -287,9 +287,9 @@ test('getUnifiedA2ATraceSessionForProfile shows all messages for the peer conver
   assert.equal(detail.transcriptItems[3].content, '# Forecast\n\nSunny with light wind.\n\nmetafile://weather-chart-1');
 
   const localUiUrl = new URL(detail.localUiUrl);
-  assert.equal(localUiUrl.pathname, '/ui/trace');
-  assert.equal(localUiUrl.searchParams.get('traceId'), PEER_SESSION_ID);
-  assert.equal(localUiUrl.searchParams.get('sessionId'), PEER_SESSION_ID);
+  assert.equal(localUiUrl.pathname, '/ui/conversations');
+  assert.equal(localUiUrl.searchParams.get('local'), LOCAL_GLOBAL_META_ID);
+  assert.equal(localUiUrl.searchParams.get('peer'), PEER_GLOBAL_META_ID);
 });
 
 test('getUnifiedA2ATraceSessionForProfile maps service-order ids back to the peer window', async () => {

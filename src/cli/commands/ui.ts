@@ -37,6 +37,8 @@ export async function runUiCommand(args: string[], context: CliRuntimeContext): 
   const serviceId = readFlagValue(args, '--service-id') || undefined;
   const mode = readFlagValue(args, '--mode') || undefined;
   const host = readFlagValue(args, '--host') || undefined;
+  const local = readFlagValue(args, '--local') || undefined;
+  const peer = readFlagValue(args, '--peer') || undefined;
 
   const handler = context.dependencies.ui?.open;
   if (!handler) {
@@ -50,5 +52,7 @@ export async function runUiCommand(args: string[], context: CliRuntimeContext): 
     ...(serviceId ? { serviceId } : {}),
     ...(mode ? { mode } : {}),
     ...(host ? { host } : {}),
+    ...(local ? { local } : {}),
+    ...(peer ? { peer } : {}),
   });
 }

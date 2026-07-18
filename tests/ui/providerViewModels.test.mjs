@@ -590,6 +590,7 @@ test('buildMyServicesPageViewModel renders IDBots-style local service rows with 
 test('buildMyServicesPageViewModel renders selected service details, closed orders, and edit defaults', () => {
   const model = buildMyServicesPageViewModel({
     selectedServiceId: 'service-current-pin-1',
+    localGlobalMetaId: 'idq1sellerlocal',
     servicesPage: {
       page: 1,
       pageSize: 20,
@@ -711,8 +712,8 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
       statusLabel: 'Refunded',
       paymentLabel: '0.00004 BTC · payment-refunded',
       ratingLabel: 'No rating',
-      traceHref: '/ui/trace?traceId=trace-refunded',
-      sessionHref: '/ui/trace?sessionId=session-refunded',
+      traceHref: '/ui/conversations?local=idq1sellerlocal&peer=idq1buyerrefund',
+      sessionHref: '/ui/conversations?local=idq1sellerlocal&peer=idq1buyerrefund',
       timeLabel: '2026-03-31 23:34',
     },
     {
@@ -720,8 +721,8 @@ test('buildMyServicesPageViewModel renders selected service details, closed orde
       statusLabel: 'Completed',
       paymentLabel: '0.00004 BTC · payment-completed',
       ratingLabel: '5 / 5',
-      traceHref: '/ui/trace?traceId=trace-completed',
-      sessionHref: '/ui/trace?sessionId=session-completed',
+      traceHref: '/ui/conversations?local=idq1sellerlocal&peer=idq1buyercomplete',
+      sessionHref: '/ui/conversations?local=idq1sellerlocal&peer=idq1buyercomplete',
       timeLabel: '2026-03-31 23:33',
     },
   ]);
