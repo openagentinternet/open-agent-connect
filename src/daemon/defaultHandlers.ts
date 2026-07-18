@@ -1367,6 +1367,52 @@ function calculateMetabotCreateInfoFields(input: CreateMetabotInput): string[] {
   return fields;
 }
 
+function calculateMetabotStoredInfoFields(profile: MetabotProfileFull): string[] {
+  const fields: string[] = [];
+  if (normalizeText(profile.bio)) fields.push('bio');
+  if (normalizeText(profile.role)) fields.push('role');
+  if (normalizeText(profile.soul)) fields.push('soul');
+  if (normalizeText(profile.goal)) fields.push('goal');
+  if (normalizeText(profile.avatarDataUrl)) fields.push('avatar');
+  if (profile.primaryProvider || profile.fallbackProvider) fields.push('primaryProvider');
+  if (profile.allowChatSkills.length > 0) fields.push('allowChatSkills');
+  if (profile.homepage) fields.push('homepage');
+  return fields;
+}
+
+function buildMetabotSetupStatus(identity: RuntimeIdentityRecord | null): {
+  state: 'pending' | 'subsidy_failed' | 'sync_failed' | 'ready';
+  retryable: boolean;
+  error: string | null;
+} {
+  if (!identity || (!identity.subsidyState && !identity.syncState)) {
+    return {
+      state: 'ready',
+      retryable: false,
+      error: null,
+    };
+  }
+  if (identity.subsidyState !== 'claimed') {
+    return {
+      state: identity.subsidyState === 'failed' ? 'subsidy_failed' : 'pending',
+      retryable: identity.subsidyState === 'failed',
+      error: normalizeText(identity.subsidyError) || null,
+    };
+  }
+  if (identity.syncState !== 'synced' && identity.syncState !== 'partial') {
+    return {
+      state: identity.syncState === 'failed' ? 'sync_failed' : 'pending',
+      retryable: true,
+      error: normalizeText(identity.syncError) || null,
+    };
+  }
+  return {
+    state: 'ready',
+    retryable: false,
+    error: null,
+  };
+}
+
 function buildBootstrapInfoPublishTargets(input: {
   name: string;
   chatPublicKey?: string | null;
@@ -15261,11 +15307,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
       listProfiles: async () => {
         const profiles = await listMetabotProfiles(normalizedSystemHomeDir);
         const activeHomeDir = path.resolve(input.homeDir);
-        return commandSuccess({
-          profiles: profiles.map((profile) => ({
+        const profilesWithSetup = await Promise.all(profiles.map(async (profile) => {
+          const runtimeState = await createRuntimeStateStore(profile.homeDir).readState().catch(() => null);
+          return {
             ...profile,
             isActive: path.resolve(profile.homeDir) === activeHomeDir,
-          })),
+            setup: buildMetabotSetupStatus(runtimeState?.identity ?? null),
+          };
+        }));
+        return commandSuccess({
+          profiles: profilesWithSetup,
         });
       },
       getProfile: async ({ slug }) => {
@@ -15357,42 +15408,46 @@ export function createDefaultMetabotDaemonHandlers(input: {
           });
           const nextState = await profileRuntimeStateStore.readState();
           const identity = nextState.identity;
-          if (!bootstrap.success || !identity) {
+          if (!identity) {
             await fs.rm(profileHomeDir, { recursive: true, force: true });
             return commandFailed(
               'identity_bootstrap_failed',
               bootstrap.error ?? 'MetaBot identity bootstrap failed before the identity was ready.'
             );
           }
-          const bootstrapInfoTargets = buildBootstrapInfoPublishTargets({
-            name,
-            chatPublicKey: identity.chatPublicKey,
-          });
-          await recordMetabotInfoPublishResults(
-            { homeDir: profileHomeDir },
-            bootstrapInfoTargets,
-            bootstrap.sync?.chainWrites ?? [],
-          );
           const chainProfile = buildMetabotProfileDraftFromIdentity({
             ...createInput,
             homeDir: profileHomeDir,
             globalMetaId: identity.globalMetaId,
             mvcAddress: identity.mvcAddress,
           });
-          const profileInfoTargets = buildMetabotInfoPublishTargets(
-            chainProfile,
-            calculateMetabotCreateInfoFields(createInput),
-          );
-          const profileChainWrites = await syncMetabotInfoToChain(
-            profileSigner,
-            chainProfile,
-            profileInfoTargets,
-            {
-              delayMs: input.identitySyncStepDelayMs,
-              operation: 'create',
-              deferPublishStateWrite: true,
-            },
-          );
+          let profileInfoTargets: MetabotInfoPublishTarget[] = [];
+          let profileChainWrites: Awaited<ReturnType<typeof syncMetabotInfoToChain>> = [];
+          if (bootstrap.success) {
+            const bootstrapInfoTargets = buildBootstrapInfoPublishTargets({
+              name,
+              chatPublicKey: identity.chatPublicKey,
+            });
+            await recordMetabotInfoPublishResults(
+              { homeDir: profileHomeDir },
+              bootstrapInfoTargets,
+              bootstrap.sync?.chainWrites ?? [],
+            );
+            profileInfoTargets = buildMetabotInfoPublishTargets(
+              chainProfile,
+              calculateMetabotCreateInfoFields(createInput),
+            );
+            profileChainWrites = await syncMetabotInfoToChain(
+              profileSigner,
+              chainProfile,
+              profileInfoTargets,
+              {
+                delayMs: input.identitySyncStepDelayMs,
+                operation: 'create',
+                deferPublishStateWrite: true,
+              },
+            );
+          }
           const profile = await createMetabotProfileFromIdentity(normalizedSystemHomeDir, {
             ...createInput,
             homeDir: profileHomeDir,
@@ -15409,6 +15464,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             identity,
             chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
             subsidy: bootstrap.subsidy,
+            setup: buildMetabotSetupStatus(identity),
             ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
           });
         } catch (error) {
@@ -15420,6 +15476,91 @@ export function createDefaultMetabotDaemonHandlers(input: {
             return commandFailed('name_taken', message);
           }
           return commandFailed('metabot_profile_create_failed', message);
+        }
+      },
+      retryProfileSetup: async ({ slug }) => {
+        const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
+        if (!profile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+        }
+        const runtimeStateStore = createRuntimeStateStore(profile.homeDir);
+        const secretStore = createFileSecretStore(profile.homeDir);
+        const signer = createSignerForProfileHome(profile.homeDir);
+        try {
+          const bootstrap = await runBootstrapFlow({
+            request: { name: profile.name },
+            createMetabot: createLocalMetabotStep({
+              runtimeStateStore,
+              secretStore,
+            }),
+            requestSubsidy: createMetabotSubsidyStep({
+              runtimeStateStore,
+              requestMvcGasSubsidy: input.requestMvcGasSubsidy,
+            }),
+            syncIdentityToChain: createLocalIdentitySyncStep({
+              runtimeStateStore,
+              signer,
+              stepDelayMs: input.identitySyncStepDelayMs,
+            }),
+          });
+          const runtimeState = await runtimeStateStore.readState();
+          const identity = runtimeState.identity;
+          if (!identity) {
+            return commandFailed('identity_bootstrap_failed', 'Local MetaBot identity is missing.');
+          }
+          const bootstrapInfoTargets = buildBootstrapInfoPublishTargets({
+            name: profile.name,
+            chatPublicKey: identity.chatPublicKey,
+          });
+          await recordMetabotInfoPublishResults(
+            profile,
+            bootstrapInfoTargets,
+            bootstrap.sync?.chainWrites ?? [],
+          );
+          if (!bootstrap.success) {
+            return commandFailed(
+              'metabot_setup_retry_failed',
+              bootstrap.error ?? 'MetaBot setup retry failed.',
+              {
+                data: {
+                  profile,
+                  subsidy: bootstrap.subsidy,
+                  setup: buildMetabotSetupStatus(identity),
+                },
+              },
+            );
+          }
+          const profileInfoTargets = buildMetabotInfoPublishTargets(
+            profile,
+            calculateMetabotStoredInfoFields(profile),
+          );
+          const profileChainWrites = await syncMetabotInfoToChain(
+            signer,
+            profile,
+            profileInfoTargets,
+            {
+              delayMs: input.identitySyncStepDelayMs,
+              operation: 'create',
+              deferPublishStateWrite: true,
+            },
+          );
+          await recordMetabotInfoPublishResults(profile, profileInfoTargets, profileChainWrites);
+          return commandSuccess({
+            profile,
+            identity,
+            chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
+            subsidy: bootstrap.subsidy,
+            setup: buildMetabotSetupStatus(identity),
+          });
+        } catch (error) {
+          const runtimeState = await runtimeStateStore.readState().catch(() => null);
+          const message = error instanceof Error ? error.message : String(error);
+          return commandFailed('metabot_setup_retry_failed', message, {
+            data: {
+              profile,
+              setup: buildMetabotSetupStatus(runtimeState?.identity ?? null),
+            },
+          });
         }
       },
       updateProfile: async (body) => {

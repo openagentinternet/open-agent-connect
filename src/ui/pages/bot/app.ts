@@ -773,7 +773,23 @@ function renderBotHero(profile){
   var view=q('[data-act="view-bot-page"]');if(view)view.disabled=!globalMetaId;
   var conversations=q('[data-act="view-conversations"]');if(conversations)conversations.disabled=!globalMetaId;
 }
-function renderDetailHeader(profile){renderBotHero(profile)}
+function renderBotSetupAlert(profile){
+  var alert=q('[data-bot-setup-alert]');if(!alert)return;
+  var setup=profile&&profile.setup;
+  if(!setup||setup.state==='ready'){alert.hidden=true;alert.innerHTML='';return}
+  var subsidyFailed=setup.state==='subsidy_failed';
+  var title=subsidyFailed
+    ?uiText('bot.subsidyFailedTitle','Subsidy claim failed')
+    :uiText('bot.setupIncompleteTitle','Bot setup is incomplete');
+  var message=setup.error||(subsidyFailed
+    ?uiText('bot.subsidyFailedMessage','The Bot was created, but its MVC subsidy could not be claimed.')
+    :uiText('bot.setupIncompleteMessage','The Bot was created locally, but its on-chain setup is incomplete.'));
+  alert.hidden=false;
+  alert.innerHTML='<div><strong>'+esc(title)+'</strong><p>'+esc(message)+'</p></div>'+
+    (setup.retryable?'<button class="btn btn-sm" data-act="retry-bot-setup" data-slug="'+esc(profile.slug||'')+'">'+esc(subsidyFailed?uiText('bot.retrySubsidy','Retry subsidy'):uiText('bot.retrySetup','Retry setup'))+'</button>':'');
+  var retry=q('[data-act="retry-bot-setup"]');if(retry)retry.addEventListener('click',function(){retryMetabotSetup(this.getAttribute('data-slug')||'',false,this)});
+}
+function renderDetailHeader(profile){renderBotHero(profile);renderBotSetupAlert(profile)}
 
 function setDetailVisible(visible){
   var empty=q('[data-detail-empty]');var bar=q('[data-tab-bar]');var content=q('[data-tab-content]');
@@ -1858,6 +1874,25 @@ function createChainSuccessMarkup(profile,url){
     '</div>'+
   '</div>';
 }
+function createChainWarningMarkup(profile,setup){
+  var subsidyFailed=setup&&setup.state==='subsidy_failed';
+  var message=setup&&setup.error||(subsidyFailed
+    ?uiText('bot.subsidyFailedMessage','The Bot was created, but its MVC subsidy could not be claimed.')
+    :uiText('bot.setupIncompleteMessage','The Bot was created locally, but its on-chain setup is incomplete.'));
+  return '<div class="modal-box create-chain-modal">'+
+    '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.createdSetupIncompleteTitle','Bot created; setup incomplete'))+'</div>'+
+    '<div class="modal-body create-chain-body">'+
+      '<div class="create-chain-copy">'+
+        '<strong>'+esc(profile&&profile.name||uiText('bot.createBot','Create Bot'))+'</strong>'+
+        '<p>'+esc(message)+'</p>'+
+      '</div>'+
+    '</div>'+
+    '<div class="modal-actions create-chain-actions">'+
+      '<button class="btn" data-act="close-created-bot">'+esc(uiText('bot.close','Close'))+'</button>'+
+      '<button class="btn btn-primary" data-act="retry-created-bot-setup" data-slug="'+esc(profile&&profile.slug||'')+'">'+esc(subsidyFailed?uiText('bot.retrySubsidy','Retry subsidy'):uiText('bot.retrySetup','Retry setup'))+'</button>'+
+    '</div>'+
+  '</div>';
+}
 function createChainErrorMarkup(message){
   return '<div class="modal-box create-chain-modal">'+
     '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.createFailed','Bot creation failed'))+'</div>'+
@@ -1884,6 +1919,10 @@ function renderCreateChainSuccess(profile){
   renderCreateModal(createChainSuccessMarkup(profile||{},url));
   wireCreateSuccessControls();
 }
+function renderCreateChainWarning(profile,setup){
+  renderCreateModal(createChainWarningMarkup(profile||{},setup||{}));
+  wireCreateSuccessControls();
+}
 function renderCreateChainError(message){
   renderCreateModal(createChainErrorMarkup(message));
   wireCreateSuccessControls();
@@ -1900,6 +1939,7 @@ function openCreatedBotHomepage(){
 function wireCreateSuccessControls(){
   var close=q('[data-act="close-created-bot"]');if(close)close.addEventListener('click',closeAddModal);
   var open=q('[data-act="open-created-bot-homepage"]');if(open)open.addEventListener('click',openCreatedBotHomepage);
+  var retry=q('[data-act="retry-created-bot-setup"]');if(retry)retry.addEventListener('click',function(){retryMetabotSetup(this.getAttribute('data-slug')||'',true,this)});
 }
 function wireCreateModalControls(){
   var cancel=q('[data-act="cancel-add"]');if(cancel)cancel.addEventListener('click',closeAddModal);
@@ -1918,6 +1958,24 @@ function openAddModal(){
   if(input)input.focus();
 }
 function closeAddModal(){var modal=q('[data-modal="add-metabot"]');if(modal)modal.classList.add('hidden');state._createdBotPageUrl=''}
+function retryMetabotSetup(slug,fromCreateModal,button){
+  slug=String(slug||'').trim();if(!slug)return Promise.resolve();
+  if(button){button.disabled=true;button.textContent=uiText('bot.retrying','Retrying...')}
+  return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/setup/retry',{method:'POST'}).then(function(r){
+    var profile=r.data&&r.data.profile||selectedProfile()||{};
+    if(fromCreateModal)renderCreateChainSuccess(profile);
+    showToast(uiText('bot.setupRetrySucceeded','Bot setup completed'));
+    return loadProfiles().catch(function(error){showToast(error.message)});
+  }).catch(function(error){
+    if(fromCreateModal){
+      var profile=state.profiles.find(function(entry){return entry.slug===slug})||{slug:slug};
+      renderCreateChainWarning(profile,{state:'subsidy_failed',error:error.message});
+    }else{
+      showToast(error.message);
+      if(button){button.disabled=false;button.textContent=uiText('bot.retry','Retry')}
+    }
+  });
+}
 function createMetabot(){
   var input=q('[data-field="new-name"]');var status=q('[data-add-status]');var btn=q('[data-act="confirm-add"]');var name=(input&&input.value||'').trim();
   if(!name){if(status){status.textContent=uiText('bot.nameRequired','Name is required');status.className='save-status error'}return}
@@ -1930,7 +1988,8 @@ function createMetabot(){
     var profile=r.data&&r.data.profile||{};
     setSelectedSlug(profile.slug||state.selectedSlug);
     state.selectedTab='publicIdentity';
-    renderCreateChainSuccess(profile);
+    if(r.data&&r.data.setup&&r.data.setup.state!=='ready')renderCreateChainWarning(profile,r.data.setup);
+    else renderCreateChainSuccess(profile);
     return loadProfiles().catch(function(error){showToast(error.message)});
   }).catch(function(error){renderCreateChainError(error.message)}).finally(function(){if(btn)btn.disabled=false});
 }

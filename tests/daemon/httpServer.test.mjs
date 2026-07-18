@@ -59,6 +59,7 @@ async function startServer(options = {}) {
     botProfiles: [],
     botProfile: [],
     botCreateProfile: [],
+    botRetryProfileSetup: [],
     botUpdateProfile: [],
     botHomepageUpload: [],
     botWallet: [],
@@ -678,6 +679,16 @@ async function startServer(options = {}) {
             primaryProvider: null,
             fallbackProvider: null,
           },
+        });
+      },
+      retryProfileSetup: async (input) => {
+        calls.botRetryProfileSetup.push(input);
+        if (input.slug === 'missing') {
+          return commandFailed('profile_not_found', 'Profile not found: missing');
+        }
+        return commandSuccess({
+          profile: { slug: input.slug, name: 'Alice Bot', globalMetaId: 'gm-alice' },
+          setup: { state: 'ready', retryable: false, error: null },
         });
       },
       updateProfile: async (input) => {
@@ -2107,6 +2118,24 @@ test('POST /api/bot/profiles validates and forwards MetaBot creation', async (t)
   assert.equal(response.status, 201);
   assert.deepEqual(server.calls.botCreateProfile, [request]);
   assert.equal(payload.data.profile.slug, 'new-bot');
+});
+
+test('POST /api/bot/profiles/:slug/setup/retry forwards MetaBot setup retries', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/profiles/alice-bot/setup/retry`, {
+    method: 'POST',
+  });
+  const payload = await response.json();
+  const missingResponse = await fetch(`${server.baseUrl}/api/bot/profiles/missing/setup/retry`, {
+    method: 'POST',
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.data.setup.state, 'ready');
+  assert.equal(missingResponse.status, 404);
+  assert.deepEqual(server.calls.botRetryProfileSetup, [{ slug: 'alice-bot' }, { slug: 'missing' }]);
 });
 
 test('PUT /api/bot/profiles/:slug forwards MetaBot profile updates', async (t) => {

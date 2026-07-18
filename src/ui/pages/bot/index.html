@@ -281,6 +281,30 @@
         background: var(--surface);
         flex-shrink: 0;
       }
+      .bot-setup-alert {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 12px 24px;
+        border-bottom: 1px solid #f3c779;
+        background: #fff8e8;
+        color: #7a4a00;
+        flex-shrink: 0;
+      }
+      .bot-setup-alert[hidden] {
+        display: none;
+      }
+      .bot-setup-alert strong {
+        display: block;
+        font-size: 13px;
+      }
+      .bot-setup-alert p {
+        margin: 3px 0 0;
+        font-size: 12px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
       .hero-avatar {
         width: 56px;
         height: 56px;
@@ -2049,6 +2073,7 @@
               </div>
             </div>
           </section>
+          <div class="bot-setup-alert" data-bot-setup-alert hidden></div>
           <div class="tab-bar" data-tab-bar hidden>
             <button class="tab-btn active" data-tab="publicIdentity" data-i18n-key="bot.publicIdentity">Public Identity</button>
             <button class="tab-btn" data-tab="behavior" data-i18n-key="bot.behavior">Behavior</button>

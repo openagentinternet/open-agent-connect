@@ -2050,33 +2050,63 @@ test('default identity create prefers the requested Cursor host provider over ne
   );
 });
 
-test('default bot createProfile removes pending local files when subsidy or chain bootstrap fails', async (t) => {
+test('default bot createProfile keeps a retryable local Bot when subsidy fails', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
   });
   const systemHomeDir = deriveSystemHome(homeDir);
   const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'failed-bot');
+  let subsidyAvailable = false;
+  const writeCalls = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
     identitySyncStepDelayMs: 0,
     getDaemonRecord: () => null,
-    requestMvcGasSubsidy: async () => ({
-      success: false,
-      error: 'subsidy unavailable',
-    }),
-    createSignerForHome: () => makeSigner(async () => {
-      throw new Error('chain sync should not run after subsidy failure');
+    requestMvcGasSubsidy: async () => subsidyAvailable
+      ? { success: true, step2: { txid: 'subsidy-retry-tx' } }
+      : { success: false, error: 'subsidy unavailable' },
+    createSignerForHome: () => makeSigner(async (input) => {
+      writeCalls.push(input);
+      return {
+        txids: [`retry-chain-tx-${writeCalls.length}`],
+        pinId: `retry-chain-pin-${writeCalls.length}`,
+        totalCost: 1,
+        network: 'mvc',
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding ?? 'utf-8',
+        globalMetaId: 'gm-retry-created',
+        mvcAddress: 'mvc-retry-created',
+      };
     }),
   });
 
-  const result = await handlers.bot.createProfile({ name: 'Failed Bot' });
+  const createResult = await handlers.bot.createProfile({ name: 'Failed Bot' });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.code, 'identity_bootstrap_failed');
-  assert.deepEqual(await listIdentityProfiles(systemHomeDir), []);
-  await assert.rejects(() => access(targetHomeDir), /ENOENT/);
+  assert.equal(createResult.ok, true);
+  assert.equal(createResult.data.setup.state, 'subsidy_failed');
+  assert.equal(createResult.data.setup.retryable, true);
+  assert.equal(createResult.data.setup.error, 'subsidy unavailable');
+  assert.equal(writeCalls.length, 0);
+  assert.equal((await listIdentityProfiles(systemHomeDir)).length, 1);
+  await access(targetHomeDir);
+
+  const listResult = await handlers.bot.listProfiles();
+  assert.equal(listResult.ok, true);
+  assert.equal(listResult.data.profiles[0].setup.state, 'subsidy_failed');
+
+  subsidyAvailable = true;
+  const retryResult = await handlers.bot.retryProfileSetup({ slug: 'failed-bot' });
+
+  assert.equal(retryResult.ok, true);
+  assert.equal(retryResult.data.setup.state, 'ready');
+  assert.deepEqual(writeCalls.map((input) => input.path), ['/info/name', '/info/chatpubkey']);
+  const runtimeState = await createRuntimeStateStore(targetHomeDir).readState();
+  assert.equal(runtimeState.identity.subsidyState, 'claimed');
+  assert.equal(runtimeState.identity.syncState, 'synced');
 });
 
 test('default bot createProfile removes post-chain local files when manager indexing fails', async (t) => {

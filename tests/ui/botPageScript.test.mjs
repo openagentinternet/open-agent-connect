@@ -2833,6 +2833,99 @@ test('bot page create flow sends only the minimal identity fields', async () => 
   });
 });
 
+test('bot page keeps subsidy failure visible after creation and retries setup', async () => {
+  const fields = {
+    '[data-field="new-name"]': field('Fanny'),
+    '[data-add-status]': field(),
+    '[data-act="confirm-add"]': field(),
+  };
+  const modal = {
+    innerHTML: '',
+    classList: { add: () => {}, remove: () => {} },
+  };
+  fields['[data-modal="add-metabot"]'] = modal;
+  const requests = [];
+  const context = {
+    document: {
+      querySelector: (selector) => fields[selector] ?? null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    },
+    fetch: (url, options) => {
+      requests.push({ url, method: options?.method });
+      if (url.endsWith('/setup/retry')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: {
+              profile: { slug: 'fanny', name: 'Fanny', globalMetaId: 'gm-fanny' },
+              setup: { state: 'ready', retryable: false, error: null },
+            },
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            profile: { slug: 'fanny', name: 'Fanny', globalMetaId: 'gm-fanny' },
+            subsidy: { success: false, error: 'asset utxo list is empty' },
+            setup: { state: 'subsidy_failed', retryable: true, error: 'asset utxo list is empty' },
+          },
+        }),
+      });
+    },
+    window: {},
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+  };
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.loadProfiles = () => Promise.resolve();
+  context.showToast = () => {};
+
+  await context.createMetabot();
+
+  assert.match(modal.innerHTML, /Bot created; setup incomplete/);
+  assert.match(modal.innerHTML, /asset utxo list is empty/);
+  assert.match(modal.innerHTML, /data-act="retry-created-bot-setup"/);
+
+  await context.retryMetabotSetup('fanny', true, field());
+
+  assert.deepEqual(requests, [
+    { url: '/api/bot/profiles', method: 'POST' },
+    { url: '/api/bot/profiles/fanny/setup/retry', method: 'POST' },
+  ]);
+  assert.match(modal.innerHTML, /Bot created/);
+  assert.match(modal.innerHTML, /Open Bot homepage/);
+});
+
+test('bot page renders a persistent subsidy warning for an affected Bot', () => {
+  const alert = { hidden: true, innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-bot-setup-alert]': alert,
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.renderBotSetupAlert({
+    slug: 'fanny',
+    setup: {
+      state: 'subsidy_failed',
+      retryable: true,
+      error: 'subsidy unavailable',
+    },
+  });
+
+  assert.equal(alert.hidden, false);
+  assert.match(alert.innerHTML, /Subsidy claim failed/);
+  assert.match(alert.innerHTML, /subsidy unavailable/);
+  assert.match(alert.innerHTML, /data-act="retry-bot-setup"/);
+});
+
 test('bot page create flow forwards the host hint from the URL', async () => {
   const fields = {
     '[data-field="new-name"]': field('Codex Bot'),
