@@ -46,10 +46,10 @@ const BASE_SKILL_REGISTRY: Record<string, BaseSkillContract> = {
   'metabot-browser-open': {
     skillName: 'metabot-browser-open',
     title: 'MetaBot Browser Open',
-    summary: 'Open Agent Internet Browser for public Bot pages, domain aliases, chain pins, MetaApps, and MetaFiles through the local Browser entrypoint.',
-    instructions: 'Use the Browser CLI directly. Open Browser with no URI when the human asks for the Browser itself. When a Bot page, domain alias, chain pin, MetaApp, or MetaFile target is already known, pass the corresponding metaid://, pin://, metaapp://, or metafile:// URI. Treat dot-separated aliases such as sunnyfung.eth as metaid:// aliases. Treat 64-hex pin ids ending in i0 as pin:// resources. Do not search, create identities, or open Bot Hub from this skill.',
+    summary: 'Connect the local agent to Agent Internet through the local Browser entrypoint, and open public Bot pages, domain aliases, chain pins, MetaApps, and MetaFiles.',
+    instructions: 'Use the Browser CLI directly. Open Browser with no URI when the human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or asks for the Browser itself; browser open auto-starts a stopped daemon, and a successful return means the agent is online. For connect intent and no-target opens, lead the reply with the verbatim Agent Internet banner, then hand off with the Browser localUiUrl, the same-origin /ui/bot local Bot management page, and hints to view online Bots or chat with one; skip the banner for deep-link opens of specific targets. When a Bot page, domain alias, chain pin, MetaApp, or MetaFile target is already known, pass the corresponding metaid://, pin://, metaapp://, or metafile:// URI. Treat dot-separated aliases such as sunnyfung.eth as metaid:// aliases. Treat 64-hex pin ids ending in i0 as pin:// resources. Do not search, create identities, or open Bot Hub from this skill. Respond in the human\'s language and keep the banner untranslated.',
     commandTemplate: 'metabot browser open',
-    outputExpectation: 'Return the Browser localUiUrl plus the opened URI when one was requested.',
+    outputExpectation: 'Return the Browser localUiUrl plus the opened URI when one was requested. For connect intent and no-target opens, also return the Agent Internet banner, the same-origin /ui/bot management URL, and online-Bot follow-up hints in the human\'s language.',
     fallbackPolicy: 'If the target resource is unknown, ask for the Bot globalMetaId, domain alias, chain pinId, MetaApp pinId, or MetaFile pinId instead of guessing.',
     scope: {
       allowedCommands: [
