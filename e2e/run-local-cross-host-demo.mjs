@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+
+import { mkdtempTempRoot, stopTestDaemonsUnderRoot } from '../tests/helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../dist/cli/main.js');
@@ -30,7 +31,7 @@ function deriveSystemHome(homeDir) {
 }
 
 async function createProfileHome(prefix, slug = 'test-profile') {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const systemHome = await mkdtempTempRoot(prefix);
   const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
   await mkdir(homeDir, { recursive: true });
   return homeDir;
@@ -79,41 +80,9 @@ function assertCommandSucceeded(result, args) {
 }
 
 async function stopDaemon(homeDir) {
-  const daemonStatePath = path.join(homeDir, '.runtime', 'daemon.json');
-
-  let daemonState;
-  try {
-    daemonState = JSON.parse(await readFile(daemonStatePath, 'utf8'));
-  } catch (error) {
-    if (error?.code === 'ENOENT') {
-      return;
-    }
-    throw error;
-  }
-
-  if (Number.isFinite(daemonState.pid)) {
-    try {
-      process.kill(Number(daemonState.pid), 'SIGTERM');
-    } catch (error) {
-      if (error?.code !== 'ESRCH') {
-        throw error;
-      }
-    }
-  }
-
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    try {
-      await readFile(daemonStatePath, 'utf8');
-    } catch (error) {
-      if (error?.code === 'ENOENT') {
-        return;
-      }
-      throw error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  await rm(daemonStatePath, { force: true });
+  // Stops the daemon process group recorded under the temp system home and
+  // waits for exit; safe to call when no daemon was ever started.
+  await stopTestDaemonsUnderRoot(deriveSystemHome(homeDir));
 }
 
 async function removeTreeWithRetry(targetPath, attempts = 20) {

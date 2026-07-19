@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
-import { lstat, mkdtemp, readdir, readlink } from 'node:fs/promises';
-import os from 'node:os';
+import { lstat, readdir, readlink } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const BUILD_SCRIPT_URL = pathToFileURL(path.join(REPO_ROOT, 'scripts/build-metabot-skillpacks.mjs')).href;
@@ -18,7 +18,7 @@ let builtSkillpacksPromise;
 async function getBuiltSkillpacks() {
   if (!builtSkillpacksPromise) {
     builtSkillpacksPromise = (async () => {
-      const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-host-bind-smoke-'));
+      const outputRoot = await mkdtempTempRoot('metabot-host-bind-smoke-');
       const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
       await buildAgentConnectSkillpacks({
         repoRoot: REPO_ROOT,
@@ -63,7 +63,7 @@ async function listInstalledSharedSkills(homeDir) {
 for (const host of HOSTS) {
   test(`shared install plus \`metabot host bind-skills --host ${host}\` projects shared MetaBot skills as symlinks`, async () => {
     const { outputRoot } = await getBuiltSkillpacks();
-    const fakeHome = await mkdtemp(path.join(os.tmpdir(), `metabot-${host}-smoke-home-`));
+    const fakeHome = await mkdtempTempRoot(`metabot-${host}-smoke-home-`);
     const sharedRoot = sharedPackRoot(outputRoot);
 
     await execFile('/bin/bash', [path.join(sharedRoot, 'install.sh')], {

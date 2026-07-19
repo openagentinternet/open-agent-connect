@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -42,7 +43,7 @@ async function writePayload(tempDir, payload) {
 }
 
 async function createIndexedHome(options = {}) {
-  const home = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-home-'));
+  const home = await mkdtempTempRoot('metabot-cli-loom-home-');
   const profileHome = path.join(home, '.metabot', 'profiles', 'eric');
   const managerRoot = path.join(home, '.metabot', 'manager');
   const now = Date.now();
@@ -220,7 +221,7 @@ async function runLoom(args, options = {}) {
 }
 
 test('runCli validates a valid loom claim payload', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-validate-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-validate-');
   const payloadFile = await writePayload(tempDir, validClaimPayload());
 
   const { exitCode, envelope } = await runLoom([
@@ -241,7 +242,7 @@ test('runCli validates a valid loom claim payload', async () => {
 });
 
 test('runCli fails loom validation for an invalid claim payload', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-invalid-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-invalid-');
   const payloadFile = await writePayload(tempDir, {
     taskPinId: validTaskPinId,
   });
@@ -264,7 +265,7 @@ test('runCli fails loom validation for an invalid claim payload', async () => {
 });
 
 test('runCli reports malformed loom payload JSON as invalid_payload', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-malformed-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-malformed-');
   const payloadFile = path.join(tempDir, 'malformed.json');
   await writeFile(payloadFile, '{', 'utf8');
 
@@ -288,7 +289,7 @@ test('runCli reports malformed loom payload JSON as invalid_payload', async () =
 });
 
 test('runCli reports non-object loom payload JSON as invalid_payload', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-array-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-array-');
   const payloadFile = path.join(tempDir, 'array.json');
   await writeFile(payloadFile, '[]', 'utf8');
 
@@ -312,7 +313,7 @@ test('runCli reports non-object loom payload JSON as invalid_payload', async () 
 });
 
 test('runCli exports a loom claim chain request in the command envelope', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-export-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-export-');
   const payload = validClaimPayload();
   const payloadFile = await writePayload(tempDir, payload);
 
@@ -340,7 +341,7 @@ test('runCli exports a loom claim chain request in the command envelope', async 
 });
 
 test('runCli reports non-object loom export payload JSON as invalid_payload', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-export-array-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-export-array-');
   const payloadFile = path.join(tempDir, 'array.json');
   await writeFile(payloadFile, '[]', 'utf8');
 
@@ -364,7 +365,7 @@ test('runCli reports non-object loom export payload JSON as invalid_payload', as
 });
 
 test('runCli writes a loom claim chain request to --out', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-out-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-out-');
   const payload = validClaimPayload();
   const payloadFile = await writePayload(tempDir, payload);
 
@@ -400,7 +401,7 @@ test('runCli writes a loom claim chain request to --out', async () => {
 });
 
 test('runCli rejects unsupported loom protocols', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-protocol-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-protocol-');
   const payloadFile = await writePayload(tempDir, validClaimPayload());
 
   const { exitCode, envelope } = await runLoom([
@@ -420,7 +421,7 @@ test('runCli rejects unsupported loom protocols', async () => {
 });
 
 test('runCli rejects chain write flags on loom export commands', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-flags-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-flags-');
   const payloadFile = await writePayload(tempDir, validClaimPayload());
 
   for (const extraFlag of ['--chain', '--from']) {
@@ -739,7 +740,7 @@ test('runCli delegates loom post-task wish input to runtime dependencies', async
 
 test('runCli default loom post-task reads a payload file and writes through chain dependency', async () => {
   const home = await createIndexedHome();
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-post-task-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-post-task-');
   const payload = {
     title: 'Publish a Loom task',
     requirementContentType: 'text/markdown',
@@ -804,7 +805,7 @@ test('runCli default loom post-task reads a payload file and writes through chai
 
 test('runCli default loom post-task dry-run previews actor and network without writing', async () => {
   const home = await createIndexedHome();
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-post-task-dry-run-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-post-task-dry-run-');
   const payload = {
     title: 'Preview a Loom task',
     requirementContentType: 'text/markdown',
@@ -856,7 +857,7 @@ test('runCli default loom post-task dry-run previews actor and network without w
 
 test('runCli default loom post-task dry-run validates missing actor profile before previewing', async () => {
   const home = await createIndexedHome();
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-loom-post-task-missing-actor-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-loom-post-task-missing-actor-');
   const payload = {
     title: 'Preview a Loom task',
     requirementContentType: 'text/markdown',

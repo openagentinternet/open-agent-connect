@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -20,7 +20,7 @@ const {
 } = require('../../dist/core/metaapp/zipArchive.js');
 
 async function makeTempProject(prefix) {
-  return mkdtemp(path.join(os.tmpdir(), `metabot-metaapp-${prefix}-`));
+  return mkdtempTempRoot(`metabot-metaapp-${prefix}-`);
 }
 
 async function writeProjectFile(projectDir, relativePath, content) {
@@ -205,7 +205,9 @@ test('normalizeMetaAppPinId accepts canonical pinIds and rejects blank or path-l
 
 test('writeMetaAppZipArchive includes nested relative files and excludes unsafe paths', async () => {
   const projectDir = await makeTempProject('zip');
-  const outFile = path.join(projectDir, '..', 'metaapp.zip');
+  // Keep the archive outside the source dir but inside a tracked temp root so
+  // it does not leak into the shared os.tmpdir().
+  const outFile = path.join(await mkdtempTempRoot('metabot-metaapp-zip-out-'), 'metaapp.zip');
   await writeProjectFile(projectDir, 'index.html', '<h1>Zip app</h1>');
   await writeProjectFile(projectDir, 'assets/app.js', 'console.log("zip");');
   await writeProjectFile(projectDir, 'nested/deep/style.css', 'body { color: black; }');

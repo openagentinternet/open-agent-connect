@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { assertBrowserHostConformance } = require('@openagentinternet/agent-browser-test-harness');
@@ -23,10 +23,10 @@ const METAAPP_PIN_ID = '8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99
 const ZIP_PIN_ID = '6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0';
 
 async function makeMetaAppZipBuffer(title = 'Adapter Preview App') {
-  const projectDir = await mkdtemp(path.join(os.tmpdir(), 'oac-adapter-metaapp-project-'));
+  const projectDir = await mkdtempTempRoot('oac-adapter-metaapp-project-');
   await mkdir(path.join(projectDir, 'app'), { recursive: true });
   await writeFile(path.join(projectDir, 'app', 'index.html'), `<!doctype html><title>${title}</title>`, 'utf8');
-  const archiveDir = await mkdtemp(path.join(os.tmpdir(), 'oac-adapter-metaapp-archive-'));
+  const archiveDir = await mkdtempTempRoot('oac-adapter-metaapp-archive-');
   const archivePath = path.join(archiveDir, 'metaapp.zip');
   await writeMetaAppZipArchive({ sourceDir: projectDir, outFile: archivePath });
   return readFile(archivePath);

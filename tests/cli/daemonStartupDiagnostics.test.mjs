@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -14,7 +15,7 @@ const { resolveMetabotDaemonPaths } = require('../../dist/core/state/paths.js');
 const { createDaemonStateStore } = require('../../dist/core/state/daemonStateStore.js');
 
 test('collectDaemonStartupDiagnostics reads global daemon.json and daemon.lock for the installation', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-daemon-diagnostics-'));
+  const systemHome = await mkdtempTempRoot('metabot-daemon-diagnostics-');
   const paths = resolveMetabotDaemonPaths(systemHome);
   t.after(async () => {
     await rm(systemHome, { recursive: true, force: true });

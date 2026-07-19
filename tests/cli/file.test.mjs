@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
 
 test('runCli dispatches `metabot file upload --request-file` with parsed JSON request', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/photo.png',
@@ -52,7 +53,7 @@ test('runCli dispatches `metabot file upload --request-file` with parsed JSON re
 });
 
 test('runCli dispatches `metabot file upload --request-file --chain btc` and sets network=btc', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-btc-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-btc-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/photo.png',
@@ -83,7 +84,7 @@ test('runCli dispatches `metabot file upload --request-file --chain btc` and set
 });
 
 test('runCli dispatches `metabot file upload --request-file --chain opcat` and sets network=opcat', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-opcat-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-opcat-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/photo.png',
@@ -114,7 +115,7 @@ test('runCli dispatches `metabot file upload --request-file --chain opcat` and s
 });
 
 test('runCli dispatches `metabot file upload --from` to the upload dependency', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-from-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-from-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/photo.png',
@@ -147,7 +148,7 @@ test('runCli dispatches `metabot file upload --from` to the upload dependency', 
 });
 
 test('runCli fails `metabot file upload` when --chain value is missing', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-missing-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-missing-chain-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/photo.png',
@@ -178,7 +179,7 @@ test('runCli fails `metabot file upload` when --chain value is missing', async (
 });
 
 test('runCli fails `metabot file upload` when --chain value is doge', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-invalid-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-invalid-chain-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/photo.png',
@@ -209,7 +210,7 @@ test('runCli fails `metabot file upload` when --chain value is doge', async () =
 });
 
 test('runCli dispatches `metabot file upload-large --request-file` to uploadLarge', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-large-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-large-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/video.mp4',
@@ -490,7 +491,7 @@ test('runCli rejects multiple upload-large positional paths before dependency ca
 });
 
 test('runCli resolves upload-large relative file paths from the request file directory', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-large-relative-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-large-relative-');
   const requestDir = path.join(tempDir, 'requests');
   const requestFile = path.join(requestDir, 'request.json');
   await mkdir(requestDir, { recursive: true });
@@ -519,7 +520,7 @@ test('runCli resolves upload-large relative file paths from the request file dir
 });
 
 test('runCli dispatches upload-large flags for actor, chain, and verification', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-large-flags-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-large-flags-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/archive.zip',
@@ -564,7 +565,7 @@ test('runCli dispatches upload-large flags for actor, chain, and verification', 
 });
 
 test('runCli dispatches upload-large --chain opcat to uploadLarge', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-large-opcat-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-large-opcat-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/archive.zip',
@@ -598,7 +599,7 @@ test('runCli dispatches upload-large --chain opcat to uploadLarge', async () => 
 });
 
 test('runCli fails `metabot file upload-large` when --chain value is doge before dependency call', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-file-large-doge-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-file-large-doge-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     filePath: '/tmp/archive.zip',

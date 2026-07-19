@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
@@ -15,7 +15,7 @@ const {
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 async function createTempProfileHome(slug = 'test-slug') {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-resolver-'));
+  const base = await mkdtempTempRoot('metabot-resolver-');
   const profileRoot = path.join(base, '.metabot', 'profiles', slug);
   await fs.mkdir(path.join(base, '.metabot', 'LLM'), { recursive: true });
   await fs.mkdir(path.join(base, '.metabot', 'manager'), { recursive: true });

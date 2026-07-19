@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
 
 test('runCli dispatches `metabot buzz post --request-file` with parsed JSON request', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-buzz-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     content: 'hello metabot buzz',
@@ -52,7 +53,7 @@ test('runCli dispatches `metabot buzz post --request-file` with parsed JSON requ
 });
 
 test('runCli dispatches `metabot buzz post --request-file --chain` for supported write chains', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-network-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-buzz-network-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     content: 'hello metabot buzz',
@@ -83,7 +84,7 @@ test('runCli dispatches `metabot buzz post --request-file --chain` for supported
 });
 
 test('runCli dispatches `metabot buzz post --from` to the post dependency', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-from-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-buzz-from-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     content: 'hello from alice',
@@ -116,7 +117,7 @@ test('runCli dispatches `metabot buzz post --from` to the post dependency', asyn
 });
 
 test('runCli fails `metabot buzz post` when --chain value is unsupported', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-buzz-invalid-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-buzz-invalid-chain-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     content: 'hello metabot buzz',

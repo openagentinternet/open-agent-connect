@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
 
 test('runCli dispatches `metabot chain write --request-file` with parsed JSON request', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-chain-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     path: '/protocols/simplebuzz',
@@ -54,7 +55,7 @@ test('runCli dispatches `metabot chain write --request-file` with parsed JSON re
 });
 
 test('runCli dispatches `metabot chain write --request-file --chain` and overrides request network', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-chain-network-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-chain-network-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     path: '/protocols/simplebuzz',
@@ -88,7 +89,7 @@ test('runCli dispatches `metabot chain write --request-file --chain` and overrid
 });
 
 test('runCli dispatches `metabot chain write --from` to the write dependency', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-chain-from-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-chain-from-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     path: '/protocols/simplebuzz',
@@ -126,7 +127,7 @@ test('runCli dispatches `metabot chain write --from` to the write dependency', a
 });
 
 test('runCli fails `metabot chain write` when --chain value is missing', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-chain-missing-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-chain-missing-chain-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     path: '/protocols/simplebuzz',

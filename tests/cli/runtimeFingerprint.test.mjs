@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -12,7 +12,7 @@ const {
 } = require('../../dist/cli/runtime.js');
 
 test('getDaemonRuntimeFingerprint changes when runtime js files change', async () => {
-  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-runtime-fingerprint-'));
+  const rootDir = await mkdtempTempRoot('metabot-runtime-fingerprint-');
   const cliDir = path.join(rootDir, 'cli');
   const coreDir = path.join(rootDir, 'core');
   await mkdir(cliDir, { recursive: true });

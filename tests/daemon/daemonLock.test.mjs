@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRootSync } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { createMetabotDaemon } = require('../../dist/daemon/index.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 function createHome(prefix) {
-  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const systemHome = mkdtempTempRootSync(prefix);
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'test-profile');
   mkdirSync(homeDir, { recursive: true });
   return homeDir;

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { chmod, cp, lstat, mkdir, readFile, readlink, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 const BUILD_SCRIPT_URL = pathToFileURL(path.join(REPO_ROOT, 'scripts/build-metabot-skillpacks.mjs')).href;
@@ -157,7 +157,7 @@ async function getBuiltSkillpacks() {
         cwd: REPO_ROOT,
         maxBuffer: 100 * 1024 * 1024,
       });
-      const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'metabot-skillpacks-'));
+      const outputRoot = await mkdtempTempRoot('metabot-skillpacks-');
       const { buildAgentConnectSkillpacks } = await import(BUILD_SCRIPT_URL);
       const result = await buildAgentConnectSkillpacks({
         repoRoot: REPO_ROOT,
@@ -938,7 +938,7 @@ test('buildAgentConnectSkillpacks publishes the shared buzz and file writer skil
 
 test('shared install.sh copies shared skills and installs a runnable metabot shim from the bundled runtime', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
-  const fakeHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-install-home-'));
+  const fakeHome = await mkdtempTempRoot('metabot-install-home-');
 
   const sharedRoot = sharedPackRoot(outputRoot);
   await execFile('/bin/bash', [path.join(sharedRoot, 'install.sh')], {
@@ -1010,8 +1010,8 @@ test('host wrapper install.sh runs the packaged shared install flow and binds ho
   const { outputRoot } = await getBuiltSkillpacks();
 
   for (const host of HOSTS) {
-    const fakeHome = await mkdtemp(path.join(os.tmpdir(), `metabot-${host}-wrapper-home-`));
-    const isolatedPackRoot = await mkdtemp(path.join(os.tmpdir(), `metabot-${host}-wrapper-pack-`));
+    const fakeHome = await mkdtempTempRoot(`metabot-${host}-wrapper-home-`);
+    const isolatedPackRoot = await mkdtempTempRoot(`metabot-${host}-wrapper-pack-`);
     const hostRoot = path.join(isolatedPackRoot, host);
     await cp(path.join(outputRoot, host), hostRoot, { recursive: true });
 

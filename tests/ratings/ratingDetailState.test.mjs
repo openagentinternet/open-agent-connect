@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -11,7 +11,7 @@ const {
 } = require('../../dist/core/ratings/ratingDetailState.js');
 
 async function createProfileHome(prefix, slug = 'test-profile') {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const systemHome = await mkdtempTempRoot(prefix);
   const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
   await mkdir(path.join(systemHome, '.metabot', 'manager'), { recursive: true });
   await mkdir(homeDir, { recursive: true });

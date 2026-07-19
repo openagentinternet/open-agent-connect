@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -11,7 +11,7 @@ const {
 } = require('../../dist/core/metaapp/localCache.js');
 
 async function makeProfileRoot(prefix) {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), `metabot-metaapp-cache-${prefix}-`));
+  const systemHome = await mkdtempTempRoot(`metabot-metaapp-cache-${prefix}-`);
   return path.join(systemHome, '.metabot', 'profiles', 'alice');
 }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
-import os from 'node:os';
+import { readFile } from 'node:fs/promises';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const { createDaemonStateStore } = require('../../dist/core/state/daemonStateStore.js');
 
 test('createDaemonStateStore persists one installation endpoint and global daemon process record', async () => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-global-daemon-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-global-daemon-');
   const store = createDaemonStateStore(systemHomeDir);
 
   await store.writeInstallation({

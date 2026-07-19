@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -12,7 +11,7 @@ const {
 } = require('../../dist/core/loom/index.js');
 
 async function createProfileHome() {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'metabot-loom-cache-'));
+  const root = await mkdtempTempRoot('metabot-loom-cache-');
   return path.join(root, '.metabot', 'profiles', 'eric');
 }
 

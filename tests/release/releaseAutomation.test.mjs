@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const execFile = promisify(execFileCallback);
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
@@ -30,7 +30,7 @@ async function makeVersionFixture({
     },
   },
 } = {}) {
-  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-release-version-'));
+  const fixtureRoot = await mkdtempTempRoot('oac-release-version-');
   await writeFile(
     path.join(fixtureRoot, 'package.json'),
     JSON.stringify({ name: 'open-agent-connect', version: packageVersion }, null, 2),

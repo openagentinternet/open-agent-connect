@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -20,7 +20,7 @@ function deriveSystemHome(homeDir) {
 }
 
 async function createProfileHome(prefix, slug = 'test-profile') {
-  const systemHome = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  const systemHome = await mkdtempTempRoot(prefix);
   const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
   await fs.mkdir(homeDir, { recursive: true });

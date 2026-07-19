@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -18,7 +18,7 @@ const legacyOnlineKeys = {
 };
 
 async function createProfileHome(prefix, slug = 'test-profile') {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const systemHome = await mkdtempTempRoot(prefix);
   const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
   await mkdir(path.join(systemHome, '.metabot', 'manager'), { recursive: true });
   await mkdir(homeDir, { recursive: true });

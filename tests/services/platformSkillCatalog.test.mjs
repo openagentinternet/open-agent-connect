@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
@@ -15,7 +15,7 @@ const {
 } = require('../../dist/core/services/platformSkillCatalog.js');
 
 async function createProfileHome(slug = 'provider-profile') {
-  const systemHome = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-platform-skill-catalog-'));
+  const systemHome = await mkdtempTempRoot('oac-platform-skill-catalog-');
   const profileRoot = path.join(systemHome, '.metabot', 'profiles', slug);
   await fs.mkdir(path.join(systemHome, '.metabot', 'manager'), { recursive: true });
   await fs.mkdir(path.join(systemHome, '.metabot', 'LLM'), { recursive: true });

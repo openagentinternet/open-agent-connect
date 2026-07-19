@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
-import os from 'node:os';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { createProfileHome } from '../helpers/profileHome.mjs';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -153,7 +153,7 @@ test('createLocalIdentitySyncStep persists name first and retries chatpubkey wit
 });
 
 test('ensureProfileWorkspace creates the required workspace files and eager runtime directories', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-profile-workspace-'));
+  const systemHome = await mkdtempTempRoot('metabot-profile-workspace-');
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
 
   await ensureProfileWorkspace({

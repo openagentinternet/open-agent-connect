@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -49,7 +49,7 @@ async function writeSkill(root, name) {
 }
 
 async function createProfileContext(t, name = 'Policy Bot') {
-  const systemHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-private-chat-allowed-'));
+  const systemHomeDir = await mkdtempTempRoot('oac-private-chat-allowed-');
   t.after(async () => {
     await fs.rm(systemHomeDir, { recursive: true, force: true });
   });

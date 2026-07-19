@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+
+import { cleanupTempRoot, mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -21,7 +22,7 @@ function parseLastJson(chunks) {
 }
 
 async function createIndexedProfileHome() {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-daemon-lifecycle-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-daemon-lifecycle-');
   const homeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'alice');
   const paths = resolveMetabotPaths(homeDir);
   await mkdir(paths.managerRoot, { recursive: true });
@@ -106,7 +107,7 @@ test('daemon stop refuses an unverified live pid and preserves its record', asyn
   const { systemHomeDir, homeDir } = await createIndexedProfileHome();
   const store = createDaemonStateStore(systemHomeDir);
   t.after(async () => {
-    await rm(systemHomeDir, { recursive: true, force: true });
+    await cleanupTempRoot(systemHomeDir);
   });
 
   await store.writeDaemon(globalDaemonRecord({
@@ -149,7 +150,7 @@ test('daemon stop keeps a dead daemon record when its recorded port is still occ
     await new Promise((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });
-    await rm(systemHomeDir, { recursive: true, force: true });
+    await cleanupTempRoot(systemHomeDir);
   });
 
   await store.writeDaemon(globalDaemonRecord({
@@ -189,15 +190,9 @@ test('daemon stop waits for a verified daemon to exit before clearing its record
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
   };
   t.after(async () => {
-    const daemon = await store.readDaemon();
-    if (daemon?.pid) {
-      try {
-        process.kill(daemon.pid, 'SIGTERM');
-      } catch {
-        // The daemon already exited.
-      }
-    }
-    await rm(systemHomeDir, { recursive: true, force: true });
+    // Stops the daemon process group and waits for exit before removing the
+    // temp system home.
+    await cleanupTempRoot(systemHomeDir);
   });
 
   const startOutput = [];
@@ -236,15 +231,9 @@ test('first installation persists the bounded fallback port and never drifts aft
     await new Promise((resolve, reject) => {
       defaultPortBlocker.close((error) => error ? reject(error) : resolve());
     }).catch(() => undefined);
-    const daemon = await daemonStore.readDaemon();
-    if (daemon?.pid) {
-      try {
-        process.kill(daemon.pid, 'SIGTERM');
-      } catch {
-        // The daemon already exited.
-      }
-    }
-    await rm(systemHomeDir, { recursive: true, force: true });
+    // Stops the daemon process group and waits for exit before removing the
+    // temp system home.
+    await cleanupTempRoot(systemHomeDir);
   });
 
   const env = {
@@ -318,15 +307,9 @@ test('first global start quarantines stale profile daemon metadata without touch
     startedAt: 1,
   });
   t.after(async () => {
-    const daemon = await daemonStore.readDaemon();
-    if (daemon?.pid) {
-      try {
-        process.kill(daemon.pid, 'SIGTERM');
-      } catch {
-        // The daemon already exited.
-      }
-    }
-    await rm(systemHomeDir, { recursive: true, force: true });
+    // Stops the daemon process group and waits for exit before removing the
+    // temp system home.
+    await cleanupTempRoot(systemHomeDir);
   });
 
   const env = {

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -170,7 +170,7 @@ test('platform registry assigns provider-specific LLM icons for every managed ru
 
 test('runtime discovery uses expanded provider metadata and environment auth checks', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-discovery-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-discovery-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const copilotPath = path.join(binDir, 'copilot');
@@ -255,7 +255,7 @@ test('runtime discovery uses expanded provider metadata and environment auth che
 });
 
 test('runtime discovery can use registry default executable paths for app-bundled CLIs', async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-app-default-'));
+  const tempRoot = await mkdtempTempRoot('oac-provider-app-default-');
   const zcodePath = path.join(tempRoot, 'ZCode.app', 'Contents', 'Resources', 'glm', 'zcode.cjs');
   const workbuddyPath = path.join(tempRoot, 'WorkBuddy.app', 'Contents', 'Resources', 'app.asar.unpacked', 'cli', 'bin', 'codebuddy');
   await mkdir(path.dirname(zcodePath), { recursive: true });
@@ -294,7 +294,7 @@ test('runtime discovery can use registry default executable paths for app-bundle
 
 test('runtime discovery tries multiple registry binary names in order', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-binary-fallback-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-binary-fallback-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const fallbackPath = path.join(binDir, 'codex-fallback');
@@ -325,7 +325,7 @@ test('runtime discovery tries multiple registry binary names in order', async ()
 
 test('runtime discovery honors explicit provider path environment overrides outside PATH', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-env-path-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-env-path-');
     const binDir = path.join(tempRoot, 'external-bin');
     await mkdir(binDir, { recursive: true });
     const opencodePath = path.join(binDir, 'opencode');
@@ -353,7 +353,7 @@ test('runtime discovery honors explicit provider path environment overrides outs
 
 test('runtime discovery keeps WorkBuddy independent from CodeBuddy path aliases', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-workbuddy-path-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-workbuddy-path-');
     const binDir = path.join(tempRoot, 'external-bin');
     await mkdir(binDir, { recursive: true });
     const codebuddyPath = path.join(binDir, 'codebuddy');
@@ -407,7 +407,7 @@ test('runtime discovery keeps WorkBuddy independent from CodeBuddy path aliases'
 
 test('runtime discovery limits a requested host probe to that host provider', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-targeted-discovery-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-targeted-discovery-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const codexPath = path.join(binDir, 'codex');
@@ -431,7 +431,7 @@ test('runtime discovery limits a requested host probe to that host provider', as
 
 test('runtime discovery uses login-shell resolved executables when daemon PATH misses a provider', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-shell-path-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-shell-path-');
     const binDir = path.join(tempRoot, 'login-shell-bin');
     await mkdir(binDir, { recursive: true });
     const codebuddyPath = path.join(binDir, 'codebuddy');
@@ -454,7 +454,7 @@ test('runtime discovery uses login-shell resolved executables when daemon PATH m
 
 test('runtime discovery ignores a broken PATH shadow when a later binary is healthy', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-path-shadow-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-path-shadow-');
     const brokenBinDir = path.join(tempRoot, 'broken-bin');
     const healthyBinDir = path.join(tempRoot, 'healthy-bin');
     await mkdir(brokenBinDir, { recursive: true });
@@ -487,7 +487,7 @@ test('runtime discovery ignores a broken PATH shadow when a later binary is heal
 
 test('runtime discovery marks a binary unavailable when version probe exits non-zero', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-bad-version-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-bad-version-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const codexPath = path.join(binDir, 'codex');
@@ -514,7 +514,7 @@ test('runtime discovery marks a binary unavailable when version probe exits non-
 
 test('runtime discovery marks version-only binaries as detected until readiness succeeds', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-detected-readiness-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-detected-readiness-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const codexPath = path.join(binDir, 'codex');
@@ -540,7 +540,7 @@ test('runtime discovery marks version-only binaries as detected until readiness 
 
 test('runtime discovery marks binaries healthy only after readiness returns non-empty output', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-healthy-readiness-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-healthy-readiness-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const geminiPath = path.join(binDir, 'gemini');
@@ -569,7 +569,7 @@ test('runtime discovery marks binaries healthy only after readiness returns non-
 
 test('runtime discovery gives slow-start providers an extended readiness window', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-readiness-timeout-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-readiness-timeout-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const cursorPath = path.join(binDir, 'cursor-agent');
@@ -596,7 +596,7 @@ test('runtime discovery gives slow-start providers an extended readiness window'
 
 test('runtime discovery probes different providers concurrently', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-concurrent-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-concurrent-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const codexPath = path.join(binDir, 'codex');
@@ -637,7 +637,7 @@ test('runtime discovery probes different providers concurrently', async () => {
 
 test('runtime discovery skips readiness for recently healthy known runtimes', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-known-healthy-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-known-healthy-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const codexPath = path.join(binDir, 'codex');
@@ -674,7 +674,7 @@ test('runtime discovery skips readiness for recently healthy known runtimes', as
 
 test('runtime discovery lets slow Cursor version probes complete before readiness', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-version-timeout-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-version-timeout-');
     const binDir = path.join(tempRoot, 'bin');
     await mkdir(binDir, { recursive: true });
     const cursorPath = path.join(binDir, 'cursor-agent');
@@ -710,7 +710,7 @@ test('runtime discovery uses the full readiness window as semantic inactivity fo
 
 test('runtime discovery keeps scanning when an earlier binary is only detected', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oac-provider-readiness-fallback-'));
+    const tempRoot = await mkdtempTempRoot('oac-provider-readiness-fallback-');
     const detectedBinDir = path.join(tempRoot, 'detected-bin');
     const healthyBinDir = path.join(tempRoot, 'healthy-bin');
     await mkdir(detectedBinDir, { recursive: true });
@@ -762,7 +762,7 @@ function testRuntimeFixture(overrides = {}) {
 }
 
 async function writeVersionProbeBin(rootPrefix, body) {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), rootPrefix));
+  const tempRoot = await mkdtempTempRoot(rootPrefix);
   const binDir = path.join(tempRoot, 'bin');
   await mkdir(binDir, { recursive: true });
   const codexPath = path.join(binDir, 'codex');

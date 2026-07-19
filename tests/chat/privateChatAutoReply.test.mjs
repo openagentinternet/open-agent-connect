@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
@@ -17,7 +17,7 @@ const { createHostLlmChatReplyRunner } = require('../../dist/core/chat/hostLlmCh
 const { createPrivateChatAutoReplyOrchestrator } = require('../../dist/core/chat/privateChatAutoReply.js');
 
 async function createTempProfileHome() {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-autoreply-test-'));
+  const base = await mkdtempTempRoot('metabot-autoreply-test-');
   const profileRoot = path.join(base, '.metabot', 'profiles', 'test-slug');
   const managerRoot = path.join(base, '.metabot', 'manager');
   const skillsRoot = path.join(base, '.metabot', 'skills');

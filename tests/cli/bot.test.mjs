@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -45,7 +46,7 @@ test('runCli dispatches bot profile read commands', async () => {
 });
 
 test('runCli dispatches bot profile mutations with actor selectors', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-bot-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-bot-');
   const payloadFile = path.join(tempDir, 'profile.json');
   await writeFile(payloadFile, JSON.stringify({ displayName: 'Alice Bot' }), 'utf8');
 
@@ -98,7 +99,7 @@ test('runCli dispatches bot profile mutations with actor selectors', async () =>
 });
 
 test('runCli dispatches bot config, wallet, backup, runtime, and session commands', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-bot-config-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-bot-config-');
   const configFile = path.join(tempDir, 'config.json');
   await writeFile(configFile, JSON.stringify({ chain: { defaultWriteNetwork: 'doge' } }), 'utf8');
 

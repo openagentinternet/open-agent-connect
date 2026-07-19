@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
@@ -43,7 +43,7 @@ const DEFAULT_CONFIG = {
 };
 
 async function withTempProfileHome(action) {
-  const systemHome = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-config-'));
+  const systemHome = await mkdtempTempRoot('metabot-config-');
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'test-profile');
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
   const previousHome = process.env.METABOT_HOME;

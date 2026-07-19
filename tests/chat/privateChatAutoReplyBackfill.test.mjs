@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -13,7 +13,7 @@ const {
 } = require('../../dist/core/chat/privateChatAutoReplyBackfill.js');
 
 async function createTempProfileHome() {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-autoreply-backfill-test-'));
+  const base = await mkdtempTempRoot('metabot-autoreply-backfill-test-');
   const profileRoot = path.join(base, '.metabot', 'profiles', 'test-slug');
   await fs.mkdir(profileRoot, { recursive: true });
   return { base, profileRoot };

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test, { afterEach, beforeEach } from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { mvc } = require('meta-contract');
@@ -52,7 +52,7 @@ afterEach(() => {
 });
 
 async function tempFile(name, content) {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-sponsor-direct-'));
+  const tempDir = await mkdtempTempRoot('metabot-sponsor-direct-');
   const filePath = path.join(tempDir, name);
   await writeFile(filePath, Buffer.from(content));
   return filePath;

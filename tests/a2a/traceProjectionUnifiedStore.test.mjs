@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir } from 'node:fs/promises';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -49,7 +49,7 @@ const DELIVERY_IMAGE_ARTIFACT = {
 };
 
 async function createProfileFixture() {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-a2a-trace-projection-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-a2a-trace-projection-');
   const homeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'alice');
   await mkdir(homeDir, { recursive: true });
   const profile = await upsertIdentityProfile({

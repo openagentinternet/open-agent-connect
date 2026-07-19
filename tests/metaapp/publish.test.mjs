@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -23,7 +23,7 @@ const COMMENT_PIN = `${'e'.repeat(64)}i0`;
 const PREVIEW_ARTIFACT_URI = 'metafile://<uploaded-metaapp-zip-pin>.zip';
 
 async function makeProject(prefix, manifest = {}) {
-  const projectDir = await mkdtemp(path.join(os.tmpdir(), `metabot-metaapp-publish-${prefix}-`));
+  const projectDir = await mkdtempTempRoot(`metabot-metaapp-publish-${prefix}-`);
   await writeProjectFile(projectDir, 'dist/index.html', '<h1>MetaApp</h1>');
   await writeProjectFile(projectDir, 'dist/assets/app.js', 'console.log("metaapp");');
   await writeProjectFile(projectDir, 'package.json', JSON.stringify({ scripts: { build: 'vite build' } }));
@@ -34,7 +34,7 @@ async function makeProject(prefix, manifest = {}) {
 }
 
 async function makeStaticProject(prefix, manifest = {}) {
-  const projectDir = await mkdtemp(path.join(os.tmpdir(), `metabot-metaapp-static-${prefix}-`));
+  const projectDir = await mkdtempTempRoot(`metabot-metaapp-static-${prefix}-`);
   await writeProjectFile(projectDir, 'index.html', '<h1>Static MetaApp</h1>');
   await writeProjectFile(projectDir, 'assets/app.js', 'console.log("static metaapp");');
   if (Object.keys(manifest).length > 0) {
@@ -58,7 +58,7 @@ function createDeps(overrides = {}) {
     upserts,
     now: () => 1_700_000_000_000,
     async makeTempDir() {
-      return mkdtemp(path.join(os.tmpdir(), 'metabot-metaapp-archive-'));
+      return mkdtempTempRoot('metabot-metaapp-archive-');
     },
     createPreviewSession(input) {
       calls.push({ type: 'previewSession', input });

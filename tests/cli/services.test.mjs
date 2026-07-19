@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess, commandWaiting } = require('../../dist/core/contracts/commandResult.js');
 
 test('runCli dispatches `metabot services publish --payload-file` with parsed JSON payload', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-publish-');
   const payloadFile = path.join(tempDir, 'payload.json');
   await writeFile(payloadFile, JSON.stringify({
     serviceName: 'Tarot Reading',
@@ -62,7 +62,7 @@ test('runCli dispatches `metabot services publish --payload-file` with parsed JS
 });
 
 test('runCli dispatches `metabot services publish --payload-file --chain` for supported write chains', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-network-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-publish-network-');
   const payloadFile = path.join(tempDir, 'payload.json');
   await writeFile(payloadFile, JSON.stringify({
     serviceName: 'Tarot Reading',
@@ -95,7 +95,7 @@ test('runCli dispatches `metabot services publish --payload-file --chain` for su
 });
 
 test('runCli dispatches `metabot services publish --from --payload-file --chain` with actor slug', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-from-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-publish-from-');
   const payloadFile = path.join(tempDir, 'payload.json');
   await writeFile(payloadFile, JSON.stringify({
     serviceName: 'Tarot Reading',
@@ -141,7 +141,7 @@ test('runCli dispatches `metabot services publish --from --payload-file --chain`
 });
 
 test('runCli fails `metabot services publish` when --chain value is missing', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-missing-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-publish-missing-chain-');
   const payloadFile = path.join(tempDir, 'payload.json');
   await writeFile(payloadFile, JSON.stringify({
     serviceName: 'Tarot Reading',
@@ -174,7 +174,7 @@ test('runCli fails `metabot services publish` when --chain value is missing', as
 });
 
 test('runCli fails `metabot services publish` when --chain value is unsupported', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-publish-invalid-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-publish-invalid-chain-');
   const payloadFile = path.join(tempDir, 'payload.json');
   await writeFile(payloadFile, JSON.stringify({
     serviceName: 'Tarot Reading',
@@ -293,7 +293,7 @@ test('runCli keeps `metabot services publish-skills --slug` as a compatibility a
 });
 
 test('runCli dispatches `metabot services call --request-file` with parsed JSON request', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-call-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-call-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     request: {
@@ -343,7 +343,7 @@ test('runCli dispatches `metabot services call --request-file` with parsed JSON 
 });
 
 test('runCli dispatches `metabot services call --from --request-file` with actor slug', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-call-from-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-call-from-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     request: {
@@ -379,7 +379,7 @@ test('runCli dispatches `metabot services call --from --request-file` with actor
 });
 
 test('runCli services call TTY trace polling preserves the selected actor', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-call-poll-from-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-call-poll-from-');
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     request: {
@@ -417,7 +417,7 @@ test('runCli services call TTY trace polling preserves the selected actor', asyn
 });
 
 test('runCli dispatches `metabot services rate --request-file --chain` for supported write chains', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-network-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-rate-network-');
   const requestFile = path.join(tempDir, 'rating.json');
   await writeFile(requestFile, JSON.stringify({
     traceId: 'trace-123',
@@ -450,7 +450,7 @@ test('runCli dispatches `metabot services rate --request-file --chain` for suppo
 });
 
 test('runCli dispatches `metabot services rate --from --request-file --chain` with actor slug', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-from-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-rate-from-');
   const requestFile = path.join(tempDir, 'rating.json');
   await writeFile(requestFile, JSON.stringify({
     traceId: 'trace-123',
@@ -586,7 +586,7 @@ test('runCli dispatches `metabot services owned orders` with service id and pagi
 });
 
 test('runCli dispatches `metabot services owned modify` from payload with actor and chain', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-owned-modify-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-owned-modify-');
   const payloadFile = path.join(tempDir, 'payload.json');
   await writeFile(payloadFile, JSON.stringify({
     serviceId: 'svc-1',
@@ -660,7 +660,7 @@ test('runCli dispatches `metabot services owned revoke` with actor and chain', a
 });
 
 test('runCli rejects `--all` for owned service mutations', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-owned-invalid-all-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-owned-invalid-all-');
   const payloadFile = path.join(tempDir, 'payload.json');
   await writeFile(payloadFile, JSON.stringify({ serviceId: 'svc-1' }), 'utf8');
 
@@ -966,7 +966,7 @@ test('runCli keeps provider order/refund commands as service lifecycle aliases',
 });
 
 test('runCli fails `metabot services rate` when --chain value is missing', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-missing-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-rate-missing-chain-');
   const requestFile = path.join(tempDir, 'rating.json');
   await writeFile(requestFile, JSON.stringify({
     traceId: 'trace-123',
@@ -999,7 +999,7 @@ test('runCli fails `metabot services rate` when --chain value is missing', async
 });
 
 test('runCli fails `metabot services rate` when --chain value is unsupported', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-rate-invalid-chain-'));
+  const tempDir = await mkdtempTempRoot('metabot-cli-rate-invalid-chain-');
   const requestFile = path.join(tempDir, 'rating.json');
   await writeFile(requestFile, JSON.stringify({
     traceId: 'trace-123',

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -103,7 +104,7 @@ async function configureAllowedChatSkillProfile(systemHomeDir, profileHomeDir, s
 }
 
 async function createProfileHome(t, slug) {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-auto-reply-dispatcher-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-auto-reply-dispatcher-');
   const homeDir = path.join(systemHomeDir, '.metabot', 'profiles', slug);
   await mkdir(homeDir, { recursive: true });
   t.after(async () => {
@@ -284,7 +285,7 @@ test('auto-reply dispatcher routes inbound ORDER for non-active profiles to orde
 });
 
 test('auto-reply dispatcher default runner wires allowed chat skills for non-active profiles', async (t) => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-auto-reply-allowed-skills-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-auto-reply-allowed-skills-');
   const betaHomeDir = await createRegisteredProfile(t, systemHomeDir, {
     name: 'Beta Bot',
     slug: 'beta-bot',
@@ -370,7 +371,7 @@ test('auto-reply dispatcher default runner wires allowed chat skills for non-act
 });
 
 test('startup recovery replays persisted inbound ORDER messages without provider sessions', async (t) => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-a2a-order-replay-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-a2a-order-replay-');
   const didiGlobalMetaId = 'idq1didi00000000000000000000000000000';
   const ericGlobalMetaId = 'idq1eric00000000000000000000000000000';
   const didiHomeDir = await createRegisteredProfile(t, systemHomeDir, {
@@ -442,7 +443,7 @@ test('startup recovery replays persisted inbound ORDER messages without provider
 });
 
 test('startup recovery counts failed ORDER handler envelopes as replay failures', async (t) => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-a2a-order-replay-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-a2a-order-replay-');
   const didiGlobalMetaId = 'idq1didi00000000000000000000000000000';
   const ericGlobalMetaId = 'idq1eric00000000000000000000000000000';
   const didiHomeDir = await createRegisteredProfile(t, systemHomeDir, {
@@ -508,7 +509,7 @@ test('startup recovery counts failed ORDER handler envelopes as replay failures'
 });
 
 test('startup recovery skips persisted ORDER messages that already have provider sessions', async (t) => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-a2a-order-replay-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-a2a-order-replay-');
   const didiGlobalMetaId = 'idq1didi00000000000000000000000000000';
   const ericGlobalMetaId = 'idq1eric00000000000000000000000000000';
   const didiHomeDir = await createRegisteredProfile(t, systemHomeDir, {

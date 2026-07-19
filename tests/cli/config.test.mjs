@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+
+import { mkdtempTempRootSync } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -20,7 +21,7 @@ function deriveSystemHome(homeDir) {
 }
 
 function createProfileHome(prefix, slug = 'test-profile') {
-  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const systemHome = mkdtempTempRootSync(prefix);
   const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
   mkdirSync(homeDir, { recursive: true });
@@ -53,7 +54,7 @@ function createProfileHome(prefix, slug = 'test-profile') {
 }
 
 function createProfilePair(prefix) {
-  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const systemHome = mkdtempTempRootSync(prefix);
   const aliceHome = path.join(systemHome, '.metabot', 'profiles', 'actor-alice');
   const bobHome = path.join(systemHome, '.metabot', 'profiles', 'actor-bob');
   const managerRoot = path.join(systemHome, '.metabot', 'manager');

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -12,7 +12,7 @@ const {
 } = require('../../dist/core/metaapp/previewSessions.js');
 
 async function makeArtifactDir(prefix) {
-  return mkdtemp(path.join(os.tmpdir(), `metabot-metaapp-preview-${prefix}-`));
+  return mkdtempTempRoot(`metabot-metaapp-preview-${prefix}-`);
 }
 
 async function writeArtifactFile(artifactDir, relativePath, content) {

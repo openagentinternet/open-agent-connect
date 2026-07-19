@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test, { afterEach, beforeEach } from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const mvcChainAdapter = require('../../dist/core/chain/adapters/mvc.js').default;
@@ -48,7 +49,7 @@ afterEach(() => {
 });
 
 async function tempFile(name, sizeOrContent) {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-large-upload-'));
+  const tempDir = await mkdtempTempRoot('metabot-large-upload-');
   const filePath = path.join(tempDir, name);
   const content = typeof sizeOrContent === 'number'
     ? Buffer.alloc(sizeOrContent, 0x61)
@@ -193,7 +194,7 @@ test('uploadLargeFileToChain fails missing files before any upload dependency is
 });
 
 test('uploadLargeFileToChain rejects non-regular files without exposing absolute paths', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-large-upload-dir-'));
+  const tempDir = await mkdtempTempRoot('metabot-large-upload-dir-');
   const directCalls = [];
 
   await assert.rejects(

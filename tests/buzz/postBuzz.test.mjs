@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { postBuzzToChain } = require('../../dist/core/buzz/postBuzz.js');
 
 test('postBuzzToChain uploads attachments first and then writes a simplebuzz payload with metafile URIs', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-buzz-post-'));
+  const tempDir = await mkdtempTempRoot('metabot-buzz-post-');
   const attachmentPath = path.join(tempDir, 'photo.png');
   await writeFile(attachmentPath, Buffer.from('hello photo'));
 

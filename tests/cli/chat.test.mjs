@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
 
 async function createChatRequestFile(prefix, request = {}) {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), prefix));
+  const tempDir = await mkdtempTempRoot(prefix);
   const requestFile = path.join(tempDir, 'request.json');
   await writeFile(requestFile, JSON.stringify({
     to: 'gm-remote-bob',

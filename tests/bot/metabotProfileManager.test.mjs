@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { access, chmod, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { access, chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -37,7 +37,7 @@ const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const FIXTURE_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 async function createSystemHome() {
-  return await mkdtemp(path.join(os.tmpdir(), 'oac-metabot-manager-'));
+  return await mkdtempTempRoot('oac-metabot-manager-');
 }
 
 function runtime(provider, id, health = 'healthy') {

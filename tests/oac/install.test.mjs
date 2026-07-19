@@ -2,17 +2,17 @@ import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runOac } = require('../../dist/oac/main.js');
 const execFile = promisify(execFileCallback);
 
 async function createSystemHome(prefix) {
-  const systemHome = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  const systemHome = await mkdtempTempRoot(prefix);
   return { systemHome };
 }
 
@@ -209,8 +209,8 @@ test('runOac auto-detects codex when CODEX_HOME is the only host signal', async 
 });
 
 test('runOac install uses Windows user profile fallback when HOME is unavailable', async (t) => {
-  const userProfile = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-install-userprofile-'));
-  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-install-cwd-fallback-'));
+  const userProfile = await mkdtempTempRoot('oac-install-userprofile-');
+  const cwd = await mkdtempTempRoot('oac-install-cwd-fallback-');
   const previousHome = process.env.HOME;
   const previousUserProfile = process.env.USERPROFILE;
   const previousCwd = process.cwd();

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
 import { cleanupProfileHome } from '../helpers/profileHome.mjs';
+import { mkdtempTempRoot, stopTestDaemonsUnderRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -67,7 +67,7 @@ async function createProfileHome(systemHome, slug = 'test-profile') {
 }
 
 async function createProfileHomeTemp(prefix, slug = 'test-profile') {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), prefix || 'metabot-cli-runtime-'));
+  const systemHome = await mkdtempTempRoot(prefix || 'metabot-cli-runtime-');
   return createProfileHome(systemHome, slug);
 }
 
@@ -337,7 +337,7 @@ test('service refund sync loop prevents overlapping runs and clears its interval
 });
 
 test('createPrivateChatReplyRunnerForProfile wires allowed chat skills for the active profile path', async (t) => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-active-allowed-skills-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-active-allowed-skills-');
   t.after(async () => {
     await rm(systemHomeDir, { recursive: true, force: true });
   });
@@ -822,67 +822,11 @@ async function startFakeSocketPresenceApiServer(options = {}) {
   };
 }
 
+// Teardown for tests that may have spawned a real detached daemon: stop the
+// whole process group and wait for the processes to exit (handled inside
+// stopTestDaemonsUnderRoot) before the temp system home is removed.
 async function stopDaemon(homeDir) {
-  const statePath = daemonStatePath(homeDir);
-
-  let daemonState;
-  try {
-    daemonState = JSON.parse(await readFile(statePath, 'utf8'));
-  } catch (error) {
-    const code = error?.code;
-    if (code === 'ENOENT') {
-      return;
-    }
-    throw error;
-  }
-
-  const pid = Number.isFinite(daemonState.pid) ? Number(daemonState.pid) : null;
-
-  if (pid != null) {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch (error) {
-      const code = error?.code;
-      if (code !== 'ESRCH') {
-        throw error;
-      }
-    }
-  }
-
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    let daemonStateExists = true;
-    try {
-      await readFile(statePath, 'utf8');
-    } catch (error) {
-      const code = error?.code;
-      if (code === 'ENOENT') {
-        daemonStateExists = false;
-      } else {
-        throw error;
-      }
-    }
-    if (!daemonStateExists && (pid == null || !isProcessAlive(pid))) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  if (pid != null && isProcessAlive(pid)) {
-    throw new Error(`Timed out stopping daemon process ${pid}.`);
-  }
-  await rm(statePath, { force: true });
-}
-
-function isProcessAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code !== 'ESRCH';
-  }
+  await stopTestDaemonsUnderRoot(deriveSystemHome(homeDir));
 }
 
 async function writeDirectorySeeds(homeDir, providers) {
@@ -905,7 +849,7 @@ async function fetchJson(baseUrl, routePath, options = {}) {
 }
 
 test('runtime home selection rejects METABOT_HOME paths outside the v2 profiles root', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
 
   assert.throws(
     () => resolveMetabotHomeSelection({
@@ -920,7 +864,7 @@ test('runtime home selection rejects METABOT_HOME paths outside the v2 profiles 
 });
 
 test('runtime home selection rejects METABOT_HOME pointed at the raw system home', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
 
   assert.throws(
     () => resolveMetabotHomeSelection({
@@ -935,7 +879,7 @@ test('runtime home selection rejects METABOT_HOME pointed at the raw system home
 });
 
 test('runtime home selection rejects an unindexed orphan METABOT_HOME for existing-profile operations', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const orphanHome = await createProfileHome(systemHome, 'orphan-profile');
 
   assert.throws(
@@ -951,7 +895,7 @@ test('runtime home selection rejects an unindexed orphan METABOT_HOME for existi
 });
 
 test('runtime home selection rejects a legacy-only .metabot hot layout', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   await mkdir(path.join(systemHome, '.metabot', 'hot'), { recursive: true });
 
   assert.throws(
@@ -966,7 +910,7 @@ test('runtime home selection rejects a legacy-only .metabot hot layout', async (
 });
 
 test('runtime home selection reports no active profile initialized instead of falling back to raw HOME', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
 
   assert.throws(
     () => resolveMetabotHomeSelection({
@@ -980,7 +924,7 @@ test('runtime home selection reports no active profile initialized instead of fa
 });
 
 test('identity create auto-creates the slugged profile workspace and doctor reports the identity as loaded', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
   t.after(async () => stopDaemon(homeDir));
 
@@ -1034,7 +978,7 @@ test('identity create auto-creates the slugged profile workspace and doctor repo
 });
 
 test('doctor reports canonical CLI shim path using METABOT_BIN_DIR override', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
   const canonicalBinDir = path.join(systemHome, 'custom-bin');
   const canonicalMetabotPath = path.join(canonicalBinDir, 'metabot');
@@ -1067,7 +1011,7 @@ test('doctor reports canonical CLI shim path using METABOT_BIN_DIR override', as
 });
 
 test('identity create returns identity_name_conflict when an active identity with a different name already exists', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'bob');
   t.after(async () => stopDaemon(homeDir));
 
@@ -1093,7 +1037,7 @@ test('identity create returns identity_name_conflict when an active identity wit
 });
 
 test('identity list/assign/who supports switching active local bot home across registered profiles', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const bobHome = path.join(systemHome, '.metabot', 'profiles', 'bob');
   const charlesHome = path.join(systemHome, '.metabot', 'profiles', 'charles');
 
@@ -1135,7 +1079,7 @@ test('identity list/assign/who supports switching active local bot home across r
 });
 
 test('identity assign resolves a slugged profile from a human display name', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
   const canonicalHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhang');
   await mkdir(canonicalHome, { recursive: true });
@@ -1169,7 +1113,7 @@ test('identity assign resolves a slugged profile from a human display name', asy
 });
 
 test('identity assign rejects ambiguous near-tied profile matches', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
   const zhangHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhang');
   const zhaoHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhao');
@@ -1219,7 +1163,7 @@ test('identity assign rejects ambiguous near-tied profile matches', async () => 
 });
 
 test('identity create rejects duplicate names across different local homes on the same machine', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const firstHome = path.join(systemHome, '.metabot', 'profiles', 'david');
   const secondHome = path.join(systemHome, '.metabot', 'profiles', 'david-2');
 
@@ -1252,7 +1196,7 @@ test('identity create rejects duplicate names across different local homes on th
 });
 
 test('identity create rejects a ready explicit home when another indexed profile already owns the same name', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const indexedHome = path.join(systemHome, '.metabot', 'profiles', 'bob');
   const explicitHome = path.join(systemHome, '.metabot', 'profiles', 'bob-shadow');
   t.after(async () => stopDaemon(indexedHome));
@@ -1287,7 +1231,7 @@ test('identity create rejects a ready explicit home when another indexed profile
 });
 
 test('identity create ignores a fresh explicit noncanonical home and activates the canonical slugged profile', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const explicitHome = path.join(systemHome, '.metabot', 'profiles', 'custom-home');
   const canonicalHome = path.join(systemHome, '.metabot', 'profiles', 'alice');
   t.after(async () => stopDaemon(canonicalHome));
@@ -1314,7 +1258,7 @@ test('identity create ignores a fresh explicit noncanonical home and activates t
 });
 
 test('identity list reads only from manager/identity-profiles.json and does not rewrite it from runtime state', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
   const bobHome = path.join(systemHome, '.metabot', 'profiles', 'bob');
   await mkdir(path.join(bobHome, '.runtime'), { recursive: true });
@@ -1359,7 +1303,7 @@ test('identity list reads only from manager/identity-profiles.json and does not 
 });
 
 test('identity who returns an explicit error when no active profile is initialized', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
 
   const who = await runCommandWithEnv(systemHome, ['identity', 'who'], {
     HOME: systemHome,
@@ -1739,7 +1683,7 @@ test('buzz post succeeds immediately after bootstrap identity create', async (t)
 });
 
 test('buzz post --from uses the selected actor identity and default write network', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-buzz-from-'));
+  const systemHome = await mkdtempTempRoot('metabot-cli-runtime-buzz-from-');
   const aliceHome = await createProfileHome(systemHome, 'actor-alice');
   const bobHome = await createProfileHome(systemHome, 'actor-bob');
   t.after(async () => {
@@ -1771,7 +1715,7 @@ test('buzz post --from uses the selected actor identity and default write networ
 });
 
 test('buzz post --from bob uses the shared daemon and forwards bob as the actor', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cross-profile-daemon-'));
+  const systemHome = await mkdtempTempRoot('metabot-cross-profile-daemon-');
   const aliceHome = await createProfileHome(systemHome, 'alice');
   const bobHome = await createProfileHome(systemHome, 'bob');
 
@@ -1809,7 +1753,7 @@ test('buzz post --from bob uses the shared daemon and forwards bob as the actor'
 });
 
 test('metaapp view --from bob keeps the selected actor in the shared daemon localUiUrl', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-metaapp-view-daemon-'));
+  const systemHome = await mkdtempTempRoot('metabot-metaapp-view-daemon-');
   const aliceHome = await createProfileHome(systemHome, 'alice');
   const bobHome = await createProfileHome(systemHome, 'bob');
 
@@ -2727,7 +2671,7 @@ test('network services merges remote demo directory seeds and returns provider d
 });
 
 test('wallet balance --from reads the selected actor identity and address', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-wallet-from-'));
+  const systemHome = await mkdtempTempRoot('metabot-cli-runtime-wallet-from-');
   const aliceHome = await createProfileHome(systemHome, 'actor-alice');
   const bobHome = await createProfileHome(systemHome, 'actor-bob');
   t.after(async () => {
@@ -4090,7 +4034,7 @@ test('chat private writes encrypted simplemsg on chain and stores a chat trace i
 });
 
 test('chat private --from uses the selected actor identity, default write network, and local stores', async (t) => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-runtime-chat-from-'));
+  const systemHome = await mkdtempTempRoot('metabot-cli-runtime-chat-from-');
   const aliceHome = await createProfileHome(systemHome, 'actor-alice');
   const bobHome = await createProfileHome(systemHome, 'actor-bob');
   t.after(async () => {

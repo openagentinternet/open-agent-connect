@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -40,7 +40,7 @@ function makeFakeAdapter(chain, calls, overrides = {}) {
 }
 
 async function withPatchedWalletRuntime(t, options, fn) {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'oac-wallet-runtime-'));
+  const tempRoot = await mkdtempTempRoot('oac-wallet-runtime-');
   t.after(async () => {
     await rm(tempRoot, { recursive: true, force: true });
   });

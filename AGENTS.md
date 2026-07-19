@@ -47,6 +47,8 @@ Test rules:
 - Tests run with `--test-concurrency=1`.
 - `tests/cli/runtime.test.mjs` must run last; the npm scripts already enforce that.
 - If your shell defaults to an unsupported Node version, switch to a supported Node 20-24 runtime explicitly for verification.
+- Create test temp directories only through `tests/helpers/tempRoots.mjs` (`mkdtempTempRoot`/`mkdtempTempRootSync`). Raw `fs.mkdtemp(os.tmpdir(), ...)` in tests or e2e scripts is not allowed. The helper registers teardown that stops test daemons (whole process group, waited) and removes the root on success, failure, or timeout.
+- `npm test` and `npm run verify` run the suite through `scripts/run-tests-with-leak-guard.mjs`, which fails the run if new `metabot-*`/`oac-*`/`loom-*` temp roots remain under `os.tmpdir()` afterwards. `npm run test:raw` runs the suite without the guard.
 
 ## Verification Policy
 

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -22,17 +22,17 @@ async function makeProfileRoot(systemHome, slug) {
 }
 
 async function makeZipBuffer(title) {
-  const projectDir = await mkdtemp(path.join(os.tmpdir(), 'oac-metaapp-artifact-project-'));
+  const projectDir = await mkdtempTempRoot('oac-metaapp-artifact-project-');
   await mkdir(path.join(projectDir, 'bundle'), { recursive: true });
   await writeFile(path.join(projectDir, 'bundle', 'index.html'), `<!doctype html><title>${title}</title>`);
   await writeFile(path.join(projectDir, 'bundle', 'app.js'), `window.__title = ${JSON.stringify(title)};`);
-  const archivePath = path.join(await mkdtemp(path.join(os.tmpdir(), 'oac-metaapp-artifact-archive-')), 'metaapp.zip');
+  const archivePath = path.join(await mkdtempTempRoot('oac-metaapp-artifact-archive-'), 'metaapp.zip');
   await writeMetaAppZipArchive({ sourceDir: projectDir, outFile: archivePath });
   return readFile(archivePath);
 }
 
 test('artifact cache root is shared across profiles under ~/.metabot/cache/metaapps', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'oac-metaapp-shared-cache-'));
+  const systemHome = await mkdtempTempRoot('oac-metaapp-shared-cache-');
   const alice = createMetaAppArtifactCacheStore(await makeProfileRoot(systemHome, 'alice'));
   const bob = createMetaAppArtifactCacheStore(await makeProfileRoot(systemHome, 'bob'));
 
@@ -42,7 +42,7 @@ test('artifact cache root is shared across profiles under ~/.metabot/cache/metaa
 });
 
 test('artifact cache writes extracted app once and reuses it across profiles', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'oac-metaapp-artifact-cache-'));
+  const systemHome = await mkdtempTempRoot('oac-metaapp-artifact-cache-');
   const alice = createMetaAppArtifactCacheStore(await makeProfileRoot(systemHome, 'alice'), { now: () => 1000 });
   const bob = createMetaAppArtifactCacheStore(await makeProfileRoot(systemHome, 'bob'), { now: () => 2000 });
   const descriptor = {
@@ -67,7 +67,7 @@ test('artifact cache writes extracted app once and reuses it across profiles', a
 });
 
 test('artifact cache misses when current effective content reference changes', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'oac-metaapp-artifact-cache-miss-'));
+  const systemHome = await mkdtempTempRoot('oac-metaapp-artifact-cache-miss-');
   const store = createMetaAppArtifactCacheStore(await makeProfileRoot(systemHome, 'alice'));
   const descriptor = {
     metaAppPinId: METAAPP_PIN_ID,
@@ -94,7 +94,7 @@ test('artifact cache misses when current effective content reference changes', a
 });
 
 test('artifact cache reports shared stats and clears a pin artifact', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'oac-metaapp-artifact-cache-stats-'));
+  const systemHome = await mkdtempTempRoot('oac-metaapp-artifact-cache-stats-');
   const store = createMetaAppArtifactCacheStore(await makeProfileRoot(systemHome, 'alice'));
   const descriptor = {
     metaAppPinId: METAAPP_PIN_ID,

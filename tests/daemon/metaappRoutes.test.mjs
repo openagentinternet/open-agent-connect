@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { createHttpServer } = require('../../dist/daemon/httpServer.js');
@@ -247,7 +247,7 @@ test('GET /api/metaapp/preview-assets/<previewId>/missing.html maps failed asset
 });
 
 test('GET /api/metaapp/preview-assets from default handlers preserves registry failure codes', async (t) => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-metaapp-route-default-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-metaapp-route-default-');
   const homeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'alice');
   await mkdir(homeDir, { recursive: true });
   const server = await startServer(createDefaultMetabotDaemonHandlers({

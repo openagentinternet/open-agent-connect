@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempTempRootSync } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
 
 function createProfileHome(prefix, slug = 'test-profile') {
-  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const systemHome = mkdtempTempRootSync(prefix);
   const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
   mkdirSync(homeDir, { recursive: true });
   return homeDir;

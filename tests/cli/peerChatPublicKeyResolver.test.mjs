@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
@@ -26,7 +26,7 @@ async function createProfile(systemHomeDir, slug, globalMetaId) {
 }
 
 test('local profile chat public key resolver reads runtime identity before secrets', async () => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-peer-key-resolver-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-peer-key-resolver-');
   const homeDir = await createProfile(systemHomeDir, 'alice', 'idq-alice');
 
   await createRuntimeStateStore(homeDir).writeState({
@@ -58,7 +58,7 @@ test('local profile chat public key resolver reads runtime identity before secre
 });
 
 test('local profile chat public key resolver falls back to identity secrets', async () => {
-  const systemHomeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-peer-key-secret-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-peer-key-secret-');
   const homeDir = await createProfile(systemHomeDir, 'bob', 'idq-bob');
   await createFileSecretStore(homeDir).writeIdentitySecrets({
     globalMetaId: 'idq-bob',

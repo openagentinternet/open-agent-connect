@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -19,7 +19,7 @@ test('inferUploadContentType maps common file extensions and falls back to octet
 });
 
 test('uploadLocalFileToChain reads the local file, writes /file to chain, and returns a metafile URI', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-file-upload-'));
+  const tempDir = await mkdtempTempRoot('metabot-file-upload-');
   const filePath = path.join(tempDir, 'photo.png');
   await writeFile(filePath, Buffer.from('hello metabot file'));
 
@@ -69,7 +69,7 @@ test('uploadLocalFileToChain reads the local file, writes /file to chain, and re
 });
 
 test('uploadLocalFileToChain appends a content type extension when the file name has none', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-file-upload-mime-'));
+  const tempDir = await mkdtempTempRoot('metabot-file-upload-mime-');
   const filePath = path.join(tempDir, 'homepage');
   await writeFile(filePath, Buffer.from('<!doctype html>'));
 
@@ -126,7 +126,7 @@ test('uploadFileBufferToChain appends a content type extension when the file nam
 });
 
 test('uploadLocalFileToChain rejects DOGE file uploads before writing to chain', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-file-upload-doge-'));
+  const tempDir = await mkdtempTempRoot('metabot-file-upload-doge-');
   const filePath = path.join(tempDir, 'photo.png');
   await writeFile(filePath, Buffer.from('hello doge guard'));
 

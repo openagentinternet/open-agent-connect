@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { lstat, mkdir, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -24,7 +24,7 @@ function fakeSigner() {
 }
 
 async function tempWorkspace() {
-  return mkdtemp(path.join(os.tmpdir(), 'oac-provider-artifacts-'));
+  return mkdtempTempRoot('oac-provider-artifacts-');
 }
 
 async function writeWorkspaceFile(workspace, relativePath, content = 'artifact') {

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -38,7 +38,7 @@ const {
 } = require('../../dist/core/platform/platformRegistry.js');
 
 async function createTempDir(prefix = 'metabot-llm-executor-') {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  return mkdtempTempRoot(prefix);
 }
 
 async function writeExecutableScript(dir, name, source) {

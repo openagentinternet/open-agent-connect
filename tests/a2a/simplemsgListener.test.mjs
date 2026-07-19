@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createECDH } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -27,7 +27,7 @@ function createIdentityPair() {
 }
 
 async function createSystemHome(t) {
-  const systemHomeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-simplemsg-listener-'));
+  const systemHomeDir = await mkdtempTempRoot('metabot-simplemsg-listener-');
   t.after(async () => {
     await fs.rm(systemHomeDir, { recursive: true, force: true });
   });

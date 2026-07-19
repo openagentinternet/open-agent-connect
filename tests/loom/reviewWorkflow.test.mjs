@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -225,7 +225,7 @@ function createWorkflowStore(events, state = workflowState(), root = '/tmp/metab
 
 async function createDeps(overrides = {}) {
   const events = overrides.events ?? [];
-  const root = overrides.root ?? await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-loom-review-'));
+  const root = overrides.root ?? await mkdtempTempRoot('metabot-loom-review-');
   const input = {
     from: 'requester',
     taskPinId,

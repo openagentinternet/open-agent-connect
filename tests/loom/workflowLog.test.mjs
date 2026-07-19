@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { access, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -351,7 +351,7 @@ test('renders circular and bigint diagnostics without throwing', () => {
 });
 
 test('writes rendered process logs to the expected path', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'loom-process-log-'));
+  const directory = await mkdtempTempRoot('loom-process-log-');
   try {
     const result = await writeLoomProcessLogFile({
       directory,
@@ -378,7 +378,7 @@ test('writes rendered process logs to the expected path', async () => {
 });
 
 test('keeps tiny capped written process logs within maxBytes after newline handling', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'loom-process-log-'));
+  const directory = await mkdtempTempRoot('loom-process-log-');
   const maxBytes = 1;
   try {
     const result = await writeLoomProcessLogFile({
@@ -396,7 +396,7 @@ test('keeps tiny capped written process logs within maxBytes after newline handl
 });
 
 test('does not exceed exact process log byte caps when writing newline', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'loom-process-log-'));
+  const directory = await mkdtempTempRoot('loom-process-log-');
   const baseInput = {
     taskPinId: 'task-pin',
     claimPinId: 'claim-pin',
@@ -422,7 +422,7 @@ test('does not exceed exact process log byte caps when writing newline', async (
 });
 
 test('rejects unsafe process log filenames without writing outside the directory', async () => {
-  const parentDirectory = await mkdtemp(join(tmpdir(), 'loom-process-log-parent-'));
+  const parentDirectory = await mkdtempTempRoot('loom-process-log-parent-');
   const directory = join(parentDirectory, 'logs');
   const outsidePath = join(parentDirectory, 'escape.md');
   try {

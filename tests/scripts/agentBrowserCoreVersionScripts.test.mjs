@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const execFile = promisify(execFileCallback);
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
@@ -63,7 +63,7 @@ async function writeJson(filePath, value) {
 }
 
 async function createFixtureRepo(t, options = {}) {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-abc-version-'));
+  const tempRoot = await mkdtempTempRoot('oac-abc-version-');
   t.after(async () => fs.rm(tempRoot, { recursive: true, force: true }));
 
   const rootPackage = createRootPackage(options.packageVersion ?? '0.3.0');

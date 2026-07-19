@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
@@ -208,7 +209,7 @@ test('runCli dispatches `metabot doctor` and preserves the doctor envelope', asy
 });
 
 test('runCli doctor reports when the invoked CLI entry differs from the canonical shim target', async () => {
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-cli-doctor-entry-'));
+  const homeDir = await mkdtempTempRoot('metabot-cli-doctor-entry-');
   const canonicalShimPath = path.join(homeDir, '.metabot', 'bin', 'metabot');
   const canonicalTargetPath = path.join(homeDir, 'dev-worktree', 'dist', 'cli', 'main.js');
   const currentEntryPath = '/opt/homebrew/lib/node_modules/open-agent-connect/dist/cli/main.js';
@@ -576,7 +577,7 @@ test('runCli dispatches `metabot ui open` with actor, session, and service selec
 });
 
 test('runCli doctor fails closed when no active profile is initialized', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const stdout = [];
   const stderr = [];
 
@@ -604,7 +605,7 @@ test('runCli doctor fails closed when no active profile is initialized', async (
 });
 
 test('runCli doctor rejects an explicit orphan METABOT_HOME that is not manager-indexed', async () => {
-  const systemHome = await mkdtemp(path.join(os.tmpdir(), 'metabot-system-home-'));
+  const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const orphanHome = path.join(systemHome, '.metabot', 'profiles', 'orphan-profile');
   const stdout = [];
   const stderr = [];

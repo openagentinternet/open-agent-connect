@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -18,7 +18,7 @@ function normalizePathForAssert(filePath) {
 }
 
 async function profileHome(prefix = 'loom-dashboard-store-') {
-  return path.join(await mkdtemp(path.join(os.tmpdir(), prefix)), '.metabot', 'profiles', 'eric');
+  return path.join(await mkdtempTempRoot(prefix), '.metabot', 'profiles', 'eric');
 }
 
 function clone(value) {

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -16,7 +16,7 @@ const {
 } = require('../../dist/core/identity/identityProfiles.js');
 
 async function createSystemHome() {
-  return mkdtemp(path.join(os.tmpdir(), 'metabot-identity-profiles-'));
+  return mkdtempTempRoot('metabot-identity-profiles-');
 }
 
 test('profile records persist slug and aliases in the manager index', async () => {

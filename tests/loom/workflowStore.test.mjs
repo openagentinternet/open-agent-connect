@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -37,7 +37,7 @@ function baseWorkflowState(overrides = {}) {
 }
 
 test('resolves workflow paths under profile runtime loom root', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-'), '.metabot', 'profiles', 'eric');
   const paths = resolveLoomWorkflowPaths(profileHome, { taskPinId, claimPinId, localRunId: 'run-1' });
   assert.match(normalizePathForAssert(paths.loomRuntimeRoot), /\.runtime\/loom$/);
   assert.match(normalizePathForAssert(paths.workflowsRoot), /\.runtime\/loom\/workflows$/);
@@ -51,7 +51,7 @@ test('resolves workflow paths under profile runtime loom root', async () => {
 });
 
 test('resolves pending claim preview paths with run fallback', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-preview-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-preview-'), '.metabot', 'profiles', 'eric');
   const paths = resolveLoomWorkflowPaths(profileHome, { taskPinId });
   assert.match(normalizePathForAssert(paths.workflowPath), /\.runtime\/loom\/workflows\/a+.*\/pending-claim\.json$/);
   assert.match(normalizePathForAssert(paths.workspaceRepoPath), /\.runtime\/loom\/workspaces\/a+.*\/pending-claim\/repo$/);
@@ -59,7 +59,7 @@ test('resolves pending claim preview paths with run fallback', async () => {
 });
 
 test('workflow store resolve supports pending claim preview paths', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-resolve-preview-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-resolve-preview-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const paths = store.resolve(taskPinId);
   assert.match(normalizePathForAssert(paths.workflowPath), /\.runtime\/loom\/workflows\/a+.*\/pending-claim\.json$/);
@@ -70,7 +70,7 @@ test('workflow store resolve supports pending claim preview paths', async () => 
 });
 
 test('workflow store writes and reads normalized state', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-state-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-state-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const written = await store.write(baseWorkflowState({
     developerMetaBotSlug: 'eric',
@@ -86,7 +86,7 @@ test('workflow store writes and reads normalized state', async () => {
 });
 
 test('workflow store normalizes missing statuses on read', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-read-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-read-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const workflowPath = store.resolve(taskPinId, claimPinId).workflowPath;
   await mkdir(path.dirname(workflowPath), { recursive: true });
@@ -96,7 +96,7 @@ test('workflow store normalizes missing statuses on read', async () => {
 });
 
 test('workflow store returns null for malformed state', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-malformed-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-malformed-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const workflowPath = store.resolve(taskPinId, claimPinId).workflowPath;
   await mkdir(path.dirname(workflowPath), { recursive: true });
@@ -105,7 +105,7 @@ test('workflow store returns null for malformed state', async () => {
 });
 
 test('workflow store returns null when statuses is not an array', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-bad-statuses-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-bad-statuses-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const workflowPath = store.resolve(taskPinId, claimPinId).workflowPath;
   await mkdir(path.dirname(workflowPath), { recursive: true });
@@ -116,7 +116,7 @@ test('workflow store returns null when statuses is not an array', async () => {
 });
 
 test('workflow store returns null for malformed status entry', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-bad-status-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-bad-status-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const workflowPath = store.resolve(taskPinId, claimPinId).workflowPath;
   await mkdir(path.dirname(workflowPath), { recursive: true });
@@ -127,7 +127,7 @@ test('workflow store returns null for malformed status entry', async () => {
 });
 
 test('workflow store returns null for malformed commit entry', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-bad-commit-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-bad-commit-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const workflowPath = store.resolve(taskPinId, claimPinId).workflowPath;
   await mkdir(path.dirname(workflowPath), { recursive: true });
@@ -142,7 +142,7 @@ test('workflow store returns null for malformed commit entry', async () => {
 });
 
 test('workflow store write does not create repo directories', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-side-effects-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-side-effects-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const paths = store.resolve(taskPinId, claimPinId);
   await store.write(baseWorkflowState());
@@ -151,7 +151,7 @@ test('workflow store write does not create repo directories', async () => {
 });
 
 test('workflow store write leaves no temp file after success', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-atomic-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-atomic-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   const workflowPath = store.resolve(taskPinId, claimPinId).workflowPath;
   await store.write(baseWorkflowState());
@@ -160,7 +160,7 @@ test('workflow store write leaves no temp file after success', async () => {
 });
 
 test('workflow store returns null for missing state', async () => {
-  const profileHome = path.join(await mkdtemp(path.join(os.tmpdir(), 'loom-store-missing-')), '.metabot', 'profiles', 'eric');
+  const profileHome = path.join(await mkdtempTempRoot('loom-store-missing-'), '.metabot', 'profiles', 'eric');
   const store = createLoomWorkflowStore(profileHome);
   assert.equal(await store.read(taskPinId, claimPinId), null);
 });

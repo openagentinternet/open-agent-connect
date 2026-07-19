@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const {
@@ -31,7 +31,7 @@ const DEFAULT_IDENTITY = {
 };
 
 async function tempFile(name, content) {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-metafs-large-'));
+  const tempDir = await mkdtempTempRoot('metabot-metafs-large-');
   const filePath = path.join(tempDir, name);
   const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
   await writeFile(filePath, buffer);

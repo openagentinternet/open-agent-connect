@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempTempRootSync } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -18,7 +18,7 @@ const LOCAL_GLOBAL_META_ID = 'idq14hmvlocal000000000000000000000000';
 const PEER_GLOBAL_META_ID = 'idq1g35dpeer0000000000000000000000000';
 
 function createProfileHome(prefix, slug = 'alice') {
-  const systemHome = mkdtempSync(path.join(tmpdir(), prefix));
+  const systemHome = mkdtempTempRootSync(prefix);
   const homeDir = path.join(systemHome, '.metabot', 'profiles', slug);
   mkdirSync(homeDir, { recursive: true });
   return homeDir;

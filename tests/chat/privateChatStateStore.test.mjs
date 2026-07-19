@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
@@ -10,7 +10,7 @@ const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createPrivateChatStateStore } = require('../../dist/core/chat/privateChatStateStore.js');
 
 async function createTempProfileHome() {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'metabot-chat-test-'));
+  const base = await mkdtempTempRoot('metabot-chat-test-');
   const profileRoot = path.join(base, '.metabot', 'profiles', 'test-slug');
   const managerRoot = path.join(base, '.metabot', 'manager');
   const skillsRoot = path.join(base, '.metabot', 'skills');
