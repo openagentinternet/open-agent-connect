@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { existsSync, readdirSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
@@ -375,7 +377,9 @@ test('file upload failure returns metaapp_upload_failed and skips chain write', 
   assert.equal(result.state, 'failed');
   assert.equal(result.code, 'metaapp_upload_failed');
   assert.ok(result.data.archive);
-  assert.equal(typeof result.data.archive.filePath, 'string');
+  // The staging directory is removed after upload; archive no longer exposes a filePath.
+  assert.equal('filePath' in result.data.archive, false);
+  assert.equal(typeof result.data.archive.sha256, 'string');
   assert.deepEqual(deps.calls.map((call) => call.type), ['upload']);
 });
 
@@ -593,4 +597,142 @@ test('commentMetaApp writes paycomment payload', async () => {
     contentType: 'text/plain;utf-8',
     commentTo: CREATE_PIN,
   });
+});
+
+// The staging directory created by makeArchive (os.tmpdir()) must be removed
+// after publish/update, on success and on every failure path. These tests run
+// the production archive path by NOT injecting makeTempDir, then capture the
+// staging dir from the upload input and assert it no longer exists afterwards.
+function listMetabotMetaappTmpdirEntries() {
+  try {
+    return readdirSync(os.tmpdir()).filter((entry) => entry.startsWith('metabot-metaapp-'));
+  } catch {
+    return [];
+  }
+}
+
+function captureStagingDirDeps(stagingDirRef, overrides = {}) {
+  const { uploadFile: overrideUpload, ...rest } = overrides;
+  return createDeps({
+    // Force the production os.tmpdir() staging path so the test can observe
+    // that makeArchive cleans up the directory it owns. Callers that need the
+    // injected makeTempDir can pass it back via overrides.
+    makeTempDir: undefined,
+    async uploadFile(input) {
+      stagingDirRef.dir = path.dirname(input.filePath);
+      if (overrideUpload) {
+        return overrideUpload(input);
+      }
+      return {
+        pinId: 'upload-pin',
+        txids: ['upload-tx'],
+        network: input.network ?? 'mvc',
+        filePath: input.filePath,
+        contentType: input.contentType,
+        bytes: 123,
+        metafileUri: 'metafile://upload-pin.zip',
+        globalMetaId: 'owner-meta-id',
+      };
+    },
+    ...rest,
+  });
+}
+
+test('publishMetaApp removes the self-created staging directory after success', async () => {
+  const projectDir = await makeProject('staging-cleanup-publish');
+  const stagingDirRef = {};
+  const deps = captureStagingDirDeps(stagingDirRef);
+  // No makeTempDir injection: makeArchive owns and must clean the staging dir.
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.state, 'success');
+  assert.ok(stagingDirRef.dir, 'upload received a staging filePath');
+  assert.equal(existsSync(stagingDirRef.dir), false, 'staging dir removed after publish');
+  assert.equal('filePath' in result.data.archive, false);
+});
+
+test('updateMetaApp removes the self-created staging directory after success', async () => {
+  const projectDir = await makeProject('staging-cleanup-update');
+  const stagingDirRef = {};
+  const deps = captureStagingDirDeps(stagingDirRef);
+
+  const result = await updateMetaApp({
+    projectDir,
+    targetPinId: UPDATE_TARGET_PIN,
+    confirm: true,
+  }, deps);
+
+  assert.equal(result.state, 'success');
+  assert.ok(stagingDirRef.dir, 'upload received a staging filePath');
+  assert.equal(existsSync(stagingDirRef.dir), false, 'staging dir removed after update');
+});
+
+test('publishMetaApp removes the staging directory even when upload fails', async () => {
+  const projectDir = await makeProject('staging-cleanup-upload-failure');
+  const stagingDirRef = {};
+  const deps = captureStagingDirDeps(stagingDirRef, {
+    async uploadFile() {
+      throw new Error('upload exploded');
+    },
+  });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'metaapp_upload_failed');
+  assert.ok(stagingDirRef.dir, 'upload was attempted with a staging filePath');
+  assert.equal(existsSync(stagingDirRef.dir), false, 'staging dir removed after upload failure');
+});
+
+test('publishMetaApp removes the staging directory even when chain write fails', async () => {
+  const projectDir = await makeProject('staging-cleanup-write-failure');
+  const stagingDirRef = {};
+  const deps = captureStagingDirDeps(stagingDirRef, {
+    async writeChain() {
+      throw new Error('chain exploded');
+    },
+  });
+
+  const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'metaapp_publish_failed');
+  assert.equal(existsSync(stagingDirRef.dir), false, 'staging dir removed after chain-write failure');
+});
+
+test('publishMetaApp keeps the staging directory supplied via deps.makeTempDir', async () => {
+  const projectDir = await makeProject('staging-cleanup-injected');
+  const injectedDir = await mkdtemp(path.join(os.tmpdir(), 'metabot-test-injected-staging-'));
+  try {
+    const stagingDirRef = {};
+    const deps = captureStagingDirDeps(stagingDirRef, {
+      async makeTempDir() {
+        return injectedDir;
+      },
+    });
+
+    const result = await publishMetaApp({ projectDir, confirm: true }, deps);
+
+    assert.equal(result.state, 'success');
+    assert.equal(stagingDirRef.dir, injectedDir, 'upload used the injected staging dir');
+    // Caller-owned staging dir must survive the publish lifecycle.
+    assert.equal(existsSync(injectedDir), true, 'injected staging dir is left untouched');
+  } finally {
+    await rm(injectedDir, { recursive: true, force: true });
+  }
+});
+
+test('publishMetaApp confirmation preview removes the staging directory', async () => {
+  const projectDir = await makeProject('staging-cleanup-preview');
+  // confirm:false builds an archive for the preview payload but must still clean up.
+  // Omit makeTempDir so makeArchive runs the production os.tmpdir() path it owns.
+  const deps = createDeps({ makeTempDir: undefined });
+  const beforeEntries = new Set(listMetabotMetaappTmpdirEntries());
+
+  const result = await publishMetaApp({ projectDir, confirm: false }, deps);
+
+  assert.equal(result.state, 'awaiting_confirmation');
+  const leftover = listMetabotMetaappTmpdirEntries().filter((entry) => !beforeEntries.has(entry));
+  assert.equal(leftover.length, 0, `confirmation preview leaked staging dirs: ${leftover.join(', ')}`);
 });

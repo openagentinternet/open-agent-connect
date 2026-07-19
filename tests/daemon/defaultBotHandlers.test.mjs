@@ -4,12 +4,6 @@ import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
-import { watchTempRootPrefix } from '../helpers/tempRoots.mjs';
-
-// The default metaapp publish/update handlers stage archives in os.tmpdir()
-// and keep them as upload evidence (see makeArchive in src/core/metaapp/publish.ts).
-// Sweep whatever this file's tests stage so the temp roots do not leak.
-watchTempRootPrefix('metabot-metaapp-');
 
 const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
