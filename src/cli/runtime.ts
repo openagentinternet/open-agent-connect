@@ -1606,6 +1606,12 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
     deps: PrivateChatAutoReplyDependencies,
     config: PrivateChatAutoReplyConfig,
   ) => PrivateChatAutoReplyOrchestrator;
+  // Resolves the live auto-reply config for a given profile home dir. The
+  // returned object must be the same reference that the daemon's setAutoReply
+  // handler mutates, so that toggling auto-reply off at runtime actually gates
+  // inbound-message handling for that profile. When omitted, the dispatcher
+  // falls back to the shared autoReplyConfig (kept for tests/legacy callers).
+  resolveAutoReplyConfigForHome?: (homeDir: string) => PrivateChatAutoReplyConfig;
 }
 
 type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
@@ -1976,6 +1982,12 @@ export function createPrivateChatAutoReplyProfileDispatcher(
         logWarning: (scope, message) => console.warn(scope, message),
       });
     const profileGlobalMetaId = normalizeEnvText(profile.globalMetaId);
+    // Use the live per-home config (the same object setAutoReply mutates) so a
+    // runtime toggle-off is observed by this orchestrator immediately. Fall
+    // back to the shared config when no resolver is wired (tests/legacy).
+    const profileAutoReplyConfig = input.resolveAutoReplyConfigForHome
+      ? input.resolveAutoReplyConfigForHome(profileHomeDir)
+      : input.autoReplyConfig;
     const orchestrator = createOrchestrator({
       stateStore: createPrivateChatStateStore(profilePaths),
       strategyStore: createChatStrategyStore(profilePaths),
@@ -1987,7 +1999,7 @@ export function createPrivateChatAutoReplyProfileDispatcher(
       },
       resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
       replyRunner,
-    }, input.autoReplyConfig);
+    }, profileAutoReplyConfig);
 
     orchestrators.set(cacheKey, orchestrator);
     return orchestrator;
@@ -3972,6 +3984,12 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     autoReplyConfig: sharedAutoReplyConfig,
     resolvePeerChatPublicKey,
     llmExecutor,
+    // Wire the live per-home config resolver so each profile orchestrator reads
+    // the same object that handlers.chat.setAutoReply mutates. Without this,
+    // toggling Auto-Reply off in /ui/bot (or via the CLI) for a non-default bot
+    // would be ignored — the orchestrator would keep reading the daemon-default
+    // shared config.
+    resolveAutoReplyConfigForHome: (homeDir) => handlers.resolveAutoReplyConfigForHome(homeDir),
     handleOrderProtocolMessageForProfile: async (profile, message) => {
       const handler = handlers.services?.handleInboundOrderProtocolMessage;
       if (!handler) {

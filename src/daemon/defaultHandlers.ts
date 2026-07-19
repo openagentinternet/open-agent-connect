@@ -4933,7 +4933,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
   metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
   conversationProfileFetch?: typeof fetch;
   env?: NodeJS.ProcessEnv;
-}): MetabotDaemonHttpHandlers {
+}): MetabotDaemonHttpHandlers & {
+  // Internal helper (not an HTTP route). Returns the live per-home auto-reply
+  // config object that setAutoReply mutates, so other components (e.g. the
+  // profile auto-reply dispatcher) can read the same reference and observe
+  // runtime toggles immediately.
+  resolveAutoReplyConfigForHome: (homeDir: string) => PrivateChatAutoReplyConfig;
+} {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   // Create default adapter registry if none provided (backward compat)
@@ -16235,6 +16241,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     },
   };
+  // Attach the live per-home auto-reply config resolver so callers in the same
+  // process (e.g. the profile auto-reply dispatcher) read the exact object that
+  // setAutoReply mutates. Not an HTTP route; ignored by the router.
+  (handlers as MetabotDaemonHttpHandlers & {
+    resolveAutoReplyConfigForHome: (homeDir: string) => PrivateChatAutoReplyConfig;
+  }).resolveAutoReplyConfigForHome = resolveAutoReplyConfigForHome;
   daemonHandlers = handlers;
-  return handlers;
+  return handlers as MetabotDaemonHttpHandlers & {
+    resolveAutoReplyConfigForHome: (homeDir: string) => PrivateChatAutoReplyConfig;
+  };
 }
