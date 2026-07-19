@@ -11,6 +11,7 @@ const {
   createPrivateChatAutoReplyProfileDispatcher,
   replayUnhandledA2AOrderMessagesForProfiles,
 } = require('../../dist/cli/runtime.js');
+const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
@@ -111,6 +112,16 @@ async function createProfileHome(t, slug) {
     await rm(systemHomeDir, { recursive: true, force: true });
   });
   return homeDir;
+}
+
+function readOnlySigner() {
+  return {
+    getIdentity: async () => ({}),
+    getPrivateChatIdentity: async () => ({}),
+    writePin: async () => {
+      throw new Error('writePin should not be called by auto-reply config handlers');
+    },
+  };
 }
 
 async function createRegisteredProfile(t, systemHomeDir, input) {
@@ -586,4 +597,87 @@ test('startup recovery skips persisted ORDER messages that already have provider
 
   assert.equal(result.replayed, 0);
   assert.equal(result.skipped, 1);
+});
+
+// Regression: toggling Auto-Reply off (via the UI or the CLI) for a non-default
+// bot profile must actually stop that profile's orchestrator from replying.
+// Previously the dispatcher's per-profile orchestrator closed over the daemon-
+// default shared config, while setAutoReply mutated a detached per-home copy,
+// so the toggle was silently ignored for every bot except the active one.
+test('setAutoReply off for a non-default profile is observed by the dispatcher orchestrator', async (t) => {
+  const systemHomeDir = await mkdtempTempRoot('metabot-auto-reply-toggle-regression-');
+  const daemonHomeDir = await createRegisteredProfile(t, systemHomeDir, {
+    name: 'Daemon Active',
+    slug: 'daemon-active',
+    globalMetaId: 'idq1actv00000000000000000000000000000',
+  });
+  const betaHomeDir = await createRegisteredProfile(t, systemHomeDir, {
+    name: 'Beta Bot',
+    slug: 'beta-bot',
+    globalMetaId: 'idq1beta00000000000000000000000000000',
+  });
+  t.after(async () => {
+    await rm(systemHomeDir, { recursive: true, force: true });
+  });
+
+  const sharedAutoReplyConfig = {
+    enabled: true,
+    acceptPolicy: 'accept_all',
+    defaultStrategyId: null,
+  };
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: daemonHomeDir,
+    systemHomeDir,
+    signer: readOnlySigner(),
+    getDaemonRecord: () => null,
+    autoReplyConfig: sharedAutoReplyConfig,
+  });
+
+  const handled = [];
+  const dispatcher = createPrivateChatAutoReplyProfileDispatcher({
+    autoReplyConfig: sharedAutoReplyConfig,
+    resolveAutoReplyConfigForHome: (homeDir) => handlers.resolveAutoReplyConfigForHome(homeDir),
+    resolvePeerChatPublicKey: async () => 'peer-chat-key',
+    llmExecutor: { execute: async () => 'session', getSession: async () => null },
+    createOrchestrator: (_deps, config) => ({
+      handleInboundMessage: async () => {
+        // Mirror the real orchestrator's enabled gate.
+        if (!config.enabled) return;
+        handled.push(true);
+      },
+    }),
+  });
+
+  const betaProfile = {
+    name: 'Beta Bot',
+    slug: 'beta-bot',
+    aliases: ['beta-bot'],
+    homeDir: betaHomeDir,
+    globalMetaId: 'idq1beta00000000000000000000000000000',
+    mvcAddress: 'mvc-beta',
+    createdAt: 1_777_000_000_000,
+    updatedAt: 1_777_000_000_000,
+  };
+  const inbound = {
+    fromGlobalMetaId: 'idq1peer00000000000000000000000000000',
+    content: 'hi beta',
+    messagePinId: 'incoming-pin-toggle',
+    fromChatPublicKey: 'peer-chat-key',
+    timestamp: 1_777_000_000_001,
+    rawMessage: null,
+  };
+
+  // Prime the orchestrator (lazily created, closes over the live per-home config).
+  await dispatcher.handleInboundMessage(betaProfile, inbound);
+  assert.equal(handled.length, 1, 'orchestrator handled the inbound message while enabled');
+
+  // Toggle Auto-Reply off for the non-default profile via the same handler the
+  // UI and CLI use.
+  const disabled = await handlers.chat.setAutoReply({ from: 'beta-bot', enabled: false });
+  assert.equal(disabled.ok, true);
+  assert.equal(disabled.data.enabled, false);
+
+  // The very same orchestrator instance must now observe enabled=false and skip.
+  await dispatcher.handleInboundMessage(betaProfile, inbound);
+  assert.equal(handled.length, 1, 'orchestrator skipped the inbound message after toggle off');
 });
