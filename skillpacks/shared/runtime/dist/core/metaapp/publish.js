@@ -202,13 +202,41 @@ function manualActionResult(plan, manifest) {
     });
 }
 async function makeArchive(input) {
-    const tempDir = input.deps.makeTempDir
-        ? await input.deps.makeTempDir()
-        : await node_fs_1.promises.mkdtemp(node_path_1.default.join(node_os_1.default.tmpdir(), 'metabot-metaapp-'));
-    return (0, zipArchive_1.writeMetaAppZipArchive)({
-        sourceDir: input.artifactDir,
-        outFile: node_path_1.default.join(tempDir, 'metaapp.zip'),
-    });
+    let tempDir;
+    let ownsTempDir;
+    if (input.deps.makeTempDir) {
+        tempDir = await input.deps.makeTempDir();
+        // A temp dir supplied via deps belongs to the caller; we must not remove it.
+        ownsTempDir = false;
+    }
+    else {
+        tempDir = await node_fs_1.promises.mkdtemp(node_path_1.default.join(node_os_1.default.tmpdir(), 'metabot-metaapp-'));
+        ownsTempDir = true;
+    }
+    try {
+        const archive = await (0, zipArchive_1.writeMetaAppZipArchive)({
+            sourceDir: input.artifactDir,
+            outFile: node_path_1.default.join(tempDir, 'metaapp.zip'),
+        });
+        return { ...archive, tempDir, ownsTempDir };
+    }
+    catch (error) {
+        if (ownsTempDir) {
+            await node_fs_1.promises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+        }
+        throw error;
+    }
+}
+// Public archive payload exposed in command results. The staging directory is
+// always removed after upload (or immediately on archive failure), so callers
+// must not receive a filePath that would dangle; only the immutable archive
+// metadata is surfaced.
+function publicArchive(archive) {
+    return {
+        bytes: archive.bytes,
+        sha256: archive.sha256,
+        entries: archive.entries,
+    };
 }
 async function createConfirmationData(input, deps, plan, manifest) {
     const data = createPreviewData(input, deps, plan, manifest);
@@ -216,19 +244,26 @@ async function createConfirmationData(input, deps, plan, manifest) {
         return data;
     }
     const archive = await makeArchive({ deps, artifactDir: plan.artifactDir });
-    data.archivePreview = {
-        bytes: archive.bytes,
-        sha256: archive.sha256,
-        entries: archive.entries,
-    };
-    data.payloadPreview = cleanManifestForPayload(finalizeManifestForWrite({
-        plan,
-        manifest,
-        artifactUri: METAAPP_RUNTIME_URI_PREVIEW,
-        contentHash: archive.sha256,
-        compatibilityMirrorContent: input.compatibilityMirrorContent,
-    }));
-    return data;
+    try {
+        data.archivePreview = {
+            bytes: archive.bytes,
+            sha256: archive.sha256,
+            entries: archive.entries,
+        };
+        data.payloadPreview = cleanManifestForPayload(finalizeManifestForWrite({
+            plan,
+            manifest,
+            artifactUri: METAAPP_RUNTIME_URI_PREVIEW,
+            contentHash: archive.sha256,
+            compatibilityMirrorContent: input.compatibilityMirrorContent,
+        }));
+        return data;
+    }
+    finally {
+        if (archive.ownsTempDir) {
+            await node_fs_1.promises.rm(archive.tempDir, { recursive: true, force: true }).catch(() => undefined);
+        }
+    }
 }
 function uploadArtifactUri(upload) {
     const metafileUri = normalizeText(upload.metafileUri);
@@ -258,86 +293,93 @@ async function writePublishedMetaApp(input) {
         deps: input.deps,
         artifactDir: input.plan.artifactDir,
     });
-    let upload;
     try {
-        upload = await input.deps.uploadFile({
-            filePath: archive.filePath,
-            contentType: 'application/zip',
-            network: input.network,
+        let upload;
+        try {
+            upload = await input.deps.uploadFile({
+                filePath: archive.filePath,
+                contentType: 'application/zip',
+                network: input.network,
+            });
+        }
+        catch (error) {
+            const feeAssistData = readFeeAssistFailureData(error);
+            return (0, commandResult_1.commandFailed)('metaapp_upload_failed', `Unable to upload MetaApp archive: ${errorMessage(error)}`, {
+                data: {
+                    archive: publicArchive(archive),
+                    ...(feeAssistData ?? {}),
+                },
+            });
+        }
+        const artifactUri = uploadArtifactUri(upload);
+        const manifest = finalizeManifestForWrite({
+            plan: input.plan,
+            manifest: input.manifest,
+            artifactUri,
+            contentHash: archive.sha256,
+            compatibilityMirrorContent: input.compatibilityMirrorContent,
         });
-    }
-    catch (error) {
-        const feeAssistData = readFeeAssistFailureData(error);
-        return (0, commandResult_1.commandFailed)('metaapp_upload_failed', `Unable to upload MetaApp archive: ${errorMessage(error)}`, {
-            data: {
-                archive,
-                ...(feeAssistData ?? {}),
-            },
-        });
-    }
-    const artifactUri = uploadArtifactUri(upload);
-    const manifest = finalizeManifestForWrite({
-        plan: input.plan,
-        manifest: input.manifest,
-        artifactUri,
-        contentHash: archive.sha256,
-        compatibilityMirrorContent: input.compatibilityMirrorContent,
-    });
-    const payload = cleanManifestForPayload(manifest);
-    let chainWrite;
-    try {
-        chainWrite = await input.deps.writeChain({
+        const payload = cleanManifestForPayload(manifest);
+        let chainWrite;
+        try {
+            chainWrite = await input.deps.writeChain({
+                operation: input.operation,
+                path: input.path,
+                contentType: 'application/json',
+                payload: JSON.stringify(payload),
+                network: input.network,
+            });
+        }
+        catch (error) {
+            return (0, commandResult_1.commandFailed)('metaapp_publish_failed', `Unable to write MetaApp protocol payload: ${errorMessage(error)}`, {
+                data: {
+                    archive: publicArchive(archive),
+                    upload,
+                    payload,
+                },
+            });
+        }
+        const pinId = (0, pinId_1.assertMetaAppPinId)(chainWrite.pinId, 'chain write pinId');
+        const firstPinId = input.operation === 'modify'
+            ? normalizeText(chainWrite.firstPinId) || normalizeText(input.firstPinIdFallback) || input.targetPinId || pinId
+            : normalizeText(chainWrite.firstPinId) || pinId;
+        const now = input.deps.now ? input.deps.now() : Date.now();
+        const record = buildGalleryRecord({
             operation: input.operation,
-            path: input.path,
-            contentType: 'application/json',
-            payload: JSON.stringify(payload),
-            network: input.network,
+            pinId,
+            firstPinId,
+            manifest,
+            chainWrite,
+            upload,
+            now,
+        });
+        const warnings = [...input.warnings];
+        try {
+            await input.deps.upsertLocal(record);
+        }
+        catch (error) {
+            warnings.push({
+                code: 'metaapp_local_cache_upsert_failed',
+                message: `Unable to update local MetaApp cache: ${errorMessage(error)}`,
+            });
+        }
+        return (0, commandResult_1.commandSuccess)({
+            pinId,
+            firstPinId,
+            metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId, firstPinId),
+            localUiUrl: buildLocalUiUrl(pinId, firstPinId),
+            archive: publicArchive(archive),
+            upload,
+            chainWrite,
+            record,
+            warnings,
         });
     }
-    catch (error) {
-        return (0, commandResult_1.commandFailed)('metaapp_publish_failed', `Unable to write MetaApp protocol payload: ${errorMessage(error)}`, {
-            data: {
-                archive,
-                upload,
-                payload,
-            },
-        });
+    finally {
+        if (archive.ownsTempDir) {
+            await node_fs_1.promises.rm(archive.tempDir, { recursive: true, force: true }).catch(() => undefined);
+        }
     }
-    const pinId = (0, pinId_1.assertMetaAppPinId)(chainWrite.pinId, 'chain write pinId');
-    const firstPinId = input.operation === 'modify'
-        ? normalizeText(chainWrite.firstPinId) || normalizeText(input.firstPinIdFallback) || input.targetPinId || pinId
-        : normalizeText(chainWrite.firstPinId) || pinId;
-    const now = input.deps.now ? input.deps.now() : Date.now();
-    const record = buildGalleryRecord({
-        operation: input.operation,
-        pinId,
-        firstPinId,
-        manifest,
-        chainWrite,
-        upload,
-        now,
-    });
-    const warnings = [...input.warnings];
-    try {
-        await input.deps.upsertLocal(record);
-    }
-    catch (error) {
-        warnings.push({
-            code: 'metaapp_local_cache_upsert_failed',
-            message: `Unable to update local MetaApp cache: ${errorMessage(error)}`,
-        });
-    }
-    return (0, commandResult_1.commandSuccess)({
-        pinId,
-        firstPinId,
-        metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId, firstPinId),
-        localUiUrl: buildLocalUiUrl(pinId, firstPinId),
-        archive,
-        upload,
-        chainWrite,
-        record,
-        warnings,
-    });
 }
 async function previewMetaAppProject(input, deps = {}) {
     const { plan, manifest } = await inspectAndDraft(input);
