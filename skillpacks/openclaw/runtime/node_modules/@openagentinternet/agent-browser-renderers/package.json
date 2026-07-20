@@ -1,6 +1,6 @@
 {
   "name": "@openagentinternet/agent-browser-renderers",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
     }
   },
   "dependencies": {
-    "@openagentinternet/agent-browser-host-contract": "0.3.9",
+    "@openagentinternet/agent-browser-host-contract": "0.3.10",
     "marked": "^18.0.5"
   },
   "scripts": {

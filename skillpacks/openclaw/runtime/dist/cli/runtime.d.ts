@@ -70,6 +70,7 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
         llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
     }) => ChatReplyRunner;
     createOrchestrator?: (deps: PrivateChatAutoReplyDependencies, config: PrivateChatAutoReplyConfig) => PrivateChatAutoReplyOrchestrator;
+    resolveAutoReplyConfigForHome?: (homeDir: string) => PrivateChatAutoReplyConfig;
 }
 type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
     localProfileSlug?: string | null;

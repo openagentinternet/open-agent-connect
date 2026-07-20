@@ -13864,6 +13864,10 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         },
     };
+    // Attach the live per-home auto-reply config resolver so callers in the same
+    // process (e.g. the profile auto-reply dispatcher) read the exact object that
+    // setAutoReply mutates. Not an HTTP route; ignored by the router.
+    handlers.resolveAutoReplyConfigForHome = resolveAutoReplyConfigForHome;
     daemonHandlers = handlers;
     return handlers;
 }

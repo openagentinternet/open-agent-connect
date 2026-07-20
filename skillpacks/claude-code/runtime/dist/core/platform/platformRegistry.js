@@ -254,6 +254,13 @@ exports.PLATFORM_DEFINITIONS = [
             roots: [
                 { id: 'kimi-home', kind: 'global', path: '~/.kimi/skills', autoBind: 'when-parent-exists' },
                 { id: 'kimi-config-agents', kind: 'global', path: '~/.config/agents/skills', autoBind: 'when-parent-exists' },
+                {
+                    id: 'kimi-work-desktop',
+                    kind: 'global',
+                    path: '~/Library/Application Support/kimi-desktop/daimon-share/daimon/skills',
+                    windowsPath: '~/AppData/Roaming/kimi-desktop/daimon-share/daimon/skills',
+                    autoBind: 'when-parent-exists',
+                },
             ],
         },
         executor: {
@@ -425,11 +432,44 @@ function resolvePlatformSkillRootPath(root, systemHomeDir, env = {}) {
             return node_path_1.default.resolve(homeOverride, 'skills');
         }
     }
-    if (root.path === '~') {
+    const isWin = process.platform === 'win32';
+    const rawPath = (isWin && root.windowsPath) ? root.windowsPath : root.path;
+    if (isWin) {
+        const roamingMatch = matchWindowsAppDataPrefix(rawPath, '~/AppData/Roaming');
+        if (roamingMatch) {
+            const appData = normalizeOptionalEnvPath(env.APPDATA);
+            if (appData) {
+                return node_path_1.default.resolve(appData, roamingMatch);
+            }
+        }
+        const localMatch = matchWindowsAppDataPrefix(rawPath, '~/AppData/Local');
+        if (localMatch) {
+            const localAppData = normalizeOptionalEnvPath(env.LOCALAPPDATA);
+            if (localAppData) {
+                return node_path_1.default.resolve(localAppData, localMatch);
+            }
+        }
+    }
+    if (rawPath === '~') {
         return node_path_1.default.resolve(systemHomeDir);
     }
-    if (root.path.startsWith('~/')) {
-        return node_path_1.default.resolve(systemHomeDir, root.path.slice(2));
+    if (rawPath.startsWith('~/')) {
+        return node_path_1.default.resolve(systemHomeDir, rawPath.slice(2));
     }
-    return node_path_1.default.resolve(systemHomeDir, root.path);
+    return node_path_1.default.resolve(systemHomeDir, rawPath);
+}
+/**
+ * When `rawPath` starts with the given `~/AppData/...` prefix (case-insensitive),
+ * returns the remaining relative path; otherwise returns null. Used to resolve
+ * Windows app-data skill roots against %APPDATA% / %LOCALAPPDATA%.
+ */
+function matchWindowsAppDataPrefix(rawPath, prefix) {
+    if (rawPath.length < prefix.length || rawPath[prefix.length] !== '/') {
+        return null;
+    }
+    const head = rawPath.slice(0, prefix.length);
+    if (head.toLowerCase() !== prefix.toLowerCase()) {
+        return null;
+    }
+    return rawPath.slice(prefix.length + 1);
 }

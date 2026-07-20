@@ -137,5 +137,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
     conversationProfileFetch?: typeof fetch;
     env?: NodeJS.ProcessEnv;
-}): MetabotDaemonHttpHandlers;
+}): MetabotDaemonHttpHandlers & {
+    resolveAutoReplyConfigForHome: (homeDir: string) => PrivateChatAutoReplyConfig;
+};
 export {};

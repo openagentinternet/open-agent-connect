@@ -29,6 +29,12 @@ export interface PlatformSkillRoot {
     kind: 'global' | 'project';
     homeEnv?: string;
     path: string;
+    /**
+     * Optional Windows-specific skill root path, used only on win32. POSIX-style
+     * (forward slashes, `~/`-prefixed) so it can be resolved against %APPDATA% or
+     * %LOCALAPPDATA%. When omitted, `path` is used on all platforms.
+     */
+    windowsPath?: string;
     autoBind: 'always' | 'when-parent-exists' | 'manual';
     sharedStandard?: boolean;
 }
