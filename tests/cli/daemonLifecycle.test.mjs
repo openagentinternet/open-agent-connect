@@ -21,6 +21,30 @@ function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
 }
 
+async function closeServerAndConnections(server) {
+  await new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+    server.closeAllConnections();
+  });
+}
+
+async function listenIfAvailable(server, port) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      if (error?.code === 'EADDRINUSE') {
+        resolve(false);
+        return;
+      }
+      reject(error);
+    };
+    server.once('error', onError);
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', onError);
+      resolve(true);
+    });
+  });
+}
+
 async function createIndexedProfileHome() {
   const systemHomeDir = await mkdtempTempRoot('metabot-daemon-lifecycle-');
   const homeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'alice');
@@ -224,13 +248,9 @@ test('first installation persists the bounded fallback port and never drifts aft
   const { systemHomeDir, homeDir } = await createIndexedProfileHome();
   const daemonStore = createDaemonStateStore(systemHomeDir);
   const defaultPortBlocker = http.createServer();
-  await new Promise((resolve, reject) => {
-    defaultPortBlocker.listen(10001, '127.0.0.1', (error) => error ? reject(error) : resolve());
-  });
+  await listenIfAvailable(defaultPortBlocker, 10001);
   t.after(async () => {
-    await new Promise((resolve, reject) => {
-      defaultPortBlocker.close((error) => error ? reject(error) : resolve());
-    }).catch(() => undefined);
+    await closeServerAndConnections(defaultPortBlocker).catch(() => undefined);
     // Stops the daemon process group and waits for exit before removing the
     // temp system home.
     await cleanupTempRoot(systemHomeDir);
@@ -254,15 +274,13 @@ test('first installation persists the bounded fallback port and never drifts aft
   assert.equal(startExitCode, 0, startOutput.join(''));
 
   const installation = await daemonStore.readInstallation();
-  assert.deepEqual(installation && {
-    host: installation.host,
-    port: installation.port,
-    selectionOrigin: installation.selectionOrigin,
-  }, {
-    host: '127.0.0.1',
-    port: 10002,
-    selectionOrigin: 'fallback',
-  });
+  assert.equal(installation?.host, '127.0.0.1');
+  assert.equal(installation?.selectionOrigin, 'fallback');
+  assert.ok(
+    Number.isInteger(installation?.port)
+      && installation.port >= 10002
+      && installation.port <= 10020,
+  );
 
   const stopOutput = [];
   const stopExitCode = await runCli(['daemon', 'stop'], {
@@ -274,13 +292,9 @@ test('first installation persists the bounded fallback port and never drifts aft
   assert.equal(stopExitCode, 0, stopOutput.join(''));
 
   const fallbackPortBlocker = http.createServer();
-  await new Promise((resolve, reject) => {
-    fallbackPortBlocker.listen(10002, '127.0.0.1', (error) => error ? reject(error) : resolve());
-  });
+  assert.equal(await listenIfAvailable(fallbackPortBlocker, installation.port), true);
   t.after(async () => {
-    await new Promise((resolve, reject) => {
-      fallbackPortBlocker.close((error) => error ? reject(error) : resolve());
-    }).catch(() => undefined);
+    await closeServerAndConnections(fallbackPortBlocker).catch(() => undefined);
   });
 
   const restartOutput = [];
@@ -292,7 +306,7 @@ test('first installation persists the bounded fallback port and never drifts aft
   });
   assert.equal(restartExitCode, 1);
   assert.match(parseLastJson(restartOutput).message, /daemon_port_in_use/);
-  assert.equal((await daemonStore.readInstallation())?.port, 10002);
+  assert.equal((await daemonStore.readInstallation())?.port, installation.port);
 });
 
 test('first global start quarantines stale profile daemon metadata without touching profile state', async (t) => {
@@ -334,8 +348,14 @@ test('first global start quarantines stale profile daemon metadata without touch
     true,
   );
   assert.equal((await daemonStore.readDaemon())?.instanceId, 'default');
-  assert.equal((await daemonStore.readInstallation())?.host, '127.0.0.1');
-  assert.equal((await daemonStore.readInstallation())?.port, 10001);
+  const installation = await daemonStore.readInstallation();
+  assert.equal(installation?.host, '127.0.0.1');
+  assert.ok(
+    Number.isInteger(installation?.port)
+      && installation.port >= 10001
+      && installation.port <= 10020,
+  );
+  assert.equal(installation?.selectionOrigin, installation?.port === 10001 ? 'default' : 'fallback');
 
   const stopOutput = [];
   const stopExitCode = await runCli(['daemon', 'stop'], {

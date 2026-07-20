@@ -1018,7 +1018,23 @@ test('POST /api/services/refunds/sync calls the refund sync handler and returns 
 });
 
 test('POST /api/services/refunds/sync all=true reconciles local seller refunds back to buyer traces', async (t) => {
-  const app = await startProviderServer();
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://chain.test/pin/path/list')) {
+      return new Response(JSON.stringify({
+        data: { list: [], nextCursor: null },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(url, init);
+  };
+
+  const app = await startProviderServer({ chainApiBaseUrl: 'https://chain.test' });
   t.after(async () => {
     await app.close();
   });

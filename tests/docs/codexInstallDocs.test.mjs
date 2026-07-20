@@ -12,12 +12,11 @@ const LEGACY_OAC_BANNER_LINE = /_   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___
 test('README exposes one user-facing install prompt and the npm fallback', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
 
-  assert.match(readme, /## Install/i);
-  assert.match(readme, /Recommended Agent Install/i);
+  assert.match(readme, /## Install OAC/i);
   assert.match(readme, /npm i -g open-agent-connect/);
   assert.match(readme, /oac install/);
   assert.match(readme, /docs\/install\/open-agent-connect\.md/);
-  assert.match(readme, /Read https:\/\/github\.com\/openagentinternet\/open-agent-connect\/blob\/main\/docs\/install\/open-agent-connect\.md/i);
+  assert.match(readme, /Read https:\/\/openagentinternet\.org\/INSTALL\.md and install Open Agent Connect/i);
   assert.match(readme, /docs\/install\/uninstall-open-agent-connect\.md/);
   assert.doesNotMatch(readme, /raw\.githubusercontent\.com\/openagentinternet\/open-agent-connect\/main\/docs\/install\/open-agent-connect\.md/i);
   assert.doesNotMatch(readme, /host roots contain symlinks/i);
@@ -118,7 +117,7 @@ test('unified install guide documents registry-driven bare install and force hos
   );
 
   assert.match(readme, /npm i -g open-agent-connect@latest && oac install/);
-  assert.match(readme, /Supported platforms/i);
+  assert.match(readme, /OAC works with Codex[\s\S]*WorkBuddy\./i);
   assert.doesNotMatch(readme, /~\/\.metabot\/skills/i);
   assert.doesNotMatch(readme, /host roots contain symlinks/i);
   assert.doesNotMatch(readme, /~\/\.metabot\/skills\/metabot-\*/);

@@ -1,11 +1,11 @@
 {
-  "core": "0.2.40",
-  "cli": "0.2.40",
+  "core": "0.2.41",
+  "cli": "0.2.41",
   "skillpacks": {
-    "codex": "0.2.40",
-    "claude-code": "0.2.40",
-    "openclaw": "0.2.40",
-    "zcode": "0.2.40",
-    "workbuddy": "0.2.40"
+    "codex": "0.2.41",
+    "claude-code": "0.2.41",
+    "openclaw": "0.2.41",
+    "zcode": "0.2.41",
+    "workbuddy": "0.2.41"
   }
 }
