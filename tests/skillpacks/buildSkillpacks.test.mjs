@@ -68,6 +68,10 @@ function hostWrapperSharedSkillFile(root, host, skillName) {
   return path.join(root, host, 'runtime', 'shared-skills', skillName, 'SKILL.md');
 }
 
+function hostWrapperHostSkillFile(root, host, skillName) {
+  return path.join(root, host, 'runtime', 'host-skills', skillName, 'SKILL.md');
+}
+
 function hostWrapperSharedSkillPath(root, host, skillName, ...segments) {
   return path.join(root, host, 'runtime', 'shared-skills', skillName, ...segments);
 }
@@ -171,8 +175,9 @@ async function getBuiltSkillpacks() {
 
 function assertMetaAppPrivateChatComposerContract(content, label) {
   assert.match(content, /browser\.privateChat\.compose/, `${label} should document the composer bridge`);
+  assert.match(content, /browser\.simplemsg\.compose/, `${label} should document the explicit-message composer bridge`);
   assert.match(content, /Browser-owned private-chat composer/, `${label} should preserve composer ownership`);
-  assert.match(content, /no recipient or message-content parameters/, `${label} should forbid iframe-controlled recipients and content`);
+  assert.match(content, /no recipient or message-content parameters/, `${label} should keep the owner-derived composer parameter-free`);
   assert.match(
     content,
     /`\{ opened: true \}` result means only that the Browser composer opened; it does not mean the message was sent/,
@@ -184,7 +189,12 @@ function assertMetaAppPrivateChatComposerContract(content, label) {
     `${label} should restrict simplemsg conversation URIs to navigation`,
   );
   assert.match(content, /`metaid\.pin\.write` is not the private-chat API/, `${label} should forbid PIN-write private chat`);
+  assert.match(content, /must not construct private messages through `\/protocols\/simplemsg`/, `${label} should forbid raw simplemsg PIN writes`);
+  assert.match(content, /parse or resolve peer chat public keys, encrypt, sign, broadcast/, `${label} should preserve host-owned cryptography and broadcast`);
+  assert.match(content, /never for a sending button or an “Open in IDChat” Web link/, `${label} should not present conversation navigation as IDChat Web sending`);
+  assert.match(content, /exact service-provided `http:\/\/` or `https:\/\/` URL, never a guessed IDChat URL/, `${label} should require authoritative external URLs`);
   assert.match(content, /unsupported_method/, `${label} should document unsupported hosts`);
+  assert.match(content, /without a raw PIN-write or direct-send fallback/, `${label} should forbid unsafe unsupported-method fallbacks`);
 
   const standardMessageExample = content.match(
     /<button type="button" id="message-button">Message<\/button>\s*<script>([\s\S]*?)<\/script>/,
@@ -198,6 +208,15 @@ function assertMetaAppPrivateChatComposerContract(content, label) {
   assert.doesNotMatch(standardMessageExample[0], /params\s*:/, `${label} should not pass params in its standard Message example`);
   assert.doesNotMatch(standardMessageExample[0], /\bto\s*:/, `${label} should not pass a recipient in its standard Message example`);
   assert.doesNotMatch(standardMessageExample[0], /\bcontent\s*:/, `${label} should not pass message content in its standard Message example`);
+
+  assert.match(
+    content,
+    /method: 'browser\.simplemsg\.compose',\s*params: \{ to, content \}/,
+    `${label} should pass explicit recipient and content to the explicit-message composer`,
+  );
+  assert.match(content, /if \(!to \|\| !content\)/, `${label} should reject empty explicit-message inputs`);
+  assert.match(content, /Review and send this message in Browser/, `${label} should describe opened confirmation without claiming send`);
+  assert.doesNotMatch(content, /return \{ status: 'sent' \}/, `${label} should not treat an opened confirmation as sent`);
 }
 
 test('source MetaBot skills keep valid frontmatter and actor selection guidance', async () => {
@@ -302,6 +321,9 @@ test('buildAgentConnectSkillpacks includes the Browser open workflow skill', asy
 test('buildAgentConnectSkillpacks includes the unified MetaApp workflow skill', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
+  const sourceContent = await readFile(sourceSkillFile('metabot-metaapp'), 'utf8');
+  assertMetaAppPrivateChatComposerContract(sourceContent, 'source MetaApp skill');
+
   const content = await readFile(sharedSkillFile(outputRoot, 'metabot-metaapp'), 'utf8');
   assert.match(content, /^name:\s*metabot-metaapp$/m);
   assert.match(content, /single MetaApp workflow entrypoint/i);
@@ -357,8 +379,10 @@ test('buildAgentConnectSkillpacks includes the unified MetaApp workflow skill', 
 
   assertMetaAppPrivateChatComposerContract(content, 'shared MetaApp skill');
   for (const host of HOSTS) {
-    const hostContent = await readFile(hostWrapperSharedSkillFile(outputRoot, host, 'metabot-metaapp'), 'utf8');
-    assertMetaAppPrivateChatComposerContract(hostContent, `${host} MetaApp skill`);
+    const sharedHostContent = await readFile(hostWrapperSharedSkillFile(outputRoot, host, 'metabot-metaapp'), 'utf8');
+    assertMetaAppPrivateChatComposerContract(sharedHostContent, `${host} shared MetaApp skill`);
+    const hostContent = await readFile(hostWrapperHostSkillFile(outputRoot, host, 'metabot-metaapp'), 'utf8');
+    assertMetaAppPrivateChatComposerContract(hostContent, `${host} host MetaApp skill`);
   }
 });
 

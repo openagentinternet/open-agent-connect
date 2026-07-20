@@ -35,9 +35,9 @@ Classify the request first.
 3. Bot homepage or Bot Page -> use Bot Homepage MetaApp Rules, then the Publish Wizard, then optionally set `/info/homepage`.
 4. Existing MetaApp management -> use Direct CLI Shortcuts.
 
-Do not use this skill for raw hosting, unrelated file upload, paid skill service publishing, identity creation, network source management, wallet transfer, or private chat.
+Do not use this skill for raw hosting, unrelated file upload, paid skill service publishing, identity creation, network source management, wallet transfer, or sending private chat for the user.
 
-The private-chat boundary means this skill does not send private messages for the user. It must still guide MetaApp developers to create Message, Chat, or Contact Bot buttons that only open the Browser-owned private-chat composer through `browser.privateChat.compose`.
+The private-chat boundary means this skill may guide a MetaApp to open a Browser-owned confirmation flow, but it never sends the message itself. Ordinary Message, Chat, Contact Bot, and Send Message CTAs use parameter-free `browser.privateChat.compose`, with the current Bot Page owner as the recipient. A MetaApp that owns its message input or has an explicit recipient uses `browser.simplemsg.compose` with an explicit Global MetaID and non-empty content. Both flows still require the user to click the Browser-owned Send button.
 
 ## MetaApp Development Rules
 
@@ -56,9 +56,9 @@ map://<protocol>/pin/<pinId>?version=<historyIndex>
 map://simplemsg/conversation?peer=<globalMetaId>
 ```
 
-`map://simplemsg/conversation?peer=<globalMetaId>` is a navigation URI for an existing conversation resource. It does not send a message and does not open the Browser-owned private-chat composer. Use it only for an intentional “Open conversation” or “View conversation” action, never as the implementation of a Bot homepage’s top-level Message button.
+`map://simplemsg/conversation?peer=<globalMetaId>` is a navigation URI for an existing conversation resource. It does not send a message and does not open a Browser-owned confirmation flow. Use it only for an intentional “Open conversation” or “View conversation” action, never as a sending button or as the implementation of a Bot homepage's top-level Message button. Do not label this Agent Internet resource link as “Open in IDChat” or present it as an external Web link.
 
-Use `https://` only for normal external web pages, not for MetaID resources that already have an Agent Internet URI.
+Use `http://` or `https://` only for real external Web targets, not for MetaID resources that already have an Agent Internet URI. Use the exact URL provided by the service; never guess or invent an IDChat URL.
 
 For assets that ship inside the MetaApp package, use relative URLs only.
 
@@ -228,6 +228,7 @@ Use `window.AgentBrowser.request` only for host-mediated Browser capabilities:
 
 - `browser.actor.current` to read the selected actor snapshot.
 - `browser.privateChat.compose` with no parameters to open the Browser-owned private-chat composer.
+- `browser.simplemsg.compose` with `to` and `content` to open and prefill the Browser-owned private-chat confirmation dialog.
 - `metaid.pin.write` for create, modify, or revoke of MetaID PIN records.
 - `metafile.upload` before writing app records that reference files.
 
@@ -235,7 +236,11 @@ Do not request wallet APIs, private keys, payment APIs, host routes, local file 
 
 ## Browser-Owned Private Chat Composer
 
-For a custom Bot homepage MetaApp, Message, Chat, Contact Bot, and Send Message CTAs must only ask Agent Browser Core (ABC) to open its Browser-owned private-chat composer:
+Choose the compose method from the UI contract. Neither method sends from the MetaApp; each only opens a Browser-owned confirmation flow.
+
+### Owner-Derived Recipient And Browser Message Input
+
+For an ordinary Message, Chat, Contact Bot, or Send Message CTA on a custom Bot homepage, ask Agent Browser Core (ABC) to open its Browser-owned private-chat composer:
 
 ```html
 <button type="button" id="message-button">Message</button>
@@ -252,7 +257,7 @@ For a custom Bot homepage MetaApp, Message, Chat, Contact Bot, and Send Message 
 </script>
 ```
 
-The request has no recipient or message-content parameters. Do not generate code like this:
+This `browser.privateChat.compose` request has no recipient or message-content parameters. Do not generate code like this:
 
 ```js
 window.AgentBrowser.request({
@@ -264,13 +269,47 @@ window.AgentBrowser.request({
 });
 ```
 
-ABC resolves the recipient from the current resolved Bot Page owner and ignores iframe-supplied `params`. A MetaApp cannot choose or forge the recipient, prefill the message, encrypt it, sign it, or send private chat directly.
+For `browser.privateChat.compose`, ABC resolves the recipient from the current resolved Bot Page owner and ignores iframe-supplied `params`. This method does not let the MetaApp choose the recipient or prefill the message.
 
-A successful `{ opened: true }` result means only that the Browser composer opened; it does not mean the message was sent. The user must enter the message in the Browser-owned modal and explicitly click the Browser-owned Send button. Only then does the existing `private-chat` trusted action enter the OAC/IDBots host path.
+### Explicit Recipient Or MetaApp-Owned Message Input
 
-`metaid.pin.write` is not the private-chat API. A MetaApp must not construct private messages through `/protocols/simplemsg`, bypass the Browser input field, or call a host send path directly. Private chat requires host-owned peer-key resolution, encryption, signing, and broadcast.
+When a MetaApp owns its message input or has an explicit recipient, it may pass both an explicit Global MetaID and non-empty content to `browser.simplemsg.compose`:
 
-Hosts that do not support this capability return `unsupported_method`. Show ordinary unavailable or error feedback, including for other bridge errors, and do not attempt a direct-send fallback. For example, a UI may map `error.code === 'unsupported_method'` to “Messaging is unavailable in this Browser.”
+```js
+async function openMessageConfirmation(to, content) {
+  to = String(to || '').trim();
+  content = String(content || '').trim();
+  if (!to || !content) {
+    throw new Error('A recipient and message are required.');
+  }
+
+  try {
+    const result = await window.AgentBrowser.request({
+      method: 'browser.simplemsg.compose',
+      params: { to, content }
+    });
+    if (result && result.opened) {
+      return { status: 'confirmation_opened' };
+    }
+    return { status: 'unavailable' };
+  } catch (error) {
+    if (error && error.code === 'unsupported_method') {
+      return { status: 'unavailable' };
+    }
+    throw error;
+  }
+}
+```
+
+Map `confirmation_opened` to feedback such as “Review and send this message in Browser,” never “Message sent.” Map `unavailable` to ordinary feedback such as “Messaging is unavailable in this Browser.”
+
+A successful `{ opened: true }` result means only that the Browser composer opened; it does not mean the message was sent.
+
+A `browser.simplemsg.compose` dialog is already prefilled, while `browser.privateChat.compose` leaves message entry to the user. In both cases, the user must explicitly click the Browser-owned Send button. Only then does the existing `private-chat` trusted action enter the OAC/IDBots host path.
+
+`metaid.pin.write` is not the private-chat API. A MetaApp must not construct private messages through `/protocols/simplemsg`, parse or resolve peer chat public keys, encrypt, sign, broadcast, bypass Browser confirmation, or call a host send path directly. These remain host-owned responsibilities.
+
+Hosts that do not support a compose method return `unsupported_method`. Show ordinary unavailable or error feedback, including for other bridge errors, and do not fall back to `metaid.pin.write`, a raw PIN write, or any direct-send path.
 
 ## Bot Homepage MetaApp Rules
 
@@ -321,7 +360,7 @@ Do not depend on v1/v2-only fields such as top-level `services`, `actions`, `pro
 
 Bot homepage MetaApps should still follow MetaApp Development Rules: use `metaid://`, `pin://`, `metaapp://`, `metafile://`, and `map://` links, and include the AgentBrowser helper when iframe navigation is needed.
 
-If a Bot homepage has a Message, Chat, Contact Bot, or Send Message CTA, it must call `browser.privateChat.compose` without recipient or message-content parameters. Use `map://simplemsg/conversation?peer=<globalMetaId>` only when the UI intent is to view or open an existing conversation resource.
+An ordinary top-level Message, Chat, Contact Bot, or Send Message CTA must call `browser.privateChat.compose` without recipient or message-content parameters. If the MetaApp owns its message input or explicitly selects a recipient, it must instead call `browser.simplemsg.compose` with both `to` and `content`. Use `map://simplemsg/conversation?peer=<globalMetaId>` only when the UI intent is to view or open an existing conversation resource.
 
 After publishing a homepage MetaApp, ask whether to set it as the selected homepage for a local Bot. Only do this when the human explicitly wants the MetaApp to become that Bot homepage. Write through the existing Bot profile command:
 
@@ -549,12 +588,16 @@ Comment on a MetaApp:
 - When the system provides `metafileContentBaseUrl` or `manApiBaseUrl`, the app prefers those configured values over the public fallback bases.
 - Packaged asset references in HTML, CSS, Markdown, and client-side fetches use relative URLs, not site-root absolute paths such as `/assets/...`, unless the target is intentionally an external host URL.
 - Custom iframe MetaApps include the AgentBrowser navigation helper when using Agent Internet links.
-- Message, Chat, Contact Bot, and Send Message CTAs use `browser.privateChat.compose`.
+- Ordinary Message, Chat, Contact Bot, and Send Message CTAs use `browser.privateChat.compose`.
 - The `browser.privateChat.compose` request does not contain recipient or message-content parameters.
+- A MetaApp-owned message input or explicit recipient uses `browser.simplemsg.compose` with an explicit Global MetaID in `to` and non-empty `content`.
+- `{ opened: true }` is presented only as confirmation UI opened, never as sent or delivered.
 - The MetaApp does not use `metaid.pin.write` or `/protocols/simplemsg` to send private chat.
-- `map://simplemsg/conversation` is used only for conversation navigation.
-- `unsupported_method` produces ordinary unavailable or error feedback without a direct-send fallback.
-- The user still types and confirms the message in the Browser-owned composer.
+- The MetaApp does not parse chat public keys, encrypt, sign, or broadcast private chat.
+- `map://simplemsg/conversation` is used only for conversation navigation, never for a sending button or an “Open in IDChat” Web link.
+- Real external Web targets use an exact service-provided `http://` or `https://` URL, never a guessed IDChat URL.
+- `unsupported_method` produces ordinary unavailable or error feedback without a raw PIN-write or direct-send fallback.
+- The user explicitly confirms every message with the Browser-owned Send button.
 - The app does not request wallet, private key, payment, local path, host route, or parent DOM access.
 - `content` uses `metafile://` references only.
 - Local image paths are uploaded or replaced before final JSON.
