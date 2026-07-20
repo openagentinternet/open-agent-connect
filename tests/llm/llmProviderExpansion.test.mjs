@@ -26,7 +26,9 @@ const {
   getPlatformBinaryMap,
   getPlatformDisplayNames,
   getPlatformSearchOrder,
+  getPlatformSkillRoots,
   getRuntimePlatforms,
+  resolvePlatformSkillRootPath,
 } = require('../../dist/core/platform/platformRegistry.js');
 
 async function withDefaultExecutablePathsDisabled(callback) {
@@ -135,6 +137,60 @@ test('platform registry defines managed runtime metadata and install skill roots
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'workbuddy' && root.path === '~/.workbuddy/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'workbuddy' && root.path === '~/.codebuddy/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'shared-agents'));
+});
+
+test('kimi platform exposes a Kimi Work Desktop skill root with cross-platform paths', () => {
+  const kimiRoots = getPlatformSkillRoots('kimi');
+  const workDesktopRoot = kimiRoots.find((root) => root.id === 'kimi-work-desktop');
+  assert.ok(workDesktopRoot, 'kimi platform should declare a kimi-work-desktop root');
+  assert.equal(workDesktopRoot.kind, 'global');
+  assert.equal(workDesktopRoot.autoBind, 'when-parent-exists');
+  assert.equal(
+    workDesktopRoot.path,
+    '~/Library/Application Support/kimi-desktop/daimon-share/daimon/skills',
+  );
+  assert.equal(
+    workDesktopRoot.windowsPath,
+    '~/AppData/Roaming/kimi-desktop/daimon-share/daimon/skills',
+  );
+  assert.ok(
+    getInstallSkillRoots().some((root) => root.platformId === 'kimi' && root.id === 'kimi-work-desktop'),
+    'kimi-work-desktop root should be part of the install skill roots',
+  );
+});
+
+test('resolvePlatformSkillRootPath resolves Kimi Work Desktop under %APPDATA% on win32', () => {
+  const root = getPlatformSkillRoots('kimi').find((candidate) => candidate.id === 'kimi-work-desktop');
+  const originalPlatform = process.platform;
+  const fakeSystemHome = '/Users/tester';
+  const appData = 'C:\\Users\\tester\\AppData\\Roaming';
+
+  try {
+    // Non-win32: macOS path is resolved under the system home dir.
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    const macOSPath = resolvePlatformSkillRootPath(root, fakeSystemHome, {});
+    assert.equal(
+      macOSPath,
+      path.resolve(fakeSystemHome, 'Library/Application Support/kimi-desktop/daimon-share/daimon/skills'),
+    );
+
+    // win32: windowsPath is resolved against %APPDATA% when set.
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    const windowsPath = resolvePlatformSkillRootPath(root, fakeSystemHome, { APPDATA: appData });
+    assert.equal(
+      windowsPath,
+      path.resolve(appData, 'kimi-desktop/daimon-share/daimon/skills'),
+    );
+
+    // win32 without %APPDATA%: falls back to the home-relative POSIX path.
+    const windowsFallback = resolvePlatformSkillRootPath(root, fakeSystemHome, {});
+    assert.equal(
+      windowsFallback,
+      path.resolve(fakeSystemHome, 'AppData/Roaming/kimi-desktop/daimon-share/daimon/skills'),
+    );
+  } finally {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  }
 });
 
 test('platform registry assigns provider-specific LLM icons for every managed runtime', () => {

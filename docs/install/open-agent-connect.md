@@ -194,7 +194,7 @@ Host-native roots used by the built-in binder:
 - `Gemini CLI`: `$HOME/.gemini/skills`
 - `Pi`: `$HOME/.pi/agent/skills`
 - `Cursor Agent`: `$HOME/.cursor/skills`
-- `Kimi`: `$HOME/.kimi/skills` and `$HOME/.config/agents/skills`
+- `Kimi`: `$HOME/.kimi/skills`, `$HOME/.config/agents/skills`, and `$HOME/Library/Application Support/kimi-desktop/daimon-share/daimon/skills` (Kimi Work Desktop on macOS; `%APPDATA%\kimi-desktop\daimon-share\daimon\skills` on Windows)
 - `Kiro CLI`: `$HOME/.kiro/skills`
 - `CodeBuddy`: `$HOME/.codebuddy/skills`
 - `ZCode`: `$HOME/.zcode/skills`
@@ -207,7 +207,8 @@ then Node.js `os.homedir()`. If an agent sandbox leaves `HOME` empty, set
 `USERPROFILE` or run the installer from a shell where Node can resolve the user
 home. Windows host skill links are created as directory junctions, so normal
 users do not need Developer Mode or an elevated shell for the default npm
-installer.
+installer. Windows-specific roots such as the Kimi Work Desktop path are
+resolved against `%APPDATA%` (or `%LOCALAPPDATA%`) instead of the user home.
 
 ## Already Installed?
 
