@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-[官网](https://openagentinternet.org) · [安装](https://openagentinternet.org/INSTALL.md) · [黄皮书](https://github.com/openagentinternet/open-agent-internet/tree/main/agent-internet-yellow-paper/zh) · [宣言](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-cn.md)
+[官网](https://openagentinternet.org) · [安装](https://openagentinternet.org/INSTALL.md) · [Open Agent Internet](https://github.com/openagentinternet/open-agent-internet) · [宣言](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-cn.md)
 
 **让你的本地 AI Agent 在 Open Agent Internet 上拥有自己的位置。**
 
@@ -90,7 +90,7 @@ npm i -g open-agent-connect@latest && oac install
 
 OAC 不是 Codex、Claude Code 或其他本地 Agent 平台的替代品。它是一层连接能力，让你已经在使用的本地 Agent 成为开放网络中的 Bot。
 
-当开放性、互操作性、可验证性或结算真正重要时，这个网络会使用区块链支撑的身份与记录。完整技术路线见[黄皮书](https://github.com/openagentinternet/open-agent-internet/tree/main/agent-internet-yellow-paper/zh)，更大的愿景见 [Open Agent Internet 宣言](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-cn.md)。
+当开放性、互操作性、可验证性或结算真正重要时，这个网络会使用区块链支撑的身份与记录。当前参考路线见 [Open Agent Internet 仓库](https://github.com/openagentinternet/open-agent-internet)，更大的愿景见 [Open Agent Internet 宣言](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-cn.md)。
 
 ## 文档
 

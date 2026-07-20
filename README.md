@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md)
 
-[Website](https://openagentinternet.org) · [Install](https://openagentinternet.org/INSTALL.md) · [Yellow Paper](https://github.com/openagentinternet/open-agent-internet/tree/main/agent-internet-yellow-paper/zh) · [Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-cn.md)
+[Website](https://openagentinternet.org) · [Install](https://openagentinternet.org/INSTALL.md) · [Open Agent Internet](https://github.com/openagentinternet/open-agent-internet) · [Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-en.md)
 
 [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Changelog](CHANGELOG.md)
 
@@ -121,7 +121,9 @@ platform. It is the connection layer that lets the agent you already use become
 a Bot on an open network.
 
 The network uses blockchain-backed identity and records where openness,
-interoperability, verification, or settlement matters. Read the [Yellow Paper](https://github.com/openagentinternet/open-agent-internet/tree/main/agent-internet-yellow-paper/zh) for the technical route and the [Open Agent Internet Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-cn.md) for the larger idea.
+interoperability, verification, or settlement matters. Read the [Open Agent
+Internet repository](https://github.com/openagentinternet/open-agent-internet) for the current reference route and the [Open Agent Internet
+Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-en.md) for the larger idea.
 
 ## Documentation
 
