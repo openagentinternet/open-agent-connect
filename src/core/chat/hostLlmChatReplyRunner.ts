@@ -16,6 +16,10 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
+// A chat history gap beyond this (or a close marker) starts a new session in
+// the prompt; mirrors the orchestrator's idle-reopen window.
+const DEFAULT_SESSION_GAP_MS = 300_000;
+const SESSION_BOUNDARY_LINE = '--- Earlier conversation session ended. A new session starts below this line: treat it as a fresh opening, and do not end it just because the session above was closed. ---';
 
 function isPlanningPreambleLine(line: string): boolean {
   const trimmed = line.trim();
@@ -191,7 +195,7 @@ function buildChatPrompt(
   const exitLines = [
     '## Exit Mechanism',
     `End the conversation ONLY when the exchange is clearly finished. When ending, add ${CLOSE_CONVERSATION_SIGNAL} on its own final line at the very end of your reply:`,
-    '- The other party explicitly says goodbye or signals the end',
+    '- The other party explicitly says goodbye or signals the end in the CURRENT session',
     '- The conversation objective has been fully achieved over several substantive turns',
     '- Several consecutive turns from both sides contained no new, substantive content',
     `- Approaching the turn limit (currently turn ${conversation.turnCount} of ${maxTurns})`,
@@ -240,16 +244,35 @@ function buildChatPrompt(
 
   const selfName = 'Me';
   const peerName = conversation.peerName || 'Peer';
-  const historyLines = recentMessages.flatMap((msg) => {
+  const sessionGapMs = strategy?.maxIdleMs ?? DEFAULT_SESSION_GAP_MS;
+  const historyLines: string[] = [];
+  let previousTimestamp: number | null = null;
+  let previousClosedSession = false;
+  for (const msg of recentMessages) {
+    const rawContent = normalizeText(msg.content);
+    const closesSession = hasFinalByeLine(rawContent);
+    const timestamp = typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
+      ? msg.timestamp
+      : null;
+    const gapExceeded = previousTimestamp !== null
+      && timestamp !== null
+      && timestamp - previousTimestamp > sessionGapMs;
     const name = msg.direction === 'outbound' ? selfName : peerName;
     const normalizedContent = msg.direction === 'outbound'
       ? stripFinalByeLineFromHistory(stripPlanningPreamble(msg.content))
-      : normalizeText(msg.content);
-    if (!normalizedContent) {
-      return [];
+      : rawContent;
+    if (normalizedContent) {
+      // Keep older sessions visible as background, but mark the boundary so a
+      // stale farewell or a long idle gap is read as a fresh opening, not as
+      // a reason to close the new session again.
+      if (historyLines.length > 0 && (previousClosedSession || gapExceeded)) {
+        historyLines.push(SESSION_BOUNDARY_LINE);
+      }
+      historyLines.push(`${name}: ${normalizedContent}`);
     }
-    return `${name}: ${normalizedContent}`;
-  });
+    previousTimestamp = timestamp ?? previousTimestamp;
+    previousClosedSession = closesSession;
+  }
 
   if (historyLines.length > 0) {
     sections.push(`## Chat History\n${historyLines.join('\n')}`);

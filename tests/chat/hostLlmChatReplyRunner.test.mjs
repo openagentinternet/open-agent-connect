@@ -1115,3 +1115,136 @@ test('buildChatPrompt exit mechanism forbids ending over a single low-value turn
   assert.match(prompt, /Greetings and capability introductions are openings, not a reason to end/);
   assert.doesNotMatch(prompt, /no more valuable topics to discuss/);
 });
+
+test('buildChatPrompt marks a session boundary after a closed session but keeps both sessions visible', () => {
+  const prompt = buildChatPrompt(makeInput({
+    recentMessages: [
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm1',
+        direction: 'inbound',
+        senderGlobalMetaId: 'peer',
+        content: '上一轮我们聊了很多架构设计。',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 1000,
+      },
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm2',
+        direction: 'inbound',
+        senderGlobalMetaId: 'peer',
+        content: '今天就到这里，回头聊。\n\nBye',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 2000,
+      },
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm3',
+        direction: 'inbound',
+        senderGlobalMetaId: 'peer',
+        content: 'hi, are you there?',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 3000,
+      },
+    ],
+  }));
+  assert.match(prompt, /AliceBot: 上一轮我们聊了很多架构设计。/);
+  assert.match(prompt, /Earlier conversation session ended\. A new session starts below/);
+  assert.match(prompt, /AliceBot: hi, are you there\?/);
+  const oldIndex = prompt.indexOf('上一轮我们聊了很多架构设计。');
+  const boundaryIndex = prompt.indexOf('Earlier conversation session ended.');
+  const newIndex = prompt.indexOf('hi, are you there?');
+  assert.ok(oldIndex >= 0 && boundaryIndex > oldIndex && newIndex > boundaryIndex);
+});
+
+test('buildChatPrompt marks a session boundary after an idle gap beyond maxIdleMs', () => {
+  const prompt = buildChatPrompt(makeInput({
+    recentMessages: [
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm1',
+        direction: 'inbound',
+        senderGlobalMetaId: 'peer',
+        content: 'morning topic',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 1_000,
+      },
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm2',
+        direction: 'outbound',
+        senderGlobalMetaId: 'self',
+        content: 'morning reply',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 2_000,
+      },
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm3',
+        direction: 'inbound',
+        senderGlobalMetaId: 'peer',
+        content: 'evening follow-up',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 2_000 + 300_001,
+      },
+    ],
+  }));
+  assert.equal((prompt.match(/Earlier conversation session ended\./g) ?? []).length, 1);
+  assert.match(prompt, /evening follow-up/);
+});
+
+test('buildChatPrompt does not mark a session boundary in a continuous conversation', () => {
+  const prompt = buildChatPrompt(makeInput());
+  assert.doesNotMatch(prompt, /Earlier conversation session ended\./);
+});
+
+test('buildChatPrompt still marks the boundary when the closing outbound message is stripped from history', () => {
+  const prompt = buildChatPrompt(makeInput({
+    recentMessages: [
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm1',
+        direction: 'inbound',
+        senderGlobalMetaId: 'peer',
+        content: 'old session topic',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 1000,
+      },
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm2',
+        direction: 'outbound',
+        senderGlobalMetaId: 'self',
+        content: 'Bye',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 2000,
+      },
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm3',
+        direction: 'inbound',
+        senderGlobalMetaId: 'peer',
+        content: 'fresh hello after the break',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 3000,
+      },
+    ],
+  }));
+  assert.doesNotMatch(prompt, /Me: Bye/);
+  assert.match(prompt, /Earlier conversation session ended\./);
+  assert.match(prompt, /fresh hello after the break/);
+});
+
+test('buildChatPrompt exit mechanism binds goodbye to the current session', () => {
+  const prompt = buildChatPrompt(makeInput());
+  assert.match(prompt, /explicitly says goodbye or signals the end in the CURRENT session/);
+});
