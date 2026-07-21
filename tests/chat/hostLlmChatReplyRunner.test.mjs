@@ -1065,3 +1065,53 @@ test('host LLM chat runner drops a sticky runtime after it times out and sticks 
   const turnThreeFirstResolve = resolveInputs[3];
   assert.equal(turnThreeFirstResolve.explicitRuntimeId, runtimeB.id);
 });
+
+test('buildChatPrompt strips the close marker from outbound history but keeps the farewell text', () => {
+  const prompt = buildChatPrompt(makeInput({
+    recentMessages: [
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm1',
+        direction: 'inbound',
+        senderGlobalMetaId: 'peer',
+        content: '我们聊得很开心！',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 1000,
+      },
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm2',
+        direction: 'outbound',
+        senderGlobalMetaId: 'self',
+        content: '我也很开心，下次继续聊。\n\nBye',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 2000,
+      },
+      {
+        conversationId: 'pc-self-peer',
+        messageId: 'm3',
+        direction: 'outbound',
+        senderGlobalMetaId: 'self',
+        content: 'Bye',
+        messagePinId: null,
+        extensions: null,
+        timestamp: 3000,
+      },
+    ],
+  }));
+  assert.match(prompt, /Me: 我也很开心，下次继续聊。/);
+  assert.doesNotMatch(prompt, /Me: .*\n+\s*Bye\s*\n/u);
+  assert.doesNotMatch(prompt, /Me: Bye/);
+  assert.match(prompt, /AliceBot: 我们聊得很开心！/);
+});
+
+test('buildChatPrompt exit mechanism forbids ending over a single low-value turn', () => {
+  const prompt = buildChatPrompt(makeInput());
+  assert.match(prompt, /clearly finished/);
+  assert.match(prompt, /explicitly says goodbye or signals the end/);
+  assert.match(prompt, /Do NOT end the conversation just because one reply was short, generic, or low-value/);
+  assert.match(prompt, /Greetings and capability introductions are openings, not a reason to end/);
+  assert.doesNotMatch(prompt, /no more valuable topics to discuss/);
+});

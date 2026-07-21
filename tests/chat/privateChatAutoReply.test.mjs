@@ -1800,3 +1800,87 @@ test('auto-reply unified A2A persistence removes encrypted socket payload fields
   assert.equal(Object.hasOwn(incoming.raw.nested, 'payload'), false);
   assert.doesNotMatch(JSON.stringify(conversation), /encrypted-simplemsg-ciphertext|nested encrypted payload/);
 });
+
+test('auto-reply keeps order-protocol traffic out of the runner chat context', async () => {
+  const harness = await createAutoReplyHarness({ now: 1_770_000_060_000 });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const orderTxid = 'a'.repeat(64);
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'outbound',
+    createdAt: 1_770_000_000_000,
+    updatedAt: 1_770_000_059_000,
+  });
+  await harness.stateStore.appendMessages([
+    {
+      conversationId,
+      messageId: 'proto-1',
+      direction: 'inbound',
+      senderGlobalMetaId: harness.peerGlobalMetaId,
+      content: `[ORDER_STATUS:${orderTxid}] I received the order and started processing.`,
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1_770_000_000_100,
+    },
+    {
+      conversationId,
+      messageId: 'proto-2',
+      direction: 'inbound',
+      senderGlobalMetaId: harness.peerGlobalMetaId,
+      content: `[DELIVERY:${orderTxid}] {"paymentTxid":"bbbb","result":"done"}`,
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1_770_000_000_200,
+    },
+    {
+      conversationId,
+      messageId: 'proto-3',
+      direction: 'inbound',
+      senderGlobalMetaId: harness.peerGlobalMetaId,
+      content: `[NeedsRating:${orderTxid}] Please rate this service.`,
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1_770_000_000_300,
+    },
+    {
+      conversationId,
+      messageId: 'chat-1',
+      direction: 'inbound',
+      senderGlobalMetaId: harness.peerGlobalMetaId,
+      content: 'real chat question',
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1_770_000_000_400,
+    },
+    {
+      conversationId,
+      messageId: 'chat-2',
+      direction: 'outbound',
+      senderGlobalMetaId: harness.localGlobalMetaId,
+      content: 'real chat answer',
+      messagePinId: null,
+      extensions: null,
+      timestamp: 1_770_000_000_500,
+    },
+  ]);
+
+  await harness.handleInbound({
+    content: 'latest inbound',
+    messagePinId: 'incoming-pin-protocol-filter',
+  });
+
+  assert.equal(harness.runnerInputs.length, 1);
+  const contents = harness.runnerInputs[0].recentMessages.map((message) => message.content);
+  assert.deepEqual(contents, ['real chat question', 'real chat answer', 'latest inbound']);
+
+  // The protocol records stay in the state store; only the prompt context is filtered.
+  const stored = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.ok(stored.some((message) => message.content.startsWith(`[ORDER_STATUS:${orderTxid}]`)));
+});

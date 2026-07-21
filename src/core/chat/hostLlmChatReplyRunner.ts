@@ -112,6 +112,18 @@ function canonicalizeFinalByeLine(value: string): string {
   return lines.join('\n').trim();
 }
 
+// Drop a trailing close marker from historical outbound messages: the farewell
+// text stays, but past "Bye" markers must not teach the model to end the
+// current conversation again.
+function stripFinalByeLineFromHistory(value: string): string {
+  const lines = value.split(/\r?\n/u);
+  const finalIndex = findFinalNonEmptyLineIndex(lines);
+  if (finalIndex >= 0 && lines[finalIndex].trim().toLowerCase() === CLOSE_CONVERSATION_SIGNAL.toLowerCase()) {
+    lines.splice(finalIndex, 1);
+  }
+  return lines.join('\n').trim();
+}
+
 export interface BuildChatPromptOptions {
   metaBotSlug?: string;
 }
@@ -178,11 +190,13 @@ function buildChatPrompt(
 
   const exitLines = [
     '## Exit Mechanism',
-    `When ANY of the following conditions are met, add ${CLOSE_CONVERSATION_SIGNAL} on its own final line at the very end of your reply:`,
-    '- The conversation objective has been achieved',
-    '- The other party says goodbye or signals the end',
-    '- There are no more valuable topics to discuss',
+    `End the conversation ONLY when the exchange is clearly finished. When ending, add ${CLOSE_CONVERSATION_SIGNAL} on its own final line at the very end of your reply:`,
+    '- The other party explicitly says goodbye or signals the end',
+    '- The conversation objective has been fully achieved over several substantive turns',
+    '- Several consecutive turns from both sides contained no new, substantive content',
     `- Approaching the turn limit (currently turn ${conversation.turnCount} of ${maxTurns})`,
+    '- Do NOT end the conversation just because one reply was short, generic, or low-value; answer it and steer toward a concrete next topic instead.',
+    '- Greetings and capability introductions are openings, not a reason to end.',
   ];
   sections.push(exitLines.join('\n'));
 
@@ -229,7 +243,7 @@ function buildChatPrompt(
   const historyLines = recentMessages.flatMap((msg) => {
     const name = msg.direction === 'outbound' ? selfName : peerName;
     const normalizedContent = msg.direction === 'outbound'
-      ? stripPlanningPreamble(msg.content)
+      ? stripFinalByeLineFromHistory(stripPlanningPreamble(msg.content))
       : normalizeText(msg.content);
     if (!normalizedContent) {
       return [];

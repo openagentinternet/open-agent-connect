@@ -25,6 +25,14 @@ const CLOSE_CONVERSATION_FINAL_LINE_PATTERN = /^(?:bye|goodbye)[.!。！]?$/iu;
 const MAX_REPLIES_PER_MINUTE = 10;
 const MAX_REPLIES_PER_HOUR = 100;
 
+// Order-protocol records (ORDER/ORDER_STATUS/DELIVERY/NeedsRating/ORDER_END)
+// are service traffic, not conversation. Keep them out of the LLM chat
+// context so a completed service exchange does not read as a finished
+// conversation and nudge the model into closing the chat early.
+function filterChatPromptMessages(messages: PrivateChatMessage[]): PrivateChatMessage[] {
+  return messages.filter((message) => classifySimplemsgContent(message.content).kind !== 'order_protocol');
+}
+
 export interface PrivateChatAutoReplyDependencies {
   stateStore: PrivateChatStateStore;
   strategyStore: ChatStrategyStore;
@@ -614,10 +622,10 @@ export function createPrivateChatAutoReplyOrchestrator(
 
       // Build context and call reply runner.
       const persona = await loadChatPersona(deps.paths);
-      const recentMessages = await deps.stateStore.getRecentMessages(
+      const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(
         conversation.conversationId,
         DEFAULT_RECENT_MESSAGES_LIMIT,
-      );
+      ));
       const preparedTurn = await prepareOutboundTurn({
         conversation,
         recentMessages,
@@ -681,10 +689,10 @@ export function createPrivateChatAutoReplyOrchestrator(
           turnCount: conversation.turnCount + 1,
         };
       const persona = await loadChatPersona(deps.paths);
-      const recentMessages = await deps.stateStore.getRecentMessages(
+      const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(
         conversation.conversationId,
         DEFAULT_RECENT_MESSAGES_LIMIT,
-      );
+      ));
       const preparedTurn = await prepareOutboundTurn({
         conversation: runnerConversation,
         recentMessages,
