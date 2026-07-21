@@ -900,3 +900,168 @@ test('host LLM chat runner skips degraded runtimes and reaches a healthy fallbac
     { metaBotSlug: 'alice', excludeRuntimeIds: [degradedRuntime.id] },
   ]);
 });
+
+function makeHealthyRuntime(id, provider = 'codex') {
+  return {
+    id,
+    provider,
+    displayName: id,
+    binaryPath: `/bin/${provider}`,
+    authState: 'authenticated',
+    health: 'healthy',
+    capabilities: ['streaming'],
+    lastSeenAt: '2026-05-05T00:00:00.000Z',
+    createdAt: '2026-05-05T00:00:00.000Z',
+    updatedAt: '2026-05-05T00:00:00.000Z',
+  };
+}
+
+test('host LLM chat runner marks a timed-out runtime unavailable even with strict skill scope', async () => {
+  const runtime = makeHealthyRuntime('llm-runtime-hung');
+  const resolverCalls = {};
+  const llmExecutor = {
+    async execute() {
+      return 'llm-session-hung';
+    },
+    async getSession(sessionId) {
+      return { sessionId, status: 'running' };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime, resolverCalls),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    timeoutMs: 10,
+    pollIntervalMs: 1,
+    allowedChatSkillsResolver: async () => ({
+      skills: [],
+      skillSourcePaths: {},
+      skippedSkills: [],
+      warning: null,
+    }),
+  });
+
+  const result = await runner(makeInput());
+
+  assert.equal(result.state, 'reply');
+  assert.match(result.content, /Thanks for/);
+  assert.deepEqual(resolverCalls.markRuntimeUnavailable, ['llm-runtime-hung']);
+});
+
+test('host LLM chat runner prefers the last successful runtime on the next turn', async () => {
+  const runtimeA = makeHealthyRuntime('llm-runtime-a');
+  const resolveInputs = [];
+  const runtimeResolver = {
+    async resolveRuntime(input) {
+      resolveInputs.push(input);
+      return { runtime: runtimeA, bindingId: 'binding-a' };
+    },
+    async selectMetaBot() {
+      return null;
+    },
+    async markBindingUsed() {},
+    async markRuntimeUnavailable() {},
+  };
+  const executorCalls = [];
+  const llmExecutor = {
+    async execute(request) {
+      executorCalls.push(request);
+      return `llm-session-${executorCalls.length}`;
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'completed',
+        result: { status: 'completed', output: 'Sticky reply.', durationMs: 5 },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver,
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+  });
+
+  const first = await runner(makeInput());
+  const second = await runner(makeInput());
+
+  assert.equal(first.state, 'reply');
+  assert.equal(second.state, 'reply');
+  assert.deepEqual(resolveInputs[0], { metaBotSlug: 'alice', excludeRuntimeIds: [] });
+  assert.deepEqual(resolveInputs[1], {
+    metaBotSlug: 'alice',
+    excludeRuntimeIds: [],
+    explicitRuntimeId: runtimeA.id,
+  });
+  assert.deepEqual(executorCalls.map((request) => request.runtimeId), [runtimeA.id, runtimeA.id]);
+});
+
+test('host LLM chat runner drops a sticky runtime after it times out and sticks to the recovery', async () => {
+  const runtimeA = makeHealthyRuntime('llm-runtime-sticky');
+  const runtimeB = makeHealthyRuntime('llm-runtime-recovery', 'cursor');
+  const resolveInputs = [];
+  const markedUnavailable = [];
+  const runtimeResolver = {
+    async resolveRuntime(input) {
+      resolveInputs.push(input);
+      const excluded = input.excludeRuntimeIds ?? [];
+      if (input.explicitRuntimeId === runtimeB.id && !excluded.includes(runtimeB.id)) {
+        return { runtime: runtimeB, bindingId: 'binding-b' };
+      }
+      if (excluded.includes(runtimeA.id)) {
+        return { runtime: runtimeB, bindingId: 'binding-b' };
+      }
+      return { runtime: runtimeA, bindingId: 'binding-a' };
+    },
+    async selectMetaBot() {
+      return null;
+    },
+    async markBindingUsed() {},
+    async markRuntimeUnavailable(runtimeId) {
+      markedUnavailable.push(runtimeId);
+    },
+  };
+  let hangRuntimeA = false;
+  const llmExecutor = {
+    async execute(request) {
+      return request.runtimeId === runtimeA.id && hangRuntimeA ? 'llm-session-hung' : 'llm-session-ok';
+    },
+    async getSession(sessionId) {
+      if (sessionId === 'llm-session-hung') {
+        return { sessionId, status: 'running' };
+      }
+      return {
+        sessionId,
+        status: 'completed',
+        result: { status: 'completed', output: 'Recovery reply.', durationMs: 5 },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver,
+    llmExecutor,
+    metaBotSlug: 'alice',
+    timeoutMs: 10,
+    pollIntervalMs: 1,
+  });
+
+  const first = await runner(makeInput());
+  assert.equal(first.state, 'reply');
+
+  hangRuntimeA = true;
+  const second = await runner(makeInput());
+  assert.deepEqual(second, { state: 'reply', content: 'Recovery reply.' });
+  assert.deepEqual(markedUnavailable, [runtimeA.id]);
+
+  const third = await runner(makeInput());
+  assert.equal(third.state, 'reply');
+
+  const turnTwoFirstResolve = resolveInputs[1];
+  assert.equal(turnTwoFirstResolve.explicitRuntimeId, runtimeA.id);
+  const turnThreeFirstResolve = resolveInputs[3];
+  assert.equal(turnThreeFirstResolve.explicitRuntimeId, runtimeB.id);
+});

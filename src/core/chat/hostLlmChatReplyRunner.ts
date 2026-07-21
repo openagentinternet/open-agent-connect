@@ -12,7 +12,7 @@ import type {
   ChatReplyRunnerResult,
 } from './privateChatTypes';
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
@@ -261,6 +261,12 @@ function parseRunnerOutput(rawOutput: string): ChatReplyRunnerResult {
   };
 }
 
+type StickyRuntimePreference = {
+  get: () => string | null;
+  onSuccess: (runtimeId: string) => void;
+  onFailure: (runtimeId: string) => void;
+};
+
 async function tryExecute(
   resolver: LlmRuntimeResolver,
   llmExecutor: ChatLlmExecutor,
@@ -271,11 +277,14 @@ async function tryExecute(
   excludeRuntimeIds: Set<string>,
   allowedSkillScope: PrivateChatAllowedSkillScope,
   enforceSkillScope: boolean,
+  stickyRuntime: StickyRuntimePreference,
 ): Promise<{ result: ChatReplyRunnerResult; bindingId?: string } | null> {
   const shouldMarkRuntimeUnavailable = !enforceSkillScope;
+  const stickyRuntimeId = stickyRuntime.get();
   const resolved = await resolver.resolveRuntime({
     metaBotSlug,
     excludeRuntimeIds: Array.from(excludeRuntimeIds),
+    ...(stickyRuntimeId ? { explicitRuntimeId: stickyRuntimeId } : {}),
   });
   if (!resolved.runtime) return null;
   if (excludeRuntimeIds.has(resolved.runtime.id)) return null;
@@ -310,9 +319,11 @@ async function tryExecute(
         if (result.status === 'completed') {
           const parsed = parseRunnerOutput(result.output);
           if (parsed.state !== 'skip') {
+            stickyRuntime.onSuccess(resolved.runtime.id);
             return { result: parsed, bindingId: resolved.bindingId };
           }
           excludeRuntimeIds.add(resolved.runtime.id);
+          stickyRuntime.onFailure(resolved.runtime.id);
           if (shouldMarkRuntimeUnavailable) {
             await resolver.markRuntimeUnavailable(
               resolved.runtime.id,
@@ -322,6 +333,7 @@ async function tryExecute(
           return null;
         }
         excludeRuntimeIds.add(resolved.runtime.id);
+        stickyRuntime.onFailure(resolved.runtime.id);
         if (shouldMarkRuntimeUnavailable) {
           await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => {});
         }
@@ -331,11 +343,13 @@ async function tryExecute(
     }
 
     excludeRuntimeIds.add(resolved.runtime.id);
-    if (shouldMarkRuntimeUnavailable) {
-      await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
-    }
+    stickyRuntime.onFailure(resolved.runtime.id);
+    // A session that hangs until the poll deadline is a runtime-side signal
+    // regardless of skill isolation, so always cool the runtime down here.
+    await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
     return null;
   } catch {
+    stickyRuntime.onFailure(resolved.runtime.id);
     if (!excludeRuntimeIds.has(resolved.runtime.id)) {
       excludeRuntimeIds.add(resolved.runtime.id);
       if (shouldMarkRuntimeUnavailable) {
@@ -366,6 +380,21 @@ export function createHostLlmChatReplyRunner(options?: {
   const logWarning = options?.logWarning;
   const allowTemplateFallback = options?.allowTemplateFallback ?? true;
   const fallbackRunner = createDefaultChatReplyRunner();
+  // Remember the runtime that produced the last successful reply and try it
+  // first on the next turn; a failure clears the preference immediately. The
+  // runner instance is cached per profile, so this survives across turns.
+  let lastSuccessfulRuntimeId: string | null = null;
+  const stickyRuntime: StickyRuntimePreference = {
+    get: () => lastSuccessfulRuntimeId,
+    onSuccess: (runtimeId) => {
+      lastSuccessfulRuntimeId = runtimeId;
+    },
+    onFailure: (runtimeId) => {
+      if (lastSuccessfulRuntimeId === runtimeId) {
+        lastSuccessfulRuntimeId = null;
+      }
+    },
+  };
 
   // If no resolver provided, either fall back to template-only replies or skip.
   if (!runtimeResolver || !llmExecutor) {
@@ -403,6 +432,7 @@ export function createHostLlmChatReplyRunner(options?: {
         excludeRuntimeIds,
         allowedSkillScope,
         enforceSkillScope,
+        stickyRuntime,
       );
       if (outcome) {
         // Track lastUsedAt on the binding that was successfully used.
