@@ -14,8 +14,13 @@ import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
 import { renderBrowserPageHtml } from '../../browser/page';
-import { createI18nContext, renderClientI18nScript, renderLanguageOptions } from '../../ui/i18n';
+import { createI18nContext, renderClientI18nScript } from '../../ui/i18n';
 import type { I18nKey, LocalUiI18nContext } from '../../ui/i18n';
+import {
+  renderTopbarControls,
+  renderTopbarSettingsModal,
+  renderTopbarSettingsScript,
+} from '../../ui/topbarChrome';
 import type { MetabotUiPageName, RouteHandler } from './types';
 import { handleBundledMetaAppRoutes } from './uiMetaApps';
 
@@ -89,24 +94,14 @@ function renderNav(currentPage: MetabotUiPageName, i18n: LocalUiI18nContext): st
   }).join('');
 }
 
-function renderTopbarLanguageSelector(i18n: LocalUiI18nContext): string {
-  return [
-    `<select class="topbar-language-select" data-language-select aria-label="${escapeHtml(i18n.t('language.label'))}">`,
-    renderLanguageOptions(i18n),
-    '</select>',
-  ].join('');
-}
-
-function renderTopbarAction(i18n: LocalUiI18nContext): string {
-  return `<a class="topbar-action" href="/browser" data-i18n-key="action.openBrowser">${escapeHtml(i18n.t('action.openBrowser'))}</a>`;
-}
-
 function injectTopbarChrome(html: string, i18n: LocalUiI18nContext): string {
   const withLogo = html.replace(
     /<a class="topbar-logo" href="\/ui\/hub">MetaBot<\/a>/,
     '<a class="topbar-logo" href="/ui/bot">Open Agent Connect</a>',
   );
-  return withLogo.replace('</nav>', `</nav>${renderTopbarLanguageSelector(i18n)}${renderTopbarAction(i18n)}`);
+  return withLogo
+    .replace('</nav>', `</nav>${renderTopbarControls(i18n)}`)
+    .replace('</main>', `</main>${renderTopbarSettingsModal(i18n)}`);
 }
 
 function applyStaticI18n(html: string, i18n: LocalUiI18nContext): string {
@@ -154,7 +149,7 @@ async function renderBuiltInPage(page: MetabotUiPageName, languagePreference?: s
   // inject only the page-specific content HTML. Otherwise fall back to the
   // legacy hero wrapper for templates that don't have __PAGE_CONTENT__.
   const content = definition.contentHtml ?? '';
-  const script = `${renderClientI18nScript(i18n)}\n${definition.script}`;
+  const script = `${renderClientI18nScript(i18n)}\n${definition.script}\n;\n${renderTopbarSettingsScript()}`;
   const html = template
     .replace(/<html lang="en">/g, `<html lang="${escapeHtml(i18n.language)}">`)
     .replace(/__PAGE_TITLE__/g, escapeHtml(definition.title))
