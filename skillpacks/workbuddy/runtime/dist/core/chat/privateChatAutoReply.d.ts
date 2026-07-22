@@ -1,4 +1,5 @@
 import { type A2AConversationMessagePersister } from '../a2a/conversationPersistence';
+import { type PrivateChatSendFailureEvent } from './privateChatSendFailureLog';
 import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './privateChatStateStore';
 import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
@@ -13,6 +14,7 @@ export interface PrivateChatAutoReplyDependencies {
     resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
     replyRunner: ChatReplyRunner;
     a2aConversationPersister?: A2AConversationMessagePersister;
+    logSendFailure?: (event: PrivateChatSendFailureEvent) => void;
     now?: () => number;
 }
 export interface PrivateChatAutoReplyOrchestrator {

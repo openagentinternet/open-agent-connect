@@ -721,7 +721,7 @@ Recommended structure:
 Example shape when an active Bot already exists:
 
 ```text
-Install complete (v0.2.41). `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
+Install complete (v0.2.50). `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
 
      _                    _     ___       _                       _
     / \   __ _  ___ _ __ | |_  |_ _|_ __ | |_ ___ _ __ _ __   ___| |_
@@ -742,7 +742,7 @@ Next, tell me: "check my Bot identity". After that you can ask me to show online
 Example shape when no active Bot exists yet:
 
 ```text
-Install complete (v0.2.41). The Open Agent Connect CLI and related skills are installed and bound for this host.
+Install complete (v0.2.50). The Open Agent Connect CLI and related skills are installed and bound for this host.
 
      _                    _     ___       _                       _
     / \   __ _  ___ _ __ | |_  |_ _|_ __ | |_ ___ _ __ _ __   ___| |_
@@ -791,7 +791,7 @@ detected platform homes.
 To update to a pinned package version:
 
 ```bash
-metabot system update --target-version v0.2.41
+metabot system update --target-version v0.2.50
 ```
 
 Notes:

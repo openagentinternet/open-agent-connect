@@ -57,6 +57,7 @@ const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const simplemsgPresenceWatchdog_1 = require("../core/a2a/simplemsgPresenceWatchdog");
 const simplemsgClassifier_1 = require("../core/a2a/simplemsgClassifier");
 const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
+const privateChatSendFailureLog_1 = require("../core/chat/privateChatSendFailureLog");
 const privateChatAutoReplyBackfill_1 = require("../core/chat/privateChatAutoReplyBackfill");
 const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
@@ -3181,6 +3182,7 @@ async function serveCliDaemonProcess(context) {
         strategyStore: chatStrategyStore,
         paths,
         signer,
+        logSendFailure: (0, privateChatSendFailureLog_1.createPrivateChatSendFailureFileLogger)(paths),
         selfGlobalMetaId: async () => {
             const state = await runtimeStore.readState();
             return state.identity?.globalMetaId ?? null;

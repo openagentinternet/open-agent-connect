@@ -5,6 +5,7 @@ const privateChat_1 = require("./privateChat");
 const chatPersonaLoader_1 = require("./chatPersonaLoader");
 const conversationPersistence_1 = require("../a2a/conversationPersistence");
 const simplemsgClassifier_1 = require("../a2a/simplemsgClassifier");
+const privateChatSendFailureLog_1 = require("./privateChatSendFailureLog");
 const DEFAULT_MAX_TURNS = 30;
 const DEFAULT_MAX_IDLE_MS = 300_000;
 const DEFAULT_RECENT_MESSAGES_LIMIT = 60;
@@ -12,6 +13,13 @@ const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 const CLOSE_CONVERSATION_FINAL_LINE_PATTERN = /^(?:bye|goodbye)[.!。！]?$/iu;
 const MAX_REPLIES_PER_MINUTE = 10;
 const MAX_REPLIES_PER_HOUR = 100;
+// Order-protocol records (ORDER/ORDER_STATUS/DELIVERY/NeedsRating/ORDER_END)
+// are service traffic, not conversation. Keep them out of the LLM chat
+// context so a completed service exchange does not read as a finished
+// conversation and nudge the model into closing the chat early.
+function filterChatPromptMessages(messages) {
+    return messages.filter((message) => (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content).kind !== 'order_protocol');
+}
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -114,12 +122,34 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
         try {
             privateChatIdentity = await deps.signer.getPrivateChatIdentity();
         }
-        catch {
+        catch (error) {
+            deps.logSendFailure?.({
+                kind: 'identity_unavailable',
+                peerGlobalMetaId,
+                error: (0, privateChatSendFailureLog_1.describePrivateChatSendFailureError)(error),
+            });
             return null;
         }
-        const peerChatPublicKey = await deps.resolvePeerChatPublicKey(peerGlobalMetaId);
-        if (!peerChatPublicKey)
+        let peerChatPublicKey = null;
+        try {
+            peerChatPublicKey = await deps.resolvePeerChatPublicKey(peerGlobalMetaId);
+        }
+        catch (error) {
+            deps.logSendFailure?.({
+                kind: 'peer_chat_key_unavailable',
+                peerGlobalMetaId,
+                error: (0, privateChatSendFailureLog_1.describePrivateChatSendFailureError)(error),
+            });
             return null;
+        }
+        if (!peerChatPublicKey) {
+            deps.logSendFailure?.({
+                kind: 'peer_chat_key_unavailable',
+                peerGlobalMetaId,
+                error: null,
+            });
+            return null;
+        }
         const messageContent = extensions
             ? JSON.stringify({ content, extensions })
             : content;
@@ -151,7 +181,12 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 network: normalizeText(chatWrite.network) || null,
             };
         }
-        catch {
+        catch (error) {
+            deps.logSendFailure?.({
+                kind: 'pin_write_failed',
+                peerGlobalMetaId,
+                error: (0, privateChatSendFailureLog_1.describePrivateChatSendFailureError)(error),
+            });
             return null;
         }
     }
@@ -427,7 +462,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             }
             // Build context and call reply runner.
             const persona = await (0, chatPersonaLoader_1.loadChatPersona)(deps.paths);
-            const recentMessages = await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT);
+            const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT));
             const preparedTurn = await prepareOutboundTurn({
                 conversation,
                 recentMessages,
@@ -486,7 +521,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     turnCount: conversation.turnCount + 1,
                 };
             const persona = await (0, chatPersonaLoader_1.loadChatPersona)(deps.paths);
-            const recentMessages = await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT);
+            const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT));
             const preparedTurn = await prepareOutboundTurn({
                 conversation: runnerConversation,
                 recentMessages,

@@ -57,6 +57,7 @@ const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
 const privateChatAllowedSkills_1 = require("../core/chat/privateChatAllowedSkills");
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
+const privateChatSendFailureLog_1 = require("../core/chat/privateChatSendFailureLog");
 const privateConversation_1 = require("../core/chat/privateConversation");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const nativeWallet_1 = require("../core/wallet/nativeWallet");
@@ -5074,6 +5075,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             strategyStore: (0, chatStrategyStore_1.createChatStrategyStore)(profileHomeDir),
             paths: profileRuntimeStateStore.paths,
             signer: profileSigner,
+            logSendFailure: (0, privateChatSendFailureLog_1.createPrivateChatSendFailureFileLogger)(profileRuntimeStateStore.paths),
             selfGlobalMetaId: async () => {
                 const latestState = await profileRuntimeStateStore.readState();
                 return latestState.identity?.globalMetaId ?? null;

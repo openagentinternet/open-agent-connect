@@ -34,6 +34,30 @@ function createIdentityPair() {
   };
 }
 
+async function waitForConversationEvent(iterator, expectedType, timeoutMs, timeoutMessage) {
+  let timeout;
+  try {
+    return await Promise.race([
+      (async () => {
+        while (true) {
+          const event = await iterator.next();
+          if (event.done) {
+            throw new Error('Conversation event stream ended unexpectedly');
+          }
+          if (event.value?.type === expectedType) {
+            return event;
+          }
+        }
+      })(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function readOnlySigner() {
   return {
     getIdentity: async () => ({}),
@@ -448,19 +472,19 @@ test('default conversation event stream publishes a message event after A2A pers
   });
   const iterator = stream[Symbol.asyncIterator]();
   const initial = await iterator.next();
-  const nextEvent = iterator.next();
+  const nextEvent = waitForConversationEvent(
+    iterator,
+    'conversation-message',
+    500,
+    'Timed out waiting for conversation SSE event',
+  );
   const sent = await handlers.chat.private({
     from: LOCAL_GLOBAL_META_ID,
     to: PEER_GLOBAL_META_ID,
     content: 'live ping',
     peerChatPublicKey: peerPair.publicKeyHex,
   });
-  const event = await Promise.race([
-    nextEvent,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Timed out waiting for conversation SSE event')), 500);
-    }),
-  ]);
+  const event = await nextEvent;
   await iterator.return?.();
 
   assert.equal(initial.value.type, 'conversation-update');
@@ -480,7 +504,12 @@ test('default conversation event stream publishes a message event after external
   });
   const iterator = stream[Symbol.asyncIterator]();
   const initial = await iterator.next();
-  const nextEvent = iterator.next();
+  const nextEvent = waitForConversationEvent(
+    iterator,
+    'conversation-message',
+    500,
+    'Timed out waiting for externally persisted conversation SSE event',
+  );
 
   const persisted = await persistA2AConversationMessageBestEffort({
     paths: resolveMetabotPaths(homeDir),
@@ -501,12 +530,7 @@ test('default conversation event stream publishes a message event after external
     },
   });
 
-  const event = await Promise.race([
-    nextEvent,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Timed out waiting for externally persisted conversation SSE event')), 500);
-    }),
-  ]);
+  const event = await nextEvent;
   await iterator.return?.();
 
   assert.equal(initial.value.type, 'conversation-update');
@@ -610,7 +634,12 @@ test('default conversation guidance reopens a closed conversation, sends one gui
   });
   const iterator = stream[Symbol.asyncIterator]();
   const initial = await iterator.next();
-  const nextEvent = iterator.next();
+  const nextEvent = waitForConversationEvent(
+    iterator,
+    'conversation-message',
+    2000,
+    'Timed out waiting for guided conversation SSE event',
+  );
 
   const guided = await handlers.conversations.guidance({
     local: LOCAL_GLOBAL_META_ID,
@@ -618,12 +647,7 @@ test('default conversation guidance reopens a closed conversation, sends one gui
     guidance: 'Reopen the thread and ask for the delivery date.',
   });
 
-  const event = await Promise.race([
-    nextEvent,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Timed out waiting for guided conversation SSE event')), 2000);
-    }),
-  ]);
+  const event = await nextEvent;
   await iterator.return?.();
 
   assert.equal(initial.value.type, 'conversation-update');
