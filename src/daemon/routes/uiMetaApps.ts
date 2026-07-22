@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { resolveMetasoInfrastructureEndpoints } from '../../core/network/metasoInfrastructure';
 import type { RouteContext } from './types';
 
 type BundledMetaAppId = 'buzz' | 'chat';
@@ -175,9 +176,36 @@ function injectBaseHref(html: string, baseHref: string): string {
   return html.replace(/<head([^>]*)>/i, `<head$1>\n  <base href="${baseHref}">`);
 }
 
-function transformBundledMetaAppEntry(appId: BundledMetaAppId, html: string): string {
+function infrastructureScript(metasoP2PBaseUrl?: string): string {
+  const infrastructure = resolveMetasoInfrastructureEndpoints(metasoP2PBaseUrl);
+  const serialized = JSON.stringify(infrastructure).replace(/</g, '\\u003c');
+  return `<script>window.__OAC_INFRASTRUCTURE__ = ${serialized};</script>`;
+}
+
+async function resolveConfiguredMetasoP2PBaseUrl(context: RouteContext): Promise<string | undefined> {
+  const getSettings = context.handlers?.browser?.getSettings;
+  if (!getSettings) return undefined;
+  const actorId = context.url.searchParams.get('from') || context.url.searchParams.get('actorId') || undefined;
+  try {
+    const result = await getSettings({ actorId });
+    if (!result.ok || !result.data || typeof result.data !== 'object') return undefined;
+    const browser = (result.data as { browser?: unknown }).browser;
+    if (!browser || typeof browser !== 'object' || Array.isArray(browser)) return undefined;
+    const value = (browser as { metasoP2PBaseUrl?: unknown }).metasoP2PBaseUrl;
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function transformBundledMetaAppEntry(
+  appId: BundledMetaAppId,
+  html: string,
+  metasoP2PBaseUrl?: string,
+): string {
   const definition = BUNDLED_META_APPS[appId];
   let transformed = injectBaseHref(html, definition.baseHref);
+  transformed = transformed.replace('</head>', `  ${infrastructureScript(metasoP2PBaseUrl)}\n</head>`);
 
   if (appId === 'buzz') {
     transformed = transformed.replace('</head>', `  ${BUZZ_CONTEXT_STYLE}\n</head>`);
@@ -222,7 +250,8 @@ export async function handleBundledMetaAppRoutes(context: RouteContext): Promise
     const contentType = MIME_TYPES[path.extname(absolutePath).toLowerCase()] ?? 'application/octet-stream';
 
     if (relativePath === definition.entryRelativePath) {
-      const html = transformBundledMetaAppEntry(match.appId, body.toString('utf8'));
+      const metasoP2PBaseUrl = await resolveConfiguredMetasoP2PBaseUrl(context);
+      const html = transformBundledMetaAppEntry(match.appId, body.toString('utf8'), metasoP2PBaseUrl);
       context.sendHtml(200, html);
       return true;
     }

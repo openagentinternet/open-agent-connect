@@ -102,6 +102,7 @@ const btc_1 = require("../core/chain/adapters/btc");
 const doge_1 = require("../core/chain/adapters/doge");
 const opcat_1 = require("../core/chain/adapters/opcat");
 const configStore_1 = require("../core/config/configStore");
+const metasoInfrastructure_1 = require("../core/network/metasoInfrastructure");
 const mvcSponsorV2Client_1 = require("../core/subsidy/mvcSponsorV2Client");
 const oacBrowserHostAdapter_1 = require("./browser/oacBrowserHostAdapter");
 const configTypes_1 = require("../core/config/configTypes");
@@ -3779,6 +3780,18 @@ function createDefaultMetabotDaemonHandlers(input) {
             ?? input.createProviderLargeFileUploader?.()
             ?? (0, metaFsLargeUploader_1.createMetaFsLargeUploader)();
     const configStore = (0, configStore_1.createConfigStore)(input.homeDir);
+    async function resolveInfrastructureForHome(homeDir) {
+        const config = await (0, configStore_1.createConfigStore)(homeDir).read();
+        return (0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)(config.browser.metasoP2PBaseUrl);
+    }
+    async function resolveChatApiBaseUrlForHome(homeDir) {
+        return normalizeText(input.chatApiBaseUrl)
+            || (await resolveInfrastructureForHome(homeDir)).chatApiBaseUrl;
+    }
+    async function resolveSocketPresenceApiBaseUrlForHome(homeDir) {
+        return normalizeText(input.socketPresenceApiBaseUrl)
+            || (await resolveInfrastructureForHome(homeDir)).socketPresenceApiBaseUrl;
+    }
     async function syncCodexPersonaProjection(profile) {
         try {
             const personaConfigured = Boolean(profile.role.trim() || profile.soul.trim() || profile.goal.trim());
@@ -3900,7 +3913,9 @@ function createDefaultMetabotDaemonHandlers(input) {
         ?? ((globalMetaId) => fetchPeerChatPublicKey(globalMetaId, {
             chainApiBaseUrl: input.chainApiBaseUrl,
         }));
-    const callerReplyWaiter = input.callerReplyWaiter ?? (0, metawebReplyWaiter_1.createSocketIoMetaWebReplyWaiter)();
+    const callerReplyWaiter = input.callerReplyWaiter ?? (0, metawebReplyWaiter_1.createSocketIoMetaWebReplyWaiter)({
+        resolveSocketEndpoints: async () => [(await resolveInfrastructureForHome(input.homeDir)).socket],
+    });
     const servicePaymentExecutor = input.servicePaymentExecutor ?? (0, servicePayment_1.createWalletServicePaymentExecutor)({
         secretStore,
         adapters: adapters ?? new Map(),
@@ -4235,7 +4250,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         return readSocketPresenceStatusForGlobalMetaId({
             enabled: presence.enabled,
             globalMetaId: state.identity?.globalMetaId ?? null,
-            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceApiBaseUrl: await resolveSocketPresenceApiBaseUrlForHome(input.homeDir),
             socketPresenceFailureMode: input.socketPresenceFailureMode,
         });
     }
@@ -4278,7 +4293,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     afterIndex,
                     limit: 200,
                     fetchHistory: input.fetchPrivateChatHistory,
-                    idChatApiBaseUrl: input.idChatApiBaseUrl,
+                    chatApiBaseUrl: await resolveChatApiBaseUrlForHome(profileHomeDir),
                 });
                 for (const message of response.messages) {
                     const id = normalizeText(message.id);
@@ -5542,7 +5557,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             ratingDetailStateStore,
             resolvePeerChatPublicKey,
             chainApiBaseUrl: input.chainApiBaseUrl,
-            socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+            socketPresenceApiBaseUrl: await resolveSocketPresenceApiBaseUrlForHome(input.homeDir),
             socketPresenceFailureMode: input.socketPresenceFailureMode,
             onlineOnly: false,
         });
@@ -9336,6 +9351,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         },
         fetch: globalThis.fetch,
         env: process.env,
+        onInfrastructureSettingsUpdated: input.onBrowserInfrastructureChanged,
     };
     const browserHostAdapter = (0, oacBrowserHostAdapter_1.createOacBrowserHostAdapter)(browserHostAdapterInput);
     function browserActorId(request) {
@@ -10202,7 +10218,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     ratingDetailStateStore,
                     resolvePeerChatPublicKey,
                     chainApiBaseUrl: input.chainApiBaseUrl,
-                    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                    socketPresenceApiBaseUrl: await resolveSocketPresenceApiBaseUrlForHome(input.homeDir),
                     socketPresenceFailureMode: input.socketPresenceFailureMode,
                     onlineOnly: online === true,
                     query,
@@ -10221,7 +10237,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 const onlineOnly = online !== false;
                 try {
                     const presence = await (0, socketPresenceDirectory_1.readOnlineMetaBotsFromSocketPresence)({
-                        apiBaseUrl: input.socketPresenceApiBaseUrl,
+                        apiBaseUrl: await resolveSocketPresenceApiBaseUrlForHome(input.homeDir),
                         limit: normalizedLimit,
                     });
                     return (0, commandResult_1.commandSuccess)({
@@ -10377,7 +10393,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 const presence = await readSocketPresenceStatusForGlobalMetaId({
                     enabled: presenceConfig.enabled,
                     globalMetaId: state.identity.globalMetaId,
-                    socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                    socketPresenceApiBaseUrl: await resolveSocketPresenceApiBaseUrlForHome(input.homeDir),
                     socketPresenceFailureMode: input.socketPresenceFailureMode,
                 });
                 return (0, commandResult_1.commandSuccess)({
@@ -10844,7 +10860,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         onlineServiceCacheStore,
                         ratingDetailStateStore,
                         resolvePeerChatPublicKey,
-                        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                        socketPresenceApiBaseUrl: await resolveSocketPresenceApiBaseUrlForHome(profileHomeDir),
                         socketPresenceFailureMode: input.socketPresenceFailureMode,
                     }).catch(() => null);
                     return (0, commandResult_1.commandSuccess)({
@@ -10925,7 +10941,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         ratingDetailStateStore,
                         resolvePeerChatPublicKey,
                         chainApiBaseUrl: input.chainApiBaseUrl,
-                        socketPresenceApiBaseUrl: input.socketPresenceApiBaseUrl,
+                        socketPresenceApiBaseUrl: await resolveSocketPresenceApiBaseUrlForHome(input.homeDir),
                         socketPresenceFailureMode: input.socketPresenceFailureMode,
                         onlineOnly: true,
                     });
@@ -12396,7 +12412,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                         afterIndex: request.afterIndex,
                         limit: request.limit,
                         fetchHistory: input.fetchPrivateChatHistory,
-                        idChatApiBaseUrl: input.idChatApiBaseUrl,
+                        chatApiBaseUrl: await resolveChatApiBaseUrlForHome(actor.homeDir),
                     });
                     return (0, commandResult_1.commandSuccess)(response);
                 }

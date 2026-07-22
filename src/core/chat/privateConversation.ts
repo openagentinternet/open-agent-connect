@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { receivePrivateChat } from './privateChat';
+import { resolveMetasoInfrastructureEndpoints } from '../network/metasoInfrastructure';
 
-const DEFAULT_IDCHAT_API_BASE_URL = 'https://api.idchat.io/chat-api/group-chat';
 const DEFAULT_CONVERSATION_LIMIT = 50;
 const MAX_CONVERSATION_LIMIT = 200;
 const UNABLE_TO_DECRYPT_TEXT = '[Unable to decrypt message]';
@@ -72,7 +72,7 @@ export interface BuildPrivateConversationResponseInput {
   limit?: number;
   fetchHistory?: FetchPrivateHistory;
   fetchImpl?: typeof fetch;
-  idChatApiBaseUrl?: string;
+  chatApiBaseUrl?: string;
   now?: () => number;
 }
 
@@ -109,7 +109,7 @@ export function normalizeConversationAfterIndex(value: unknown): number | undefi
 }
 
 function normalizeBaseUrl(value: string | undefined): string {
-  return (normalizeText(value) || DEFAULT_IDCHAT_API_BASE_URL).replace(/\/+$/, '');
+  return (normalizeText(value) || resolveMetasoInfrastructureEndpoints().chatApiBaseUrl).replace(/\/+$/, '');
 }
 
 function getFetchImpl(fetchImpl: typeof fetch | undefined): typeof fetch {
@@ -148,7 +148,7 @@ function extractHistoryPage(rawData: unknown): PrivateChatHistoryPage {
 
 export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPageInput & {
   fetchImpl?: typeof fetch;
-  idChatApiBaseUrl?: string;
+  chatApiBaseUrl?: string;
 }): Promise<PrivateChatHistoryPage> {
   const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
   const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
@@ -158,7 +158,7 @@ export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPage
 
   const startIndex = Number(input.startIndex);
   const fetchImpl = getFetchImpl(input.fetchImpl);
-  const url = new URL(`${normalizeBaseUrl(input.idChatApiBaseUrl)}/private-chat-list-by-index`);
+  const url = new URL(`${normalizeBaseUrl(input.chatApiBaseUrl)}/private-chat-list-by-index`);
   url.searchParams.set('metaId', selfGlobalMetaId);
   url.searchParams.set('otherMetaId', peerGlobalMetaId);
   url.searchParams.set('startIndex', String(Number.isFinite(startIndex) && startIndex >= 0
@@ -181,7 +181,7 @@ export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPage
 
 export async function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & {
   fetchImpl?: typeof fetch;
-  idChatApiBaseUrl?: string;
+  chatApiBaseUrl?: string;
 }): Promise<unknown[]> {
   const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
   const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
@@ -195,7 +195,7 @@ export async function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & 
     startIndex: (input.afterIndex ?? -1) + 1,
     limit: input.limit,
     fetchImpl: input.fetchImpl,
-    idChatApiBaseUrl: input.idChatApiBaseUrl,
+    chatApiBaseUrl: input.chatApiBaseUrl,
   });
   return page.rows;
 }
@@ -509,7 +509,7 @@ export async function buildPrivateConversationResponse(
   const fetchHistory = input.fetchHistory ?? ((historyInput) => fetchPrivateChatHistory({
     ...historyInput,
     fetchImpl: input.fetchImpl,
-    idChatApiBaseUrl: input.idChatApiBaseUrl,
+    chatApiBaseUrl: input.chatApiBaseUrl,
   }));
   const rows = await fetchHistory({
     selfGlobalMetaId,

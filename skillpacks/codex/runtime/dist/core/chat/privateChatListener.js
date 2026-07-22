@@ -6,10 +6,8 @@ exports.decryptPrivateChatSocketMessage = decryptPrivateChatSocketMessage;
 exports.createPrivateChatListener = createPrivateChatListener;
 const socket_io_client_1 = require("socket.io-client");
 const privateChat_1 = require("./privateChat");
-const DEFAULT_SOCKET_ENDPOINTS = [
-    { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
-    { url: 'wss://www.show.now', path: '/socket/socket.io' },
-];
+const metasoInfrastructure_1 = require("../network/metasoInfrastructure");
+const DEFAULT_SOCKET_ENDPOINTS = [(0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)().socket];
 const DEFAULT_RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 function normalizeText(value) {

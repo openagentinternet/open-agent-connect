@@ -802,7 +802,7 @@ export default class FetchChatListCommand {
 
       // Fetch chat list from IDChat API
       // API endpoint: /user/latest-chat-info-list?metaid={globalMetaId}
-      const baseURL = window.ServiceLocator?.idchat || 'https://api.idchat.io/chat-api/group-chat';
+      const baseURL = window.ServiceLocator?.chat_api || window.ServiceLocator?.idchat || 'https://so.metaid.io/chat-api/group-chat';
       const endpoint = `/user/latest-chat-info-list?metaid=${encodeURIComponent(walletStore.globalMetaId)}`;
 
       // Use fetch directly

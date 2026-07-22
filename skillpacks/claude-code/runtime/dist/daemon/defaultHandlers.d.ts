@@ -106,7 +106,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     adapters?: ChainAdapterRegistry;
     identitySyncStepDelayMs?: number;
     chainApiBaseUrl?: string;
-    idChatApiBaseUrl?: string;
+    chatApiBaseUrl?: string;
     socketPresenceApiBaseUrl?: string;
     socketPresenceFailureMode?: 'throw' | 'assume_service_providers_online';
     fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
@@ -127,6 +127,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     createMvcSponsorClient?: () => MvcSponsorV2DirectUploadClient;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     onIdentityProfileRegistered?: () => Promise<void> | void;
+    onBrowserInfrastructureChanged?: (homeDir: string) => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
     createSignerForHome?: (homeDir: string) => Signer;
     autoReplyConfig?: PrivateChatAutoReplyConfig;

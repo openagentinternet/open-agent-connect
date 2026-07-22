@@ -176,7 +176,7 @@ test('simplemsg listener manager creates one listener identity per local profile
   const manager = createA2ASimplemsgListenerManager({
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
-    socketEndpoints: [{ url: 'wss://idchat.test', path: '/socket/socket.io' }],
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
   });
 
   const started = await manager.start();
@@ -190,7 +190,43 @@ test('simplemsg listener manager creates one listener identity per local profile
   assert.equal(harness.sockets.every((socket) => socket.disconnected), true);
 });
 
-test('simplemsg listener sends idchat heartbeat ping after socket connect', async (t) => {
+test('simplemsg listener resolves the Socket endpoint separately for each profile', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  await createProfile(systemHomeDir, {
+    name: 'Alpha Bot',
+    slug: 'alpha-bot',
+    globalMetaId: 'idq1alpha0000000000000000000000000000',
+    keys: createIdentityPair(),
+    createdAt: 1_777_000_000_000,
+  });
+  await createProfile(systemHomeDir, {
+    name: 'Beta Bot',
+    slug: 'beta-bot',
+    globalMetaId: 'idq1beta00000000000000000000000000000',
+    keys: createIdentityPair(),
+    createdAt: 1_777_000_000_001,
+  });
+
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    resolveSocketEndpoints: async (profile) => [{
+      url: `wss://${profile.slug}.metaso.test`,
+      path: '/socket/socket.io',
+    }],
+  });
+
+  await manager.start();
+
+  assert.deepEqual(
+    harness.sockets.map((socket) => socket.endpoint.url).sort(),
+    ['wss://alpha-bot.metaso.test', 'wss://beta-bot.metaso.test'],
+  );
+  manager.stop();
+});
+
+test('simplemsg listener sends a Metaso heartbeat ping after socket connect', async (t) => {
   const systemHomeDir = await createSystemHome(t);
   const alphaKeys = createIdentityPair();
   await createProfile(systemHomeDir, {
@@ -204,7 +240,7 @@ test('simplemsg listener sends idchat heartbeat ping after socket connect', asyn
   const manager = createA2ASimplemsgListenerManager({
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
-    socketEndpoints: [{ url: 'wss://idchat.test', path: '/socket/socket.io' }],
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
     heartbeatIntervalMs: 20,
   });
   t.after(() => manager.stop());
@@ -215,7 +251,7 @@ test('simplemsg listener sends idchat heartbeat ping after socket connect', asyn
 
   assert.ok(
     harness.sockets[0].emitted.some((entry) => entry.event === 'ping'),
-    'connected idchat sockets should emit ping heartbeats for network-visible presence',
+    'connected Metaso sockets should emit ping heartbeats for network-visible presence',
   );
 });
 
@@ -234,7 +270,7 @@ test('simplemsg listener starts on the primary endpoint and falls back to the se
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
     socketEndpoints: [
-      { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
+      { url: 'wss://primary.example', path: '/socket/socket.io' },
       { url: 'wss://www.show.now', path: '/socket/socket.io' },
     ],
   });
@@ -242,7 +278,7 @@ test('simplemsg listener starts on the primary endpoint and falls back to the se
   await manager.start();
 
   assert.equal(harness.sockets.length, 1);
-  assert.equal(harness.sockets[0].endpoint.url, 'wss://api.idchat.io');
+  assert.equal(harness.sockets[0].endpoint.url, 'wss://primary.example');
 
   await harness.sockets[0].emitServer('connect_error', new Error('primary unavailable'));
 
@@ -274,7 +310,7 @@ test('simplemsg listener manager skips profiles with missing secrets without blo
   const manager = createA2ASimplemsgListenerManager({
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
-    socketEndpoints: [{ url: 'wss://idchat.test', path: '/socket/socket.io' }],
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
   });
 
   const started = await manager.start();
@@ -300,7 +336,7 @@ test('simplemsg listener manager derives listener identity from mnemonic-backed 
   const manager = createA2ASimplemsgListenerManager({
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
-    socketEndpoints: [{ url: 'wss://idchat.test', path: '/socket/socket.io' }],
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
   });
 
   const started = await manager.start();
@@ -311,7 +347,7 @@ test('simplemsg listener manager derives listener identity from mnemonic-backed 
   assert.equal(harness.sockets[0].options.query.metaid, derived.globalMetaId);
 });
 
-test('simplemsg listener normalizes idchat and show.now socket payload envelopes', () => {
+test('simplemsg listener normalizes Metaso socket payload envelopes', () => {
   const baseMessage = {
     txId: 'tx-1',
     pinId: 'pin-1',
@@ -350,7 +386,7 @@ test('simplemsg listener decrypts inbound ciphertext into per-peer A2A storage a
   const manager = createA2ASimplemsgListenerManager({
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
-    socketEndpoints: [{ url: 'wss://idchat.test', path: '/socket/socket.io' }],
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
   });
   await manager.start();
 
@@ -404,7 +440,7 @@ test('simplemsg listener ignores messages addressed to another local profile', a
   const manager = createA2ASimplemsgListenerManager({
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
-    socketEndpoints: [{ url: 'wss://idchat.test', path: '/socket/socket.io' }],
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
   });
   await manager.start();
 
@@ -450,7 +486,7 @@ test('simplemsg listener accepts socket messages without an explicit recipient o
   const manager = createA2ASimplemsgListenerManager({
     systemHomeDir,
     socketClientFactory: harness.socketClientFactory,
-    socketEndpoints: [{ url: 'wss://idchat.test', path: '/socket/socket.io' }],
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
   });
   await manager.start();
 

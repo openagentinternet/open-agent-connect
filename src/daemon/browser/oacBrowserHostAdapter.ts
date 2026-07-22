@@ -126,6 +126,7 @@ export interface CreateOacBrowserHostAdapterInput {
     rpcUrls: string[];
     textKey: string;
   }) => BrowserNameAliasProvider;
+  onInfrastructureSettingsUpdated?: (homeDir: string) => Promise<void> | void;
 }
 
 interface PendingPinWriteConfirmation {
@@ -1123,6 +1124,13 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       const next = applyBrowserSettingsUpdate(current, settingsInput.browser);
       await targetConfigStore.set(next);
       const saved = await targetConfigStore.read();
+      if (saved.browser.metasoP2PBaseUrl !== current.browser.metasoP2PBaseUrl) {
+        try {
+          await input.onInfrastructureSettingsUpdated?.(actor.homeDir);
+        } catch {
+          // The saved configuration remains authoritative and will be used on the next reconnect.
+        }
+      }
       return browserSuccess(toHostBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
         config: saved,
         configPath: targetConfigStore.paths.configPath,

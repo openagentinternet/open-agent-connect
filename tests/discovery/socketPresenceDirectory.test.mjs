@@ -41,7 +41,7 @@ test('readOnlineMetaBotsFromSocketPresence returns normalized bot rows from onli
         },
       };
     },
-    apiBaseUrl: 'https://api.idchat.io',
+    apiBaseUrl: 'https://so.metaid.io/chat-api',
     limit: 10,
   });
 
@@ -95,7 +95,7 @@ test('readOnlineMetaBotsFromSocketPresence clamps limit to API maximum size 100'
         },
       };
     },
-    apiBaseUrl: 'https://api.idchat.io',
+    apiBaseUrl: 'https://so.metaid.io/chat-api',
     limit: 999,
   });
 
@@ -114,7 +114,7 @@ test('readOnlineMetaBotsFromSocketPresence throws when API envelope is not succe
           };
         },
       }),
-      apiBaseUrl: 'https://api.idchat.io',
+      apiBaseUrl: 'https://so.metaid.io/chat-api',
       limit: 10,
     }),
     /socket_presence_semantic_error/

@@ -12,6 +12,13 @@ const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 const CLOSE_CONVERSATION_FINAL_LINE_PATTERN = /^(?:bye|goodbye)[.!。！]?$/iu;
 const MAX_REPLIES_PER_MINUTE = 10;
 const MAX_REPLIES_PER_HOUR = 100;
+// Order-protocol records (ORDER/ORDER_STATUS/DELIVERY/NeedsRating/ORDER_END)
+// are service traffic, not conversation. Keep them out of the LLM chat
+// context so a completed service exchange does not read as a finished
+// conversation and nudge the model into closing the chat early.
+function filterChatPromptMessages(messages) {
+    return messages.filter((message) => (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content).kind !== 'order_protocol');
+}
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -427,7 +434,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             }
             // Build context and call reply runner.
             const persona = await (0, chatPersonaLoader_1.loadChatPersona)(deps.paths);
-            const recentMessages = await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT);
+            const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT));
             const preparedTurn = await prepareOutboundTurn({
                 conversation,
                 recentMessages,
@@ -486,7 +493,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                     turnCount: conversation.turnCount + 1,
                 };
             const persona = await (0, chatPersonaLoader_1.loadChatPersona)(deps.paths);
-            const recentMessages = await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT);
+            const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(conversation.conversationId, DEFAULT_RECENT_MESSAGES_LIMIT));
             const preparedTurn = await prepareOutboundTurn({
                 conversation: runnerConversation,
                 recentMessages,

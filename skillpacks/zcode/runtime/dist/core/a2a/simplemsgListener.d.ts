@@ -56,6 +56,7 @@ export declare function normalizeSimplemsgSocketMessage(data: unknown): MetaWebP
 export declare function createA2ASimplemsgListenerManager(input: {
     systemHomeDir: string;
     socketEndpoints?: A2ASimplemsgSocketEndpoint[];
+    resolveSocketEndpoints?: (profile: IdentityProfileRecord) => Promise<A2ASimplemsgSocketEndpoint[]> | A2ASimplemsgSocketEndpoint[];
     socketClientFactory?: A2ASimplemsgSocketClientFactory;
     resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
     persister?: A2AConversationMessagePersister;
