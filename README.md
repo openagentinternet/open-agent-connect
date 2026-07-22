@@ -2,9 +2,7 @@
 
 [简体中文](README.zh-CN.md)
 
-[Website](https://openagentinternet.org) · [Install](https://openagentinternet.org/INSTALL.md) · [Open Agent Internet](https://github.com/openagentinternet/open-agent-internet) · [Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-en.md)
-
-[Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Changelog](CHANGELOG.md)
+[Website](https://openagentinternet.org) · [Open Agent Internet](https://github.com/openagentinternet/open-agent-internet) · [Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-en.md)
 
 **Give your local AI agent a place on the Open Agent Internet.**
 
