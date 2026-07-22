@@ -15,6 +15,10 @@ const { loadChatPersona } = require('../../dist/core/chat/chatPersonaLoader.js')
 const { createDefaultChatReplyRunner } = require('../../dist/core/chat/defaultChatReplyRunner.js');
 const { createHostLlmChatReplyRunner } = require('../../dist/core/chat/hostLlmChatReplyRunner.js');
 const { createPrivateChatAutoReplyOrchestrator } = require('../../dist/core/chat/privateChatAutoReply.js');
+const {
+  createPrivateChatSendFailureFileLogger,
+  privateChatSendFailureLogPath,
+} = require('../../dist/core/chat/privateChatSendFailureLog.js');
 
 async function createTempProfileHome() {
   const base = await mkdtempTempRoot('metabot-autoreply-test-');
@@ -86,6 +90,7 @@ async function createAutoReplyHarness(options = {}) {
   const peerGlobalMetaId = options.peerGlobalMetaId ?? 'idq1peerbot00000000000000000000000000';
   const writes = [];
   const runnerInputs = [];
+  const sendFailureEvents = [];
   const stateStore = createPrivateChatStateStore(paths);
   const strategyStore = createChatStrategyStore(paths);
   const hasResolvePeerChatPublicKeyOverride = Object.prototype.hasOwnProperty.call(
@@ -105,6 +110,9 @@ async function createAutoReplyHarness(options = {}) {
         throw new Error('not used');
       },
       async getPrivateChatIdentity() {
+        if (options.privateChatIdentityError) {
+          throw options.privateChatIdentityError;
+        }
         return {
           globalMetaId: localGlobalMetaId,
           chatPublicKey: localKeys.publicKeyHex,
@@ -135,6 +143,9 @@ async function createAutoReplyHarness(options = {}) {
       hasResolvePeerChatPublicKeyOverride ? options.resolvePeerChatPublicKey : peerKeys.publicKeyHex
     ),
     a2aConversationPersister: options.a2aConversationPersister,
+    logSendFailure: options.logSendFailure === undefined
+      ? (event) => sendFailureEvents.push(event)
+      : options.logSendFailure ?? undefined,
     replyRunner: async (input) => {
       runnerInputs.push(input);
       if (options.replyRunner) {
@@ -161,6 +172,7 @@ async function createAutoReplyHarness(options = {}) {
     peerGlobalMetaId,
     writes,
     runnerInputs,
+    sendFailureEvents,
     stateStore,
     strategyStore,
     async handleInbound(overrides = {}) {
@@ -880,6 +892,99 @@ test('auto-reply keeps pending guidance when the outbound send fails', async () 
 
   const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
   assert.equal(messages.filter((message) => message.direction === 'outbound').length, 0);
+});
+
+test('auto-reply logs pin_write_failed when the chain write rejects', async () => {
+  const harness = await createAutoReplyHarness({
+    writePinError: new Error('mvc broadcast failed: 502'),
+  });
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-log-pin-failure' });
+
+  assert.equal(harness.writes.length, 0);
+  assert.equal(harness.sendFailureEvents.length, 1);
+  assert.equal(harness.sendFailureEvents[0].kind, 'pin_write_failed');
+  assert.equal(harness.sendFailureEvents[0].peerGlobalMetaId, harness.peerGlobalMetaId);
+  assert.ok(harness.sendFailureEvents[0].error.includes('mvc broadcast failed: 502'));
+});
+
+test('auto-reply logs identity_unavailable when the chat identity cannot be loaded', async () => {
+  const harness = await createAutoReplyHarness({
+    privateChatIdentityError: new Error('wallet is locked'),
+  });
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-log-identity-failure' });
+
+  assert.equal(harness.writes.length, 0);
+  assert.equal(harness.sendFailureEvents.length, 1);
+  assert.equal(harness.sendFailureEvents[0].kind, 'identity_unavailable');
+  assert.equal(harness.sendFailureEvents[0].peerGlobalMetaId, harness.peerGlobalMetaId);
+  assert.ok(harness.sendFailureEvents[0].error.includes('wallet is locked'));
+});
+
+test('auto-reply logs peer_chat_key_unavailable when the peer chat key is missing', async () => {
+  const harness = await createAutoReplyHarness({
+    resolvePeerChatPublicKey: null,
+  });
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-log-key-failure' });
+
+  assert.equal(harness.writes.length, 0);
+  assert.equal(harness.sendFailureEvents.length, 1);
+  assert.equal(harness.sendFailureEvents[0].kind, 'peer_chat_key_unavailable');
+  assert.equal(harness.sendFailureEvents[0].peerGlobalMetaId, harness.peerGlobalMetaId);
+  assert.equal(harness.sendFailureEvents[0].error, null);
+});
+
+test('auto-reply send failure path works without a send failure logger', async () => {
+  const harness = await createAutoReplyHarness({
+    writePinError: new Error('mvc broadcast failed: 502'),
+    logSendFailure: null,
+  });
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-no-logger' });
+
+  assert.equal(harness.writes.length, 0);
+  assert.equal(harness.sendFailureEvents.length, 0);
+});
+
+test('auto-reply does not log send failures for successful sends', async () => {
+  const harness = await createAutoReplyHarness({});
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-log-success' });
+
+  assert.equal(harness.writes.length, 1);
+  assert.equal(harness.sendFailureEvents.length, 0);
+});
+
+test('private chat send failure file logger appends JSONL under the profile runtime logs', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const logEvent = createPrivateChatSendFailureFileLogger(paths);
+
+  await logEvent({
+    kind: 'pin_write_failed',
+    peerGlobalMetaId: 'idq1peerbot00000000000000000000000000',
+    error: 'mvc broadcast failed: 502',
+  });
+  await logEvent({
+    kind: 'peer_chat_key_unavailable',
+    peerGlobalMetaId: 'idq1peerbot00000000000000000000000000',
+    error: null,
+  });
+
+  const logPath = privateChatSendFailureLogPath(paths);
+  assert.ok(logPath.includes(path.join('.runtime', 'logs')));
+  const lines = (await fs.readFile(logPath, 'utf8')).trim().split('\n');
+  assert.equal(lines.length, 2);
+  const first = JSON.parse(lines[0]);
+  assert.equal(first.kind, 'pin_write_failed');
+  assert.equal(first.peerGlobalMetaId, 'idq1peerbot00000000000000000000000000');
+  assert.equal(first.error, 'mvc broadcast failed: 502');
+  assert.ok(typeof first.timestamp === 'string' && first.timestamp.length > 0);
+  const second = JSON.parse(lines[1]);
+  assert.equal(second.kind, 'peer_chat_key_unavailable');
+  assert.equal(second.error, null);
 });
 
 test('auto-reply consumes pending guidance when send succeeds but outbound conversation persistence fails', async () => {

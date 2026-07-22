@@ -5,6 +5,10 @@ import {
   type A2AConversationMessagePersister,
 } from '../a2a/conversationPersistence';
 import { classifySimplemsgContent } from '../a2a/simplemsgClassifier';
+import {
+  describePrivateChatSendFailureError,
+  type PrivateChatSendFailureEvent,
+} from './privateChatSendFailureLog';
 import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './privateChatStateStore';
 import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
@@ -42,6 +46,7 @@ export interface PrivateChatAutoReplyDependencies {
   resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
   replyRunner: ChatReplyRunner;
   a2aConversationPersister?: A2AConversationMessagePersister;
+  logSendFailure?: (event: PrivateChatSendFailureEvent) => void;
   now?: () => number;
 }
 
@@ -216,12 +221,34 @@ export function createPrivateChatAutoReplyOrchestrator(
     let privateChatIdentity;
     try {
       privateChatIdentity = await deps.signer.getPrivateChatIdentity();
-    } catch {
+    } catch (error) {
+      deps.logSendFailure?.({
+        kind: 'identity_unavailable',
+        peerGlobalMetaId,
+        error: describePrivateChatSendFailureError(error),
+      });
       return null;
     }
 
-    const peerChatPublicKey = await deps.resolvePeerChatPublicKey(peerGlobalMetaId);
-    if (!peerChatPublicKey) return null;
+    let peerChatPublicKey: string | null = null;
+    try {
+      peerChatPublicKey = await deps.resolvePeerChatPublicKey(peerGlobalMetaId);
+    } catch (error) {
+      deps.logSendFailure?.({
+        kind: 'peer_chat_key_unavailable',
+        peerGlobalMetaId,
+        error: describePrivateChatSendFailureError(error),
+      });
+      return null;
+    }
+    if (!peerChatPublicKey) {
+      deps.logSendFailure?.({
+        kind: 'peer_chat_key_unavailable',
+        peerGlobalMetaId,
+        error: null,
+      });
+      return null;
+    }
 
     const messageContent = extensions
       ? JSON.stringify({ content, extensions })
@@ -255,7 +282,12 @@ export function createPrivateChatAutoReplyOrchestrator(
           : [],
         network: normalizeText(chatWrite.network) || null,
       };
-    } catch {
+    } catch (error) {
+      deps.logSendFailure?.({
+        kind: 'pin_write_failed',
+        peerGlobalMetaId,
+        error: describePrivateChatSendFailureError(error),
+      });
       return null;
     }
   }

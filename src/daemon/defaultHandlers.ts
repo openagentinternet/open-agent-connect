@@ -171,6 +171,7 @@ import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunne
 import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createPrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
+import { createPrivateChatSendFailureFileLogger } from '../core/chat/privateChatSendFailureLog';
 import type {
   ChatPersona,
   ChatReplyRunner,
@@ -6495,6 +6496,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       strategyStore: createChatStrategyStore(profileHomeDir),
       paths: profileRuntimeStateStore.paths,
       signer: profileSigner,
+      logSendFailure: createPrivateChatSendFailureFileLogger(profileRuntimeStateStore.paths),
       selfGlobalMetaId: async () => {
         const latestState = await profileRuntimeStateStore.readState();
         return latestState.identity?.globalMetaId ?? null;

@@ -112,6 +112,7 @@ import {
   type PrivateChatAutoReplyDependencies,
   type PrivateChatAutoReplyOrchestrator,
 } from '../core/chat/privateChatAutoReply';
+import { createPrivateChatSendFailureFileLogger } from '../core/chat/privateChatSendFailureLog';
 import { createPrivateChatAutoReplyBackfillLoop } from '../core/chat/privateChatAutoReplyBackfill';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
@@ -3950,6 +3951,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     strategyStore: chatStrategyStore,
     paths,
     signer,
+    logSendFailure: createPrivateChatSendFailureFileLogger(paths),
     selfGlobalMetaId: async () => {
       const state = await runtimeStore.readState();
       return state.identity?.globalMetaId ?? null;
