@@ -157,6 +157,7 @@ const TEST_FAKE_PROVIDER_CHAT_PUBLIC_KEY_ENV = 'METABOT_TEST_FAKE_PROVIDER_CHAT_
 const TEST_FAKE_METAWEB_REPLY_ENV = 'METABOT_TEST_FAKE_METAWEB_REPLY';
 const TEST_FAKE_BUYER_RATING_REPLY_ENV = 'METABOT_TEST_FAKE_BUYER_RATING_REPLY';
 const TEST_FAKE_PROVIDER_LLM_REPLY_ENV = 'METABOT_TEST_FAKE_PROVIDER_LLM_REPLY';
+const TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV = 'METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY';
 const ALLOW_UNINDEXED_HOME_ENV = 'METABOT_ALLOW_UNINDEXED_HOME';
 const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
@@ -3934,15 +3935,17 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
 
   // Discover LLM runtimes in background (non-blocking).
   const metaBotSlug = path.basename(paths.profileRoot);
-  void (async () => {
-    const previous = await llmRuntimeStore.read();
-    const result = await discoverLlmRuntimes({ env: context.env, knownRuntimes: previous.runtimes });
-    for (const runtime of result.runtimes) {
-      await llmRuntimeStore
-        .upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true })
-        .catch(() => { /* best effort */ });
-    }
-  })().catch(() => { /* best effort */ });
+  if (context.env[TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV] !== '1') {
+    void (async () => {
+      const previous = await llmRuntimeStore.read();
+      const result = await discoverLlmRuntimes({ env: context.env, knownRuntimes: previous.runtimes });
+      for (const runtime of result.runtimes) {
+        await llmRuntimeStore
+          .upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true })
+          .catch(() => { /* best effort */ });
+      }
+    })().catch(() => { /* best effort */ });
+  }
 
   const chatStateStore = createPrivateChatStateStore(paths);
   const chatStrategyStore = createChatStrategyStore(paths);

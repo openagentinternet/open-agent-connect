@@ -17,6 +17,13 @@ const {
 const { createDaemonStateStore } = require('../../dist/core/state/daemonStateStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
+const DAEMON_TEST_PATH = [
+  path.dirname(process.execPath),
+  ...(process.platform === 'win32'
+    ? [path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')]
+    : ['/usr/bin', '/bin']),
+].join(path.delimiter);
+
 function parseLastJson(chunks) {
   return JSON.parse(chunks.join('').trim());
 }
@@ -146,8 +153,10 @@ test('daemon stop refuses an unverified live pid and preserves its record', asyn
   const exitCode = await runCli(['daemon', 'stop'], {
     env: {
       ...process.env,
+      PATH: DAEMON_TEST_PATH,
       HOME: systemHomeDir,
       METABOT_HOME: homeDir,
+      METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
     },
     cwd: homeDir,
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
@@ -189,8 +198,10 @@ test('daemon stop keeps a dead daemon record when its recorded port is still occ
   const exitCode = await runCli(['daemon', 'stop'], {
     env: {
       ...process.env,
+      PATH: DAEMON_TEST_PATH,
       HOME: systemHomeDir,
       METABOT_HOME: homeDir,
+      METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
     },
     cwd: homeDir,
     stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
@@ -207,8 +218,10 @@ test('daemon stop waits for a verified daemon to exit before clearing its record
   const store = createDaemonStateStore(systemHomeDir);
   const env = {
     ...process.env,
+    PATH: DAEMON_TEST_PATH,
     HOME: systemHomeDir,
     METABOT_HOME: homeDir,
+    METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
@@ -258,8 +271,10 @@ test('first installation persists the bounded fallback port and never drifts aft
 
   const env = {
     ...process.env,
+    PATH: DAEMON_TEST_PATH,
     HOME: systemHomeDir,
     METABOT_HOME: homeDir,
+    METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
@@ -328,8 +343,10 @@ test('first global start quarantines stale profile daemon metadata without touch
 
   const env = {
     ...process.env,
+    PATH: DAEMON_TEST_PATH,
     HOME: systemHomeDir,
     METABOT_HOME: homeDir,
+    METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
     METABOT_TEST_FAKE_CHAIN_WRITE: '1',
     METABOT_TEST_FAKE_SUBSIDY: '1',
     METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',

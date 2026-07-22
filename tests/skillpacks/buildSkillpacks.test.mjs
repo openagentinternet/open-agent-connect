@@ -266,6 +266,28 @@ test('buildAgentConnectSkillpacks renders one shared pack plus self-contained ho
   }
 });
 
+test('buildAgentConnectSkillpacks excludes dependency test artifacts from bundled runtimes', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+  const runtimeRoots = [
+    path.join(outputRoot, SHARED_PACK, 'runtime'),
+    ...HOSTS.map((host) => path.join(outputRoot, host, 'runtime')),
+  ];
+
+  for (const runtimeRoot of runtimeRoots) {
+    await assert.rejects(
+      stat(path.join(
+        runtimeRoot,
+        'node_modules',
+        'patch-package',
+        'node_modules',
+        'brace-expansion',
+        '.tap',
+      )),
+      (error) => error?.code === 'ENOENT',
+    );
+  }
+});
+
 test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic ability map entrypoint', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 

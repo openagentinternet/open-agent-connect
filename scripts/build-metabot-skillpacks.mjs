@@ -617,7 +617,14 @@ async function copyBundledRuntimeDependencies(repoRoot, runtimeRoot, dependencyN
     await fs.cp(
       sourceDependencyRoot,
       path.join(bundledNodeModulesRoot, ...dependencyPathSegments),
-      { recursive: true, verbatimSymlinks: true },
+      {
+        recursive: true,
+        verbatimSymlinks: true,
+        filter: (sourcePath) => {
+          const relativePath = path.relative(sourceDependencyRoot, sourcePath);
+          return !relativePath.split(path.sep).includes('.tap');
+        },
+      },
     );
   }
 
