@@ -7,6 +7,7 @@ import { collectDaemonStartupDiagnostics, formatDaemonStartupTimeoutMessage } fr
 import { CLI_VERSION } from './version';
 import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
+import { createInfrastructureConfigStore } from '../core/config/infrastructureConfigStore';
 import {
   DEFAULT_WRITE_NETWORKS,
   type DefaultWriteNetwork,
@@ -3728,6 +3729,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   const paths = resolveMetabotPaths(homeDir);
   const daemonPaths = resolveMetabotDaemonPaths(systemHomeDir);
+  const infrastructureConfigStore = createInfrastructureConfigStore(daemonPaths);
   const daemonStore = createDaemonStateStore(daemonPaths);
   let daemonRecord: GlobalDaemonRecord | null = null;
   const secretStore = createFileSecretStore(homeDir);
@@ -3889,9 +3891,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const onlineServiceCacheStore = createOnlineServiceCacheStore(paths);
   const ratingDetailStateStore = createRatingDetailStateStore(paths);
   const refreshOnlineServiceCache = async () => {
-    const currentConfig = await createConfigStore(paths).read();
+    const infrastructure = await infrastructureConfigStore.read();
     const configuredPresenceApiBaseUrl = socketPresenceApiBaseUrl
-      || resolveMetasoInfrastructureEndpoints(currentConfig.browser.metasoP2PBaseUrl).socketPresenceApiBaseUrl;
+      || resolveMetasoInfrastructureEndpoints(infrastructure.metasoP2PBaseUrl).socketPresenceApiBaseUrl;
     await refreshOnlineServiceCacheFromChain({
       store: onlineServiceCacheStore,
       ratingDetailStateStore,
@@ -4023,10 +4025,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   const simplemsgListener = createA2ASimplemsgListenerManager({
     systemHomeDir: paths.systemHomeDir,
-    resolveSocketEndpoints: async (profile) => {
-      const profileConfig = await createConfigStore(profile.homeDir).read();
-      return [resolveMetasoInfrastructureEndpoints(profileConfig.browser.metasoP2PBaseUrl).socket];
-    },
+    resolveSocketEndpoints: async () => [
+      resolveMetasoInfrastructureEndpoints((await infrastructureConfigStore.read()).metasoP2PBaseUrl).socket,
+    ],
     resolvePeerChatPublicKey,
     onMessage: (profile, message) => {
       if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
@@ -4044,33 +4045,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     },
   });
   const readConfiguredSocketPresence = async () => {
-    const profiles = await listIdentityProfiles(paths.systemHomeDir);
-    const configuredUrls = socketPresenceApiBaseUrl
-      ? [socketPresenceApiBaseUrl]
-      : [...new Set(await Promise.all(
-          (profiles.length > 0 ? profiles : [{ homeDir }]).map(async (profile) => {
-            const profileConfig = await createConfigStore(profile.homeDir).read();
-            return resolveMetasoInfrastructureEndpoints(
-              profileConfig.browser.metasoP2PBaseUrl,
-            ).socketPresenceApiBaseUrl;
-          }),
-        ))];
-    const results = await Promise.allSettled(configuredUrls.map((apiBaseUrl) => (
-      readOnlineMetaBotsFromSocketPresence({ apiBaseUrl, limit: 100 })
-    )));
-    const successful = results
-      .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof readOnlineMetaBotsFromSocketPresence>>> => (
-        result.status === 'fulfilled'
-      ))
-      .map((result) => result.value);
-    if (successful.length === 0) {
-      const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-      throw failure?.reason instanceof Error
-        ? failure.reason
-        : new Error('socket_presence_unavailable');
-    }
-    const bots = new Map(successful.flatMap((result) => result.bots).map((bot) => [bot.globalMetaId, bot]));
-    return { bots: [...bots.values()] };
+    const infrastructure = await infrastructureConfigStore.read();
+    const apiBaseUrl = socketPresenceApiBaseUrl
+      || resolveMetasoInfrastructureEndpoints(infrastructure.metasoP2PBaseUrl).socketPresenceApiBaseUrl;
+    return readOnlineMetaBotsFromSocketPresence({ apiBaseUrl, limit: 100 });
   };
   const simplemsgPresenceWatchdog = createA2ASimplemsgPresenceWatchdog({
     manager: simplemsgListener,

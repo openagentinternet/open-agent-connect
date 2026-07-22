@@ -9,9 +9,6 @@ const require = createRequire(import.meta.url);
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 
 const DEFAULT_BROWSER_CONFIG = {
-  metasoP2PBaseUrl: 'https://so.metaid.io',
-  metafileContentBaseUrl: 'https://file.metaid.io/metafile-indexer',
-  manApiBaseUrl: 'https://manapi.metaid.io',
   blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
   botHomepageTemplateId: 'document',
   renderCustomBotPages: true,
@@ -114,9 +111,6 @@ test('createConfigStore defaults to the active runtime config and persists updat
         enabled: false,
       },
       browser: {
-        metasoP2PBaseUrl: 'https://so.example.test',
-        metafileContentBaseUrl: 'https://so.example.test/content',
-        manApiBaseUrl: 'https://manapi.example.test',
         blockExplorerBaseUrl: 'https://explorer.example.test/tx',
         walletApiBaseUrl: 'https://wallet.example.test',
         botHomepageTemplateId: 'compact-list',

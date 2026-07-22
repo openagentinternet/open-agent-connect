@@ -108,6 +108,7 @@ The hidden machine-managed layer inside the profile:
   manager/
     identity-profiles.json
     active-home.json
+    infrastructure.json
 
   skills/
     metabot-identity-manage/
@@ -159,11 +160,13 @@ Purpose:
 
 - maintain the global profile index
 - maintain the currently active profile pointer
+- maintain installation-wide infrastructure service endpoints
 
 Allowed contents:
 
 - `identity-profiles.json`
 - `active-home.json`
+- `infrastructure.json`
 
 Forbidden contents:
 
@@ -171,6 +174,11 @@ Forbidden contents:
 - mnemonics
 - provider API tokens
 - per-profile runtime state
+
+`infrastructure.json` contains the one installation-wide source of truth for
+Metaso P2P, MetaFile, and ManAPI base URLs. These are service endpoints, not Bot
+preferences. Every profile, daemon Socket connection, presence lookup, and
+bundled MetaApp must read the same values from this file.
 
 #### `skills/`
 
@@ -278,6 +286,8 @@ Purpose:
 Rule:
 
 - v2 uses profile-scoped config, not one global `~/.metabot/config.json`
+- infrastructure base URLs are excluded because they are installation-wide and
+  live in `manager/infrastructure.json`
 
 #### `identity-secrets.json`
 

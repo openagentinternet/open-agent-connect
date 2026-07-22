@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { createMetabotProfile, createMetabotProfileFromIdentity } = require('../../dist/core/bot/metabotProfileManager.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
+const { createInfrastructureConfigStore } = require('../../dist/core/config/infrastructureConfigStore.js');
 
 function makeSigner(writePin) {
   return {
@@ -139,7 +140,7 @@ test('Browser runtime uses host contract data while context keeps legacy identit
   assert.equal(context.data.defaultActor, undefined);
 });
 
-test('Browser settings expose and persist browser base URL configuration by active Bot', async (t) => {
+test('Browser settings expose and persist installation-wide base URL configuration', async (t) => {
   const profileHome = await createProfileHome('browser-settings');
   t.after(async () => cleanupProfileHome(profileHome));
   const systemHomeDir = deriveSystemHome(profileHome);
@@ -212,8 +213,10 @@ test('Browser settings expose and persist browser base URL configuration by acti
   });
 
   const configOnDisk = await createConfigStore(active.homeDir).read();
-  assert.equal(configOnDisk.browser.metasoP2PBaseUrl, 'https://so.example.test');
-  assert.equal(configOnDisk.browser.manApiBaseUrl, 'https://manapi.example.test');
+  const infrastructureOnDisk = await createInfrastructureConfigStore(systemHomeDir).read();
+  assert.equal(Object.hasOwn(configOnDisk.browser, 'metasoP2PBaseUrl'), false);
+  assert.equal(infrastructureOnDisk.metasoP2PBaseUrl, 'https://so.example.test');
+  assert.equal(infrastructureOnDisk.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(configOnDisk.browser.botHomepageTemplateId, 'compact-list');
   assert.deepEqual(configOnDisk.browser.nameResolution, {
     enabled: true,

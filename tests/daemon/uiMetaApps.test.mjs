@@ -3,16 +3,16 @@ import test from 'node:test';
 
 import { handleBundledMetaAppRoutes } from '../../dist/daemon/routes/uiMetaApps.js';
 
-test('bundled Chat entry receives Metaso-derived HTTP and Socket endpoints for the selected actor', async () => {
+test('bundled Chat entry receives global Metaso-derived HTTP and Socket endpoints', async () => {
   let response = null;
-  let requestedActorId = null;
+  let requestedSettingsInput = null;
   const handled = await handleBundledMetaAppRoutes({
     url: new URL('http://127.0.0.1:62860/ui/chat?from=alice'),
     req: { method: 'GET' },
     handlers: {
       browser: {
-        getSettings: async ({ actorId }) => {
-          requestedActorId = actorId;
+        getSettings: async (input) => {
+          requestedSettingsInput = input;
           return {
             ok: true,
             state: 'success',
@@ -34,7 +34,7 @@ test('bundled Chat entry receives Metaso-derived HTTP and Socket endpoints for t
   });
 
   assert.equal(handled, true);
-  assert.equal(requestedActorId, 'alice');
+  assert.deepEqual(requestedSettingsInput, {});
   assert.equal(response?.status, 200);
   assert.match(response.html, /window\.__OAC_INFRASTRUCTURE__/);
   assert.match(response.html, /https:\/\/metaso\.example\.test\/proxy\/chat-api\/group-chat/);

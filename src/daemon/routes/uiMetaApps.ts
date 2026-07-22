@@ -185,9 +185,8 @@ function infrastructureScript(metasoP2PBaseUrl?: string): string {
 async function resolveConfiguredMetasoP2PBaseUrl(context: RouteContext): Promise<string | undefined> {
   const getSettings = context.handlers?.browser?.getSettings;
   if (!getSettings) return undefined;
-  const actorId = context.url.searchParams.get('from') || context.url.searchParams.get('actorId') || undefined;
   try {
-    const result = await getSettings({ actorId });
+    const result = await getSettings({});
     if (!result.ok || !result.data || typeof result.data !== 'object') return undefined;
     const browser = (result.data as { browser?: unknown }).browser;
     if (!browser || typeof browser !== 'object' || Array.isArray(browser)) return undefined;
