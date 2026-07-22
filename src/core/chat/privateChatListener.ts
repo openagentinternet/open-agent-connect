@@ -1,11 +1,9 @@
 import { io, type Socket } from 'socket.io-client';
 import { receivePrivateChat } from './privateChat';
 import type { PrivateChatInboundMessage } from './privateChatTypes';
+import { resolveMetasoInfrastructureEndpoints } from '../network/metasoInfrastructure';
 
-const DEFAULT_SOCKET_ENDPOINTS = [
-  { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
-  { url: 'wss://www.show.now', path: '/socket/socket.io' },
-];
+const DEFAULT_SOCKET_ENDPOINTS = [resolveMetasoInfrastructureEndpoints().socket];
 
 const DEFAULT_RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;

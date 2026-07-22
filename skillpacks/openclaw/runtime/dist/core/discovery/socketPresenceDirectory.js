@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.readOnlineMetaBotsFromSocketPresence = readOnlineMetaBotsFromSocketPresence;
-const DEFAULT_SOCKET_PRESENCE_API_BASE = 'https://api.idchat.io';
+const metasoInfrastructure_1 = require("../network/metasoInfrastructure");
 const DEFAULT_SOCKET_PRESENCE_SIZE = 20;
 const MAX_SOCKET_PRESENCE_SIZE = 100;
 function normalizeText(value) {
@@ -19,7 +19,7 @@ function normalizeInteger(value, fallback = 0) {
 }
 function normalizeApiBaseUrl(value) {
     const normalized = normalizeText(value);
-    return (normalized || DEFAULT_SOCKET_PRESENCE_API_BASE).replace(/\/$/, '');
+    return (normalized || (0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)().socketPresenceApiBaseUrl).replace(/\/$/, '');
 }
 function normalizeListSize(value) {
     if (!Number.isFinite(value)) {

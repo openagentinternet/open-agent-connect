@@ -7,10 +7,14 @@ exports.stripPlanningPreamble = stripPlanningPreamble;
 exports.isPlanningPreambleLine = isPlanningPreambleLine;
 const defaultChatReplyRunner_1 = require("./defaultChatReplyRunner");
 const privateChatAllowedSkills_1 = require("./privateChatAllowedSkills");
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
+// A chat history gap beyond this (or a close marker) starts a new session in
+// the prompt; mirrors the orchestrator's idle-reopen window.
+const DEFAULT_SESSION_GAP_MS = 300_000;
+const SESSION_BOUNDARY_LINE = '--- Earlier conversation session ended. A new session starts below this line: treat it as a fresh opening, and do not end it just because the session above was closed. ---';
 function isPlanningPreambleLine(line) {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -88,6 +92,17 @@ function canonicalizeFinalByeLine(value) {
     }
     return lines.join('\n').trim();
 }
+// Drop a trailing close marker from historical outbound messages: the farewell
+// text stays, but past "Bye" markers must not teach the model to end the
+// current conversation again.
+function stripFinalByeLineFromHistory(value) {
+    const lines = value.split(/\r?\n/u);
+    const finalIndex = findFinalNonEmptyLineIndex(lines);
+    if (finalIndex >= 0 && lines[finalIndex].trim().toLowerCase() === CLOSE_CONVERSATION_SIGNAL.toLowerCase()) {
+        lines.splice(finalIndex, 1);
+    }
+    return lines.join('\n').trim();
+}
 function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills_1.emptyPrivateChatAllowedSkillScope)(), options = {}) {
     const { conversation, recentMessages, persona, strategy } = input;
     const maxTurns = strategy?.maxTurns ?? 30;
@@ -134,11 +149,13 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     sections.push(strategyLines.join('\n'));
     const exitLines = [
         '## Exit Mechanism',
-        `When ANY of the following conditions are met, add ${CLOSE_CONVERSATION_SIGNAL} on its own final line at the very end of your reply:`,
-        '- The conversation objective has been achieved',
-        '- The other party says goodbye or signals the end',
-        '- There are no more valuable topics to discuss',
+        `End the conversation ONLY when the exchange is clearly finished. When ending, add ${CLOSE_CONVERSATION_SIGNAL} on its own final line at the very end of your reply:`,
+        '- The other party explicitly says goodbye or signals the end in the CURRENT session',
+        '- The conversation objective has been fully achieved over several substantive turns',
+        '- Several consecutive turns from both sides contained no new, substantive content',
         `- Approaching the turn limit (currently turn ${conversation.turnCount} of ${maxTurns})`,
+        '- Do NOT end the conversation just because one reply was short, generic, or low-value; answer it and steer toward a concrete next topic instead.',
+        '- Greetings and capability introductions are openings, not a reason to end.',
     ];
     sections.push(exitLines.join('\n'));
     sections.push([
@@ -177,16 +194,35 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     ].join('\n'));
     const selfName = 'Me';
     const peerName = conversation.peerName || 'Peer';
-    const historyLines = recentMessages.flatMap((msg) => {
+    const sessionGapMs = strategy?.maxIdleMs ?? DEFAULT_SESSION_GAP_MS;
+    const historyLines = [];
+    let previousTimestamp = null;
+    let previousClosedSession = false;
+    for (const msg of recentMessages) {
+        const rawContent = normalizeText(msg.content);
+        const closesSession = hasFinalByeLine(rawContent);
+        const timestamp = typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
+            ? msg.timestamp
+            : null;
+        const gapExceeded = previousTimestamp !== null
+            && timestamp !== null
+            && timestamp - previousTimestamp > sessionGapMs;
         const name = msg.direction === 'outbound' ? selfName : peerName;
         const normalizedContent = msg.direction === 'outbound'
-            ? stripPlanningPreamble(msg.content)
-            : normalizeText(msg.content);
-        if (!normalizedContent) {
-            return [];
+            ? stripFinalByeLineFromHistory(stripPlanningPreamble(msg.content))
+            : rawContent;
+        if (normalizedContent) {
+            // Keep older sessions visible as background, but mark the boundary so a
+            // stale farewell or a long idle gap is read as a fresh opening, not as
+            // a reason to close the new session again.
+            if (historyLines.length > 0 && (previousClosedSession || gapExceeded)) {
+                historyLines.push(SESSION_BOUNDARY_LINE);
+            }
+            historyLines.push(`${name}: ${normalizedContent}`);
         }
-        return `${name}: ${normalizedContent}`;
-    });
+        previousTimestamp = timestamp ?? previousTimestamp;
+        previousClosedSession = closesSession;
+    }
     if (historyLines.length > 0) {
         sections.push(`## Chat History\n${historyLines.join('\n')}`);
     }
@@ -205,11 +241,13 @@ function parseRunnerOutput(rawOutput) {
         content,
     };
 }
-async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope) {
+async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime) {
     const shouldMarkRuntimeUnavailable = !enforceSkillScope;
+    const stickyRuntimeId = stickyRuntime.get();
     const resolved = await resolver.resolveRuntime({
         metaBotSlug,
         excludeRuntimeIds: Array.from(excludeRuntimeIds),
+        ...(stickyRuntimeId ? { explicitRuntimeId: stickyRuntimeId } : {}),
     });
     if (!resolved.runtime)
         return null;
@@ -243,15 +281,18 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs,
                 if (result.status === 'completed') {
                     const parsed = parseRunnerOutput(result.output);
                     if (parsed.state !== 'skip') {
+                        stickyRuntime.onSuccess(resolved.runtime.id);
                         return { result: parsed, bindingId: resolved.bindingId };
                     }
                     excludeRuntimeIds.add(resolved.runtime.id);
+                    stickyRuntime.onFailure(resolved.runtime.id);
                     if (shouldMarkRuntimeUnavailable) {
                         await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime completed without returning output.').catch(() => { });
                     }
                     return null;
                 }
                 excludeRuntimeIds.add(resolved.runtime.id);
+                stickyRuntime.onFailure(resolved.runtime.id);
                 if (shouldMarkRuntimeUnavailable) {
                     await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => { });
                 }
@@ -260,12 +301,14 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs,
             await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
         }
         excludeRuntimeIds.add(resolved.runtime.id);
-        if (shouldMarkRuntimeUnavailable) {
-            await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => { });
-        }
+        stickyRuntime.onFailure(resolved.runtime.id);
+        // A session that hangs until the poll deadline is a runtime-side signal
+        // regardless of skill isolation, so always cool the runtime down here.
+        await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => { });
         return null;
     }
     catch {
+        stickyRuntime.onFailure(resolved.runtime.id);
         if (!excludeRuntimeIds.has(resolved.runtime.id)) {
             excludeRuntimeIds.add(resolved.runtime.id);
             if (shouldMarkRuntimeUnavailable) {
@@ -286,6 +329,21 @@ function createHostLlmChatReplyRunner(options) {
     const logWarning = options?.logWarning;
     const allowTemplateFallback = options?.allowTemplateFallback ?? true;
     const fallbackRunner = (0, defaultChatReplyRunner_1.createDefaultChatReplyRunner)();
+    // Remember the runtime that produced the last successful reply and try it
+    // first on the next turn; a failure clears the preference immediately. The
+    // runner instance is cached per profile, so this survives across turns.
+    let lastSuccessfulRuntimeId = null;
+    const stickyRuntime = {
+        get: () => lastSuccessfulRuntimeId,
+        onSuccess: (runtimeId) => {
+            lastSuccessfulRuntimeId = runtimeId;
+        },
+        onFailure: (runtimeId) => {
+            if (lastSuccessfulRuntimeId === runtimeId) {
+                lastSuccessfulRuntimeId = null;
+            }
+        },
+    };
     // If no resolver provided, either fall back to template-only replies or skip.
     if (!runtimeResolver || !llmExecutor) {
         return async (input) => (allowTemplateFallback && !normalizeText(input.operatorGuidanceText)
@@ -309,7 +367,7 @@ function createHostLlmChatReplyRunner(options) {
             && !normalizeText(input.operatorGuidanceText);
         // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
         for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
-            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope);
+            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime);
             if (outcome) {
                 // Track lastUsedAt on the binding that was successfully used.
                 if (outcome.bindingId) {

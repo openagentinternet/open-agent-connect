@@ -53,6 +53,8 @@ import { createOnlineServiceCacheStore, DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERV
 import { refreshOnlineServiceCacheFromChain } from '../core/discovery/onlineServiceCacheSync';
 import { buildRemoteServicesPrompt } from '../core/delegation/remoteCall';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
+import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
+import { resolveMetasoInfrastructureEndpoints } from '../core/network/metasoInfrastructure';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import type { LocalIdentitySecrets } from '../core/secrets/secretStore';
 import {
@@ -3814,6 +3816,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   let refreshA2ASimplemsgListenerAfterIdentityRegistration: () => Promise<void> = async () => {
     pendingA2ASimplemsgRefreshAfterIdentityRegistration = true;
   };
+  let refreshA2ASimplemsgListenerAfterInfrastructureChange: () => Promise<void> = async () => {};
   let onProviderPresenceChanged: (enabled: boolean) => Promise<void> = async () => {};
 
   const handlers = createDefaultMetabotDaemonHandlers({
@@ -3851,6 +3854,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
     onProviderPresenceChanged: (enabled) => onProviderPresenceChanged(enabled),
     onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
+    onBrowserInfrastructureChanged: () => refreshA2ASimplemsgListenerAfterInfrastructureChange(),
   });
 
   const daemon = createMetabotDaemon({
@@ -3884,11 +3888,14 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const onlineServiceCacheStore = createOnlineServiceCacheStore(paths);
   const ratingDetailStateStore = createRatingDetailStateStore(paths);
   const refreshOnlineServiceCache = async () => {
+    const currentConfig = await createConfigStore(paths).read();
+    const configuredPresenceApiBaseUrl = socketPresenceApiBaseUrl
+      || resolveMetasoInfrastructureEndpoints(currentConfig.browser.metasoP2PBaseUrl).socketPresenceApiBaseUrl;
     await refreshOnlineServiceCacheFromChain({
       store: onlineServiceCacheStore,
       ratingDetailStateStore,
       chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-      socketPresenceApiBaseUrl,
+      socketPresenceApiBaseUrl: configuredPresenceApiBaseUrl,
       socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? 'assume_service_providers_online'
         : 'throw',
@@ -4014,6 +4021,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   const simplemsgListener = createA2ASimplemsgListenerManager({
     systemHomeDir: paths.systemHomeDir,
+    resolveSocketEndpoints: async (profile) => {
+      const profileConfig = await createConfigStore(profile.homeDir).read();
+      return [resolveMetasoInfrastructureEndpoints(profileConfig.browser.metasoP2PBaseUrl).socket];
+    },
     resolvePeerChatPublicKey,
     onMessage: (profile, message) => {
       if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
@@ -4030,8 +4041,38 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       console.warn('[A2A simplemsg listener]', error.message);
     },
   });
+  const readConfiguredSocketPresence = async () => {
+    const profiles = await listIdentityProfiles(paths.systemHomeDir);
+    const configuredUrls = socketPresenceApiBaseUrl
+      ? [socketPresenceApiBaseUrl]
+      : [...new Set(await Promise.all(
+          (profiles.length > 0 ? profiles : [{ homeDir }]).map(async (profile) => {
+            const profileConfig = await createConfigStore(profile.homeDir).read();
+            return resolveMetasoInfrastructureEndpoints(
+              profileConfig.browser.metasoP2PBaseUrl,
+            ).socketPresenceApiBaseUrl;
+          }),
+        ))];
+    const results = await Promise.allSettled(configuredUrls.map((apiBaseUrl) => (
+      readOnlineMetaBotsFromSocketPresence({ apiBaseUrl, limit: 100 })
+    )));
+    const successful = results
+      .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof readOnlineMetaBotsFromSocketPresence>>> => (
+        result.status === 'fulfilled'
+      ))
+      .map((result) => result.value);
+    if (successful.length === 0) {
+      const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      throw failure?.reason instanceof Error
+        ? failure.reason
+        : new Error('socket_presence_unavailable');
+    }
+    const bots = new Map(successful.flatMap((result) => result.bots).map((bot) => [bot.globalMetaId, bot]));
+    return { bots: [...bots.values()] };
+  };
   const simplemsgPresenceWatchdog = createA2ASimplemsgPresenceWatchdog({
     manager: simplemsgListener,
+    readOnlineMetaBots: readConfiguredSocketPresence,
     onRestart: (event) => {
       const missingNames = event.missing
         .map((profile) => `${profile.name || profile.slug} (${profile.globalMetaId})`)
@@ -4049,6 +4090,18 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
       listener: simplemsgListener,
       watchdog: simplemsgPresenceWatchdog,
+    });
+  };
+  refreshA2ASimplemsgListenerAfterInfrastructureChange = async () => {
+    const currentConfig = await createConfigStore(paths).read().catch(() => daemonConfig);
+    const providerPresence = await providerPresenceStore.read().catch(() => ({ enabled: true }));
+    await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
+      enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
+      listener: simplemsgListener,
+      watchdog: simplemsgPresenceWatchdog,
+    });
+    void refreshOnlineServiceCache().catch((error) => {
+      console.warn('[online service cache] infrastructure refresh failed:', error instanceof Error ? error.message : String(error));
     });
   };
   onProviderPresenceChanged = async (enabled) => {

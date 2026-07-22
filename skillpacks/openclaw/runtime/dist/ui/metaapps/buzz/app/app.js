@@ -14,11 +14,21 @@ import {
   resolveBuzzRouteMode,
 } from '../idframework/utils/buzz-route.js';
 
+const infrastructure = window.__OAC_INFRASTRUCTURE__ || {};
+const chatApiBaseUrl = infrastructure.chatApiBaseUrl || 'https://so.metaid.io/chat-api/group-chat';
+const socketPath = String(infrastructure.socket?.path || '/socket/socket.io');
+const socketPathPrefix = socketPath.endsWith('/socket.io')
+  ? socketPath.slice(0, -'/socket.io'.length)
+  : socketPath;
+
 window.ServiceLocator = {
   metaid_man: 'https://www.show.now/man',
   metafs: 'https://file.metaid.io/metafile-indexer/api/v1',
   man_api: 'https://man.metaid.io/api',
-  idchat: 'https://api.idchat.io/chat-api/group-chat',
+  chat_api: chatApiBaseUrl,
+  idchat: chatApiBaseUrl,
+  chat_ws: infrastructure.socket?.url || 'wss://so.metaid.io',
+  chat_ws_path: socketPathPrefix,
 };
 
 window.IDFrameworkConfig = {

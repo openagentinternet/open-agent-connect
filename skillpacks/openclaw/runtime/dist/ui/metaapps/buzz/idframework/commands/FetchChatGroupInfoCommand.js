@@ -111,7 +111,7 @@ export default class FetchChatGroupInfoCommand {
     };
 
     try {
-      const baseURL = (window.ServiceLocator?.idchat || 'https://api.idchat.io/chat-api/group-chat').replace(/\/+$/, '');
+      const baseURL = (window.ServiceLocator?.chat_api || window.ServiceLocator?.idchat || 'https://so.metaid.io/chat-api/group-chat').replace(/\/+$/, '');
       const endpoint = `/group-info?groupId=${encodeURIComponent(groupId)}`;
       const response = await fetch(`${baseURL}${endpoint}`, {
         method: 'GET',

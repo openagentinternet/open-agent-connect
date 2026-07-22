@@ -120,6 +120,7 @@ async function createAdapter(input) {
     writeMetaIdPin: input.writeMetaIdPin,
     nameAliasProviders: input.nameAliasProviders,
     ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
+    onInfrastructureSettingsUpdated: input.onInfrastructureSettingsUpdated,
     resolveActorWriteContext: async (rawActor) => {
       const slug = typeof rawActor === 'string' ? rawActor.trim() : '';
       if (!slug) {
@@ -349,9 +350,13 @@ test('OAC browser host adapter persists Browser settings for the selected profil
     globalMetaId: 'idq1settingsbrowser',
     mvcAddress: '18SettingsBrowser',
   });
+  const infrastructureUpdates = [];
   const adapter = await createAdapter({
     homeDir: active.homeDir,
     systemHomeDir,
+    onInfrastructureSettingsUpdated: async (homeDir) => {
+      infrastructureUpdates.push(homeDir);
+    },
   });
 
   const updated = await adapter.updateSettings({
@@ -398,6 +403,7 @@ test('OAC browser host adapter persists Browser settings for the selected profil
   assert.equal(configOnDisk.browser.metasoP2PBaseUrl, 'https://so.example.test');
   assert.equal(configOnDisk.browser.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(configOnDisk.browser.botHomepageTemplateId, 'compact-list');
+  assert.deepEqual(infrastructureUpdates, [active.homeDir]);
   assert.deepEqual(configOnDisk.browser.nameResolution, {
     enabled: true,
     ens: {

@@ -50,8 +50,8 @@ export function resolveSocketConfig() {
     : {};
   let fallbackUrl = '';
   try {
-    if (locator && locator.idchat) {
-      fallbackUrl = new URL(String(locator.idchat)).origin;
+    if (locator && (locator.chat_api || locator.idchat)) {
+      fallbackUrl = new URL(String(locator.chat_api || locator.idchat)).origin;
     }
   } catch (_) {
     fallbackUrl = '';
@@ -61,7 +61,7 @@ export function resolveSocketConfig() {
       cfg.CHAT_WS ||
       locator.chat_ws ||
       fallbackUrl ||
-      'https://api.idchat.io'
+      'wss://so.metaid.io'
     ).replace(/\/$/, ''),
     pathPrefix: String(
       cfg.CHAT_WS_PATH !== undefined

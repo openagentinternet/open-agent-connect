@@ -9,10 +9,8 @@ const paths_1 = require("../state/paths");
 const localMnemonicSigner_1 = require("../signing/localMnemonicSigner");
 const privateChatListener_1 = require("../chat/privateChatListener");
 const conversationPersistence_1 = require("./conversationPersistence");
-const DEFAULT_SOCKET_ENDPOINTS = [
-    { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
-    { url: 'wss://www.show.now', path: '/socket/socket.io' },
-];
+const metasoInfrastructure_1 = require("../network/metasoInfrastructure");
+const DEFAULT_SOCKET_ENDPOINTS = [(0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)().socket];
 const DEFAULT_RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -197,7 +195,7 @@ function createProfileSimplemsgListener(input) {
             stopHeartbeat(socket);
         });
         socket.on('heartbeat_ack', () => {
-            // The ack is emitted by idchat after a heartbeat ping; no payload is required.
+            // The ack confirms that the Metaso socket registered the heartbeat ping.
         });
         socket.on('message', async (data) => {
             await handleSocketPayload(data).catch((error) => {
@@ -273,7 +271,6 @@ function createProfileSimplemsgListener(input) {
     };
 }
 function createA2ASimplemsgListenerManager(input) {
-    const endpoints = input.socketEndpoints ?? DEFAULT_SOCKET_ENDPOINTS;
     const socketClientFactory = input.socketClientFactory ?? defaultSocketClientFactory;
     const persister = input.persister ?? conversationPersistence_1.persistA2AConversationMessage;
     const listProfiles = input.listProfiles ?? identityProfiles_1.listIdentityProfiles;
@@ -319,6 +316,9 @@ function createA2ASimplemsgListenerManager(input) {
                     });
                     continue;
                 }
+                const endpoints = input.socketEndpoints
+                    ?? await input.resolveSocketEndpoints?.(profile)
+                    ?? DEFAULT_SOCKET_ENDPOINTS;
                 const listener = createProfileSimplemsgListener({
                     profile,
                     paths: loaded.paths,

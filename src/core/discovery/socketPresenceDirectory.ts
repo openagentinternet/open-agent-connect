@@ -1,4 +1,5 @@
-const DEFAULT_SOCKET_PRESENCE_API_BASE = 'https://api.idchat.io';
+import { resolveMetasoInfrastructureEndpoints } from '../network/metasoInfrastructure';
+
 const DEFAULT_SOCKET_PRESENCE_SIZE = 20;
 const MAX_SOCKET_PRESENCE_SIZE = 100;
 
@@ -61,7 +62,7 @@ function normalizeInteger(value: unknown, fallback = 0): number {
 
 function normalizeApiBaseUrl(value: string | undefined): string {
   const normalized = normalizeText(value);
-  return (normalized || DEFAULT_SOCKET_PRESENCE_API_BASE).replace(/\/$/, '');
+  return (normalized || resolveMetasoInfrastructureEndpoints().socketPresenceApiBaseUrl).replace(/\/$/, '');
 }
 
 function normalizeListSize(value: number | undefined): number {

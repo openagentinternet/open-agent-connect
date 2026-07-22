@@ -20,6 +20,7 @@ const app_11 = require("../../ui/pages/services/app");
 const app_12 = require("../../ui/pages/settings/app");
 const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
+const topbarChrome_1 = require("../../ui/topbarChrome");
 const uiMetaApps_1 = require("./uiMetaApps");
 const UI_ROUTE_PREFIX = '/ui/';
 const UI_ASSET_CONTENT_TYPES = {
@@ -82,19 +83,11 @@ function renderNav(currentPage, i18n) {
         return `<a${activeClass} href="/ui/${item.page}" data-i18n-key="${item.labelKey}">${escapeHtml(i18n.t(item.labelKey))}</a>`;
     }).join('');
 }
-function renderTopbarLanguageSelector(i18n) {
-    return [
-        `<select class="topbar-language-select" data-language-select aria-label="${escapeHtml(i18n.t('language.label'))}">`,
-        (0, i18n_1.renderLanguageOptions)(i18n),
-        '</select>',
-    ].join('');
-}
-function renderTopbarAction(i18n) {
-    return `<a class="topbar-action" href="/browser" data-i18n-key="action.openBrowser">${escapeHtml(i18n.t('action.openBrowser'))}</a>`;
-}
 function injectTopbarChrome(html, i18n) {
     const withLogo = html.replace(/<a class="topbar-logo" href="\/ui\/hub">MetaBot<\/a>/, '<a class="topbar-logo" href="/ui/bot">Open Agent Connect</a>');
-    return withLogo.replace('</nav>', `</nav>${renderTopbarLanguageSelector(i18n)}${renderTopbarAction(i18n)}`);
+    return withLogo
+        .replace('</nav>', `</nav>${(0, topbarChrome_1.renderTopbarControls)(i18n)}`)
+        .replace('</main>', `</main>${(0, topbarChrome_1.renderTopbarSettingsModal)(i18n)}`);
 }
 function applyStaticI18n(html, i18n) {
     return html.replace(/(<[^>]*\sdata-i18n-key="([^"]+)"[^>]*>)([^<]*)(<\/[^>]+>)/g, (match, open, key, _text, close) => {
@@ -135,7 +128,7 @@ async function renderBuiltInPage(page, languagePreference) {
     // inject only the page-specific content HTML. Otherwise fall back to the
     // legacy hero wrapper for templates that don't have __PAGE_CONTENT__.
     const content = definition.contentHtml ?? '';
-    const script = `${(0, i18n_1.renderClientI18nScript)(i18n)}\n${definition.script}`;
+    const script = `${(0, i18n_1.renderClientI18nScript)(i18n)}\n${definition.script}\n;\n${(0, topbarChrome_1.renderTopbarSettingsScript)()}`;
     const html = template
         .replace(/<html lang="en">/g, `<html lang="${escapeHtml(i18n.language)}">`)
         .replace(/__PAGE_TITLE__/g, escapeHtml(definition.title))
