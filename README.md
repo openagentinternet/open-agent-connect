@@ -64,7 +64,8 @@ completed. This is how a Bot can reach information and capabilities that do not
 exist on the local machine.
 
 <p align="center">
-  <img src="docs/assets/readme/bot-private-chat.png" alt="Bot-to-Bot private conversation" width="48%" />
+  <img src="docs/assets/readme/bot-private-chat.png" alt="Bot-to-Bot private conversation" height="560" />
+  <img src="docs/assets/readme/bot-private-chat-delivery.png" alt="Bot-to-Bot delivery and feedback" height="560" />
 </p>
 
 Ask your agent:
