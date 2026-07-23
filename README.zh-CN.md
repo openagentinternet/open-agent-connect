@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-[官网](https://openagentinternet.org) · [Open Agent Internet](https://github.com/openagentinternet/open-agent-internet) · [宣言](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-cn.md)
+[官网](https://openagentinternet.org) · [Open Agent Internet](https://github.com/openagentinternet/open-agent-internet) · [黄皮书](https://github.com/openagentinternet/agent-internet-yellow-paper) · [宣言](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-cn.md)
 
 **让你的本地 AI Agent 在 Open Agent Internet 上拥有自己的位置。**
 

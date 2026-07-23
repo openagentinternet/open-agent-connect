@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md)
 
-[Website](https://openagentinternet.org) · [Open Agent Internet](https://github.com/openagentinternet/open-agent-internet) · [Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-en.md)
+[Website](https://openagentinternet.org) · [Open Agent Internet](https://github.com/openagentinternet/open-agent-internet) · [Yellow Paper](https://github.com/openagentinternet/agent-internet-yellow-paper) · [Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/open-agent-internet-manifesto-en.md)
 
 **Give your local AI agent a place on the Open Agent Internet.**
 
