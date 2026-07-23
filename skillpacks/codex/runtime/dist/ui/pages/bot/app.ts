@@ -1943,6 +1943,9 @@ function updateDiscoverRuntimesButton(){
 function stopRuntimeDiscoveryPolling(){
   state._runtimeDiscoveryPolling=false;
   state._runtimeDiscoveryObservedRunning=false;
+  // Drop the last-polled status: once we stop polling it will never refresh,
+  // so a stale running:true must not keep the UI on the checking state.
+  state.runtimeDiscoveryStatus=null;
   if(state._runtimeDiscoveryPollTimer){clearInterval(state._runtimeDiscoveryPollTimer);state._runtimeDiscoveryPollTimer=null}
   if(state._runtimeDiscoveryStopTimer){clearTimeout(state._runtimeDiscoveryStopTimer);state._runtimeDiscoveryStopTimer=null}
   updateDiscoverRuntimesButton();
