@@ -5850,15 +5850,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
   }
 
   function mergeConversationName(currentName: unknown, globalMetaId: string, profile: ConversationProfileProjection | null): string | null {
-    return meaningfulConversationName(currentName, globalMetaId)
-      || profile?.name
+    return meaningfulConversationName(profile?.name, globalMetaId)
+      || meaningfulConversationName(currentName, globalMetaId)
       || normalizeText(currentName)
       || null;
   }
 
   function mergeConversationAvatar(currentAvatar: unknown, profile: ConversationProfileProjection | null): string | null {
-    return (isUsableAvatarReference(currentAvatar) ? normalizeText(currentAvatar) : '')
-      || (isUsableAvatarReference(profile?.avatar) ? normalizeText(profile?.avatar) : '')
+    return (isUsableAvatarReference(profile?.avatar) ? normalizeText(profile?.avatar) : '')
+      || (isUsableAvatarReference(currentAvatar) ? normalizeText(currentAvatar) : '')
       || null;
   }
 
