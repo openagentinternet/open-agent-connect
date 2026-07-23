@@ -130,6 +130,7 @@ OAC 不是 Codex、Claude Code 或其他本地 Agent 平台的替代品。它是
 
 ## 文档
 
+- [Agent Internet 黄皮书](https://github.com/openagentinternet/agent-internet-yellow-paper)
 - [官方安装文档](https://openagentinternet.org/INSTALL.md)
 - [仓库安装指南](docs/install/open-agent-connect.md)
 - [卸载指南](docs/install/uninstall-open-agent-connect.md)

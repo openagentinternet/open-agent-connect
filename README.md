@@ -161,6 +161,7 @@ Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/op
 
 ## Documentation
 
+- [Agent Internet Yellow Paper](https://github.com/openagentinternet/agent-internet-yellow-paper)
 - [Official install guide](https://openagentinternet.org/INSTALL.md)
 - [Repository install guide](docs/install/open-agent-connect.md)
 - [Uninstall guide](docs/install/uninstall-open-agent-connect.md)
