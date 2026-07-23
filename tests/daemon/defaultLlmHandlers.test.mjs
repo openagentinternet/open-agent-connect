@@ -115,3 +115,94 @@ test('LLM runtime discovery preserves recently healthy runtime on transient read
   assert.equal(byId.get(discoveredRuntimeId).health, 'healthy');
   assert.equal(byId.get(discoveredRuntimeId).healthReason, undefined);
 });
+
+
+function deferredGate() {
+  let release;
+  const promise = new Promise((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+async function waitForCondition(condition, label, timeoutMs = 3000) {
+  const startedAt = Date.now();
+  for (;;) {
+    if (await condition()) return;
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Timed out waiting for ${label}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+test('llm discoverRuntimes background mode mirrors the bot handler behavior', async (t) => {
+  const homeDir = await createProfileHome('metabot-llm-discover-background-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  await createLlmRuntimeStore(resolveMetabotPaths(homeDir)).write({
+    version: 1,
+    runtimes: [makeRuntime({ id: 'runtime-codex', health: 'healthy' })],
+  });
+
+  const gate = deferredGate();
+  let discoverCalls = 0;
+  let observedProviders = null;
+  let progressiveUpsertDone = false;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    getDaemonRecord: () => null,
+    discoverLlmRuntimes: async (input) => {
+      discoverCalls += 1;
+      observedProviders = input.providers ?? null;
+      const discovered = makeRuntime({
+        id: 'runtime-workbuddy',
+        provider: 'workbuddy',
+        displayName: 'WorkBuddy',
+        binaryPath: '/bin/workbuddy',
+        health: 'detected',
+      });
+      await input.onRuntimeDiscovered(discovered);
+      progressiveUpsertDone = true;
+      await gate.promise;
+      return { runtimes: [discovered], errors: [] };
+    },
+  });
+
+  const first = await handlers.llm.discoverRuntimes({ background: true, providers: ['workbuddy', 'bogus'] });
+  assert.equal(first.ok, true);
+  assert.equal(first.data.status, 'running');
+  assert.deepEqual(first.data.runtimes.map((entry) => entry.id), ['runtime-codex']);
+
+  await waitForCondition(() => progressiveUpsertDone, 'background sweep to upsert mid-sweep');
+  assert.equal(discoverCalls, 1);
+  assert.deepEqual(observedProviders, ['workbuddy'], 'invalid provider entries are ignored');
+
+  const duringList = await handlers.llm.listRuntimes();
+  assert.equal(duringList.data.discoveryStatus.running, true);
+  assert.ok(
+    duringList.data.runtimes.some((entry) => entry.id === 'runtime-workbuddy'),
+    'progressive upserts are visible to listRuntimes mid-sweep',
+  );
+
+  const second = await handlers.llm.discoverRuntimes({ background: true });
+  assert.equal(second.data.status, 'running');
+  assert.equal(discoverCalls, 1, 'single-flight: no second sweep while one is in flight');
+
+  gate.release();
+  await waitForCondition(async () => {
+    const list = await handlers.llm.listRuntimes();
+    return list.data.discoveryStatus && list.data.discoveryStatus.running === false;
+  }, 'background sweep to settle');
+
+  const afterList = await handlers.llm.listRuntimes();
+  assert.equal(afterList.data.discoveryStatus.running, false);
+  assert.ok(afterList.data.discoveryStatus.lastFinishedAt);
+  assert.ok(afterList.data.runtimes.some((entry) => entry.id === 'runtime-workbuddy'));
+  assert.equal(
+    afterList.data.runtimes.find((entry) => entry.id === 'runtime-codex').health,
+    'healthy',
+    'a provider-subset sweep must not retire runtimes of other providers',
+  );
+});
