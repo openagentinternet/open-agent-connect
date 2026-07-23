@@ -3823,6 +3823,10 @@ test('bot discoverRuntimes background mode coalesces sweeps and exposes discover
   const third = await handlers.bot.discoverRuntimes({ background: true });
   assert.equal(third.data.status, 'running');
   await waitForCondition(() => discoverCalls === 2, 'a new sweep after the previous one settled');
+  await waitForCondition(async () => {
+    const list = await handlers.bot.listRuntimes();
+    return list.data.discoveryStatus && list.data.discoveryStatus.running === false;
+  }, 'the follow-up sweep to settle before test teardown');
 });
 
 test('bot discoverRuntimes blocking mode keeps its response shape and records status', async (t) => {
