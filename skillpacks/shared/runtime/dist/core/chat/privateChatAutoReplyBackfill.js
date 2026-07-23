@@ -4,8 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createPrivateChatAutoReplyBackfillLoop = createPrivateChatAutoReplyBackfillLoop;
+exports.createPrivateChatAutoReplyBackfillProfileManager = createPrivateChatAutoReplyBackfillProfileManager;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const identityProfiles_1 = require("../identity/identityProfiles");
 const privateConversation_1 = require("./privateConversation");
 const CURSOR_STATE_VERSION = 1;
 const DEFAULT_INTERVAL_MS = 15_000;
@@ -224,42 +226,50 @@ function toInboundMessage(message, peerChatPublicKey) {
         rawMessage: createRawBackfillMessage(message),
     };
 }
-function createDefaultHistoryClient() {
+function createDefaultHistoryClient(options) {
     return {
-        async fetchRecent(input) {
+        async fetchRecent(historyInput) {
+            const chatApiBaseUrl = await Promise.resolve(options.resolveChatApiBaseUrl?.());
             const firstPage = await (0, privateConversation_1.fetchPrivateChatHistoryPage)({
-                selfGlobalMetaId: input.selfGlobalMetaId,
-                peerGlobalMetaId: input.peerGlobalMetaId,
+                selfGlobalMetaId: historyInput.selfGlobalMetaId,
+                peerGlobalMetaId: historyInput.peerGlobalMetaId,
                 startIndex: 0,
                 limit: 1,
+                chatApiBaseUrl,
+                fetchImpl: options.fetchImpl,
             });
             const startIndex = firstPage.total === null
                 ? 0
-                : Math.max(0, firstPage.total - input.limit);
+                : Math.max(0, firstPage.total - historyInput.limit);
             const page = await (0, privateConversation_1.fetchPrivateChatHistoryPage)({
-                selfGlobalMetaId: input.selfGlobalMetaId,
-                peerGlobalMetaId: input.peerGlobalMetaId,
+                selfGlobalMetaId: historyInput.selfGlobalMetaId,
+                peerGlobalMetaId: historyInput.peerGlobalMetaId,
                 startIndex,
-                limit: input.limit,
+                limit: historyInput.limit,
+                chatApiBaseUrl,
+                fetchImpl: options.fetchImpl,
             });
             return (0, privateConversation_1.buildPrivateConversationResponse)({
-                selfGlobalMetaId: input.selfGlobalMetaId,
-                peerGlobalMetaId: input.peerGlobalMetaId,
-                localPrivateKeyHex: input.localPrivateKeyHex,
-                peerChatPublicKey: input.peerChatPublicKey,
+                selfGlobalMetaId: historyInput.selfGlobalMetaId,
+                peerGlobalMetaId: historyInput.peerGlobalMetaId,
+                localPrivateKeyHex: historyInput.localPrivateKeyHex,
+                peerChatPublicKey: historyInput.peerChatPublicKey,
                 afterIndex: startIndex > 0 ? startIndex - 1 : undefined,
-                limit: input.limit,
+                limit: historyInput.limit,
                 fetchHistory: async () => page.rows,
             });
         },
-        async fetchAfter(input) {
+        async fetchAfter(historyInput) {
+            const chatApiBaseUrl = await Promise.resolve(options.resolveChatApiBaseUrl?.());
             return (0, privateConversation_1.buildPrivateConversationResponse)({
-                selfGlobalMetaId: input.selfGlobalMetaId,
-                peerGlobalMetaId: input.peerGlobalMetaId,
-                localPrivateKeyHex: input.localPrivateKeyHex,
-                peerChatPublicKey: input.peerChatPublicKey,
-                afterIndex: input.afterIndex,
-                limit: input.limit,
+                selfGlobalMetaId: historyInput.selfGlobalMetaId,
+                peerGlobalMetaId: historyInput.peerGlobalMetaId,
+                localPrivateKeyHex: historyInput.localPrivateKeyHex,
+                peerChatPublicKey: historyInput.peerChatPublicKey,
+                afterIndex: historyInput.afterIndex,
+                limit: historyInput.limit,
+                chatApiBaseUrl,
+                fetchImpl: options.fetchImpl,
             });
         },
     };
@@ -273,7 +283,10 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
     const startupCatchUpMs = normalizePositiveInteger(options.startupCatchUpMs, DEFAULT_STARTUP_CATCH_UP_MS);
     const cursorPath = options.cursorPath
         ?? node_path_1.default.join(deps.paths.stateRoot, 'private-chat-auto-reply-backfill.json');
-    const historyClient = deps.historyClient ?? createDefaultHistoryClient();
+    const historyClient = deps.historyClient ?? createDefaultHistoryClient({
+        resolveChatApiBaseUrl: deps.resolveChatApiBaseUrl,
+        fetchImpl: deps.fetchImpl,
+    });
     const getNow = deps.now ?? (() => Date.now());
     let timer = null;
     let syncing = false;
@@ -411,6 +424,76 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
         },
         isRunning() {
             return timer !== null;
+        },
+    };
+}
+function cloneProfileReport(report) {
+    return {
+        started: report.started.map((profile) => ({
+            ...profile,
+            aliases: profile.aliases.slice(),
+        })),
+        skipped: report.skipped.map((entry) => ({
+            profile: {
+                ...entry.profile,
+                aliases: entry.profile.aliases.slice(),
+            },
+            reason: entry.reason,
+        })),
+    };
+}
+function createPrivateChatAutoReplyBackfillProfileManager(input) {
+    const listProfiles = input.listProfiles ?? identityProfiles_1.listIdentityProfiles;
+    let loops = [];
+    let running = false;
+    let lastReport = {
+        started: [],
+        skipped: [],
+    };
+    return {
+        async start() {
+            if (running)
+                return cloneProfileReport(lastReport);
+            const profiles = await listProfiles(input.systemHomeDir);
+            const nextLoops = [];
+            const started = [];
+            const skipped = [];
+            for (const profile of profiles) {
+                try {
+                    const loop = await input.createLoop(profile);
+                    if (!loop) {
+                        skipped.push({ profile, reason: 'profile_backfill_unavailable' });
+                        continue;
+                    }
+                    loop.start();
+                    nextLoops.push(loop);
+                    started.push(profile);
+                }
+                catch (error) {
+                    skipped.push({
+                        profile,
+                        reason: error instanceof Error ? error.message : String(error),
+                    });
+                }
+            }
+            loops = nextLoops;
+            running = true;
+            lastReport = { started, skipped };
+            return cloneProfileReport(lastReport);
+        },
+        stop() {
+            for (const loop of loops) {
+                loop.stop();
+            }
+            loops = [];
+            running = false;
+            lastReport = { started: [], skipped: [] };
+        },
+        isRunning() {
+            return running;
+        },
+        getLastReport() {
+            return cloneProfileReport(lastReport);
         },
     };
 }

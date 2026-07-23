@@ -23,7 +23,9 @@ function createDefaultConfig() {
             enabled: true,
         },
         browser: {
-            ...browserDefaults,
+            botHomepageTemplateId: browserDefaults.botHomepageTemplateId,
+            renderCustomBotPages: browserDefaults.renderCustomBotPages,
+            nameResolution: browserDefaults.nameResolution,
             blockExplorerBaseUrl: DEFAULT_BLOCK_EXPLORER_BASE_URL,
             defaultChainName: 'mvc',
             localMode: true,

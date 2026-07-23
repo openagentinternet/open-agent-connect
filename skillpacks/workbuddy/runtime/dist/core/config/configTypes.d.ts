@@ -12,9 +12,6 @@ export interface ChainConfig {
     mvcSponsorUploadEnabled: boolean;
 }
 export interface BrowserConfig {
-    metasoP2PBaseUrl: string;
-    metafileContentBaseUrl: string;
-    manApiBaseUrl: string;
     renderCustomBotPages: boolean;
     nameResolution: BrowserNameResolutionConfig;
     blockExplorerBaseUrl?: string;

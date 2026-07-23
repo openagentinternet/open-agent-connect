@@ -127,7 +127,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     createMvcSponsorClient?: () => MvcSponsorV2DirectUploadClient;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     onIdentityProfileRegistered?: () => Promise<void> | void;
-    onBrowserInfrastructureChanged?: (homeDir: string) => Promise<void> | void;
+    onBrowserInfrastructureChanged?: () => Promise<void> | void;
     requestMvcGasSubsidy?: (options: RequestMvcGasSubsidyOptions) => Promise<RequestMvcGasSubsidyResult>;
     createSignerForHome?: (homeDir: string) => Signer;
     autoReplyConfig?: PrivateChatAutoReplyConfig;

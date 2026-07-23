@@ -12,6 +12,7 @@ const agent_browser_core_1 = require("@openagentinternet/agent-browser-core");
 const agent_browser_name_resolvers_1 = require("@openagentinternet/agent-browser-name-resolvers");
 const agent_browser_host_contract_1 = require("@openagentinternet/agent-browser-host-contract");
 const configStore_1 = require("../../core/config/configStore");
+const infrastructureConfigStore_1 = require("../../core/config/infrastructureConfigStore");
 const metafileUrls_1 = require("../../core/files/metafileUrls");
 const llmTypes_1 = require("../../core/llm/llmTypes");
 const artifactCache_1 = require("../../core/metaapp/artifactCache");
@@ -75,6 +76,30 @@ function resolveBrowserHostConfig(input) {
                 ? { ensNameAliasProviderFactory: input.ensNameAliasProviderFactory }
                 : {}),
         }),
+    };
+}
+function withInfrastructureConfig(config, infrastructure) {
+    return {
+        ...config,
+        browser: {
+            ...config.browser,
+            ...infrastructure,
+        },
+    };
+}
+function splitBrowserSettingsConfig(config) {
+    const { metasoP2PBaseUrl, metafileContentBaseUrl, manApiBaseUrl, ...profileBrowser } = config.browser ?? {};
+    const defaults = (0, infrastructureConfigStore_1.createDefaultInfrastructureConfig)();
+    return {
+        profileConfig: {
+            ...config,
+            browser: profileBrowser,
+        },
+        infrastructure: {
+            metasoP2PBaseUrl: metasoP2PBaseUrl ?? defaults.metasoP2PBaseUrl,
+            metafileContentBaseUrl: metafileContentBaseUrl ?? defaults.metafileContentBaseUrl,
+            manApiBaseUrl: manApiBaseUrl ?? defaults.manApiBaseUrl,
+        },
     };
 }
 function actorSelector(input) {
@@ -617,6 +642,7 @@ function createOacBrowserHostAdapter(input) {
         ? Math.floor(Number(input.confirmationTtlMs))
         : DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS;
     const pendingPinWriteConfirmations = new Map();
+    const infrastructureConfigStore = (0, infrastructureConfigStore_1.createInfrastructureConfigStore)(input.systemHomeDir);
     async function resolveActor(actorInput) {
         return input.resolveActorWriteContext(actorSelector(actorInput));
     }
@@ -839,10 +865,14 @@ function createOacBrowserHostAdapter(input) {
         if ('failure' in actor)
             return toBrowserResult(actor.failure);
         const targetConfigStore = (0, configStore_1.createConfigStore)(actor.homeDir);
-        const config = await targetConfigStore.read();
+        const [profileConfig, infrastructure] = await Promise.all([
+            targetConfigStore.read(),
+            infrastructureConfigStore.read(),
+        ]);
+        const config = withInfrastructureConfig(profileConfig, infrastructure);
         return (0, agent_browser_host_contract_1.browserSuccess)(toHostBrowserSettingsSnapshot((0, agent_browser_core_1.createBrowserSettingsSnapshot)({
             config,
-            configPath: targetConfigStore.paths.configPath,
+            configPath: infrastructureConfigStore.paths.infrastructureConfigPath,
             env,
         })));
     }
@@ -851,14 +881,24 @@ function createOacBrowserHostAdapter(input) {
         if ('failure' in actor)
             return toBrowserResult(actor.failure);
         const targetConfigStore = (0, configStore_1.createConfigStore)(actor.homeDir);
-        const current = await targetConfigStore.read();
+        const [currentProfileConfig, currentInfrastructure] = await Promise.all([
+            targetConfigStore.read(),
+            infrastructureConfigStore.read(),
+        ]);
+        const current = withInfrastructureConfig(currentProfileConfig, currentInfrastructure);
         try {
             const next = (0, agent_browser_core_1.applyBrowserSettingsUpdate)(current, settingsInput.browser);
-            await targetConfigStore.set(next);
-            const saved = await targetConfigStore.read();
-            if (saved.browser.metasoP2PBaseUrl !== current.browser.metasoP2PBaseUrl) {
+            const split = splitBrowserSettingsConfig(next);
+            await infrastructureConfigStore.set(split.infrastructure);
+            await targetConfigStore.set(split.profileConfig);
+            const [savedProfileConfig, savedInfrastructure] = await Promise.all([
+                targetConfigStore.read(),
+                infrastructureConfigStore.read(),
+            ]);
+            const saved = withInfrastructureConfig(savedProfileConfig, savedInfrastructure);
+            if (savedInfrastructure.metasoP2PBaseUrl !== currentInfrastructure.metasoP2PBaseUrl) {
                 try {
-                    await input.onInfrastructureSettingsUpdated?.(actor.homeDir);
+                    await input.onInfrastructureSettingsUpdated?.();
                 }
                 catch {
                     // The saved configuration remains authoritative and will be used on the next reconnect.
@@ -866,7 +906,7 @@ function createOacBrowserHostAdapter(input) {
             }
             return (0, agent_browser_host_contract_1.browserSuccess)(toHostBrowserSettingsSnapshot((0, agent_browser_core_1.createBrowserSettingsSnapshot)({
                 config: saved,
-                configPath: targetConfigStore.paths.configPath,
+                configPath: infrastructureConfigStore.paths.infrastructureConfigPath,
                 env,
             })));
         }
@@ -915,7 +955,11 @@ function createOacBrowserHostAdapter(input) {
         const actor = await resolveActor(resolveInput);
         if ('failure' in actor)
             return toBrowserResult(actor.failure);
-        const config = await (0, configStore_1.createConfigStore)(actor.homeDir).read();
+        const [profileConfig, infrastructure] = await Promise.all([
+            (0, configStore_1.createConfigStore)(actor.homeDir).read(),
+            infrastructureConfigStore.read(),
+        ]);
+        const config = withInfrastructureConfig(profileConfig, infrastructure);
         const { browserConfig, nameAliasProviders, } = resolveBrowserHostConfig({
             config,
             env,

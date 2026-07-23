@@ -105,7 +105,6 @@ function normalizeConfig(input) {
     const defaultWriteNetwork = normalizeString(chainSource.defaultWriteNetwork).toLowerCase();
     const browserDefaultChainName = normalizeString(browserSource.defaultChainName).toLowerCase();
     const walletApiBaseUrl = normalizeString(browserSource.walletApiBaseUrl) || defaults.browser.walletApiBaseUrl;
-    const manApiBaseUrl = normalizeString(browserSource.manApiBaseUrl) || defaults.browser.manApiBaseUrl;
     const normalizedConfig = {
         chain: {
             defaultWriteNetwork: (0, configTypes_1.isDefaultWriteNetwork)(defaultWriteNetwork)
@@ -120,9 +119,6 @@ function normalizeConfig(input) {
             enabled: normalizeBoolean(autoReplySource.enabled, defaults.autoReply.enabled),
         },
         browser: {
-            metasoP2PBaseUrl: normalizeString(browserSource.metasoP2PBaseUrl) || defaults.browser.metasoP2PBaseUrl,
-            metafileContentBaseUrl: normalizeString(browserSource.metafileContentBaseUrl) || defaults.browser.metafileContentBaseUrl,
-            manApiBaseUrl,
             blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,
             botHomepageTemplateId: (0, agent_browser_core_1.normalizeBotHomepageTemplateId)(browserSource.botHomepageTemplateId, defaults.browser.botHomepageTemplateId),
             renderCustomBotPages: normalizeBoolean(browserSource.renderCustomBotPages, defaults.browser.renderCustomBotPages),

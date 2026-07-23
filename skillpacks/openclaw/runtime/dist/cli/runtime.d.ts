@@ -5,6 +5,7 @@ import type { Signer } from '../core/signing/signer';
 import { type A2ASimplemsgListenerManager, type A2ASimplemsgListenerStartReport } from '../core/a2a/simplemsgListener';
 import { type A2ASimplemsgPresenceWatchdog } from '../core/a2a/simplemsgPresenceWatchdog';
 import { type PrivateChatAutoReplyDependencies, type PrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
+import { type PrivateChatAutoReplyBackfillProfileManager } from '../core/chat/privateChatAutoReplyBackfill';
 import type { ChatReplyRunner, PrivateChatAutoReplyConfig, PrivateChatInboundMessage } from '../core/chat/privateChatTypes';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
@@ -22,6 +23,7 @@ export declare function buildA2ASimplemsgInboundDispatcher(input: {
 export declare function refreshA2ASimplemsgListenerForIdentityProfileRegistration(input: {
     enabled: boolean;
     listener: Pick<A2ASimplemsgListenerManager, 'start' | 'stop'>;
+    backfill?: Pick<PrivateChatAutoReplyBackfillProfileManager, 'start' | 'stop'>;
     watchdog?: Pick<A2ASimplemsgPresenceWatchdog, 'start' | 'stop'>;
 }): Promise<{
     refreshed: boolean;

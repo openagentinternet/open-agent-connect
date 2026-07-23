@@ -1,3 +1,4 @@
+import { type IdentityProfileRecord } from '../identity/identityProfiles';
 import type { MetabotPaths } from '../state/paths';
 import type { PrivateChatStateStore } from './privateChatStateStore';
 import type { PrivateChatInboundMessage } from './privateChatTypes';
@@ -30,6 +31,8 @@ export interface PrivateChatAutoReplyBackfillDependencies {
     handleInboundMessage: (message: PrivateChatInboundMessage) => Promise<void>;
     historyClient?: PrivateChatAutoReplyBackfillHistoryClient;
     listPeerGlobalMetaIds?: () => Promise<string[]>;
+    resolveChatApiBaseUrl?: () => Promise<string | undefined> | string | undefined;
+    fetchImpl?: typeof fetch;
     now?: () => number;
     onError?: (error: Error) => void;
 }
@@ -51,4 +54,22 @@ export interface PrivateChatAutoReplyBackfillLoop {
     stop(): void;
     isRunning(): boolean;
 }
+export interface PrivateChatAutoReplyBackfillProfileReport {
+    started: IdentityProfileRecord[];
+    skipped: Array<{
+        profile: IdentityProfileRecord;
+        reason: string;
+    }>;
+}
+export interface PrivateChatAutoReplyBackfillProfileManager {
+    start(): Promise<PrivateChatAutoReplyBackfillProfileReport>;
+    stop(): void;
+    isRunning(): boolean;
+    getLastReport(): PrivateChatAutoReplyBackfillProfileReport;
+}
 export declare function createPrivateChatAutoReplyBackfillLoop(deps: PrivateChatAutoReplyBackfillDependencies, options?: PrivateChatAutoReplyBackfillOptions): PrivateChatAutoReplyBackfillLoop;
+export declare function createPrivateChatAutoReplyBackfillProfileManager(input: {
+    systemHomeDir: string;
+    listProfiles?: (systemHomeDir: string) => Promise<IdentityProfileRecord[]>;
+    createLoop: (profile: IdentityProfileRecord) => PrivateChatAutoReplyBackfillLoop | null | Promise<PrivateChatAutoReplyBackfillLoop | null>;
+}): PrivateChatAutoReplyBackfillProfileManager;

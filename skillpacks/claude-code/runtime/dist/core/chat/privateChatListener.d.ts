@@ -26,12 +26,14 @@ export interface MetaWebPrivateMessage {
     fromGlobalMetaId?: string | null;
     toGlobalMetaId?: string | null;
     fromUserInfo?: {
+        globalMetaId?: string | null;
         name?: string | null;
         avatar?: string | null;
         chatPublicKey?: string | null;
     } | null;
 }
 export declare function pinIdFromPrivateChatSocketMessage(message: MetaWebPrivateMessage): string | null;
+export declare function senderGlobalMetaIdFromPrivateChatSocketMessage(message: MetaWebPrivateMessage): string;
 export declare function normalizePrivateChatSocketMessage(data: unknown): MetaWebPrivateMessage | null;
 export declare function decryptPrivateChatSocketMessage(message: MetaWebPrivateMessage, identity: PrivateChatListenerIdentity, peerChatPublicKeyOverride: string | null): string | null;
 export declare function createPrivateChatListener(input: {

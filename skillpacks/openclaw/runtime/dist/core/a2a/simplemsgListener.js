@@ -123,7 +123,7 @@ function createProfileSimplemsgListener(input) {
         const message = normalizeSimplemsgSocketMessage(payload);
         if (!message)
             return;
-        const fromGlobalMetaId = normalizeText(message.fromGlobalMetaId);
+        const fromGlobalMetaId = (0, privateChatListener_1.senderGlobalMetaIdFromPrivateChatSocketMessage)(message);
         if (!fromGlobalMetaId)
             return;
         const localGlobalMetaId = normalizeText(input.identity.globalMetaId);

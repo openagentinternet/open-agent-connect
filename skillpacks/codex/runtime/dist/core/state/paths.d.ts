@@ -16,6 +16,7 @@ export interface MetabotPaths {
     locksRoot: string;
     identityProfilesPath: string;
     activeHomePath: string;
+    infrastructureConfigPath: string;
     configPath: string;
     identitySecretsPath: string;
     providerSecretsPath: string;
@@ -56,6 +57,8 @@ export interface MetabotPaths {
 export interface MetabotDaemonPaths {
     systemHomeDir: string;
     metabotRoot: string;
+    managerRoot: string;
+    infrastructureConfigPath: string;
     runtimeRoot: string;
     locksRoot: string;
     logsRoot: string;

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.pinIdFromPrivateChatSocketMessage = pinIdFromPrivateChatSocketMessage;
+exports.senderGlobalMetaIdFromPrivateChatSocketMessage = senderGlobalMetaIdFromPrivateChatSocketMessage;
 exports.normalizePrivateChatSocketMessage = normalizePrivateChatSocketMessage;
 exports.decryptPrivateChatSocketMessage = decryptPrivateChatSocketMessage;
 exports.createPrivateChatListener = createPrivateChatListener;
@@ -24,6 +25,10 @@ function pinIdFromPrivateChatSocketMessage(message) {
         return pinId;
     const txId = normalizeText(message.txId);
     return txId ? `${txId}i0` : null;
+}
+function senderGlobalMetaIdFromPrivateChatSocketMessage(message) {
+    return normalizeText(message.fromUserInfo?.globalMetaId)
+        || normalizeText(message.fromGlobalMetaId);
 }
 function normalizePrivateChatSocketMessage(data) {
     let parsed = data;
@@ -74,7 +79,7 @@ function decryptPrivateChatSocketMessage(message, identity, peerChatPublicKeyOve
             },
             peerChatPublicKey,
             payload: {
-                fromGlobalMetaId: normalizeText(message.fromGlobalMetaId),
+                fromGlobalMetaId: senderGlobalMetaIdFromPrivateChatSocketMessage(message),
                 content: normalizeText(message.content) || null,
                 rawData: normalizeText(message.content)
                     ? JSON.stringify({ content: normalizeText(message.content) })
@@ -119,7 +124,7 @@ function createPrivateChatListener(input) {
         const message = normalizePrivateChatSocketMessage(data);
         if (!message)
             return;
-        const fromGlobalMetaId = normalizeText(message.fromGlobalMetaId);
+        const fromGlobalMetaId = senderGlobalMetaIdFromPrivateChatSocketMessage(message);
         if (!fromGlobalMetaId)
             return;
         // Filter out messages not addressed to us, but allow messages with no toGlobalMetaId

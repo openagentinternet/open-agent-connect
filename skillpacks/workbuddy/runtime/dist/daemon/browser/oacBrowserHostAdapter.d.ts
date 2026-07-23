@@ -59,7 +59,7 @@ export interface CreateOacBrowserHostAdapterInput {
         rpcUrls: string[];
         textKey: string;
     }) => BrowserNameAliasProvider;
-    onInfrastructureSettingsUpdated?: (homeDir: string) => Promise<void> | void;
+    onInfrastructureSettingsUpdated?: () => Promise<void> | void;
 }
 export declare function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterInput): BrowserHostAdapter;
 export {};

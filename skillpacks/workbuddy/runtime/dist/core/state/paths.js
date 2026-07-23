@@ -49,6 +49,7 @@ function buildMetabotPaths(input) {
         locksRoot: input.locksRoot,
         identityProfilesPath: node_path_1.default.join(input.managerRoot, 'identity-profiles.json'),
         activeHomePath: node_path_1.default.join(input.managerRoot, 'active-home.json'),
+        infrastructureConfigPath: node_path_1.default.join(input.managerRoot, 'infrastructure.json'),
         configPath: node_path_1.default.join(input.runtimeRoot, 'config.json'),
         identitySecretsPath: input.identitySecretsPath,
         providerSecretsPath: input.providerSecretsPath,
@@ -135,6 +136,7 @@ function resolveMetabotPaths(homeDir) {
 function resolveMetabotDaemonPaths(systemHomeDir) {
     const normalizedSystemHomeDir = normalizeInputHomeDir(systemHomeDir);
     const metabotRoot = node_path_1.default.join(normalizedSystemHomeDir, '.metabot');
+    const managerRoot = node_path_1.default.join(metabotRoot, 'manager');
     const runtimeRoot = node_path_1.default.join(metabotRoot, 'runtime');
     const locksRoot = node_path_1.default.join(runtimeRoot, 'locks');
     const logsRoot = node_path_1.default.join(runtimeRoot, 'logs');
@@ -142,6 +144,8 @@ function resolveMetabotDaemonPaths(systemHomeDir) {
     return {
         systemHomeDir: normalizedSystemHomeDir,
         metabotRoot,
+        managerRoot,
+        infrastructureConfigPath: node_path_1.default.join(managerRoot, 'infrastructure.json'),
         runtimeRoot,
         locksRoot,
         logsRoot,

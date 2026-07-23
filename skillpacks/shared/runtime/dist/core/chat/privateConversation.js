@@ -139,6 +139,25 @@ function firstText(...values) {
     }
     return '';
 }
+function resolveKnownParticipant(selfGlobalMetaId, peerGlobalMetaId, ...values) {
+    const normalizedSelf = selfGlobalMetaId.toLowerCase();
+    const normalizedPeer = peerGlobalMetaId.toLowerCase();
+    for (const value of values) {
+        const candidate = normalizeText(value).toLowerCase();
+        if (candidate === normalizedSelf)
+            return selfGlobalMetaId;
+        if (candidate === normalizedPeer)
+            return peerGlobalMetaId;
+    }
+    return '';
+}
+function oppositeParticipant(participant, selfGlobalMetaId, peerGlobalMetaId) {
+    if (participant === selfGlobalMetaId)
+        return peerGlobalMetaId;
+    if (participant === peerGlobalMetaId)
+        return selfGlobalMetaId;
+    return '';
+}
 function normalizeTimestamp(raw, fallbackNowMs) {
     let value = Number(raw || 0);
     if (!Number.isFinite(value) || value <= 0) {
@@ -222,24 +241,31 @@ function buildPayloadSnapshot(row) {
     };
 }
 function resolveFromGlobalMetaId(input) {
-    const direct = firstText(input.row.fromGlobalMetaId, input.row.from_meta_id, input.row.createGlobalMetaId, input.row.createUserMetaId, input.fromUserInfo?.globalMetaId, input.userInfo?.globalMetaId);
+    const direct = resolveKnownParticipant(input.selfGlobalMetaId, input.peerGlobalMetaId, input.row.fromGlobalMetaId, input.row.from_meta_id, input.row.createGlobalMetaId, input.row.createUserMetaId, input.fromUserInfo?.globalMetaId, input.userInfo?.globalMetaId);
     if (direct)
         return direct;
-    if (input.payloadTo === input.selfGlobalMetaId)
-        return input.peerGlobalMetaId;
-    if (input.payloadTo === input.peerGlobalMetaId)
-        return input.selfGlobalMetaId;
-    return '';
+    const recipient = resolveKnownParticipant(input.selfGlobalMetaId, input.peerGlobalMetaId, input.row.toGlobalMetaId, input.row.to_meta_id, input.row.receiveGlobalMetaId, input.row.targetGlobalMetaId, input.payloadTo);
+    if (recipient) {
+        return oppositeParticipant(recipient, input.selfGlobalMetaId, input.peerGlobalMetaId);
+    }
+    return firstText(input.row.fromGlobalMetaId, input.row.from_meta_id, input.row.createGlobalMetaId, input.row.createUserMetaId, input.fromUserInfo?.globalMetaId, input.userInfo?.globalMetaId);
 }
 function resolveToGlobalMetaId(input) {
-    const direct = firstText(input.row.toGlobalMetaId, input.row.to_meta_id, input.row.receiveGlobalMetaId, input.row.targetGlobalMetaId, input.payloadTo);
+    const direct = resolveKnownParticipant(input.selfGlobalMetaId, input.peerGlobalMetaId, input.row.toGlobalMetaId, input.row.to_meta_id, input.row.receiveGlobalMetaId, input.row.targetGlobalMetaId, input.payloadTo);
     if (direct)
         return direct;
-    if (input.fromGlobalMetaId === input.selfGlobalMetaId)
-        return input.peerGlobalMetaId;
-    if (input.fromGlobalMetaId === input.peerGlobalMetaId)
-        return input.selfGlobalMetaId;
-    return '';
+    const sender = resolveKnownParticipant(input.selfGlobalMetaId, input.peerGlobalMetaId, input.fromGlobalMetaId);
+    if (sender) {
+        return oppositeParticipant(sender, input.selfGlobalMetaId, input.peerGlobalMetaId);
+    }
+    return firstText(input.row.toGlobalMetaId, input.row.to_meta_id, input.row.receiveGlobalMetaId, input.row.targetGlobalMetaId, input.payloadTo);
+}
+function normalizeTransactionId(rawTxId, pinId) {
+    const txId = normalizeText(rawTxId);
+    if (!txId || txId !== pinId)
+        return txId;
+    const pinMatch = /^([0-9a-f]{64})i\d+$/iu.exec(pinId);
+    return pinMatch?.[1] ?? txId;
 }
 function isFileProtocol(protocol) {
     return protocol === '/protocols/simplefilemsg';
@@ -306,7 +332,7 @@ function normalizeConversationRow(input) {
     const timestamp = normalizeTimestamp(row.timestamp ?? row.time ?? payloadSnapshot.payload?.timestamp, input.nowMs);
     const index = Number.isFinite(Number(row.index)) ? Math.floor(Number(row.index)) : 0;
     const pinId = firstText(row.pinId, row.pin_id);
-    const txId = firstText(row.txId, row.tx_id, row.txid);
+    const txId = normalizeTransactionId(firstText(row.txId, row.tx_id, row.txid), pinId);
     const id = pinId || txId || buildStableId({
         fromGlobalMetaId,
         toGlobalMetaId,
