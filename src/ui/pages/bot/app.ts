@@ -567,6 +567,7 @@ function wireProviderPickers(){
       picker.querySelectorAll('[data-provider-value]').forEach(function(row){row.removeAttribute('selected')});
       this.setAttribute('selected','');
       var menu=q('[data-provider-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
+      var unavailable=picker.parentElement&&picker.parentElement.querySelector('[data-provider-open-runtimes]');if(unavailable)unavailable.remove();
     });
   });
   qq('[data-provider-open-runtimes]').forEach(function(el){

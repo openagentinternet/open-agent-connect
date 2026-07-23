@@ -1124,6 +1124,70 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
 });
 
+test('bot page removes an unavailable-provider reminder after selecting a ready provider', () => {
+  const listeners = new Map();
+  const input = field('openclaw');
+  const trigger = { innerHTML: '' };
+  const menu = {
+    setAttribute: (name, value) => {
+      menu[name] = value;
+    },
+  };
+  const reminder = {
+    removed: false,
+    remove() {
+      this.removed = true;
+    },
+  };
+  const option = {
+    attrs: new Map([['data-provider-value', 'codex']]),
+    addEventListener: (eventName, handler) => listeners.set(eventName, handler),
+    closest: (selector) => (selector === '[data-provider-picker]' ? picker : null),
+    getAttribute(name) {
+      return this.attrs.get(name) ?? null;
+    },
+    removeAttribute(name) {
+      this.attrs.delete(name);
+    },
+    setAttribute(name, value) {
+      this.attrs.set(name, String(value));
+    },
+  };
+  const picker = {
+    parentElement: {
+      querySelector: (selector) => (selector === '[data-provider-open-runtimes]' ? reminder : null),
+    },
+    getAttribute: (name) => (name === 'data-provider-picker' ? 'primaryProvider' : null),
+    querySelector: (selector) => {
+      if (selector === '[data-field="primaryProvider"]') return input;
+      if (selector === '[data-provider-toggle="primaryProvider"]') return trigger;
+      return null;
+    },
+    querySelectorAll: (selector) => (selector === '[data-provider-value]' ? [option] : []),
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-provider-menu="primaryProvider"]': menu,
+    },
+    querySelectorAll: (selector) => (selector === '[data-provider-value]' ? [option] : []),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.runtimes = [{ id: 'runtime-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' }];
+  context.wireProviderPickers();
+  listeners.get('click').call(option, { preventDefault: () => {} });
+
+  assert.equal(input.value, 'codex');
+  assert.equal(input.getAttribute('data-provider-touched'), '1');
+  assert.equal(reminder.removed, true);
+});
+
+test('bot page styles the unavailable-provider reminder as a lightweight inline hint', () => {
+  const template = readFileSync(new URL('../../src/ui/pages/bot/index.html', import.meta.url), 'utf8');
+
+  assert.match(template, /\.provider-unavailable-link\s*\{[^}]*background:\s*transparent;[^}]*font-family:\s*var\(--mono\);[^}]*font-size:\s*11px;[^}]*font-weight:\s*400;/s);
+});
+
 test('bot page renders provider-specific LLM icons even when runtime state has stale generic logos', () => {
   const summary = { innerHTML: '' };
   const context = createBotScriptContext({
