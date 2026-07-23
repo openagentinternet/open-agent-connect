@@ -132,6 +132,163 @@ test('auto-reply backfill processes missed incoming private messages for known p
   assert.equal(handledMessages[0].rawMessage.source, 'private-chat-history-backfill');
 });
 
+test('auto-reply backfill recovers an unanswered outbound message missing from durable history', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peerbot00000000000000000000000000';
+  const conversationId = `pc-${selfGlobalMetaId}-${peerGlobalMetaId}`;
+  const recoveryCalls = [];
+  await stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'outbound',
+    createdAt: 1_770_000_000_000,
+    updatedAt: 1_770_000_000_000,
+  });
+  await stateStore.appendMessages([{
+    conversationId,
+    messageId: 'logical-outbound-1',
+    direction: 'outbound',
+    senderGlobalMetaId: selfGlobalMetaId,
+    content: 'message that disappeared after broadcast',
+    messagePinId: `${'a'.repeat(64)}i0`,
+    extensions: null,
+    timestamp: 1_770_000_000_000,
+  }]);
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async () => {},
+    recoverOutboundMessage: async (peer, message) => {
+      recoveryCalls.push({ peer, message });
+      return true;
+    },
+    listPeerGlobalMetaIds: async () => [peerGlobalMetaId],
+    historyClient: {
+      async fetchRecent() {
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 20,
+          serverTime: 1_770_000_002_000,
+          messages: [],
+        };
+      },
+      async fetchAfter() {
+        throw new Error('fetchAfter should not be used without an existing cursor');
+      },
+    },
+    now: () => 1_770_000_002_000,
+  }, {
+    outboundRecoveryDelayMs: 1_000,
+  });
+
+  const result = await loop.syncOnce();
+
+  assert.equal(result.recovered, 1);
+  assert.equal(recoveryCalls.length, 1);
+  assert.equal(recoveryCalls[0].peer, peerGlobalMetaId);
+  assert.equal(recoveryCalls[0].message.messageId, 'logical-outbound-1');
+});
+
+test('auto-reply backfill does not recover an outbound pin already visible by transaction id', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peerbot00000000000000000000000000';
+  const conversationId = `pc-${selfGlobalMetaId}-${peerGlobalMetaId}`;
+  const txid = 'b'.repeat(64);
+  let recoveryCalls = 0;
+  await stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'outbound',
+    createdAt: 1_770_000_000_000,
+    updatedAt: 1_770_000_000_000,
+  });
+  await stateStore.appendMessages([{
+    conversationId,
+    messageId: 'logical-outbound-1',
+    direction: 'outbound',
+    senderGlobalMetaId: selfGlobalMetaId,
+    content: 'durably indexed message',
+    messagePinId: `${txid}i0`,
+    extensions: null,
+    timestamp: 1_770_000_000_000,
+  }]);
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async () => {},
+    recoverOutboundMessage: async () => {
+      recoveryCalls += 1;
+      return true;
+    },
+    listPeerGlobalMetaIds: async () => [peerGlobalMetaId],
+    historyClient: {
+      async fetchRecent() {
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 20,
+          serverTime: 1_770_000_002_000,
+          messages: [{
+            id: `${txid}i0`,
+            pinId: `${txid}i0`,
+            txId: txid,
+            protocol: '/protocols/simplemsg',
+            content: 'durably indexed message',
+            timestamp: 1_770_000_000,
+            index: 20,
+            fromGlobalMetaId: selfGlobalMetaId,
+            toGlobalMetaId: peerGlobalMetaId,
+          }],
+        };
+      },
+      async fetchAfter() {
+        throw new Error('fetchAfter should not be used without an existing cursor');
+      },
+    },
+    now: () => 1_770_000_002_000,
+  }, {
+    outboundRecoveryDelayMs: 1_000,
+  });
+
+  const result = await loop.syncOnce();
+
+  assert.equal(result.recovered, 0);
+  assert.equal(recoveryCalls, 0);
+});
+
 test('auto-reply backfill reads history from the currently configured chat API base URL', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);

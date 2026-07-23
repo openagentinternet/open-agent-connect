@@ -51,6 +51,7 @@ export interface PersistA2AConversationMessageInput {
     raw?: Record<string, unknown> | null;
   };
   orderSession?: Partial<A2AOrderConversationSession> | null;
+  replaceExistingMessage?: boolean;
 }
 
 export type A2AConversationMessagePersister = (
@@ -314,7 +315,14 @@ export async function persistA2AConversationMessage(
   };
 
   const store = createA2AConversationStore({ paths, local, peer });
-  await store.appendMessages([message]);
+  if (input.replaceExistingMessage) {
+    const replaced = await store.replaceMessage(message.messageId, message);
+    if (!replaced) {
+      await store.appendMessages([message]);
+    }
+  } else {
+    await store.appendMessages([message]);
+  }
   await store.upsertSession({
     sessionId,
     type: 'peer',

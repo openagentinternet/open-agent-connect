@@ -52,6 +52,10 @@ export interface PrivateChatAutoReplyDependencies {
 
 export interface PrivateChatAutoReplyOrchestrator {
   handleInboundMessage(message: PrivateChatInboundMessage): Promise<void>;
+  retryOutboundMessage(
+    peerGlobalMetaId: string,
+    message: PrivateChatMessage,
+  ): Promise<boolean>;
   handleLocalGuidedTurn(
     peerGlobalMetaId: string,
     options?: {
@@ -488,6 +492,78 @@ export function createPrivateChatAutoReplyOrchestrator(
   }
 
   return {
+    async retryOutboundMessage(peerGlobalMetaId, message) {
+      if (message.direction !== 'outbound') return false;
+      const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
+      const normalizedPeerGlobalMetaId = normalizeText(peerGlobalMetaId);
+      if (!selfGlobalMetaId || !normalizedPeerGlobalMetaId) return false;
+      if (!(await latestConversationMessageMatches({
+        stateStore: deps.stateStore,
+        conversationId: message.conversationId,
+        expectedMessageId: message.messageId,
+      }))) {
+        return false;
+      }
+
+      const outboundReply = await sendReplyMessage(
+        selfGlobalMetaId,
+        normalizedPeerGlobalMetaId,
+        message.content,
+        message.extensions,
+      );
+      if (!outboundReply) return false;
+
+      const timestamp = getNow();
+      const failedPinIds = Array.from(new Set([
+        ...(message.deliveryRecovery?.failedPinIds ?? []),
+        normalizeText(message.messagePinId),
+      ].filter(Boolean)));
+      const deliveryRecovery = {
+        failedPinIds,
+        retryCount: (message.deliveryRecovery?.retryCount ?? 0) + 1,
+      };
+      const replacement: PrivateChatMessage = {
+        ...message,
+        senderGlobalMetaId: selfGlobalMetaId,
+        messagePinId: outboundReply.pinId,
+        timestamp,
+        deliveryRecovery,
+      };
+      const replaced = await deps.stateStore.replaceMessage(message.messageId, replacement);
+      if (!replaced) return false;
+
+      await persistA2AConversationMessageBestEffort({
+        paths: deps.paths,
+        local: {
+          globalMetaId: selfGlobalMetaId,
+        },
+        peer: {
+          globalMetaId: normalizedPeerGlobalMetaId,
+        },
+        message: {
+          messageId: message.messageId,
+          direction: 'outgoing',
+          content: message.content,
+          pinId: outboundReply.pinId,
+          txid: outboundReply.txids[0] ?? null,
+          txids: outboundReply.txids,
+          chain: outboundReply.network ?? 'mvc',
+          timestamp,
+          raw: { deliveryRecovery },
+        },
+        replaceExistingMessage: true,
+      }, deps.a2aConversationPersister);
+
+      const conversation = await deps.stateStore.getConversationByPeer(normalizedPeerGlobalMetaId);
+      if (conversation) {
+        await deps.stateStore.upsertConversation({
+          ...conversation,
+          lastDirection: 'outbound',
+          updatedAt: timestamp,
+        });
+      }
+      return true;
+    },
     async handleInboundMessage(message) {
       if (!config.enabled) return;
 

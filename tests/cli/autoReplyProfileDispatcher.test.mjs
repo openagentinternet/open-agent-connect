@@ -215,6 +215,67 @@ test('auto-reply dispatcher handles inbound private chat for non-active local pr
   assert.equal(handled[0].message.content, 'hello beta');
 });
 
+test('auto-reply dispatcher routes outbound recovery through the target profile orchestrator', async (t) => {
+  const betaHomeDir = await createProfileHome(t, 'beta-bot');
+  const recoveryCalls = [];
+  const profile = {
+    name: 'Beta Bot',
+    slug: 'beta-bot',
+    aliases: ['beta-bot'],
+    homeDir: betaHomeDir,
+    globalMetaId: 'idq1beta00000000000000000000000000000',
+    mvcAddress: 'mvc-beta',
+    createdAt: 1_777_000_000_000,
+    updatedAt: 1_777_000_000_000,
+  };
+  const outboundMessage = {
+    conversationId: 'pc-beta-peer',
+    messageId: 'logical-outbound-1',
+    direction: 'outbound',
+    senderGlobalMetaId: profile.globalMetaId,
+    content: 'retry this message',
+    messagePinId: 'dropped-pin',
+    extensions: null,
+    timestamp: 1_777_000_000_000,
+  };
+  const dispatcher = createPrivateChatAutoReplyProfileDispatcher({
+    autoReplyConfig: {
+      enabled: true,
+      acceptPolicy: 'accept_all',
+      defaultStrategyId: null,
+    },
+    resolvePeerChatPublicKey: async () => 'peer-chat-key',
+    llmExecutor: {
+      execute: async () => 'unused-session',
+      getSession: async () => null,
+    },
+    createSignerForHome: () => readOnlySigner(),
+    createOrchestrator: (deps) => ({
+      retryOutboundMessage: async (peerGlobalMetaId, message) => {
+        recoveryCalls.push({
+          profileRoot: deps.paths.profileRoot,
+          peerGlobalMetaId,
+          message,
+        });
+        return true;
+      },
+      handleInboundMessage: async () => {},
+      handleLocalGuidedTurn: async () => {},
+    }),
+  });
+
+  const recovered = await dispatcher.retryOutboundMessage(
+    profile,
+    'idq1peer00000000000000000000000000000',
+    outboundMessage,
+  );
+
+  assert.equal(recovered, true);
+  assert.equal(recoveryCalls.length, 1);
+  assert.equal(recoveryCalls[0].profileRoot, betaHomeDir);
+  assert.equal(recoveryCalls[0].message.messageId, 'logical-outbound-1');
+});
+
 test('auto-reply dispatcher routes inbound ORDER for non-active profiles to order handler', async (t) => {
   const betaHomeDir = await createProfileHome(t, 'beta-bot');
   const orderCalls = [];

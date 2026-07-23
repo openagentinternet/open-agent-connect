@@ -1,5 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { MVC_PENDING_UTXO_TTL_MS } from '../chain/mvcPendingUtxos';
+import { classifySimplemsgContent } from '../a2a/simplemsgClassifier';
 import {
   listIdentityProfiles,
   type IdentityProfileRecord,
@@ -22,6 +24,7 @@ const CURSOR_STATE_VERSION = 1;
 const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_RECENT_LIMIT = 100;
 const DEFAULT_STARTUP_CATCH_UP_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS = 3;
 const UNABLE_TO_DECRYPT_TEXT = '[Unable to decrypt message]';
 const UNSUPPORTED_FILE_TEXT = '[Unsupported file message]';
 
@@ -56,6 +59,10 @@ export interface PrivateChatAutoReplyBackfillDependencies {
   getLocalPrivateChatIdentity: () => Promise<LocalPrivateChatIdentity>;
   resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
   handleInboundMessage: (message: PrivateChatInboundMessage) => Promise<void>;
+  recoverOutboundMessage?: (
+    peerGlobalMetaId: string,
+    message: PrivateChatMessage,
+  ) => Promise<boolean>;
   historyClient?: PrivateChatAutoReplyBackfillHistoryClient;
   listPeerGlobalMetaIds?: () => Promise<string[]>;
   resolveChatApiBaseUrl?: () => Promise<string | undefined> | string | undefined;
@@ -68,6 +75,8 @@ export interface PrivateChatAutoReplyBackfillOptions {
   intervalMs?: number;
   recentLimit?: number;
   startupCatchUpMs?: number;
+  outboundRecoveryDelayMs?: number;
+  maxOutboundRecoveryAttempts?: number;
   cursorPath?: string;
 }
 
@@ -76,6 +85,7 @@ export interface PrivateChatAutoReplyBackfillSyncResult {
   processed: number;
   skipped: number;
   failed: number;
+  recovered: number;
 }
 
 export interface PrivateChatAutoReplyBackfillLoop {
@@ -403,6 +413,41 @@ function getMessageDedupId(message: ChatViewerMessage): string {
   return normalizeText(message.pinId) || normalizeText(message.txId) || normalizeText(message.id);
 }
 
+function normalizePinTransactionId(value: unknown): string {
+  return normalizeText(value).replace(/i\d+$/iu, '');
+}
+
+function collectHistoryMessageIds(messages: ChatViewerMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    for (const value of [message.id, message.pinId, message.txId]) {
+      const normalized = normalizeText(value);
+      if (normalized) ids.add(normalized);
+      const transactionId = normalizePinTransactionId(normalized);
+      if (transactionId) ids.add(transactionId);
+    }
+  }
+  return ids;
+}
+
+function isOutboundMessageVisible(
+  message: PrivateChatMessage,
+  historyMessages: ChatViewerMessage[],
+): boolean {
+  const historyIds = collectHistoryMessageIds(historyMessages);
+  const attemptedPinIds = [
+    message.messagePinId,
+    ...(message.deliveryRecovery?.failedPinIds ?? []),
+  ];
+  return attemptedPinIds.some((value) => {
+    const normalized = normalizeText(value);
+    return Boolean(normalized) && (
+      historyIds.has(normalized)
+      || historyIds.has(normalizePinTransactionId(normalized))
+    );
+  });
+}
+
 export function createPrivateChatAutoReplyBackfillLoop(
   deps: PrivateChatAutoReplyBackfillDependencies,
   options: PrivateChatAutoReplyBackfillOptions = {},
@@ -412,6 +457,14 @@ export function createPrivateChatAutoReplyBackfillLoop(
   const startupCatchUpMs = normalizePositiveInteger(
     options.startupCatchUpMs,
     DEFAULT_STARTUP_CATCH_UP_MS,
+  );
+  const outboundRecoveryDelayMs = normalizePositiveInteger(
+    options.outboundRecoveryDelayMs,
+    MVC_PENDING_UTXO_TTL_MS,
+  );
+  const maxOutboundRecoveryAttempts = normalizePositiveInteger(
+    options.maxOutboundRecoveryAttempts,
+    DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS,
   );
   const cursorPath = options.cursorPath
     ?? path.join(deps.paths.stateRoot, 'private-chat-auto-reply-backfill.json');
@@ -426,13 +479,13 @@ export function createPrivateChatAutoReplyBackfillLoop(
   const syncOnce = async (): Promise<PrivateChatAutoReplyBackfillSyncResult> => {
     const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
     if (!selfGlobalMetaId) {
-      return { peers: 0, processed: 0, skipped: 0, failed: 0 };
+      return { peers: 0, processed: 0, skipped: 0, failed: 0, recovered: 0 };
     }
 
     const localIdentity = await deps.getLocalPrivateChatIdentity();
     const localPrivateKeyHex = normalizeText(localIdentity.privateKeyHex);
     if (!localPrivateKeyHex) {
-      return { peers: 0, processed: 0, skipped: 0, failed: 0 };
+      return { peers: 0, processed: 0, skipped: 0, failed: 0, recovered: 0 };
     }
 
     const state = await deps.stateStore.readState();
@@ -444,6 +497,7 @@ export function createPrivateChatAutoReplyBackfillLoop(
     let processed = 0;
     let skipped = 0;
     let failed = 0;
+    let recovered = 0;
 
     for (const peerGlobalMetaId of peers) {
       const peerKey = normalizeGlobalMetaId(peerGlobalMetaId);
@@ -524,6 +578,44 @@ export function createPrivateChatAutoReplyBackfillLoop(
         };
         cursorChanged = true;
       }
+
+      if (deps.recoverOutboundMessage) {
+        const conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
+        const latestMessages = conversation
+          ? await deps.stateStore.getRecentMessages(conversation.conversationId, 1)
+          : [];
+        const latestMessage = latestMessages.at(-1) ?? null;
+        const retryCount = latestMessage?.deliveryRecovery?.retryCount ?? 0;
+        const recoveryEligible = Boolean(
+          latestMessage
+          && latestMessage.direction === 'outbound'
+          && normalizeText(latestMessage.messagePinId)
+          && classifySimplemsgContent(latestMessage.content).kind === 'private_chat'
+          && getNow() - latestMessage.timestamp >= outboundRecoveryDelayMs
+          && retryCount < maxOutboundRecoveryAttempts,
+        );
+        if (recoveryEligible && latestMessage) {
+          try {
+            const recoveryHistory = existingCursor
+              ? await historyClient.fetchRecent({
+                selfGlobalMetaId,
+                peerGlobalMetaId,
+                localPrivateKeyHex,
+                peerChatPublicKey,
+                limit: recentLimit,
+              })
+              : response;
+            if (!isOutboundMessageVisible(latestMessage, recoveryHistory.messages)) {
+              if (await deps.recoverOutboundMessage(peerGlobalMetaId, latestMessage)) {
+                recovered += 1;
+              }
+            }
+          } catch (error) {
+            failed += 1;
+            deps.onError?.(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+      }
     }
 
     if (cursorChanged) {
@@ -535,6 +627,7 @@ export function createPrivateChatAutoReplyBackfillLoop(
       processed,
       skipped,
       failed,
+      recovered,
     };
   };
 
