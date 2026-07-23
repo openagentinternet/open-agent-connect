@@ -1,4 +1,5 @@
 import { type A2ADeliveryArtifact } from './deliveryArtifacts';
+import { type MetasoSocketEndpoint } from '../network/metasoInfrastructure';
 export interface AwaitMetaWebServiceReplyInput {
     callerGlobalMetaId: string;
     callerPrivateKeyHex: string;
@@ -45,4 +46,6 @@ export declare function shouldAcceptServiceRatingRequestForReplyWaiter(input: {
     expectedOrderTxid?: unknown;
     pendingDeliveryOrderTxid?: unknown;
 }): boolean;
-export declare function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter;
+export declare function createSocketIoMetaWebReplyWaiter(options?: {
+    resolveSocketEndpoints?: () => Promise<MetasoSocketEndpoint[]> | MetasoSocketEndpoint[];
+}): MetaWebServiceReplyWaiter;

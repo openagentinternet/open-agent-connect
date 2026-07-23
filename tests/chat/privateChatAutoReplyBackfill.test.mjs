@@ -10,6 +10,7 @@ const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createPrivateChatStateStore } = require('../../dist/core/chat/privateChatStateStore.js');
 const {
   createPrivateChatAutoReplyBackfillLoop,
+  createPrivateChatAutoReplyBackfillProfileManager,
 } = require('../../dist/core/chat/privateChatAutoReplyBackfill.js');
 
 async function createTempProfileHome() {
@@ -129,4 +130,77 @@ test('auto-reply backfill processes missed incoming private messages for known p
   assert.equal(handledMessages[0].messagePinId, 'missed-incoming-pin');
   assert.equal(handledMessages[0].fromChatPublicKey, 'peer-chat-public-key');
   assert.equal(handledMessages[0].rawMessage.source, 'private-chat-history-backfill');
+});
+
+test('auto-reply backfill reads history from the currently configured chat API base URL', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const requestedUrls = [];
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore: createPrivateChatStateStore(paths),
+    selfGlobalMetaId: async () => 'idq1localbot0000000000000000000000000',
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: 'idq1localbot0000000000000000000000000',
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async () => {},
+    listPeerGlobalMetaIds: async () => ['idq1peerbot00000000000000000000000000'],
+    resolveChatApiBaseUrl: async () => 'http://metaso.test/custom/chat-api/group-chat',
+    fetchImpl: async (url) => {
+      requestedUrls.push(String(url));
+      return new Response(JSON.stringify({
+        code: 0,
+        data: {
+          total: 0,
+          list: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+
+  const result = await loop.syncOnce();
+
+  assert.equal(result.peers, 1);
+  assert.equal(requestedUrls.length, 2);
+  assert.equal(requestedUrls.every((url) => url.startsWith(
+    'http://metaso.test/custom/chat-api/group-chat/private-chat-list-by-index?',
+  )), true);
+});
+
+test('auto-reply backfill profile manager starts and stops an isolated loop for every profile', async () => {
+  const profiles = ['alpha', 'beta'].map((slug, index) => ({
+    name: `${slug} bot`,
+    slug,
+    aliases: [slug],
+    homeDir: `/tmp/${slug}`,
+    globalMetaId: `idq1${slug}`,
+    mvcAddress: `mvc-${slug}`,
+    createdAt: index + 1,
+    updatedAt: index + 1,
+  }));
+  const events = [];
+  const manager = createPrivateChatAutoReplyBackfillProfileManager({
+    systemHomeDir: '/tmp/system-home',
+    listProfiles: async () => profiles,
+    createLoop: (profile) => ({
+      syncOnce: async () => ({ peers: 0, processed: 0, skipped: 0, failed: 0 }),
+      start: () => events.push(`start:${profile.slug}`),
+      stop: () => events.push(`stop:${profile.slug}`),
+      isRunning: () => true,
+    }),
+  });
+
+  const report = await manager.start();
+  assert.deepEqual(report.started.map((profile) => profile.slug), ['alpha', 'beta']);
+  assert.equal(manager.isRunning(), true);
+  assert.deepEqual(events, ['start:alpha', 'start:beta']);
+
+  manager.stop();
+  assert.equal(manager.isRunning(), false);
+  assert.deepEqual(events, ['start:alpha', 'start:beta', 'stop:alpha', 'stop:beta']);
 });

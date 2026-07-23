@@ -273,6 +273,7 @@ exports.DICTIONARIES = {
         'language.auto': 'Auto',
         'language.en': 'English',
         'language.zhCN': '简体中文',
+        'language.toggle': 'Switch language',
         'settings.title': 'Settings — Open Agent Connect',
         'settings.heading': 'Settings',
         'settings.description': 'Review Bot provider runtime, network, wallet, and browser settings.',
@@ -300,6 +301,20 @@ exports.DICTIONARIES = {
         'settings.discovery.body': 'Network source health for online Bot and service listings.',
         'settings.diagnostics.title': 'Advanced Diagnostics',
         'settings.diagnostics.body': 'Legacy diagnostics remain directly available without becoming top-level navigation.',
+        'settings.modal.baseUrls': 'Base URLs',
+        'settings.modal.metasoP2PBaseUrl': 'Metaso P2P Base URL',
+        'settings.modal.metafileBaseUrl': 'Metafile Base URL',
+        'settings.modal.manApiBaseUrl': 'ManAPI Base URL',
+        'settings.modal.infrastructurePrefix': 'The infrastructure of the Open Agent Internet is decentralized. Build your own via ',
+        'settings.modal.infrastructureSuffix': '.',
+        'settings.modal.close': 'Close',
+        'settings.modal.save': 'Save',
+        'settings.modal.loading': 'Loading Base URLs...',
+        'settings.modal.saving': 'Saving Base URLs...',
+        'settings.modal.saved': 'Base URLs saved.',
+        'settings.modal.loadFailed': 'Failed to load Base URLs: {message}',
+        'settings.modal.saveFailed': 'Failed to save Base URLs: {message}',
+        'settings.modal.unknownError': 'Unknown error',
         'myServices.title': 'My Services',
         'myServices.eyebrow': 'Service Ledger',
         'myServices.heading': 'My Services',
@@ -855,6 +870,7 @@ exports.DICTIONARIES = {
         'language.auto': 'Auto',
         'language.en': 'English',
         'language.zhCN': '简体中文',
+        'language.toggle': '切换语言',
         'settings.title': '设置 — Open Agent Connect',
         'settings.heading': '设置',
         'settings.description': '查看 Bot 服务方运行时、网络、钱包和浏览器设置。',
@@ -882,6 +898,20 @@ exports.DICTIONARIES = {
         'settings.discovery.body': '在线 Bot 和服务列表的网络来源健康状态。',
         'settings.diagnostics.title': '高级诊断',
         'settings.diagnostics.body': '旧版诊断入口保持直接可用，但不进入顶层导航。',
+        'settings.modal.baseUrls': '基础 URL',
+        'settings.modal.metasoP2PBaseUrl': 'Metaso P2P 基础 URL',
+        'settings.modal.metafileBaseUrl': 'Metafile 基础 URL',
+        'settings.modal.manApiBaseUrl': 'ManAPI 基础 URL',
+        'settings.modal.infrastructurePrefix': 'Open Agent Internet 的基础设施是去中心化的。可通过 ',
+        'settings.modal.infrastructureSuffix': ' 构建自己的基础设施。',
+        'settings.modal.close': '关闭',
+        'settings.modal.save': '保存',
+        'settings.modal.loading': '正在加载基础 URL...',
+        'settings.modal.saving': '正在保存基础 URL...',
+        'settings.modal.saved': '基础 URL 已保存。',
+        'settings.modal.loadFailed': '基础 URL 加载失败：{message}',
+        'settings.modal.saveFailed': '基础 URL 保存失败：{message}',
+        'settings.modal.unknownError': '未知错误',
         'myServices.title': '我的服务',
         'myServices.eyebrow': '服务台账',
         'myServices.heading': '我的服务',
@@ -1279,6 +1309,10 @@ function renderClientI18nScript(i18n) {
         if (key) option.textContent = t(key);
       });
     });
+    queryAll('[data-i18n-aria-label]').forEach((element) => {
+      const key = element.getAttribute('data-i18n-aria-label') || '';
+      if (key && typeof element.setAttribute === 'function') element.setAttribute('aria-label', t(key));
+    });
     if (typeof window !== 'undefined') {
       window.__oacLocalUiI18n = { t, getPreference: () => currentPreference, getLanguage: () => currentLanguage };
       if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
@@ -1299,6 +1333,12 @@ function renderClientI18nScript(i18n) {
       const target = event.target && event.target.closest ? event.target.closest('[data-language-select]') : null;
       if (!target) return;
       setPreference(target.value, { persist: true });
+    });
+    document.addEventListener('click', (event) => {
+      const target = event.target && event.target.closest ? event.target.closest('[data-language-toggle]') : null;
+      if (!target) return;
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      setPreference(currentLanguage === 'zh-CN' ? 'en' : 'zh-CN', { persist: true });
     });
   }
 })();`;

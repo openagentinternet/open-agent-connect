@@ -57,9 +57,9 @@ export declare function normalizeConversationLimit(value: unknown): number;
 export declare function normalizeConversationAfterIndex(value: unknown): number | undefined;
 export declare function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPageInput & {
     fetchImpl?: typeof fetch;
-    idChatApiBaseUrl?: string;
+    chatApiBaseUrl?: string;
 }): Promise<PrivateChatHistoryPage>;
 export declare function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & {
     fetchImpl?: typeof fetch;
-    idChatApiBaseUrl?: string;
+    chatApiBaseUrl?: string;
 }): Promise<unknown[]>;

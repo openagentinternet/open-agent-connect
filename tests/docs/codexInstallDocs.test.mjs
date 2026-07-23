@@ -12,7 +12,7 @@ const LEGACY_OAC_BANNER_LINE = /_   ___ ___ _  _ _____    ___ ___  _  _ _  _ ___
 test('README exposes one user-facing install prompt and the npm fallback', async () => {
   const readme = await readFile(path.join(REPO_ROOT, 'README.md'), 'utf8');
 
-  assert.match(readme, /## Install OAC/i);
+  assert.match(readme, /^## Install$/im);
   assert.match(readme, /npm i -g open-agent-connect/);
   assert.match(readme, /oac install/);
   assert.match(readme, /docs\/install\/open-agent-connect\.md/);

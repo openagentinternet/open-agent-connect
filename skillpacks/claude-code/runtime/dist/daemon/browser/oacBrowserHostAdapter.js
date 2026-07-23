@@ -856,6 +856,14 @@ function createOacBrowserHostAdapter(input) {
             const next = (0, agent_browser_core_1.applyBrowserSettingsUpdate)(current, settingsInput.browser);
             await targetConfigStore.set(next);
             const saved = await targetConfigStore.read();
+            if (saved.browser.metasoP2PBaseUrl !== current.browser.metasoP2PBaseUrl) {
+                try {
+                    await input.onInfrastructureSettingsUpdated?.(actor.homeDir);
+                }
+                catch {
+                    // The saved configuration remains authoritative and will be used on the next reconnect.
+                }
+            }
             return (0, agent_browser_host_contract_1.browserSuccess)(toHostBrowserSettingsSnapshot((0, agent_browser_core_1.createBrowserSettingsSnapshot)({
                 config: saved,
                 configPath: targetConfigStore.paths.configPath,

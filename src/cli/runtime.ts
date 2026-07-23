@@ -7,6 +7,7 @@ import { collectDaemonStartupDiagnostics, formatDaemonStartupTimeoutMessage } fr
 import { CLI_VERSION } from './version';
 import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired, commandSuccess, type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
+import { createInfrastructureConfigStore } from '../core/config/infrastructureConfigStore';
 import {
   DEFAULT_WRITE_NETWORKS,
   type DefaultWriteNetwork,
@@ -53,6 +54,8 @@ import { createOnlineServiceCacheStore, DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERV
 import { refreshOnlineServiceCacheFromChain } from '../core/discovery/onlineServiceCacheSync';
 import { buildRemoteServicesPrompt } from '../core/delegation/remoteCall';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
+import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
+import { resolveMetasoInfrastructureEndpoints } from '../core/network/metasoInfrastructure';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import type { LocalIdentitySecrets } from '../core/secrets/secretStore';
 import {
@@ -113,7 +116,11 @@ import {
   type PrivateChatAutoReplyOrchestrator,
 } from '../core/chat/privateChatAutoReply';
 import { createPrivateChatSendFailureFileLogger } from '../core/chat/privateChatSendFailureLog';
-import { createPrivateChatAutoReplyBackfillLoop } from '../core/chat/privateChatAutoReplyBackfill';
+import {
+  createPrivateChatAutoReplyBackfillLoop,
+  createPrivateChatAutoReplyBackfillProfileManager,
+  type PrivateChatAutoReplyBackfillProfileManager,
+} from '../core/chat/privateChatAutoReplyBackfill';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
@@ -221,6 +228,7 @@ export function buildA2ASimplemsgInboundDispatcher(input: {
 export async function refreshA2ASimplemsgListenerForIdentityProfileRegistration(input: {
   enabled: boolean;
   listener: Pick<A2ASimplemsgListenerManager, 'start' | 'stop'>;
+  backfill?: Pick<PrivateChatAutoReplyBackfillProfileManager, 'start' | 'stop'>;
   watchdog?: Pick<A2ASimplemsgPresenceWatchdog, 'start' | 'stop'>;
 }): Promise<{ refreshed: boolean; report: A2ASimplemsgListenerStartReport | null }> {
   if (!input.enabled) {
@@ -232,7 +240,9 @@ export async function refreshA2ASimplemsgListenerForIdentityProfileRegistration(
 
   input.watchdog?.stop();
   input.listener.stop();
+  input.backfill?.stop();
   const report = await input.listener.start();
+  await input.backfill?.start();
   input.watchdog?.start();
   return {
     refreshed: true,
@@ -3727,6 +3737,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   const paths = resolveMetabotPaths(homeDir);
   const daemonPaths = resolveMetabotDaemonPaths(systemHomeDir);
+  const infrastructureConfigStore = createInfrastructureConfigStore(daemonPaths);
   const daemonStore = createDaemonStateStore(daemonPaths);
   let daemonRecord: GlobalDaemonRecord | null = null;
   const secretStore = createFileSecretStore(homeDir);
@@ -3816,6 +3827,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   let refreshA2ASimplemsgListenerAfterIdentityRegistration: () => Promise<void> = async () => {
     pendingA2ASimplemsgRefreshAfterIdentityRegistration = true;
   };
+  let refreshA2ASimplemsgListenerAfterInfrastructureChange: () => Promise<void> = async () => {};
   let onProviderPresenceChanged: (enabled: boolean) => Promise<void> = async () => {};
 
   const handlers = createDefaultMetabotDaemonHandlers({
@@ -3853,6 +3865,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
     onProviderPresenceChanged: (enabled) => onProviderPresenceChanged(enabled),
     onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
+    onBrowserInfrastructureChanged: () => refreshA2ASimplemsgListenerAfterInfrastructureChange(),
   });
 
   const daemon = createMetabotDaemon({
@@ -3886,11 +3899,14 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const onlineServiceCacheStore = createOnlineServiceCacheStore(paths);
   const ratingDetailStateStore = createRatingDetailStateStore(paths);
   const refreshOnlineServiceCache = async () => {
+    const infrastructure = await infrastructureConfigStore.read();
+    const configuredPresenceApiBaseUrl = socketPresenceApiBaseUrl
+      || resolveMetasoInfrastructureEndpoints(infrastructure.metasoP2PBaseUrl).socketPresenceApiBaseUrl;
     await refreshOnlineServiceCacheFromChain({
       store: onlineServiceCacheStore,
       ratingDetailStateStore,
       chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-      socketPresenceApiBaseUrl,
+      socketPresenceApiBaseUrl: configuredPresenceApiBaseUrl,
       socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? 'assume_service_providers_online'
         : 'throw',
@@ -3971,20 +3987,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       logWarning: (scope, message) => console.warn(scope, message),
     }),
   }, sharedAutoReplyConfig);
-  const chatAutoReplyBackfill = createPrivateChatAutoReplyBackfillLoop({
-    paths,
-    stateStore: chatStateStore,
-    selfGlobalMetaId: async () => {
-      const state = await runtimeStore.readState();
-      return state.identity?.globalMetaId ?? null;
-    },
-    getLocalPrivateChatIdentity: async () => signer.getPrivateChatIdentity(),
-    resolvePeerChatPublicKey,
-    handleInboundMessage: async (message) => chatAutoReplyOrchestrator.handleInboundMessage(message),
-    onError: (error) => {
-      console.warn('[private chat auto-reply backfill]', error.message);
-    },
-  });
   const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
     autoReplyConfig: sharedAutoReplyConfig,
     resolvePeerChatPublicKey,
@@ -4006,6 +4008,46 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       });
     },
   });
+  const chatAutoReplyBackfill = createPrivateChatAutoReplyBackfillProfileManager({
+    systemHomeDir: paths.systemHomeDir,
+    createLoop: (profile) => {
+      const profilePaths = resolveMetabotPaths(profile.homeDir);
+      const profileRuntimeStore = createRuntimeStateStore(profilePaths);
+      const profileBaseSigner = createLocalMnemonicSigner({
+        secretStore: createFileSecretStore(profile.homeDir),
+        adapters,
+      });
+      const profileSigner = path.resolve(profile.homeDir) === path.resolve(homeDir)
+        ? signer
+        : context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+          ? createTestChainWriteSigner(profileBaseSigner)
+          : profileBaseSigner;
+      return createPrivateChatAutoReplyBackfillLoop({
+        paths: profilePaths,
+        stateStore: createPrivateChatStateStore(profilePaths),
+        selfGlobalMetaId: async () => {
+          const state = await profileRuntimeStore.readState().catch(() => null);
+          return state?.identity?.globalMetaId || profile.globalMetaId || null;
+        },
+        getLocalPrivateChatIdentity: async () => profileSigner.getPrivateChatIdentity(),
+        resolvePeerChatPublicKey,
+        resolveChatApiBaseUrl: async () => {
+          const infrastructure = await infrastructureConfigStore.read();
+          return resolveMetasoInfrastructureEndpoints(infrastructure.metasoP2PBaseUrl).chatApiBaseUrl;
+        },
+        handleInboundMessage: async (message) => {
+          if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
+            await chatAutoReplyOrchestrator.handleInboundMessage(message);
+            return;
+          }
+          await profileAutoReplyDispatcher.handleInboundMessage(profile, message);
+        },
+        onError: (error) => {
+          console.warn(`[private chat auto-reply backfill:${profile.slug}]`, error.message);
+        },
+      });
+    },
+  });
 
   const daemonConfig = await createConfigStore(paths).read();
   const simplemsgInboundDispatcher = buildA2ASimplemsgInboundDispatcher({
@@ -4019,6 +4061,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   });
   const simplemsgListener = createA2ASimplemsgListenerManager({
     systemHomeDir: paths.systemHomeDir,
+    resolveSocketEndpoints: async () => [
+      resolveMetasoInfrastructureEndpoints((await infrastructureConfigStore.read()).metasoP2PBaseUrl).socket,
+    ],
     resolvePeerChatPublicKey,
     onMessage: (profile, message) => {
       if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
@@ -4035,8 +4080,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       console.warn('[A2A simplemsg listener]', error.message);
     },
   });
+  const readConfiguredSocketPresence = async () => {
+    const infrastructure = await infrastructureConfigStore.read();
+    const apiBaseUrl = socketPresenceApiBaseUrl
+      || resolveMetasoInfrastructureEndpoints(infrastructure.metasoP2PBaseUrl).socketPresenceApiBaseUrl;
+    return readOnlineMetaBotsFromSocketPresence({ apiBaseUrl, limit: 100 });
+  };
   const simplemsgPresenceWatchdog = createA2ASimplemsgPresenceWatchdog({
     manager: simplemsgListener,
+    readOnlineMetaBots: readConfiguredSocketPresence,
     onRestart: (event) => {
       const missingNames = event.missing
         .map((profile) => `${profile.name || profile.slug} (${profile.globalMetaId})`)
@@ -4053,7 +4105,21 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
       enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
       listener: simplemsgListener,
+      backfill: chatAutoReplyBackfill,
       watchdog: simplemsgPresenceWatchdog,
+    });
+  };
+  refreshA2ASimplemsgListenerAfterInfrastructureChange = async () => {
+    const currentConfig = await createConfigStore(paths).read().catch(() => daemonConfig);
+    const providerPresence = await providerPresenceStore.read().catch(() => ({ enabled: true }));
+    await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
+      enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
+      listener: simplemsgListener,
+      backfill: chatAutoReplyBackfill,
+      watchdog: simplemsgPresenceWatchdog,
+    });
+    void refreshOnlineServiceCache().catch((error) => {
+      console.warn('[online service cache] infrastructure refresh failed:', error instanceof Error ? error.message : String(error));
     });
   };
   onProviderPresenceChanged = async (enabled) => {
@@ -4074,15 +4140,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
       enabled: true,
       listener: simplemsgListener,
+      backfill: chatAutoReplyBackfill,
       watchdog: simplemsgPresenceWatchdog,
     });
-    chatAutoReplyBackfill.start();
   };
   const providerPresence = await providerPresenceStore.read();
   if (daemonConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled) {
     await simplemsgListener.start();
     simplemsgPresenceWatchdog.start();
-    chatAutoReplyBackfill.start();
+    await chatAutoReplyBackfill.start();
     void replayUnhandledA2AOrderMessagesForProfiles({
       systemHomeDir: paths.systemHomeDir,
       activeHomeDir: homeDir,

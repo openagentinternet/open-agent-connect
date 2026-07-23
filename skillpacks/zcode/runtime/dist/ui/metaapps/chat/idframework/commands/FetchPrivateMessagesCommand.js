@@ -189,7 +189,7 @@ export default class FetchPrivateMessagesCommand {
       const locator = (typeof window !== 'undefined' && window.ServiceLocator)
         ? window.ServiceLocator
         : (globalThis.ServiceLocator || null);
-      const baseURL = (locator?.idchat || 'https://api.idchat.io/chat-api/group-chat').replace(/\/+$/, '');
+      const baseURL = (locator?.chat_api || locator?.idchat || 'https://so.metaid.io/chat-api/group-chat').replace(/\/+$/, '');
       const query = new URLSearchParams({
         metaId: metaId,
         otherMetaId: otherMetaId,

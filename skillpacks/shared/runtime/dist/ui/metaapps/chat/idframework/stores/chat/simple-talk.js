@@ -426,8 +426,8 @@ export class SimpleTalkStore {
   async _fetchByIndexFromServer(params) {
     const isPrivate = this.context.mode === 'private';
     const base = String(
-      (window.ServiceLocator && window.ServiceLocator.idchat) ||
-      'https://api.idchat.io/chat-api/group-chat'
+      (window.ServiceLocator && (window.ServiceLocator.chat_api || window.ServiceLocator.idchat)) ||
+      'https://so.metaid.io/chat-api/group-chat'
     ).replace(/\/$/, '');
     const query = new URLSearchParams({
       size: String(params.size || this.pageSize),

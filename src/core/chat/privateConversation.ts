@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { receivePrivateChat } from './privateChat';
+import { resolveMetasoInfrastructureEndpoints } from '../network/metasoInfrastructure';
 
-const DEFAULT_IDCHAT_API_BASE_URL = 'https://api.idchat.io/chat-api/group-chat';
 const DEFAULT_CONVERSATION_LIMIT = 50;
 const MAX_CONVERSATION_LIMIT = 200;
 const UNABLE_TO_DECRYPT_TEXT = '[Unable to decrypt message]';
@@ -72,7 +72,7 @@ export interface BuildPrivateConversationResponseInput {
   limit?: number;
   fetchHistory?: FetchPrivateHistory;
   fetchImpl?: typeof fetch;
-  idChatApiBaseUrl?: string;
+  chatApiBaseUrl?: string;
   now?: () => number;
 }
 
@@ -109,7 +109,7 @@ export function normalizeConversationAfterIndex(value: unknown): number | undefi
 }
 
 function normalizeBaseUrl(value: string | undefined): string {
-  return (normalizeText(value) || DEFAULT_IDCHAT_API_BASE_URL).replace(/\/+$/, '');
+  return (normalizeText(value) || resolveMetasoInfrastructureEndpoints().chatApiBaseUrl).replace(/\/+$/, '');
 }
 
 function getFetchImpl(fetchImpl: typeof fetch | undefined): typeof fetch {
@@ -148,7 +148,7 @@ function extractHistoryPage(rawData: unknown): PrivateChatHistoryPage {
 
 export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPageInput & {
   fetchImpl?: typeof fetch;
-  idChatApiBaseUrl?: string;
+  chatApiBaseUrl?: string;
 }): Promise<PrivateChatHistoryPage> {
   const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
   const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
@@ -158,7 +158,7 @@ export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPage
 
   const startIndex = Number(input.startIndex);
   const fetchImpl = getFetchImpl(input.fetchImpl);
-  const url = new URL(`${normalizeBaseUrl(input.idChatApiBaseUrl)}/private-chat-list-by-index`);
+  const url = new URL(`${normalizeBaseUrl(input.chatApiBaseUrl)}/private-chat-list-by-index`);
   url.searchParams.set('metaId', selfGlobalMetaId);
   url.searchParams.set('otherMetaId', peerGlobalMetaId);
   url.searchParams.set('startIndex', String(Number.isFinite(startIndex) && startIndex >= 0
@@ -181,7 +181,7 @@ export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPage
 
 export async function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & {
   fetchImpl?: typeof fetch;
-  idChatApiBaseUrl?: string;
+  chatApiBaseUrl?: string;
 }): Promise<unknown[]> {
   const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
   const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
@@ -195,7 +195,7 @@ export async function fetchPrivateChatHistory(input: FetchPrivateHistoryInput & 
     startIndex: (input.afterIndex ?? -1) + 1,
     limit: input.limit,
     fetchImpl: input.fetchImpl,
-    idChatApiBaseUrl: input.idChatApiBaseUrl,
+    chatApiBaseUrl: input.chatApiBaseUrl,
   });
   return page.rows;
 }
@@ -221,6 +221,31 @@ function firstText(...values: unknown[]): string {
     const normalized = normalizeText(value);
     if (normalized) return normalized;
   }
+  return '';
+}
+
+function resolveKnownParticipant(
+  selfGlobalMetaId: string,
+  peerGlobalMetaId: string,
+  ...values: unknown[]
+): string {
+  const normalizedSelf = selfGlobalMetaId.toLowerCase();
+  const normalizedPeer = peerGlobalMetaId.toLowerCase();
+  for (const value of values) {
+    const candidate = normalizeText(value).toLowerCase();
+    if (candidate === normalizedSelf) return selfGlobalMetaId;
+    if (candidate === normalizedPeer) return peerGlobalMetaId;
+  }
+  return '';
+}
+
+function oppositeParticipant(
+  participant: string,
+  selfGlobalMetaId: string,
+  peerGlobalMetaId: string,
+): string {
+  if (participant === selfGlobalMetaId) return peerGlobalMetaId;
+  if (participant === peerGlobalMetaId) return selfGlobalMetaId;
   return '';
 }
 
@@ -322,7 +347,9 @@ function resolveFromGlobalMetaId(input: {
   selfGlobalMetaId: string;
   peerGlobalMetaId: string;
 }): string {
-  const direct = firstText(
+  const direct = resolveKnownParticipant(
+    input.selfGlobalMetaId,
+    input.peerGlobalMetaId,
     input.row.fromGlobalMetaId,
     input.row.from_meta_id,
     input.row.createGlobalMetaId,
@@ -331,9 +358,28 @@ function resolveFromGlobalMetaId(input: {
     input.userInfo?.globalMetaId,
   );
   if (direct) return direct;
-  if (input.payloadTo === input.selfGlobalMetaId) return input.peerGlobalMetaId;
-  if (input.payloadTo === input.peerGlobalMetaId) return input.selfGlobalMetaId;
-  return '';
+
+  const recipient = resolveKnownParticipant(
+    input.selfGlobalMetaId,
+    input.peerGlobalMetaId,
+    input.row.toGlobalMetaId,
+    input.row.to_meta_id,
+    input.row.receiveGlobalMetaId,
+    input.row.targetGlobalMetaId,
+    input.payloadTo,
+  );
+  if (recipient) {
+    return oppositeParticipant(recipient, input.selfGlobalMetaId, input.peerGlobalMetaId);
+  }
+
+  return firstText(
+    input.row.fromGlobalMetaId,
+    input.row.from_meta_id,
+    input.row.createGlobalMetaId,
+    input.row.createUserMetaId,
+    input.fromUserInfo?.globalMetaId,
+    input.userInfo?.globalMetaId,
+  );
 }
 
 function resolveToGlobalMetaId(input: {
@@ -343,7 +389,9 @@ function resolveToGlobalMetaId(input: {
   selfGlobalMetaId: string;
   peerGlobalMetaId: string;
 }): string {
-  const direct = firstText(
+  const direct = resolveKnownParticipant(
+    input.selfGlobalMetaId,
+    input.peerGlobalMetaId,
     input.row.toGlobalMetaId,
     input.row.to_meta_id,
     input.row.receiveGlobalMetaId,
@@ -351,9 +399,30 @@ function resolveToGlobalMetaId(input: {
     input.payloadTo,
   );
   if (direct) return direct;
-  if (input.fromGlobalMetaId === input.selfGlobalMetaId) return input.peerGlobalMetaId;
-  if (input.fromGlobalMetaId === input.peerGlobalMetaId) return input.selfGlobalMetaId;
-  return '';
+
+  const sender = resolveKnownParticipant(
+    input.selfGlobalMetaId,
+    input.peerGlobalMetaId,
+    input.fromGlobalMetaId,
+  );
+  if (sender) {
+    return oppositeParticipant(sender, input.selfGlobalMetaId, input.peerGlobalMetaId);
+  }
+
+  return firstText(
+    input.row.toGlobalMetaId,
+    input.row.to_meta_id,
+    input.row.receiveGlobalMetaId,
+    input.row.targetGlobalMetaId,
+    input.payloadTo,
+  );
+}
+
+function normalizeTransactionId(rawTxId: unknown, pinId: string): string {
+  const txId = normalizeText(rawTxId);
+  if (!txId || txId !== pinId) return txId;
+  const pinMatch = /^([0-9a-f]{64})i\d+$/iu.exec(pinId);
+  return pinMatch?.[1] ?? txId;
 }
 
 function isFileProtocol(protocol: string): boolean {
@@ -442,7 +511,7 @@ function normalizeConversationRow(input: {
   );
   const index = Number.isFinite(Number(row.index)) ? Math.floor(Number(row.index)) : 0;
   const pinId = firstText(row.pinId, row.pin_id);
-  const txId = firstText(row.txId, row.tx_id, row.txid);
+  const txId = normalizeTransactionId(firstText(row.txId, row.tx_id, row.txid), pinId);
   const id = pinId || txId || buildStableId({
     fromGlobalMetaId,
     toGlobalMetaId,
@@ -509,7 +578,7 @@ export async function buildPrivateConversationResponse(
   const fetchHistory = input.fetchHistory ?? ((historyInput) => fetchPrivateChatHistory({
     ...historyInput,
     fetchImpl: input.fetchImpl,
-    idChatApiBaseUrl: input.idChatApiBaseUrl,
+    chatApiBaseUrl: input.chatApiBaseUrl,
   }));
   const rows = await fetchHistory({
     selfGlobalMetaId,

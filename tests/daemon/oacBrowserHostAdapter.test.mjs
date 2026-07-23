@@ -13,6 +13,7 @@ const { createOacBrowserHostAdapter } = require('../../dist/daemon/browser/oacBr
 const { createMetabotProfile, createMetabotProfileFromIdentity, getMetabotProfile } = require('../../dist/core/bot/metabotProfileManager.js');
 const { commandFailed } = require('../../dist/core/contracts/commandResult.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
+const { createInfrastructureConfigStore } = require('../../dist/core/config/infrastructureConfigStore.js');
 const { createMetaAppPreviewSessionRegistry } = require('../../dist/core/metaapp/previewSessions.js');
 const { writeMetaAppZipArchive } = require('../../dist/core/metaapp/zipArchive.js');
 
@@ -120,6 +121,7 @@ async function createAdapter(input) {
     writeMetaIdPin: input.writeMetaIdPin,
     nameAliasProviders: input.nameAliasProviders,
     ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
+    onInfrastructureSettingsUpdated: input.onInfrastructureSettingsUpdated,
     resolveActorWriteContext: async (rawActor) => {
       const slug = typeof rawActor === 'string' ? rawActor.trim() : '';
       if (!slug) {
@@ -338,7 +340,7 @@ test('OAC browser host adapter returns profile_not_found for unknown runtime act
   assert.equal(runtime.code, 'profile_not_found');
 });
 
-test('OAC browser host adapter persists Browser settings for the selected profile', async (t) => {
+test('OAC browser host adapter shares infrastructure settings across profiles', async (t) => {
   const profileHome = await createProfileHome('oac-browser-adapter-settings');
   t.after(async () => cleanupProfileHome(profileHome));
   const systemHomeDir = deriveSystemHome(profileHome);
@@ -349,9 +351,19 @@ test('OAC browser host adapter persists Browser settings for the selected profil
     globalMetaId: 'idq1settingsbrowser',
     mvcAddress: '18SettingsBrowser',
   });
+  const other = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Other Settings Browser Bot',
+    homeDir: path.join(systemHomeDir, '.metabot', 'profiles', 'other-settings-browser-bot'),
+    globalMetaId: 'idq1othersettingsbrowser',
+    mvcAddress: '18OtherSettingsBrowser',
+  });
+  const infrastructureUpdates = [];
   const adapter = await createAdapter({
     homeDir: active.homeDir,
     systemHomeDir,
+    onInfrastructureSettingsUpdated: async () => {
+      infrastructureUpdates.push('updated');
+    },
   });
 
   const updated = await adapter.updateSettings({
@@ -394,10 +406,25 @@ test('OAC browser host adapter persists Browser settings for the selected profil
     },
   });
 
+  const readFromOther = await adapter.getSettings({ actorId: other.slug });
+  assert.equal(readFromOther.ok, true);
+  assert.equal(readFromOther.data.browser.metasoP2PBaseUrl, 'https://so.example.test');
+  assert.equal(readFromOther.data.browser.manApiBaseUrl, 'https://manapi.example.test');
+  assert.equal(
+    readFromOther.data.configPath,
+    path.join(systemHomeDir, '.metabot', 'manager', 'infrastructure.json'),
+  );
+
   const configOnDisk = await createConfigStore(active.homeDir).read();
-  assert.equal(configOnDisk.browser.metasoP2PBaseUrl, 'https://so.example.test');
-  assert.equal(configOnDisk.browser.manApiBaseUrl, 'https://manapi.example.test');
+  const otherConfigOnDisk = await createConfigStore(other.homeDir).read();
+  const infrastructureOnDisk = await createInfrastructureConfigStore(systemHomeDir).read();
+  assert.equal(Object.hasOwn(configOnDisk.browser, 'metasoP2PBaseUrl'), false);
+  assert.equal(Object.hasOwn(otherConfigOnDisk.browser, 'metasoP2PBaseUrl'), false);
+  assert.equal(infrastructureOnDisk.metasoP2PBaseUrl, 'https://so.example.test');
+  assert.equal(infrastructureOnDisk.manApiBaseUrl, 'https://manapi.example.test');
   assert.equal(configOnDisk.browser.botHomepageTemplateId, 'compact-list');
+  assert.equal(otherConfigOnDisk.browser.botHomepageTemplateId, 'document');
+  assert.deepEqual(infrastructureUpdates, ['updated']);
   assert.deepEqual(configOnDisk.browser.nameResolution, {
     enabled: true,
     ens: {

@@ -32,7 +32,7 @@ The transport is the same in all cases. The business meaning is derived from mes
 - `src/cli/commands/chat.ts` handles `metabot chat private`.
 - `src/daemon/defaultHandlers.ts` contains the current service-call, private-chat, trace, and session handlers.
 - `src/core/chat/privateChat.ts` encrypts and decrypts `/protocols/simplemsg`.
-- `src/core/chat/privateChatListener.ts` already listens to idchat.io and show.now socket.io endpoints for private messages.
+- `src/core/chat/privateChatListener.ts` listens to the configured Metaso Socket.IO endpoint for private messages.
 - `src/core/chat/privateChatAutoReply.ts` persists current private-chat state and uses the existing LLM reply runner.
 - `src/core/a2a/sessionStateStore.ts` stores current A2A sessions in `.runtime/sessions/a2a-session-state.json`.
 - `src/core/a2a/metawebReplyWaiter.ts` waits for provider delivery replies after service calls.
@@ -319,7 +319,7 @@ Existing `.runtime/sessions/a2a-session-state.json` and `.runtime/state/private-
 
 The default listener uses the IDBots endpoint order:
 
-1. `wss://api.idchat.io` with path `/socket/socket.io`
+1. the configured Metaso P2P Base URL, defaulting to `wss://so.metaid.io` with path `/socket/socket.io`
 2. `wss://www.show.now` with path `/socket/socket.io`
 
 Both endpoints use `type=pc` and `metaid=<localGlobalMetaId>`.
@@ -592,7 +592,7 @@ Deliverables:
 Deliverables:
 
 - `.runtime/A2A/chat-<self8>-<peer8>.json` store.
-- One listener per local MetaBot profile with idchat/show.now fallback.
+- One listener per local MetaBot profile using that profile's configured Metaso P2P Base URL.
 - Listener appends decrypted plaintext messages into per-peer files.
 - Service and private-chat outbound writes append to the same files.
 - Old stores remain read-only compatibility sources.

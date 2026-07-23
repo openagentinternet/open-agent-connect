@@ -9,10 +9,8 @@ const privateChat_1 = require("../chat/privateChat");
 const orderProtocol_1 = require("./protocol/orderProtocol");
 const serviceOrderProtocols_1 = require("../orders/serviceOrderProtocols");
 const deliveryArtifacts_1 = require("./deliveryArtifacts");
-const DEFAULT_SOCKET_ENDPOINTS = [
-    { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
-    { url: 'wss://www.show.now', path: '/socket/socket.io' },
-];
+const metasoInfrastructure_1 = require("../network/metasoInfrastructure");
+const DEFAULT_SOCKET_ENDPOINTS = [(0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)().socket];
 const DEFAULT_NEEDS_RATING_GRACE_MS = 3_000;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -137,12 +135,15 @@ function decryptInboundPlaintext(message, input) {
         return null;
     }
 }
-function createSocketIoMetaWebReplyWaiter() {
+function createSocketIoMetaWebReplyWaiter(options = {}) {
     return {
-        awaitServiceReply(input) {
+        async awaitServiceReply(input) {
             const timeoutMs = Number.isFinite(input.timeoutMs)
                 ? Math.max(250, Math.floor(input.timeoutMs))
                 : 15_000;
+            const endpoints = options.resolveSocketEndpoints
+                ? await options.resolveSocketEndpoints()
+                : DEFAULT_SOCKET_ENDPOINTS;
             return new Promise((resolve) => {
                 let settled = false;
                 let timeoutHandle = null;
@@ -176,7 +177,7 @@ function createSocketIoMetaWebReplyWaiter() {
                 timeoutHandle = setTimeout(() => {
                     finish({ state: 'timeout' });
                 }, timeoutMs);
-                for (const endpoint of DEFAULT_SOCKET_ENDPOINTS) {
+                for (const endpoint of endpoints) {
                     const socket = (0, socket_io_client_1.io)(endpoint.url, {
                         path: endpoint.path,
                         query: {

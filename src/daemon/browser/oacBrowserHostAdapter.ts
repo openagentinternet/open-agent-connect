@@ -49,6 +49,12 @@ import type {
 } from '@openagentinternet/agent-browser-host-contract';
 import { createConfigStore } from '../../core/config/configStore';
 import {
+  createDefaultInfrastructureConfig,
+  createInfrastructureConfigStore,
+  type InfrastructureConfig,
+} from '../../core/config/infrastructureConfigStore';
+import type { BrowserConfig, MetabotConfig } from '../../core/config/configTypes';
+import {
   type MetabotCommandResult,
 } from '../../core/contracts/commandResult';
 import { buildMetafileContentUrls } from '../../core/files/metafileUrls';
@@ -126,6 +132,7 @@ export interface CreateOacBrowserHostAdapterInput {
     rpcUrls: string[];
     textKey: string;
   }) => BrowserNameAliasProvider;
+  onInfrastructureSettingsUpdated?: () => Promise<void> | void;
 }
 
 interface PendingPinWriteConfirmation {
@@ -211,6 +218,42 @@ function resolveBrowserHostConfig(input: {
         ? { ensNameAliasProviderFactory: input.ensNameAliasProviderFactory }
         : {}),
     }),
+  };
+}
+
+function withInfrastructureConfig(
+  config: MetabotConfig,
+  infrastructure: InfrastructureConfig,
+): MetabotConfig & BrowserConfigContainer {
+  return {
+    ...config,
+    browser: {
+      ...config.browser,
+      ...infrastructure,
+    },
+  };
+}
+
+function splitBrowserSettingsConfig(
+  config: MetabotConfig & BrowserConfigContainer,
+): { profileConfig: MetabotConfig; infrastructure: InfrastructureConfig } {
+  const {
+    metasoP2PBaseUrl,
+    metafileContentBaseUrl,
+    manApiBaseUrl,
+    ...profileBrowser
+  } = config.browser ?? {};
+  const defaults = createDefaultInfrastructureConfig();
+  return {
+    profileConfig: {
+      ...config,
+      browser: profileBrowser as BrowserConfig,
+    },
+    infrastructure: {
+      metasoP2PBaseUrl: metasoP2PBaseUrl ?? defaults.metasoP2PBaseUrl,
+      metafileContentBaseUrl: metafileContentBaseUrl ?? defaults.metafileContentBaseUrl,
+      manApiBaseUrl: manApiBaseUrl ?? defaults.manApiBaseUrl,
+    },
   };
 }
 
@@ -833,6 +876,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     ? Math.floor(Number(input.confirmationTtlMs))
     : DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS;
   const pendingPinWriteConfirmations = new Map<string, PendingPinWriteConfirmation>();
+  const infrastructureConfigStore = createInfrastructureConfigStore(input.systemHomeDir);
 
   async function resolveActor(
     actorInput?: BrowserActorInput & { from?: string },
@@ -1106,10 +1150,14 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     const actor = await resolveActor(settingsInput);
     if ('failure' in actor) return toBrowserResult(actor.failure);
     const targetConfigStore = createConfigStore(actor.homeDir);
-    const config = await targetConfigStore.read();
+    const [profileConfig, infrastructure] = await Promise.all([
+      targetConfigStore.read(),
+      infrastructureConfigStore.read(),
+    ]);
+    const config = withInfrastructureConfig(profileConfig, infrastructure);
     return browserSuccess(toHostBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
       config,
-      configPath: targetConfigStore.paths.configPath,
+      configPath: infrastructureConfigStore.paths.infrastructureConfigPath,
       env,
     })));
   }
@@ -1118,14 +1166,31 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     const actor = await resolveActor(settingsInput);
     if ('failure' in actor) return toBrowserResult(actor.failure);
     const targetConfigStore = createConfigStore(actor.homeDir);
-    const current = await targetConfigStore.read();
+    const [currentProfileConfig, currentInfrastructure] = await Promise.all([
+      targetConfigStore.read(),
+      infrastructureConfigStore.read(),
+    ]);
+    const current = withInfrastructureConfig(currentProfileConfig, currentInfrastructure);
     try {
       const next = applyBrowserSettingsUpdate(current, settingsInput.browser);
-      await targetConfigStore.set(next);
-      const saved = await targetConfigStore.read();
+      const split = splitBrowserSettingsConfig(next);
+      await infrastructureConfigStore.set(split.infrastructure);
+      await targetConfigStore.set(split.profileConfig);
+      const [savedProfileConfig, savedInfrastructure] = await Promise.all([
+        targetConfigStore.read(),
+        infrastructureConfigStore.read(),
+      ]);
+      const saved = withInfrastructureConfig(savedProfileConfig, savedInfrastructure);
+      if (savedInfrastructure.metasoP2PBaseUrl !== currentInfrastructure.metasoP2PBaseUrl) {
+        try {
+          await input.onInfrastructureSettingsUpdated?.();
+        } catch {
+          // The saved configuration remains authoritative and will be used on the next reconnect.
+        }
+      }
       return browserSuccess(toHostBrowserSettingsSnapshot(createBrowserSettingsSnapshot({
         config: saved,
-        configPath: targetConfigStore.paths.configPath,
+        configPath: infrastructureConfigStore.paths.infrastructureConfigPath,
         env,
       })));
     } catch (error) {
@@ -1172,7 +1237,11 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
   async function resolveResource(resolveInput: BrowserResolveInput & { from?: string }): Promise<BrowserCommandResult<BrowserResolveResult>> {
     const actor = await resolveActor(resolveInput);
     if ('failure' in actor) return toBrowserResult(actor.failure);
-    const config = await createConfigStore(actor.homeDir).read();
+    const [profileConfig, infrastructure] = await Promise.all([
+      createConfigStore(actor.homeDir).read(),
+      infrastructureConfigStore.read(),
+    ]);
+    const config = withInfrastructureConfig(profileConfig, infrastructure);
     const {
       browserConfig,
       nameAliasProviders,

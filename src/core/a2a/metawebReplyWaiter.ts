@@ -12,11 +12,12 @@ import {
   normalizeDeliveryArtifacts,
   type A2ADeliveryArtifact,
 } from './deliveryArtifacts';
+import {
+  resolveMetasoInfrastructureEndpoints,
+  type MetasoSocketEndpoint,
+} from '../network/metasoInfrastructure';
 
-const DEFAULT_SOCKET_ENDPOINTS = [
-  { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
-  { url: 'wss://www.show.now', path: '/socket/socket.io' },
-];
+const DEFAULT_SOCKET_ENDPOINTS = [resolveMetasoInfrastructureEndpoints().socket];
 const DEFAULT_NEEDS_RATING_GRACE_MS = 3_000;
 
 export interface AwaitMetaWebServiceReplyInput {
@@ -231,12 +232,17 @@ function decryptInboundPlaintext(
   }
 }
 
-export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
+export function createSocketIoMetaWebReplyWaiter(options: {
+  resolveSocketEndpoints?: () => Promise<MetasoSocketEndpoint[]> | MetasoSocketEndpoint[];
+} = {}): MetaWebServiceReplyWaiter {
   return {
-    awaitServiceReply(input: AwaitMetaWebServiceReplyInput): Promise<AwaitMetaWebServiceReplyResult> {
+    async awaitServiceReply(input: AwaitMetaWebServiceReplyInput): Promise<AwaitMetaWebServiceReplyResult> {
       const timeoutMs = Number.isFinite(input.timeoutMs)
         ? Math.max(250, Math.floor(input.timeoutMs))
         : 15_000;
+      const endpoints = options.resolveSocketEndpoints
+        ? await options.resolveSocketEndpoints()
+        : DEFAULT_SOCKET_ENDPOINTS;
 
       return new Promise((resolve) => {
         let settled = false;
@@ -272,7 +278,7 @@ export function createSocketIoMetaWebReplyWaiter(): MetaWebServiceReplyWaiter {
           finish({ state: 'timeout' });
         }, timeoutMs);
 
-        for (const endpoint of DEFAULT_SOCKET_ENDPOINTS) {
+        for (const endpoint of endpoints) {
           const socket = io(endpoint.url, {
             path: endpoint.path,
             query: {

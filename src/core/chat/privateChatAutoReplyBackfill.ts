@@ -1,5 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+  listIdentityProfiles,
+  type IdentityProfileRecord,
+} from '../identity/identityProfiles';
 import type { MetabotPaths } from '../state/paths';
 import type { PrivateChatStateStore } from './privateChatStateStore';
 import type {
@@ -54,6 +58,8 @@ export interface PrivateChatAutoReplyBackfillDependencies {
   handleInboundMessage: (message: PrivateChatInboundMessage) => Promise<void>;
   historyClient?: PrivateChatAutoReplyBackfillHistoryClient;
   listPeerGlobalMetaIds?: () => Promise<string[]>;
+  resolveChatApiBaseUrl?: () => Promise<string | undefined> | string | undefined;
+  fetchImpl?: typeof fetch;
   now?: () => number;
   onError?: (error: Error) => void;
 }
@@ -77,6 +83,21 @@ export interface PrivateChatAutoReplyBackfillLoop {
   start(): void;
   stop(): void;
   isRunning(): boolean;
+}
+
+export interface PrivateChatAutoReplyBackfillProfileReport {
+  started: IdentityProfileRecord[];
+  skipped: Array<{
+    profile: IdentityProfileRecord;
+    reason: string;
+  }>;
+}
+
+export interface PrivateChatAutoReplyBackfillProfileManager {
+  start(): Promise<PrivateChatAutoReplyBackfillProfileReport>;
+  stop(): void;
+  isRunning(): boolean;
+  getLastReport(): PrivateChatAutoReplyBackfillProfileReport;
 }
 
 interface CursorPeerState {
@@ -325,43 +346,54 @@ function toInboundMessage(message: ChatViewerMessage, peerChatPublicKey: string)
   };
 }
 
-function createDefaultHistoryClient(): PrivateChatAutoReplyBackfillHistoryClient {
+function createDefaultHistoryClient(options: {
+  resolveChatApiBaseUrl?: () => Promise<string | undefined> | string | undefined;
+  fetchImpl?: typeof fetch;
+}): PrivateChatAutoReplyBackfillHistoryClient {
   return {
-    async fetchRecent(input) {
+    async fetchRecent(historyInput) {
+      const chatApiBaseUrl = await Promise.resolve(options.resolveChatApiBaseUrl?.());
       const firstPage = await fetchPrivateChatHistoryPage({
-        selfGlobalMetaId: input.selfGlobalMetaId,
-        peerGlobalMetaId: input.peerGlobalMetaId,
+        selfGlobalMetaId: historyInput.selfGlobalMetaId,
+        peerGlobalMetaId: historyInput.peerGlobalMetaId,
         startIndex: 0,
         limit: 1,
+        chatApiBaseUrl,
+        fetchImpl: options.fetchImpl,
       });
       const startIndex = firstPage.total === null
         ? 0
-        : Math.max(0, firstPage.total - input.limit);
+        : Math.max(0, firstPage.total - historyInput.limit);
       const page = await fetchPrivateChatHistoryPage({
-        selfGlobalMetaId: input.selfGlobalMetaId,
-        peerGlobalMetaId: input.peerGlobalMetaId,
+        selfGlobalMetaId: historyInput.selfGlobalMetaId,
+        peerGlobalMetaId: historyInput.peerGlobalMetaId,
         startIndex,
-        limit: input.limit,
+        limit: historyInput.limit,
+        chatApiBaseUrl,
+        fetchImpl: options.fetchImpl,
       });
       return buildPrivateConversationResponse({
-        selfGlobalMetaId: input.selfGlobalMetaId,
-        peerGlobalMetaId: input.peerGlobalMetaId,
-        localPrivateKeyHex: input.localPrivateKeyHex,
-        peerChatPublicKey: input.peerChatPublicKey,
+        selfGlobalMetaId: historyInput.selfGlobalMetaId,
+        peerGlobalMetaId: historyInput.peerGlobalMetaId,
+        localPrivateKeyHex: historyInput.localPrivateKeyHex,
+        peerChatPublicKey: historyInput.peerChatPublicKey,
         afterIndex: startIndex > 0 ? startIndex - 1 : undefined,
-        limit: input.limit,
+        limit: historyInput.limit,
         fetchHistory: async () => page.rows,
       });
     },
 
-    async fetchAfter(input) {
+    async fetchAfter(historyInput) {
+      const chatApiBaseUrl = await Promise.resolve(options.resolveChatApiBaseUrl?.());
       return buildPrivateConversationResponse({
-        selfGlobalMetaId: input.selfGlobalMetaId,
-        peerGlobalMetaId: input.peerGlobalMetaId,
-        localPrivateKeyHex: input.localPrivateKeyHex,
-        peerChatPublicKey: input.peerChatPublicKey,
-        afterIndex: input.afterIndex,
-        limit: input.limit,
+        selfGlobalMetaId: historyInput.selfGlobalMetaId,
+        peerGlobalMetaId: historyInput.peerGlobalMetaId,
+        localPrivateKeyHex: historyInput.localPrivateKeyHex,
+        peerChatPublicKey: historyInput.peerChatPublicKey,
+        afterIndex: historyInput.afterIndex,
+        limit: historyInput.limit,
+        chatApiBaseUrl,
+        fetchImpl: options.fetchImpl,
       });
     },
   };
@@ -383,7 +415,10 @@ export function createPrivateChatAutoReplyBackfillLoop(
   );
   const cursorPath = options.cursorPath
     ?? path.join(deps.paths.stateRoot, 'private-chat-auto-reply-backfill.json');
-  const historyClient = deps.historyClient ?? createDefaultHistoryClient();
+  const historyClient = deps.historyClient ?? createDefaultHistoryClient({
+    resolveChatApiBaseUrl: deps.resolveChatApiBaseUrl,
+    fetchImpl: deps.fetchImpl,
+  });
   const getNow = deps.now ?? (() => Date.now());
   let timer: ReturnType<typeof setInterval> | null = null;
   let syncing = false;
@@ -533,6 +568,91 @@ export function createPrivateChatAutoReplyBackfillLoop(
 
     isRunning() {
       return timer !== null;
+    },
+  };
+}
+
+function cloneProfileReport(
+  report: PrivateChatAutoReplyBackfillProfileReport,
+): PrivateChatAutoReplyBackfillProfileReport {
+  return {
+    started: report.started.map((profile) => ({
+      ...profile,
+      aliases: profile.aliases.slice(),
+    })),
+    skipped: report.skipped.map((entry) => ({
+      profile: {
+        ...entry.profile,
+        aliases: entry.profile.aliases.slice(),
+      },
+      reason: entry.reason,
+    })),
+  };
+}
+
+export function createPrivateChatAutoReplyBackfillProfileManager(input: {
+  systemHomeDir: string;
+  listProfiles?: (systemHomeDir: string) => Promise<IdentityProfileRecord[]>;
+  createLoop: (
+    profile: IdentityProfileRecord,
+  ) => PrivateChatAutoReplyBackfillLoop | null | Promise<PrivateChatAutoReplyBackfillLoop | null>;
+}): PrivateChatAutoReplyBackfillProfileManager {
+  const listProfiles = input.listProfiles ?? listIdentityProfiles;
+  let loops: PrivateChatAutoReplyBackfillLoop[] = [];
+  let running = false;
+  let lastReport: PrivateChatAutoReplyBackfillProfileReport = {
+    started: [],
+    skipped: [],
+  };
+
+  return {
+    async start() {
+      if (running) return cloneProfileReport(lastReport);
+
+      const profiles = await listProfiles(input.systemHomeDir);
+      const nextLoops: PrivateChatAutoReplyBackfillLoop[] = [];
+      const started: IdentityProfileRecord[] = [];
+      const skipped: PrivateChatAutoReplyBackfillProfileReport['skipped'] = [];
+
+      for (const profile of profiles) {
+        try {
+          const loop = await input.createLoop(profile);
+          if (!loop) {
+            skipped.push({ profile, reason: 'profile_backfill_unavailable' });
+            continue;
+          }
+          loop.start();
+          nextLoops.push(loop);
+          started.push(profile);
+        } catch (error) {
+          skipped.push({
+            profile,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      loops = nextLoops;
+      running = true;
+      lastReport = { started, skipped };
+      return cloneProfileReport(lastReport);
+    },
+
+    stop() {
+      for (const loop of loops) {
+        loop.stop();
+      }
+      loops = [];
+      running = false;
+      lastReport = { started: [], skipped: [] };
+    },
+
+    isRunning() {
+      return running;
+    },
+
+    getLastReport() {
+      return cloneProfileReport(lastReport);
     },
   };
 }

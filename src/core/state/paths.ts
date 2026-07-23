@@ -18,6 +18,7 @@ export interface MetabotPaths {
   locksRoot: string;
   identityProfilesPath: string;
   activeHomePath: string;
+  infrastructureConfigPath: string;
   configPath: string;
   identitySecretsPath: string;
   providerSecretsPath: string;
@@ -63,6 +64,8 @@ export interface MetabotPaths {
 export interface MetabotDaemonPaths {
   systemHomeDir: string;
   metabotRoot: string;
+  managerRoot: string;
+  infrastructureConfigPath: string;
   runtimeRoot: string;
   locksRoot: string;
   logsRoot: string;
@@ -168,6 +171,7 @@ function buildMetabotPaths(input: {
     locksRoot: input.locksRoot,
     identityProfilesPath: path.join(input.managerRoot, 'identity-profiles.json'),
     activeHomePath: path.join(input.managerRoot, 'active-home.json'),
+    infrastructureConfigPath: path.join(input.managerRoot, 'infrastructure.json'),
     configPath: path.join(input.runtimeRoot, 'config.json'),
     identitySecretsPath: input.identitySecretsPath,
     providerSecretsPath: input.providerSecretsPath,
@@ -264,6 +268,7 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
 export function resolveMetabotDaemonPaths(systemHomeDir: string): MetabotDaemonPaths {
   const normalizedSystemHomeDir = normalizeInputHomeDir(systemHomeDir);
   const metabotRoot = path.join(normalizedSystemHomeDir, '.metabot');
+  const managerRoot = path.join(metabotRoot, 'manager');
   const runtimeRoot = path.join(metabotRoot, 'runtime');
   const locksRoot = path.join(runtimeRoot, 'locks');
   const logsRoot = path.join(runtimeRoot, 'logs');
@@ -272,6 +277,8 @@ export function resolveMetabotDaemonPaths(systemHomeDir: string): MetabotDaemonP
   return {
     systemHomeDir: normalizedSystemHomeDir,
     metabotRoot,
+    managerRoot,
+    infrastructureConfigPath: path.join(managerRoot, 'infrastructure.json'),
     runtimeRoot,
     locksRoot,
     logsRoot,

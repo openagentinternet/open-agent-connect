@@ -45,6 +45,8 @@ const onlineServiceCache_1 = require("../core/discovery/onlineServiceCache");
 const onlineServiceCacheSync_1 = require("../core/discovery/onlineServiceCacheSync");
 const remoteCall_1 = require("../core/delegation/remoteCall");
 const ratingDetailState_1 = require("../core/ratings/ratingDetailState");
+const socketPresenceDirectory_1 = require("../core/discovery/socketPresenceDirectory");
+const metasoInfrastructure_1 = require("../core/network/metasoInfrastructure");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
@@ -3053,6 +3055,7 @@ async function serveCliDaemonProcess(context) {
     let refreshA2ASimplemsgListenerAfterIdentityRegistration = async () => {
         pendingA2ASimplemsgRefreshAfterIdentityRegistration = true;
     };
+    let refreshA2ASimplemsgListenerAfterInfrastructureChange = async () => { };
     let onProviderPresenceChanged = async () => { };
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
@@ -3089,6 +3092,7 @@ async function serveCliDaemonProcess(context) {
         providerRuntimeCanStart: useFakeProviderLlm ? async () => true : undefined,
         onProviderPresenceChanged: (enabled) => onProviderPresenceChanged(enabled),
         onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
+        onBrowserInfrastructureChanged: () => refreshA2ASimplemsgListenerAfterInfrastructureChange(),
     });
     const daemon = (0, daemon_1.createMetabotDaemon)({
         homeDirOrPaths: paths,
@@ -3119,11 +3123,14 @@ async function serveCliDaemonProcess(context) {
     const onlineServiceCacheStore = (0, onlineServiceCache_1.createOnlineServiceCacheStore)(paths);
     const ratingDetailStateStore = (0, ratingDetailState_1.createRatingDetailStateStore)(paths);
     const refreshOnlineServiceCache = async () => {
+        const currentConfig = await (0, configStore_1.createConfigStore)(paths).read();
+        const configuredPresenceApiBaseUrl = socketPresenceApiBaseUrl
+            || (0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)(currentConfig.browser.metasoP2PBaseUrl).socketPresenceApiBaseUrl;
         await (0, onlineServiceCacheSync_1.refreshOnlineServiceCacheFromChain)({
             store: onlineServiceCacheStore,
             ratingDetailStateStore,
             chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
-            socketPresenceApiBaseUrl,
+            socketPresenceApiBaseUrl: configuredPresenceApiBaseUrl,
             socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
                 ? 'assume_service_providers_online'
                 : 'throw',
@@ -3249,6 +3256,10 @@ async function serveCliDaemonProcess(context) {
     });
     const simplemsgListener = (0, simplemsgListener_1.createA2ASimplemsgListenerManager)({
         systemHomeDir: paths.systemHomeDir,
+        resolveSocketEndpoints: async (profile) => {
+            const profileConfig = await (0, configStore_1.createConfigStore)(profile.homeDir).read();
+            return [(0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)(profileConfig.browser.metasoP2PBaseUrl).socket];
+        },
         resolvePeerChatPublicKey,
         onMessage: (profile, message) => {
             if (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)) {
@@ -3265,8 +3276,30 @@ async function serveCliDaemonProcess(context) {
             console.warn('[A2A simplemsg listener]', error.message);
         },
     });
+    const readConfiguredSocketPresence = async () => {
+        const profiles = await (0, identityProfiles_1.listIdentityProfiles)(paths.systemHomeDir);
+        const configuredUrls = socketPresenceApiBaseUrl
+            ? [socketPresenceApiBaseUrl]
+            : [...new Set(await Promise.all((profiles.length > 0 ? profiles : [{ homeDir }]).map(async (profile) => {
+                    const profileConfig = await (0, configStore_1.createConfigStore)(profile.homeDir).read();
+                    return (0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)(profileConfig.browser.metasoP2PBaseUrl).socketPresenceApiBaseUrl;
+                })))];
+        const results = await Promise.allSettled(configuredUrls.map((apiBaseUrl) => ((0, socketPresenceDirectory_1.readOnlineMetaBotsFromSocketPresence)({ apiBaseUrl, limit: 100 }))));
+        const successful = results
+            .filter((result) => (result.status === 'fulfilled'))
+            .map((result) => result.value);
+        if (successful.length === 0) {
+            const failure = results.find((result) => result.status === 'rejected');
+            throw failure?.reason instanceof Error
+                ? failure.reason
+                : new Error('socket_presence_unavailable');
+        }
+        const bots = new Map(successful.flatMap((result) => result.bots).map((bot) => [bot.globalMetaId, bot]));
+        return { bots: [...bots.values()] };
+    };
     const simplemsgPresenceWatchdog = (0, simplemsgPresenceWatchdog_1.createA2ASimplemsgPresenceWatchdog)({
         manager: simplemsgListener,
+        readOnlineMetaBots: readConfiguredSocketPresence,
         onRestart: (event) => {
             const missingNames = event.missing
                 .map((profile) => `${profile.name || profile.slug} (${profile.globalMetaId})`)
@@ -3284,6 +3317,18 @@ async function serveCliDaemonProcess(context) {
             enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
             listener: simplemsgListener,
             watchdog: simplemsgPresenceWatchdog,
+        });
+    };
+    refreshA2ASimplemsgListenerAfterInfrastructureChange = async () => {
+        const currentConfig = await (0, configStore_1.createConfigStore)(paths).read().catch(() => daemonConfig);
+        const providerPresence = await providerPresenceStore.read().catch(() => ({ enabled: true }));
+        await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
+            enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
+            listener: simplemsgListener,
+            watchdog: simplemsgPresenceWatchdog,
+        });
+        void refreshOnlineServiceCache().catch((error) => {
+            console.warn('[online service cache] infrastructure refresh failed:', error instanceof Error ? error.message : String(error));
         });
     };
     onProviderPresenceChanged = async (enabled) => {

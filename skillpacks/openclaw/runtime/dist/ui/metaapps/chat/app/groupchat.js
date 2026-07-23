@@ -1,13 +1,21 @@
 import { getWsNewStore } from '@idf/stores/chat/ws-new.js';
 
+const infrastructure = window.__OAC_INFRASTRUCTURE__ || {};
+const chatApiBaseUrl = infrastructure.chatApiBaseUrl || 'https://so.metaid.io/chat-api/group-chat';
+const socketPath = String(infrastructure.socket?.path || '/socket/socket.io');
+const socketPathPrefix = socketPath.endsWith('/socket.io')
+  ? socketPath.slice(0, -'/socket.io'.length)
+  : socketPath;
+
 window.ServiceLocator = {
   ...(window.ServiceLocator || {}),
   metaid_man: 'https://www.show.now/man',
   metafs: 'https://file.metaid.io/metafile-indexer/api/v1',
   man_api: 'https://man.metaid.io/api',
-  idchat: 'https://api.idchat.io/chat-api/group-chat',
-  chat_ws: 'https://api.idchat.io',
-  chat_ws_path: '/socket',
+  chat_api: chatApiBaseUrl,
+  idchat: chatApiBaseUrl,
+  chat_ws: infrastructure.socket?.url || 'wss://so.metaid.io',
+  chat_ws_path: socketPathPrefix,
 };
 
 window.IDFrameworkConfig = {
@@ -427,7 +435,7 @@ function resolveApiBase() {
   const locator = (typeof window !== 'undefined' && window.ServiceLocator)
     ? window.ServiceLocator
     : {};
-  return String(locator.idchat || 'https://api.idchat.io/chat-api/group-chat').replace(/\/+$/, '');
+  return String(locator.chat_api || locator.idchat || 'https://so.metaid.io/chat-api/group-chat').replace(/\/+$/, '');
 }
 
 async function fetchGroupMessagesRaw(groupId, startIndex, size) {

@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleBundledMetaAppRoutes = handleBundledMetaAppRoutes;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const metasoInfrastructure_1 = require("../../core/network/metasoInfrastructure");
 const BUNDLED_META_APPS = {
     buzz: {
         entryRelativePath: 'app/index.html',
@@ -159,9 +160,34 @@ function injectBaseHref(html, baseHref) {
     }
     return html.replace(/<head([^>]*)>/i, `<head$1>\n  <base href="${baseHref}">`);
 }
-function transformBundledMetaAppEntry(appId, html) {
+function infrastructureScript(metasoP2PBaseUrl) {
+    const infrastructure = (0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)(metasoP2PBaseUrl);
+    const serialized = JSON.stringify(infrastructure).replace(/</g, '\\u003c');
+    return `<script>window.__OAC_INFRASTRUCTURE__ = ${serialized};</script>`;
+}
+async function resolveConfiguredMetasoP2PBaseUrl(context) {
+    const getSettings = context.handlers?.browser?.getSettings;
+    if (!getSettings)
+        return undefined;
+    const actorId = context.url.searchParams.get('from') || context.url.searchParams.get('actorId') || undefined;
+    try {
+        const result = await getSettings({ actorId });
+        if (!result.ok || !result.data || typeof result.data !== 'object')
+            return undefined;
+        const browser = result.data.browser;
+        if (!browser || typeof browser !== 'object' || Array.isArray(browser))
+            return undefined;
+        const value = browser.metasoP2PBaseUrl;
+        return typeof value === 'string' ? value : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+function transformBundledMetaAppEntry(appId, html, metasoP2PBaseUrl) {
     const definition = BUNDLED_META_APPS[appId];
     let transformed = injectBaseHref(html, definition.baseHref);
+    transformed = transformed.replace('</head>', `  ${infrastructureScript(metasoP2PBaseUrl)}\n</head>`);
     if (appId === 'buzz') {
         transformed = transformed.replace('</head>', `  ${BUZZ_CONTEXT_STYLE}\n</head>`);
         transformed = transformed.replace('</body>', `  ${BUZZ_CONTEXT_SCRIPT}\n</body>`);
@@ -198,7 +224,8 @@ async function handleBundledMetaAppRoutes(context) {
         const { absolutePath, body } = await readBundledMetaAppFile(match.appId, relativePath);
         const contentType = MIME_TYPES[node_path_1.default.extname(absolutePath).toLowerCase()] ?? 'application/octet-stream';
         if (relativePath === definition.entryRelativePath) {
-            const html = transformBundledMetaAppEntry(match.appId, body.toString('utf8'));
+            const metasoP2PBaseUrl = await resolveConfiguredMetasoP2PBaseUrl(context);
+            const html = transformBundledMetaAppEntry(match.appId, body.toString('utf8'), metasoP2PBaseUrl);
             context.sendHtml(200, html);
             return true;
         }

@@ -8,6 +8,7 @@ import {
   decryptPrivateChatSocketMessage,
   normalizePrivateChatSocketMessage,
   pinIdFromPrivateChatSocketMessage,
+  senderGlobalMetaIdFromPrivateChatSocketMessage,
   type MetaWebPrivateMessage,
   type PrivateChatListenerIdentity,
 } from '../chat/privateChatListener';
@@ -17,11 +18,9 @@ import {
   persistA2AConversationMessageBestEffort,
   type A2AConversationMessagePersister,
 } from './conversationPersistence';
+import { resolveMetasoInfrastructureEndpoints } from '../network/metasoInfrastructure';
 
-const DEFAULT_SOCKET_ENDPOINTS = [
-  { url: 'wss://api.idchat.io', path: '/socket/socket.io' },
-  { url: 'wss://www.show.now', path: '/socket/socket.io' },
-];
+const DEFAULT_SOCKET_ENDPOINTS = [resolveMetasoInfrastructureEndpoints().socket];
 
 const DEFAULT_RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
@@ -228,7 +227,7 @@ function createProfileSimplemsgListener(input: {
     const message = normalizeSimplemsgSocketMessage(payload);
     if (!message) return;
 
-    const fromGlobalMetaId = normalizeText(message.fromGlobalMetaId);
+    const fromGlobalMetaId = senderGlobalMetaIdFromPrivateChatSocketMessage(message);
     if (!fromGlobalMetaId) return;
 
     const localGlobalMetaId = normalizeText(input.identity.globalMetaId);
@@ -303,7 +302,7 @@ function createProfileSimplemsgListener(input: {
       stopHeartbeat(socket);
     });
     socket.on('heartbeat_ack', () => {
-      // The ack is emitted by idchat after a heartbeat ping; no payload is required.
+      // The ack confirms that the Metaso socket registered the heartbeat ping.
     });
     socket.on('message', async (data: unknown) => {
       await handleSocketPayload(data).catch((error) => {
@@ -382,6 +381,9 @@ function createProfileSimplemsgListener(input: {
 export function createA2ASimplemsgListenerManager(input: {
   systemHomeDir: string;
   socketEndpoints?: A2ASimplemsgSocketEndpoint[];
+  resolveSocketEndpoints?: (
+    profile: IdentityProfileRecord,
+  ) => Promise<A2ASimplemsgSocketEndpoint[]> | A2ASimplemsgSocketEndpoint[];
   socketClientFactory?: A2ASimplemsgSocketClientFactory;
   resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   persister?: A2AConversationMessagePersister;
@@ -393,7 +395,6 @@ export function createA2ASimplemsgListenerManager(input: {
   heartbeatIntervalMs?: number;
   onError?: (error: Error) => void;
 }): A2ASimplemsgListenerManager {
-  const endpoints = input.socketEndpoints ?? DEFAULT_SOCKET_ENDPOINTS;
   const socketClientFactory = input.socketClientFactory ?? defaultSocketClientFactory;
   const persister = input.persister ?? persistA2AConversationMessage;
   const listProfiles = input.listProfiles ?? listIdentityProfiles;
@@ -442,6 +443,10 @@ export function createA2ASimplemsgListenerManager(input: {
           });
           continue;
         }
+
+        const endpoints = input.socketEndpoints
+          ?? await input.resolveSocketEndpoints?.(profile)
+          ?? DEFAULT_SOCKET_ENDPOINTS;
 
         const listener = createProfileSimplemsgListener({
           profile,

@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
 const {
   DEFAULT_LANGUAGE_PREFERENCE,
   DICTIONARIES,
   normalizeLanguagePreference,
+  renderClientI18nScript,
   renderLanguageOptions,
   resolveConcreteLanguage,
   translate,
@@ -233,4 +235,58 @@ test('language selector renders only concrete language options and selects the r
   const enAutoOptions = renderLanguageOptions({ preference: 'auto', language: 'en', t });
   assert.match(enAutoOptions, /<option value="en" selected>English<\/option>/);
   assert.doesNotMatch(enAutoOptions, /value="auto"/);
+});
+
+test('language icon toggles between English and Simplified Chinese and persists the choice', () => {
+  const listeners = new Map();
+  const values = new Map();
+  const i18nLabel = {
+    textContent: '',
+    getAttribute: () => 'language.toggle',
+  };
+  const ariaLabel = {
+    attrs: {},
+    getAttribute: () => 'language.toggle',
+    setAttribute(name, value) { this.attrs[name] = value; },
+  };
+  const documentElement = { lang: '' };
+  const context = {
+    CustomEvent,
+    URLSearchParams,
+    navigator: { languages: ['en-US'] },
+    localStorage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+    },
+    document: {
+      documentElement,
+      addEventListener: (name, handler) => listeners.set(name, handler),
+      querySelectorAll: (selector) => ({
+        '[data-i18n-key]': [i18nLabel],
+        '[data-i18n-aria-label]': [ariaLabel],
+      })[selector] ?? [],
+    },
+    window: {
+      location: { search: '' },
+      dispatchEvent() {},
+    },
+  };
+
+  vm.runInNewContext(renderClientI18nScript({
+    preference: 'auto',
+    language: 'en',
+    t: (key) => DICTIONARIES.en[key] ?? key,
+  }), context);
+
+  const toggle = { closest: (selector) => selector === '[data-language-toggle]' ? toggle : null };
+  listeners.get('click')({ target: toggle, preventDefault() {} });
+  assert.equal(documentElement.lang, 'zh-CN');
+  assert.equal(values.get('oac.localUi.languagePreference'), 'zh-CN');
+  assert.equal(i18nLabel.textContent, '切换语言');
+  assert.equal(ariaLabel.attrs['aria-label'], '切换语言');
+
+  listeners.get('click')({ target: toggle, preventDefault() {} });
+  assert.equal(documentElement.lang, 'en');
+  assert.equal(values.get('oac.localUi.languagePreference'), 'en');
+  assert.equal(i18nLabel.textContent, 'Switch language');
 });

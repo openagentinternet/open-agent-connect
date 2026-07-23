@@ -7,7 +7,7 @@ exports.fetchPrivateChatHistory = fetchPrivateChatHistory;
 exports.buildPrivateConversationResponse = buildPrivateConversationResponse;
 const node_crypto_1 = require("node:crypto");
 const privateChat_1 = require("./privateChat");
-const DEFAULT_IDCHAT_API_BASE_URL = 'https://api.idchat.io/chat-api/group-chat';
+const metasoInfrastructure_1 = require("../network/metasoInfrastructure");
 const DEFAULT_CONVERSATION_LIMIT = 50;
 const MAX_CONVERSATION_LIMIT = 200;
 const UNABLE_TO_DECRYPT_TEXT = '[Unable to decrypt message]';
@@ -33,7 +33,7 @@ function normalizeConversationAfterIndex(value) {
     return Math.floor(numeric);
 }
 function normalizeBaseUrl(value) {
-    return (normalizeText(value) || DEFAULT_IDCHAT_API_BASE_URL).replace(/\/+$/, '');
+    return (normalizeText(value) || (0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)().chatApiBaseUrl).replace(/\/+$/, '');
 }
 function getFetchImpl(fetchImpl) {
     return fetchImpl ?? fetch;
@@ -81,7 +81,7 @@ async function fetchPrivateChatHistoryPage(input) {
     }
     const startIndex = Number(input.startIndex);
     const fetchImpl = getFetchImpl(input.fetchImpl);
-    const url = new URL(`${normalizeBaseUrl(input.idChatApiBaseUrl)}/private-chat-list-by-index`);
+    const url = new URL(`${normalizeBaseUrl(input.chatApiBaseUrl)}/private-chat-list-by-index`);
     url.searchParams.set('metaId', selfGlobalMetaId);
     url.searchParams.set('otherMetaId', peerGlobalMetaId);
     url.searchParams.set('startIndex', String(Number.isFinite(startIndex) && startIndex >= 0
@@ -111,7 +111,7 @@ async function fetchPrivateChatHistory(input) {
         startIndex: (input.afterIndex ?? -1) + 1,
         limit: input.limit,
         fetchImpl: input.fetchImpl,
-        idChatApiBaseUrl: input.idChatApiBaseUrl,
+        chatApiBaseUrl: input.chatApiBaseUrl,
     });
     return page.rows;
 }
@@ -368,7 +368,7 @@ async function buildPrivateConversationResponse(input) {
     const fetchHistory = input.fetchHistory ?? ((historyInput) => fetchPrivateChatHistory({
         ...historyInput,
         fetchImpl: input.fetchImpl,
-        idChatApiBaseUrl: input.idChatApiBaseUrl,
+        chatApiBaseUrl: input.chatApiBaseUrl,
     }));
     const rows = await fetchHistory({
         selfGlobalMetaId,
