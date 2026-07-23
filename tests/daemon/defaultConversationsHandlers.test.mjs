@@ -274,14 +274,14 @@ test('default conversation handlers read one peer timeline by local and peer Glo
   assert.equal(messages.data.messages[0].sender.globalMetaId, PEER_GLOBAL_META_ID);
 });
 
-test('default conversation handlers enrich peer name and avatar from local profiles', async (t) => {
+test('default conversation handlers prefer current local profile identity over stale conversation snapshots', async (t) => {
   const { handlers } = await createFixture(t, {
     peerProfile: {
-      name: 'Known Remote Bot',
-      avatarDataUrl: 'data:image/png;base64,remote',
+      name: 'Alice',
+      avatarDataUrl: 'data:image/png;base64,current-alice',
     },
-    conversationPeerName: '',
-    conversationPeerAvatar: null,
+    conversationPeerName: '{"name":"Alicee"}',
+    conversationPeerAvatar: '/content/stale-alice-avatar',
   });
 
   const listed = await handlers.conversations.list({
@@ -295,13 +295,15 @@ test('default conversation handlers enrich peer name and avatar from local profi
   });
 
   assert.equal(listed.ok, true);
-  assert.equal(listed.data.conversations[0].peerName, 'Known Remote Bot');
-  assert.equal(listed.data.conversations[0].peerAvatar, 'data:image/png;base64,remote');
+  assert.equal(listed.data.conversations[0].peerName, 'Alice');
+  assert.equal(listed.data.conversations[0].peerAvatar, 'data:image/png;base64,current-alice');
   assert.equal(messages.ok, true);
-  assert.equal(messages.data.peerBot.name, 'Known Remote Bot');
-  assert.equal(messages.data.peerBot.avatar, 'data:image/png;base64,remote');
-  assert.equal(messages.data.messages[0].sender.name, 'Known Remote Bot');
-  assert.equal(messages.data.messages[0].sender.avatar, 'data:image/png;base64,remote');
+  assert.equal(messages.data.peerBot.name, 'Alice');
+  assert.equal(messages.data.peerBot.avatar, 'data:image/png;base64,current-alice');
+  assert.equal(messages.data.messages[0].sender.name, 'Alice');
+  assert.equal(messages.data.messages[0].sender.avatar, 'data:image/png;base64,current-alice');
+  assert.equal(messages.data.messages[1].recipient.name, 'Alice');
+  assert.equal(messages.data.messages[1].recipient.avatar, 'data:image/png;base64,current-alice');
 });
 
 test('default conversation handlers enrich remote LLM providers from the public profile API', async (t) => {
