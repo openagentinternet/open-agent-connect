@@ -4726,7 +4726,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   // config object that setAutoReply mutates, so other components (e.g. the
   // profile auto-reply dispatcher) can read the same reference and observe
   // runtime toggles immediately.
-  resolveAutoReplyConfigForHome: (homeDir: string) => PrivateChatAutoReplyConfig;
+  resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
 } {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
@@ -6075,7 +6075,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? `/ui/apps?pinId=${encodeURIComponent(pinId)}`;
   }
 
-  function resolveAutoReplyConfigForHome(homeDir: string): PrivateChatAutoReplyConfig {
+  async function resolveAutoReplyConfigForHome(homeDir: string): Promise<PrivateChatAutoReplyConfig> {
     const normalizedProfileHomeDir = path.resolve(homeDir);
     if (normalizedProfileHomeDir === path.resolve(input.homeDir)) {
       return autoReplyConfig;
@@ -6084,8 +6084,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (existing) {
       return existing;
     }
+    const persistedConfig = await createConfigStore(normalizedProfileHomeDir).read();
     const created: PrivateChatAutoReplyConfig = {
-      enabled: autoReplyConfig.enabled,
+      enabled: persistedConfig.autoReply.enabled,
       acceptPolicy: autoReplyConfig.acceptPolicy,
       defaultStrategyId: autoReplyConfig.defaultStrategyId,
     };
@@ -6124,7 +6125,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       privateChatStateStore: actor.homeDir === path.resolve(input.homeDir)
         ? privateChatStateStore
         : createPrivateChatStateStore(actor.homeDir),
-      autoReplyConfig: resolveAutoReplyConfigForHome(actor.homeDir),
+      autoReplyConfig: await resolveAutoReplyConfigForHome(actor.homeDir),
     };
   }
 
@@ -6211,7 +6212,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const profileSigner = profileHomeDir === path.resolve(input.homeDir)
       ? signer
       : createSignerForProfileHome(profileHomeDir);
-    const profileAutoReplyConfig = resolveAutoReplyConfigForHome(profileHomeDir);
+    const profileAutoReplyConfig = await resolveAutoReplyConfigForHome(profileHomeDir);
 
     const state = await profileRuntimeStateStore.readState();
     if (!state.identity) {
@@ -14319,13 +14320,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if ('failure' in actor) {
           return actor.failure;
         }
-        actor.autoReplyConfig.enabled = autoReplyInput.enabled === true;
+        const enabled = autoReplyInput.enabled === true;
+        try {
+          await persistAutoReplyEnabled(actor.homeDir, enabled);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn('[chat] failed to persist auto-reply enabled flag', error);
+          return commandFailed(
+            'auto_reply_persist_failed',
+            `Failed to save the auto-reply setting: ${message}`,
+          );
+        }
+        actor.autoReplyConfig.enabled = enabled;
         if (autoReplyInput.defaultStrategyId !== undefined) {
           actor.autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
         }
-        await persistAutoReplyEnabled(actor.homeDir, actor.autoReplyConfig.enabled).catch((error) => {
-          console.warn('[chat] failed to persist auto-reply enabled flag', error);
-        });
         return commandSuccess({
           enabled: actor.autoReplyConfig.enabled,
           defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
@@ -15651,10 +15660,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
   // process (e.g. the profile auto-reply dispatcher) read the exact object that
   // setAutoReply mutates. Not an HTTP route; ignored by the router.
   (handlers as MetabotDaemonHttpHandlers & {
-    resolveAutoReplyConfigForHome: (homeDir: string) => PrivateChatAutoReplyConfig;
+    resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
   }).resolveAutoReplyConfigForHome = resolveAutoReplyConfigForHome;
   daemonHandlers = handlers;
   return handlers as MetabotDaemonHttpHandlers & {
-    resolveAutoReplyConfigForHome: (homeDir: string) => PrivateChatAutoReplyConfig;
+    resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
   };
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { cleanupProfileHome, createProfileHome } from '../helpers/profileHome.mjs';
@@ -60,6 +60,22 @@ test('setAutoReply toggling back to enabled updates the persisted config', async
 test('autoReplyStatus defaults to enabled when the config has not been touched', async (t) => {
   const { handlers } = await createFixture(t);
 
+  const status = await handlers.chat.autoReplyStatus({});
+  assert.equal(status.ok, true);
+  assert.equal(status.data.enabled, true);
+});
+
+test('setAutoReply reports a persistence failure and keeps the live setting unchanged', async (t) => {
+  const { homeDir, handlers } = await createFixture(t);
+  const configStore = createConfigStore(homeDir);
+  await configStore.ensureLayout();
+  const configPath = configStore.paths.configPath;
+  await writeFile(configPath, '{ invalid json', 'utf8');
+
+  const result = await handlers.chat.setAutoReply({ enabled: false });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'auto_reply_persist_failed');
   const status = await handlers.chat.autoReplyStatus({});
   assert.equal(status.ok, true);
   assert.equal(status.data.enabled, true);

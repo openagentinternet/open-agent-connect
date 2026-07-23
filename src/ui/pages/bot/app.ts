@@ -797,7 +797,8 @@ function toggleAutoReply(profile,nextEnabled){
     if(state.selectedTab==='chatSkills'&&state.selectedSlug===slug){
       var panel=chatSkillsPanelForProfile(profile);
       var toggle=queryWithin(panel,'[data-auto-reply-toggle]');
-      if(toggle){toggle.classList.toggle('loading',false)}
+      var enabled=Boolean(state.autoReplyBySlug[slug]);
+      if(toggle){toggle.classList.toggle('on',enabled);toggle.classList.toggle('loading',false);toggle.setAttribute('aria-checked',enabled?'true':'false');var labelEl=queryWithin(toggle,'.toggle-text');if(labelEl)labelEl.textContent=enabled?uiText('bot.autoReplyOn','On'):uiText('bot.autoReplyOff','Off')}
       var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=error&&error.message?error.message:String(error||'Failed to save.');status.className='save-status error'}
     }
   });
