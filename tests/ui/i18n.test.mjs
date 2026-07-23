@@ -82,8 +82,18 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
     'bot.personaPresetReplace',
     'bot.primaryLlmProvider',
     'bot.fallbackLlmProvider',
-    'bot.noLlmLabel',
-    'bot.noLlmTitle',
+    'bot.noLlmBoundLabel',
+    'bot.noLlmBoundTitle',
+    'bot.llmNotReadyLabel',
+    'bot.llmNotReadyTitle',
+    'bot.runtimeGroupReady',
+    'bot.runtimeGroupDetected',
+    'bot.runtimeNotReadySuffix',
+    'bot.noRuntimesYet',
+    'bot.detectedNotReadyOne',
+    'bot.detectedNotReadyMany',
+    'bot.checkingRuntimes',
+    'bot.checkingRuntimesHint',
     'bot.publishService',
     'bot.manageServices',
     'bot.wallet',
@@ -172,8 +182,10 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
   assert.equal(translate('zh-CN', 'bot.chainCreatePendingMessage'), '数据正在写入链上，请等候 15-30 秒。');
   assert.equal(translate('en', 'bot.openBotHomepage'), 'Open Bot homepage');
   assert.equal(translate('zh-CN', 'bot.openBotHomepage'), '打开 Bot 主页');
-  assert.equal(translate('en', 'bot.noLlmLabel'), 'NO LLM');
-  assert.equal(translate('zh-CN', 'bot.noLlmLabel'), 'NO LLM');
+  assert.equal(translate('en', 'bot.noLlmBoundLabel'), 'NO LLM BOUND');
+  assert.equal(translate('zh-CN', 'bot.noLlmBoundLabel'), '未绑定 LLM');
+  assert.equal(translate('en', 'bot.llmNotReadyLabel'), 'LLM NOT READY');
+  assert.equal(translate('zh-CN', 'bot.llmNotReadyLabel'), 'LLM 未就绪');
   assert.equal(translate('en', 'bot.runtimeSummaryMany', { count: 2 }), '2 detected providers visible. Unavailable providers are hidden from this list.');
   assert.equal(translate('zh-CN', 'bot.runtimeSummaryMany', { count: 2 }), '检测到 2 个可见提供方。不可用提供方已隐藏。');
   assert.equal(translate('en', 'bot.confirmDeleteCountdown', { count: 5 }), 'Confirm Delete (5s)');

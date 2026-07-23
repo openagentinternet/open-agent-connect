@@ -35,6 +35,7 @@ import { resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 import { createLlmRuntimeStore, type LlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore, type LlmBindingStore } from '../core/llm/llmBindingStore';
 import { discoverLlmRuntimes, testLlmRuntimeReadiness } from '../core/llm/llmRuntimeDiscovery';
+import { isRuntimePlatformId } from '../core/platform/platformRegistry';
 import {
   isLlmProvider,
   normalizeLlmBinding,
@@ -4892,6 +4893,115 @@ async function withRefundMutationLock<T>(
   }
 }
 
+interface LlmDiscoverySweepStatus {
+  running: boolean;
+  lastStartedAt?: string;
+  lastFinishedAt?: string;
+  /** Queued-or-running sweep count; internal only, never exposed to clients. */
+  activeSweeps: number;
+}
+
+// In-memory sweep bookkeeping shared by the bot and llm runtime routes,
+// keyed by the resolved runtime-store home dir. Never persisted to runtimes.json.
+const llmDiscoverySweepStatusByHomeDir = new Map<string, LlmDiscoverySweepStatus>();
+// Tail promise of the serialized sweep chain, keyed the same way. Sweeps for
+// one store always run one at a time, in arrival order.
+const llmDiscoverySweepChainByHomeDir = new Map<string, Promise<unknown>>();
+
+// Public view exposed through the runtimes API; internal counters stay hidden.
+type LlmDiscoveryStatusView = Pick<LlmDiscoverySweepStatus, 'running' | 'lastStartedAt' | 'lastFinishedAt'>;
+
+function llmDiscoveryStatusForHomeDir(homeDir: string): LlmDiscoveryStatusView | undefined {
+  const status = llmDiscoverySweepStatusByHomeDir.get(homeDir);
+  if (!status) return undefined;
+  return {
+    running: status.running,
+    ...(status.lastStartedAt ? { lastStartedAt: status.lastStartedAt } : {}),
+    ...(status.lastFinishedAt ? { lastFinishedAt: status.lastFinishedAt } : {}),
+  };
+}
+
+function normalizeDiscoveryProviders(value: unknown): LlmProvider[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is LlmProvider => isRuntimePlatformId(entry));
+}
+
+async function runLlmDiscoverySweep(
+  homeDir: string,
+  providers: LlmProvider[],
+  discover: typeof discoverLlmRuntimes,
+): Promise<{ discovered: number; runtimes: LlmRuntime[]; errors: Array<{ provider: string; message: string }> }> {
+  const runtimeStore = createLlmRuntimeStore(homeDir);
+  const previous = await runtimeStore.read();
+  const result = await discover({
+    env: process.env,
+    knownRuntimes: previous.runtimes,
+    ...(providers.length ? { providers } : {}),
+    onRuntimeDiscovered: async (runtime) => {
+      await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
+    },
+  });
+  const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
+  // A provider-subset sweep only retires previously known runtimes of the swept providers.
+  const sweptProviders = providers.length ? new Set<LlmProvider>(providers) : null;
+  for (const runtime of previous.runtimes) {
+    if (runtime.provider === 'custom') continue;
+    if (sweptProviders && !sweptProviders.has(runtime.provider)) continue;
+    if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
+      await runtimeStore.updateHealth(runtime.id, 'unavailable');
+    }
+  }
+  const updated = await runtimeStore.read();
+  return { discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors };
+}
+
+async function runTrackedLlmDiscoverySweep(
+  homeDir: string,
+  providers: LlmProvider[],
+  discover: typeof discoverLlmRuntimes,
+) {
+  // Every sweep — blocking or background — joins one serialized chain per
+  // store, so concurrent triggers cannot interleave store writes or flip the
+  // shared status early. `running` clears only when the last queued sweep
+  // settles.
+  const status = llmDiscoverySweepStatusByHomeDir.get(homeDir) ?? { running: false, activeSweeps: 0 };
+  status.activeSweeps += 1;
+  status.running = true;
+  if (status.activeSweeps === 1) {
+    status.lastStartedAt = new Date().toISOString();
+  }
+  llmDiscoverySweepStatusByHomeDir.set(homeDir, status);
+  const previous = llmDiscoverySweepChainByHomeDir.get(homeDir) ?? Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(() => runLlmDiscoverySweep(homeDir, providers, discover));
+  llmDiscoverySweepChainByHomeDir.set(homeDir, current);
+  try {
+    return await current;
+  } finally {
+    status.activeSweeps -= 1;
+    if (status.activeSweeps === 0) {
+      status.running = false;
+      status.lastFinishedAt = new Date().toISOString();
+    }
+    if (llmDiscoverySweepChainByHomeDir.get(homeDir) === current) {
+      llmDiscoverySweepChainByHomeDir.delete(homeDir);
+    }
+  }
+}
+
+function startBackgroundLlmDiscoverySweep(
+  homeDir: string,
+  providers: LlmProvider[],
+  discover: typeof discoverLlmRuntimes,
+): void {
+  // Single-flight: one in-flight sweep per store; concurrent triggers coalesce.
+  if (llmDiscoverySweepStatusByHomeDir.get(homeDir)?.running) return;
+  runTrackedLlmDiscoverySweep(homeDir, providers, discover).catch((error) => {
+    console.warn('[llm] background runtime discovery failed', error);
+  });
+}
+
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
   systemHomeDir?: string;
@@ -4930,6 +5040,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
   providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
   testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
+  discoverLlmRuntimes?: typeof discoverLlmRuntimes;
   conversationGuidanceReplyRunner?: ChatReplyRunner;
   metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
   conversationProfileFetch?: typeof fetch;
@@ -16036,9 +16147,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (requestedSlug && !selectedProfile) {
           return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
         }
-        const runtimeStore = createLlmRuntimeStore(selectedProfile?.homeDir ?? input.homeDir);
+        const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
+        const runtimeStore = createLlmRuntimeStore(profileHomeDir);
         const state = await runtimeStore.read();
-        return commandSuccess(state);
+        const discoveryStatus = llmDiscoveryStatusForHomeDir(profileHomeDir);
+        return commandSuccess({
+          ...state,
+          ...(discoveryStatus ? { discoveryStatus } : {}),
+        });
       },
       discoverRuntimes: async (request = {}) => {
         const requestedSlug = normalizeText(request.from);
@@ -16049,21 +16165,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('profile_not_found', `MetaBot profile not found: ${requestedSlug}`);
         }
         const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
-        const runtimeStore = createLlmRuntimeStore(profileHomeDir);
-        const previous = await runtimeStore.read();
-        const result = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
-        const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
-        for (const runtime of result.runtimes) {
-          await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
+        const providers = normalizeDiscoveryProviders(request.providers);
+        const discover = input.discoverLlmRuntimes ?? discoverLlmRuntimes;
+        if (request.background === true) {
+          startBackgroundLlmDiscoverySweep(profileHomeDir, providers, discover);
+          const runtimeStore = createLlmRuntimeStore(profileHomeDir);
+          const state = await runtimeStore.read();
+          return commandSuccess({ status: 'running', runtimes: state.runtimes });
         }
-        for (const runtime of previous.runtimes) {
-          if (runtime.provider === 'custom') continue;
-          if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
-            await runtimeStore.updateHealth(runtime.id, 'unavailable');
-          }
-        }
-        const updated = await runtimeStore.read();
-        return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
+        const result = await runTrackedLlmDiscoverySweep(profileHomeDir, providers, discover);
+        return commandSuccess(result);
       },
       testRuntime: async (request) => {
         const requestedSlug = normalizeText(request.from);
@@ -16159,24 +16270,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
       listRuntimes: async () => {
         const runtimeStore = createLlmRuntimeStore(input.homeDir);
         const state = await runtimeStore.read();
-        return commandSuccess(state);
+        const discoveryStatus = llmDiscoveryStatusForHomeDir(input.homeDir);
+        return commandSuccess({
+          ...state,
+          ...(discoveryStatus ? { discoveryStatus } : {}),
+        });
       },
-      discoverRuntimes: async () => {
-        const runtimeStore = createLlmRuntimeStore(input.homeDir);
-        const previous = await runtimeStore.read();
-        const result = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
-        const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
-        for (const runtime of result.runtimes) {
-          await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
+      discoverRuntimes: async (request = {}) => {
+        const providers = normalizeDiscoveryProviders(request.providers);
+        const discover = input.discoverLlmRuntimes ?? discoverLlmRuntimes;
+        if (request.background === true) {
+          startBackgroundLlmDiscoverySweep(input.homeDir, providers, discover);
+          const runtimeStore = createLlmRuntimeStore(input.homeDir);
+          const state = await runtimeStore.read();
+          return commandSuccess({ status: 'running', runtimes: state.runtimes });
         }
-        for (const runtime of previous.runtimes) {
-          if (runtime.provider === 'custom') continue;
-          if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
-            await runtimeStore.updateHealth(runtime.id, 'unavailable');
-          }
-        }
-        const updated = await runtimeStore.read();
-        return commandSuccess({ discovered: result.runtimes.length, runtimes: updated.runtimes, errors: result.errors });
+        const result = await runTrackedLlmDiscoverySweep(input.homeDir, providers, discover);
+        return commandSuccess(result);
       },
       listBindings: async (request = {}) => {
         const profile = await resolveLlmProfileForActor(request);

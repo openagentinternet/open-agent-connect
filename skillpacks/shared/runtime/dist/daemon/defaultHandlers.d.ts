@@ -1,7 +1,7 @@
 import { type MetabotCommandResult } from '../core/contracts/commandResult';
 import { createRuntimeStateStore, type RuntimeDaemonRecord } from '../core/state/runtimeStateStore';
 import { type MetabotPaths } from '../core/state/paths';
-import { testLlmRuntimeReadiness } from '../core/llm/llmRuntimeDiscovery';
+import { discoverLlmRuntimes, testLlmRuntimeReadiness } from '../core/llm/llmRuntimeDiscovery';
 import type { LlmRuntime } from '../core/llm/llmTypes';
 import type { LlmExecutor } from '../core/llm/executor';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
@@ -133,6 +133,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
     providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
     testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
+    discoverLlmRuntimes?: typeof discoverLlmRuntimes;
     conversationGuidanceReplyRunner?: ChatReplyRunner;
     metaAppManFetch?: NonNullable<Parameters<typeof createMetaAppManOwnerClient>[0]>['fetchFn'];
     conversationProfileFetch?: typeof fetch;

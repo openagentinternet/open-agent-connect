@@ -249,9 +249,15 @@ export const handleBotRoutes: RouteHandler = async (context) => {
   }
 
   if (url.pathname === '/api/bot/runtimes/discover' && req.method === 'POST') {
+    // Missing or malformed JSON bodies are treated as {}.
+    const body = await context.readJsonBody().catch((): Record<string, unknown> => ({}));
     const result = handlers.bot?.discoverRuntimes
       ? await handlers.bot.discoverRuntimes({
           ...(normalizeSlug(url.searchParams.get('from') ?? '') ? { from: normalizeSlug(url.searchParams.get('from') ?? '') } : {}),
+          ...(body.background === true ? { background: true } : {}),
+          ...(Array.isArray(body.providers)
+            ? { providers: body.providers.filter((entry): entry is string => typeof entry === 'string') }
+            : {}),
         })
       : commandFailed('not_implemented', 'MetaBot runtime discovery handler not configured.');
     context.sendJson(200, result);

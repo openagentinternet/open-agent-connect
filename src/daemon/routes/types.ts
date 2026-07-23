@@ -202,7 +202,7 @@ export interface MetabotDaemonHttpHandlers {
   };
   llm?: {
     listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
-    discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+    discoverRuntimes?: (input?: { background?: boolean; providers?: string[] }) => Awaitable<MetabotCommandResult<unknown>>;
     listBindings?: (input?: { from?: string; slug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     upsertBindings?: (input: { from?: string; slug?: string; bindings: Record<string, unknown>[] }) => Awaitable<MetabotCommandResult<unknown>>;
     removeBinding?: (input: { from?: string; bindingId: string }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -230,7 +230,7 @@ export interface MetabotDaemonHttpHandlers {
     getBackup?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     deleteProfile?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listRuntimes?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    discoverRuntimes?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    discoverRuntimes?: (input?: { from?: string; background?: boolean; providers?: string[] }) => Awaitable<MetabotCommandResult<unknown>>;
     testRuntime?: (input: { from?: string; runtimeId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listSessions?: (input: { slug?: string; limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
   };

@@ -541,8 +541,8 @@ async function startServer(options = {}) {
           ],
         });
       },
-      discoverRuntimes: async () => {
-        calls.llmDiscoverRuntimes.push({});
+      discoverRuntimes: async (input = {}) => {
+        calls.llmDiscoverRuntimes.push(input);
         return commandSuccess({
           discovered: 1,
           runtimes: [
@@ -811,8 +811,8 @@ async function startServer(options = {}) {
           ],
         });
       },
-      discoverRuntimes: async () => {
-        calls.botDiscoverRuntimes.push({});
+      discoverRuntimes: async (input = {}) => {
+        calls.botDiscoverRuntimes.push(input);
         return commandSuccess({
           discovered: 1,
           runtimes: [
@@ -3846,4 +3846,71 @@ test('GET /ui/chat/app/chat.js serves bundled Chat static assets from the same d
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /javascript/i);
   assert.match(javascript, /GROUP_TEXT_PROTOCOL/);
+});
+
+
+test('POST /api/bot/runtimes/discover accepts a JSON body with background and providers', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/runtimes/discover?from=alice-bot`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ background: true, providers: ['workbuddy', 42] }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(server.calls.botDiscoverRuntimes, [
+    { from: 'alice-bot', background: true, providers: ['workbuddy'] },
+  ]);
+});
+
+test('POST /api/bot/runtimes/discover treats a malformed JSON body as empty', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/bot/runtimes/discover`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{not json',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(server.calls.botDiscoverRuntimes, [{}]);
+});
+
+test('POST /api/llm/runtimes/discover accepts a JSON body with background and providers', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/runtimes/discover`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ background: true, providers: ['workbuddy'] }),
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(server.calls.llmDiscoverRuntimes, [{ background: true, providers: ['workbuddy'] }]);
+});
+
+test('POST /api/llm/runtimes/discover treats a malformed JSON body as empty', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const response = await fetch(`${server.baseUrl}/api/llm/runtimes/discover`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '[1,2,3]',
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.deepEqual(server.calls.llmDiscoverRuntimes, [{}]);
 });

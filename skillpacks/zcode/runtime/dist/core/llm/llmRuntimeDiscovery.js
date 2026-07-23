@@ -17,15 +17,13 @@ const node_path_1 = __importDefault(require("node:path"));
 const platformRegistry_1 = require("../platform/platformRegistry");
 const registry_1 = require("./executor/backends/registry");
 const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
-const SLOW_START_READINESS_TIMEOUT_MS = 45_000;
 const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
-const SLOW_START_VERSION_PROBE_TIMEOUT_MS = 20_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
 const DEFAULT_PROVIDER_DISCOVERY_CONCURRENCY = 8;
 const DEFAULT_RECENT_HEALTHY_READINESS_SKIP_MS = 30 * 60 * 1000;
 const READINESS_PROMPT = 'Reply exactly OK.';
 const LOGIN_SHELL_RESOLVE_TIMEOUT_MS = 3_000;
-const LOGIN_SHELL_RESOLVE_KILL_GRACE_MS = 2_000;
+const PROBE_KILL_GRACE_MS = 2_000;
 function getPathEnv(env) {
     return (env ?? process.env).PATH ?? '';
 }
@@ -112,6 +110,28 @@ function buildLoginShellResolveScript(names) {
         'done',
     ].join('\n');
 }
+/**
+ * Sends SIGTERM, then escalates to SIGKILL after a grace window and destroys
+ * the child's stdio streams so a wedged child (or grandchildren holding its
+ * pipes) cannot hold the `close` event open. Returns a cancel function for
+ * the escalation timer; `onTerminated` runs when the grace window expires.
+ */
+function terminateChildWithKillGrace(child, onTerminated) {
+    try {
+        child.kill('SIGTERM');
+    }
+    catch { /* best effort */ }
+    const graceTimer = setTimeout(() => {
+        try {
+            child.kill('SIGKILL');
+        }
+        catch { /* best effort */ }
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        onTerminated();
+    }, PROBE_KILL_GRACE_MS);
+    return () => clearTimeout(graceTimer);
+}
 async function resolveExecutablesViaLoginShell(names, env = process.env) {
     const safeNames = [...new Set(names)].filter(safeAgentName);
     if (!safeNames.length)
@@ -128,14 +148,14 @@ async function resolveExecutablesViaLoginShell(names, env = process.env) {
         });
         let output = '';
         let settled = false;
-        let graceTimer;
+        let cancelKillEscalation;
         const finish = () => {
             if (settled)
                 return;
             settled = true;
             clearTimeout(timeoutTimer);
-            if (graceTimer)
-                clearTimeout(graceTimer);
+            if (cancelKillEscalation)
+                cancelKillEscalation();
             const resolved = {};
             for (const line of output.trim().split('\n')) {
                 const [name, candidate] = line.split('\t', 2);
@@ -146,17 +166,7 @@ async function resolveExecutablesViaLoginShell(names, env = process.env) {
             resolve(resolved);
         };
         const timeoutTimer = setTimeout(() => {
-            try {
-                child.kill('SIGTERM');
-            }
-            catch { /* best effort */ }
-            graceTimer = setTimeout(() => {
-                try {
-                    child.kill('SIGKILL');
-                }
-                catch { /* best effort */ }
-                finish();
-            }, LOGIN_SHELL_RESOLVE_KILL_GRACE_MS);
+            cancelKillEscalation = terminateChildWithKillGrace(child, finish);
         }, LOGIN_SHELL_RESOLVE_TIMEOUT_MS);
         child.stdout?.setEncoding('utf8');
         child.stdout?.on('data', (chunk) => { output += chunk; });
@@ -251,25 +261,35 @@ async function probeExecutableVersion(binaryPath, versionArgs = ['--version'], t
         });
         let output = '';
         let settled = false;
+        let timedOut = false;
+        let cancelKillEscalation;
+        const timeoutMessage = `Version probe timed out after ${timeoutMs}ms.`;
         const finish = (probe) => {
             if (settled)
                 return;
             settled = true;
             clearTimeout(timer);
+            if (cancelKillEscalation)
+                cancelKillEscalation();
             resolve(probe);
         };
         const timer = setTimeout(() => {
-            try {
-                child.kill('SIGTERM');
-            }
-            catch { /* best effort */ }
-            finish({ ok: false, message: `Version probe timed out after ${timeoutMs}ms.` });
+            timedOut = true;
+            // TERM -> grace -> KILL + stream destroy, so a wedged shim (or one whose
+            // grandchildren hold its pipes) cannot leak past the probe window.
+            cancelKillEscalation = terminateChildWithKillGrace(child, () => {
+                finish({ ok: false, message: timeoutMessage });
+            });
         }, timeoutMs);
         child.stdout?.setEncoding('utf8');
         child.stderr?.setEncoding('utf8');
         child.stdout?.on('data', (chunk) => { output += chunk; });
         child.stderr?.on('data', (chunk) => { output += chunk; });
         child.on('close', (code) => {
+            if (timedOut) {
+                finish({ ok: false, message: timeoutMessage });
+                return;
+            }
             const trimmed = output.trim();
             if (code !== 0) {
                 finish({
@@ -336,22 +356,24 @@ function buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, op
 function readinessSucceeded(result) {
     return result.ok && typeof result.output === 'string' && result.output.trim().length > 0;
 }
+function probeHintsForProvider(provider) {
+    if (!(0, platformRegistry_1.isRuntimePlatformId)(provider))
+        return undefined;
+    return (0, platformRegistry_1.getRuntimePlatformDefinition)(provider).runtime.probeHints;
+}
 function readinessTimeoutForProvider(provider, override) {
     if (override !== undefined)
         return override;
-    return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
-        ? SLOW_START_READINESS_TIMEOUT_MS
-        : DEFAULT_READINESS_TIMEOUT_MS;
+    return probeHintsForProvider(provider)?.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
 }
 function versionProbeTimeoutForProvider(provider) {
-    return provider === 'cursor'
-        ? SLOW_START_VERSION_PROBE_TIMEOUT_MS
-        : DEFAULT_VERSION_PROBE_TIMEOUT_MS;
+    return probeHintsForProvider(provider)?.versionProbeTimeoutMs ?? DEFAULT_VERSION_PROBE_TIMEOUT_MS;
 }
 function readinessSemanticInactivityTimeoutForProvider(provider, readinessTimeoutMs) {
-    return ['codex', 'cursor', 'claude-code', 'zcode'].includes(provider)
-        ? readinessTimeoutMs
-        : Math.min(readinessTimeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS);
+    const hint = probeHintsForProvider(provider)?.semanticInactivityTimeoutMs;
+    if (hint !== undefined)
+        return hint;
+    return Math.min(readinessTimeoutMs, DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS);
 }
 async function defaultRuntimeReadinessProbe(input) {
     const binaryPath = input.runtime.binaryPath;
@@ -542,6 +564,67 @@ async function testLlmRuntimeReadiness(runtime, options) {
                 : 'Readiness probe did not return a usable response.'),
     };
 }
+/**
+ * Lazily resolves executables through a login shell, but only for providers
+ * that found no candidate through the cheap sources (env overrides, PATH,
+ * default executable paths). Shell-returned paths are re-verified before use
+ * because fnm/nvm multishell dirs can vanish between resolution and use.
+ */
+async function resolveMissedExecutablesViaLoginShell(platforms, pathDirs, env) {
+    const missedBinaryNames = [];
+    for (const platform of platforms) {
+        const candidates = await executableCandidatesForProvider(platform.id, platform, pathDirs, env, undefined);
+        if (candidates.length === 0) {
+            missedBinaryNames.push(...providerPathSearchBinaryNames(platform));
+        }
+    }
+    if (missedBinaryNames.length === 0)
+        return {};
+    const shellResolved = await resolveExecutablesViaLoginShell(missedBinaryNames, env);
+    const verified = {};
+    for (const [name, candidate] of Object.entries(shellResolved)) {
+        try {
+            await node_fs_1.promises.access(candidate, node_fs_1.promises.constants.X_OK);
+            verified[name] = candidate;
+        }
+        catch {
+            // Shell-resolved path vanished before it could be probed; skip it.
+        }
+    }
+    return verified;
+}
+/**
+ * Orders platforms so likely-present providers are probed first: providers
+ * with known runtimes, then providers whose default executable paths exist
+ * on disk, then everything else. Relative order within a tier follows
+ * registry order.
+ */
+async function orderPlatformsForDiscovery(platforms, knownRuntimes) {
+    const knownProviders = new Set(knownRuntimes.map((runtime) => runtime.provider));
+    const providersWithExistingDefaults = new Set();
+    for (const platform of platforms) {
+        if (knownProviders.has(platform.id))
+            continue;
+        for (const candidate of platform.runtime.defaultExecutablePaths ?? []) {
+            try {
+                await node_fs_1.promises.access(candidate);
+                providersWithExistingDefaults.add(platform.id);
+                break;
+            }
+            catch {
+                // Best effort: a missing default path just keeps the provider in the last tier.
+            }
+        }
+    }
+    const tierOf = (platform) => {
+        if (knownProviders.has(platform.id))
+            return 0;
+        if (providersWithExistingDefaults.has(platform.id))
+            return 1;
+        return 2;
+    };
+    return [...platforms].sort((a, b) => tierOf(a) - tierOf(b));
+}
 async function discoverLlmRuntimes(input) {
     const env = input?.env ?? process.env;
     const pathDirs = splitPath(getPathEnv(env));
@@ -551,11 +634,15 @@ async function discoverLlmRuntimes(input) {
     const platforms = requestedProviders.size > 0
         ? (0, platformRegistry_1.getRuntimePlatforms)().filter((platform) => requestedProviders.has(platform.id))
         : (0, platformRegistry_1.getRuntimePlatforms)();
-    const shellResolvedExecutables = input?.shellResolvedExecutables ?? await resolveExecutablesViaLoginShell(platforms.flatMap((platform) => platform.runtime.binaryNames), env);
-    const knownRuntimesById = new Map((input?.knownRuntimes ?? []).map((runtime) => [runtime.id, runtime]));
-    const discoveryResults = await mapWithConcurrency(platforms, normalizeProviderDiscoveryConcurrency(input?.providerConcurrency), async (platform) => {
+    const shellResolvedExecutables = input?.shellResolvedExecutables
+        ?? await resolveMissedExecutablesViaLoginShell(platforms, pathDirs, env);
+    const knownRuntimes = input?.knownRuntimes ?? [];
+    const knownRuntimesById = new Map(knownRuntimes.map((runtime) => [runtime.id, runtime]));
+    const orderedPlatforms = await orderPlatformsForDiscovery(platforms, knownRuntimes);
+    const discoveryResults = await mapWithConcurrency(orderedPlatforms, normalizeProviderDiscoveryConcurrency(input?.providerConcurrency), async (platform) => {
+        let runtime = null;
         try {
-            const runtime = await discoverProvider(platform.id, pathDirs, {
+            runtime = await discoverProvider(platform.id, pathDirs, {
                 createId: input?.createId,
                 now: input?.now,
                 env,
@@ -566,7 +653,6 @@ async function discoverLlmRuntimes(input) {
                 cwd: input?.cwd,
                 shellResolvedExecutables,
             });
-            return { runtime, error: null };
         }
         catch (err) {
             return {
@@ -577,6 +663,21 @@ async function discoverLlmRuntimes(input) {
                 },
             };
         }
+        if (runtime && input?.onRuntimeDiscovered) {
+            try {
+                await input.onRuntimeDiscovered(runtime);
+            }
+            catch (err) {
+                return {
+                    runtime,
+                    error: {
+                        provider: platform.id,
+                        message: err instanceof Error ? err.message : String(err),
+                    },
+                };
+            }
+        }
+        return { runtime, error: null };
     });
     for (const result of discoveryResults) {
         if (result.runtime) {

@@ -132,8 +132,15 @@ export const handleLlmRoutes: RouteHandler = async (context) => {
 
   // POST /api/llm/runtimes/discover
   if (url.pathname === '/api/llm/runtimes/discover' && req.method === 'POST') {
+    // Missing or malformed JSON bodies are treated as {}.
+    const body = await context.readJsonBody().catch((): Record<string, unknown> => ({}));
     const result = handlers.llm?.discoverRuntimes
-      ? await handlers.llm.discoverRuntimes()
+      ? await handlers.llm.discoverRuntimes({
+          ...(body.background === true ? { background: true } : {}),
+          ...(Array.isArray(body.providers)
+            ? { providers: body.providers.filter((entry): entry is string => typeof entry === 'string') }
+            : {}),
+        })
       : commandFailed('not_implemented', 'LLM discover handler not configured.');
     context.sendJson(200, result);
     return true;

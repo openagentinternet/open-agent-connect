@@ -257,7 +257,10 @@ export interface MetabotDaemonHttpHandlers {
     };
     llm?: {
         listRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
-        discoverRuntimes?: () => Awaitable<MetabotCommandResult<unknown>>;
+        discoverRuntimes?: (input?: {
+            background?: boolean;
+            providers?: string[];
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         listBindings?: (input?: {
             from?: string;
             slug?: string;
@@ -342,6 +345,8 @@ export interface MetabotDaemonHttpHandlers {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         discoverRuntimes?: (input?: {
             from?: string;
+            background?: boolean;
+            providers?: string[];
         }) => Awaitable<MetabotCommandResult<unknown>>;
         testRuntime?: (input: {
             from?: string;
