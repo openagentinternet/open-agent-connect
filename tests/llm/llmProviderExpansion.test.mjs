@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -16,6 +16,7 @@ const {
 } = require('../../dist/core/llm/llmTypes.js');
 const {
   discoverLlmRuntimes,
+  probeExecutableVersion,
   readinessSemanticInactivityTimeoutForProvider,
   testLlmRuntimeReadiness,
 } = require('../../dist/core/llm/llmRuntimeDiscovery.js');
@@ -889,4 +890,381 @@ test('testLlmRuntimeReadiness returns unavailable when version probing fails', a
   assert.match(result.healthReason, /permission denied|Version probe exited/);
   assert.equal(result.healthCheckedAt, '2026-05-22T06:10:00.000Z');
   assert.equal(readinessCalled, false);
+});
+
+
+test('platform registry carries probe hints for slow-start providers', () => {
+  const hints = Object.fromEntries(
+    PLATFORM_DEFINITIONS.map((platform) => [platform.id, platform.runtime?.probeHints]),
+  );
+  assert.deepEqual(hints.codex, { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 });
+  assert.deepEqual(hints.cursor, { readinessTimeoutMs: 45_000, versionProbeTimeoutMs: 20_000, semanticInactivityTimeoutMs: 45_000 });
+  assert.deepEqual(hints['claude-code'], { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 });
+  assert.deepEqual(hints.zcode, { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 });
+  assert.deepEqual(hints.workbuddy, { readinessTimeoutMs: 45_000, versionProbeTimeoutMs: 20_000, semanticInactivityTimeoutMs: 45_000 });
+  assert.equal(hints.opencode, undefined);
+});
+
+test('runtime discovery resolves probe timeouts from registry probe hints', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-probe-hints-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const workbuddyPath = path.join(binDir, 'workbuddy-cli');
+    const openclawPath = path.join(binDir, 'openclaw');
+    await writeFile(workbuddyPath, '#!/bin/sh\necho "2.103.3"\n', 'utf8');
+    await writeFile(openclawPath, '#!/bin/sh\necho "openclaw 1.2.3"\n', 'utf8');
+    await chmod(workbuddyPath, 0o755);
+    await chmod(openclawPath, 0o755);
+
+    const observedTimeouts = {};
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir, OAC_WORKBUDDY_PATH: workbuddyPath },
+      providers: ['workbuddy', 'openclaw'],
+      now: () => '2026-07-23T00:00:00.000Z',
+      readinessProbe: async ({ runtime, timeoutMs }) => {
+        observedTimeouts[runtime.provider] = timeoutMs;
+        return { ok: true, output: 'OK' };
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(observedTimeouts.workbuddy, 45_000);
+    assert.equal(observedTimeouts.openclaw, 30_000);
+    assert.equal(readinessSemanticInactivityTimeoutForProvider('workbuddy', 45_000), 45_000);
+    assert.equal(readinessSemanticInactivityTimeoutForProvider('openclaw', 30_000), 15_000);
+  });
+});
+
+test('runtime discovery lets slow WorkBuddy version probes complete before readiness', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-workbuddy-version-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const workbuddyPath = path.join(binDir, 'workbuddy-cli');
+    await writeFile(workbuddyPath, '#!/bin/sh\n/bin/sleep 6\necho "2.103.3"\n', 'utf8');
+    await chmod(workbuddyPath, 0o755);
+
+    let readinessCalled = false;
+    const result = await discoverLlmRuntimes({
+      env: { PATH: '', OAC_WORKBUDDY_PATH: workbuddyPath },
+      providers: ['workbuddy'],
+      now: () => '2026-07-23T00:05:00.000Z',
+      readinessProbe: async () => {
+        readinessCalled = true;
+        return { ok: true, output: 'OK' };
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].provider, 'workbuddy');
+    assert.equal(result.runtimes[0].version, '2.103.3');
+    assert.equal(result.runtimes[0].health, 'healthy');
+    assert.equal(readinessCalled, true);
+  });
+});
+
+async function writeFakeLoginShell(tempRoot, resolvedLines = []) {
+  const shellDir = path.join(tempRoot, 'fake-shell');
+  await mkdir(shellDir, { recursive: true });
+  const shellPath = path.join(shellDir, 'bash');
+  await writeFile(shellPath, [
+    '#!/bin/sh',
+    'printf \'%s\\n\' "$*" > "$LOGIN_SHELL_MARKER"',
+    ...resolvedLines,
+  ].join('\n'), 'utf8');
+  await chmod(shellPath, 0o755);
+  return shellPath;
+}
+
+test('runtime discovery skips the login shell when every provider resolves cheaply', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-shell-skip-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const codexPath = path.join(binDir, 'codex');
+    const opencodePath = path.join(binDir, 'opencode');
+    await writeFile(codexPath, '#!/bin/sh\necho "codex 1.0.0"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await chmod(codexPath, 0o755);
+    await chmod(opencodePath, 0o755);
+    const shellPath = await writeFakeLoginShell(tempRoot);
+    const markerPath = path.join(tempRoot, 'shell-marker');
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir, SHELL: shellPath, LOGIN_SHELL_MARKER: markerPath },
+      providers: ['codex', 'opencode'],
+      now: () => '2026-07-23T02:00:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['codex', 'opencode']);
+    assert.equal(existsSync(markerPath), false, 'login shell must not spawn when nothing is missed');
+  });
+});
+
+test('runtime discovery does not spawn a login shell for env-override-only providers', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-shell-env-only-');
+    const binDir = path.join(tempRoot, 'external-bin');
+    await mkdir(binDir, { recursive: true });
+    const geminiPath = path.join(binDir, 'gemini');
+    await writeFile(geminiPath, '#!/bin/sh\necho "gemini 9.9.9"\n', 'utf8');
+    await chmod(geminiPath, 0o755);
+    const shellPath = await writeFakeLoginShell(tempRoot);
+    const markerPath = path.join(tempRoot, 'shell-marker');
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: '', OAC_GEMINI_PATH: geminiPath, SHELL: shellPath, LOGIN_SHELL_MARKER: markerPath },
+      providers: ['gemini'],
+      now: () => '2026-07-23T02:05:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['gemini']);
+    assert.equal(result.runtimes[0].binaryPath, geminiPath);
+    assert.equal(existsSync(markerPath), false, 'env-override-only providers must not trigger a shell spawn');
+  });
+});
+
+test('runtime discovery resolves only missed binary names through the login shell', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-shell-missed-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const codexPath = path.join(binDir, 'codex');
+    await writeFile(codexPath, '#!/bin/sh\necho "codex 1.0.0"\n', 'utf8');
+    await chmod(codexPath, 0o755);
+    const shellPath = await writeFakeLoginShell(tempRoot);
+    const markerPath = path.join(tempRoot, 'shell-marker');
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir, SHELL: shellPath, LOGIN_SHELL_MARKER: markerPath },
+      now: () => '2026-07-23T02:10:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['codex']);
+    assert.equal(existsSync(markerPath), true, 'login shell should run for missed providers');
+    const invocation = await readFile(markerPath, 'utf8');
+    assert.match(invocation, /for n in /);
+    assert.ok(invocation.includes('gemini'), 'missed provider binary names are queried');
+    assert.ok(invocation.includes('cursor-agent'), 'missed provider binary names are queried');
+    assert.ok(!invocation.includes('codex'), 'already-resolved providers are not queried');
+  });
+});
+
+test('runtime discovery rejects shell-resolved paths that are not executable', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-shell-stale-');
+    const shellPath = await writeFakeLoginShell(tempRoot, [
+      'printf \'gemini\\t%s\\n\' "$RESOLVED_GEMINI"',
+    ]);
+    const markerPath = path.join(tempRoot, 'shell-marker');
+    const stalePath = path.join(tempRoot, 'vanished', 'gemini');
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: '', SHELL: shellPath, LOGIN_SHELL_MARKER: markerPath, RESOLVED_GEMINI: stalePath },
+      providers: ['gemini'],
+      now: () => '2026-07-23T02:20:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 0, 'stale shell-resolved paths must be re-verified away');
+  });
+});
+
+test('runtime discovery lazily resolves missed providers through the login shell', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-shell-lazy-');
+    const binDir = path.join(tempRoot, 'login-only-bin');
+    await mkdir(binDir, { recursive: true });
+    const geminiPath = path.join(binDir, 'gemini');
+    await writeFile(geminiPath, '#!/bin/sh\necho "gemini 9.9.9"\n', 'utf8');
+    await chmod(geminiPath, 0o755);
+    const shellPath = await writeFakeLoginShell(tempRoot, [
+      'printf \'gemini\\t%s\\n\' "$RESOLVED_GEMINI"',
+    ]);
+    const markerPath = path.join(tempRoot, 'shell-marker');
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: '', SHELL: shellPath, LOGIN_SHELL_MARKER: markerPath, RESOLVED_GEMINI: geminiPath },
+      providers: ['gemini'],
+      now: () => '2026-07-23T02:30:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['gemini']);
+    assert.equal(result.runtimes[0].binaryPath, geminiPath);
+    assert.equal(result.runtimes[0].health, 'healthy');
+  });
+});
+
+test('runtime discovery injection of shellResolvedExecutables skips lazy shell resolution', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-shell-inject-');
+    const shellPath = await writeFakeLoginShell(tempRoot);
+    const markerPath = path.join(tempRoot, 'shell-marker');
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: '', SHELL: shellPath, LOGIN_SHELL_MARKER: markerPath },
+      shellResolvedExecutables: {},
+      now: () => '2026-07-23T02:40:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 0);
+    assert.equal(existsSync(markerPath), false, 'injected shell results must bypass the login shell');
+  });
+});
+
+test('runtime discovery prioritizes known-runtime providers before others', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-tier-known-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const codexPath = path.join(binDir, 'codex');
+    const geminiPath = path.join(binDir, 'gemini');
+    const zcodePath = path.join(binDir, 'zcode');
+    await writeFile(codexPath, '#!/bin/sh\necho "codex 1.0.0"\n', 'utf8');
+    await writeFile(geminiPath, '#!/bin/sh\necho "gemini 2.0.0"\n', 'utf8');
+    await writeFile(zcodePath, '#!/bin/sh\necho "0.14.8"\n', 'utf8');
+    await chmod(codexPath, 0o755);
+    await chmod(geminiPath, 0o755);
+    await chmod(zcodePath, 0o755);
+
+    const discoveredOrder = [];
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      now: () => '2026-07-23T01:00:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+      providerConcurrency: 1,
+      knownRuntimes: [
+        testRuntimeFixture({ id: 'llm_zcode_known', provider: 'zcode', binaryPath: zcodePath }),
+      ],
+      onRuntimeDiscovered: async (runtime) => {
+        discoveredOrder.push(runtime.provider);
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(discoveredOrder, ['zcode', 'codex', 'gemini']);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['zcode', 'codex', 'gemini']);
+  });
+});
+
+test('runtime discovery prioritizes providers with existing default executable paths', async () => {
+  const tempRoot = await mkdtempTempRoot('oac-provider-tier-defaults-');
+  const binDir = path.join(tempRoot, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const codexPath = path.join(binDir, 'codex');
+  const zcodePath = path.join(tempRoot, 'ZCode.app', 'Contents', 'Resources', 'glm', 'zcode.cjs');
+  const workbuddyPath = path.join(tempRoot, 'WorkBuddy.app', 'Contents', 'Resources', 'app.asar.unpacked', 'cli', 'bin', 'codebuddy');
+  await mkdir(path.dirname(zcodePath), { recursive: true });
+  await mkdir(path.dirname(workbuddyPath), { recursive: true });
+  await writeFile(codexPath, '#!/bin/sh\necho "codex 1.0.0"\n', 'utf8');
+  await writeFile(zcodePath, '#!/bin/sh\necho "0.14.8"\n', 'utf8');
+  await writeFile(workbuddyPath, '#!/bin/sh\necho "2.103.3"\n', 'utf8');
+  await chmod(codexPath, 0o755);
+  await chmod(zcodePath, 0o755);
+  await chmod(workbuddyPath, 0o755);
+
+  const zcodePlatform = PLATFORM_DEFINITIONS.find((platform) => platform.id === 'zcode');
+  const workbuddyPlatform = PLATFORM_DEFINITIONS.find((platform) => platform.id === 'workbuddy');
+  const originalZCodeDefaults = [...zcodePlatform.runtime.defaultExecutablePaths];
+  const originalWorkBuddyDefaults = [...workbuddyPlatform.runtime.defaultExecutablePaths];
+  zcodePlatform.runtime.defaultExecutablePaths = [zcodePath];
+  workbuddyPlatform.runtime.defaultExecutablePaths = [workbuddyPath];
+  try {
+    const discoveredOrder = [];
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      providers: ['codex', 'zcode', 'workbuddy'],
+      now: () => '2026-07-23T01:10:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+      providerConcurrency: 1,
+      onRuntimeDiscovered: async (runtime) => {
+        discoveredOrder.push(runtime.provider);
+      },
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.deepEqual(discoveredOrder, ['zcode', 'workbuddy', 'codex']);
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['zcode', 'workbuddy', 'codex']);
+  } finally {
+    zcodePlatform.runtime.defaultExecutablePaths = originalZCodeDefaults;
+    workbuddyPlatform.runtime.defaultExecutablePaths = originalWorkBuddyDefaults;
+  }
+});
+
+test('runtime discovery surfaces onRuntimeDiscovered failures without aborting the sweep', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-callback-error-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const codexPath = path.join(binDir, 'codex');
+    const opencodePath = path.join(binDir, 'opencode');
+    await writeFile(codexPath, '#!/bin/sh\necho "codex 1.0.0"\n', 'utf8');
+    await writeFile(opencodePath, '#!/bin/sh\necho "opencode 0.9.1"\n', 'utf8');
+    await chmod(codexPath, 0o755);
+    await chmod(opencodePath, 0o755);
+
+    const result = await discoverLlmRuntimes({
+      env: { PATH: binDir },
+      providers: ['codex', 'opencode'],
+      now: () => '2026-07-23T01:20:00.000Z',
+      readinessProbe: async () => ({ ok: true, output: 'OK' }),
+      onRuntimeDiscovered: async (runtime) => {
+        if (runtime.provider === 'codex') throw new Error('upsert failed');
+      },
+    });
+
+    assert.deepEqual(result.runtimes.map((runtime) => runtime.provider), ['codex', 'opencode']);
+    assert.equal(result.errors.length, 1);
+    assert.deepEqual(result.errors[0], { provider: 'codex', message: 'upsert failed' });
+  });
+});
+
+test('version probe escalates and settles when an executable ignores SIGTERM', async () => {
+  const tempRoot = await mkdtempTempRoot('oac-probe-kill-');
+  const binDir = path.join(tempRoot, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const pidPath = path.join(tempRoot, 'child.pid');
+  const wedgedPath = path.join(binDir, 'wedged');
+  await writeFile(wedgedPath, [
+    '#!/bin/sh',
+    'trap "" TERM',
+    'printf \'%s\' $$ > "$PID_PATH"',
+    'while :; do printf \'x\\n\'; sleep 1; done',
+  ].join('\n'), 'utf8');
+  await chmod(wedgedPath, 0o755);
+
+  const startedAt = Date.now();
+  const probe = await probeExecutableVersion(wedgedPath, ['--version'], 500, { PATH: binDir, PID_PATH: pidPath });
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(probe.ok, false);
+  assert.equal(probe.message, 'Version probe timed out after 500ms.');
+  assert.ok(elapsedMs >= 500, `probe must not settle before the timeout, took ${elapsedMs}ms`);
+  assert.ok(elapsedMs < 15_000, `probe must settle shortly after the kill grace window, took ${elapsedMs}ms`);
+
+  const childPid = Number(await readFile(pidPath, 'utf8'));
+  assert.ok(Number.isInteger(childPid) && childPid > 0, 'wedged child should have recorded its pid');
+  let childRunning = true;
+  for (let attempt = 0; attempt < 50 && childRunning; attempt += 1) {
+    try {
+      process.kill(childPid, 0);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } catch {
+      childRunning = false;
+    }
+  }
+  assert.equal(childRunning, false, 'wedged probe child must be gone after escalation');
 });

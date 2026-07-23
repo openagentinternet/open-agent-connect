@@ -16051,11 +16051,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         const profileHomeDir = selectedProfile?.homeDir ?? input.homeDir;
         const runtimeStore = createLlmRuntimeStore(profileHomeDir);
         const previous = await runtimeStore.read();
-        const result = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
+        const result = await discoverLlmRuntimes({
+          env: process.env,
+          knownRuntimes: previous.runtimes,
+          onRuntimeDiscovered: async (runtime) => {
+            await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
+          },
+        });
         const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
-        for (const runtime of result.runtimes) {
-          await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
-        }
         for (const runtime of previous.runtimes) {
           if (runtime.provider === 'custom') continue;
           if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
@@ -16164,11 +16167,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
       discoverRuntimes: async () => {
         const runtimeStore = createLlmRuntimeStore(input.homeDir);
         const previous = await runtimeStore.read();
-        const result = await discoverLlmRuntimes({ env: process.env, knownRuntimes: previous.runtimes });
+        const result = await discoverLlmRuntimes({
+          env: process.env,
+          knownRuntimes: previous.runtimes,
+          onRuntimeDiscovered: async (runtime) => {
+            await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
+          },
+        });
         const discoveredRuntimeIds = new Set(result.runtimes.map((runtime) => runtime.id));
-        for (const runtime of result.runtimes) {
-          await runtimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
-        }
         for (const runtime of previous.runtimes) {
           if (runtime.provider === 'custom') continue;
           if (!discoveredRuntimeIds.has(runtime.id) && runtime.health !== 'unavailable') {
