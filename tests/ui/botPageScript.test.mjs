@@ -1111,12 +1111,16 @@ test('bot page renders provider pickers with icons and only exposes none for fal
   assert.match(primaryPicker, /data-provider-picker="primaryProvider"/);
   assert.match(primaryPicker, /data-provider-icon="codex"/);
   assert.match(primaryPicker, /<img src="\/ui\/assets\/platforms\/codex\.svg" alt="" loading="lazy" \/>/);
-  assert.doesNotMatch(primaryPicker, /data-provider-icon="claude-code"/);
   assert.match(primaryPicker, /data-provider-value="codex"[^>]*selected/);
+  // Degraded providers render as disabled detected options, never as selectable values.
+  assert.match(primaryPicker, /data-provider-icon="claude-code"/);
+  assert.doesNotMatch(primaryPicker, /data-provider-value="claude-code"/);
+  assert.match(primaryPicker, /provider-option-not-ready" disabled/);
   assert.doesNotMatch(primaryPicker, /data-provider-icon="openclaw"/);
   assert.match(fallbackPicker, /data-provider-option="none"/);
   assert.match(fallbackPicker, /<img src="\/ui\/assets\/platforms\/generic\.svg" alt="" loading="lazy" \/>/);
-  assert.doesNotMatch(fallbackPicker, /data-provider-icon="claude-code"/);
+  assert.match(fallbackPicker, /data-provider-icon="claude-code"/);
+  assert.doesNotMatch(fallbackPicker, /data-provider-value="claude-code"/);
   assert.doesNotMatch(fallbackPicker, /data-provider-icon="openclaw"/);
 });
 
@@ -3760,6 +3764,12 @@ test('bot page deep link focus is consumed after the first successful activation
           json: () => Promise.resolve({ ok: true, data: { runtimes: [] } }),
         });
       }
+      if (url === '/api/bot/runtimes/discover') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { status: 'running', runtimes: [] } }),
+        });
+      }
       throw new Error(`Unexpected fetch ${url}`);
     },
   });
@@ -4078,11 +4088,11 @@ test('bot page local bots list marks bots with no usable primary or fallback LLM
     return list.innerHTML.slice(start, next === -1 ? undefined : next);
   };
   const items = Object.fromEntries(context.state.profiles.map((profile) => [profile.slug, itemHtml(profile.slug)]));
-  assert.match(items['broken-bot'], /NO LLM[\s\S]*Broken Bot/);
-  assert.match(items['empty-bot'], /NO LLM[\s\S]*Empty Bot/);
-  assert.match(items['fallback-broken-bot'], /NO LLM[\s\S]*Fallback Broken Bot/);
-  assert.doesNotMatch(items['healthy-bot'], /NO LLM/);
-  assert.doesNotMatch(items['fallback-healthy-bot'], /NO LLM/);
+  assert.match(items['broken-bot'], /LLM NOT READY[\s\S]*Broken Bot/);
+  assert.match(items['empty-bot'], /NO LLM BOUND[\s\S]*Empty Bot/);
+  assert.match(items['fallback-broken-bot'], /LLM NOT READY[\s\S]*Fallback Broken Bot/);
+  assert.doesNotMatch(items['healthy-bot'], /LLM NOT READY|NO LLM BOUND/);
+  assert.doesNotMatch(items['fallback-healthy-bot'], /LLM NOT READY|NO LLM BOUND/);
   assert.doesNotMatch(list.innerHTML, /unavailable/i);
   assert.doesNotMatch(list.innerHTML, /runtime-codex/);
   assert.doesNotMatch(list.innerHTML, /Claude Code/);
@@ -4820,4 +4830,266 @@ test('bot page delete confirmation uses the required warning and disables confir
   assert.match(markup, /Please make sure you have backed up the mnemonic/);
   assert.match(markup, /Confirm Delete \(5s\)/);
   assert.match(markup, /data-act="confirm-delete" disabled/);
+});
+
+
+async function flushPromises(rounds = 6) {
+  for (let i = 0; i < rounds; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+function createDiscoveryPollingHarness(runtimesResponses) {
+  const intervals = [];
+  const timeouts = [];
+  const discoverPosts = [];
+  const button = field();
+  const queue = [...runtimesResponses];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-act="discover-runtimes"]': button,
+    },
+    globals: {
+      setInterval: (fn, ms) => {
+        intervals.push({ fn, ms });
+        return intervals.length;
+      },
+      clearInterval: () => {},
+      setTimeout: (fn, ms) => {
+        timeouts.push({ fn, ms });
+        return timeouts.length + 1000;
+      },
+      clearTimeout: () => {},
+    },
+    fetch: (url, opts) => {
+      if (url === '/api/bot/runtimes/discover' && opts && opts.method === 'POST') {
+        discoverPosts.push(opts.body ? JSON.parse(opts.body) : {});
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { status: 'running', runtimes: [] } }),
+        });
+      }
+      if (url === '/api/bot/runtimes') {
+        const payload = queue.length > 1 ? queue.shift() : queue[0];
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: payload }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, data: {} }) });
+    },
+  });
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  return { context, intervals, timeouts, discoverPosts, button };
+}
+
+test('bot page picker groups ready runtimes and disables detected providers with reason title', () => {
+  const context = createBotScriptContext({});
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.runtimes = [
+    { id: 'rt-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' },
+    { id: 'rt-workbuddy', provider: 'workbuddy', displayName: 'WorkBuddy', health: 'detected', healthReason: 'Readiness probe timed out after 30000ms.' },
+  ];
+
+  const picker = context.providerPickerMarkup('primaryProvider', 'Primary Provider', '', false);
+
+  const readyIndex = picker.indexOf('>Ready</div>');
+  const detectedIndex = picker.indexOf('>Detected (not ready)</div>');
+  assert.ok(readyIndex !== -1, 'ready group label renders');
+  assert.ok(detectedIndex !== -1, 'detected group label renders');
+  assert.ok(readyIndex < detectedIndex, 'ready group renders above the detected group');
+  assert.match(picker, /data-provider-value="codex"/);
+  assert.doesNotMatch(picker, /data-provider-value="workbuddy"/);
+  assert.match(picker, /provider-option-not-ready" disabled aria-disabled="true" title="Readiness probe timed out after 30000ms\."/);
+  assert.match(picker, /WorkBuddy \(not ready\)/);
+});
+
+test('bot page picker empty state distinguishes nothing discovered from detected-not-ready', () => {
+  const context = createBotScriptContext({});
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.state.runtimes = [];
+  let picker = context.providerPickerMarkup('primaryProvider', 'Primary Provider', '', false);
+  assert.match(picker, /No LLM runtimes discovered yet\./);
+
+  context.state.runtimes = [
+    { id: 'rt-workbuddy', provider: 'workbuddy', displayName: 'WorkBuddy', health: 'detected' },
+  ];
+  picker = context.providerPickerMarkup('primaryProvider', 'Primary Provider', '', false);
+  assert.match(picker, /1 runtime detected but not ready — open LLM runtimes to test\./);
+
+  context.state.runtimes = [
+    { id: 'rt-workbuddy', provider: 'workbuddy', displayName: 'WorkBuddy', health: 'detected' },
+    { id: 'rt-zcode', provider: 'zcode', displayName: 'ZCode', health: 'degraded' },
+  ];
+  picker = context.providerPickerMarkup('primaryProvider', 'Primary Provider', '', false);
+  assert.match(picker, /2 runtimes detected but not ready — open LLM runtimes to test\./);
+
+  context.state._runtimeDiscoveryPolling = true;
+  picker = context.providerPickerMarkup('primaryProvider', 'Primary Provider', '', false);
+  assert.match(picker, /Checking local LLM runtimes…/);
+  assert.match(picker, /This can take up to a minute on the first run\./);
+});
+
+test('bot page sidebar splits not-bound and bound-not-ready LLM labels', () => {
+  const context = createBotScriptContext({});
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+
+  context.state._runtimesLoaded = false;
+  context.state.runtimes = [];
+  const unbound = context.noLlmLabelMarkup({ slug: 'a', primaryProvider: '', fallbackProvider: '' });
+  assert.match(unbound, /NO LLM BOUND/);
+  assert.match(unbound, /No Primary or Fallback LLM bound to this bot\./);
+
+  const boundProfile = { slug: 'b', primaryProvider: 'codex' };
+  assert.equal(context.noLlmLabelMarkup(boundProfile), '', 'no label before runtimes load');
+
+  context.state._runtimesLoaded = true;
+  context.state.runtimes = [{ id: 'rt-codex', provider: 'codex', displayName: 'Codex', health: 'detected' }];
+  const notReady = context.noLlmLabelMarkup(boundProfile);
+  assert.match(notReady, /LLM NOT READY/);
+  assert.match(notReady, /Bound LLM runtimes are not ready yet\./);
+
+  context.state.runtimes = [{ id: 'rt-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' }];
+  assert.equal(context.noLlmLabelMarkup(boundProfile), '', 'no label when a bound provider is healthy');
+});
+
+test('bot page runtime summary shows a checking row while discovery runs', () => {
+  const summary = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-runtime-summary]': summary,
+    },
+  });
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'bot-1';
+  context.state.profiles = [{ slug: 'bot-1', name: 'Bot One', primaryProvider: 'workbuddy' }];
+  context.state.runtimes = [{ id: 'rt-workbuddy', provider: 'workbuddy', displayName: 'WorkBuddy', health: 'detected' }];
+  context.state.runtimeDiscoveryStatus = { running: true };
+
+  context.renderRuntimeSummary();
+  assert.match(summary.innerHTML, /Checking local LLM runtimes…/);
+  assert.match(summary.innerHTML, /This can take up to a minute on the first run\./);
+
+  context.state.runtimeDiscoveryStatus = { running: false };
+  context.state.runtimes = [{ id: 'rt-workbuddy', provider: 'workbuddy', displayName: 'WorkBuddy', health: 'healthy' }];
+  context.renderRuntimeSummary();
+  assert.doesNotMatch(summary.innerHTML, /Checking local LLM runtimes…/);
+});
+
+test('bot page auto-fires one background discovery per load when nothing is healthy', async () => {
+  const harness = createDiscoveryPollingHarness([
+    { runtimes: [], discoveryStatus: { running: true } },
+  ]);
+
+  await harness.context.loadRuntimes();
+  await flushPromises();
+  assert.equal(harness.discoverPosts.length, 1);
+  assert.deepEqual(harness.discoverPosts[0], { background: true });
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, true);
+
+  await harness.context.loadRuntimes();
+  await harness.context.loadRuntimes();
+  await flushPromises();
+  assert.equal(harness.discoverPosts.length, 1, 'auto discovery fires at most once per page load');
+});
+
+test('bot page does not auto-fire background discovery when a healthy runtime exists', async () => {
+  const harness = createDiscoveryPollingHarness([
+    { runtimes: [{ id: 'rt-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' }] },
+  ]);
+
+  await harness.context.loadRuntimes();
+  await flushPromises();
+  assert.equal(harness.discoverPosts.length, 0);
+  assert.equal(harness.context.state._runtimeDiscoveryAutoTriggered, false);
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, false);
+});
+
+test('bot page manual refresh uses background mode and polling stops when a healthy runtime appears', async () => {
+  const harness = createDiscoveryPollingHarness([
+    { runtimes: [], discoveryStatus: { running: true } },
+    { runtimes: [{ id: 'rt-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' }], discoveryStatus: { running: false } },
+  ]);
+  harness.context.state._runtimeDiscoveryAutoTriggered = true;
+
+  harness.context.discoverRuntimes();
+  await flushPromises();
+  assert.equal(harness.discoverPosts.length, 1);
+  assert.deepEqual(harness.discoverPosts[0], { background: true });
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, true);
+  assert.equal(harness.button.disabled, true);
+  assert.equal(harness.button.textContent, 'Refreshing...');
+  assert.equal(harness.intervals.length, 1);
+  assert.equal(harness.intervals[0].ms, 2000, 'polling runs every 2s');
+
+  harness.context.discoverRuntimes();
+  await flushPromises();
+  assert.equal(harness.discoverPosts.length, 1, 'a manual click while polling is a no-op');
+
+  await harness.intervals[0].fn();
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, false);
+  assert.equal(harness.button.disabled, false);
+  assert.equal(harness.button.textContent, 'Refresh Runtimes');
+});
+
+test('bot page runtime discovery polling stops when the sweep reports not running', async () => {
+  const harness = createDiscoveryPollingHarness([
+    { runtimes: [], discoveryStatus: { running: true } },
+    { runtimes: [{ id: 'rt-workbuddy', provider: 'workbuddy', displayName: 'WorkBuddy', health: 'detected' }], discoveryStatus: { running: false, lastFinishedAt: '2026-07-23T00:00:00.000Z' } },
+  ]);
+  harness.context.state._runtimeDiscoveryAutoTriggered = true;
+
+  harness.context.discoverRuntimes();
+  await flushPromises();
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, true);
+
+  await harness.intervals[0].fn();
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, false);
+  assert.equal(harness.button.disabled, false);
+  assert.equal(harness.button.textContent, 'Refresh Runtimes');
+});
+
+test('bot page runtime discovery polling stops at the 60s hard timeout', async () => {
+  const harness = createDiscoveryPollingHarness([
+    { runtimes: [], discoveryStatus: { running: true } },
+  ]);
+  harness.context.state._runtimeDiscoveryAutoTriggered = true;
+
+  harness.context.discoverRuntimes();
+  await flushPromises();
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, true);
+  const stopTimer = harness.timeouts.find((entry) => entry.ms === 60000);
+  assert.ok(stopTimer, 'a 60s hard stop timer is armed');
+
+  stopTimer.fn();
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, false);
+  assert.equal(harness.button.disabled, false);
+  assert.equal(harness.button.textContent, 'Refresh Runtimes');
+});
+
+test('bot page discovery rework i18n keys exist in both dictionaries', () => {
+  const keys = [
+    'bot.runtimeGroupReady',
+    'bot.runtimeGroupDetected',
+    'bot.runtimeNotReadySuffix',
+    'bot.noRuntimesYet',
+    'bot.detectedNotReadyOne',
+    'bot.detectedNotReadyMany',
+    'bot.checkingRuntimes',
+    'bot.checkingRuntimesHint',
+    'bot.noLlmBoundLabel',
+    'bot.noLlmBoundTitle',
+    'bot.llmNotReadyLabel',
+    'bot.llmNotReadyTitle',
+  ];
+  for (const key of keys) {
+    assert.notEqual(translate('en', key), key, `${key} missing from en dictionary`);
+    assert.notEqual(translate('zh-CN', key), key, `${key} missing from zh-CN dictionary`);
+  }
+  assert.equal(
+    translate('en', 'bot.detectedNotReadyMany', { count: 3 }),
+    '3 runtimes detected but not ready — open LLM runtimes to test.',
+  );
+  assert.equal(
+    translate('zh-CN', 'bot.detectedNotReadyMany', { count: 3 }),
+    '已检测到 3 个运行时，但尚未就绪——请打开 LLM 运行时进行测试。',
+  );
 });
