@@ -8,7 +8,6 @@ import { buildTracePageDefinition } from '../../ui/pages/trace/app';
 import { buildBotPageDefinition } from '../../ui/pages/bot/app';
 import { buildConversationsPageDefinition } from '../../ui/pages/conversations/app';
 import { buildAppsPageDefinition } from '../../ui/pages/apps/app';
-import { buildLoomPageDefinition } from '../../ui/pages/loom/app';
 import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
@@ -53,7 +52,6 @@ const PAGE_BUILDERS: Partial<Record<MetabotUiPageName, LocalUiPageBuilder>> = {
   'services': buildServicesPageDefinition,
   'apps': buildAppsPageDefinition,
   'settings': buildSettingsPageDefinition,
-  'loom': () => buildLoomPageDefinition(),
   'metaapps': buildMetaAppsPageDefinition,
 };
 

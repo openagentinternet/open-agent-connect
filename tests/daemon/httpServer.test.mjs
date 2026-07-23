@@ -75,10 +75,6 @@ async function startServer(options = {}) {
     botConfigSet: [],
     configGet: [],
     configSet: [],
-    loomDashboard: [],
-    loomTaskDetail: [],
-    loomRefresh: [],
-    loomActions: [],
   };
 
   const server = createHttpServer({
@@ -928,61 +924,6 @@ async function startServer(options = {}) {
         });
       },
     },
-    loom: {
-      getDashboard: async (input) => {
-        calls.loomDashboard.push(input);
-        return commandSuccess({
-          dashboard: {
-            filters: input,
-            tasks: [],
-            details: [],
-          },
-        });
-      },
-      getTaskDetail: async (input) => {
-        calls.loomTaskDetail.push(input);
-        if (input.taskPinId === 'task-missing') {
-          return commandFailed('loom_dashboard_task_not_found', 'Loom dashboard task was not found.', {
-            data: { taskPinId: input.taskPinId },
-          });
-        }
-        return commandSuccess({
-          detail: {
-            taskPinId: input.taskPinId,
-            title: 'Implement route',
-          },
-        });
-      },
-      refresh: async (input) => {
-        calls.loomRefresh.push(input);
-        return commandSuccess({
-          refreshed: true,
-          input,
-        });
-      },
-      actions: async (input) => {
-        calls.loomActions.push(input);
-        switch (input.result) {
-          case 'preview':
-            return commandAwaitingConfirmation({ action: input.action });
-          case 'validation':
-            return commandFailed('loom_action_invalid', 'Unsupported Loom UI action.');
-          case 'permission':
-            return commandFailed('permission_denied', 'This actor cannot mutate the task.');
-          case 'conflict':
-            return commandFailed('already_delivered', 'This claim is already delivered.');
-          case 'stale':
-            return commandFailed('stale_task_state', 'Refresh the task before retrying.');
-          case 'finalized':
-            return commandFailed('delivery_finalized_conflict', 'This delivery has already been finalized.');
-          default:
-            return commandSuccess({
-              action: input.action,
-              accepted: true,
-            });
-        }
-      },
-    },
     ui: useBuiltInUiPages
       ? undefined
       : {
@@ -1620,203 +1561,6 @@ test('POST /api/buzz/post parses the JSON body and forwards it to buzz.post', as
       attachments: ['metafile://file-pin-1.png'],
     },
   });
-});
-
-test('GET /api/loom/dashboard forwards query filters to loom.getDashboard', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const response = await fetch(`${server.baseUrl}/api/loom/dashboard?refresh=true&from=eric&limit=25&state=review&role=needs_action&query=github`);
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.loomDashboard, [
-    {
-      refresh: true,
-      from: 'eric',
-      limit: 25,
-      state: 'review',
-      role: 'needs_action',
-      query: 'github',
-    },
-  ]);
-  assert.equal(payload.ok, true);
-});
-
-test('GET /api/loom/tasks/:taskPinId forwards taskPinId, from, and refresh to loom.getTaskDetail', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const response = await fetch(`${server.baseUrl}/api/loom/tasks/task-123?from=eric&refresh=true`);
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.loomTaskDetail, [
-    {
-      taskPinId: 'task-123',
-      from: 'eric',
-      refresh: true,
-    },
-  ]);
-  assert.equal(payload.ok, true);
-});
-
-test('POST /api/loom/refresh forwards the JSON body to loom.refresh', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const request = { from: 'eric', limit: 200 };
-  const response = await fetch(`${server.baseUrl}/api/loom/refresh`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(request),
-  });
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.loomRefresh, [request]);
-  assert.equal(payload.ok, true);
-});
-
-test('POST /api/loom/actions forwards the JSON body to loom.actions', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const request = { action: 'claimAndStart', confirm: true, from: 'dev', taskPinId: 'task-1' };
-  const response = await fetch(`${server.baseUrl}/api/loom/actions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(request),
-  });
-  const payload = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.deepEqual(server.calls.loomActions, [request]);
-  assert.deepEqual(payload, commandSuccess({
-    action: 'claimAndStart',
-    accepted: true,
-  }));
-});
-
-test('unsupported method on /api/loom/actions returns method_not_allowed', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const response = await fetch(`${server.baseUrl}/api/loom/actions`, {
-    method: 'GET',
-  });
-  const payload = await response.json();
-
-  assert.equal(response.status, 405);
-  assert.equal(response.headers.get('allow'), 'POST');
-  assert.deepEqual(payload, commandFailed('method_not_allowed', 'Expected POST.'));
-});
-
-test('POST /api/loom/actions returns bad_request for invalid JSON', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const response = await fetch(`${server.baseUrl}/api/loom/actions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: '{"action":',
-  });
-  const payload = await response.json();
-
-  assert.equal(response.status, 400);
-  assert.equal(payload.ok, false);
-  assert.equal(payload.code, 'bad_request');
-  assert.deepEqual(server.calls.loomActions, []);
-});
-
-test('POST /api/loom/actions maps action result states to HTTP statuses', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const cases = [
-    { result: 'preview', status: 200, state: 'awaiting_confirmation' },
-    { result: 'validation', status: 400, code: 'loom_action_invalid' },
-    { result: 'permission', status: 403, code: 'permission_denied' },
-    { result: 'conflict', status: 409, code: 'already_delivered' },
-    { result: 'stale', status: 409, code: 'stale_task_state' },
-    { result: 'finalized', status: 409, code: 'delivery_finalized_conflict' },
-  ];
-
-  for (const entry of cases) {
-    const response = await fetch(`${server.baseUrl}/api/loom/actions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ action: 'acceptAndPay', result: entry.result }),
-    });
-    const payload = await response.json();
-
-    assert.equal(response.status, entry.status);
-    if (entry.state) {
-      assert.equal(payload.ok, true);
-      assert.equal(payload.state, entry.state);
-    } else {
-      assert.equal(payload.ok, false);
-      assert.equal(payload.code, entry.code);
-    }
-  }
-});
-
-test('unsupported method on /api/loom/dashboard returns method_not_allowed', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const response = await fetch(`${server.baseUrl}/api/loom/dashboard`, {
-    method: 'POST',
-  });
-  const payload = await response.json();
-
-  assert.equal(response.status, 405);
-  assert.equal(response.headers.get('allow'), 'GET');
-  assert.deepEqual(payload, commandFailed('method_not_allowed', 'Expected GET.'));
-});
-
-test('unsupported methods on loom task and refresh routes return method_not_allowed', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const taskResponse = await fetch(`${server.baseUrl}/api/loom/tasks/task-123`, {
-    method: 'POST',
-  });
-  const taskPayload = await taskResponse.json();
-
-  assert.equal(taskResponse.status, 405);
-  assert.equal(taskResponse.headers.get('allow'), 'GET');
-  assert.deepEqual(taskPayload, commandFailed('method_not_allowed', 'Expected GET.'));
-
-  const refreshResponse = await fetch(`${server.baseUrl}/api/loom/refresh`, {
-    method: 'GET',
-  });
-  const refreshPayload = await refreshResponse.json();
-
-  assert.equal(refreshResponse.status, 405);
-  assert.equal(refreshResponse.headers.get('allow'), 'POST');
-  assert.deepEqual(refreshPayload, commandFailed('method_not_allowed', 'Expected POST.'));
-});
-
-test('GET /api/loom/tasks/:taskPinId returns stable not-found payload from handler', async (t) => {
-  const server = await startServer();
-  t.after(async () => server.close());
-
-  const response = await fetch(`${server.baseUrl}/api/loom/tasks/task-missing?from=eric`);
-  const payload = await response.json();
-
-  assert.equal(response.status, 404);
-  assert.deepEqual(payload, commandFailed('loom_dashboard_task_not_found', 'Loom dashboard task was not found.', {
-    data: { taskPinId: 'task-missing' },
-  }));
 });
 
 test('POST /api/llm/execute forwards the request and returns an accepted session id', async (t) => {
@@ -2895,6 +2639,29 @@ test('retired /api/master routes are not mounted on the main HTTP server', async
   }
 });
 
+test('retired /api/loom routes are not mounted on the main HTTP server', async (t) => {
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const routes = [
+    { method: 'GET', path: '/api/loom/dashboard' },
+    { method: 'GET', path: '/api/loom/tasks/task-123' },
+    { method: 'POST', path: '/api/loom/refresh' },
+    { method: 'POST', path: '/api/loom/actions' },
+  ];
+
+  for (const route of routes) {
+    const response = await fetch(`${server.baseUrl}${route.path}`, {
+      method: route.method,
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, 404);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'not_found');
+  }
+});
+
 test('/api/apps owner-management routes are not registered as canonical routes', async (t) => {
   const server = await startServer();
   t.after(async () => server.close());
@@ -3720,26 +3487,17 @@ test('GET /ui/refund renders buyer and seller refund operations', async (t) => {
   assert.doesNotMatch(html, /\/api\/provider\/refund\/settle/);
 });
 
-test('GET /ui/loom remains directly available without appearing in console navigation', async (t) => {
+test('GET /ui/loom returns not_found after loom retirement', async (t) => {
   const server = await startServer({ useBuiltInUiPages: true });
   t.after(async () => server.close());
 
   const response = await fetch(`${server.baseUrl}/ui/loom`);
-  const html = await response.text();
-  const nav = extractTopbarNav(html);
+  const payload = await response.json();
 
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
-  assert.match(html, /Loom Board/);
-  assert.match(html, /data-loom-refresh/);
-  assert.match(html, /data-loom-board/);
-  assert.match(html, /data-loom-detail/);
-  assert.match(html, /\/api\/loom\/dashboard/);
-  assert.match(html, /\/api\/loom\/refresh/);
-  assert.doesNotMatch(nav, /href="\/ui\/loom"/);
-  assert.doesNotMatch(html, /\/api\/chain/);
-  assert.doesNotMatch(html, /\/api\/wallet/);
-  assert.doesNotMatch(html, /\/api\/services\/rate/);
+  assert.equal(response.status, 404);
+  assert.match(response.headers.get('content-type') ?? '', /application\/json/i);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, 'not_found');
 });
 
 test('GET /ui/apps serves the Apps owner console and appears after Services', async (t) => {

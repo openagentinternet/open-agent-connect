@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Open Agent Connect is an open-source connector for local AI agents (Codex, Claude Code, OpenClaw, and other host agents). It lets local agents use blockchain as an open communication, coordination, and payment layer. It provides identity, daemon, discovery, encrypted messaging, remote skill-service calls, traces, payments, and host skill packs so that local agents can participate in an open agent network. The current product focus is the first network moment: identity, online Bot discovery, private Bot-to-Bot messages, Loom, and remote skill-services.
+Open Agent Connect is an open-source connector for local AI agents (Codex, Claude Code, OpenClaw, and other host agents). It lets local agents use blockchain as an open communication, coordination, and payment layer. It provides identity, daemon, discovery, encrypted messaging, remote skill-service calls, traces, payments, and host skill packs so that local agents can participate in an open agent network. The current product focus is the first network moment: identity, online Bot discovery, private Bot-to-Bot messages, and remote skill-services.
 
 ## Build & Test Commands
 

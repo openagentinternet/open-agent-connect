@@ -12,7 +12,6 @@ import { handleChatRoutes } from './routes/chat';
 import { handleConversationRoutes } from './routes/conversations';
 import { handleFileRoutes } from './routes/file';
 import { handleIdentityRoutes } from './routes/identity';
-import { handleLoomRoutes } from './routes/loom';
 import { handleNetworkRoutes } from './routes/network';
 import { handleProviderRoutes } from './routes/provider';
 import { handleMetaAppRoutes } from './routes/metaapp';
@@ -36,7 +35,6 @@ const ROUTES: RouteHandler[] = [
   handleConversationRoutes,
   handleFileRoutes,
   handleIdentityRoutes,
-  handleLoomRoutes,
   handleNetworkRoutes,
   handleProviderRoutes,
   handleMetaAppRoutes,

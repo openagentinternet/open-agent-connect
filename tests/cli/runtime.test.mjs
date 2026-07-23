@@ -36,6 +36,9 @@ const { createA2AConversationStore } = require('../../dist/core/a2a/conversation
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
 const { createTestServicePaymentExecutor } = require('../../dist/core/payments/servicePayment.js');
 
+// Daemon boots in this file must not probe the ambient PATH for LLM runtimes.
+process.env.METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY = '1';
+
 const TEST_JSON_READ_RETRIES = 5;
 const TEST_JSON_READ_DELAY_MS = 10;
 const LEGACY_PROVIDER_PRESENCE_KEYS = [

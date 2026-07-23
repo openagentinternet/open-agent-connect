@@ -15,7 +15,6 @@ const SUPPORTED_UI_PAGES = new Set([
   'my-services',
   'trace',
   'refund',
-  'loom',
   'metaapps',
 ]);
 

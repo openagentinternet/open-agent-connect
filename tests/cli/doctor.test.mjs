@@ -533,22 +533,6 @@ test('runCli dispatches `metabot ui open --page trace --trace-id` and returns th
   });
 });
 
-test('runCli dispatches `metabot ui open --page loom --from` and forwards the actor URL', async () => {
-  const harness = createHarness();
-  const exitCode = await runCli(['ui', 'open', '--page', 'loom', '--from', 'eric'], harness.context);
-
-  assert.equal(exitCode, 0);
-  assert.deepEqual(harness.calls.ui, [{ page: 'loom', from: 'eric' }]);
-  assert.deepEqual(parseLastJson(harness.stdout), {
-    ok: true,
-    state: 'success',
-    data: {
-      page: 'loom',
-      localUiUrl: '/ui/loom?from=eric',
-    },
-  });
-});
-
 test('runCli dispatches `metabot ui open` with actor, session, and service selectors', async () => {
   const harness = createHarness();
   const exitCode = await runCli([

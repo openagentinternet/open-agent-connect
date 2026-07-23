@@ -36,7 +36,7 @@ Should trigger when:
 
 - The user asks the local Bot, bot, or MetaBot to upload a local file and get a `metafile://...` URI.
 - A downstream workflow needs a file URI, preview URL, or download URL for a local file.
-- A downstream skill needs a file URI first, such as buzz attachments, service icons/documents, Loom attachments, MetaApp assets, or A2A delivery artifacts.
+- A downstream skill needs a file URI first, such as buzz attachments, service icons/documents, MetaApp assets, or A2A delivery artifacts.
 
 Should not trigger when:
 

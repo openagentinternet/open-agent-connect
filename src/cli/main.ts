@@ -22,7 +22,6 @@ import { runHostCommand } from './commands/host';
 import { runWalletCommand } from './commands/wallet';
 import { runSystemCommand } from './commands/system';
 import { runLlmCommand } from './commands/llm';
-import { runLoomCommand } from './commands/loom';
 import { runMetaAppCommand } from './commands/metaapp';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
@@ -131,9 +130,6 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'llm':
           result = await runLlmCommand(rest, context);
-          break;
-        case 'loom':
-          result = await runLoomCommand(rest, context);
           break;
         case 'metaapp':
           result = await runMetaAppCommand(rest, context);

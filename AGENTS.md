@@ -30,7 +30,9 @@
 ```bash
 npm run build
 npm run build:skillpacks
-npm run test
+npm run test:fast          # fast tier: ~95% of subtests, minutes
+npm run test:integration   # integration tier: the slow daemon/build-heavy files
+npm run test               # full suite = fast + integration
 npm run verify
 npm run test:contracts
 ```
@@ -46,15 +48,17 @@ Test rules:
 - Build before running tests.
 - Tests run with `--test-concurrency=1`.
 - `tests/cli/runtime.test.mjs` must run last; the npm scripts already enforce that.
+- Test tiers are defined in `scripts/run-test-suite.mjs`. The integration tier is a small allowlist of slow process/daemon/build-heavy files (runtime, skillpacks build, LLM discovery, cross-host e2e, npm package). Keep new slow files out of the fast tier: if a test file boots real daemons, runs full builds, or sleeps on timeouts, add it to `INTEGRATION_FILES` there instead.
 - If your shell defaults to an unsupported Node version, switch to a supported Node 20-24 runtime explicitly for verification.
 - Create test temp directories only through `tests/helpers/tempRoots.mjs` (`mkdtempTempRoot`/`mkdtempTempRootSync`). Raw `fs.mkdtemp(os.tmpdir(), ...)` in tests or e2e scripts is not allowed. The helper registers teardown that stops test daemons (whole process group, waited) and removes the root on success, failure, or timeout.
-- `npm test` and `npm run verify` run the suite through `scripts/run-tests-with-leak-guard.mjs`, which fails the run if new `metabot-*`/`oac-*`/`loom-*` temp roots remain under `os.tmpdir()` afterwards. `npm run test:raw` runs the suite without the guard.
+- `npm test`, `npm run test:fast`, `npm run test:integration`, and `npm run verify` run through `scripts/run-tests-with-leak-guard.mjs`, which fails the run if new `metabot-*`/`oac-*`/`loom-*` temp roots remain under `os.tmpdir()` afterwards. The `*:raw` variants run without the guard.
 
 ## Verification Policy
 
 - Start with the smallest meaningful verification set for the files you changed.
 - Do not run full `npm test` by default.
-- Full `npm test` is required for shared runtime behavior, wallet or chain writes, persistence format changes, release artifacts, package or build plumbing, broad skillpack output, or when the user explicitly asks for it.
+- For everyday development and pre-merge checks, `npm run test:fast` is the default suite.
+- Full `npm test` (or `test:fast` + `test:integration`) is required for shared runtime behavior, wallet or chain writes, persistence format changes, release artifacts, package or build plumbing, broad skillpack output, before releases, or when the user explicitly asks for it.
 - For narrow docs, prompts, SKILLs, scripts, or UI copy changes, scoped checks plus `git diff --check` are usually enough.
 
 ## Definition Of Done

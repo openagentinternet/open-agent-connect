@@ -40,7 +40,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+trace\s+/m);
   assert.match(output, /^\s+browser\s+/m);
   assert.match(output, /^\s+system\s+/m);
-  assert.match(output, /^\s+loom\s+/m);
+  assert.doesNotMatch(output, /^\s+loom\s+/m);
   assert.match(output, /^\s+metaapp\s+/m);
   assert.match(output, /^\s+metaapp\s+.*owner list\/delete.*project packaging/m);
   assert.doesNotMatch(output, /^\s+master\s+/m);
@@ -65,7 +65,7 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.ok(output.subcommands.some((entry) => entry.name === 'bot'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'host'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'provider'));
-  assert.ok(output.subcommands.some((entry) => entry.name === 'loom'));
+  assert.equal(output.subcommands.some((entry) => entry.name === 'loom'), false);
   assert.ok(output.subcommands.some((entry) => entry.name === 'browser'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'metaapp'));
   assert.ok(output.subcommands.some((entry) => (
@@ -77,8 +77,8 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.equal(output.subcommands.some((entry) => entry.name === 'evolution'), false);
 });
 
-test('runCli rejects retired master and evolution commands', async () => {
-  for (const command of ['master', 'evolution']) {
+test('runCli rejects retired master, evolution, and loom commands', async () => {
+  for (const command of ['master', 'evolution', 'loom']) {
     const stdout = [];
 
     const exitCode = await runCli([command], {
@@ -214,179 +214,6 @@ test('runCli prints metaapp preview help with manifest-file override', async () 
   assert.match(output, /--manifest-file <path>/);
   assert.match(output, /manifest override file/i);
   assert.match(output, /metabot metaapp preview --project-dir \.\/dist-site --manifest-file metaapp\.json/);
-});
-
-test('runCli prints loom group help for validation and export commands', async () => {
-  const stdout = [];
-
-  const exitCode = await runCli(['loom', '--help'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(exitCode, 0);
-  const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot loom <subcommand>/m);
-  assert.match(output, /validate\s+Validate one Loom protocol payload\./);
-  assert.match(output, /export-chain-request\s+Build a chain write request for one Loom payload\./);
-  assert.match(output, /draft-task\s+Draft a Loom task payload with the selected MetaBot LLM runtime\./);
-  assert.match(output, /sync\s+Synchronize raw Loom protocol records into the local cache\./);
-  assert.match(output, /list\s+List task-centric Loom records from the local cache\./);
-  assert.match(output, /show\s+Show one Loom task and grouped related raw records\./);
-  assert.match(output, /dashboard\s+Show the Loom task dashboard\./);
-});
-
-test('runCli prints loom validate help with protocol and payload-file flags', async () => {
-  const stdout = [];
-
-  const exitCode = await runCli(['loom', 'validate', '--help'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(exitCode, 0);
-  const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot loom validate --protocol <protocol> --payload-file <path>/m);
-  assert.match(output, /--protocol <protocol>/);
-  assert.match(output, /--payload-file <path>/);
-  assert.match(output, /invalid_payload/);
-});
-
-test('runCli prints loom export-chain-request help and JSON help', async () => {
-  const textStdout = [];
-
-  const textExitCode = await runCli(['loom', 'export-chain-request', '--help'], {
-    stdout: { write: (chunk) => { textStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(textExitCode, 0);
-  const textOutput = textStdout.join('');
-  assert.match(textOutput, /^Usage:\s+metabot loom export-chain-request --protocol <protocol> --payload-file <path> \[--out <path>\]/m);
-  assert.match(textOutput, /--out <path>/);
-  assert.match(textOutput, /payload/);
-
-  const jsonStdout = [];
-  const jsonExitCode = await runCli(['loom', 'export-chain-request', '--help', '--json'], {
-    stdout: { write: (chunk) => { jsonStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(jsonExitCode, 0);
-  const jsonOutput = JSON.parse(jsonStdout.join(''));
-  assert.deepEqual(jsonOutput.commandPath, ['loom', 'export-chain-request']);
-  assert.equal(jsonOutput.command, 'metabot loom export-chain-request');
-  assert.ok(jsonOutput.optionalFlags.some((flag) => flag.flag === '--out'));
-});
-
-test('runCli prints loom sync, list, and show help', async () => {
-  const syncStdout = [];
-  const syncExitCode = await runCli(['loom', 'sync', '--help'], {
-    stdout: { write: (chunk) => { syncStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-  assert.equal(syncExitCode, 0);
-  assert.match(syncStdout.join(''), /^Usage:\s+metabot loom sync \[--limit <n>\]/m);
-
-  const listStdout = [];
-  const listExitCode = await runCli(['loom', 'list', '--help'], {
-    stdout: { write: (chunk) => { listStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-  assert.equal(listExitCode, 0);
-  assert.match(listStdout.join(''), /^Usage:\s+metabot loom list \[--refresh\] \[--limit <n>\] \[--tag <tag>\] \[--currency <SPACE\|BTC\|DOGE\|OPCAT>\]/m);
-
-  const showStdout = [];
-  const showExitCode = await runCli(['loom', 'show', '--help'], {
-    stdout: { write: (chunk) => { showStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-  assert.equal(showExitCode, 0);
-  assert.match(showStdout.join(''), /^Usage:\s+metabot loom show <taskPinId> \[--refresh\]/m);
-});
-
-test('runCli prints loom dashboard help with filter flags', async () => {
-  const stdout = [];
-
-  const exitCode = await runCli(['loom', 'dashboard', '--help'], {
-    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(exitCode, 0);
-  const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot loom dashboard \[--from <bot-slug>\] \[--refresh\] \[--limit <n>\] \[--state <state-or-column>\] \[--role <all\|requester\|developer\|needs_action>\] \[--query <text>\]/m);
-  assert.match(output, /--from <bot-slug>/);
-  assert.match(output, /--refresh/);
-  assert.match(output, /--limit <n>/);
-  assert.match(output, /--state <state-or-column>/);
-  assert.match(output, /--role <all\|requester\|developer\|needs_action>/);
-  assert.match(output, /--query <text>/);
-  assert.match(output, /not_implemented/);
-  assert.match(output, /updates the local raw Loom cache and dashboard index/);
-  assert.match(output, /does not write chain data, perform payments, or mutate GitHub or browsers/);
-});
-
-test('runCli prints loom draft-task help with wish and actor flags', async () => {
-  const textStdout = [];
-  const textExitCode = await runCli(['loom', 'draft-task', '--help'], {
-    stdout: { write: (chunk) => { textStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(textExitCode, 0);
-  const textOutput = textStdout.join('');
-  assert.match(textOutput, /^Usage:\s+metabot loom draft-task --wish <text> \[--from <bot-slug>\] \[--allow-invalid\]/m);
-  assert.match(textOutput, /--wish <text>/);
-  assert.match(textOutput, /--from <bot-slug>/);
-  assert.match(textOutput, /--allow-invalid/);
-  assert.match(textOutput, /invalid_llm_output/);
-
-  const jsonStdout = [];
-  const jsonExitCode = await runCli(['loom', 'draft-task', '--help', '--json'], {
-    stdout: { write: (chunk) => { jsonStdout.push(String(chunk)); return true; } },
-    stderr: { write: () => true },
-  });
-
-  assert.equal(jsonExitCode, 0);
-  const jsonOutput = JSON.parse(jsonStdout.join(''));
-  assert.deepEqual(jsonOutput.commandPath, ['loom', 'draft-task']);
-  assert.equal(jsonOutput.command, 'metabot loom draft-task');
-  assert.ok(jsonOutput.requiredFlags.some((flag) => flag.flag === '--wish'));
-  assert.ok(jsonOutput.optionalFlags.some((flag) => flag.flag === '--allow-invalid'));
-});
-
-test('runCli prints loom workflow command help', async () => {
-  const outputs = new Map();
-
-  for (const command of [
-    'post-task',
-    'claim-and-start',
-    'run-dev-round',
-    'deliver',
-    'accept-and-pay',
-    'review-delivery',
-    'state',
-  ]) {
-    const stdout = [];
-    const exitCode = await runCli(['loom', command, '--help'], {
-      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
-      stderr: { write: () => true },
-    });
-
-    assert.equal(exitCode, 0);
-    const output = stdout.join('');
-    outputs.set(command, output);
-    assert.match(output, new RegExp(`metabot loom ${command}`));
-  }
-
-  assert.match(outputs.get('accept-and-pay'), /--score <1-5>/);
-  assert.match(outputs.get('accept-and-pay'), /--confirm-payment/);
-  assert.match(outputs.get('accept-and-pay'), /without.*--confirm-payment.*payment/i);
-  assert.match(outputs.get('claim-and-start'), /git/i);
-  assert.match(outputs.get('claim-and-start'), /gh/i);
-  assert.match(outputs.get('claim-and-start'), /github/i);
-  assert.match(outputs.get('run-dev-round'), /git|gh|github/i);
 });
 
 test('runCli prints bot group help for profile, runtime, and session commands', async () => {
@@ -1493,20 +1320,6 @@ test('runCli machine-readable help resolves every public leaf command to its exa
     ['llm', 'unbind'],
     ['llm', 'set-preferred'],
     ['llm', 'get-preferred'],
-    ['loom', 'validate'],
-    ['loom', 'export-chain-request'],
-    ['loom', 'draft-task'],
-    ['loom', 'sync'],
-    ['loom', 'post-task'],
-    ['loom', 'claim-and-start'],
-    ['loom', 'run-dev-round'],
-    ['loom', 'deliver'],
-    ['loom', 'accept-and-pay'],
-    ['loom', 'review-delivery'],
-    ['loom', 'state'],
-    ['loom', 'list'],
-    ['loom', 'show'],
-    ['loom', 'dashboard'],
   ];
 
   for (const commandPath of publicLeafCommands) {

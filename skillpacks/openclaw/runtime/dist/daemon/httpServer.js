@@ -18,7 +18,6 @@ const chat_1 = require("./routes/chat");
 const conversations_1 = require("./routes/conversations");
 const file_1 = require("./routes/file");
 const identity_1 = require("./routes/identity");
-const loom_1 = require("./routes/loom");
 const network_1 = require("./routes/network");
 const provider_1 = require("./routes/provider");
 const metaapp_1 = require("./routes/metaapp");
@@ -39,7 +38,6 @@ const ROUTES = [
     conversations_1.handleConversationRoutes,
     file_1.handleFileRoutes,
     identity_1.handleIdentityRoutes,
-    loom_1.handleLoomRoutes,
     network_1.handleNetworkRoutes,
     provider_1.handleProviderRoutes,
     metaapp_1.handleMetaAppRoutes,

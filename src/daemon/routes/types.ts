@@ -16,7 +16,6 @@ export type MetabotUiPageName =
   | 'services'
   | 'apps'
   | 'settings'
-  | 'loom'
   | 'metaapps'
   | 'browser';
 
@@ -76,12 +75,6 @@ export interface MetabotDaemonHttpHandlers {
   identity?: {
     create?: (input: { name: string; host?: string; profileSlug?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;
-  };
-  loom?: {
-    getDashboard?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    getTaskDetail?: (input: { taskPinId: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    refresh?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
-    actions?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   network?: {
     listServices?: (input: { online?: boolean; query?: string; cached?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
