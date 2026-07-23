@@ -38,6 +38,7 @@ export interface MetaWebPrivateMessage {
   fromGlobalMetaId?: string | null;
   toGlobalMetaId?: string | null;
   fromUserInfo?: {
+    globalMetaId?: string | null;
     name?: string | null;
     avatar?: string | null;
     chatPublicKey?: string | null;
@@ -59,6 +60,13 @@ export function pinIdFromPrivateChatSocketMessage(message: MetaWebPrivateMessage
   if (pinId) return pinId;
   const txId = normalizeText(message.txId);
   return txId ? `${txId}i0` : null;
+}
+
+export function senderGlobalMetaIdFromPrivateChatSocketMessage(
+  message: MetaWebPrivateMessage,
+): string {
+  return normalizeText(message.fromUserInfo?.globalMetaId)
+    || normalizeText(message.fromGlobalMetaId);
 }
 
 export function normalizePrivateChatSocketMessage(data: unknown): MetaWebPrivateMessage | null {
@@ -118,7 +126,7 @@ export function decryptPrivateChatSocketMessage(
       },
       peerChatPublicKey,
       payload: {
-        fromGlobalMetaId: normalizeText(message.fromGlobalMetaId),
+        fromGlobalMetaId: senderGlobalMetaIdFromPrivateChatSocketMessage(message),
         content: normalizeText(message.content) || null,
         rawData: normalizeText(message.content)
           ? JSON.stringify({ content: normalizeText(message.content) })
@@ -173,7 +181,7 @@ export function createPrivateChatListener(input: {
     const message = normalizePrivateChatSocketMessage(data);
     if (!message) return;
 
-    const fromGlobalMetaId = normalizeText(message.fromGlobalMetaId);
+    const fromGlobalMetaId = senderGlobalMetaIdFromPrivateChatSocketMessage(message);
     if (!fromGlobalMetaId) return;
 
     // Filter out messages not addressed to us, but allow messages with no toGlobalMetaId

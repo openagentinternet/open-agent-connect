@@ -270,17 +270,29 @@ test('refreshA2ASimplemsgListenerForIdentityProfileRegistration restarts the lis
       events.push('watchdog:start');
     },
   };
+  const backfill = {
+    stop: () => {
+      events.push('backfill:stop');
+    },
+    start: async () => {
+      events.push('backfill:start');
+      return { started: [], skipped: [] };
+    },
+  };
 
   const result = await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
     enabled: true,
     listener,
+    backfill,
     watchdog,
   });
 
   assert.deepEqual(events, [
     'watchdog:stop',
     'listener:stop',
+    'backfill:stop',
     'listener:start',
+    'backfill:start',
     'watchdog:start',
   ]);
   assert.equal(result.refreshed, true);

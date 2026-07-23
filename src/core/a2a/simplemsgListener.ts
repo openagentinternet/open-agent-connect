@@ -8,6 +8,7 @@ import {
   decryptPrivateChatSocketMessage,
   normalizePrivateChatSocketMessage,
   pinIdFromPrivateChatSocketMessage,
+  senderGlobalMetaIdFromPrivateChatSocketMessage,
   type MetaWebPrivateMessage,
   type PrivateChatListenerIdentity,
 } from '../chat/privateChatListener';
@@ -226,7 +227,7 @@ function createProfileSimplemsgListener(input: {
     const message = normalizeSimplemsgSocketMessage(payload);
     if (!message) return;
 
-    const fromGlobalMetaId = normalizeText(message.fromGlobalMetaId);
+    const fromGlobalMetaId = senderGlobalMetaIdFromPrivateChatSocketMessage(message);
     if (!fromGlobalMetaId) return;
 
     const localGlobalMetaId = normalizeText(input.identity.globalMetaId);

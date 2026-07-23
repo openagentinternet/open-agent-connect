@@ -423,6 +423,56 @@ test('simplemsg listener decrypts inbound ciphertext into per-peer A2A storage a
   assert.equal(Object.hasOwn(conversation.messages[0].raw, 'content'), false);
 });
 
+test('simplemsg listener prefers the sender GlobalMetaID from user info over an address-shaped top-level field', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1local0000000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peer00000000000000000000000000000';
+  const { homeDir } = await createProfile(systemHomeDir, {
+    name: 'Local Bot',
+    slug: 'local-bot',
+    globalMetaId: localGlobalMetaId,
+    keys: localKeys,
+  });
+
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+  });
+  await manager.start();
+
+  const payload = buildEncryptedSocketPayload({
+    fromGlobalMetaId: peerGlobalMetaId,
+    fromKeys: peerKeys,
+    toGlobalMetaId: localGlobalMetaId,
+    toChatPublicKey: localKeys.publicKeyHex,
+    content: 'sender identity recovered',
+    pinId: 'incoming-pin-recovered-sender',
+  });
+  payload.fromGlobalMetaId = '1BNesCuvJeW2DAF42xkyCU1ifZVuNZ61mv';
+  payload.fromUserInfo.globalMetaId = peerGlobalMetaId;
+  await harness.sockets[0].emitServer('WS_SERVER_NOTIFY_PRIVATE_CHAT', payload);
+
+  const conversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: localGlobalMetaId,
+      chatPublicKey: localKeys.publicKeyHex,
+    },
+    peer: {
+      globalMetaId: peerGlobalMetaId,
+      chatPublicKey: peerKeys.publicKeyHex,
+    },
+  }).readConversation();
+
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].content, 'sender identity recovered');
+  assert.equal(conversation.peer.globalMetaId, peerGlobalMetaId);
+});
+
 test('simplemsg listener ignores messages addressed to another local profile', async (t) => {
   const systemHomeDir = await createSystemHome(t);
   const localKeys = createIdentityPair();

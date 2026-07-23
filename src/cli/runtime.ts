@@ -116,7 +116,11 @@ import {
   type PrivateChatAutoReplyOrchestrator,
 } from '../core/chat/privateChatAutoReply';
 import { createPrivateChatSendFailureFileLogger } from '../core/chat/privateChatSendFailureLog';
-import { createPrivateChatAutoReplyBackfillLoop } from '../core/chat/privateChatAutoReplyBackfill';
+import {
+  createPrivateChatAutoReplyBackfillLoop,
+  createPrivateChatAutoReplyBackfillProfileManager,
+  type PrivateChatAutoReplyBackfillProfileManager,
+} from '../core/chat/privateChatAutoReplyBackfill';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
@@ -223,6 +227,7 @@ export function buildA2ASimplemsgInboundDispatcher(input: {
 export async function refreshA2ASimplemsgListenerForIdentityProfileRegistration(input: {
   enabled: boolean;
   listener: Pick<A2ASimplemsgListenerManager, 'start' | 'stop'>;
+  backfill?: Pick<PrivateChatAutoReplyBackfillProfileManager, 'start' | 'stop'>;
   watchdog?: Pick<A2ASimplemsgPresenceWatchdog, 'start' | 'stop'>;
 }): Promise<{ refreshed: boolean; report: A2ASimplemsgListenerStartReport | null }> {
   if (!input.enabled) {
@@ -234,7 +239,9 @@ export async function refreshA2ASimplemsgListenerForIdentityProfileRegistration(
 
   input.watchdog?.stop();
   input.listener.stop();
+  input.backfill?.stop();
   const report = await input.listener.start();
+  await input.backfill?.start();
   input.watchdog?.start();
   return {
     refreshed: true,
@@ -3977,20 +3984,6 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       logWarning: (scope, message) => console.warn(scope, message),
     }),
   }, sharedAutoReplyConfig);
-  const chatAutoReplyBackfill = createPrivateChatAutoReplyBackfillLoop({
-    paths,
-    stateStore: chatStateStore,
-    selfGlobalMetaId: async () => {
-      const state = await runtimeStore.readState();
-      return state.identity?.globalMetaId ?? null;
-    },
-    getLocalPrivateChatIdentity: async () => signer.getPrivateChatIdentity(),
-    resolvePeerChatPublicKey,
-    handleInboundMessage: async (message) => chatAutoReplyOrchestrator.handleInboundMessage(message),
-    onError: (error) => {
-      console.warn('[private chat auto-reply backfill]', error.message);
-    },
-  });
   const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
     autoReplyConfig: sharedAutoReplyConfig,
     resolvePeerChatPublicKey,
@@ -4009,6 +4002,46 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       return handler({
         ...message,
         localProfileSlug: profile.slug,
+      });
+    },
+  });
+  const chatAutoReplyBackfill = createPrivateChatAutoReplyBackfillProfileManager({
+    systemHomeDir: paths.systemHomeDir,
+    createLoop: (profile) => {
+      const profilePaths = resolveMetabotPaths(profile.homeDir);
+      const profileRuntimeStore = createRuntimeStateStore(profilePaths);
+      const profileBaseSigner = createLocalMnemonicSigner({
+        secretStore: createFileSecretStore(profile.homeDir),
+        adapters,
+      });
+      const profileSigner = path.resolve(profile.homeDir) === path.resolve(homeDir)
+        ? signer
+        : context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+          ? createTestChainWriteSigner(profileBaseSigner)
+          : profileBaseSigner;
+      return createPrivateChatAutoReplyBackfillLoop({
+        paths: profilePaths,
+        stateStore: createPrivateChatStateStore(profilePaths),
+        selfGlobalMetaId: async () => {
+          const state = await profileRuntimeStore.readState().catch(() => null);
+          return state?.identity?.globalMetaId || profile.globalMetaId || null;
+        },
+        getLocalPrivateChatIdentity: async () => profileSigner.getPrivateChatIdentity(),
+        resolvePeerChatPublicKey,
+        resolveChatApiBaseUrl: async () => {
+          const infrastructure = await infrastructureConfigStore.read();
+          return resolveMetasoInfrastructureEndpoints(infrastructure.metasoP2PBaseUrl).chatApiBaseUrl;
+        },
+        handleInboundMessage: async (message) => {
+          if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
+            await chatAutoReplyOrchestrator.handleInboundMessage(message);
+            return;
+          }
+          await profileAutoReplyDispatcher.handleInboundMessage(profile, message);
+        },
+        onError: (error) => {
+          console.warn(`[private chat auto-reply backfill:${profile.slug}]`, error.message);
+        },
       });
     },
   });
@@ -4069,6 +4102,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
       enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
       listener: simplemsgListener,
+      backfill: chatAutoReplyBackfill,
       watchdog: simplemsgPresenceWatchdog,
     });
   };
@@ -4078,6 +4112,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
       enabled: currentConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled,
       listener: simplemsgListener,
+      backfill: chatAutoReplyBackfill,
       watchdog: simplemsgPresenceWatchdog,
     });
     void refreshOnlineServiceCache().catch((error) => {
@@ -4102,15 +4137,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     await refreshA2ASimplemsgListenerForIdentityProfileRegistration({
       enabled: true,
       listener: simplemsgListener,
+      backfill: chatAutoReplyBackfill,
       watchdog: simplemsgPresenceWatchdog,
     });
-    chatAutoReplyBackfill.start();
   };
   const providerPresence = await providerPresenceStore.read();
   if (daemonConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled) {
     await simplemsgListener.start();
     simplemsgPresenceWatchdog.start();
-    chatAutoReplyBackfill.start();
+    await chatAutoReplyBackfill.start();
     void replayUnhandledA2AOrderMessagesForProfiles({
       systemHomeDir: paths.systemHomeDir,
       activeHomeDir: homeDir,

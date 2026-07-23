@@ -164,3 +164,49 @@ test('buildPrivateConversationResponse keeps decrypt failures visible without re
   assert.doesNotMatch(JSON.stringify(response), /secret reply/);
   assert.doesNotMatch(JSON.stringify(response), /U2FsdGVkX1/);
 });
+
+test('buildPrivateConversationResponse repairs Metaso address-shaped sender fields within the requested conversation', async () => {
+  const local = createIdentityPair();
+  const peer = createIdentityPair();
+  const selfGlobalMetaId = 'idq1local0000000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peer00000000000000000000000000000';
+  const txId = '2e9ff38e092ff5bf1b565bfa9091bc4197b682e34be8c2dc01c514dfe37ed525';
+  const pinId = `${txId}i0`;
+  const outbound = sendPrivateChat({
+    fromIdentity: {
+      globalMetaId: peerGlobalMetaId,
+      privateKeyHex: peer.privateKeyHex,
+    },
+    toGlobalMetaId: selfGlobalMetaId,
+    peerChatPublicKey: local.publicKeyHex,
+    content: 'just say hi',
+    timestamp: 1_784_797_191,
+  });
+
+  const response = await buildPrivateConversationResponse({
+    selfGlobalMetaId,
+    peerGlobalMetaId,
+    localPrivateKeyHex: local.privateKeyHex,
+    peerChatPublicKey: peer.publicKeyHex,
+    fetchHistory: async () => [{
+      pinId,
+      txId: pinId,
+      path: '/protocols/simplemsg',
+      content: outbound.payload,
+      from: '1BNesCuvJeW2DAF42xkyCU1ifZVuNZ61mv',
+      fromAddress: '1BNesCuvJeW2DAF42xkyCU1ifZVuNZ61mv',
+      fromGlobalMetaId: '1BNesCuvJeW2DAF42xkyCU1ifZVuNZ61mv',
+      globalMetaId: null,
+      toGlobalMetaId: selfGlobalMetaId,
+      timestamp: 1_784_797_191,
+      index: 9,
+    }],
+  });
+
+  assert.equal(response.messages.length, 1);
+  assert.equal(response.messages[0].content, 'just say hi');
+  assert.equal(response.messages[0].fromGlobalMetaId, peerGlobalMetaId);
+  assert.equal(response.messages[0].toGlobalMetaId, selfGlobalMetaId);
+  assert.equal(response.messages[0].pinId, pinId);
+  assert.equal(response.messages[0].txId, txId);
+});
