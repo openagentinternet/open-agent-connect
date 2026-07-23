@@ -3875,3 +3875,59 @@ test('bot discoverRuntimes blocking mode keeps its response shape and records st
   assert.equal(afterList.data.discoveryStatus.running, false, 'blocking sweeps also record status');
   assert.ok(afterList.data.discoveryStatus.lastFinishedAt);
 });
+
+test('bot discoverRuntimes serializes a blocking sweep behind an in-flight sweep', async (t) => {
+  const homeDir = await createProfileHome('metabot-bot-discover-serialize-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [runtime('codex', 'runtime-codex', 'healthy')],
+  });
+
+  const gates = [deferredGate(), deferredGate()];
+  let discoverCalls = 0;
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir: deriveSystemHome(homeDir),
+    getDaemonRecord: () => null,
+    discoverLlmRuntimes: async (input) => {
+      const callIndex = discoverCalls;
+      discoverCalls += 1;
+      const discovered = runtime('workbuddy', `runtime-workbuddy-${callIndex}`, 'healthy');
+      await input.onRuntimeDiscovered(discovered);
+      await gates[callIndex].promise;
+      return { runtimes: [discovered], errors: [] };
+    },
+  });
+
+  const background = await handlers.bot.discoverRuntimes({ background: true });
+  assert.equal(background.data.status, 'running');
+  await waitForCondition(() => discoverCalls === 1, 'background sweep to start');
+
+  const blockingPromise = handlers.bot.discoverRuntimes({});
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(discoverCalls, 1, 'blocking sweep queues behind the in-flight sweep instead of racing it');
+
+  const during = await handlers.bot.listRuntimes();
+  assert.equal(during.data.discoveryStatus.running, true);
+
+  gates[0].release();
+  await waitForCondition(() => discoverCalls === 2, 'queued blocking sweep to start once the first sweep settles');
+  const between = await handlers.bot.listRuntimes();
+  assert.equal(
+    between.data.discoveryStatus.running,
+    true,
+    'status stays running until the last queued sweep settles',
+  );
+
+  gates[1].release();
+  const blocking = await blockingPromise;
+  assert.equal(blocking.ok, true);
+  assert.equal(blocking.data.discovered, 1);
+
+  const after = await handlers.bot.listRuntimes();
+  assert.equal(after.data.discoveryStatus.running, false);
+  assert.ok(after.data.discoveryStatus.lastFinishedAt);
+});

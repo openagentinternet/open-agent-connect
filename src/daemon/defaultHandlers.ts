@@ -4897,13 +4897,21 @@ interface LlmDiscoverySweepStatus {
   running: boolean;
   lastStartedAt?: string;
   lastFinishedAt?: string;
+  /** Queued-or-running sweep count; internal only, never exposed to clients. */
+  activeSweeps: number;
 }
 
 // In-memory sweep bookkeeping shared by the bot and llm runtime routes,
 // keyed by the resolved runtime-store home dir. Never persisted to runtimes.json.
 const llmDiscoverySweepStatusByHomeDir = new Map<string, LlmDiscoverySweepStatus>();
+// Tail promise of the serialized sweep chain, keyed the same way. Sweeps for
+// one store always run one at a time, in arrival order.
+const llmDiscoverySweepChainByHomeDir = new Map<string, Promise<unknown>>();
 
-function llmDiscoveryStatusForHomeDir(homeDir: string): LlmDiscoverySweepStatus | undefined {
+// Public view exposed through the runtimes API; internal counters stay hidden.
+type LlmDiscoveryStatusView = Pick<LlmDiscoverySweepStatus, 'running' | 'lastStartedAt' | 'lastFinishedAt'>;
+
+function llmDiscoveryStatusForHomeDir(homeDir: string): LlmDiscoveryStatusView | undefined {
   const status = llmDiscoverySweepStatusByHomeDir.get(homeDir);
   if (!status) return undefined;
   return {
@@ -4952,15 +4960,33 @@ async function runTrackedLlmDiscoverySweep(
   providers: LlmProvider[],
   discover: typeof discoverLlmRuntimes,
 ) {
-  const status = llmDiscoverySweepStatusByHomeDir.get(homeDir) ?? { running: false };
+  // Every sweep — blocking or background — joins one serialized chain per
+  // store, so concurrent triggers cannot interleave store writes or flip the
+  // shared status early. `running` clears only when the last queued sweep
+  // settles.
+  const status = llmDiscoverySweepStatusByHomeDir.get(homeDir) ?? { running: false, activeSweeps: 0 };
+  status.activeSweeps += 1;
   status.running = true;
-  status.lastStartedAt = new Date().toISOString();
+  if (status.activeSweeps === 1) {
+    status.lastStartedAt = new Date().toISOString();
+  }
   llmDiscoverySweepStatusByHomeDir.set(homeDir, status);
+  const previous = llmDiscoverySweepChainByHomeDir.get(homeDir) ?? Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(() => runLlmDiscoverySweep(homeDir, providers, discover));
+  llmDiscoverySweepChainByHomeDir.set(homeDir, current);
   try {
-    return await runLlmDiscoverySweep(homeDir, providers, discover);
+    return await current;
   } finally {
-    status.running = false;
-    status.lastFinishedAt = new Date().toISOString();
+    status.activeSweeps -= 1;
+    if (status.activeSweeps === 0) {
+      status.running = false;
+      status.lastFinishedAt = new Date().toISOString();
+    }
+    if (llmDiscoverySweepChainByHomeDir.get(homeDir) === current) {
+      llmDiscoverySweepChainByHomeDir.delete(homeDir);
+    }
   }
 }
 

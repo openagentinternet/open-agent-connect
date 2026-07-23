@@ -5065,6 +5065,31 @@ test('bot page runtime discovery polling stops at the 60s hard timeout', async (
   assert.equal(harness.button.textContent, 'Refresh Runtimes');
 });
 
+test('bot page runtime discovery hard timeout falls back to the empty state', async () => {
+  const harness = createDiscoveryPollingHarness([
+    { runtimes: [], discoveryStatus: { running: true } },
+  ]);
+  harness.context.state._runtimeDiscoveryAutoTriggered = true;
+
+  harness.context.discoverRuntimes();
+  await flushPromises();
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, true);
+
+  const stopTimer = harness.timeouts.find((entry) => entry.ms === 60000);
+  assert.ok(stopTimer, 'a 60s hard stop timer is armed');
+  stopTimer.fn();
+
+  assert.equal(
+    harness.context.state.runtimeDiscoveryStatus,
+    null,
+    'stale sweep status is cleared when polling stops',
+  );
+  assert.equal(harness.context.runtimeDiscoveryInProgress(), false);
+  const picker = harness.context.providerPickerMarkup('primaryProvider', 'Primary Provider', '', false);
+  assert.match(picker, /No LLM runtimes discovered yet\./);
+  assert.doesNotMatch(picker, /Checking local LLM runtimes/);
+});
+
 test('bot page discovery rework i18n keys exist in both dictionaries', () => {
   const keys = [
     'bot.runtimeGroupReady',
