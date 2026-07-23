@@ -13,6 +13,16 @@ export interface PlatformDefinition {
         envAliases?: string[];
         pathSearchBinaryNames?: string[];
         defaultExecutablePaths?: string[];
+        /**
+         * Optional probe timing policy. App-embedded CLIs start slowly, so they
+         * get wider windows. Missing fields fall back to the discovery defaults
+         * (readiness 30s, version probe 5s, semantic inactivity min(readiness, 15s)).
+         */
+        probeHints?: {
+            readinessTimeoutMs?: number;
+            versionProbeTimeoutMs?: number;
+            semanticInactivityTimeoutMs?: number;
+        };
     };
     skills: {
         roots: PlatformSkillRoot[];

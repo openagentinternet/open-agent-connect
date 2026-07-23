@@ -46,6 +46,7 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['ANTHROPIC_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            probeHints: { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 },
         },
         skills: {
             roots: [
@@ -69,6 +70,7 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['OPENAI_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            probeHints: { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 },
         },
         skills: {
             roots: [
@@ -227,6 +229,8 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['CURSOR_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            // App-bundled CLI: cold start is slow, so both probes get wider windows.
+            probeHints: { readinessTimeoutMs: 45_000, versionProbeTimeoutMs: 20_000, semanticInactivityTimeoutMs: 45_000 },
         },
         skills: {
             roots: [
@@ -325,6 +329,7 @@ exports.PLATFORM_DEFINITIONS = [
             authEnv: ['ZCODE_API_KEY', 'Z_AI_API_KEY', 'ZAI_API_KEY', 'BIGMODEL_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
             defaultExecutablePaths: ['/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'],
+            probeHints: { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 },
         },
         skills: {
             roots: [
@@ -351,6 +356,8 @@ exports.PLATFORM_DEFINITIONS = [
             envAliases: [],
             pathSearchBinaryNames: [],
             defaultExecutablePaths: ['/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy'],
+            // App-bundled CLI: cold start is slow, so both probes get wider windows.
+            probeHints: { readinessTimeoutMs: 45_000, versionProbeTimeoutMs: 20_000, semanticInactivityTimeoutMs: 45_000 },
         },
         skills: {
             roots: [

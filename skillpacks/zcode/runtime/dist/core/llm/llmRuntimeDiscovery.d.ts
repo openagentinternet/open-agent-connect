@@ -11,6 +11,7 @@ export interface DiscoveryInput {
     recentHealthyReadinessSkipMs?: number;
     cwd?: string;
     shellResolvedExecutables?: Record<string, string>;
+    onRuntimeDiscovered?: (runtime: LlmRuntime) => void | Promise<void>;
 }
 export interface DiscoveryResult {
     runtimes: LlmRuntime[];

@@ -24,7 +24,7 @@ function buildBotPageScript() {
 var qq=function(s){return document.querySelectorAll(s)};
 var HOMEPAGE_UPLOAD_MAX_BYTES=50*1024*1024;
 var PERSONA_PRESET_CATALOG=${inlineScriptJson(personaPresets_1.PERSONA_PRESET_CATALOG)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
 var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
@@ -299,16 +299,16 @@ function providerIsHealthy(provider){
 function profileHasUsableLlm(profile){
   return profileLlmProviders(profile).some(providerIsHealthy);
 }
-function shouldShowNoLlmLabel(profile){
-  var providers=profileLlmProviders(profile);
-  if(!providers.length)return true;
-  if(!state._runtimesLoaded&&!state.runtimes.length)return false;
-  return !profileHasUsableLlm(profile);
-}
 function noLlmLabelMarkup(profile){
-  if(!shouldShowNoLlmLabel(profile))return '';
-  var title=uiText('bot.noLlmTitle','No healthy Primary or Fallback LLM configured.');
-  return '<span class="metabot-no-llm-label" title="'+esc(title)+'" aria-label="'+esc(title)+'">'+esc(uiText('bot.noLlmLabel','NO LLM'))+'</span>';
+  var providers=profileLlmProviders(profile);
+  if(!providers.length){
+    var boundTitle=uiText('bot.noLlmBoundTitle','No Primary or Fallback LLM bound to this bot.');
+    return '<span class="metabot-no-llm-label" title="'+esc(boundTitle)+'" aria-label="'+esc(boundTitle)+'">'+esc(uiText('bot.noLlmBoundLabel','NO LLM BOUND'))+'</span>';
+  }
+  if(!state._runtimesLoaded&&!state.runtimes.length)return '';
+  if(profileHasUsableLlm(profile))return '';
+  var title=uiText('bot.llmNotReadyTitle','Bound LLM runtimes are not ready yet. Open LLM runtimes to test or refresh.');
+  return '<span class="metabot-no-llm-label" title="'+esc(title)+'" aria-label="'+esc(title)+'">'+esc(uiText('bot.llmNotReadyLabel','LLM NOT READY'))+'</span>';
 }
 function runtimeIconMarkup(runtime){
   var key=String((runtime&&runtime.provider)||'generic');
@@ -412,8 +412,36 @@ function uniqueProviderRuntimes(){
   availableRuntimes().forEach(function(r){if(!r.provider||seen[r.provider])return;seen[r.provider]=true;rows.push(r)});
   return rows;
 }
+function anyHealthyRuntime(){return state.runtimes.some(function(r){return r&&r.health==='healthy'})}
+function notReadyProviderRuntimes(){
+  var healthyProviders={};var seen={};var rows=[];
+  availableRuntimes().forEach(function(r){if(r.provider)healthyProviders[r.provider]=true});
+  state.runtimes.forEach(function(r){
+    if(!r||!r.provider||seen[r.provider]||healthyProviders[r.provider])return;
+    if(r.health!=='detected'&&r.health!=='degraded')return;
+    seen[r.provider]=true;
+    var best=providerRuntime(r.provider);
+    if(best)rows.push(best);
+  });
+  return rows;
+}
+function runtimeDiscoveryInProgress(){
+  if(state._runtimeDiscoveryPolling)return true;
+  return Boolean(state.runtimeDiscoveryStatus&&state.runtimeDiscoveryStatus.running);
+}
+function pickerEmptyCopy(){
+  if(runtimeDiscoveryInProgress()){
+    return esc(uiText('bot.checkingRuntimes','Checking local LLM runtimes…'))+'<div class="provider-empty-hint">'+esc(uiText('bot.checkingRuntimesHint','This can take up to a minute on the first run.'))+'</div>';
+  }
+  var notReady=notReadyProviderRuntimes();
+  if(notReady.length){
+    var one=notReady.length===1;
+    return esc(uiText(one?'bot.detectedNotReadyOne':'bot.detectedNotReadyMany',one?'1 runtime detected but not ready — open LLM runtimes to test.':'{count} runtimes detected but not ready — open LLM runtimes to test.',{count:notReady.length}));
+  }
+  return esc(uiText('bot.noRuntimesYet','No LLM runtimes discovered yet.'));
+}
 function providerPickerMarkup(field,label,selected,allowNone,touched){
-  var current=selected||'';var rows=uniqueProviderRuntimes();
+  var current=selected||'';var rows=uniqueProviderRuntimes();var notReadyRows=notReadyProviderRuntimes();
   var active=rows.find(function(r){return r.provider===current});
   var buttonLabel=active?runtimeLabel(active):(current?uiText('bot.providerUnavailable','Provider unavailable')+': '+current:uiText('bot.none','None'));
   var buttonIcon=current?providerIconMarkup(current):providerIconMarkup('generic');
@@ -425,14 +453,29 @@ function providerPickerMarkup(field,label,selected,allowNone,touched){
   if(allowNone){
     html+='<button type="button" class="provider-option" data-provider-option="none" data-provider-value=""'+(!current?' selected':'')+'>'+providerIconMarkup('generic')+'<span>'+esc(uiText('bot.none','None'))+'</span></button>';
   }
-  rows.forEach(function(r){
-    var selectedAttr=current===r.provider?' selected':'';
-    html+='<button type="button" class="provider-option" data-provider-option="'+esc(r.provider)+'" data-provider-value="'+esc(r.provider)+'"'+selectedAttr+'>'+providerIconMarkup(r.provider)+'<span>'+esc(runtimeLabel(r))+'</span></button>';
-  });
-  if(!rows.length){
-    html+='<div class="provider-empty">'+esc(uiText('bot.noHealthyRuntimes','No healthy runtimes found'))+'</div>';
+  if(rows.length){
+    html+='<div class="provider-group-label">'+esc(uiText('bot.runtimeGroupReady','Ready'))+'</div>';
+    rows.forEach(function(r){
+      var selectedAttr=current===r.provider?' selected':'';
+      html+='<button type="button" class="provider-option" data-provider-option="'+esc(r.provider)+'" data-provider-value="'+esc(r.provider)+'"'+selectedAttr+'>'+providerIconMarkup(r.provider)+'<span>'+esc(runtimeLabel(r))+'</span></button>';
+    });
   }
-  html+='</div></div></div>';
+  if(notReadyRows.length){
+    html+='<div class="provider-group-label">'+esc(uiText('bot.runtimeGroupDetected','Detected (not ready)'))+'</div>';
+    notReadyRows.forEach(function(r){
+      var name=r.displayName||r.provider||r.id||'-';
+      var title=r.healthReason||'';
+      html+='<button type="button" class="provider-option provider-option-not-ready" disabled aria-disabled="true"'+(title?' title="'+esc(title)+'"':'')+'>'+providerIconMarkup(r.provider)+'<span>'+esc(name+' ('+uiText('bot.runtimeNotReadySuffix','not ready')+')')+'</span></button>';
+    });
+  }
+  if(!rows.length){
+    html+='<div class="provider-empty">'+pickerEmptyCopy()+'</div>';
+  }
+  html+='</div></div>';
+  if(current&&!active){
+    html+='<button type="button" class="provider-unavailable-link" data-provider-open-runtimes="1">'+esc(uiText('bot.providerUnavailable','Provider unavailable')+': '+current)+'</button>';
+  }
+  html+='</div>';
   return html;
 }
 function homepagePanelMarkup(profile){
@@ -524,6 +567,9 @@ function wireProviderPickers(){
       this.setAttribute('selected','');
       var menu=q('[data-provider-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
     });
+  });
+  qq('[data-provider-open-runtimes]').forEach(function(el){
+    el.addEventListener('click',function(event){event.preventDefault();openRuntimeModal()});
   });
 }
 function wireChainPickers(){
@@ -1792,6 +1838,12 @@ function renderRuntimeSummary(){
       '<span class="runtime-summary-meta">'+esc(meta)+'</span>'+
     '</div>');
   });
+  if(runtimeDiscoveryInProgress()&&!anyHealthyRuntime()){
+    rows.push('<div class="runtime-summary-row runtime-summary-checking">'+
+      '<span class="runtime-summary-name">'+esc(uiText('bot.checkingRuntimes','Checking local LLM runtimes…'))+'</span>'+
+      '<span class="runtime-summary-meta">'+esc(uiText('bot.checkingRuntimesHint','This can take up to a minute on the first run.'))+'</span>'+
+    '</div>');
+  }
   root.innerHTML=rows.join('');
 }
 
@@ -1849,7 +1901,7 @@ function switchTab(tab,silent){
 
 function loadStats(){renderStats();return Promise.resolve()}
 function loadProfiles(){return api('/api/bot/profiles').then(function(r){state.profiles=(r.data&&r.data.profiles)||[];state.profiles.forEach(function(profile){if(profile&&profile.slug&&!Object.prototype.hasOwnProperty.call(state.chatAllowedSkillsBySlug,profile.slug))state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(profile.allowChatSkills)});applyBotManagementRouteRequest();if(!state.selectedSlug&&state.profiles.length)setSelectedSlug(state.profiles[0].slug);if(state.selectedSlug&&!state.profiles.some(function(p){return p.slug===state.selectedSlug}))setSelectedSlug(state.profiles[0]&&state.profiles[0].slug||'');state.originalProfile=selectedProfile();renderMetabotList();renderDetailHeader(state.originalProfile);setDetailVisible(Boolean(state.originalProfile));renderCurrentTab();renderStats()})}
-function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];state._runtimesLoaded=true;renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];state._runtimesLoaded=true;renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()})}
+function loadRuntimes(){return api('/api/bot/runtimes').then(function(r){state.runtimes=(r.data&&r.data.runtimes)||[];state.runtimeDiscoveryStatus=(r.data&&r.data.discoveryStatus)||null;state._runtimesLoaded=true;renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).catch(function(){state.runtimes=[];state.runtimeDiscoveryStatus=null;state._runtimesLoaded=true;renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal()}).then(maybeAutoDiscoverRuntimes)}
 function loadSessions(slug){var activeSlug=slug||state.selectedSlug;if(!activeSlug){state.sessions=[];renderHistoryTab();renderStats();return Promise.resolve()}return api('/api/bot/sessions?slug='+encodeURIComponent(activeSlug)+'&limit=50').then(function(r){if(activeSlug!==state.selectedSlug)return;state.sessions=(r.data&&r.data.sessions)||[];renderHistoryTab();renderStats()}).catch(function(){if(activeSlug!==state.selectedSlug)return;state.sessions=[];renderHistoryTab();renderStats()})}
 function loadSelectedProfileConfig(force){
   var slug=state.selectedSlug;
@@ -1882,9 +1934,53 @@ function saveSettings(){
   }).finally(function(){btn=q('[data-act="save-settings"]');if(btn)btn.disabled=false});
 }
 
+function updateDiscoverRuntimesButton(){
+  var btn=q('[data-act="discover-runtimes"]');if(!btn)return;
+  if(state._runtimeDiscoveryPolling){btn.disabled=true;btn.textContent=uiText('bot.refreshing','Refreshing...')}
+  else{btn.disabled=false;btn.textContent=uiText('bot.refreshRuntimes','Refresh Runtimes')}
+}
+function stopRuntimeDiscoveryPolling(){
+  state._runtimeDiscoveryPolling=false;
+  state._runtimeDiscoveryObservedRunning=false;
+  if(state._runtimeDiscoveryPollTimer){clearInterval(state._runtimeDiscoveryPollTimer);state._runtimeDiscoveryPollTimer=null}
+  if(state._runtimeDiscoveryStopTimer){clearTimeout(state._runtimeDiscoveryStopTimer);state._runtimeDiscoveryStopTimer=null}
+  updateDiscoverRuntimesButton();
+  renderMetabotList();renderCurrentTab();renderStats();if(state._runtimeModalOpen)renderRuntimeModal();
+}
+function pollRuntimeDiscoveryOnce(){
+  return loadRuntimes().then(function(){
+    if(anyHealthyRuntime()){stopRuntimeDiscoveryPolling();return}
+    var status=state.runtimeDiscoveryStatus;
+    if(status&&status.running===true){state._runtimeDiscoveryObservedRunning=true;return}
+    if(status&&status.running===false&&state._runtimeDiscoveryObservedRunning)stopRuntimeDiscoveryPolling();
+  });
+}
+function startRuntimeDiscoveryPolling(){
+  if(state._runtimeDiscoveryPolling)return false;
+  state._runtimeDiscoveryPolling=true;
+  state._runtimeDiscoveryObservedRunning=false;
+  updateDiscoverRuntimesButton();
+  state._runtimeDiscoveryPollTimer=setInterval(pollRuntimeDiscoveryOnce,2000);
+  state._runtimeDiscoveryStopTimer=setTimeout(stopRuntimeDiscoveryPolling,60000);
+  return true;
+}
+function triggerBackgroundRuntimeDiscovery(){
+  return api('/api/bot/runtimes/discover',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({background:true})})
+    .then(function(){return pollRuntimeDiscoveryOnce()})
+    .catch(function(error){showToast(error.message||uiText('bot.runtimeRefreshFailed','Runtime refresh failed'));stopRuntimeDiscoveryPolling()});
+}
+function maybeAutoDiscoverRuntimes(){
+  if(state._runtimeDiscoveryAutoTriggered)return;
+  if(!state._runtimesLoaded)return;
+  if(anyHealthyRuntime())return;
+  state._runtimeDiscoveryAutoTriggered=true;
+  if(!startRuntimeDiscoveryPolling())return;
+  triggerBackgroundRuntimeDiscovery();
+}
 function discoverRuntimes(){
-  var btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=true;btn.textContent=uiText('bot.refreshing','Refreshing...')}
-  api('/api/bot/runtimes/discover',{method:'POST'}).then(function(){return loadRuntimes()}).catch(function(error){showToast(error.message||uiText('bot.runtimeRefreshFailed','Runtime refresh failed'))}).finally(function(){btn=q('[data-act="discover-runtimes"]');if(btn){btn.disabled=false;btn.textContent=uiText('bot.refreshRuntimes','Refresh Runtimes')}})
+  if(state._runtimeDiscoveryPolling)return;
+  if(!startRuntimeDiscoveryPolling())return;
+  triggerBackgroundRuntimeDiscovery();
 }
 function testRuntime(runtimeId){
   if(!runtimeId)return Promise.resolve();
@@ -2177,6 +2273,7 @@ function rerenderLocalizedBotPage(){
 }
 if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
   window.addEventListener('oac:i18n-changed',rerenderLocalizedBotPage);
+  window.addEventListener('beforeunload',stopRuntimeDiscoveryPolling);
 }
 
 document.addEventListener('DOMContentLoaded',function(){
