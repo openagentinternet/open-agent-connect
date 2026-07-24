@@ -104,6 +104,7 @@ import type {
   ChatReplyRunner,
   PrivateChatAutoReplyConfig,
   PrivateChatInboundMessage,
+  PrivateChatMessage,
 } from '../core/chat/privateChatTypes';
 import { createTestServicePaymentExecutor } from '../core/payments/servicePayment';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
@@ -1408,6 +1409,11 @@ export interface PrivateChatAutoReplyProfileDispatcher {
     profile: IdentityProfileRecord,
     message: PrivateChatInboundMessage,
   ): Promise<void>;
+  retryOutboundMessage(
+    profile: IdentityProfileRecord,
+    peerGlobalMetaId: string,
+    message: PrivateChatMessage,
+  ): Promise<boolean>;
 }
 
 export interface PrivateChatAutoReplyProfileDispatcherOptions {
@@ -1838,6 +1844,10 @@ export function createPrivateChatAutoReplyProfileDispatcher(
   }
 
   return {
+    async retryOutboundMessage(profile, peerGlobalMetaId, message) {
+      const orchestrator = getOrCreateOrchestrator(profile);
+      return orchestrator?.retryOutboundMessage(peerGlobalMetaId, message) ?? false;
+    },
     async handleInboundMessage(profile, message) {
       const orchestrator = await getOrCreateOrchestrator(profile);
       if (!orchestrator) return;
@@ -3389,6 +3399,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
             return;
           }
           await profileAutoReplyDispatcher.handleInboundMessage(profile, message);
+        },
+        recoverOutboundMessage: async (peerGlobalMetaId, message) => {
+          if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
+            return chatAutoReplyOrchestrator.retryOutboundMessage(peerGlobalMetaId, message);
+          }
+          return profileAutoReplyDispatcher.retryOutboundMessage(
+            profile,
+            peerGlobalMetaId,
+            message,
+          );
         },
         onError: (error) => {
           console.warn(`[private chat auto-reply backfill:${profile.slug}]`, error.message);

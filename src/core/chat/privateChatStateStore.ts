@@ -68,6 +68,10 @@ export interface PrivateChatStateStore {
     leaseId?: string | null,
   ): Promise<PrivateChatConversation | null>;
   appendMessages(messages: PrivateChatMessage[]): Promise<PrivateChatMessage[]>;
+  replaceMessage(
+    messageId: string,
+    replacement: PrivateChatMessage,
+  ): Promise<PrivateChatMessage | null>;
   getConversationByPeer(peerGlobalMetaId: string): Promise<PrivateChatConversation | null>;
   getRecentMessages(conversationId: string, limit?: number): Promise<PrivateChatMessage[]>;
 }
@@ -511,6 +515,26 @@ export function createPrivateChatStateStore(
         };
       });
       return appendedMessages;
+    },
+
+    async replaceMessage(messageId, replacement) {
+      const normalizedMessageId = normalizeText(messageId);
+      if (!normalizedMessageId) return null;
+      let replacedMessage: PrivateChatMessage | null = null;
+      await this.updateState(state => {
+        const messageIndex = state.messages.findIndex(message => message.messageId === normalizedMessageId);
+        if (messageIndex < 0) return state;
+        const normalizedReplacement = {
+          ...replacement,
+          messageId: normalizedMessageId,
+          timestamp: normalizeTimestampMs(replacement.timestamp),
+        };
+        const messages = state.messages.slice();
+        messages[messageIndex] = normalizedReplacement;
+        replacedMessage = normalizedReplacement;
+        return { ...state, messages };
+      });
+      return replacedMessage;
     },
 
     async getConversationByPeer(peerGlobalMetaId) {

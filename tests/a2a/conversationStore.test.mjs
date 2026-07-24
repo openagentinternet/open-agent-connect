@@ -175,6 +175,30 @@ test('conversation store appends messages once by messageId', async () => {
   assert.deepEqual(state.indexes.messageIds, ['msg-1', 'msg-2']);
 });
 
+test('conversation store replaces a logical message while preserving its index', async () => {
+  const store = createStore();
+  await store.appendMessages([createMessage(1)]);
+
+  const replaced = await store.replaceMessage('msg-1', createMessage(1, {
+    pinId: 'retry-pin-1',
+    txid: 'retry-tx-1',
+    txids: ['retry-tx-1'],
+    raw: {
+      deliveryRecovery: {
+        failedPinIds: ['pin-1'],
+        retryCount: 1,
+      },
+    },
+  }));
+
+  const state = await store.readConversation();
+  assert.equal(replaced.messageId, 'msg-1');
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].pinId, 'retry-pin-1');
+  assert.equal(state.messages[0].txid, 'retry-tx-1');
+  assert.deepEqual(state.indexes.messageIds, ['msg-1']);
+});
+
 test('conversation store trims messages to the newest 2000 records', async () => {
   const store = createStore();
   const messages = Array.from({ length: 2005 }, (_, index) => createMessage(index));

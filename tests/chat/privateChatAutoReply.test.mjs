@@ -461,6 +461,55 @@ test('auto-reply persists inbound and outbound private chat messages to the unif
   ), true);
 });
 
+test('outbound recovery resends the same logical turn and replaces its dropped pin projection', async () => {
+  let currentNow = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now: () => currentNow });
+  await harness.handleInbound();
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const initialMessages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const initialOutbound = initialMessages.at(-1);
+  const conversationBeforeRetry = await harness.stateStore.getConversationByPeer(
+    harness.peerGlobalMetaId,
+  );
+
+  currentNow += 10 * 60 * 1000;
+  const recovered = await harness.orchestrator.retryOutboundMessage(
+    harness.peerGlobalMetaId,
+    initialOutbound,
+  );
+
+  const recoveredMessages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const recoveredOutbound = recoveredMessages.at(-1);
+  const conversationAfterRetry = await harness.stateStore.getConversationByPeer(
+    harness.peerGlobalMetaId,
+  );
+  const unified = await createA2AConversationStore({
+    paths: harness.paths,
+    local: { globalMetaId: harness.localGlobalMetaId },
+    peer: { globalMetaId: harness.peerGlobalMetaId },
+  }).readConversation();
+  const unifiedOutbound = unified.messages.find(message => message.direction === 'outgoing');
+
+  assert.equal(recovered, true);
+  assert.equal(harness.writes.length, 2);
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(recoveredMessages.length, 2);
+  assert.equal(recoveredOutbound.messageId, initialOutbound.messageId);
+  assert.equal(recoveredOutbound.messagePinId, 'reply-pin-2');
+  assert.deepEqual(recoveredOutbound.deliveryRecovery, {
+    failedPinIds: ['reply-pin-1'],
+    retryCount: 1,
+  });
+  assert.equal(conversationAfterRetry.turnCount, conversationBeforeRetry.turnCount);
+  assert.equal(unified.messages.length, 2);
+  assert.equal(unifiedOutbound.messageId, initialOutbound.messageId);
+  assert.equal(unifiedOutbound.pinId, 'reply-pin-2');
+  assert.deepEqual(unifiedOutbound.raw.deliveryRecovery, {
+    failedPinIds: ['reply-pin-1'],
+    retryCount: 1,
+  });
+});
+
 test('auto-reply ignores a duplicate inbound private chat message that reuses the same messagePinId', async () => {
   const harness = await createAutoReplyHarness();
 

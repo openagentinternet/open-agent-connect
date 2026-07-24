@@ -1,6 +1,6 @@
 import type { ChainUtxo } from './adapters/types';
 
-const PENDING_SPENT_OUTPOINT_TTL_MS = 10 * 60 * 1000;
+export const MVC_PENDING_UTXO_TTL_MS = 10 * 60 * 1000;
 
 interface PendingSpentOutpoint {
   expiresAt: number;
@@ -52,7 +52,7 @@ export function rememberPendingMvcTransaction(input: {
 }): void {
   const now = input.now ?? Date.now();
   prunePendingMvcUtxos(now);
-  const expiresAt = now + PENDING_SPENT_OUTPOINT_TTL_MS;
+  const expiresAt = now + MVC_PENDING_UTXO_TTL_MS;
   for (const utxo of input.spentUtxos) {
     const key = getMvcUtxoOutpointKey({
       address: input.address,

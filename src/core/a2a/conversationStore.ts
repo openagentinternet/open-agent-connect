@@ -35,6 +35,10 @@ export interface A2AConversationStore {
     updater: (state: A2AConversationState) => A2AConversationState | Promise<A2AConversationState>,
   ): Promise<A2AConversationState>;
   appendMessages(messages: A2AConversationMessage[]): Promise<A2AConversationMessage[]>;
+  replaceMessage(
+    messageId: string,
+    replacement: A2AConversationMessage,
+  ): Promise<A2AConversationMessage | null>;
   upsertSession(session: A2AConversationSession): Promise<A2AConversationSession>;
   findSessionById(sessionId: string): Promise<A2AConversationSession | null>;
   findSessionByOrderTxid(orderTxid: string): Promise<A2AConversationSession | null>;
@@ -413,6 +417,25 @@ export function createA2AConversationStore(input: CreateA2AConversationStoreInpu
         };
       });
       return appended;
+    },
+
+    async replaceMessage(messageId, replacement) {
+      const normalizedMessageId = normalizeText(messageId);
+      if (!normalizedMessageId) return null;
+      let replacedMessage: A2AConversationMessage | null = null;
+      await this.updateConversation(state => {
+        const messageIndex = state.messages.findIndex(message => message.messageId === normalizedMessageId);
+        if (messageIndex < 0) return state;
+        const normalizedReplacement = {
+          ...replacement,
+          messageId: normalizedMessageId,
+        };
+        const messages = state.messages.slice();
+        messages[messageIndex] = normalizedReplacement;
+        replacedMessage = normalizedReplacement;
+        return { ...state, messages };
+      });
+      return replacedMessage;
     },
 
     async upsertSession(session) {

@@ -104,6 +104,41 @@ test('appendMessages deduplicates by messageId', async () => {
   assert.equal(state.messages.length, 1);
 });
 
+test('replaceMessage updates a logical message without adding a duplicate', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+  const original = {
+    conversationId: 'pc-self-peer',
+    messageId: 'logical-message-1',
+    direction: 'outbound',
+    senderGlobalMetaId: 'self',
+    content: 'hello',
+    messagePinId: 'dropped-pin',
+    extensions: null,
+    timestamp: 1000,
+  };
+  await store.appendMessages([original]);
+
+  const replaced = await store.replaceMessage(original.messageId, {
+    ...original,
+    messagePinId: 'retry-pin',
+    timestamp: 2000,
+    deliveryRecovery: {
+      failedPinIds: ['dropped-pin'],
+      retryCount: 1,
+    },
+  });
+
+  const state = await store.readState();
+  assert.equal(replaced.messageId, original.messageId);
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].messagePinId, 'retry-pin');
+  assert.deepEqual(state.messages[0].deliveryRecovery, {
+    failedPinIds: ['dropped-pin'],
+    retryCount: 1,
+  });
+});
+
 test('getConversationByPeer returns the active conversation for a peer', async () => {
   const { profileRoot } = await createTempProfileHome();
   const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
