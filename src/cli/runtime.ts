@@ -1845,7 +1845,7 @@ export function createPrivateChatAutoReplyProfileDispatcher(
 
   return {
     async retryOutboundMessage(profile, peerGlobalMetaId, message) {
-      const orchestrator = getOrCreateOrchestrator(profile);
+      const orchestrator = await getOrCreateOrchestrator(profile);
       return orchestrator?.retryOutboundMessage(peerGlobalMetaId, message) ?? false;
     },
     async handleInboundMessage(profile, message) {
