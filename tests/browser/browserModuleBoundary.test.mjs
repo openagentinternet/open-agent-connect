@@ -33,6 +33,10 @@ test('Browser module exports page rendering and API route boundary', async () =>
   assert.match(html, /data-browser-uri-input/);
   assert.match(html, /\/api\/browser\/runtime/);
   assert.match(html, /\/api\/browser\/actions/);
+  // The default-served page must go through OAC's buildBrowserPageDefinition so
+  // the bridge adapters are injected (not ABC's vanilla definition).
+  assert.match(html, /oacBrowserHostAdapters/);
+  assert.match(html, /oacHandleBridgeMetafileUpload/);
 });
 
 test('Browser page renders template preview images with browser-safe URLs', async () => {
