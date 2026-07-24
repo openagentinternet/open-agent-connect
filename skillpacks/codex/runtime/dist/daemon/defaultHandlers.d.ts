@@ -34,6 +34,7 @@ export declare function rebuildTraceArtifactsFromSessionState(input: {
     trace: SessionTraceRecord;
     artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
 }>;
+export declare function llmDiscoverySweepRunningForHomeDir(homeDir: string): boolean;
 export declare function createDefaultMetabotDaemonHandlers(input: {
     homeDir: string;
     systemHomeDir?: string;

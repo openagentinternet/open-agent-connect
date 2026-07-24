@@ -69,6 +69,7 @@ const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
 const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
+const llmAvailabilityRecovery_1 = require("../core/llm/llmAvailabilityRecovery");
 const platformSkillCatalog_1 = require("../core/services/platformSkillCatalog");
 const executor_1 = require("../core/llm/executor");
 const update_1 = require("../core/system/update");
@@ -1091,11 +1092,17 @@ function createCliSigner(context, homeDir) {
     }
     return baseSigner;
 }
+// Set while the daemon runtime is up (spec R5.3): chat turns that find no
+// selectable runtime nudge this loop to re-probe their profile's store soon.
+let activeLlmAvailabilityRecovery = null;
 function createPrivateChatReplyRunnerForProfile(input) {
     return (0, hostLlmChatReplyRunner_1.createHostLlmChatReplyRunner)({
         runtimeResolver: input.runtimeResolver,
         llmExecutor: input.llmExecutor,
         metaBotSlug: input.metaBotSlug,
+        requestAvailabilityRecovery: () => {
+            activeLlmAvailabilityRecovery?.requestSoon(input.paths.profileRoot);
+        },
         allowedChatSkillsResolver: (0, privateChatAllowedSkills_1.createPrivateChatAllowedSkillsResolver)({
             paths: input.paths,
             metaBotSlug: input.metaBotSlug,
@@ -2595,6 +2602,31 @@ async function serveCliDaemonProcess(context) {
                     .catch(() => { });
             }
         })().catch(() => { });
+    }
+    // Availability recovery loop (spec R4): trickle re-probes of
+    // detected/degraded/cooldown-expired runtimes across the host store and
+    // every indexed profile store, so a runtime that failed readiness once
+    // becomes selectable again without waiting for a manual rediscovery.
+    // Tests that skip background LLM discovery skip this loop as well.
+    if (context.env[TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV] !== '1') {
+        const llmAvailabilityRecovery = (0, llmAvailabilityRecovery_1.createLlmAvailabilityRecovery)({
+            env: context.env,
+            listTargetHomes: async () => {
+                const homes = [node_path_1.default.resolve(homeDir)];
+                const profiles = await (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir).catch(() => []);
+                for (const profile of profiles) {
+                    const profileHome = typeof profile.homeDir === 'string' ? node_path_1.default.resolve(profile.homeDir) : '';
+                    if (profileHome && !homes.includes(profileHome)) {
+                        homes.push(profileHome);
+                    }
+                }
+                return homes;
+            },
+            isStoreBusy: (targetHomeDir) => (0, defaultHandlers_1.llmDiscoverySweepRunningForHomeDir)(targetHomeDir),
+            logger: (message, error) => console.warn(message, error ?? ''),
+        });
+        activeLlmAvailabilityRecovery = llmAvailabilityRecovery;
+        llmAvailabilityRecovery.start();
     }
     const chatStateStore = (0, privateChatStateStore_1.createPrivateChatStateStore)(paths);
     const chatStrategyStore = (0, chatStrategyStore_1.createChatStrategyStore)(paths);

@@ -32,6 +32,8 @@ export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
     homeDir: string;
     globalMetaId: string;
     mvcAddress: string;
+    /** Roles whose provider came from system defaulting (not user request); binding writes for them accept any availability tier. */
+    systemDefaultProviderRoles?: Array<'primary' | 'fallback'>;
 }
 export interface UpdateMetabotInfoInput {
     name?: string;
@@ -75,7 +77,9 @@ export interface DeleteMetabotProfileResult {
     removedExecutorSessions: string[];
 }
 export declare function readTextFile(filePath: string): Promise<string>;
+export declare function runtimeAvailabilityTier(runtime: LlmRuntime): number;
 export declare function selectRuntimeForProvider(runtimes: LlmRuntime[], provider: LlmProvider): LlmRuntime;
+export declare function selectBestRuntimeForProvider(runtimes: LlmRuntime[], provider: LlmProvider): LlmRuntime | null;
 export declare function selectDefaultMetabotProviders(input: {
     runtimes: LlmRuntime[];
     preferredProvider?: LlmProvider | null;
