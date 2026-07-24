@@ -516,7 +516,9 @@ export function createPrivateChatAutoReplyBackfillLoop(
             peerGlobalMetaId,
             localPrivateKeyHex,
             peerChatPublicKey,
-            afterIndex: existingCursor.afterIndex,
+            // MetaSO can assign the same index to messages from opposite directions.
+            // Re-read the cursor index and rely on message IDs to deduplicate it.
+            afterIndex: Math.max(-1, existingCursor.afterIndex - 1),
             limit: recentLimit,
           })
           : await historyClient.fetchRecent({

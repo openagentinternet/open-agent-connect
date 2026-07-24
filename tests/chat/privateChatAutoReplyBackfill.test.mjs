@@ -132,6 +132,80 @@ test('auto-reply backfill processes missed incoming private messages for known p
   assert.equal(handledMessages[0].rawMessage.source, 'private-chat-history-backfill');
 });
 
+test('auto-reply backfill re-reads the cursor index when opposite directions share it', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peerbot00000000000000000000000000';
+  const handledMessages = [];
+  const historyCalls = [];
+
+  await fs.mkdir(paths.stateRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(paths.stateRoot, 'private-chat-auto-reply-backfill.json'),
+    `${JSON.stringify({
+      version: 1,
+      peers: {
+        [peerGlobalMetaId]: {
+          afterIndex: 16,
+          updatedAt: 1_770_000_000_000,
+        },
+      },
+    }, null, 2)}\n`,
+    'utf8',
+  );
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async (message) => {
+      handledMessages.push(message);
+    },
+    listPeerGlobalMetaIds: async () => [peerGlobalMetaId],
+    historyClient: {
+      async fetchRecent() {
+        throw new Error('fetchRecent should not be used with an existing cursor');
+      },
+      async fetchAfter(input) {
+        historyCalls.push(input);
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 16,
+          serverTime: 1_770_000_001_000,
+          messages: [{
+            id: 'missed-incoming-at-duplicate-index',
+            pinId: 'missed-incoming-at-duplicate-index',
+            protocol: '/protocols/simplemsg',
+            content: 'message from the opposite direction',
+            timestamp: 1_770_000_001,
+            index: 16,
+            fromGlobalMetaId: peerGlobalMetaId,
+            toGlobalMetaId: selfGlobalMetaId,
+          }],
+        };
+      },
+    },
+    now: () => 1_770_000_001_000,
+  });
+
+  const result = await loop.syncOnce();
+
+  assert.equal(result.processed, 1);
+  assert.equal(historyCalls.length, 1);
+  assert.equal(historyCalls[0].afterIndex, 15);
+  assert.equal(handledMessages.length, 1);
+  assert.equal(handledMessages[0].messagePinId, 'missed-incoming-at-duplicate-index');
+});
+
 test('auto-reply backfill recovers an unanswered outbound message missing from durable history', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
