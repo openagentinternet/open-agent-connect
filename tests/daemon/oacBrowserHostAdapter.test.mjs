@@ -119,6 +119,7 @@ async function createAdapter(input) {
     privateChat: input.privateChat,
     serviceCall: input.serviceCall,
     writeMetaIdPin: input.writeMetaIdPin,
+    uploadMetaFile: input.uploadMetaFile,
     nameAliasProviders: input.nameAliasProviders,
     ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
     onInfrastructureSettingsUpdated: input.onInfrastructureSettingsUpdated,
@@ -931,6 +932,125 @@ test('OAC browser host adapter keeps copy-uri actor-agnostic', async () => {
       copiedText: 'metaapp://fixture',
     },
   });
+});
+
+test('OAC browser host adapter uploads host-picked files via metafile-upload trusted action', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-metafile-upload');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Upload Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1uploadbot',
+    mvcAddress: '18UploadBot',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    uploadMetaFile: async (input) => {
+      calls.push(input);
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          files: [
+            {
+              pinId: 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789i0',
+              uri: 'metafile://abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789i0.png',
+              name: 'photo.png',
+              size: 1024,
+              contentType: 'image/png',
+              actor: { uri: 'metaid://idq1uploadbot', globalMetaId: 'idq1uploadbot', name: 'Upload Bot' },
+            },
+          ],
+        },
+      };
+    },
+  });
+
+  const fileData = Buffer.from('fake-png-bytes').toString('base64');
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://fixture',
+    kind: 'metafile-upload',
+    payload: {
+      source: { kind: 'host-picker', multiple: false, accept: ['image/*'] },
+      entries: [{ name: 'photo.png', contentType: 'image/png', data: fileData }],
+      purpose: 'post-image',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.kind, 'metafile-upload');
+  assert.equal(result.data.handled, true);
+  assert.equal(result.data.data.files.length, 1);
+  const file = result.data.data.files[0];
+  assert.equal(file.pinId, 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789i0');
+  assert.equal(file.uri.startsWith('metafile://'), true);
+  assert.equal(file.name, 'photo.png');
+  assert.equal(file.size, 1024);
+  assert.equal(file.contentType, 'image/png');
+  assert.equal(file.actor.globalMetaId, 'idq1uploadbot');
+  // The picker hints and decoded entry bytes reach the host handler.
+  assert.deepEqual(calls[0].request.accept, ['image/*']);
+  assert.equal(calls[0].request.purpose, 'post-image');
+  assert.equal(calls[0].request.entries[0].name, 'photo.png');
+  assert.equal(calls[0].request.entries[0].data.toString('utf8'), 'fake-png-bytes');
+});
+
+test('OAC browser host adapter rejects metafile-upload without host-picker source', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-metafile-bad-source');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Bad Source Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1badsource',
+    mvcAddress: '18BadSource',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    uploadMetaFile: async () => ({ ok: true, state: 'success', data: { files: [] } }),
+  });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://fixture',
+    kind: 'metafile-upload',
+    payload: { source: { kind: 'inline' }, entries: [] },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'invalid_params');
+});
+
+test('OAC browser host adapter reports unsupported_method when metafile upload is unconfigured', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-metafile-unconfigured');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Unconfigured Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1unconfigured',
+    mvcAddress: '18Unconfigured',
+  });
+  // No uploadMetaFile handler wired.
+  const adapter = await createAdapter({ homeDir: active.homeDir, systemHomeDir });
+
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug,
+    resourceUri: 'metaapp://fixture',
+    kind: 'metafile-upload',
+    payload: { source: { kind: 'host-picker' }, entries: [{ name: 'a.txt', data: 'AAAA' }] },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'unsupported_method');
 });
 
 test('OAC browser host adapter maps service trusted actions to OAC service input', async (t) => {

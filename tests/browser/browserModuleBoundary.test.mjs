@@ -72,6 +72,22 @@ test('Browser page modules consume the published ABC UI package', () => {
   }
 });
 
+test('OAC Browser page script injects host bridge adapters for ABC gaps', () => {
+  const definition = browserPageApp.buildBrowserPageDefinition();
+  const script = definition.script;
+
+  // Problem 1: host-owned file picker for metafile.upload.
+  assert.match(script, /oacHandleBridgeMetafileUpload/);
+  assert.match(script, /createElement\('input'\)/);
+  // Problem 2: two-phase pin-write confirmation round-trip.
+  assert.match(script, /oacHandleBridgePinWrite/);
+  assert.match(script, /oac-pin-confirm/);
+  assert.match(script, /confirmRequest\.payload/);
+  // Problem 3: re-emit browser.actor.changed once runtime is ready.
+  assert.match(script, /oacLoadRuntime/);
+  assert.match(script, /browser\.actor\.changed/);
+});
+
 test('Browser API route boundary uses the published host contract result shape', () => {
   const contents = readFileSync(new URL('../../dist/browser/http.js', import.meta.url), 'utf8');
 

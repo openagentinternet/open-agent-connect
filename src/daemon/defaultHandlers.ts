@@ -3,7 +3,7 @@ import type { Dirent, FSWatcher } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { browserFailure, browserSuccess } from '@openagentinternet/agent-browser-host-contract';
-import type { BrowserRuntimeSnapshot } from '@openagentinternet/agent-browser-host-contract';
+import type { BrowserRuntimeSnapshot, BrowserTrustedActionInput } from '@openagentinternet/agent-browser-host-contract';
 import {
   commandAwaitingConfirmation,
   commandFailed,
@@ -204,7 +204,7 @@ import {
   type ProductionLargeFileUploader,
 } from '../core/files/uploadLargeFile';
 import { createMetaFsLargeUploader } from '../core/files/metaFsLargeUploader';
-import { uploadLocalFileToChain } from '../core/files/uploadFile';
+import { uploadFileBufferToChain, uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
 import { createMetaAppLocalCacheStore } from '../core/metaapp/localCache';
@@ -10829,6 +10829,53 @@ export function createDefaultMetabotDaemonHandlers(input: {
         );
       }
     },
+    uploadMetaFile: async ({ actorId, request }) => {
+      try {
+        const actor = await resolveActorWriteContext(actorId);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const bridgeActor = await resolveBrowserBridgeActorForHome(actor.homeDir);
+        if (!bridgeActor) {
+          return commandManualActionRequired(
+            'actor_required',
+            'A selected MetaID Actor Bot with a Global MetaID is required.',
+          );
+        }
+        const network = await resolveWriteNetworkForHome(undefined, actor.homeDir);
+        const files: Array<{
+          pinId: string;
+          uri: string;
+          name: string;
+          size: number;
+          contentType: string;
+          actor: { uri: string; globalMetaId: string; name: string };
+        }> = [];
+        for (const entry of request.entries) {
+          const uploaded = await uploadFileBufferToChain({
+            signer: actor.signer,
+            fileName: entry.name || 'upload',
+            data: entry.data,
+            contentType: entry.contentType || undefined,
+            network,
+          });
+          files.push({
+            pinId: uploaded.pinId,
+            uri: uploaded.metafileUri,
+            name: uploaded.fileName,
+            size: uploaded.bytes,
+            contentType: uploaded.contentType,
+            actor: bridgeActor,
+          });
+        }
+        return commandSuccess({ files });
+      } catch (error) {
+        return commandFailed(
+          'upload_failed',
+          safeBrowserBridgeErrorMessage(error, 'MetaFile upload failed.'),
+        );
+      }
+    },
     fetch: globalThis.fetch,
     env: process.env,
     onInfrastructureSettingsUpdated: input.onBrowserInfrastructureChanged,
@@ -11068,6 +11115,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
           Object.assign(actionRequest, { payload: request.payload });
         }
         return browserHostAdapter.runTrustedAction(actionRequest);
+      },
+      metafileUpload: async (request = {}) => {
+        // The ABC bridge client posts the host-picked file bytes to this
+        // endpoint (not the generic /api/browser/actions route). Reuse the
+        // trusted-action path so validation, actor resolution, and result
+        // mapping stay in one place.
+        const payload: Record<string, unknown> = {};
+        for (const key of Object.keys(request)) {
+          payload[key] = (request as Record<string, unknown>)[key];
+        }
+        return browserHostAdapter.runTrustedAction({
+          actorId: browserActorId(request),
+          resourceUri: normalizeText((request as { resourceUri?: unknown }).resourceUri),
+          kind: 'metafile-upload' as BrowserTrustedActionInput['kind'],
+          payload,
+        });
       },
     },
     config: {
