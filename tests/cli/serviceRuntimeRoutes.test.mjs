@@ -57,6 +57,26 @@ async function startRecordingDaemon() {
   };
 }
 
+test('default CLI blocks direct private-chat sends during orchestrated reply generation', async () => {
+  const dependencies = createDefaultCliDependencies({
+    cwd: process.cwd(),
+    env: {
+      METABOT_PRIVATE_CHAT_REPLY_GENERATION: '1',
+    },
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+  });
+
+  const result = await dependencies.chat.private({
+    to: 'idq1peer',
+    content: 'must not be sent directly',
+    from: 'sunnybot',
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'private_chat_delivery_owned_by_orchestrator');
+});
+
 test('default CLI service dependencies use canonical service daemon routes', async (t) => {
   const daemon = await startRecordingDaemon();
   t.after(async () => daemon.close());

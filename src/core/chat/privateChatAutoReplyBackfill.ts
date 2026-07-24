@@ -63,6 +63,7 @@ export interface PrivateChatAutoReplyBackfillDependencies {
     peerGlobalMetaId: string,
     message: PrivateChatMessage,
   ) => Promise<boolean>;
+  recoverInboundReply?: (peerGlobalMetaId: string) => Promise<boolean>;
   historyClient?: PrivateChatAutoReplyBackfillHistoryClient;
   listPeerGlobalMetaIds?: () => Promise<string[]>;
   resolveChatApiBaseUrl?: () => Promise<string | undefined> | string | undefined;
@@ -77,6 +78,7 @@ export interface PrivateChatAutoReplyBackfillOptions {
   startupCatchUpMs?: number;
   outboundRecoveryDelayMs?: number;
   maxOutboundRecoveryAttempts?: number;
+  inboundRecoveryDelayMs?: number;
   cursorPath?: string;
 }
 
@@ -466,6 +468,10 @@ export function createPrivateChatAutoReplyBackfillLoop(
     options.maxOutboundRecoveryAttempts,
     DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS,
   );
+  const inboundRecoveryDelayMs = normalizePositiveInteger(
+    options.inboundRecoveryDelayMs,
+    DEFAULT_INTERVAL_MS,
+  );
   const cursorPath = options.cursorPath
     ?? path.join(deps.paths.stateRoot, 'private-chat-auto-reply-backfill.json');
   const historyClient = deps.historyClient ?? createDefaultHistoryClient({
@@ -611,6 +617,32 @@ export function createPrivateChatAutoReplyBackfillLoop(
               if (await deps.recoverOutboundMessage(peerGlobalMetaId, latestMessage)) {
                 recovered += 1;
               }
+            }
+          } catch (error) {
+            failed += 1;
+            deps.onError?.(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+      }
+
+      if (deps.recoverInboundReply) {
+        const conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
+        const latestMessages = conversation
+          ? await deps.stateStore.getRecentMessages(conversation.conversationId, 1)
+          : [];
+        const latestMessage = latestMessages.at(-1) ?? null;
+        const recoveryEligible = Boolean(
+          conversation?.state === 'active'
+          && conversation.lastDirection === 'inbound'
+          && latestMessage
+          && latestMessage.direction === 'inbound'
+          && classifySimplemsgContent(latestMessage.content).kind === 'private_chat'
+          && getNow() - latestMessage.timestamp >= inboundRecoveryDelayMs,
+        );
+        if (recoveryEligible) {
+          try {
+            if (await deps.recoverInboundReply(peerGlobalMetaId)) {
+              recovered += 1;
             }
           } catch (error) {
             failed += 1;

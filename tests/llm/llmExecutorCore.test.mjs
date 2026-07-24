@@ -2273,6 +2273,34 @@ process.stdout.write(JSON.stringify({ type: 'result', result: 'done' }) + '\\n')
   assert.match(args.at(-1), /User task only/);
 });
 
+test('Cursor backend can return only the protocol final result for reply generation', async () => {
+  const base = await createTempDir();
+  const binaryPath = await writeExecutableScript(base, 'fake-cursor-final.js', `#!/usr/bin/env node
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + '\\n');
+}
+send({ type: 'assistant', message: { content: [{ type: 'output_text', text: 'Finding context.\\n' }] } });
+send({ type: 'assistant', message: { content: [{ type: 'output_text', text: 'Final peer reply.' }] } });
+send({ type: 'result', result: 'Final peer reply.' });
+`);
+  const backend = createCursorBackend(binaryPath);
+
+  const result = await backend.execute(
+    {
+      runtimeId: 'llm_cursor',
+      runtime: { ...runtime, provider: 'cursor', binaryPath },
+      prompt: 'reply to peer',
+      cwd: base,
+      outputMode: 'final',
+    },
+    { emit: () => {} },
+    new AbortController().signal,
+  );
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output, 'Final peer reply.');
+});
+
 test('CodeBuddy backend launches stream-json print mode and normalizes events', async () => {
   const base = await createTempDir();
   const argsPath = path.join(base, 'args.json');

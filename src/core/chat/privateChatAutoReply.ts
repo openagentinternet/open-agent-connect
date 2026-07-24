@@ -52,6 +52,7 @@ export interface PrivateChatAutoReplyDependencies {
 
 export interface PrivateChatAutoReplyOrchestrator {
   handleInboundMessage(message: PrivateChatInboundMessage): Promise<void>;
+  retryPendingInboundMessage(peerGlobalMetaId: string): Promise<boolean>;
   retryOutboundMessage(
     peerGlobalMetaId: string,
     message: PrivateChatMessage,
@@ -214,6 +215,7 @@ export function createPrivateChatAutoReplyOrchestrator(
   config: PrivateChatAutoReplyConfig,
 ): PrivateChatAutoReplyOrchestrator {
   const rateLimiter: RateLimiterState = { replyTimestamps: [] };
+  const activeInboundReplies = new Set<string>();
   const getNow = deps.now ?? (() => Date.now());
 
   async function sendReplyMessage(
@@ -491,7 +493,120 @@ export function createPrivateChatAutoReplyOrchestrator(
     }
   }
 
+  async function replyToInboundMessage(input: {
+    selfGlobalMetaId: string;
+    peerGlobalMetaId: string;
+    conversation: PrivateChatConversation;
+    inboundMessage: PrivateChatMessage;
+    strategy: Awaited<ReturnType<ChatStrategyStore['getStrategy']>>;
+  }): Promise<boolean> {
+    const replyKey = `${input.conversation.conversationId}:${input.inboundMessage.messageId}`;
+    if (activeInboundReplies.has(replyKey)) return false;
+    if (!checkRateLimit(rateLimiter, getNow())) return false;
+
+    activeInboundReplies.add(replyKey);
+    try {
+      const guidanceWasPending = Boolean(
+        normalizeText(input.conversation.pendingGuidanceText)
+        && typeof input.conversation.pendingGuidanceCreatedAt === 'number',
+      );
+      const guidanceToConsume = guidanceWasPending
+        ? await deps.stateStore.claimPendingGuidance(
+            input.conversation.conversationId,
+            { now: getNow() },
+          )
+        : null;
+      if (guidanceWasPending && !guidanceToConsume) return false;
+
+      const maxTurns = input.strategy?.maxTurns ?? DEFAULT_MAX_TURNS;
+      if (input.conversation.turnCount >= maxTurns && !guidanceToConsume) {
+        const committedConversation = await commitOutboundTurn({
+          selfGlobalMetaId: input.selfGlobalMetaId,
+          peerGlobalMetaId: input.peerGlobalMetaId,
+          conversation: input.conversation,
+          content: ensureFinalByeLine('It was great chatting with you. Let us continue another time.'),
+          extensions: null,
+          shouldClose: true,
+          triggerMessageId: input.inboundMessage.messageId,
+        });
+        if (!committedConversation) return false;
+        rateLimiter.replyTimestamps.push(getNow());
+        return true;
+      }
+
+      const persona = await loadChatPersona(deps.paths);
+      const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(
+        input.conversation.conversationId,
+        DEFAULT_RECENT_MESSAGES_LIMIT,
+      ));
+      const preparedTurn = await prepareOutboundTurn({
+        conversation: input.conversation,
+        recentMessages,
+        persona,
+        strategy: input.strategy,
+        inboundMessage: input.inboundMessage,
+        operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
+      });
+      if (!preparedTurn) {
+        if (guidanceToConsume) {
+          await deps.stateStore.releasePendingGuidanceClaimIfMatches(
+            input.conversation.conversationId,
+            guidanceToConsume,
+          );
+        }
+        return false;
+      }
+
+      const committedConversation = await commitOutboundTurn({
+        selfGlobalMetaId: input.selfGlobalMetaId,
+        peerGlobalMetaId: input.peerGlobalMetaId,
+        conversation: input.conversation,
+        content: preparedTurn.content,
+        extensions: preparedTurn.extensions,
+        shouldClose: preparedTurn.shouldClose,
+        triggerMessageId: input.inboundMessage.messageId,
+        guidanceToConsume,
+      });
+      if (!committedConversation) return false;
+
+      rateLimiter.replyTimestamps.push(getNow());
+      return true;
+    } finally {
+      activeInboundReplies.delete(replyKey);
+    }
+  }
+
   return {
+    async retryPendingInboundMessage(peerGlobalMetaId) {
+      if (!config.enabled) return false;
+      const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
+      const normalizedPeerGlobalMetaId = normalizeText(peerGlobalMetaId);
+      if (!selfGlobalMetaId || !normalizedPeerGlobalMetaId) return false;
+
+      const conversation = await deps.stateStore.getConversationByPeer(normalizedPeerGlobalMetaId);
+      if (!conversation || conversation.state !== 'active' || conversation.lastDirection !== 'inbound') {
+        return false;
+      }
+      const [latestMessage] = await deps.stateStore.getRecentMessages(conversation.conversationId, 1);
+      if (
+        !latestMessage
+        || latestMessage.direction !== 'inbound'
+        || hasFinalByeLine(latestMessage.content)
+        || classifySimplemsgContent(latestMessage.content).kind !== 'private_chat'
+      ) {
+        return false;
+      }
+      const strategy = conversation.strategyId
+        ? await deps.strategyStore.getStrategy(conversation.strategyId)
+        : null;
+      return replyToInboundMessage({
+        selfGlobalMetaId,
+        peerGlobalMetaId: normalizedPeerGlobalMetaId,
+        conversation,
+        inboundMessage: latestMessage,
+        strategy,
+      });
+    },
     async retryOutboundMessage(peerGlobalMetaId, message) {
       if (message.direction !== 'outbound') return false;
       const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
@@ -692,79 +807,14 @@ export function createPrivateChatAutoReplyOrchestrator(
         return;
       }
 
-      // Check auto-reply eligibility.
       if (conversation.state !== 'active') return;
-      if (!checkRateLimit(rateLimiter, now)) return;
-
-      const guidanceWasPending = Boolean(
-        normalizeText(conversation.pendingGuidanceText)
-        && typeof conversation.pendingGuidanceCreatedAt === 'number',
-      );
-      const guidanceToConsume = guidanceWasPending
-        ? await deps.stateStore.claimPendingGuidance(
-            conversation.conversationId,
-            { now: getNow() },
-          )
-        : null;
-      if (guidanceWasPending && !guidanceToConsume) {
-        return;
-      }
-
-      const maxTurns = strategy?.maxTurns ?? DEFAULT_MAX_TURNS;
-
-      // Check hard turn limit unless an operator-guided turn must run now.
-      if (conversation.turnCount >= maxTurns && !guidanceToConsume) {
-        const committedConversation = await commitOutboundTurn({
-          selfGlobalMetaId,
-          peerGlobalMetaId,
-          conversation,
-          content: ensureFinalByeLine('It was great chatting with you. Let us continue another time.'),
-          extensions: null,
-          shouldClose: true,
-        });
-        if (committedConversation) {
-          rateLimiter.replyTimestamps.push(getNow());
-        }
-        return;
-      }
-
-      // Build context and call reply runner.
-      const persona = await loadChatPersona(deps.paths);
-      const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(
-        conversation.conversationId,
-        DEFAULT_RECENT_MESSAGES_LIMIT,
-      ));
-      const preparedTurn = await prepareOutboundTurn({
-        conversation,
-        recentMessages,
-        persona,
-        strategy,
-        inboundMessage: inboundMessageRecord,
-        operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
-      });
-      if (!preparedTurn) {
-        if (guidanceToConsume) {
-          await deps.stateStore.releasePendingGuidanceClaimIfMatches(
-            conversation.conversationId,
-            guidanceToConsume,
-          );
-        }
-        return;
-      }
-
-      const committedConversation = await commitOutboundTurn({
+      await replyToInboundMessage({
         selfGlobalMetaId,
         peerGlobalMetaId,
         conversation,
-        content: preparedTurn.content,
-        extensions: preparedTurn.extensions,
-        shouldClose: preparedTurn.shouldClose,
-        triggerMessageId: inboundMessageRecord.messageId,
-        guidanceToConsume,
+        strategy,
+        inboundMessage: inboundMessageRecord,
       });
-      if (!committedConversation) return;
-
-      rateLimiter.replyTimestamps.push(getNow());
     },
     async handleLocalGuidedTurn(peerGlobalMetaId, options = {}) {
       const selfGlobalMetaId = await deps.selfGlobalMetaId();
