@@ -2179,6 +2179,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot browser <subcommand>',
     subcommands: [
       { name: 'open', summary: 'Open the Agent Internet Browser page, optionally deep-linked to one resource URI.' },
+      { name: 'tab', summary: 'Ask an already-open Browser page to open a resource URI in a new tab.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -2207,6 +2208,42 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot browser open --uri metaapp://<pinId>',
       'metabot browser open --uri metafile://<pinId>.png',
       'metabot browser open --uri pin://<pinId>',
+    ],
+  },
+  {
+    commandPath: ['browser', 'tab'],
+    summary: 'Ask an already-open Browser page to open a resource URI in a new tab.',
+    usage: 'metabot browser tab <subcommand>',
+    subcommands: [
+      { name: 'open', summary: 'Open one Browser resource URI in a new tab of a running Browser page.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['browser', 'tab', 'open'],
+    summary: 'Ask every currently-open Browser page to open one resource URI in a new tab.',
+    usage: 'metabot browser tab open --uri <resource-uri>',
+    optionalFlags: [
+      {
+        flag: '--uri',
+        value: '<resource-uri>',
+        description: 'Browser resource URI to open in a new tab, such as metaid://<globalMetaId>, metaid://sunnyfung.eth, metaapp://<pinId>, metafile://<pinId>.png, or pin://<pinId>.',
+      },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'uri',
+      'pagesReached',
+    ],
+    failureSemantics: [
+      'Fails when --uri is missing, empty, or looks like a flag, or when the daemon cannot be reached.',
+      'pagesReached 0 is not a failure: the open is pending until a Browser page connects.',
+    ],
+    examples: [
+      'metabot browser tab open --uri metaid://<globalMetaId>',
+      'metabot browser tab open --uri metaid://sunnyfung.eth',
+      'metabot browser tab open --uri metaapp://<pinId>',
+      'metabot browser tab open --uri pin://<pinId>',
     ],
   },
   {

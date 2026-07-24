@@ -87,7 +87,12 @@ test('OAC Browser page script injects host bridge adapters for ABC gaps', () => 
   assert.match(script, /oacHandleBridgePinWrite/);
   assert.match(script, /oac-pin-confirm/);
   assert.match(script, /confirmRequest\.payload/);
-  // Problem 3: re-emit browser.actor.changed once runtime is ready.
+  // Problem 3: daemon-pushed tab opens feed ABC's client-only AgentBrowserTabs.
+  assert.match(script, /\/api\/browser\/events/);
+  assert.match(script, /agent-browser:open-tab/);
+  assert.match(script, /AgentBrowserTabs/);
+  assert.match(script, /globalThis\.EventSource/);
+  // Problem 4: re-emit browser.actor.changed once runtime is ready.
   assert.match(script, /oacLoadRuntime/);
   assert.match(script, /browser\.actor\.changed/);
 });
@@ -344,4 +349,100 @@ test('Browser API route boundary uses Browser command-result semantics', async (
   assert.equal(sent[0].status, 200);
   assert.equal(sent[0].payload.state, 'success');
   assert.equal(sent[0].payload.data.source.resolver, 'test');
+});
+
+test('Browser tab open POST fans out to every subscribed page and returns success', async () => {
+  const delivered = [];
+  const unregister = browserModule.registerBrowserTabSink((event) => delivered.push(event));
+  try {
+    const { handled, sent } = await callBrowserRoute({
+      method: 'POST',
+      path: '/api/browser/tabs/open',
+      body: { uri: 'metaid://idq1alice' },
+    });
+
+    assert.equal(handled, true);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].status, 200);
+    assert.equal(sent[0].payload.ok, true);
+    assert.equal(sent[0].payload.data.uri, 'metaid://idq1alice');
+    assert.equal(sent[0].payload.data.pagesReached, 1);
+    assert.equal(sent[0].payload.data.note, undefined);
+
+    // The sink received the fire-and-forget open-tab event.
+    assert.deepEqual(delivered, [{ type: 'agent-browser:open-tab', uri: 'metaid://idq1alice' }]);
+  } finally {
+    unregister();
+  }
+});
+
+test('Browser tab open POST reaches every connected page', async () => {
+  const a = [];
+  const b = [];
+  const unA = browserModule.registerBrowserTabSink((event) => a.push(event));
+  const unB = browserModule.registerBrowserTabSink((event) => b.push(event));
+  try {
+    const { sent } = await callBrowserRoute({
+      method: 'POST',
+      path: '/api/browser/tabs/open',
+      body: { uri: 'metaapp://8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0' },
+    });
+
+    assert.equal(sent[0].status, 200);
+    assert.equal(sent[0].payload.data.pagesReached, 2);
+    assert.equal(a.length, 1);
+    assert.equal(b.length, 1);
+  } finally {
+    unA();
+    unB();
+  }
+});
+
+test('Browser tab open POST with no page open reports pagesReached 0 and a note', async () => {
+  // No sink registered (other tests clean theirs up).
+  const { sent } = await callBrowserRoute({
+    method: 'POST',
+    path: '/api/browser/tabs/open',
+    body: { uri: 'pin://8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0' },
+  });
+
+  assert.equal(sent[0].status, 200);
+  assert.equal(sent[0].payload.ok, true);
+  assert.equal(sent[0].payload.data.pagesReached, 0);
+  assert.match(sent[0].payload.data.note, /no Browser page currently open/);
+});
+
+test('Browser tab open POST rejects missing or flag-like uri', async () => {
+  const missing = await callBrowserRoute({
+    method: 'POST',
+    path: '/api/browser/tabs/open',
+    body: {},
+  });
+  assert.equal(missing.sent[0].status, 400);
+  assert.equal(missing.sent[0].payload.code, 'missing_uri');
+
+  const empty = await callBrowserRoute({
+    method: 'POST',
+    path: '/api/browser/tabs/open',
+    body: { uri: '   ' },
+  });
+  assert.equal(empty.sent[0].status, 400);
+  assert.equal(empty.sent[0].payload.code, 'missing_uri');
+
+  const flagLike = await callBrowserRoute({
+    method: 'POST',
+    path: '/api/browser/tabs/open',
+    body: { uri: '--uri' },
+  });
+  assert.equal(flagLike.sent[0].status, 400);
+  assert.equal(flagLike.sent[0].payload.code, 'invalid_browser_uri');
+});
+
+test('Browser tab open route rejects non-POST methods', async () => {
+  const { handled, sent } = await callBrowserRoute({
+    method: 'GET',
+    path: '/api/browser/tabs/open',
+  });
+  assert.equal(handled, true);
+  assert.equal(sent[0].status, 405);
 });

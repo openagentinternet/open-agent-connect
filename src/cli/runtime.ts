@@ -2206,6 +2206,33 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     });
   }
 
+  // Ask every currently-open Browser page to open a URI in a new tab. The daemon
+  // fans the request out via the Browser tab SSE transport; ABC's client-only
+  // AgentBrowserTabs.openTab performs the actual open. No tab id is returned —
+  // tab ids are client-only and never reach the daemon.
+  async function openBrowserTab(input: {
+    uri: string;
+  }): Promise<MetabotCommandResult<unknown>> {
+    const response = await requestJson<{
+      ok?: boolean;
+      uri?: string;
+      pagesReached?: number;
+      note?: string;
+    }>(context, 'POST', '/api/browser/tabs/open', { uri: input.uri });
+    if (!response.ok) {
+      return commandFailed(
+        response.code ?? 'browser_tab_open_failed',
+        response.message ?? 'Browser tab open failed.',
+      );
+    }
+    const data = response.data ?? {};
+    return commandSuccess({
+      uri: typeof data.uri === 'string' ? data.uri : input.uri,
+      pagesReached: typeof data.pagesReached === 'number' ? data.pagesReached : 0,
+      ...(data.note ? { note: data.note } : {}),
+    });
+  }
+
   return {
     config: {
       get: async (input) => {
@@ -2359,6 +2386,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     },
     browser: {
       open: async (input) => openLocalBrowserPage(input),
+      tabOpen: async (input) => openBrowserTab(input),
     },
     chain: {
       write: async (input) => requestJsonForSelectedActor(
