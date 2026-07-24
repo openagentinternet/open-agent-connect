@@ -58,6 +58,7 @@ import {
   getMetabotMnemonicBackup,
   getMetabotWalletInfo,
   listMetabotProfiles,
+  selectBestRuntimeForProvider,
   selectDefaultMetabotProviders,
   selectRuntimeForProvider,
   recordMetabotInfoPublishResults,
@@ -1155,8 +1156,8 @@ function mergeMetabotCreateRuntimeCandidates(...groups: LlmRuntime[][]): LlmRunt
   return [...runtimeById.values()];
 }
 
-function hasHealthyMetabotCreateProvider(runtimes: LlmRuntime[], provider: LlmProvider): boolean {
-  return runtimes.some((runtime) => runtime.provider === provider && runtime.health === 'healthy');
+function hasMetabotCreateProviderCandidate(runtimes: LlmRuntime[], provider: LlmProvider): boolean {
+  return runtimes.some((runtime) => runtime.provider !== 'custom' && runtime.provider === provider);
 }
 
 async function resolveDefaultMetabotCreateProviders(input: {
@@ -1165,6 +1166,7 @@ async function resolveDefaultMetabotCreateProviders(input: {
   preferredProvider?: LlmProvider | null;
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
+  discover?: typeof discoverLlmRuntimes;
 }): Promise<{ primaryProvider?: LlmProvider | null; fallbackProvider?: LlmProvider | null }> {
   const targetRuntimeStore = createLlmRuntimeStore(resolveMetabotPaths(input.homeDir));
   const targetRuntimeState = await targetRuntimeStore.read();
@@ -1180,12 +1182,16 @@ async function resolveDefaultMetabotCreateProviders(input: {
   const preferredProvider = input.preferredProvider && input.preferredProvider !== 'custom'
     ? input.preferredProvider
     : null;
+  // Probe for the requested host only when it has no candidate at ANY
+  // availability tier (spec R1.3): a stored detected/degraded row is enough to
+  // attempt a best-effort bind, so re-probing it here would only add latency.
   if (
     preferredProvider
     && input.primaryProvider === undefined
-    && !hasHealthyMetabotCreateProvider(candidateRuntimes, preferredProvider)
+    && !hasMetabotCreateProviderCandidate(candidateRuntimes, preferredProvider)
   ) {
-    const discoveryResult = await discoverLlmRuntimes({
+    const discover = input.discover ?? discoverLlmRuntimes;
+    const discoveryResult = await discover({
       env: process.env,
       providers: [preferredProvider],
       knownRuntimes: candidateRuntimes,
@@ -1209,15 +1215,13 @@ async function resolveDefaultMetabotCreateProviders(input: {
 
   for (const provider of [defaults.primaryProvider, defaults.fallbackProvider]) {
     if (!provider || provider === 'custom') continue;
-    try {
-      const runtime = selectRuntimeForProvider(candidateRuntimes, provider);
-      await targetRuntimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
-    } catch (error) {
-      if (input.primaryProvider === provider || input.fallbackProvider === provider) {
-        continue;
-      }
-      throw error;
-    }
+    // System-resolved providers may sit at any availability tier (spec R1.3);
+    // carry the best-tier row into the target store so the binding write can
+    // reference it. A provider with no candidate at all never reaches this
+    // loop, but skip defensively instead of failing creation.
+    const runtime = selectBestRuntimeForProvider(candidateRuntimes, provider);
+    if (!runtime) continue;
+    await targetRuntimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
   }
 
   return defaults;
@@ -1228,22 +1232,40 @@ async function applyDefaultMetabotCreateProviders(input: {
   homeDir: string;
   sourceHomeDir?: string;
   preferredProvider?: LlmProvider | null;
-}): Promise<CreateMetabotInput> {
+  discover?: typeof discoverLlmRuntimes;
+}): Promise<{
+  createInput: CreateMetabotInput;
+  systemDefaultProviderRoles: Array<'primary' | 'fallback'>;
+}> {
   const defaults = await resolveDefaultMetabotCreateProviders({
     homeDir: input.homeDir,
     sourceHomeDir: input.sourceHomeDir,
     preferredProvider: input.preferredProvider,
     primaryProvider: input.createInput.primaryProvider,
     fallbackProvider: input.createInput.fallbackProvider,
+    discover: input.discover,
   });
+  // Roles the system filled in (not explicit in the request body) may be
+  // bound best-effort at any availability tier (spec R1); explicit roles keep
+  // the healthy-only gate downstream.
+  const systemDefaultProviderRoles: Array<'primary' | 'fallback'> = [];
+  if (input.createInput.primaryProvider === undefined && defaults.primaryProvider) {
+    systemDefaultProviderRoles.push('primary');
+  }
+  if (input.createInput.fallbackProvider === undefined && defaults.fallbackProvider) {
+    systemDefaultProviderRoles.push('fallback');
+  }
   return {
-    ...input.createInput,
-    ...(input.createInput.primaryProvider === undefined && defaults.primaryProvider !== undefined
-      ? { primaryProvider: defaults.primaryProvider }
-      : {}),
-    ...(input.createInput.fallbackProvider === undefined && defaults.fallbackProvider !== undefined
-      ? { fallbackProvider: defaults.fallbackProvider }
-      : {}),
+    createInput: {
+      ...input.createInput,
+      ...(input.createInput.primaryProvider === undefined && defaults.primaryProvider !== undefined
+        ? { primaryProvider: defaults.primaryProvider }
+        : {}),
+      ...(input.createInput.fallbackProvider === undefined && defaults.fallbackProvider !== undefined
+        ? { fallbackProvider: defaults.fallbackProvider }
+        : {}),
+    },
+    systemDefaultProviderRoles,
   };
 }
 
@@ -11620,6 +11642,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           defaultProviders = await resolveDefaultMetabotCreateProviders({
             homeDir: profileHomeDir,
             preferredProvider,
+            discover: input.discoverLlmRuntimes,
           });
         } catch (error) {
           if (error instanceof RequestedMetabotHostUnavailableError) {
@@ -11667,6 +11690,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ...(defaultProviders.fallbackProvider !== undefined
                 ? { fallbackProvider: defaultProviders.fallbackProvider }
                 : {}),
+              // Both roles here came from system defaulting (host/env
+              // preference resolution), never from explicit user fields.
+              systemDefaultProviderRoles: [
+                ...(defaultProviders.primaryProvider ? ['primary' as const] : []),
+                ...(defaultProviders.fallbackProvider ? ['fallback' as const] : []),
+              ],
             });
             const profileInfoTargets = buildMetabotInfoPublishTargets(profile, ['primaryProvider']);
             const profileChainWrites = await syncMetabotInfoToChain(targetSigner, profile, profileInfoTargets, {
@@ -14987,13 +15016,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const profileHomeDir = resolvedHome.homeDir;
+        // Roles explicitly provided in the request body keep the healthy-only
+        // availability gate; roles the system resolves below accept a
+        // best-effort candidate at any tier (spec R1).
+        const explicitPrimaryProvider = createInput.primaryProvider;
+        const explicitFallbackProvider = createInput.fallbackProvider;
+        let systemDefaultProviderRoles: Array<'primary' | 'fallback'> = [];
         try {
-          createInput = await applyDefaultMetabotCreateProviders({
+          const applied = await applyDefaultMetabotCreateProviders({
             createInput,
             homeDir: profileHomeDir,
             sourceHomeDir: input.homeDir,
             preferredProvider: resolveMetabotCreatePreferredProvider(body),
+            discover: input.discoverLlmRuntimes,
           });
+          createInput = applied.createInput;
+          systemDefaultProviderRoles = applied.systemDefaultProviderRoles;
         } catch (error) {
           if (error instanceof RequestedMetabotHostUnavailableError) {
             return commandFailed('requested_host_unavailable', error.message);
@@ -15016,8 +15054,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
         });
         try {
           await validateMetabotProviderAvailability(providerValidationProfile, {
-            primaryProvider: createInput.primaryProvider,
-            fallbackProvider: createInput.fallbackProvider,
+            primaryProvider: explicitPrimaryProvider,
+            fallbackProvider: explicitFallbackProvider,
           });
         } catch (error) {
           return commandFailed('invalid_metabot_profile_create', error instanceof Error ? error.message : String(error));
@@ -15088,6 +15126,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             homeDir: profileHomeDir,
             globalMetaId: identity.globalMetaId,
             mvcAddress: identity.mvcAddress,
+            systemDefaultProviderRoles,
           });
           await recordMetabotInfoPublishResults(profile, profileInfoTargets, profileChainWrites);
           await notifyIdentityProfileRegistered();

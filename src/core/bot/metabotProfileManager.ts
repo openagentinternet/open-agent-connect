@@ -86,6 +86,8 @@ export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
   homeDir: string;
   globalMetaId: string;
   mvcAddress: string;
+  /** Roles whose provider came from system defaulting (not user request); binding writes for them accept any availability tier. */
+  systemDefaultProviderRoles?: Array<'primary' | 'fallback'>;
 }
 
 export interface UpdateMetabotInfoInput {
@@ -239,8 +241,21 @@ function compareRuntimeActivityPreference(left: LlmRuntime, right: LlmRuntime): 
   return left.id.localeCompare(right.id);
 }
 
-function isDefaultSelectableRuntime(runtime: LlmRuntime): boolean {
-  return runtime.provider !== 'custom' && runtime.health === 'healthy';
+// Availability tiers for SYSTEM default selection only (spec R1). Lower is
+// more likely usable. Explicit provider requests and the message-path
+// resolver keep their healthy-only gates; never reuse this there.
+export function runtimeAvailabilityTier(runtime: LlmRuntime): number {
+  if (runtime.health === 'healthy') return 0;
+  if (runtime.health === 'detected' && runtime.authState === 'authenticated') return 1;
+  if (runtime.health === 'detected') return 2;
+  if (runtime.health === 'degraded') return 3;
+  return 4; // unavailable
+}
+
+function compareRuntimeAvailabilityPreference(left: LlmRuntime, right: LlmRuntime): number {
+  const tierDelta = runtimeAvailabilityTier(left) - runtimeAvailabilityTier(right);
+  if (tierDelta !== 0) return tierDelta;
+  return compareRuntimeActivityPreference(left, right);
 }
 
 export function selectRuntimeForProvider(runtimes: LlmRuntime[], provider: LlmProvider): LlmRuntime {
@@ -254,6 +269,17 @@ export function selectRuntimeForProvider(runtimes: LlmRuntime[], provider: LlmPr
   return runtime;
 }
 
+// Best-tier runtime for a provider across ALL availability tiers (spec R1.6);
+// used for system-selected binding rows, which are valid on non-healthy
+// runtimes. Returns null when the provider has no candidate at all.
+export function selectBestRuntimeForProvider(runtimes: LlmRuntime[], provider: LlmProvider): LlmRuntime | null {
+  if (provider === 'custom') return null;
+  const candidates = runtimes.filter((runtime) => (
+    runtime.provider !== 'custom' && runtime.provider === provider
+  )).sort(compareRuntimeAvailabilityPreference);
+  return candidates[0] ?? null;
+}
+
 export function selectDefaultMetabotProviders(input: {
   runtimes: LlmRuntime[];
   preferredProvider?: LlmProvider | null;
@@ -261,8 +287,8 @@ export function selectDefaultMetabotProviders(input: {
   fallbackProvider?: LlmProvider | null;
 }): { primaryProvider?: LlmProvider | null; fallbackProvider?: LlmProvider | null } {
   const availableRuntimes = input.runtimes
-    .filter(isDefaultSelectableRuntime)
-    .sort(compareRuntimeActivityPreference);
+    .filter((runtime) => runtime.provider !== 'custom')
+    .sort(compareRuntimeAvailabilityPreference);
   const availableProviderRows = availableRuntimes.filter((runtime, index, rows) => (
     rows.findIndex((candidate) => candidate.provider === runtime.provider) === index
   ));
@@ -475,10 +501,14 @@ export async function createMetabotProfile(
     homeDir: resolvedHome.homeDir,
   });
   const fullProfile = await buildMetabotProfileFull(profile);
+  const systemDefaultRoles = new Set<'primary' | 'fallback'>();
+  if (input.primaryProvider === undefined && providerSelection.primaryProvider) systemDefaultRoles.add('primary');
+  if (input.fallbackProvider === undefined && providerSelection.fallbackProvider) systemDefaultRoles.add('fallback');
   const writeProviderBindings = await buildProviderBindingWrite({
     profile: fullProfile,
     primaryProvider: providerSelection.primaryProvider,
     fallbackProvider: providerSelection.fallbackProvider,
+    systemDefaultRoles,
   });
   if (writeProviderBindings) {
     await writeProviderBindings();
@@ -565,10 +595,16 @@ export async function createMetabotProfileFromIdentity(
     mvcAddress: draft.mvcAddress,
   });
   const fullProfile = await buildMetabotProfileFull(profile);
+  const systemDefaultRoles = new Set<'primary' | 'fallback'>(input.systemDefaultProviderRoles ?? []);
+  if (!input.systemDefaultProviderRoles) {
+    if (input.primaryProvider === undefined && providerSelection.primaryProvider) systemDefaultRoles.add('primary');
+    if (input.fallbackProvider === undefined && providerSelection.fallbackProvider) systemDefaultRoles.add('fallback');
+  }
   const writeProviderBindings = await buildProviderBindingWrite({
     profile: fullProfile,
     primaryProvider: draft.primaryProvider,
     fallbackProvider: draft.fallbackProvider,
+    systemDefaultRoles,
   });
   if (writeProviderBindings) {
     await writeProviderBindings();
@@ -682,6 +718,7 @@ async function buildProviderBindingWrite(input: {
   profile: MetabotProfileFull;
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
+  systemDefaultRoles?: ReadonlySet<'primary' | 'fallback'>;
 }): Promise<(() => Promise<void>) | null> {
   const updates: Array<{ role: 'primary' | 'fallback'; provider: LlmProvider | null }> = [];
   if (input.primaryProvider !== undefined) {
@@ -712,7 +749,10 @@ async function buildProviderBindingWrite(input: {
       }
       continue;
     }
-    const runtime = selectRuntimeForProvider(runtimeState.runtimes, update.provider);
+    const runtime = input.systemDefaultRoles?.has(update.role)
+      ? selectBestRuntimeForProvider(runtimeState.runtimes, update.provider)
+      : selectRuntimeForProvider(runtimeState.runtimes, update.provider);
+    if (!runtime) continue; // System-selected role whose candidate vanished: skip the row instead of failing creation.
     const binding = normalizeLlmBinding(buildProviderBinding({
       slug: input.profile.slug,
       runtime,

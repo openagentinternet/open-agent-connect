@@ -1798,11 +1798,6 @@ test('default bot createProfile rejects an unavailable requested host instead of
   t.after(async () => {
     await cleanupProfileHome(homeDir);
   });
-  const originalPath = process.env.PATH;
-  process.env.PATH = '';
-  t.after(() => {
-    process.env.PATH = originalPath;
-  });
   const systemHomeDir = deriveSystemHome(homeDir);
   await createLlmRuntimeStore(homeDir).write({
     version: 1,
@@ -1813,6 +1808,9 @@ test('default bot createProfile rejects an unavailable requested host instead of
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => null,
+    // Hermetic: the requested host has no candidate at any tier, regardless of
+    // what is installed on the machine running the test.
+    discoverLlmRuntimes: async () => ({ runtimes: [], errors: [] }),
     ...makeChainedCreateOverrides(writeCalls),
   });
 
@@ -1825,6 +1823,52 @@ test('default bot createProfile rejects an unavailable requested host instead of
   assert.equal(result.code, 'requested_host_unavailable');
   assert.match(result.message, /gemini/);
   assert.deepEqual(writeCalls, []);
+});
+
+test('default bot createProfile binds a detected requested host best-effort instead of rejecting it', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [runtime('claude-code', 'runtime-source-claude', 'healthy')],
+  });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    // The requested host is installed but not readiness-verified (detected);
+    // creation must still bind it best-effort (spec R1.3).
+    discoverLlmRuntimes: async () => ({
+      runtimes: [runtime('gemini', 'runtime-gemini-detected', 'detected')],
+      errors: [],
+    }),
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({
+    name: 'Detected Host Bot',
+    host: 'gemini',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.primaryProvider, 'gemini');
+  assert.equal(result.data.profile.fallbackProvider, 'claude-code');
+  const targetRuntimeState = await createLlmRuntimeStore(result.data.profile.homeDir).read();
+  assert.deepEqual(
+    targetRuntimeState.runtimes.map((entry) => entry.id).sort(),
+    ['runtime-gemini-detected', 'runtime-source-claude'],
+  );
+  const bindings = await createLlmBindingStore(result.data.profile.homeDir).read();
+  assert.deepEqual(
+    bindings.bindings.map((binding) => [binding.role, binding.llmRuntimeId]).sort(),
+    [
+      ['fallback', 'runtime-source-claude'],
+      ['primary', 'runtime-gemini-detected'],
+    ],
+  );
 });
 
 test('default bot createProfile from UI defaults providers by recent runtime activity', async (t) => {
