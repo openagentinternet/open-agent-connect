@@ -49,6 +49,12 @@ function installSocketIoMock() {
               listener(data);
             }
           },
+          emitEvent(eventName, data) {
+            const listener = listeners.get(eventName);
+            if (listener) {
+              listener(data);
+            }
+          },
         };
         sockets.push(socket);
         return socket;
@@ -136,6 +142,64 @@ async function awaitReplyFromEncryptedMessages(messages) {
     socketMock.restore();
   }
 }
+
+test('metaweb reply waiter resolves delivery replies emitted as named socket events', async () => {
+  const callerPair = createIdentityPair();
+  const providerPair = createIdentityPair();
+  const socketMock = installSocketIoMock();
+  try {
+    const { createSocketIoMetaWebReplyWaiter } = require('../../dist/core/a2a/metawebReplyWaiter.js');
+    const waiter = createSocketIoMetaWebReplyWaiter();
+    const replyPromise = waiter.awaitServiceReply({
+      callerGlobalMetaId: CALLER_GLOBAL_META_ID,
+      callerPrivateKeyHex: callerPair.privateKeyHex,
+      providerGlobalMetaId: PROVIDER_GLOBAL_META_ID,
+      providerChatPublicKey: providerPair.publicKeyHex,
+      servicePinId: SERVICE_PIN_ID,
+      paymentTxid: PAYMENT_TXID,
+      orderTxid: ORDER_TXID,
+      timeoutMs: 1000,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(socketMock.sockets.length > 0, 'expected reply waiter to open socket listeners');
+
+    const deliveryContent = `[DELIVERY:${ORDER_TXID}] ${JSON.stringify({
+      paymentTxid: PAYMENT_TXID,
+      servicePinId: SERVICE_PIN_ID,
+      result: 'Named event delivery is ready.',
+    })}`;
+    socketMock.sockets[0].emitEvent(
+      'WS_SERVER_NOTIFY_PRIVATE_CHAT',
+      encryptProviderMessage({
+        content: deliveryContent,
+        callerPair,
+        providerPair,
+        pinId: `${'3'.repeat(64)}i0`,
+        timestamp: BASE_TIME,
+      }),
+    );
+    socketMock.sockets[0].emitEvent('WS_RESPONSE_SUCCESS', {
+      data: encryptProviderMessage({
+        content: `[NeedsRating:${ORDER_TXID}] Please rate this service.`,
+        callerPair,
+        providerPair,
+        pinId: `${'4'.repeat(64)}i0`,
+        timestamp: BASE_TIME + 1,
+      }),
+    });
+
+    const reply = await replyPromise;
+
+    assert.equal(reply.state, 'completed');
+    assert.equal(reply.responseText, 'Named event delivery is ready.');
+    assert.equal(reply.deliveryPinId, `${'3'.repeat(64)}i0`);
+    assert.equal(reply.ratingRequestText, 'Please rate this service.');
+    assert.equal(reply.ratingRequestPinId, `${'4'.repeat(64)}i0`);
+  } finally {
+    socketMock.restore();
+  }
+});
 
 test('metaweb reply waiter returns artifacts from structured delivery payloads', async () => {
   const deliveryContent = `[DELIVERY:${ORDER_TXID}] ${JSON.stringify({

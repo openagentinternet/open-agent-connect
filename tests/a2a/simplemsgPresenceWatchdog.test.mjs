@@ -89,3 +89,64 @@ test('simplemsg presence watchdog restarts listener when a started local profile
   assert.equal(restartEvents.length, 1);
   assert.deepEqual(restartEvents[0].missing.map((profile) => profile.globalMetaId), ['idq1beta']);
 });
+
+test('simplemsg presence watchdog treats a truncated presence page as healthy instead of restarting', async () => {
+  let nowMs = 0;
+  const manager = createManager({
+    started: [
+      {
+        slug: 'alpha',
+        name: 'Alpha Bot',
+        homeDir: '/tmp/alpha',
+        globalMetaId: 'idq1alpha',
+      },
+      {
+        slug: 'beta',
+        name: 'Beta Bot',
+        homeDir: '/tmp/beta',
+        globalMetaId: 'idq1beta',
+      },
+    ],
+    skipped: [],
+  });
+  const restartEvents = [];
+  const watchdog = createA2ASimplemsgPresenceWatchdog({
+    manager,
+    gracePeriodMs: 50,
+    restartCooldownMs: 0,
+    now: () => nowMs,
+    readOnlineMetaBots: async () => ({
+      source: 'socket_presence',
+      total: 150,
+      onlineWindowSeconds: 1200,
+      bots: [
+        {
+          globalMetaId: 'idq1alpha',
+          lastSeenAt: nowMs,
+          lastSeenAgoSeconds: 0,
+          deviceCount: 1,
+          online: true,
+          name: 'Alpha Bot',
+          goal: '',
+        },
+      ],
+    }),
+    onRestart: (event) => {
+      restartEvents.push(event);
+    },
+  });
+
+  const firstCheck = await watchdog.checkOnce();
+  nowMs += 51;
+  const secondCheck = await watchdog.checkOnce();
+
+  // idq1beta is absent from the page, but the server reports more online
+  // identities than the capped page returned, so absence proves nothing.
+  assert.equal(firstCheck.status, 'healthy');
+  assert.deepEqual(firstCheck.missing, []);
+  assert.equal(secondCheck.status, 'healthy');
+  assert.deepEqual(secondCheck.missing, []);
+  assert.equal(manager.stops, 0);
+  assert.equal(manager.starts, 0);
+  assert.equal(restartEvents.length, 0);
+});

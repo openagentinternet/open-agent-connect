@@ -50,6 +50,7 @@ export interface FetchPrivateHistoryPageInput {
   peerGlobalMetaId: string;
   startIndex?: number;
   limit: number;
+  timeoutMs?: number;
 }
 
 export interface PrivateChatHistoryPage {
@@ -283,12 +284,26 @@ export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPage
     : 0));
   url.searchParams.set('size', String(normalizeConversationLimit(input.limit)));
 
-  const response = await fetchImpl(url.toString(), {
-    method: 'GET',
-    headers: {
-      'content-type': 'application/json',
-    },
-  });
+  // A hung history request must not wedge the backfill loop that relies on this
+  // fetch for all gap recovery, so bound it with an explicit timeout.
+  const timeoutMs = Number.isFinite(Number(input.timeoutMs))
+    ? Math.max(1, Math.floor(Number(input.timeoutMs)))
+    : 15_000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  timeout.unref?.();
+  let response: Response;
+  try {
+    response = await fetchImpl(url.toString(), {
+      method: 'GET',
+      headers: {
+        'content-type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
     throw new Error(`history_fetch_http_${response.status}`);
   }

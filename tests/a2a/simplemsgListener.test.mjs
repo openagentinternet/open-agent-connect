@@ -519,6 +519,166 @@ test('simplemsg listener ignores messages addressed to another local profile', a
   assert.equal(conversation.messages.length, 0);
 });
 
+test('simplemsg listener normalizes Unix-second socket timestamps to milliseconds', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1local0000000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peer00000000000000000000000000000';
+  const { homeDir } = await createProfile(systemHomeDir, {
+    name: 'Local Bot',
+    slug: 'local-bot',
+    globalMetaId: localGlobalMetaId,
+    keys: localKeys,
+  });
+
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+  });
+  await manager.start();
+
+  const payload = buildEncryptedSocketPayload({
+    fromGlobalMetaId: peerGlobalMetaId,
+    fromKeys: peerKeys,
+    toGlobalMetaId: localGlobalMetaId,
+    toChatPublicKey: localKeys.publicKeyHex,
+    content: 'seconds timestamp payload',
+    pinId: 'incoming-pin-seconds-timestamp',
+    timestamp: 1_784_910_335,
+  });
+  await harness.sockets[0].emitServer('WS_SERVER_NOTIFY_PRIVATE_CHAT', payload);
+
+  const conversation = await createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: localGlobalMetaId,
+      chatPublicKey: localKeys.publicKeyHex,
+    },
+    peer: {
+      globalMetaId: peerGlobalMetaId,
+      chatPublicKey: peerKeys.publicKeyHex,
+    },
+  }).readConversation();
+
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].timestamp, 1_784_910_335_000);
+});
+
+test('simplemsg listener reports undecryptable pushes and processes their redelivery once the peer key resolves', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1local0000000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peer00000000000000000000000000000';
+  const { homeDir } = await createProfile(systemHomeDir, {
+    name: 'Local Bot',
+    slug: 'local-bot',
+    globalMetaId: localGlobalMetaId,
+    keys: localKeys,
+  });
+
+  let peerKeyAvailable = false;
+  const errors = [];
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    resolvePeerChatPublicKey: async () => (peerKeyAvailable ? peerKeys.publicKeyHex : null),
+    onError: (error) => errors.push(error),
+  });
+  await manager.start();
+
+  const payload = buildEncryptedSocketPayload({
+    fromGlobalMetaId: peerGlobalMetaId,
+    fromKeys: peerKeys,
+    toGlobalMetaId: localGlobalMetaId,
+    toChatPublicKey: localKeys.publicKeyHex,
+    content: 'redelivered after key lookup recovered',
+    pinId: 'incoming-pin-redelivered',
+  });
+  delete payload.fromUserInfo.chatPublicKey;
+  await harness.sockets[0].emitServer('WS_SERVER_NOTIFY_PRIVATE_CHAT', payload);
+
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /dropped undecryptable simplemsg push/);
+  assert.match(errors[0].message, /incoming-pin-redelivered/);
+
+  const store = createA2AConversationStore({
+    homeDir,
+    local: {
+      globalMetaId: localGlobalMetaId,
+      chatPublicKey: localKeys.publicKeyHex,
+    },
+    peer: {
+      globalMetaId: peerGlobalMetaId,
+      chatPublicKey: peerKeys.publicKeyHex,
+    },
+  });
+  assert.equal((await store.readConversation()).messages.length, 0);
+
+  // The failed delivery must not stay pinned as seen: the redelivery of the
+  // same pinId is processed once the peer chat key becomes resolvable.
+  peerKeyAvailable = true;
+  await harness.sockets[0].emitServer('WS_SERVER_NOTIFY_PRIVATE_CHAT', payload);
+
+  const conversation = await waitForMessages(store, 1);
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].content, 'redelivered after key lookup recovered');
+  assert.equal(conversation.messages[0].pinId, 'incoming-pin-redelivered');
+});
+
+test('simplemsg listener reports persistence failures and still delivers the inbound message', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  const localKeys = createIdentityPair();
+  const peerKeys = createIdentityPair();
+  const localGlobalMetaId = 'idq1local0000000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peer00000000000000000000000000000';
+  await createProfile(systemHomeDir, {
+    name: 'Local Bot',
+    slug: 'local-bot',
+    globalMetaId: localGlobalMetaId,
+    keys: localKeys,
+  });
+
+  const errors = [];
+  const delivered = [];
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    socketEndpoints: [{ url: 'wss://metaso.test', path: '/socket/socket.io' }],
+    persister: async () => {
+      throw new Error('disk full');
+    },
+    onMessage: async (profile, message) => {
+      delivered.push(message);
+    },
+    onError: (error) => errors.push(error),
+  });
+  await manager.start();
+
+  const payload = buildEncryptedSocketPayload({
+    fromGlobalMetaId: peerGlobalMetaId,
+    fromKeys: peerKeys,
+    toGlobalMetaId: localGlobalMetaId,
+    toChatPublicKey: localKeys.publicKeyHex,
+    content: 'persist failure still delivers',
+    pinId: 'incoming-pin-persist-failure',
+  });
+  await harness.sockets[0].emitServer('WS_SERVER_NOTIFY_PRIVATE_CHAT', payload);
+
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /failed to persist simplemsg push/);
+  assert.match(errors[0].message, /disk full/);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].content, 'persist failure still delivers');
+  assert.equal(delivered[0].messagePinId, 'incoming-pin-persist-failure');
+});
+
 test('simplemsg listener accepts socket messages without an explicit recipient on the subscribed identity stream', async (t) => {
   const systemHomeDir = await createSystemHome(t);
   const localKeys = createIdentityPair();

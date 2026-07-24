@@ -10,6 +10,7 @@ const {
 const {
   buildPrivateConversationResponse,
   extractPrivateChatPeerGlobalMetaIds,
+  fetchPrivateChatHistoryPage,
   fetchPrivateChatPeerGlobalMetaIds,
 } = require('../../dist/core/chat/privateConversation.js');
 
@@ -94,6 +95,61 @@ test('fetchPrivateChatPeerGlobalMetaIds rejects MetaSO business errors returned 
     }),
     /peer_directory_fetch_api_1/,
   );
+});
+
+test('fetchPrivateChatHistoryPage aborts a hung history request after timeoutMs', async () => {
+  let capturedSignal = null;
+  const startedAt = Date.now();
+
+  await assert.rejects(
+    fetchPrivateChatHistoryPage({
+      selfGlobalMetaId: 'idq1local0000000000000000000000000000',
+      peerGlobalMetaId: 'idq1peer00000000000000000000000000000',
+      limit: 20,
+      timeoutMs: 20,
+      chatApiBaseUrl: 'https://metaso.test/chat-api/group-chat/',
+      fetchImpl: (_url, options) => {
+        capturedSignal = options?.signal ?? null;
+        // A request that never settles on its own; only the abort frees it.
+        return new Promise((_resolve, reject) => {
+          capturedSignal.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        });
+      },
+    }),
+    (error) => error.name === 'AbortError',
+  );
+
+  assert.ok(Date.now() - startedAt < 2_000, 'history fetch should abort well under 2s');
+  assert.ok(capturedSignal instanceof AbortSignal);
+  assert.equal(capturedSignal.aborted, true);
+});
+
+test('fetchPrivateChatHistoryPage passes an AbortSignal to fetch and returns parsed history rows', async () => {
+  let capturedSignal = null;
+
+  const page = await fetchPrivateChatHistoryPage({
+    selfGlobalMetaId: 'idq1local0000000000000000000000000000',
+    peerGlobalMetaId: 'idq1peer00000000000000000000000000000',
+    limit: 20,
+    chatApiBaseUrl: 'https://metaso.test/chat-api/group-chat/',
+    fetchImpl: async (_url, options) => {
+      capturedSignal = options?.signal ?? null;
+      return new Response(JSON.stringify({
+        code: 0,
+        data: {
+          total: 1,
+          list: [{ pinId: 'pin-1', index: 3 }],
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  assert.ok(capturedSignal instanceof AbortSignal);
+  assert.equal(capturedSignal.aborted, false);
+  assert.equal(page.total, 1);
+  assert.deepEqual(page.rows, [{ pinId: 'pin-1', index: 3 }]);
 });
 
 test('buildPrivateConversationResponse fetches private history and returns decrypted normalized viewer messages', async () => {

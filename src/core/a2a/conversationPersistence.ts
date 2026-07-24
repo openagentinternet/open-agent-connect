@@ -254,8 +254,10 @@ export async function persistA2AConversationMessage(
   const sessionId = buildA2APeerSessionId(localGlobalMetaId, peerGlobalMetaId);
   const txids = normalizeTxids(input.message.txids);
   const txid = normalizeText(input.message.txid) || txids[0] || null;
-  const timestamp = Number.isFinite(input.message.timestamp)
-    ? Math.trunc(Number(input.message.timestamp))
+  const parsedTimestamp = Number(input.message.timestamp);
+  const timestamp = Number.isFinite(parsedTimestamp) && parsedTimestamp > 0
+    // Upstream sources mix Unix seconds and milliseconds; always store milliseconds.
+    ? Math.trunc(parsedTimestamp < 1_000_000_000_000 ? parsedTimestamp * 1000 : parsedTimestamp)
     : Date.now();
   const display = normalizeSimplemsgDisplayContent({
     content: input.message.content,

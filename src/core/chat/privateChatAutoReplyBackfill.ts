@@ -325,6 +325,28 @@ function isReplyableIncomingMessage(
     && content !== UNSUPPORTED_FILE_TEXT;
 }
 
+// Rows that match a peer-to-self simplemsg but failed decryption are skipped
+// like any other non-replyable row — but skipping them while still advancing
+// the cursor would lose them permanently when the decrypt failure was
+// transient (e.g. peer chat key lookup hiccup). Detect them so the caller can
+// hold the cursor and retry on the next tick.
+function isUndecryptableIncomingMessage(
+  message: ChatViewerMessage,
+  selfGlobalMetaId: string,
+  peerGlobalMetaId: string,
+): boolean {
+  if (normalizeGlobalMetaId(message.fromGlobalMetaId) !== normalizeGlobalMetaId(peerGlobalMetaId)) {
+    return false;
+  }
+  if (normalizeGlobalMetaId(message.toGlobalMetaId) !== normalizeGlobalMetaId(selfGlobalMetaId)) {
+    return false;
+  }
+  if (message.protocol && message.protocol !== '/protocols/simplemsg') {
+    return false;
+  }
+  return normalizeText(message.content) === UNABLE_TO_DECRYPT_TEXT;
+}
+
 function shouldProcessInitialMessage(input: {
   message: ChatViewerMessage;
   peerGlobalMetaId: string;
@@ -577,6 +599,15 @@ export function createPrivateChatAutoReplyBackfillLoop(
       let peerFailed = false;
       for (const message of response.messages) {
         if (!isReplyableIncomingMessage(message, selfGlobalMetaId, peerGlobalMetaId)) {
+          if (isUndecryptableIncomingMessage(message, selfGlobalMetaId, peerGlobalMetaId)) {
+            // Hold the cursor so the row is retried instead of permanently lost.
+            peerFailed = true;
+            failed += 1;
+            deps.onError?.(new Error(
+              `undecryptable simplemsg from ${peerGlobalMetaId} at history index ${message.index}; cursor held for retry`,
+            ));
+            continue;
+          }
           skipped += 1;
           continue;
         }
