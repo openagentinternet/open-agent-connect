@@ -139,9 +139,12 @@ async function createAutoReplyHarness(options = {}) {
       },
     },
     selfGlobalMetaId: async () => localGlobalMetaId,
-    resolvePeerChatPublicKey: async () => (
-      hasResolvePeerChatPublicKeyOverride ? options.resolvePeerChatPublicKey : peerKeys.publicKeyHex
-    ),
+    resolvePeerChatPublicKey: async () => {
+      if (!hasResolvePeerChatPublicKeyOverride) return peerKeys.publicKeyHex;
+      return typeof options.resolvePeerChatPublicKey === 'function'
+        ? options.resolvePeerChatPublicKey()
+        : options.resolvePeerChatPublicKey;
+    },
     a2aConversationPersister: options.a2aConversationPersister,
     logSendFailure: options.logSendFailure === undefined
       ? (event) => sendFailureEvents.push(event)
@@ -955,6 +958,62 @@ test('auto-reply logs pin_write_failed when the chain write rejects', async () =
   assert.equal(harness.sendFailureEvents[0].kind, 'pin_write_failed');
   assert.equal(harness.sendFailureEvents[0].peerGlobalMetaId, harness.peerGlobalMetaId);
   assert.ok(harness.sendFailureEvents[0].error.includes('mvc broadcast failed: 502'));
+});
+
+test('auto-reply retries a stored inbound turn after the original send fails', async () => {
+  let keyAvailable = false;
+  let runnerCalls = 0;
+  const peerPublicKey = createIdentityPair().publicKeyHex;
+  const harness = await createAutoReplyHarness({
+    resolvePeerChatPublicKey: () => keyAvailable ? peerPublicKey : null,
+    replyRunner: async () => {
+      runnerCalls += 1;
+      return { state: 'reply', content: 'recovered reply' };
+    },
+  });
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-retry-after-send-failure' });
+  assert.equal(harness.writes.length, 0);
+  assert.equal(runnerCalls, 1);
+
+  keyAvailable = true;
+  assert.equal(await harness.orchestrator.retryPendingInboundMessage(harness.peerGlobalMetaId), true);
+  assert.equal(harness.writes.length, 1);
+  assert.equal(runnerCalls, 2);
+  assert.equal(await harness.orchestrator.retryPendingInboundMessage(harness.peerGlobalMetaId), false);
+});
+
+test('auto-reply does not start a recovery reply while the live inbound reply is still running', async () => {
+  let releaseRunner;
+  let runnerCalls = 0;
+  const runnerStarted = new Promise((resolve) => {
+    releaseRunner = resolve;
+  });
+  let finishRunner;
+  const runnerFinished = new Promise((resolve) => {
+    finishRunner = resolve;
+  });
+  const harness = await createAutoReplyHarness({
+    replyRunner: async () => {
+      runnerCalls += 1;
+      releaseRunner();
+      await runnerFinished;
+      return { state: 'reply', content: 'single reply' };
+    },
+  });
+
+  const liveReply = harness.handleInbound({ messagePinId: 'incoming-pin-live-reply' });
+  await runnerStarted;
+  assert.equal(
+    await harness.orchestrator.retryPendingInboundMessage(harness.peerGlobalMetaId),
+    false,
+  );
+  assert.equal(runnerCalls, 1);
+
+  finishRunner();
+  await liveReply;
+  assert.equal(harness.writes.length, 1);
+  assert.equal(runnerCalls, 1);
 });
 
 test('auto-reply logs identity_unavailable when the chat identity cannot be loaded', async () => {

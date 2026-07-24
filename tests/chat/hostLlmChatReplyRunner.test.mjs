@@ -171,32 +171,33 @@ test('parseRunnerOutput handles only Bye as visible close content', () => {
   assert.equal(result.content, 'Bye');
 });
 
-test('buildChatPrompt includes chain write actor rules when metaBotSlug is provided', () => {
+test('buildChatPrompt makes OAC the only private-chat delivery owner', () => {
   const prompt = buildChatPrompt(makeInput(), emptyPrivateChatAllowedSkillScope(), {
     metaBotSlug: 'mb-75fe8aaf',
   });
-  assert.match(prompt, /## Chain Write Actor \(critical\)/);
+  assert.match(prompt, /## Reply Delivery Boundary \(critical\)/);
   assert.match(prompt, /local MetaBot profile `mb-75fe8aaf`/);
-  assert.match(prompt, /--from mb-75fe8aaf/);
-  assert.match(prompt, /Never omit `--from`/);
+  assert.match(prompt, /Open Agent Connect owns delivery/);
+  assert.match(prompt, /NEVER call `metabot chat private`/);
+  assert.match(prompt, /Do not perform chain writes/);
 });
 
-test('buildChatPrompt omits private chat skill actor hints when no skills are allowed', () => {
+test('buildChatPrompt omits private chat skill read-only hints when no skills are allowed', () => {
   const prompt = buildChatPrompt(makeInput(), emptyPrivateChatAllowedSkillScope(), {
     metaBotSlug: 'mb-75fe8aaf',
   });
-  assert.doesNotMatch(prompt, /private chat skill performs uploads or config reads/);
+  assert.doesNotMatch(prompt, /Use allowed private-chat skills only for read-only context/);
   assert.match(prompt, /Persona Immersion \(critical\)/);
   assert.match(prompt, /Never say you are reading skills, checking context, or preparing to send a reply/);
   assert.match(prompt, /No private chat skills are available for this turn/);
 });
 
-test('buildChatPrompt omits chain write actor rules without metaBotSlug', () => {
+test('buildChatPrompt omits reply delivery boundary without metaBotSlug', () => {
   const prompt = buildChatPrompt(makeInput());
-  assert.doesNotMatch(prompt, /## Chain Write Actor/);
+  assert.doesNotMatch(prompt, /## Reply Delivery Boundary/);
 });
 
-test('host LLM chat runner injects chain write actor rules from metaBotSlug', async () => {
+test('host LLM chat runner injects the reply delivery boundary from metaBotSlug', async () => {
   const runtime = {
     id: 'llm-runtime-1',
     provider: 'codex',
@@ -238,8 +239,8 @@ test('host LLM chat runner injects chain write actor rules from metaBotSlug', as
   await runner(makeInput());
 
   assert.equal(executorCalls.length, 1);
-  assert.match(executorCalls[0].prompt, /## Chain Write Actor \(critical\)/);
-  assert.match(executorCalls[0].prompt, /--from mb-75fe8aaf/);
+  assert.match(executorCalls[0].prompt, /## Reply Delivery Boundary \(critical\)/);
+  assert.match(executorCalls[0].prompt, /NEVER call `metabot chat private`/);
 });
 
 test('buildChatPrompt ends with Reply now:', () => {
@@ -278,6 +279,13 @@ test('parseRunnerOutput strips invisible private-chat execution narration before
   const result = parseRunnerOutput(raw);
   assert.equal(result.state, 'reply');
   assert.equal(result.content, '感谢你帮查地址，确认是全新起点反而更清晰了。');
+});
+
+test('parseRunnerOutput strips Cursor private-chat path and send narration', () => {
+  const raw = 'Finding the private-chat send path and session context so the reply goes out as sunnybot.\nSending the private chat reply as sunnybot.\nGood to see you too.';
+  const result = parseRunnerOutput(raw);
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'Good to see you too.');
 });
 
 test('buildChatPrompt includes persona immersion rules when skills are allowed', () => {
@@ -389,6 +397,8 @@ test('host LLM chat runner executes through the injected LLM executor', async ()
   assert.equal(executorCalls[0].runtime, runtime);
   assert.equal(executorCalls[0].timeout, 321);
   assert.equal(executorCalls[0].metaBotSlug, 'alice');
+  assert.equal(executorCalls[0].outputMode, 'final');
+  assert.equal(executorCalls[0].env.METABOT_PRIVATE_CHAT_REPLY_GENERATION, '1');
   assert.match(executorCalls[0].prompt, /Reply now:/);
   assert.deepEqual(resolverCalls.resolveRuntime, [{ metaBotSlug: 'alice', excludeRuntimeIds: [] }]);
   assert.deepEqual(resolverCalls.markBindingUsed, ['binding-1']);

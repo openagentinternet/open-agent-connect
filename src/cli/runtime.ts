@@ -97,7 +97,10 @@ import {
 } from '../core/chat/privateChatAutoReplyBackfill';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
-import { createHostLlmChatReplyRunner } from '../core/chat/hostLlmChatReplyRunner';
+import {
+  createHostLlmChatReplyRunner,
+  PRIVATE_CHAT_REPLY_GENERATION_ENV,
+} from '../core/chat/hostLlmChatReplyRunner';
 import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
 import { createLlmOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
 import type {
@@ -1416,6 +1419,10 @@ export interface PrivateChatAutoReplyProfileDispatcher {
     peerGlobalMetaId: string,
     message: PrivateChatMessage,
   ): Promise<boolean>;
+  retryPendingInboundMessage(
+    profile: IdentityProfileRecord,
+    peerGlobalMetaId: string,
+  ): Promise<boolean>;
 }
 
 export interface PrivateChatAutoReplyProfileDispatcherOptions {
@@ -1846,6 +1853,7 @@ export function createPrivateChatAutoReplyProfileDispatcher(
       },
       resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
       replyRunner,
+      logSendFailure: createPrivateChatSendFailureFileLogger(profilePaths),
     }, profileAutoReplyConfig);
 
     orchestrators.set(cacheKey, orchestrator);
@@ -1853,6 +1861,10 @@ export function createPrivateChatAutoReplyProfileDispatcher(
   }
 
   return {
+    async retryPendingInboundMessage(profile, peerGlobalMetaId) {
+      const orchestrator = await getOrCreateOrchestrator(profile);
+      return orchestrator?.retryPendingInboundMessage(peerGlobalMetaId) ?? false;
+    },
     async retryOutboundMessage(profile, peerGlobalMetaId, message) {
       const orchestrator = await getOrCreateOrchestrator(profile);
       return orchestrator?.retryOutboundMessage(peerGlobalMetaId, message) ?? false;
@@ -2757,12 +2769,20 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       ),
     },
     chat: {
-      private: async (input) => requestJsonForSelectedActor(
-        'POST',
-        '/api/chat/private',
-        typeof input.from === 'string' ? input.from : undefined,
-        input,
-      ),
+      private: async (input) => {
+        if (context.env[PRIVATE_CHAT_REPLY_GENERATION_ENV] === '1') {
+          return commandFailed(
+            'private_chat_delivery_owned_by_orchestrator',
+            'Private-chat reply generation cannot send messages directly; Open Agent Connect owns delivery.',
+          );
+        }
+        return requestJsonForSelectedActor(
+          'POST',
+          '/api/chat/private',
+          typeof input.from === 'string' ? input.from : undefined,
+          input,
+        );
+      },
       conversations: async (input = {}) => {
         const params = new URLSearchParams();
         if (input.from) params.set('from', input.from);
@@ -3443,6 +3463,15 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
             profile,
             peerGlobalMetaId,
             message,
+          );
+        },
+        recoverInboundReply: async (peerGlobalMetaId) => {
+          if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {
+            return chatAutoReplyOrchestrator.retryPendingInboundMessage(peerGlobalMetaId);
+          }
+          return profileAutoReplyDispatcher.retryPendingInboundMessage(
+            profile,
+            peerGlobalMetaId,
           );
         },
         onError: (error) => {

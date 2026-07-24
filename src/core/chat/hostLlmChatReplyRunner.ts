@@ -16,6 +16,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
 const CLOSE_CONVERSATION_SIGNAL = 'Bye';
+export const PRIVATE_CHAT_REPLY_GENERATION_ENV = 'METABOT_PRIVATE_CHAT_REPLY_GENERATION';
 // A chat history gap beyond this (or a close marker) starts a new session in
 // the prompt; mirrors the orchestrator's idle-reopen window.
 const DEFAULT_SESSION_GAP_MS = 300_000;
@@ -61,6 +62,15 @@ function isInvisibleExecutionLine(line: string): boolean {
     && /skill|context|conversation/i.test(trimmed)
     && /reply|respond/i.test(trimmed)
   ) {
+    return true;
+  }
+  if (
+    /^(?:Finding|Checking|Reading|Locating|Looking up)\b/i.test(trimmed)
+    && /private[- ]chat|session|conversation|reply|send path/i.test(trimmed)
+  ) {
+    return true;
+  }
+  if (/^Sending (?:the )?(?:private[- ]chat )?reply\b/i.test(trimmed)) {
     return true;
   }
   return false;
@@ -162,15 +172,15 @@ function buildChatPrompt(
 
   if (metaBotSlug) {
     const actorLines = [
-      '## Chain Write Actor (critical)',
+      '## Reply Delivery Boundary (critical)',
       `You are replying as local MetaBot profile \`${metaBotSlug}\`.`,
-      `- Any on-chain write MUST pass \`--from ${metaBotSlug}\` on every metabot CLI command.`,
-      '- This includes `buzz post`, `file upload`, `chain write`, and `chat private`.',
-      '- Never omit `--from` in this private chat turn; omission uses the host active identity and publishes under the wrong MetaBot.',
+      '- Generate reply text only. Open Agent Connect owns delivery and will publish the returned text exactly once.',
+      '- NEVER call `metabot chat private`, a private-chat send skill, or any other command that sends this reply.',
+      '- Do not perform chain writes, uploads, or external side effects while generating this reply.',
     ];
     if (allowedSkillScope.skills.length > 0) {
       actorLines.push(
-        '- When a private chat skill performs uploads or config reads, keep the same `--from` slug on every related command.',
+        '- Use allowed private-chat skills only for read-only context needed to compose the reply.',
       );
     }
     sections.push(actorLines.join('\n'));
@@ -347,6 +357,10 @@ async function tryExecute(
       prompt,
       timeout: timeoutMs,
       metaBotSlug,
+      outputMode: 'final',
+      env: {
+        [PRIVATE_CHAT_REPLY_GENERATION_ENV]: '1',
+      },
     };
     if (enforceSkillScope) {
       request.skillIsolation = 'strict';
