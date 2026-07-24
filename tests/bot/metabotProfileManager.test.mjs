@@ -19,6 +19,9 @@ const {
   getMetabotMnemonicBackup,
   getMetabotWalletInfo,
   listMetabotProfiles,
+  runtimeAvailabilityTier,
+  selectBestRuntimeForProvider,
+  selectDefaultMetabotProviders,
   syncMetabotInfoToChain,
   updateMetabotProfile,
   validateAvatarDataUrl,
@@ -140,6 +143,90 @@ test('createMetabotProfile defaults primary and fallback providers from recently
   );
 });
 
+test('selectDefaultMetabotProviders ranks availability tiers ahead of activity', () => {
+  const older = '2026-05-01T00:00:00.000Z';
+  const newer = '2026-05-06T00:00:00.000Z';
+  // tier 1 (detected+authenticated) beats tier 2 (detected other auth) despite age.
+  const tier1 = { ...runtime('codex', 'runtime-codex', 'detected'), authState: 'authenticated', lastSeenAt: older, updatedAt: older };
+  const tier2 = { ...runtime('workbuddy', 'runtime-workbuddy', 'detected'), authState: 'unknown', lastSeenAt: newer, updatedAt: newer };
+  const selection = selectDefaultMetabotProviders({ runtimes: [tier2, tier1] });
+  assert.equal(selection.primaryProvider, 'codex');
+  assert.equal(selection.fallbackProvider, 'workbuddy');
+});
+
+test('selectDefaultMetabotProviders prefers detected over degraded and degraded over unavailable', () => {
+  const detected = runtime('codex', 'runtime-codex', 'detected');
+  const degraded = runtime('claude-code', 'runtime-claude', 'degraded');
+  const unavailable = runtime('gemini', 'runtime-gemini', 'unavailable');
+  const selection = selectDefaultMetabotProviders({ runtimes: [unavailable, degraded, detected] });
+  assert.equal(selection.primaryProvider, 'codex');
+  assert.equal(selection.fallbackProvider, 'claude-code');
+  const noDetected = selectDefaultMetabotProviders({ runtimes: [unavailable, degraded] });
+  assert.equal(noDetected.primaryProvider, 'claude-code');
+});
+
+test('selectDefaultMetabotProviders binds the single runtime of a one-runtime machine at any tier', () => {
+  const only = runtime('workbuddy', 'runtime-workbuddy', 'unavailable');
+  const selection = selectDefaultMetabotProviders({ runtimes: [only] });
+  assert.equal(selection.primaryProvider, 'workbuddy');
+  assert.equal(selection.fallbackProvider, undefined);
+});
+
+test('selectDefaultMetabotProviders keeps the preferred provider when it has a candidate at any tier', () => {
+  const healthy = runtime('claude-code', 'runtime-claude', 'healthy');
+  const degradedPreferred = runtime('codex', 'runtime-codex', 'degraded');
+  const selection = selectDefaultMetabotProviders({
+    runtimes: [healthy, degradedPreferred],
+    preferredProvider: 'codex',
+  });
+  assert.equal(selection.primaryProvider, 'codex');
+  assert.equal(selection.fallbackProvider, 'claude-code');
+});
+
+test('selectDefaultMetabotProviders prefers the most recently active unavailable runtime within tier 4', () => {
+  const older = { ...runtime('codex', 'runtime-codex', 'unavailable'), lastSeenAt: '2026-05-01T00:00:00.000Z', updatedAt: '2026-05-01T00:00:00.000Z', createdAt: '2026-05-01T00:00:00.000Z' };
+  const newer = { ...runtime('workbuddy', 'runtime-workbuddy', 'unavailable'), lastSeenAt: '2026-05-06T00:00:00.000Z', updatedAt: '2026-05-06T00:00:00.000Z' };
+  const selection = selectDefaultMetabotProviders({ runtimes: [older, newer] });
+  assert.equal(selection.primaryProvider, 'workbuddy');
+});
+
+test('selectBestRuntimeForProvider returns the best-tier runtime or null', () => {
+  const healthy = runtime('codex', 'runtime-codex-healthy', 'healthy');
+  const detected = { ...runtime('codex', 'runtime-codex-detected', 'detected'), lastSeenAt: '2026-05-06T00:00:00.000Z', updatedAt: '2026-05-06T00:00:00.000Z' };
+  assert.equal(selectBestRuntimeForProvider([detected, healthy], 'codex').id, 'runtime-codex-healthy');
+  assert.equal(selectBestRuntimeForProvider([detected], 'codex').id, 'runtime-codex-detected');
+  assert.equal(selectBestRuntimeForProvider([], 'codex'), null);
+  assert.equal(selectBestRuntimeForProvider([detected], 'custom'), null);
+});
+
+test('createMetabotProfile binds a detected runtime when nothing is healthy', async () => {
+  const systemHomeDir = await createSystemHome();
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'detected-default-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [runtime('workbuddy', 'runtime-workbuddy', 'detected')],
+  });
+  const created = await createMetabotProfile(systemHomeDir, { name: 'Detected Default Bot' });
+  assert.equal(created.primaryProvider, 'workbuddy');
+  const bindings = JSON.parse(await readFile(resolveMetabotPaths(created.homeDir).llmBindingsPath, 'utf8')).bindings;
+  assert.equal(bindings.length, 1);
+  assert.equal(bindings[0].role, 'primary');
+  assert.equal(bindings[0].llmRuntimeId, 'runtime-workbuddy');
+});
+
+test('createMetabotProfile still rejects an explicitly requested provider without a healthy runtime', async () => {
+  const systemHomeDir = await createSystemHome();
+  const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'explicit-detected-bot');
+  await createLlmRuntimeStore(targetHomeDir).write({
+    version: 1,
+    runtimes: [runtime('workbuddy', 'runtime-workbuddy', 'detected')],
+  });
+  await assert.rejects(
+    () => createMetabotProfile(systemHomeDir, { name: 'Explicit Detected Bot', primaryProvider: 'workbuddy' }),
+    /No available runtime found for provider: workbuddy/,
+  );
+});
+
 test('createMetabotProfile leaves fallback empty when only one provider is available', async () => {
   const systemHomeDir = await createSystemHome();
   const targetHomeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'single-llm-bot');
@@ -147,7 +234,6 @@ test('createMetabotProfile leaves fallback empty when only one provider is avail
     version: 1,
     runtimes: [
       runtime('codex', 'runtime-codex'),
-      runtime('gemini', 'runtime-gemini', 'unavailable'),
     ],
   });
 

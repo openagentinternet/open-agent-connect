@@ -22,5 +22,12 @@ export declare function createHostLlmChatReplyRunner(options?: {
     allowedChatSkillsResolver?: PrivateChatAllowedSkillsResolver;
     logWarning?: (scope: string, message: string) => void;
     allowTemplateFallback?: boolean;
+    /**
+     * Fired once per turn when no runtime could even be attempted (spec R5) —
+     * fire-and-forget, never awaited; the turn still falls back as before.
+     */
+    requestAvailabilityRecovery?: (input: {
+        metaBotSlug?: string;
+    }) => void;
 }): ChatReplyRunner;
 export { buildChatPrompt, parseRunnerOutput, stripPlanningPreamble, isPlanningPreambleLine };

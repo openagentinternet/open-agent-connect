@@ -191,6 +191,11 @@ export declare const DICTIONARIES: {
         readonly 'bot.chainCreatePendingMessage': "Data is being written on-chain. Please wait 15-30 seconds.";
         readonly 'bot.chainCreateSuccessTitle': "Bot created";
         readonly 'bot.chainCreateSuccessMessage': "The Bot identity has been written on-chain.";
+        readonly 'bot.createLlmBound': "LLM bound: {provider}";
+        readonly 'bot.createLlmPending': "Selected {provider} — verifying availability…";
+        readonly 'bot.createLlmPendingHint': "It becomes usable automatically once ready; you can also test it under LLM runtimes.";
+        readonly 'bot.createLlmNone': "No LLM discovered on this machine yet — detecting in the background.";
+        readonly 'bot.createLlmNoneHint': "Bind one later from the bot settings page.";
         readonly 'bot.createdSetupIncompleteTitle': "Bot created; setup incomplete";
         readonly 'bot.subsidyFailedTitle': "Subsidy claim failed";
         readonly 'bot.subsidyFailedMessage': "The Bot was created, but its MVC subsidy could not be claimed.";
@@ -788,6 +793,11 @@ export declare const DICTIONARIES: {
         readonly 'bot.chainCreatePendingMessage': "数据正在写入链上，请等候 15-30 秒。";
         readonly 'bot.chainCreateSuccessTitle': "Bot 创建成功";
         readonly 'bot.chainCreateSuccessMessage': "Bot 身份已写入链上。";
+        readonly 'bot.createLlmBound': "已绑定 LLM：{provider}";
+        readonly 'bot.createLlmPending': "已选择 {provider}，正在验证可用性…";
+        readonly 'bot.createLlmPendingHint': "就绪后会自动可用，也可在 LLM 运行时中手动测试。";
+        readonly 'bot.createLlmNone': "本机暂未发现 LLM，已在后台检测。";
+        readonly 'bot.createLlmNoneHint': "稍后可在 Bot 设置页面绑定。";
         readonly 'bot.createdSetupIncompleteTitle': "Bot 已创建，初始化未完成";
         readonly 'bot.subsidyFailedTitle': "补贴领取失败";
         readonly 'bot.subsidyFailedMessage': "Bot 已创建，但 MVC 补贴领取失败。";

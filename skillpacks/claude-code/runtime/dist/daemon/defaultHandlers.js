@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveServiceOrderPaymentMetadata = resolveServiceOrderPaymentMetadata;
 exports.fetchPeerChatPublicKey = fetchPeerChatPublicKey;
 exports.rebuildTraceArtifactsFromSessionState = rebuildTraceArtifactsFromSessionState;
+exports.llmDiscoverySweepRunningForHomeDir = llmDiscoverySweepRunningForHomeDir;
 exports.createDefaultMetabotDaemonHandlers = createDefaultMetabotDaemonHandlers;
 const node_fs_1 = require("node:fs");
 const node_crypto_1 = require("node:crypto");
@@ -810,6 +811,13 @@ class RequestedMetabotHostUnavailableError extends Error {
         this.provider = provider;
     }
 }
+// Kept in sync with cli/runtime.ts: end-to-end tests set this to keep daemon
+// behavior hermetic on machines that really have provider CLIs installed.
+// Injected discover functions always win over this gate (unit tests).
+const TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV = 'METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY';
+function createTimeLlmDiscoveryDisabled(discover) {
+    return !discover && process.env[TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV] === '1';
+}
 function mergeMetabotCreateRuntimeCandidates(...groups) {
     const runtimeById = new Map();
     for (const group of groups) {
@@ -819,8 +827,8 @@ function mergeMetabotCreateRuntimeCandidates(...groups) {
     }
     return [...runtimeById.values()];
 }
-function hasHealthyMetabotCreateProvider(runtimes, provider) {
-    return runtimes.some((runtime) => runtime.provider === provider && runtime.health === 'healthy');
+function hasMetabotCreateProviderCandidate(runtimes, provider) {
+    return runtimes.some((runtime) => runtime.provider !== 'custom' && runtime.provider === provider);
 }
 async function resolveDefaultMetabotCreateProviders(input) {
     const targetRuntimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(input.homeDir));
@@ -830,13 +838,35 @@ async function resolveDefaultMetabotCreateProviders(input) {
         ? targetRuntimeState
         : await (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(sourceHomeDir)).read();
     let candidateRuntimes = mergeMetabotCreateRuntimeCandidates(targetRuntimeState.runtimes, sourceRuntimeState.runtimes);
+    const discover = input.discover ?? llmRuntimeDiscovery_1.discoverLlmRuntimes;
+    // Presence scan (spec R2): on a fresh install neither store has ever seen
+    // a runtime, so run ONE bounded scan with readiness probes skipped. It only
+    // feeds selection here — it writes nothing to either store and never
+    // retires known runtimes.
+    let presenceScanRan = false;
+    if (!candidateRuntimes.some((runtime) => runtime.provider !== 'custom')
+        && !createTimeLlmDiscoveryDisabled(input.discover)) {
+        const scan = await discover({
+            env: process.env,
+            knownRuntimes: [],
+            skipReadinessProbe: true,
+        });
+        presenceScanRan = true;
+        candidateRuntimes = mergeMetabotCreateRuntimeCandidates(candidateRuntimes, scan.runtimes);
+    }
     const preferredProvider = input.preferredProvider && input.preferredProvider !== 'custom'
         ? input.preferredProvider
         : null;
+    // Probe for the requested host only when it has no candidate at ANY
+    // availability tier (spec R1.3): a stored detected/degraded row is enough to
+    // attempt a best-effort bind, so re-probing it here would only add latency.
+    // Skipped when the presence scan already covered every provider.
     if (preferredProvider
         && input.primaryProvider === undefined
-        && !hasHealthyMetabotCreateProvider(candidateRuntimes, preferredProvider)) {
-        const discoveryResult = await (0, llmRuntimeDiscovery_1.discoverLlmRuntimes)({
+        && !presenceScanRan
+        && !hasMetabotCreateProviderCandidate(candidateRuntimes, preferredProvider)
+        && !createTimeLlmDiscoveryDisabled(input.discover)) {
+        const discoveryResult = await discover({
             env: process.env,
             providers: [preferredProvider],
             knownRuntimes: candidateRuntimes,
@@ -857,16 +887,14 @@ async function resolveDefaultMetabotCreateProviders(input) {
     for (const provider of [defaults.primaryProvider, defaults.fallbackProvider]) {
         if (!provider || provider === 'custom')
             continue;
-        try {
-            const runtime = (0, metabotProfileManager_1.selectRuntimeForProvider)(candidateRuntimes, provider);
-            await targetRuntimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
-        }
-        catch (error) {
-            if (input.primaryProvider === provider || input.fallbackProvider === provider) {
-                continue;
-            }
-            throw error;
-        }
+        // System-resolved providers may sit at any availability tier (spec R1.3);
+        // carry the best-tier row into the target store so the binding write can
+        // reference it. A provider with no candidate at all never reaches this
+        // loop, but skip defensively instead of failing creation.
+        const runtime = (0, metabotProfileManager_1.selectBestRuntimeForProvider)(candidateRuntimes, provider);
+        if (!runtime)
+            continue;
+        await targetRuntimeStore.upsertRuntime(runtime, { preserveRecentHealthyOnDetected: true });
     }
     return defaults;
 }
@@ -877,16 +905,70 @@ async function applyDefaultMetabotCreateProviders(input) {
         preferredProvider: input.preferredProvider,
         primaryProvider: input.createInput.primaryProvider,
         fallbackProvider: input.createInput.fallbackProvider,
+        discover: input.discover,
     });
+    // Roles the system filled in (not explicit in the request body) may be
+    // bound best-effort at any availability tier (spec R1); explicit roles keep
+    // the healthy-only gate downstream.
+    const systemDefaultProviderRoles = [];
+    if (input.createInput.primaryProvider === undefined && defaults.primaryProvider) {
+        systemDefaultProviderRoles.push('primary');
+    }
+    if (input.createInput.fallbackProvider === undefined && defaults.fallbackProvider) {
+        systemDefaultProviderRoles.push('fallback');
+    }
     return {
-        ...input.createInput,
-        ...(input.createInput.primaryProvider === undefined && defaults.primaryProvider !== undefined
-            ? { primaryProvider: defaults.primaryProvider }
-            : {}),
-        ...(input.createInput.fallbackProvider === undefined && defaults.fallbackProvider !== undefined
-            ? { fallbackProvider: defaults.fallbackProvider }
+        createInput: {
+            ...input.createInput,
+            ...(input.createInput.primaryProvider === undefined && defaults.primaryProvider !== undefined
+                ? { primaryProvider: defaults.primaryProvider }
+                : {}),
+            ...(input.createInput.fallbackProvider === undefined && defaults.fallbackProvider !== undefined
+                ? { fallbackProvider: defaults.fallbackProvider }
+                : {}),
+        },
+        systemDefaultProviderRoles,
+    };
+}
+// Reads the freshly written bindings of a created profile and derives the
+// machine-readable creation outcome (spec R3.3) plus the providers that still
+// need an upgrade probe. Status follows the effective (primary, else
+// fallback) binding: 'healthy' when its runtime is healthy, 'pending' when
+// bound below healthy, 'none' when nothing could be bound at any tier.
+async function collectCreateLlmBindingOutcome(input) {
+    const [bindingState, runtimeState] = await Promise.all([
+        (0, llmBindingStore_1.createLlmBindingStore)(input.homeDir).read(),
+        (0, llmRuntimeStore_1.createLlmRuntimeStore)((0, paths_1.resolveMetabotPaths)(input.homeDir)).read(),
+    ]);
+    const runtimeById = new Map(runtimeState.runtimes.map((runtime) => [runtime.id, runtime]));
+    const slugBindings = bindingState.bindings.filter((binding) => binding.metaBotSlug === input.slug);
+    const primaryBinding = selectVisibleRoleBinding(slugBindings.filter((binding) => binding.role === 'primary'));
+    const fallbackBinding = selectVisibleRoleBinding(slugBindings.filter((binding) => binding.role === 'fallback'));
+    const pendingProviders = [];
+    for (const binding of [primaryBinding, fallbackBinding]) {
+        if (!binding)
+            continue;
+        const runtime = runtimeById.get(binding.llmRuntimeId);
+        if (runtime && runtime.provider !== 'custom' && runtime.health !== 'healthy'
+            && !pendingProviders.includes(runtime.provider)) {
+            pendingProviders.push(runtime.provider);
+        }
+    }
+    const effectiveBinding = primaryBinding ?? fallbackBinding;
+    const effectiveRuntime = effectiveBinding ? runtimeById.get(effectiveBinding.llmRuntimeId) : undefined;
+    const llmBinding = {
+        ...(input.primaryProvider ? { primaryProvider: input.primaryProvider } : {}),
+        ...(input.fallbackProvider ? { fallbackProvider: input.fallbackProvider } : {}),
+        status: !effectiveBinding
+            ? 'none'
+            : effectiveRuntime?.health === 'healthy'
+                ? 'healthy'
+                : 'pending',
+        ...(effectiveBinding && effectiveRuntime?.health !== 'healthy' && effectiveRuntime?.healthReason
+            ? { reason: effectiveRuntime.healthReason }
             : {}),
     };
+    return { llmBinding, pendingProviders };
 }
 function buildDefaultBindingId(slug, runtimeId, role) {
     const safeRuntime = runtimeId.replace(/[^a-zA-Z0-9._-]+/g, '_');
@@ -3521,7 +3603,7 @@ const llmDiscoverySweepStatusByHomeDir = new Map();
 // one store always run one at a time, in arrival order.
 const llmDiscoverySweepChainByHomeDir = new Map();
 function llmDiscoveryStatusForHomeDir(homeDir) {
-    const status = llmDiscoverySweepStatusByHomeDir.get(homeDir);
+    const status = llmDiscoverySweepStatusByHomeDir.get(node_path_1.default.resolve(homeDir));
     if (!status)
         return undefined;
     return {
@@ -3529,6 +3611,11 @@ function llmDiscoveryStatusForHomeDir(homeDir) {
         ...(status.lastStartedAt ? { lastStartedAt: status.lastStartedAt } : {}),
         ...(status.lastFinishedAt ? { lastFinishedAt: status.lastFinishedAt } : {}),
     };
+}
+// Cross-module read for the availability recovery loop (spec R4.4): skip a
+// store's recovery cycle while any discovery sweep owns it.
+function llmDiscoverySweepRunningForHomeDir(homeDir) {
+    return llmDiscoverySweepStatusByHomeDir.get(node_path_1.default.resolve(homeDir))?.running === true;
 }
 function normalizeDiscoveryProviders(value) {
     if (!Array.isArray(value))
@@ -3565,19 +3652,20 @@ async function runTrackedLlmDiscoverySweep(homeDir, providers, discover) {
     // Every sweep — blocking or background — joins one serialized chain per
     // store, so concurrent triggers cannot interleave store writes or flip the
     // shared status early. `running` clears only when the last queued sweep
-    // settles.
-    const status = llmDiscoverySweepStatusByHomeDir.get(homeDir) ?? { running: false, activeSweeps: 0 };
+    // settles. Keys are normalized so cross-module readers see the same entry.
+    const statusKey = node_path_1.default.resolve(homeDir);
+    const status = llmDiscoverySweepStatusByHomeDir.get(statusKey) ?? { running: false, activeSweeps: 0 };
     status.activeSweeps += 1;
     status.running = true;
     if (status.activeSweeps === 1) {
         status.lastStartedAt = new Date().toISOString();
     }
-    llmDiscoverySweepStatusByHomeDir.set(homeDir, status);
-    const previous = llmDiscoverySweepChainByHomeDir.get(homeDir) ?? Promise.resolve();
+    llmDiscoverySweepStatusByHomeDir.set(statusKey, status);
+    const previous = llmDiscoverySweepChainByHomeDir.get(statusKey) ?? Promise.resolve();
     const current = previous
         .catch(() => undefined)
         .then(() => runLlmDiscoverySweep(homeDir, providers, discover));
-    llmDiscoverySweepChainByHomeDir.set(homeDir, current);
+    llmDiscoverySweepChainByHomeDir.set(statusKey, current);
     try {
         return await current;
     }
@@ -3587,14 +3675,14 @@ async function runTrackedLlmDiscoverySweep(homeDir, providers, discover) {
             status.running = false;
             status.lastFinishedAt = new Date().toISOString();
         }
-        if (llmDiscoverySweepChainByHomeDir.get(homeDir) === current) {
-            llmDiscoverySweepChainByHomeDir.delete(homeDir);
+        if (llmDiscoverySweepChainByHomeDir.get(statusKey) === current) {
+            llmDiscoverySweepChainByHomeDir.delete(statusKey);
         }
     }
 }
 function startBackgroundLlmDiscoverySweep(homeDir, providers, discover) {
     // Single-flight: one in-flight sweep per store; concurrent triggers coalesce.
-    if (llmDiscoverySweepStatusByHomeDir.get(homeDir)?.running)
+    if (llmDiscoverySweepStatusByHomeDir.get(node_path_1.default.resolve(homeDir))?.running)
         return;
     runTrackedLlmDiscoverySweep(homeDir, providers, discover).catch((error) => {
         console.warn('[llm] background runtime discovery failed', error);
@@ -9620,6 +9708,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     defaultProviders = await resolveDefaultMetabotCreateProviders({
                         homeDir: profileHomeDir,
                         preferredProvider,
+                        discover: input.discoverLlmRuntimes,
                     });
                 }
                 catch (error) {
@@ -9663,6 +9752,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                             ...(defaultProviders.fallbackProvider !== undefined
                                 ? { fallbackProvider: defaultProviders.fallbackProvider }
                                 : {}),
+                            // Both roles here came from system defaulting (host/env
+                            // preference resolution), never from explicit user fields.
+                            systemDefaultProviderRoles: [
+                                ...(defaultProviders.primaryProvider ? ['primary'] : []),
+                                ...(defaultProviders.fallbackProvider ? ['fallback'] : []),
+                            ],
                         });
                         const profileInfoTargets = (0, metabotProfileManager_1.buildMetabotInfoPublishTargets)(profile, ['primaryProvider']);
                         const profileChainWrites = await (0, metabotProfileManager_1.syncMetabotInfoToChain)(targetSigner, profile, profileInfoTargets, {
@@ -12748,13 +12843,22 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('name_taken', resolvedHome.message);
                 }
                 const profileHomeDir = resolvedHome.homeDir;
+                // Roles explicitly provided in the request body keep the healthy-only
+                // availability gate; roles the system resolves below accept a
+                // best-effort candidate at any tier (spec R1).
+                const explicitPrimaryProvider = createInput.primaryProvider;
+                const explicitFallbackProvider = createInput.fallbackProvider;
+                let systemDefaultProviderRoles = [];
                 try {
-                    createInput = await applyDefaultMetabotCreateProviders({
+                    const applied = await applyDefaultMetabotCreateProviders({
                         createInput,
                         homeDir: profileHomeDir,
                         sourceHomeDir: input.homeDir,
                         preferredProvider: resolveMetabotCreatePreferredProvider(body),
+                        discover: input.discoverLlmRuntimes,
                     });
+                    createInput = applied.createInput;
+                    systemDefaultProviderRoles = applied.systemDefaultProviderRoles;
                 }
                 catch (error) {
                     if (error instanceof RequestedMetabotHostUnavailableError) {
@@ -12775,8 +12879,8 @@ function createDefaultMetabotDaemonHandlers(input) {
                 });
                 try {
                     await validateMetabotProviderAvailability(providerValidationProfile, {
-                        primaryProvider: createInput.primaryProvider,
-                        fallbackProvider: createInput.fallbackProvider,
+                        primaryProvider: explicitPrimaryProvider,
+                        fallbackProvider: explicitFallbackProvider,
                     });
                 }
                 catch (error) {
@@ -12833,18 +12937,32 @@ function createDefaultMetabotDaemonHandlers(input) {
                         homeDir: profileHomeDir,
                         globalMetaId: identity.globalMetaId,
                         mvcAddress: identity.mvcAddress,
+                        systemDefaultProviderRoles,
                     });
                     await (0, metabotProfileManager_1.recordMetabotInfoPublishResults)(profile, profileInfoTargets, profileChainWrites);
                     await notifyIdentityProfileRegistered();
                     const hostPersonaProjection = (profile.role.trim() || profile.soul.trim() || profile.goal.trim())
                         ? await syncCodexPersonaProjection(profile)
                         : undefined;
+                    const { llmBinding, pendingProviders } = await collectCreateLlmBindingOutcome({
+                        homeDir: profileHomeDir,
+                        slug: profile.slug,
+                        primaryProvider: profile.primaryProvider,
+                        fallbackProvider: profile.fallbackProvider,
+                    });
+                    if (pendingProviders.length > 0 && !createTimeLlmDiscoveryDisabled(input.discoverLlmRuntimes)) {
+                        // Post-create upgrade probe (spec R3.1): fire-and-forget, joins the
+                        // serialized sweep chain of the NEW profile's store, so a pending
+                        // binding flips healthy as soon as its runtime answers readiness.
+                        startBackgroundLlmDiscoverySweep(profileHomeDir, pendingProviders, input.discoverLlmRuntimes ?? llmRuntimeDiscovery_1.discoverLlmRuntimes);
+                    }
                     return (0, commandResult_1.commandSuccess)({
                         profile,
                         identity,
                         chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
                         subsidy: bootstrap.subsidy,
                         setup: buildMetabotSetupStatus(identity),
+                        llmBinding,
                         ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
                     });
                 }

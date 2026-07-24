@@ -12,6 +12,8 @@ export interface DiscoveryInput {
     cwd?: string;
     shellResolvedExecutables?: Record<string, string>;
     onRuntimeDiscovered?: (runtime: LlmRuntime) => void | Promise<void>;
+    /** Presence-scan mode: stop after the version probe and report each found binary as `detected` without running readiness probes. */
+    skipReadinessProbe?: boolean;
 }
 export interface DiscoveryResult {
     runtimes: LlmRuntime[];
@@ -52,6 +54,7 @@ export declare function discoverProvider(provider: LlmProvider, pathDirs: string
     recentHealthyReadinessSkipMs?: number;
     cwd?: string;
     shellResolvedExecutables?: Record<string, string>;
+    skipReadinessProbe?: boolean;
 }): Promise<LlmRuntime | null>;
 export declare function testLlmRuntimeReadiness(runtime: LlmRuntime, options?: {
     env?: NodeJS.ProcessEnv;

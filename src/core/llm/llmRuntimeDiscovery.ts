@@ -25,6 +25,8 @@ export interface DiscoveryInput {
   cwd?: string;
   shellResolvedExecutables?: Record<string, string>;
   onRuntimeDiscovered?: (runtime: LlmRuntime) => void | Promise<void>;
+  /** Presence-scan mode: stop after the version probe and report each found binary as `detected` without running readiness probes. */
+  skipReadinessProbe?: boolean;
 }
 
 export interface DiscoveryResult {
@@ -543,6 +545,7 @@ export async function discoverProvider(
     recentHealthyReadinessSkipMs?: number;
     cwd?: string;
     shellResolvedExecutables?: Record<string, string>;
+    skipReadinessProbe?: boolean;
   },
 ): Promise<LlmRuntime | null> {
   if (provider === 'custom') return null; // Custom runtimes are registered manually.
@@ -582,6 +585,15 @@ export async function discoverProvider(
           healthReason: undefined,
           unavailableUntil: undefined,
           healthCheckedAt: knownRuntime.healthCheckedAt ?? knownRuntime.updatedAt,
+        };
+      }
+      // Presence-scan mode (spec R2): the binary exists and answers --version;
+      // report it as detected without paying the readiness-probe latency.
+      if (options?.skipReadinessProbe) {
+        return {
+          ...runtime,
+          health: 'detected',
+          healthReason: 'Readiness probe skipped during presence scan.',
         };
       }
       const readiness = await readinessProbe({
@@ -818,6 +830,7 @@ export async function discoverLlmRuntimes(input?: DiscoveryInput): Promise<Disco
           recentHealthyReadinessSkipMs: input?.recentHealthyReadinessSkipMs,
           cwd: input?.cwd,
           shellResolvedExecutables,
+          skipReadinessProbe: input?.skipReadinessProbe,
         });
       } catch (err) {
         return {

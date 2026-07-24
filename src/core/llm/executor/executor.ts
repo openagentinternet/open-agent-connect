@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { LlmBackendFactory } from './backends/backend';
@@ -51,6 +51,17 @@ const STRICT_ISOLATION_USER_HOME_FILES: Partial<Record<string, string[]>> = {
 };
 
 const STRICT_ISOLATION_SOURCE_HOME_PROVIDERS = new Set<string>(['cursor', 'codebuddy', 'zcode', 'workbuddy']);
+
+// Strict-isolation scope reuse (spec R7). Prepared HOME scopes are cached per
+// (metaBotSlug, provider, skill allowlist, platform-home fingerprint) inside
+// the profile's sessions root, so a chat turn no longer pays the platform-home
+// copy cost every time. Trust boundary: a cached scope is only ever reused
+// for the same profile + provider + allowlist domain; any fingerprint or
+// allowlist change keys a fresh scope, and the LRU cap below bounds residue.
+// The whole cache lives under the profile's sessions root, so deleting the
+// profile removes it with the profile home.
+const STRICT_ISOLATION_SCOPE_CACHE_DIR = '.skill-scope-cache';
+const STRICT_ISOLATION_SCOPE_CACHE_LIMIT = 8;
 
 function createSessionId(): string {
   return `llm_${randomUUID()}`;
@@ -262,6 +273,162 @@ async function removeStrictSkillIsolationScope(scope: StrictSkillIsolationScope 
   await fs.rm(scope.root, { recursive: true, force: true });
 }
 
+interface StrictIsolationScopeAcquisition {
+  scope: StrictSkillIsolationScope;
+  /** Reusable scopes persist across turns and must NOT be removed after a turn. */
+  reusable: boolean;
+}
+
+async function fingerprintStrictIsolationSourceFiles(input: {
+  provider: string;
+  sourceHome: string;
+  baseEnv?: NodeJS.ProcessEnv;
+  requestEnv?: Record<string, string>;
+}): Promise<Array<{ path: string; size?: number; mtimeMs?: number; missing?: true }>> {
+  const filePaths: string[] = [];
+  for (const fileName of STRICT_ISOLATION_USER_HOME_FILES[input.provider] ?? []) {
+    filePaths.push(path.join(input.sourceHome, fileName));
+  }
+  const supportFiles = STRICT_ISOLATION_PLATFORM_HOME_FILES[input.provider] ?? [];
+  if (supportFiles.length > 0 && isPlatformId(input.provider)) {
+    const sourceEnv = mergeStringEnvValues(input.baseEnv, input.requestEnv);
+    const seenParents = new Set<string>();
+    for (const root of getPlatformSkillRoots(input.provider)) {
+      if (root.kind !== 'global') continue;
+      const sourceParent = skillRootParent(resolvePlatformSkillRootPath(root, input.sourceHome, sourceEnv));
+      if (seenParents.has(sourceParent)) continue;
+      seenParents.add(sourceParent);
+      for (const fileName of supportFiles) {
+        filePaths.push(path.join(sourceParent, fileName));
+      }
+    }
+  }
+  const fingerprint: Array<{ path: string; size?: number; mtimeMs?: number; missing?: true }> = [];
+  for (const filePath of filePaths.sort()) {
+    try {
+      const stat = await fs.stat(filePath);
+      fingerprint.push({ path: filePath, size: stat.size, mtimeMs: Math.round(stat.mtimeMs) });
+    } catch {
+      fingerprint.push({ path: filePath, missing: true });
+    }
+  }
+  return fingerprint;
+}
+
+function hashStrictIsolationScopeKey(parts: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 16);
+}
+
+async function pruneStrictIsolationScopeCache(cacheRoot: string): Promise<void> {
+  let entries;
+  try {
+    entries = await fs.readdir(cacheRoot, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  const scopeDirs = entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('scope-'))
+    .map((entry) => path.join(cacheRoot, entry.name));
+  if (scopeDirs.length <= STRICT_ISOLATION_SCOPE_CACHE_LIMIT) return;
+  const withUsage = await Promise.all(scopeDirs.map(async (dir) => {
+    try {
+      const stat = await fs.stat(path.join(dir, '.last-used'));
+      return { dir, usedAt: stat.mtimeMs };
+    } catch {
+      return { dir, usedAt: 0 };
+    }
+  }));
+  withUsage.sort((left, right) => right.usedAt - left.usedAt);
+  for (const stale of withUsage.slice(STRICT_ISOLATION_SCOPE_CACHE_LIMIT)) {
+    await fs.rm(stale.dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+// Acquires a strict-isolation scope for one turn (spec R7): providers whose
+// platform home needs file copies reuse a cached prepared HOME keyed by
+// (metaBotSlug, provider, skill allowlist, platform-home fingerprint);
+// source-home providers keep per-turn scopes, so their behavior is unchanged.
+async function acquireStrictSkillIsolationScope(input: {
+  sessionsRoot: string;
+  provider: string;
+  metaBotSlug?: string;
+  skills?: string[];
+  skillSourcePaths?: Record<string, string>;
+  baseEnv?: NodeJS.ProcessEnv;
+  requestEnv?: Record<string, string>;
+}): Promise<StrictIsolationScopeAcquisition> {
+  if (shouldUseSourceHomeForStrictIsolation(input.provider)) {
+    return { scope: await createStrictSkillIsolationScope(input), reusable: false };
+  }
+
+  const sourceEnv = mergeStringEnvValues(input.baseEnv, input.requestEnv);
+  const keySourceHome = sourceEnv.HOME || process.env.HOME || '<isolated>';
+  const fingerprint = await fingerprintStrictIsolationSourceFiles({
+    provider: input.provider,
+    sourceHome: keySourceHome,
+    baseEnv: input.baseEnv,
+    requestEnv: input.requestEnv,
+  });
+  const key = hashStrictIsolationScopeKey({
+    metaBotSlug: input.metaBotSlug ?? '',
+    provider: input.provider,
+    skills: [...(input.skills ?? [])].sort(),
+    skillSourcePaths: Object.entries(input.skillSourcePaths ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+    fingerprint,
+  });
+
+  const cacheRoot = path.join(input.sessionsRoot, STRICT_ISOLATION_SCOPE_CACHE_DIR);
+  const root = path.join(cacheRoot, `scope-${key}`);
+  const cwd = path.join(root, 'work');
+  const systemHomeDir = path.join(root, 'home');
+  let reused = true;
+  try {
+    await fs.access(root);
+  } catch {
+    reused = false;
+  }
+  await fs.mkdir(cwd, { recursive: true });
+  await fs.mkdir(path.join(systemHomeDir, '.config'), { recursive: true });
+
+  const sourceHome = keySourceHome === '<isolated>' ? systemHomeDir : keySourceHome;
+  const env = buildStrictSkillIsolationEnv({
+    provider: input.provider,
+    sourceHome,
+    isolatedHome: systemHomeDir,
+    isolatedCwd: cwd,
+    baseEnv: input.baseEnv,
+    requestEnv: input.requestEnv,
+  });
+  if (!reused) {
+    await prepareStrictSkillIsolationPlatformHome({
+      provider: input.provider,
+      sourceHome,
+      isolatedHome: systemHomeDir,
+      env,
+      baseEnv: input.baseEnv,
+      requestEnv: input.requestEnv,
+    });
+  }
+  await fs.writeFile(path.join(root, '.last-used'), new Date().toISOString(), 'utf8').catch(() => undefined);
+  await pruneStrictIsolationScopeCache(cacheRoot).catch(() => undefined);
+
+  return {
+    scope: {
+      root,
+      cwd,
+      systemHomeDir,
+      skillSystemHomeDir: systemHomeDir,
+      env,
+    },
+    reusable: true,
+  };
+}
+
+async function releaseStrictSkillIsolationScope(acquisition: StrictIsolationScopeAcquisition | null): Promise<void> {
+  if (!acquisition || acquisition.reusable) return;
+  await removeStrictSkillIsolationScope(acquisition.scope);
+}
+
 export class LlmExecutor {
   private readonly sessionsRoot: string;
   private readonly transcriptsRoot: string;
@@ -405,18 +572,22 @@ export class LlmExecutor {
     binaryPath: string,
     controller: AbortController,
   ): Promise<void> {
-    let isolationScope: StrictSkillIsolationScope | null = null;
+    let isolation: StrictIsolationScopeAcquisition | null = null;
     try {
       const startedAt = nowIso();
       const strictSkillIsolation = request.skillIsolation === 'strict';
-      isolationScope = strictSkillIsolation
-        ? await createStrictSkillIsolationScope({
+      isolation = strictSkillIsolation
+        ? await acquireStrictSkillIsolationScope({
           sessionsRoot: this.sessionsRoot,
           provider: request.runtime.provider,
+          metaBotSlug: request.metaBotSlug,
+          skills: request.skills,
+          skillSourcePaths: request.skillSourcePaths,
           baseEnv: this.env,
           requestEnv: request.env,
         })
         : null;
+      const isolationScope = isolation?.scope ?? null;
       const cwd = isolationScope?.cwd ?? request.cwd ?? process.cwd();
       const requestEnv = isolationScope?.env ?? request.env;
       const backendRequest: LlmExecutionRequest = { ...request, cwd, env: requestEnv };
@@ -477,7 +648,7 @@ export class LlmExecutor {
         completedAt: nowIso(),
       });
       this.running.delete(sessionId);
-      await removeStrictSkillIsolationScope(isolationScope).catch((error) => {
+      await releaseStrictSkillIsolationScope(isolation).catch((error) => {
         this.pushEvent(sessionId, {
           type: 'log',
           level: 'warning',
@@ -487,7 +658,7 @@ export class LlmExecutor {
       this.pushEvent(sessionId, { type: 'result', result });
       this.closeStream(sessionId);
     } finally {
-      await removeStrictSkillIsolationScope(isolationScope).catch(() => undefined);
+      await releaseStrictSkillIsolationScope(isolation).catch(() => undefined);
     }
   }
 

@@ -54,7 +54,11 @@
     "build:skillpacks": "node scripts/build-metabot-skillpacks.mjs",
     "build:packs": "node scripts/build-release-packs.mjs",
     "test": "npm run build && node scripts/run-tests-with-leak-guard.mjs",
-    "test:raw": "node --test --test-concurrency=1 $(find tests -name '*.test.mjs' ! -path 'tests/cli/runtime.test.mjs' -print) && node --test --test-concurrency=1 tests/cli/runtime.test.mjs",
+    "test:raw": "node scripts/run-test-suite.mjs all",
+    "test:fast": "npm run build && node scripts/run-tests-with-leak-guard.mjs -- npm run --silent test:fast:raw",
+    "test:fast:raw": "node scripts/run-test-suite.mjs fast",
+    "test:integration": "npm run build && node scripts/run-tests-with-leak-guard.mjs -- npm run --silent test:integration:raw",
+    "test:integration:raw": "node scripts/run-test-suite.mjs integration",
     "test:contracts": "npm run build && node --test tests/contracts/*.test.mjs",
     "verify": "npm run build && npm run build:skillpacks && node scripts/run-tests-with-leak-guard.mjs"
   },

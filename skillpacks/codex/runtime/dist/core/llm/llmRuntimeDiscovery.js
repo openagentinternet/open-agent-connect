@@ -455,6 +455,15 @@ async function discoverProvider(provider, pathDirs, options) {
                     healthCheckedAt: knownRuntime.healthCheckedAt ?? knownRuntime.updatedAt,
                 };
             }
+            // Presence-scan mode (spec R2): the binary exists and answers --version;
+            // report it as detected without paying the readiness-probe latency.
+            if (options?.skipReadinessProbe) {
+                return {
+                    ...runtime,
+                    health: 'detected',
+                    healthReason: 'Readiness probe skipped during presence scan.',
+                };
+            }
             const readiness = await readinessProbe({
                 runtime,
                 env,
@@ -652,6 +661,7 @@ async function discoverLlmRuntimes(input) {
                 recentHealthyReadinessSkipMs: input?.recentHealthyReadinessSkipMs,
                 cwd: input?.cwd,
                 shellResolvedExecutables,
+                skipReadinessProbe: input?.skipReadinessProbe,
             });
         }
         catch (err) {

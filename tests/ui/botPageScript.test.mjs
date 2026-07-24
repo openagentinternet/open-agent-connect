@@ -6,13 +6,13 @@ import vm from 'node:vm';
 
 const require = createRequire(import.meta.url);
 const { buildBotPageDefinition } = require('../../dist/ui/pages/bot/app.js');
-const { translate } = require('../../dist/ui/i18n.js');
+const { DICTIONARIES, translate } = require('../../dist/ui/i18n.js');
 
 function zhI18nWindow() {
   return {
     __oacLocalUiI18n: {
       getLanguage: () => 'zh-CN',
-      t: (key) => translate('zh-CN', key),
+      t: (key, replacements) => translate('zh-CN', key, replacements),
     },
   };
 }
@@ -1304,6 +1304,76 @@ test('bot page uses Simplified Chinese create validation and progress copy', () 
   assert.match(modal.innerHTML, /正在上链/);
   assert.match(modal.innerHTML, /数据正在写入链上，请等候 15-30 秒。/);
   assert.doesNotMatch(modal.innerHTML, /data-act="confirm-add"/);
+});
+
+async function createBotWithLlmBinding(llmBinding, windowOverride) {
+  const modal = {
+    innerHTML: '',
+    classList: {
+      add: () => {},
+      remove: () => {},
+    },
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-field="new-name"]': field('Rin'),
+      '[data-add-status]': field(),
+      '[data-act="confirm-add"]': field(),
+      '[data-modal="add-metabot"]': modal,
+    },
+    window: windowOverride ?? {},
+  });
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.api = () => Promise.resolve({
+    ok: true,
+    data: {
+      profile: { slug: 'rin', name: 'Rin' },
+      setup: { state: 'ready' },
+      llmBinding,
+    },
+  });
+  context.loadProfiles = () => Promise.resolve();
+  await context.createMetabot();
+  return modal.innerHTML;
+}
+
+test('bot page create success shows the bound LLM outcome from the response', async () => {
+  const html = await createBotWithLlmBinding({ status: 'healthy', primaryProvider: 'workbuddy' });
+  assert.match(html, /LLM bound: workbuddy/);
+});
+
+test('bot page create success shows the pending LLM outcome with its hint', async () => {
+  const html = await createBotWithLlmBinding({ status: 'pending', primaryProvider: 'codex' });
+  assert.match(html, /Selected codex — verifying availability…/);
+  assert.match(html, /It becomes usable automatically once ready; you can also test it under LLM runtimes\./);
+});
+
+test('bot page create success shows the no-LLM outcome with its hint', async () => {
+  const html = await createBotWithLlmBinding({ status: 'none' });
+  assert.match(html, /No LLM discovered on this machine yet — detecting in the background\./);
+  assert.match(html, /Bind one later from the bot settings page\./);
+});
+
+test('bot page create success omits the LLM outcome when the response has no llmBinding', async () => {
+  const html = await createBotWithLlmBinding(null);
+  assert.doesNotMatch(html, /create-chain-llm/);
+});
+
+test('bot page create LLM outcome copy exists in both dictionaries with Simplified Chinese parity', async () => {
+  const keys = ['bot.createLlmBound', 'bot.createLlmPending', 'bot.createLlmPendingHint', 'bot.createLlmNone', 'bot.createLlmNoneHint'];
+  for (const key of keys) {
+    assert.equal(typeof DICTIONARIES.en[key], 'string', key);
+    assert.equal(typeof DICTIONARIES['zh-CN'][key], 'string', key);
+  }
+  assert.equal(DICTIONARIES['zh-CN']['bot.createLlmBound'], '已绑定 LLM：{provider}');
+  assert.equal(DICTIONARIES['zh-CN']['bot.createLlmPending'], '已选择 {provider}，正在验证可用性…');
+  assert.equal(DICTIONARIES['zh-CN']['bot.createLlmPendingHint'], '就绪后会自动可用，也可在 LLM 运行时中手动测试。');
+  assert.equal(DICTIONARIES['zh-CN']['bot.createLlmNone'], '本机暂未发现 LLM，已在后台检测。');
+  assert.equal(DICTIONARIES['zh-CN']['bot.createLlmNoneHint'], '稍后可在 Bot 设置页面绑定。');
+
+  const html = await createBotWithLlmBinding({ status: 'pending', primaryProvider: 'codex' }, zhI18nWindow());
+  assert.match(html, /已选择 codex，正在验证可用性…/);
+  assert.match(html, /就绪后会自动可用，也可在 LLM 运行时中手动测试。/);
 });
 
 test('bot page renders chat skills tab for private conversation replies only', async () => {

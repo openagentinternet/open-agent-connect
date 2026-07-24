@@ -566,6 +566,7 @@ function wireProviderPickers(){
       picker.querySelectorAll('[data-provider-value]').forEach(function(row){row.removeAttribute('selected')});
       this.setAttribute('selected','');
       var menu=q('[data-provider-menu="'+field+'"]');if(menu)menu.setAttribute('hidden','');
+      var unavailable=picker.parentElement&&picker.parentElement.querySelector('[data-provider-open-runtimes]');if(unavailable)unavailable.remove();
     });
   });
   qq('[data-provider-open-runtimes]').forEach(function(el){
@@ -2053,7 +2054,23 @@ function createChainPendingMarkup(name){
     '</div>'+
   '</div>';
 }
-function createChainSuccessMarkup(profile,url){
+function createLlmBindingMarkup(llmBinding){
+  if(!llmBinding||!llmBinding.status)return '';
+  var provider=String(llmBinding.primaryProvider||'').trim();
+  if(llmBinding.status==='healthy'&&provider){
+    return '<p class="create-chain-llm create-chain-llm-bound">'+esc(uiText('bot.createLlmBound','LLM bound: {provider}',{provider:provider}))+'</p>';
+  }
+  if(llmBinding.status==='pending'&&provider){
+    return '<p class="create-chain-llm create-chain-llm-pending">'+esc(uiText('bot.createLlmPending','Selected {provider} — verifying availability…',{provider:provider}))+'</p>'+
+      '<p class="create-chain-llm-hint">'+esc(uiText('bot.createLlmPendingHint','It becomes usable automatically once ready; you can also test it under LLM runtimes.'))+'</p>';
+  }
+  if(llmBinding.status==='none'){
+    return '<p class="create-chain-llm create-chain-llm-none">'+esc(uiText('bot.createLlmNone','No LLM discovered on this machine yet — detecting in the background.'))+'</p>'+
+      '<p class="create-chain-llm-hint">'+esc(uiText('bot.createLlmNoneHint','Bind one later from the bot settings page.'))+'</p>';
+  }
+  return '';
+}
+function createChainSuccessMarkup(profile,url,llmBinding){
   var openDisabled=url?'':' disabled';
   return '<div class="modal-box create-chain-modal">'+
     '<div class="modal-title" id="add-metabot-title">'+esc(uiText('bot.chainCreateSuccessTitle','Bot created'))+'</div>'+
@@ -2062,6 +2079,7 @@ function createChainSuccessMarkup(profile,url){
       '<div class="create-chain-copy">'+
         '<strong>'+esc(profile&&profile.name||uiText('bot.createBot','Create Bot'))+'</strong>'+
         '<p>'+esc(uiText('bot.chainCreateSuccessMessage','The Bot identity has been written on-chain.'))+'</p>'+
+        createLlmBindingMarkup(llmBinding)+
       '</div>'+
     '</div>'+
     '<div class="modal-actions create-chain-actions">'+
@@ -2109,10 +2127,10 @@ function renderCreateModal(markup){
 function renderCreateChainPending(name){
   renderCreateModal(createChainPendingMarkup(name));
 }
-function renderCreateChainSuccess(profile){
+function renderCreateChainSuccess(profile,llmBinding){
   var url=profile&&profile.globalMetaId?botBrowserPath(profile.globalMetaId):'';
   state._createdBotPageUrl=url;
-  renderCreateModal(createChainSuccessMarkup(profile||{},url));
+  renderCreateModal(createChainSuccessMarkup(profile||{},url,llmBinding));
   wireCreateSuccessControls();
 }
 function renderCreateChainWarning(profile,setup){
@@ -2182,10 +2200,11 @@ function createMetabot(){
   if(host)body.host=host;
   return api('/api/bot/profiles',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     var profile=r.data&&r.data.profile||{};
+    var llmBinding=r.data&&r.data.llmBinding||null;
     setSelectedSlug(profile.slug||state.selectedSlug);
     state.selectedTab='publicIdentity';
     if(r.data&&r.data.setup&&r.data.setup.state!=='ready')renderCreateChainWarning(profile,r.data.setup);
-    else renderCreateChainSuccess(profile);
+    else renderCreateChainSuccess(profile,llmBinding);
     return loadProfiles().catch(function(error){showToast(error.message)});
   }).catch(function(error){renderCreateChainError(error.message)}).finally(function(){if(btn)btn.disabled=false});
 }

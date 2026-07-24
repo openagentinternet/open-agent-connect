@@ -71,7 +71,7 @@ import {
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
-import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain } from '../daemon/defaultHandlers';
+import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain, llmDiscoverySweepRunningForHomeDir } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import {
@@ -114,6 +114,8 @@ import {
   summarizeResolvedLlmRuntime,
 } from '../core/llm/llmRuntimeResolver';
 import { discoverLlmRuntimes } from '../core/llm/llmRuntimeDiscovery';
+import { createLlmAvailabilityRecovery } from '../core/llm/llmAvailabilityRecovery';
+import type { LlmAvailabilityRecovery } from '../core/llm/llmAvailabilityRecovery';
 import { createPlatformSkillCatalog } from '../core/services/platformSkillCatalog';
 import {
   LlmExecutor,
@@ -1452,6 +1454,10 @@ type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
   localProfileSlug?: string | null;
 };
 
+// Set while the daemon runtime is up (spec R5.3): chat turns that find no
+// selectable runtime nudge this loop to re-probe their profile's store soon.
+let activeLlmAvailabilityRecovery: Pick<LlmAvailabilityRecovery, 'requestSoon'> | null = null;
+
 export function createPrivateChatReplyRunnerForProfile(input: {
   paths: MetabotPaths;
   metaBotSlug: string;
@@ -1466,6 +1472,9 @@ export function createPrivateChatReplyRunnerForProfile(input: {
     runtimeResolver: input.runtimeResolver,
     llmExecutor: input.llmExecutor,
     metaBotSlug: input.metaBotSlug,
+    requestAvailabilityRecovery: () => {
+      activeLlmAvailabilityRecovery?.requestSoon(input.paths.profileRoot);
+    },
     allowedChatSkillsResolver: createPrivateChatAllowedSkillsResolver({
       paths: input.paths,
       metaBotSlug: input.metaBotSlug,
@@ -3319,6 +3328,32 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
           .catch(() => { /* best effort */ });
       }
     })().catch(() => { /* best effort */ });
+  }
+
+  // Availability recovery loop (spec R4): trickle re-probes of
+  // detected/degraded/cooldown-expired runtimes across the host store and
+  // every indexed profile store, so a runtime that failed readiness once
+  // becomes selectable again without waiting for a manual rediscovery.
+  // Tests that skip background LLM discovery skip this loop as well.
+  if (context.env[TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV] !== '1') {
+    const llmAvailabilityRecovery = createLlmAvailabilityRecovery({
+      env: context.env,
+      listTargetHomes: async () => {
+        const homes = [path.resolve(homeDir)];
+        const profiles = await listIdentityProfiles(systemHomeDir).catch(() => []);
+        for (const profile of profiles) {
+          const profileHome = typeof profile.homeDir === 'string' ? path.resolve(profile.homeDir) : '';
+          if (profileHome && !homes.includes(profileHome)) {
+            homes.push(profileHome);
+          }
+        }
+        return homes;
+      },
+      isStoreBusy: (targetHomeDir) => llmDiscoverySweepRunningForHomeDir(targetHomeDir),
+      logger: (message, error) => console.warn(message, error ?? ''),
+    });
+    activeLlmAvailabilityRecovery = llmAvailabilityRecovery;
+    llmAvailabilityRecovery.start();
   }
 
   const chatStateStore = createPrivateChatStateStore(paths);

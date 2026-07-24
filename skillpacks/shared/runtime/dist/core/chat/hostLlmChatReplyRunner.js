@@ -241,7 +241,7 @@ function parseRunnerOutput(rawOutput) {
         content,
     };
 }
-async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime) {
+async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime, pollDeadlineTracker, turnState) {
     const shouldMarkRuntimeUnavailable = !enforceSkillScope;
     const stickyRuntimeId = stickyRuntime.get();
     const resolved = await resolver.resolveRuntime({
@@ -272,6 +272,7 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs,
             request.skills = allowedSkillScope.skills;
             request.skillSourcePaths = allowedSkillScope.skillSourcePaths;
         }
+        turnState.attemptedExecution = true;
         const sessionId = await llmExecutor.execute(request);
         const deadline = Date.now() + timeoutMs;
         while (Date.now() <= deadline) {
@@ -282,6 +283,7 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs,
                     const parsed = parseRunnerOutput(result.output);
                     if (parsed.state !== 'skip') {
                         stickyRuntime.onSuccess(resolved.runtime.id);
+                        pollDeadlineTracker.reset(resolved.runtime.id);
                         return { result: parsed, bindingId: resolved.bindingId };
                     }
                     excludeRuntimeIds.add(resolved.runtime.id);
@@ -302,9 +304,13 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs,
         }
         excludeRuntimeIds.add(resolved.runtime.id);
         stickyRuntime.onFailure(resolved.runtime.id);
-        // A session that hangs until the poll deadline is a runtime-side signal
-        // regardless of skill isolation, so always cool the runtime down here.
-        await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => { });
+        // A session that hangs until the poll deadline is usually a cold start,
+        // not a dead runtime (spec R6): the first consecutive deadline excludes
+        // the runtime for this turn and clears the sticky preference, but only
+        // the SECOND consecutive deadline marks it unavailable.
+        if (pollDeadlineTracker.recordTimeout(resolved.runtime.id) >= 2) {
+            await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => { });
+        }
         return null;
     }
     catch {
@@ -344,6 +350,17 @@ function createHostLlmChatReplyRunner(options) {
             }
         },
     };
+    const consecutivePollDeadlineTimeouts = new Map();
+    const pollDeadlineTracker = {
+        recordTimeout: (runtimeId) => {
+            const count = (consecutivePollDeadlineTimeouts.get(runtimeId) ?? 0) + 1;
+            consecutivePollDeadlineTimeouts.set(runtimeId, count);
+            return count;
+        },
+        reset: (runtimeId) => {
+            consecutivePollDeadlineTimeouts.delete(runtimeId);
+        },
+    };
     // If no resolver provided, either fall back to template-only replies or skip.
     if (!runtimeResolver || !llmExecutor) {
         return async (input) => (allowTemplateFallback && !normalizeText(input.operatorGuidanceText)
@@ -365,15 +382,27 @@ function createHostLlmChatReplyRunner(options) {
         const excludeRuntimeIds = new Set();
         const templateFallbackAllowedForTurn = allowTemplateFallback
             && !normalizeText(input.operatorGuidanceText);
+        const turnState = { attemptedExecution: false };
         // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
         for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
-            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime);
+            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime, pollDeadlineTracker, turnState);
             if (outcome) {
                 // Track lastUsedAt on the binding that was successfully used.
                 if (outcome.bindingId) {
                     runtimeResolver.markBindingUsed(outcome.bindingId).catch(() => { });
                 }
                 return outcome.result;
+            }
+        }
+        // No runtime could even be attempted this turn (nothing selectable): ask
+        // the availability recovery loop to re-probe this profile's runtimes
+        // (fire-and-forget, spec R5), then fall back exactly as before.
+        if (!turnState.attemptedExecution) {
+            try {
+                options?.requestAvailabilityRecovery?.({ metaBotSlug });
+            }
+            catch {
+                // Recovery hints must never affect the reply path.
             }
         }
         // All runtimes failed — either fall back to template-only reply or skip.

@@ -916,7 +916,7 @@ function makeHealthyRuntime(id, provider = 'codex') {
   };
 }
 
-test('host LLM chat runner marks a timed-out runtime unavailable even with strict skill scope', async () => {
+test('host LLM chat runner does not mark the first poll-deadline but marks the second consecutive one', async () => {
   const runtime = makeHealthyRuntime('llm-runtime-hung');
   const resolverCalls = {};
   const llmExecutor = {
@@ -942,11 +942,127 @@ test('host LLM chat runner marks a timed-out runtime unavailable even with stric
     }),
   });
 
+  const first = await runner(makeInput());
+  assert.equal(first.state, 'reply');
+  assert.match(first.content, /Thanks for/);
+  assert.deepEqual(
+    resolverCalls.markRuntimeUnavailable ?? [],
+    [],
+    'a first poll-deadline is treated as a cold start, not a wedge (spec R6)',
+  );
+
+  const second = await runner(makeInput());
+  assert.equal(second.state, 'reply');
+  assert.deepEqual(
+    resolverCalls.markRuntimeUnavailable,
+    ['llm-runtime-hung'],
+    'a second consecutive poll-deadline marks the runtime unavailable',
+  );
+});
+
+test('host LLM chat runner resets the poll-deadline count after a successful turn', async () => {
+  const runtime = makeHealthyRuntime('llm-runtime-flaky');
+  const resolverCalls = {};
+  let hang = true;
+  const llmExecutor = {
+    async execute() {
+      return hang ? 'llm-session-hung' : 'llm-session-ok';
+    },
+    async getSession(sessionId) {
+      if (sessionId === 'llm-session-hung') {
+        return { sessionId, status: 'running' };
+      }
+      return {
+        sessionId,
+        status: 'completed',
+        result: { status: 'completed', output: 'Recovered reply.', durationMs: 5 },
+      };
+    },
+  };
+
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime, resolverCalls),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    timeoutMs: 10,
+    pollIntervalMs: 1,
+  });
+
+  await runner(makeInput());
+  assert.deepEqual(resolverCalls.markRuntimeUnavailable ?? [], [], 'first hang does not mark');
+
+  hang = false;
+  const okTurn = await runner(makeInput());
+  assert.equal(okTurn.state, 'reply');
+  assert.equal(okTurn.content, 'Recovered reply.');
+
+  hang = true;
+  await runner(makeInput());
+  assert.deepEqual(resolverCalls.markRuntimeUnavailable ?? [], [], 'success reset the counter, so the next hang is a first again');
+
+  await runner(makeInput());
+  assert.deepEqual(resolverCalls.markRuntimeUnavailable, ['llm-runtime-flaky'], 'two consecutive hangs mark unavailable');
+});
+
+test('host LLM chat runner fires requestAvailabilityRecovery once when no runtime is selectable', async () => {
+  const recoveryCalls = [];
+  const runtimeResolver = {
+    async resolveRuntime() {
+      return { runtime: null };
+    },
+    async selectMetaBot() {
+      return null;
+    },
+    async markBindingUsed() {},
+    async markRuntimeUnavailable() {},
+  };
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver,
+    llmExecutor: {
+      async execute() {
+        throw new Error('must not execute without a runtime');
+      },
+      async getSession() {
+        throw new Error('must not poll without a runtime');
+      },
+    },
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    requestAvailabilityRecovery: (input) => {
+      recoveryCalls.push(input);
+    },
+  });
+
+  const result = await runner(makeInput());
+
+  assert.equal(result.state, 'reply', 'the turn still falls back to the template reply');
+  assert.match(result.content, /Thanks for/);
+  assert.deepEqual(recoveryCalls, [{ metaBotSlug: 'alice' }], 'exactly one recovery request per turn (spec R5)');
+});
+
+test('host LLM chat runner does not fire requestAvailabilityRecovery when a runtime was attempted', async () => {
+  const recoveryCalls = [];
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(makeHealthyRuntime('llm-runtime-attempted')),
+    llmExecutor: {
+      async execute() {
+        throw new Error('executor blew up');
+      },
+      async getSession() {
+        throw new Error('unreachable');
+      },
+    },
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    requestAvailabilityRecovery: (input) => {
+      recoveryCalls.push(input);
+    },
+  });
+
   const result = await runner(makeInput());
 
   assert.equal(result.state, 'reply');
-  assert.match(result.content, /Thanks for/);
-  assert.deepEqual(resolverCalls.markRuntimeUnavailable, ['llm-runtime-hung']);
+  assert.deepEqual(recoveryCalls, [], 'a resolved-but-failed runtime has its own cooldown path');
 });
 
 test('host LLM chat runner prefers the last successful runtime on the next turn', async () => {
@@ -1055,7 +1171,9 @@ test('host LLM chat runner drops a sticky runtime after it times out and sticks 
   hangRuntimeA = true;
   const second = await runner(makeInput());
   assert.deepEqual(second, { state: 'reply', content: 'Recovery reply.' });
-  assert.deepEqual(markedUnavailable, [runtimeA.id]);
+  // A first poll-deadline clears the sticky preference but no longer wedges
+  // the runtime into unavailable (spec R6).
+  assert.deepEqual(markedUnavailable, []);
 
   const third = await runner(makeInput());
   assert.equal(third.state, 'reply');
