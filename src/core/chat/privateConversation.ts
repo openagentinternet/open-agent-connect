@@ -58,6 +58,17 @@ export interface PrivateChatHistoryPage {
   nextTimestamp: number | null;
 }
 
+export interface FetchPrivateChatPeerGlobalMetaIdsInput {
+  selfGlobalMetaId: string;
+  knownPeers?: Array<{
+    globalMetaId: string;
+    chatPublicKey?: string | null;
+  }>;
+  fetchImpl?: typeof fetch;
+  chatApiBaseUrl?: string;
+  timeoutMs?: number;
+}
+
 export type FetchPrivateHistory = (
   input: FetchPrivateHistoryInput
 ) => Promise<unknown[]>;
@@ -144,6 +155,112 @@ function extractHistoryPage(rawData: unknown): PrivateChatHistoryPage {
     total: Number.isFinite(total) && total >= 0 ? Math.floor(total) : null,
     nextTimestamp: Number.isFinite(nextTimestamp) ? Math.floor(nextTimestamp) : null,
   };
+}
+
+function isModernGlobalMetaId(value: string): boolean {
+  return /^idq1[a-z0-9]+$/iu.test(value);
+}
+
+export function extractPrivateChatPeerGlobalMetaIds(
+  rawData: unknown,
+  selfGlobalMetaId: string,
+  knownPeers: FetchPrivateChatPeerGlobalMetaIdsInput['knownPeers'] = [],
+): string[] {
+  const normalizedSelf = normalizeText(selfGlobalMetaId).toLowerCase();
+  const peers = new Map<string, string>();
+  const knownPeerByChatPublicKey = new Map<string, string>();
+  for (const knownPeer of knownPeers) {
+    const globalMetaId = normalizeText(knownPeer.globalMetaId);
+    const chatPublicKey = normalizeText(knownPeer.chatPublicKey).toLowerCase();
+    if (globalMetaId && globalMetaId.toLowerCase() !== normalizedSelf && chatPublicKey) {
+      knownPeerByChatPublicKey.set(chatPublicKey, globalMetaId);
+    }
+  }
+
+  for (const rawRow of extractList(rawData)) {
+    const row = readObject(rawRow);
+    if (!row) continue;
+    const chatType = firstText(row.type, row.chatType, row.chat_type).toLowerCase();
+    if (chatType && chatType !== '2' && chatType !== 'msg') continue;
+
+    const userInfo = readObject(row.userInfo);
+    const lastMessage = readObject(row.lastMessage) ?? readObject(row.last_message);
+    let foundPeerGlobalMetaId = false;
+    const candidates = [
+      row.globalMetaId,
+      row.global_meta_id,
+      userInfo?.globalMetaId,
+      userInfo?.globalmetaid,
+      lastMessage?.fromGlobalMetaId,
+      lastMessage?.toGlobalMetaId,
+    ];
+    for (const candidate of candidates) {
+      const peer = normalizeText(candidate);
+      const normalizedPeer = peer.toLowerCase();
+      if (!isModernGlobalMetaId(peer) || normalizedPeer === normalizedSelf) continue;
+      peers.set(normalizedPeer, peer);
+      foundPeerGlobalMetaId = true;
+    }
+    if (!foundPeerGlobalMetaId) {
+      const chatPublicKey = firstText(
+        userInfo?.chatPublicKey,
+        userInfo?.chatpubkey,
+        row.chatPublicKey,
+        row.chatpubkey,
+      ).toLowerCase();
+      const mappedPeer = knownPeerByChatPublicKey.get(chatPublicKey);
+      if (mappedPeer) {
+        peers.set(mappedPeer.toLowerCase(), mappedPeer);
+      }
+    }
+  }
+
+  return Array.from(peers.values());
+}
+
+export async function fetchPrivateChatPeerGlobalMetaIds(
+  input: FetchPrivateChatPeerGlobalMetaIdsInput,
+): Promise<string[]> {
+  const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
+  if (!selfGlobalMetaId) {
+    throw new Error('selfGlobalMetaId is required');
+  }
+
+  const url = new URL(`${normalizeBaseUrl(input.chatApiBaseUrl)}/user/latest-chat-info-list`);
+  url.searchParams.set('metaId', selfGlobalMetaId);
+  const timeoutMs = Number.isFinite(Number(input.timeoutMs))
+    ? Math.max(1, Math.floor(Number(input.timeoutMs)))
+    : 10_000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  timeout.unref?.();
+  let response: Response;
+  try {
+    response = await getFetchImpl(input.fetchImpl)(url.toString(), {
+      method: 'GET',
+      headers: {
+        'content-type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) {
+    throw new Error(`peer_directory_fetch_http_${response.status}`);
+  }
+
+  const rawData = await response.json();
+  const apiCode = Number(readObject(rawData)?.code);
+  if (Number.isFinite(apiCode) && apiCode !== 0) {
+    throw new Error(`peer_directory_fetch_api_${Math.floor(apiCode)}`);
+  }
+
+  return extractPrivateChatPeerGlobalMetaIds(
+    rawData,
+    selfGlobalMetaId,
+    input.knownPeers,
+  );
 }
 
 export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPageInput & {

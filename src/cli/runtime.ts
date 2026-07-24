@@ -96,6 +96,8 @@ import {
   type PrivateChatAutoReplyBackfillProfileManager,
 } from '../core/chat/privateChatAutoReplyBackfill';
 import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore';
+import { fetchPrivateChatPeerGlobalMetaIds } from '../core/chat/privateConversation';
+import { buildLocalA2AProjectedPeerIndex } from '../core/chat/privateChatPeerDiscovery';
 import { createChatStrategyStore } from '../core/chat/chatStrategyStore';
 import {
   createHostLlmChatReplyRunner,
@@ -3421,6 +3423,99 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       });
     },
   });
+  type PeerDiscoverySnapshot = {
+    expiresAt: number;
+    knownPeers: Array<{ globalMetaId: string; chatPublicKey: string }>;
+    localProjectedPeerIndex: Map<string, string[]>;
+  };
+  let peerDiscoverySnapshot: PeerDiscoverySnapshot | null = null;
+  let peerDiscoverySnapshotPending: Promise<PeerDiscoverySnapshot> | null = null;
+  const loadPeerDiscoverySnapshot = async (): Promise<PeerDiscoverySnapshot> => {
+    if (peerDiscoverySnapshot && peerDiscoverySnapshot.expiresAt > Date.now()) {
+      return peerDiscoverySnapshot;
+    }
+    if (peerDiscoverySnapshotPending) return peerDiscoverySnapshotPending;
+    peerDiscoverySnapshotPending = (async () => {
+      const profiles = await listIdentityProfiles(paths.systemHomeDir).catch(() => []);
+      const [knownPeers, localProjectedPeerIndex] = await Promise.all([
+        Promise.all(profiles.map(async (candidate) => {
+          const runtimeState = await createRuntimeStateStore(candidate.homeDir)
+            .readState()
+            .catch(() => null);
+          return {
+            globalMetaId: normalizeEnvText(
+              runtimeState?.identity?.globalMetaId || candidate.globalMetaId,
+            ),
+            chatPublicKey: normalizeEnvText(runtimeState?.identity?.chatPublicKey),
+          };
+        })),
+        buildLocalA2AProjectedPeerIndex(profiles),
+      ]);
+      const snapshot = {
+        expiresAt: Date.now() + 30_000,
+        knownPeers: knownPeers.filter((candidate) => candidate.globalMetaId),
+        localProjectedPeerIndex,
+      };
+      peerDiscoverySnapshot = snapshot;
+      return snapshot;
+    })();
+    try {
+      return await peerDiscoverySnapshotPending;
+    } finally {
+      peerDiscoverySnapshotPending = null;
+    }
+  };
+
+  const peerDirectoryCache = new Map<string, { expiresAt: number; peers: string[] }>();
+  const peerDirectoryPending = new Map<string, Promise<string[]>>();
+  const peerDirectoryLanes: Array<Promise<void>> = Array.from(
+    { length: 4 },
+    () => Promise.resolve(),
+  );
+  let nextPeerDirectoryLane = 0;
+  const readCachedPeerDirectory = (
+    selfGlobalMetaId: string,
+    knownPeers: Array<{ globalMetaId: string; chatPublicKey: string }>,
+  ): string[] => {
+    const key = normalizeEnvText(selfGlobalMetaId).toLowerCase();
+    const cached = peerDirectoryCache.get(key);
+    if (!key || (cached && cached.expiresAt > Date.now())) {
+      return cached?.peers ?? [];
+    }
+
+    if (!peerDirectoryPending.has(key)) {
+      const laneIndex = nextPeerDirectoryLane % peerDirectoryLanes.length;
+      nextPeerDirectoryLane += 1;
+      const request = peerDirectoryLanes[laneIndex].then(async () => {
+        const infrastructure = await infrastructureConfigStore.read();
+        const chatApiBaseUrl = resolveMetasoInfrastructureEndpoints(
+          infrastructure.metasoP2PBaseUrl,
+        ).chatApiBaseUrl;
+        return fetchPrivateChatPeerGlobalMetaIds({
+          selfGlobalMetaId,
+          knownPeers,
+          chatApiBaseUrl,
+          timeoutMs: 10_000,
+        });
+      });
+      peerDirectoryLanes[laneIndex] = request.then(() => undefined, () => undefined);
+      peerDirectoryPending.set(key, request);
+      void request.then((peers) => {
+        peerDirectoryCache.set(key, { peers, expiresAt: Date.now() + 60_000 });
+      }).catch((error) => {
+        peerDirectoryCache.set(key, { peers: cached?.peers ?? [], expiresAt: Date.now() + 30_000 });
+        console.warn(
+          `[private chat peer directory:${key}]`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }).finally(() => {
+        peerDirectoryPending.delete(key);
+      });
+    }
+
+    return cached?.peers ?? [];
+  };
+
   const chatAutoReplyBackfill = createPrivateChatAutoReplyBackfillProfileManager({
     systemHomeDir: paths.systemHomeDir,
     createLoop: (profile) => {
@@ -3447,6 +3542,17 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
         resolveChatApiBaseUrl: async () => {
           const infrastructure = await infrastructureConfigStore.read();
           return resolveMetasoInfrastructureEndpoints(infrastructure.metasoP2PBaseUrl).chatApiBaseUrl;
+        },
+        listPeerGlobalMetaIds: async (selfGlobalMetaId) => {
+          const snapshot = await loadPeerDiscoverySnapshot();
+          const localProjectedPeers = snapshot.localProjectedPeerIndex.get(
+            normalizeEnvText(selfGlobalMetaId).toLowerCase(),
+          ) ?? [];
+          const directoryPeers = readCachedPeerDirectory(
+            selfGlobalMetaId,
+            snapshot.knownPeers,
+          );
+          return [...localProjectedPeers, ...directoryPeers];
         },
         handleInboundMessage: async (message) => {
           if (path.resolve(profile.homeDir) === path.resolve(homeDir)) {

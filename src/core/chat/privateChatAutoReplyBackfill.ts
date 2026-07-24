@@ -25,6 +25,7 @@ const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_RECENT_LIMIT = 100;
 const DEFAULT_STARTUP_CATCH_UP_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS = 3;
+const DEFAULT_PEER_CONCURRENCY = 4;
 const UNABLE_TO_DECRYPT_TEXT = '[Unable to decrypt message]';
 const UNSUPPORTED_FILE_TEXT = '[Unsupported file message]';
 
@@ -65,7 +66,7 @@ export interface PrivateChatAutoReplyBackfillDependencies {
   ) => Promise<boolean>;
   recoverInboundReply?: (peerGlobalMetaId: string) => Promise<boolean>;
   historyClient?: PrivateChatAutoReplyBackfillHistoryClient;
-  listPeerGlobalMetaIds?: () => Promise<string[]>;
+  listPeerGlobalMetaIds?: (selfGlobalMetaId: string) => Promise<string[]>;
   resolveChatApiBaseUrl?: () => Promise<string | undefined> | string | undefined;
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -80,6 +81,7 @@ export interface PrivateChatAutoReplyBackfillOptions {
   maxOutboundRecoveryAttempts?: number;
   inboundRecoveryDelayMs?: number;
   cursorPath?: string;
+  peerConcurrency?: number;
 }
 
 export interface PrivateChatAutoReplyBackfillSyncResult {
@@ -291,8 +293,12 @@ async function collectKnownPeerGlobalMetaIds(
     addPeer(peer);
   }
   if (deps.listPeerGlobalMetaIds) {
-    for (const peer of await deps.listPeerGlobalMetaIds()) {
-      addPeer(peer);
+    try {
+      for (const peer of await deps.listPeerGlobalMetaIds(selfGlobalMetaId)) {
+        addPeer(peer);
+      }
+    } catch (error) {
+      deps.onError?.(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
@@ -450,6 +456,24 @@ function isOutboundMessageVisible(
   });
 }
 
+async function runWithConcurrency<T>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  const runWorker = async (): Promise<void> => {
+    while (nextIndex < values.length) {
+      const value = values[nextIndex];
+      nextIndex += 1;
+      await worker(value);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, () => runWorker()),
+  );
+}
+
 export function createPrivateChatAutoReplyBackfillLoop(
   deps: PrivateChatAutoReplyBackfillDependencies,
   options: PrivateChatAutoReplyBackfillOptions = {},
@@ -471,6 +495,10 @@ export function createPrivateChatAutoReplyBackfillLoop(
   const inboundRecoveryDelayMs = normalizePositiveInteger(
     options.inboundRecoveryDelayMs,
     DEFAULT_INTERVAL_MS,
+  );
+  const peerConcurrency = normalizePositiveInteger(
+    options.peerConcurrency,
+    DEFAULT_PEER_CONCURRENCY,
   );
   const cursorPath = options.cursorPath
     ?? path.join(deps.paths.stateRoot, 'private-chat-auto-reply-backfill.json');
@@ -505,12 +533,18 @@ export function createPrivateChatAutoReplyBackfillLoop(
     let failed = 0;
     let recovered = 0;
 
-    for (const peerGlobalMetaId of peers) {
+    const orderedPeers = [...peers].sort((left, right) => {
+      const leftHasCursor = Boolean(cursorState.peers[normalizeGlobalMetaId(left)]);
+      const rightHasCursor = Boolean(cursorState.peers[normalizeGlobalMetaId(right)]);
+      return Number(leftHasCursor) - Number(rightHasCursor);
+    });
+
+    await runWithConcurrency(orderedPeers, peerConcurrency, async (peerGlobalMetaId) => {
       const peerKey = normalizeGlobalMetaId(peerGlobalMetaId);
       const peerChatPublicKey = normalizeText(await deps.resolvePeerChatPublicKey(peerGlobalMetaId));
       if (!peerChatPublicKey) {
         skipped += 1;
-        continue;
+        return;
       }
 
       const existingCursor = cursorState.peers[peerKey];
@@ -537,7 +571,7 @@ export function createPrivateChatAutoReplyBackfillLoop(
       } catch (error) {
         failed += 1;
         deps.onError?.(error instanceof Error ? error : new Error(String(error)));
-        continue;
+        return;
       }
 
       let peerFailed = false;
@@ -650,7 +684,7 @@ export function createPrivateChatAutoReplyBackfillLoop(
           }
         }
       }
-    }
+    });
 
     if (cursorChanged) {
       await writeCursorState(cursorPath, cursorState);
