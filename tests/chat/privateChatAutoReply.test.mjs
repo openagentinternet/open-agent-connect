@@ -1503,6 +1503,78 @@ test('disabled auto-reply does not run the LLM or send a private-chat response',
   assert.equal(harness.writes.length, 0);
 });
 
+test('disabled auto-reply still persists the inbound message without invoking the reply runner', async () => {
+  const now = 1_770_000_000_000;
+  const persistedInputs = [];
+  const harness = await createAutoReplyHarness({
+    now,
+    enabled: false,
+    a2aConversationPersister: async (input) => {
+      persistedInputs.push(input);
+      return {
+        messageId: input.message.messageId ?? 'persisted-inbound-message',
+        sessionId: 'a2a-peer-local-peer',
+        orderSessionId: null,
+        direction: input.message.direction,
+        kind: 'private_chat',
+        protocolTag: null,
+        orderTxid: null,
+        serviceOrderPinId: null,
+        orderPinId: null,
+        paymentTxid: null,
+        content: input.message.content,
+        contentType: 'text/plain',
+        chain: input.message.chain ?? null,
+        pinId: input.message.pinId ?? null,
+        txid: input.message.txid ?? null,
+        txids: input.message.txids ?? [],
+        replyPinId: null,
+        timestamp: input.message.timestamp ?? now,
+        chainTimestamp: null,
+        sender: { globalMetaId: input.peer.globalMetaId, name: null, avatar: null, chatPublicKey: null },
+        recipient: { globalMetaId: input.local.globalMetaId, name: null, avatar: null, chatPublicKey: null },
+        raw: null,
+      };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 4,
+    lastDirection: 'outbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+  });
+
+  await harness.handleInbound({
+    content: 'persist me even though replies are off',
+    messagePinId: 'incoming-pin-disabled-persist',
+  });
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].direction, 'inbound');
+  assert.equal(messages[0].content, 'persist me even though replies are off');
+  assert.equal(messages[0].messagePinId, 'incoming-pin-disabled-persist');
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.turnCount, 4);
+
+  assert.equal(persistedInputs.length, 1);
+  assert.equal(persistedInputs[0].message.direction, 'incoming');
+  assert.equal(persistedInputs[0].message.content, 'persist me even though replies are off');
+  assert.equal(persistedInputs[0].message.pinId, 'incoming-pin-disabled-persist');
+});
+
 test('auto-reply reopens closed conversations after the idle window elapses', async () => {
   const now = 1_770_000_000_000;
   const harness = await createAutoReplyHarness({ now });

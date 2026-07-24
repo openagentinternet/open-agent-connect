@@ -51,7 +51,7 @@ export interface A2ASimplemsgPresenceWatchdogOptions {
   restartCooldownMs?: number;
   socketPresenceLimit?: number;
   now?: () => number;
-  readOnlineMetaBots?: () => Promise<Pick<ReadOnlineMetaBotsFromSocketPresenceResult, 'bots'>>;
+  readOnlineMetaBots?: () => Promise<Pick<ReadOnlineMetaBotsFromSocketPresenceResult, 'bots' | 'total'>>;
   onRestart?: (event: A2ASimplemsgPresenceWatchdogRestartEvent) => void;
   onError?: (error: Error) => void;
 }
@@ -140,7 +140,7 @@ export function createA2ASimplemsgPresenceWatchdog(
       };
     }
 
-    let presence: Pick<ReadOnlineMetaBotsFromSocketPresenceResult, 'bots'>;
+    let presence: Pick<ReadOnlineMetaBotsFromSocketPresenceResult, 'bots' | 'total'>;
     try {
       presence = await readOnlineMetaBots();
     } catch (error) {
@@ -151,6 +151,24 @@ export function createA2ASimplemsgPresenceWatchdog(
         report,
         missing: [],
         error: normalizedError,
+      };
+    }
+
+    // The presence API only serves a single capped page (see
+    // MAX_SOCKET_PRESENCE_SIZE) and ignores pagination cursors, so when the
+    // server reports more online identities than the page returned, any local
+    // profile could simply be beyond the page — absence is not evidence of a
+    // dead socket. Restarting every profile listener on that false signal
+    // creates the very receive gaps the watchdog is meant to prevent.
+    const presenceTotal = Number.isFinite(Number(presence.total))
+      ? Math.floor(Number(presence.total))
+      : presence.bots.length;
+    if (presenceTotal > presence.bots.length) {
+      resetMissingState();
+      return {
+        status: 'healthy',
+        report,
+        missing: [],
       };
     }
 

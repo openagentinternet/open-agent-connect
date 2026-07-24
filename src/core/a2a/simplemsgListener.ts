@@ -104,9 +104,12 @@ function normalizeObject(value: unknown): Record<string, unknown> | null {
 }
 
 function toFiniteTimestamp(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value)
-    ? Math.trunc(value)
-    : Date.now();
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return Date.now();
+  }
+  // MetaSO delivers timestamps in Unix seconds; normalize to milliseconds so
+  // stored messages order correctly next to locally persisted millisecond ones.
+  return Math.trunc(value < 1_000_000_000_000 ? value * 1000 : value);
 }
 
 function defaultSocketClientFactory(
@@ -252,7 +255,17 @@ function createProfileSimplemsgListener(input: {
     }
 
     const plaintext = decryptPrivateChatSocketMessage(message, input.identity, peerChatPublicKey);
-    if (!plaintext) return;
+    if (!plaintext) {
+      // Allow a redelivery (e.g. after reconnect) to succeed once the peer key
+      // becomes resolvable, and keep the drop observable instead of silent.
+      if (messagePinId) {
+        seenPinIds.delete(messagePinId);
+      }
+      input.onError?.(new Error(
+        `dropped undecryptable simplemsg push (pinId: ${messagePinId ?? 'unknown'}, from: ${fromGlobalMetaId})`,
+      ));
+      return;
+    }
 
     const inboundMessage: PrivateChatInboundMessage = {
       fromGlobalMetaId,
@@ -264,7 +277,7 @@ function createProfileSimplemsgListener(input: {
       rawMessage: normalizeObject(message),
     };
 
-    await persistA2AConversationMessageBestEffort({
+    const persistResult = await persistA2AConversationMessageBestEffort({
       paths: input.paths,
       local: {
         profileSlug: input.profile.slug,
@@ -291,6 +304,11 @@ function createProfileSimplemsgListener(input: {
         raw: inboundMessage.rawMessage,
       },
     }, input.persister);
+    if (!persistResult.persisted) {
+      input.onError?.(new Error(
+        `failed to persist simplemsg push (pinId: ${messagePinId ?? 'unknown'}, from: ${fromGlobalMetaId}): ${persistResult.errorMessage ?? 'unknown error'}`,
+      ));
+    }
     await input.onMessage?.(input.profile, inboundMessage);
   };
 

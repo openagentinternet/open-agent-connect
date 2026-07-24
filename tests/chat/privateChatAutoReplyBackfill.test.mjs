@@ -420,6 +420,97 @@ test('auto-reply backfill re-reads the cursor index when opposite directions sha
   assert.equal(handledMessages[0].messagePinId, 'missed-incoming-at-duplicate-index');
 });
 
+test('auto-reply backfill holds the cursor on undecryptable history rows and retries them on the next tick', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peerbot00000000000000000000000000';
+  const handledMessages = [];
+  const errors = [];
+  let rowDecrypts = false;
+
+  const cursorPath = path.join(paths.stateRoot, 'private-chat-auto-reply-backfill.json');
+  await fs.mkdir(paths.stateRoot, { recursive: true });
+  await fs.writeFile(
+    cursorPath,
+    `${JSON.stringify({
+      version: 1,
+      peers: {
+        [peerGlobalMetaId]: {
+          afterIndex: 10,
+          updatedAt: 1_770_000_000_000,
+        },
+      },
+    }, null, 2)}\n`,
+    'utf8',
+  );
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async (message) => {
+      handledMessages.push(message);
+    },
+    listPeerGlobalMetaIds: async () => [peerGlobalMetaId],
+    historyClient: {
+      async fetchRecent() {
+        throw new Error('fetchRecent should not be used with an existing cursor');
+      },
+      async fetchAfter() {
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 16,
+          serverTime: 1_770_000_001_000,
+          messages: [{
+            id: 'transient-undecryptable-pin',
+            pinId: 'transient-undecryptable-pin',
+            protocol: '/protocols/simplemsg',
+            content: rowDecrypts ? 'recovered hello' : '[Unable to decrypt message]',
+            timestamp: 1_770_000_001,
+            index: 16,
+            fromGlobalMetaId: peerGlobalMetaId,
+            toGlobalMetaId: selfGlobalMetaId,
+          }],
+        };
+      },
+    },
+    now: () => 1_770_000_001_000,
+    onError: (error) => errors.push(error),
+  });
+
+  const failedResult = await loop.syncOnce();
+
+  assert.equal(failedResult.processed, 0);
+  assert.equal(failedResult.failed, 1);
+  assert.equal(handledMessages.length, 0);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /undecryptable simplemsg/);
+  const heldCursor = JSON.parse(await fs.readFile(cursorPath, 'utf8'));
+  assert.equal(heldCursor.peers[peerGlobalMetaId].afterIndex, 10);
+
+  // The next tick re-reads the same row; once it decrypts, it is processed
+  // and the cursor finally advances past it.
+  rowDecrypts = true;
+  const recoveredResult = await loop.syncOnce();
+
+  assert.equal(recoveredResult.processed, 1);
+  assert.equal(recoveredResult.failed, 0);
+  assert.equal(handledMessages.length, 1);
+  assert.equal(handledMessages[0].content, 'recovered hello');
+  assert.equal(handledMessages[0].messagePinId, 'transient-undecryptable-pin');
+  const advancedCursor = JSON.parse(await fs.readFile(cursorPath, 'utf8'));
+  assert.equal(advancedCursor.peers[peerGlobalMetaId].afterIndex, 16);
+});
+
 test('auto-reply backfill recovers an unanswered outbound message missing from durable history', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);

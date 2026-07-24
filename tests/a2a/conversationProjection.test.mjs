@@ -318,3 +318,30 @@ test('persistA2AConversationMessage stores simplemsg JSON payload contentType fo
   assert.equal(result.messages[0].content, '## Fresh Markdown');
   assert.equal(result.messages[0].contentType, 'text/markdown');
 });
+
+test('persistA2AConversationMessage normalizes Unix-second message timestamps to milliseconds', async (t) => {
+  const homeDir = await createProfileHome('metabot-a2a-conversation-seconds-persist-', 'eric');
+  t.after(async () => cleanupProfileHome(homeDir));
+
+  const persisted = await persistA2AConversationMessage({
+    homeDir,
+    local: actor(LOCAL_GLOBAL_META_ID, 'Eric'),
+    peer: actor(PEER_GLOBAL_META_ID, 'Weather Bot'),
+    message: {
+      direction: 'incoming',
+      content: 'seconds timestamp from the socket stream',
+      timestamp: 1_784_910_335,
+    },
+  });
+
+  assert.equal(persisted.timestamp, 1_784_910_335_000);
+
+  const result = await readPeerConversationMessages({
+    homeDir,
+    localGlobalMetaId: LOCAL_GLOBAL_META_ID,
+    peerGlobalMetaId: PEER_GLOBAL_META_ID,
+  });
+
+  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages[0].timestamp, 1_784_910_335_000);
+});

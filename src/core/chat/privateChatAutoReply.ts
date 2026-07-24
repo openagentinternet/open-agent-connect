@@ -680,8 +680,6 @@ export function createPrivateChatAutoReplyOrchestrator(
       return true;
     },
     async handleInboundMessage(message) {
-      if (!config.enabled) return;
-
       const selfGlobalMetaId = await deps.selfGlobalMetaId();
       if (!selfGlobalMetaId) return;
 
@@ -791,6 +789,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         await deps.stateStore.upsertConversation(conversation);
         return;
       }
+
+      // Inbound messages are always persisted above so they stay visible and
+      // recoverable; only the automated reply is gated by the enabled flag.
+      if (!config.enabled) return;
 
       // ---- Private-chat path: turn counting, cooldown, reply runner ----
 
