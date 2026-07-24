@@ -1421,6 +1421,59 @@ test('bot page chat skill add and remove controls rerender chat skills tab', () 
   assert.equal(renderChatSkillsTabCalls, 2);
 });
 
+test('bot page rolls back the Auto-Reply toggle when persistence fails', async () => {
+  const classes = new Set(['toggle-switch', 'on', 'loading']);
+  const attrs = new Map([['aria-checked', 'true']]);
+  const label = field('On');
+  label.textContent = 'On';
+  const toggle = {
+    classList: {
+      toggle(name, enabled) {
+        if (enabled) classes.add(name);
+        else classes.delete(name);
+      },
+    },
+    getAttribute: (name) => attrs.get(name) ?? null,
+    setAttribute: (name, value) => attrs.set(name, String(value)),
+    querySelector: (selector) => (selector === '.toggle-text' ? label : null),
+  };
+  const status = field();
+  const panel = panelElement('data-chat-skills-profile-slug', 'alice-bot', {
+    '[data-auto-reply-toggle]': toggle,
+    '[data-auto-reply-status]': status,
+  });
+  const context = createBotScriptContext({
+    elements: {
+      '[data-auto-reply-status]': status,
+      '[data-chat-skills-profile-slug]': panel,
+    },
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: false,
+        code: 'auto_reply_persist_failed',
+        message: 'Failed to save the auto-reply setting.',
+      }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  const profile = { slug: 'alice-bot' };
+  context.state.profiles = [profile];
+  context.state.selectedSlug = 'alice-bot';
+  context.state.selectedTab = 'chatSkills';
+  context.state.autoReplyBySlug['alice-bot'] = false;
+
+  await context.toggleAutoReply(profile, true);
+
+  assert.equal(classes.has('on'), false);
+  assert.equal(classes.has('loading'), false);
+  assert.equal(attrs.get('aria-checked'), 'false');
+  assert.equal(label.textContent, 'Off');
+  assert.equal(status.className, 'save-status error');
+  assert.equal(status.textContent, 'Failed to save the auto-reply setting.');
+});
+
 test('bot page preserves info form drafts when chat skill controls rerender the tab', () => {
   const root = { innerHTML: '' };
   const activeInfoPanel = {

@@ -1434,9 +1434,12 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
   // Resolves the live auto-reply config for a given profile home dir. The
   // returned object must be the same reference that the daemon's setAutoReply
   // handler mutates, so that toggling auto-reply off at runtime actually gates
-  // inbound-message handling for that profile. When omitted, the dispatcher
-  // falls back to the shared autoReplyConfig (kept for tests/legacy callers).
-  resolveAutoReplyConfigForHome?: (homeDir: string) => PrivateChatAutoReplyConfig;
+  // inbound-message handling for that profile. The daemon resolver loads a
+  // profile's persisted value before returning it after a restart. When omitted,
+  // the dispatcher falls back to the shared autoReplyConfig (tests/legacy).
+  resolveAutoReplyConfigForHome?: (
+    homeDir: string,
+  ) => PrivateChatAutoReplyConfig | Promise<PrivateChatAutoReplyConfig>;
 }
 
 type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
@@ -1756,7 +1759,9 @@ export function createPrivateChatAutoReplyProfileDispatcher(
   const orchestrators = new Map<string, PrivateChatAutoReplyOrchestrator>();
   const createOrchestrator = input.createOrchestrator ?? createPrivateChatAutoReplyOrchestrator;
 
-  function getOrCreateOrchestrator(profile: IdentityProfileRecord): PrivateChatAutoReplyOrchestrator | null {
+  async function getOrCreateOrchestrator(
+    profile: IdentityProfileRecord,
+  ): Promise<PrivateChatAutoReplyOrchestrator | null> {
     const profileHomeDir = normalizeEnvText(profile.homeDir);
     if (!profileHomeDir) return null;
     const cacheKey = path.resolve(profileHomeDir);
@@ -1811,8 +1816,10 @@ export function createPrivateChatAutoReplyProfileDispatcher(
     // runtime toggle-off is observed by this orchestrator immediately. Fall
     // back to the shared config when no resolver is wired (tests/legacy).
     const profileAutoReplyConfig = input.resolveAutoReplyConfigForHome
-      ? input.resolveAutoReplyConfigForHome(profileHomeDir)
+      ? await input.resolveAutoReplyConfigForHome(profileHomeDir)
       : input.autoReplyConfig;
+    const concurrentlyCreated = orchestrators.get(cacheKey);
+    if (concurrentlyCreated) return concurrentlyCreated;
     const orchestrator = createOrchestrator({
       stateStore: createPrivateChatStateStore(profilePaths),
       strategyStore: createChatStrategyStore(profilePaths),
@@ -1832,7 +1839,7 @@ export function createPrivateChatAutoReplyProfileDispatcher(
 
   return {
     async handleInboundMessage(profile, message) {
-      const orchestrator = getOrCreateOrchestrator(profile);
+      const orchestrator = await getOrCreateOrchestrator(profile);
       if (!orchestrator) return;
       if (!input.handleOrderProtocolMessageForProfile) {
         await orchestrator.handleInboundMessage(message);

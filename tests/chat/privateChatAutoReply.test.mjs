@@ -1386,6 +1386,15 @@ test('guided local turns still run when inbound auto-reply is disabled', async (
   assert.equal(harness.writes.length, 1);
 });
 
+test('disabled auto-reply does not run the LLM or send a private-chat response', async () => {
+  const harness = await createAutoReplyHarness({ enabled: false });
+
+  await harness.handleInbound();
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+});
+
 test('auto-reply reopens closed conversations after the idle window elapses', async () => {
   const now = 1_770_000_000_000;
   const harness = await createAutoReplyHarness({ now });

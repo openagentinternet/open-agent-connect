@@ -680,4 +680,43 @@ test('setAutoReply off for a non-default profile is observed by the dispatcher o
   // The very same orchestrator instance must now observe enabled=false and skip.
   await dispatcher.handleInboundMessage(betaProfile, inbound);
   assert.equal(handled.length, 1, 'orchestrator skipped the inbound message after toggle off');
+
+  // Recreate both the handlers and dispatcher to simulate a daemon restart.
+  // The non-active profile must reload its own config.json instead of inheriting
+  // the active daemon profile's enabled=true default.
+  const restartedSharedConfig = {
+    enabled: true,
+    acceptPolicy: 'accept_all',
+    defaultStrategyId: null,
+  };
+  const restartedHandlers = createDefaultMetabotDaemonHandlers({
+    homeDir: daemonHomeDir,
+    systemHomeDir,
+    signer: readOnlySigner(),
+    getDaemonRecord: () => null,
+    autoReplyConfig: restartedSharedConfig,
+  });
+  const restartedStatus = await restartedHandlers.chat.autoReplyStatus({ from: 'beta-bot' });
+  assert.equal(restartedStatus.ok, true);
+  assert.equal(restartedStatus.data.enabled, false);
+
+  const handledAfterRestart = [];
+  const restartedDispatcher = createPrivateChatAutoReplyProfileDispatcher({
+    autoReplyConfig: restartedSharedConfig,
+    resolveAutoReplyConfigForHome: (homeDir) => restartedHandlers.resolveAutoReplyConfigForHome(homeDir),
+    resolvePeerChatPublicKey: async () => 'peer-chat-key',
+    llmExecutor: { execute: async () => 'session', getSession: async () => null },
+    createOrchestrator: (_deps, config) => ({
+      handleInboundMessage: async () => {
+        if (!config.enabled) return;
+        handledAfterRestart.push(true);
+      },
+    }),
+  });
+
+  await restartedDispatcher.handleInboundMessage(betaProfile, {
+    ...inbound,
+    messagePinId: 'incoming-pin-after-restart',
+  });
+  assert.equal(handledAfterRestart.length, 0, 'restarted dispatcher kept the persisted toggle off');
 });
