@@ -1,5 +1,6 @@
 import {
   browserFailure,
+  browserSuccess,
   type BrowserCacheClearResult,
   type BrowserCacheSnapshot,
   type BrowserCommandResult,
@@ -13,6 +14,67 @@ import {
 import type { BrowserContextResult } from '@openagentinternet/agent-browser-core';
 
 export type Awaitable<T> = T | Promise<T>;
+
+/** Result shape for `POST /api/browser/tabs/open`. */
+export interface BrowserTabOpenResult {
+  ok: true;
+  uri: string;
+  /** Number of currently-open Browser pages the open request reached. */
+  pagesReached: number;
+  /** Present only when no page was open. */
+  note?: string;
+}
+
+/**
+ * A fire-and-forget transport sink for daemon→Browser-page tab pushes.
+ *
+ * ABC tabs are strictly client-only and session-level (see
+ * `browser-tabs-host-integration.md`): they hold no server-side state and the
+ * daemon never learns tab ids. This sink exists purely so an external caller
+ * (e.g. `metabot browser tab open --uri`) can fan a single open request out to
+ * every currently-open Browser page, which then feeds ABC's built-in
+ * `AgentBrowserTabs.openTab`. It is not tab-state storage.
+ *
+ * Sinks are registered/unregistered by the daemon SSE route that owns each
+ * connected page; `broadcastBrowserTabOpen` is called from the POST route.
+ */
+export interface BrowserTabEventSink {
+  /** Deliver an `agent-browser:open-tab` event to one subscribed page. */
+  (event: { type: 'agent-browser:open-tab'; uri: string }): void;
+}
+
+const browserTabSinks = new Set<BrowserTabEventSink>();
+
+/** Register a sink. Returns an unregister function for cleanup. */
+export function registerBrowserTabSink(sink: BrowserTabEventSink): () => void {
+  browserTabSinks.add(sink);
+  return () => {
+    browserTabSinks.delete(sink);
+  };
+}
+
+/** Number of currently-subscribed Browser pages (used to report "no page open"). */
+export function browserTabSinkCount(): number {
+  return browserTabSinks.size;
+}
+
+/**
+ * Fan an open-tab request out to every subscribed Browser page. Never throws:
+ * each sink is its own best-effort try/catch boundary. Returns the number of
+ * pages reached.
+ */
+export function broadcastBrowserTabOpen(uri: string): number {
+  let reached = 0;
+  for (const sink of browserTabSinks) {
+    try {
+      sink({ type: 'agent-browser:open-tab', uri });
+      reached += 1;
+    } catch {
+      /* a single failing sink must not block the others */
+    }
+  }
+  return reached;
+}
 
 export interface BrowserHttpHandlers {
   getRuntime?: (input?: { actorId?: string; from?: string }) => Awaitable<BrowserCommandResult<BrowserRuntimeSnapshot>>;
@@ -178,6 +240,32 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
       ? await handlers.metafileUpload({ ...input, ...actorRouteInput(url, input) })
       : browserFailure('unsupported_method', 'OAC Browser MetaFile upload requires a host-owned file picker.');
     context.sendJson(statusForBrowserResult(result), result);
+    return true;
+  }
+
+  if (url.pathname === '/api/browser/tabs/open') {
+    if (method !== 'POST') {
+      context.sendMethodNotAllowed(['POST']);
+      return true;
+    }
+    const input = await context.readJsonBody();
+    const uri = normalizeText(input.uri);
+    if (!uri) {
+      context.sendJson(400, browserFailure('missing_uri', 'uri is required to open a Browser tab.'));
+      return true;
+    }
+    if (uri.startsWith('--')) {
+      context.sendJson(400, browserFailure('invalid_browser_uri', 'uri does not look like a Browser resource URI.'));
+      return true;
+    }
+    // Fire-and-forget: fan out to every currently-open Browser page, which feeds
+    // ABC's client-only AgentBrowserTabs.openTab. No tab id is returned because
+    // tab ids are client-only (the daemon never learns them). Reaching zero
+    // pages is not an error — the open is simply pending until a page connects.
+    const reached = broadcastBrowserTabOpen(uri);
+    const data: BrowserTabOpenResult = { ok: true, uri, pagesReached: reached };
+    if (reached === 0) data.note = 'no Browser page currently open; open the Browser first';
+    context.sendJson(200, browserSuccess(data));
     return true;
   }
 

@@ -1555,6 +1555,65 @@ test('browser open preserves surrounding `--uri` whitespace while still using th
   assert.notEqual(browserUrl.pathname, '/ui/browser');
 });
 
+test('browser tab open --uri asks the running Browser page to open a new tab', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  // No Browser page is open during this test, so pagesReached is 0 with a note.
+  // The command still succeeds: the open is fire-and-forget transport.
+  const opened = await runCommand(homeDir, ['browser', 'tab', 'open', '--uri', 'metaid://idq1alice']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  assert.equal(opened.payload.data.uri, 'metaid://idq1alice');
+  assert.equal(opened.payload.data.pagesReached, 0);
+  assert.match(opened.payload.data.note, /no Browser page currently open/);
+});
+
+test('browser tab open without --uri fails with a helpful error', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['browser', 'tab', 'open']);
+
+  assert.notEqual(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, false);
+  assert.match(opened.payload.message, /--uri/);
+});
+
+test('browser tab open --uri with a flag-like value fails', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['browser', 'tab', 'open', '--uri', '--flag']);
+
+  assert.notEqual(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, false);
+  assert.match(opened.payload.message, /--uri/);
+});
+
+test('browser tab with an unknown subcommand fails', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['browser', 'tab', 'close', '--uri', 'metaid://idq1alice']);
+
+  assert.notEqual(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, false);
+});
+
 test('metaapp view returns a local apps owner console url for one pin id', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));

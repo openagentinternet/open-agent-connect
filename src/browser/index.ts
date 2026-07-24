@@ -1,8 +1,13 @@
 export {
   handleBrowserApiRoutes,
   statusForBrowserResult,
+  registerBrowserTabSink,
+  broadcastBrowserTabOpen,
+  browserTabSinkCount,
   type BrowserHttpHandlers,
   type BrowserHttpRouteContext,
+  type BrowserTabEventSink,
+  type BrowserTabOpenResult,
 } from './http';
 export { renderBrowserPageHtml } from './page';
 

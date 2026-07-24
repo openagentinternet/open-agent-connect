@@ -35,12 +35,14 @@ if (
 }
 
 // ---- OAC Browser host bridge adapters ----
-// The ABC bridge client runs in the host (parent) document. OAC overrides three
+// The ABC bridge client runs in the host (parent) document. OAC overrides
 // bridge behaviors that a headless Node host must own:
 //   1. metafile.upload  -> host-owned <input type=file> picker + base64 POST
 //   2. metaid.pin.write -> two-phase confirmation (phase 1 returns a host token
 //      that never reaches the MetaApp iframe; the host completes phase 2)
-//   3. loadRuntime      -> re-emit browser.actor.changed once runtime is ready
+//   3. tab actions      -> subscribe to daemon-pushed tab opens and feed them to
+//      ABC's client-only AgentBrowserTabs API (fire-and-forget transport only)
+//   4. loadRuntime      -> re-emit browser.actor.changed once runtime is ready
 // All referenced helpers (commandApi, renderModal, closeModal, showToast, ...) are
 // declared at the same script scope, so they are in scope here.
 (function oacBrowserHostAdapters() {
@@ -206,7 +208,28 @@ if (
     };
   }
 
-  // Problem 3: once runtime is ready, re-emit browser.actor.changed so MetaApps
+  // Problem 3: subscribe to daemon-pushed tab actions (e.g. an external
+  // "metabot browser tab open --uri" call) and feed them to ABC's built-in
+  // AgentBrowserTabs API. ABC tabs are strictly client-only and session-level,
+  // so this listener carries fire-and-forget transport only; it holds no tab
+  // state and never reports tab ids back to the daemon.
+  if (typeof globalThis !== 'undefined'
+    && typeof globalThis.EventSource === 'function'
+    && !globalThis.__oacBrowserTabEventSource) {
+    try {
+      var tabSource = new globalThis.EventSource('/api/browser/events');
+      globalThis.__oacBrowserTabEventSource = tabSource;
+      tabSource.addEventListener('agent-browser:open-tab', function (event) {
+        if (!globalThis.AgentBrowserTabs || typeof globalThis.AgentBrowserTabs.openTab !== 'function') return;
+        var data = {};
+        try { data = event.data ? JSON.parse(event.data) : {}; } catch (_) { /* best-effort */ }
+        var uri = data && typeof data.uri === 'string' ? data.uri : '';
+        globalThis.AgentBrowserTabs.openTab(uri || undefined);
+      });
+    } catch (_) { /* EventSource is best-effort; never break the page */ }
+  }
+
+  // Problem 4: once runtime is ready, re-emit browser.actor.changed so MetaApps
   // that subscribe to the event (instead of polling browser.actor.current) learn
   // the current actor. Also warn when the selected Bot has no Global MetaID.
   if (typeof loadRuntime === 'function') {
