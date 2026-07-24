@@ -1363,6 +1363,7 @@ test('default bot createProfile bootstraps a chained identity before indexing th
       step1: { address: input.mvcAddress },
       step2: { txid: 'subsidy-tx-1' },
     }),
+    discoverLlmRuntimes: async () => ({ runtimes: [], errors: [] }),
     createSignerForHome: () => makeSigner(async (input) => {
       writeCalls.push(input);
       return {
@@ -1429,6 +1430,7 @@ test('default bot createProfile writes explicit optional profile fields before l
       step1: { address: input.mvcAddress },
       step2: { txid: 'subsidy-tx-1' },
     }),
+    discoverLlmRuntimes: async () => ({ runtimes: [], errors: [] }),
     createSignerForHome: () => makeSigner(async (input) => {
       writeCalls.push(input);
       if (input.path === '/info/avatar' || input.path === '/info/persona') {
@@ -1591,6 +1593,7 @@ test('default bot createProfile writes explicitly empty allowChatSkills to chain
     identitySyncStepDelayMs: 0,
     getDaemonRecord: () => null,
     ...makeChainedCreateOverrides(),
+    discoverLlmRuntimes: async () => ({ runtimes: [], errors: [] }),
     createSignerForHome: () => makeSigner(async (input) => {
       writeCalls.push(input);
       return {
@@ -1835,16 +1838,19 @@ test('default bot createProfile binds a detected requested host best-effort inst
     version: 1,
     runtimes: [runtime('claude-code', 'runtime-source-claude', 'healthy')],
   });
+  const discoverCalls = [];
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => null,
     // The requested host is installed but not readiness-verified (detected);
     // creation must still bind it best-effort (spec R1.3).
-    discoverLlmRuntimes: async () => ({
-      runtimes: [runtime('gemini', 'runtime-gemini-detected', 'detected')],
-      errors: [],
-    }),
+    discoverLlmRuntimes: async (input) => {
+      discoverCalls.push({ providers: input.providers ?? null, skipReadinessProbe: input.skipReadinessProbe === true });
+      const discovered = runtime('gemini', 'runtime-gemini-detected', 'detected');
+      await input.onRuntimeDiscovered?.(discovered);
+      return { runtimes: [discovered], errors: [] };
+    },
     ...makeChainedCreateOverrides(),
   });
 
@@ -1856,6 +1862,11 @@ test('default bot createProfile binds a detected requested host best-effort inst
   assert.equal(result.ok, true);
   assert.equal(result.data.profile.primaryProvider, 'gemini');
   assert.equal(result.data.profile.fallbackProvider, 'claude-code');
+  assert.deepEqual(result.data.llmBinding, {
+    primaryProvider: 'gemini',
+    fallbackProvider: 'claude-code',
+    status: 'pending',
+  });
   const targetRuntimeState = await createLlmRuntimeStore(result.data.profile.homeDir).read();
   assert.deepEqual(
     targetRuntimeState.runtimes.map((entry) => entry.id).sort(),
@@ -1869,6 +1880,122 @@ test('default bot createProfile binds a detected requested host best-effort inst
       ['primary', 'runtime-gemini-detected'],
     ],
   );
+  // The pending primary triggers exactly one post-create upgrade probe on the
+  // profile store (spec R3.1); let its fire-and-forget sweep settle before cleanup.
+  await waitForCondition(() => discoverCalls.length >= 2, 'post-create upgrade probe');
+  assert.deepEqual(discoverCalls[1], { providers: ['gemini'], skipReadinessProbe: false });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+});
+
+test('default bot createProfile runs a presence scan on empty stores and upgrades the pending binding', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const discoverCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    discoverLlmRuntimes: async (input) => {
+      discoverCalls.push({ providers: input.providers ?? null, skipReadinessProbe: input.skipReadinessProbe === true });
+      if (input.skipReadinessProbe) {
+        // R2 presence scan: readiness skipped, everything found is detected.
+        return { runtimes: [runtime('workbuddy', 'runtime-workbuddy', 'detected')], errors: [] };
+      }
+      // R3 upgrade probe: the runtime answers readiness and flips healthy.
+      const upgraded = runtime('workbuddy', 'runtime-workbuddy', 'healthy');
+      await input.onRuntimeDiscovered?.(upgraded);
+      return { runtimes: [upgraded], errors: [] };
+    },
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({ name: 'Fresh Install Bot' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.primaryProvider, 'workbuddy');
+  assert.deepEqual(result.data.llmBinding, {
+    primaryProvider: 'workbuddy',
+    status: 'pending',
+  });
+  const bindings = await createLlmBindingStore(result.data.profile.homeDir).read();
+  assert.deepEqual(
+    bindings.bindings.map((binding) => [binding.role, binding.llmRuntimeId]),
+    [['primary', 'runtime-workbuddy']],
+  );
+
+  await waitForCondition(() => discoverCalls.length >= 2, 'post-create upgrade probe');
+  assert.deepEqual(discoverCalls[0], { providers: null, skipReadinessProbe: true });
+  assert.deepEqual(discoverCalls[1], { providers: ['workbuddy'], skipReadinessProbe: false });
+  await waitForCondition(async () => {
+    const state = await createLlmRuntimeStore(result.data.profile.homeDir).read();
+    return state.runtimes.find((entry) => entry.id === 'runtime-workbuddy')?.health === 'healthy';
+  }, 'profile runtime to flip healthy after the upgrade probe');
+  await new Promise((resolve) => setTimeout(resolve, 50));
+});
+
+test('default bot createProfile skips the presence scan when a store already has candidates', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [runtime('claude-code', 'runtime-source-claude', 'healthy')],
+  });
+  const discoverCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    discoverLlmRuntimes: async (input) => {
+      discoverCalls.push({ providers: input.providers ?? null, skipReadinessProbe: input.skipReadinessProbe === true });
+      return { runtimes: [], errors: [] };
+    },
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({ name: 'No Scan Bot' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.profile.primaryProvider, 'claude-code');
+  assert.deepEqual(result.data.llmBinding, {
+    primaryProvider: 'claude-code',
+    status: 'healthy',
+  });
+  assert.deepEqual(discoverCalls, [], 'no presence scan and no upgrade probe for an already-healthy binding');
+});
+
+test('default bot createProfile succeeds unbound with llmBinding none when nothing is discoverable', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const discoverCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    discoverLlmRuntimes: async (input) => {
+      discoverCalls.push({ providers: input.providers ?? null, skipReadinessProbe: input.skipReadinessProbe === true });
+      return { runtimes: [], errors: [] };
+    },
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({ name: 'No Runtime Bot' });
+
+  assert.equal(result.ok, true);
+  assert.ok(!result.data.profile.primaryProvider);
+  assert.deepEqual(result.data.llmBinding, { status: 'none' });
+  assert.equal(discoverCalls.length, 1, 'only the presence scan runs; nothing bound means no upgrade probe');
+  assert.deepEqual(discoverCalls[0], { providers: null, skipReadinessProbe: true });
+  const bindings = await createLlmBindingStore(result.data.profile.homeDir).read();
+  assert.deepEqual(bindings.bindings, []);
 });
 
 test('default bot createProfile from UI defaults providers by recent runtime activity', async (t) => {
@@ -1921,6 +2048,7 @@ test('default bot createProfile does not write fallback persona defaults to chai
     homeDir,
     systemHomeDir,
     getDaemonRecord: () => null,
+    discoverLlmRuntimes: async () => ({ runtimes: [], errors: [] }),
     ...makeChainedCreateOverrides(writeCalls),
   });
 
@@ -2198,6 +2326,7 @@ test('default bot createProfile keeps a retryable local Bot when subsidy fails',
     systemHomeDir,
     identitySyncStepDelayMs: 0,
     getDaemonRecord: () => null,
+    discoverLlmRuntimes: async () => ({ runtimes: [], errors: [] }),
     requestMvcGasSubsidy: async () => subsidyAvailable
       ? { success: true, step2: { txid: 'subsidy-retry-tx' } }
       : { success: false, error: 'subsidy unavailable' },

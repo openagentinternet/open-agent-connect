@@ -1178,6 +1178,22 @@ async function resolveDefaultMetabotCreateProviders(input: {
     targetRuntimeState.runtimes,
     sourceRuntimeState.runtimes,
   );
+  const discover = input.discover ?? discoverLlmRuntimes;
+
+  // Presence scan (spec R2): on a fresh install neither store has ever seen
+  // a runtime, so run ONE bounded scan with readiness probes skipped. It only
+  // feeds selection here — it writes nothing to either store and never
+  // retires known runtimes.
+  let presenceScanRan = false;
+  if (!candidateRuntimes.some((runtime) => runtime.provider !== 'custom')) {
+    const scan = await discover({
+      env: process.env,
+      knownRuntimes: [],
+      skipReadinessProbe: true,
+    });
+    presenceScanRan = true;
+    candidateRuntimes = mergeMetabotCreateRuntimeCandidates(candidateRuntimes, scan.runtimes);
+  }
 
   const preferredProvider = input.preferredProvider && input.preferredProvider !== 'custom'
     ? input.preferredProvider
@@ -1185,12 +1201,13 @@ async function resolveDefaultMetabotCreateProviders(input: {
   // Probe for the requested host only when it has no candidate at ANY
   // availability tier (spec R1.3): a stored detected/degraded row is enough to
   // attempt a best-effort bind, so re-probing it here would only add latency.
+  // Skipped when the presence scan already covered every provider.
   if (
     preferredProvider
     && input.primaryProvider === undefined
+    && !presenceScanRan
     && !hasMetabotCreateProviderCandidate(candidateRuntimes, preferredProvider)
   ) {
-    const discover = input.discover ?? discoverLlmRuntimes;
     const discoveryResult = await discover({
       env: process.env,
       providers: [preferredProvider],
@@ -1267,6 +1284,64 @@ async function applyDefaultMetabotCreateProviders(input: {
     },
     systemDefaultProviderRoles,
   };
+}
+
+interface CreateLlmBindingOutcome {
+  llmBinding: {
+    primaryProvider?: LlmProvider;
+    fallbackProvider?: LlmProvider;
+    status: 'healthy' | 'pending' | 'none';
+    reason?: string;
+  };
+  /** Bound providers whose runtime is not healthy yet; they get the post-create upgrade probe (spec R3.1). */
+  pendingProviders: LlmProvider[];
+}
+
+// Reads the freshly written bindings of a created profile and derives the
+// machine-readable creation outcome (spec R3.3) plus the providers that still
+// need an upgrade probe. Status follows the effective (primary, else
+// fallback) binding: 'healthy' when its runtime is healthy, 'pending' when
+// bound below healthy, 'none' when nothing could be bound at any tier.
+async function collectCreateLlmBindingOutcome(input: {
+  homeDir: string;
+  slug: string;
+  primaryProvider?: LlmProvider | null;
+  fallbackProvider?: LlmProvider | null;
+}): Promise<CreateLlmBindingOutcome> {
+  const [bindingState, runtimeState] = await Promise.all([
+    createLlmBindingStore(input.homeDir).read(),
+    createLlmRuntimeStore(resolveMetabotPaths(input.homeDir)).read(),
+  ]);
+  const runtimeById = new Map(runtimeState.runtimes.map((runtime) => [runtime.id, runtime]));
+  const slugBindings = bindingState.bindings.filter((binding) => binding.metaBotSlug === input.slug);
+  const primaryBinding = selectVisibleRoleBinding(slugBindings.filter((binding) => binding.role === 'primary'));
+  const fallbackBinding = selectVisibleRoleBinding(slugBindings.filter((binding) => binding.role === 'fallback'));
+
+  const pendingProviders: LlmProvider[] = [];
+  for (const binding of [primaryBinding, fallbackBinding]) {
+    if (!binding) continue;
+    const runtime = runtimeById.get(binding.llmRuntimeId);
+    if (runtime && runtime.provider !== 'custom' && runtime.health !== 'healthy'
+      && !pendingProviders.includes(runtime.provider)) {
+      pendingProviders.push(runtime.provider);
+    }
+  }
+
+  const effectiveBinding = primaryBinding ?? fallbackBinding;
+  const effectiveRuntime = effectiveBinding ? runtimeById.get(effectiveBinding.llmRuntimeId) : undefined;
+  const llmBinding: CreateLlmBindingOutcome['llmBinding'] = {
+    ...(input.primaryProvider ? { primaryProvider: input.primaryProvider } : {}),
+    ...(input.fallbackProvider ? { fallbackProvider: input.fallbackProvider } : {}),
+    status: !effectiveBinding
+      ? 'none'
+      : effectiveRuntime?.health === 'healthy'
+        ? 'healthy'
+        : 'pending',
+    ...(effectiveBinding && effectiveRuntime?.health !== 'healthy' && effectiveRuntime?.healthReason
+      ? { reason: effectiveRuntime.healthReason }
+      : {}),
+  };
+  return { llmBinding, pendingProviders };
 }
 
 function buildDefaultBindingId(slug: string, runtimeId: string, role: 'primary' | 'fallback'): string {
@@ -15133,12 +15208,29 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const hostPersonaProjection = (profile.role.trim() || profile.soul.trim() || profile.goal.trim())
             ? await syncCodexPersonaProjection(profile)
             : undefined;
+          const { llmBinding, pendingProviders } = await collectCreateLlmBindingOutcome({
+            homeDir: profileHomeDir,
+            slug: profile.slug,
+            primaryProvider: profile.primaryProvider,
+            fallbackProvider: profile.fallbackProvider,
+          });
+          if (pendingProviders.length > 0) {
+            // Post-create upgrade probe (spec R3.1): fire-and-forget, joins the
+            // serialized sweep chain of the NEW profile's store, so a pending
+            // binding flips healthy as soon as its runtime answers readiness.
+            startBackgroundLlmDiscoverySweep(
+              profileHomeDir,
+              pendingProviders,
+              input.discoverLlmRuntimes ?? discoverLlmRuntimes,
+            );
+          }
           return commandSuccess({
             profile,
             identity,
             chainWrites: [...(bootstrap.sync?.chainWrites ?? []), ...profileChainWrites],
             subsidy: bootstrap.subsidy,
             setup: buildMetabotSetupStatus(identity),
+            llmBinding,
             ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
           });
         } catch (error) {
