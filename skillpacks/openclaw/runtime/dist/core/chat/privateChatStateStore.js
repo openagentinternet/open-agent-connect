@@ -418,6 +418,27 @@ function createPrivateChatStateStore(homeDirOrPaths) {
             });
             return appendedMessages;
         },
+        async replaceMessage(messageId, replacement) {
+            const normalizedMessageId = normalizeText(messageId);
+            if (!normalizedMessageId)
+                return null;
+            let replacedMessage = null;
+            await this.updateState(state => {
+                const messageIndex = state.messages.findIndex(message => message.messageId === normalizedMessageId);
+                if (messageIndex < 0)
+                    return state;
+                const normalizedReplacement = {
+                    ...replacement,
+                    messageId: normalizedMessageId,
+                    timestamp: normalizeTimestampMs(replacement.timestamp),
+                };
+                const messages = state.messages.slice();
+                messages[messageIndex] = normalizedReplacement;
+                replacedMessage = normalizedReplacement;
+                return { ...state, messages };
+            });
+            return replacedMessage;
+        },
         async getConversationByPeer(peerGlobalMetaId) {
             const state = await this.readState();
             const normalizedPeer = normalizeText(peerGlobalMetaId).toLowerCase();

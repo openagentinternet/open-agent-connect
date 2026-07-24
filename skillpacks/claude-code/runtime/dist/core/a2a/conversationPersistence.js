@@ -226,7 +226,15 @@ async function persistA2AConversationMessage(input) {
         raw: sanitizeA2ARawMetadata(input.message.raw),
     };
     const store = (0, conversationStore_1.createA2AConversationStore)({ paths, local, peer });
-    await store.appendMessages([message]);
+    if (input.replaceExistingMessage) {
+        const replaced = await store.replaceMessage(message.messageId, message);
+        if (!replaced) {
+            await store.appendMessages([message]);
+        }
+    }
+    else {
+        await store.appendMessages([message]);
+    }
     await store.upsertSession({
         sessionId,
         type: 'peer',

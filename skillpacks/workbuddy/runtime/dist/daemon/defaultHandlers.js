@@ -4648,14 +4648,14 @@ function createDefaultMetabotDaemonHandlers(input) {
         };
     }
     function mergeConversationName(currentName, globalMetaId, profile) {
-        return meaningfulConversationName(currentName, globalMetaId)
-            || profile?.name
+        return meaningfulConversationName(profile?.name, globalMetaId)
+            || meaningfulConversationName(currentName, globalMetaId)
             || normalizeText(currentName)
             || null;
     }
     function mergeConversationAvatar(currentAvatar, profile) {
-        return (isUsableAvatarReference(currentAvatar) ? normalizeText(currentAvatar) : '')
-            || (isUsableAvatarReference(profile?.avatar) ? normalizeText(profile?.avatar) : '')
+        return (isUsableAvatarReference(profile?.avatar) ? normalizeText(profile?.avatar) : '')
+            || (isUsableAvatarReference(currentAvatar) ? normalizeText(currentAvatar) : '')
             || null;
     }
     function enrichConversationActor(actor, profile) {
@@ -4831,7 +4831,7 @@ function createDefaultMetabotDaemonHandlers(input) {
     function buildMetaAppAppsLocalUiUrl(pinId) {
         return buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/apps', { pinId }) ?? `/ui/apps?pinId=${encodeURIComponent(pinId)}`;
     }
-    function resolveAutoReplyConfigForHome(homeDir) {
+    async function resolveAutoReplyConfigForHome(homeDir) {
         const normalizedProfileHomeDir = node_path_1.default.resolve(homeDir);
         if (normalizedProfileHomeDir === node_path_1.default.resolve(input.homeDir)) {
             return autoReplyConfig;
@@ -4840,8 +4840,9 @@ function createDefaultMetabotDaemonHandlers(input) {
         if (existing) {
             return existing;
         }
+        const persistedConfig = await (0, configStore_1.createConfigStore)(normalizedProfileHomeDir).read();
         const created = {
-            enabled: autoReplyConfig.enabled,
+            enabled: persistedConfig.autoReply.enabled,
             acceptPolicy: autoReplyConfig.acceptPolicy,
             defaultStrategyId: autoReplyConfig.defaultStrategyId,
         };
@@ -4869,7 +4870,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             privateChatStateStore: actor.homeDir === node_path_1.default.resolve(input.homeDir)
                 ? privateChatStateStore
                 : (0, privateChatStateStore_1.createPrivateChatStateStore)(actor.homeDir),
-            autoReplyConfig: resolveAutoReplyConfigForHome(actor.homeDir),
+            autoReplyConfig: await resolveAutoReplyConfigForHome(actor.homeDir),
         };
     }
     async function ensurePrivateChatConversationForPeer(inputForConversation) {
@@ -4942,7 +4943,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         const profileSigner = profileHomeDir === node_path_1.default.resolve(input.homeDir)
             ? signer
             : createSignerForProfileHome(profileHomeDir);
-        const profileAutoReplyConfig = resolveAutoReplyConfigForHome(profileHomeDir);
+        const profileAutoReplyConfig = await resolveAutoReplyConfigForHome(profileHomeDir);
         const state = await profileRuntimeStateStore.readState();
         if (!state.identity) {
             return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before sending guided conversation turns.');
@@ -9028,6 +9029,41 @@ function createDefaultMetabotDaemonHandlers(input) {
                 return (0, commandResult_1.commandFailed)('pin_write_failed', safeBrowserBridgeErrorMessage(error, 'MetaID PIN write failed.'));
             }
         },
+        uploadMetaFile: async ({ actorId, request }) => {
+            try {
+                const actor = await resolveActorWriteContext(actorId);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const bridgeActor = await resolveBrowserBridgeActorForHome(actor.homeDir);
+                if (!bridgeActor) {
+                    return (0, commandResult_1.commandManualActionRequired)('actor_required', 'A selected MetaID Actor Bot with a Global MetaID is required.');
+                }
+                const network = await resolveWriteNetworkForHome(undefined, actor.homeDir);
+                const files = [];
+                for (const entry of request.entries) {
+                    const uploaded = await (0, uploadFile_1.uploadFileBufferToChain)({
+                        signer: actor.signer,
+                        fileName: entry.name || 'upload',
+                        data: entry.data,
+                        contentType: entry.contentType || undefined,
+                        network,
+                    });
+                    files.push({
+                        pinId: uploaded.pinId,
+                        uri: uploaded.metafileUri,
+                        name: uploaded.fileName,
+                        size: uploaded.bytes,
+                        contentType: uploaded.contentType,
+                        actor: bridgeActor,
+                    });
+                }
+                return (0, commandResult_1.commandSuccess)({ files });
+            }
+            catch (error) {
+                return (0, commandResult_1.commandFailed)('upload_failed', safeBrowserBridgeErrorMessage(error, 'MetaFile upload failed.'));
+            }
+        },
         fetch: globalThis.fetch,
         env: process.env,
         onInfrastructureSettingsUpdated: input.onBrowserInfrastructureChanged,
@@ -9234,6 +9270,22 @@ function createDefaultMetabotDaemonHandlers(input) {
                     Object.assign(actionRequest, { payload: request.payload });
                 }
                 return browserHostAdapter.runTrustedAction(actionRequest);
+            },
+            metafileUpload: async (request = {}) => {
+                // The ABC bridge client posts the host-picked file bytes to this
+                // endpoint (not the generic /api/browser/actions route). Reuse the
+                // trusted-action path so validation, actor resolution, and result
+                // mapping stay in one place.
+                const payload = {};
+                for (const key of Object.keys(request)) {
+                    payload[key] = request[key];
+                }
+                return browserHostAdapter.runTrustedAction({
+                    actorId: browserActorId(request),
+                    resourceUri: normalizeText(request.resourceUri),
+                    kind: 'metafile-upload',
+                    payload,
+                });
             },
         },
         config: {
@@ -12214,13 +12266,19 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if ('failure' in actor) {
                     return actor.failure;
                 }
-                actor.autoReplyConfig.enabled = autoReplyInput.enabled === true;
+                const enabled = autoReplyInput.enabled === true;
+                try {
+                    await persistAutoReplyEnabled(actor.homeDir, enabled);
+                }
+                catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    console.warn('[chat] failed to persist auto-reply enabled flag', error);
+                    return (0, commandResult_1.commandFailed)('auto_reply_persist_failed', `Failed to save the auto-reply setting: ${message}`);
+                }
+                actor.autoReplyConfig.enabled = enabled;
                 if (autoReplyInput.defaultStrategyId !== undefined) {
                     actor.autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
                 }
-                await persistAutoReplyEnabled(actor.homeDir, actor.autoReplyConfig.enabled).catch((error) => {
-                    console.warn('[chat] failed to persist auto-reply enabled flag', error);
-                });
                 return (0, commandResult_1.commandSuccess)({
                     enabled: actor.autoReplyConfig.enabled,
                     defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,

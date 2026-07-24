@@ -58,7 +58,7 @@ test('Browser page locks outer document while renderer viewport owns content scr
   assertDeclaration(browserShellBlock, 'height', '100%');
   assertDeclaration(browserShellBlock, 'min-height', '0');
   assertDeclaration(browserShellBlock, 'overflow', 'hidden');
-  assertDeclaration(browserShellBlock, 'grid-template-rows', '34px 58px auto minmax(0, 1fr) 32px');
+  assertDeclaration(browserShellBlock, 'grid-template-rows', '38px 58px auto minmax(0, 1fr) 32px');
 
   const viewportRowBlock = cssBlock('.browser-viewport-row');
   assertDeclaration(viewportRowBlock, 'grid-row', '4');

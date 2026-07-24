@@ -25,6 +25,7 @@ export interface PersistA2AConversationMessageInput {
         raw?: Record<string, unknown> | null;
     };
     orderSession?: Partial<A2AOrderConversationSession> | null;
+    replaceExistingMessage?: boolean;
 }
 export type A2AConversationMessagePersister = (input: PersistA2AConversationMessageInput) => Promise<A2AConversationMessage>;
 export interface A2AConversationPersistenceEvent {

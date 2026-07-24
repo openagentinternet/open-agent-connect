@@ -328,6 +328,57 @@ function validateMetaIdPinWritePayload(payload) {
         payloadSize: payloadByteSize(request),
     };
 }
+function decodeMetaFileUploadData(rawData, fileName) {
+    if (Buffer.isBuffer(rawData)) {
+        return rawData.length ? rawData : null;
+    }
+    const dataString = normalizeText(rawData);
+    if (!dataString) {
+        return null;
+    }
+    // Accept data: URLs and bare base64. A content-type in the data: URL takes
+    // precedence only as a fallback; the explicit entry contentType wins upstream.
+    const match = /^data:([^;,]*)?(;base64)?,(.*)$/isu.exec(dataString);
+    const base64 = match ? (match[3] ?? '') : dataString;
+    if (!base64 || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(base64)) {
+        return null;
+    }
+    try {
+        const buffer = Buffer.from(base64, 'base64');
+        return buffer.length ? buffer : null;
+    }
+    catch {
+        return null;
+    }
+}
+function validateMetaFileUploadPayload(payload) {
+    const source = browserRecord(payload.source);
+    if (normalizeText(source.kind) !== 'host-picker') {
+        return { failure: invalidBridgeParams('metafile.upload source.kind must be host-picker.') };
+    }
+    const accept = Array.isArray(source.accept)
+        ? source.accept.map((entry) => normalizeText(entry)).filter(Boolean)
+        : [];
+    const purpose = normalizeText(payload.purpose) || undefined;
+    const entries = [];
+    const rawEntries = Array.isArray(payload.entries) ? payload.entries : [];
+    for (const rawEntry of rawEntries) {
+        const record = browserRecord(rawEntry);
+        const name = normalizeText(record.name) || normalizeText(record.fileName);
+        const contentType = normalizeText(record.contentType) || normalizeText(record.mimeType) || undefined;
+        const data = decodeMetaFileUploadData(record.data, name);
+        if (!data) {
+            return { failure: invalidBridgeParams('metafile.upload entry requires base64 data.') };
+        }
+        entries.push({ name: name || 'upload', ...(contentType ? { contentType } : {}), data });
+    }
+    return {
+        multiple: source.multiple === true,
+        accept,
+        entries,
+        ...(purpose ? { purpose } : {}),
+    };
+}
 function sanitizeMetaAppBridgeActor(value) {
     const source = browserRecord(value);
     const globalMetaId = normalizeText(source.globalMetaId);
@@ -383,6 +434,47 @@ function sanitizePinWriteResultData(input) {
         path: pathValue,
         actor,
     };
+}
+function sanitizeMetaFileUploadResultFiles(input) {
+    const source = browserRecord(input.resultData);
+    const rawFiles = Array.isArray(source.files) ? source.files : (Array.isArray(source) ? source : null);
+    if (!rawFiles) {
+        const singleFile = normalizeMetaFileUploadFileEntry(source, input.actor);
+        return singleFile ? [singleFile] : [];
+    }
+    const files = [];
+    for (const entry of rawFiles) {
+        const file = normalizeMetaFileUploadFileEntry(entry, input.actor);
+        if (file) {
+            files.push(file);
+        }
+    }
+    return files;
+}
+function normalizeMetaFileUploadFileEntry(entry, fallbackActor) {
+    const source = browserRecord(entry);
+    const pinId = normalizeText(source.pinId);
+    if (!pinId) {
+        return null;
+    }
+    const name = normalizeText(source.name) || normalizeText(source.fileName) || 'upload';
+    const contentType = normalizeText(source.contentType) || 'application/octet-stream';
+    const uri = normalizeText(source.uri) || normalizeText(source.metafileUri) || `metafile://${pinId}`;
+    const sizeValue = Number(source.size ?? source.bytes);
+    const actor = sanitizeMetaAppBridgeActor(source.actor) ?? fallbackActor;
+    const file = {
+        pinId,
+        uri,
+        name,
+        size: Number.isFinite(sizeValue) && sizeValue >= 0 ? Math.floor(sizeValue) : 0,
+        contentType,
+        actor,
+    };
+    const contentHash = normalizeText(source.contentHash);
+    if (contentHash) {
+        file.contentHash = contentHash;
+    }
+    return file;
 }
 function sha256Text(value) {
     return (0, node_crypto_1.createHash)('sha256').update(value, 'utf8').digest('hex');
@@ -814,6 +906,45 @@ function createOacBrowserHostAdapter(input) {
             data: data,
         });
     }
+    async function runMetaFileUploadAction(actionInput) {
+        const payload = readActionPayload(actionInput);
+        const validation = validateMetaFileUploadPayload(payload);
+        if ('failure' in validation) {
+            return validation.failure;
+        }
+        const actor = await resolveMetaAppBridgeActor(actionInput);
+        if ('failure' in actor) {
+            return actor.failure;
+        }
+        if (!input.uploadMetaFile) {
+            return (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC Browser MetaFile upload is not configured.');
+        }
+        const result = await input.uploadMetaFile({
+            actorId: actor.actorId,
+            resourceUri: actionInput.resourceUri,
+            request: validation,
+        });
+        if (!result.ok) {
+            const code = browserFailureCode(result) === 'actor_required' ? 'actor_required' : 'upload_failed';
+            const message = safeBridgeMessage(browserFailureMessage(result), 'MetaFile upload failed.');
+            if (result.state === 'manual_action_required') {
+                return (0, agent_browser_host_contract_1.browserManualActionRequired)(code, message);
+            }
+            if (result.state === 'waiting') {
+                return (0, agent_browser_host_contract_1.browserWaiting)(code, message);
+            }
+            return (0, agent_browser_host_contract_1.browserFailure)(code, message);
+        }
+        const files = sanitizeMetaFileUploadResultFiles({ resultData: result.data, actor: actor.actor });
+        if (!files.length) {
+            return (0, agent_browser_host_contract_1.browserFailure)('upload_failed', 'MetaFile upload did not return any files.');
+        }
+        return (0, agent_browser_host_contract_1.browserSuccess)({
+            kind: 'metafile-upload',
+            handled: true,
+            data: { files },
+        });
+    }
     async function getRuntime(runtimeInput = {}) {
         const requestedActor = actorSelector(runtimeInput);
         const activeHomeDir = node_path_1.default.resolve(input.homeDir);
@@ -999,7 +1130,7 @@ function createOacBrowserHostAdapter(input) {
             return copyUriTrustedActionResult(actionInput);
         }
         if (actionInput.kind === 'metafile-upload') {
-            return (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC Browser MetaFile upload requires a host-owned file picker.');
+            return runMetaFileUploadAction(actionInput);
         }
         if (actionInput.kind === 'metaid-pin-write') {
             return runMetaIdPinWriteAction(actionInput);

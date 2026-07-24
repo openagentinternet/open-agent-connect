@@ -23,6 +23,10 @@ export interface PrivateChatMessage {
     messagePinId: string | null;
     extensions: Record<string, unknown> | null;
     timestamp: number;
+    deliveryRecovery?: {
+        failedPinIds: string[];
+        retryCount: number;
+    } | null;
 }
 export interface PrivateChatState {
     version: number;

@@ -1,4 +1,5 @@
 import type { ChainUtxo } from './adapters/types';
+export declare const MVC_PENDING_UTXO_TTL_MS: number;
 export declare function getMvcUtxoOutpointKey(input: {
     txId: string;
     outputIndex: number;

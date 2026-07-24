@@ -1342,7 +1342,7 @@ async function replayUnhandledA2AOrderMessagesForProfiles(input) {
 function createPrivateChatAutoReplyProfileDispatcher(input) {
     const orchestrators = new Map();
     const createOrchestrator = input.createOrchestrator ?? privateChatAutoReply_1.createPrivateChatAutoReplyOrchestrator;
-    function getOrCreateOrchestrator(profile) {
+    async function getOrCreateOrchestrator(profile) {
         const profileHomeDir = normalizeEnvText(profile.homeDir);
         if (!profileHomeDir)
             return null;
@@ -1399,8 +1399,11 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
         // runtime toggle-off is observed by this orchestrator immediately. Fall
         // back to the shared config when no resolver is wired (tests/legacy).
         const profileAutoReplyConfig = input.resolveAutoReplyConfigForHome
-            ? input.resolveAutoReplyConfigForHome(profileHomeDir)
+            ? await input.resolveAutoReplyConfigForHome(profileHomeDir)
             : input.autoReplyConfig;
+        const concurrentlyCreated = orchestrators.get(cacheKey);
+        if (concurrentlyCreated)
+            return concurrentlyCreated;
         const orchestrator = createOrchestrator({
             stateStore: (0, privateChatStateStore_1.createPrivateChatStateStore)(profilePaths),
             strategyStore: (0, chatStrategyStore_1.createChatStrategyStore)(profilePaths),
@@ -1417,8 +1420,12 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
         return orchestrator;
     }
     return {
+        async retryOutboundMessage(profile, peerGlobalMetaId, message) {
+            const orchestrator = await getOrCreateOrchestrator(profile);
+            return orchestrator?.retryOutboundMessage(peerGlobalMetaId, message) ?? false;
+        },
         async handleInboundMessage(profile, message) {
-            const orchestrator = getOrCreateOrchestrator(profile);
+            const orchestrator = await getOrCreateOrchestrator(profile);
             if (!orchestrator)
                 return;
             if (!input.handleOrderProtocolMessageForProfile) {
@@ -2706,6 +2713,12 @@ async function serveCliDaemonProcess(context) {
                         return;
                     }
                     await profileAutoReplyDispatcher.handleInboundMessage(profile, message);
+                },
+                recoverOutboundMessage: async (peerGlobalMetaId, message) => {
+                    if (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)) {
+                        return chatAutoReplyOrchestrator.retryOutboundMessage(peerGlobalMetaId, message);
+                    }
+                    return profileAutoReplyDispatcher.retryOutboundMessage(profile, peerGlobalMetaId, message);
                 },
                 onError: (error) => {
                     console.warn(`[private chat auto-reply backfill:${profile.slug}]`, error.message);

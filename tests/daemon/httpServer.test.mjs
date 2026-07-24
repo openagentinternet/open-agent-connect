@@ -2452,7 +2452,7 @@ test('GET /browser ignores lang query for Browser routes', async (t) => {
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<html lang="en"(?:\s|>)/);
   assert.match(html, /Agent Internet Browser/);
   assert.doesNotMatch(html, /创建你的第一个 Bot/);
 });
@@ -2469,7 +2469,7 @@ test('GET /browser keeps Browser chrome in English even when Accept-Language pre
   const html = await response.text();
 
   assert.equal(response.status, 200);
-  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<html lang="en"(?:\s|>)/);
   assert.match(html, /Visit home/);
   assert.match(html, /Send message/);
   assert.match(html, /Bookmarks \/ Recent/);

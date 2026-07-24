@@ -41,7 +41,7 @@ export interface BrowserHttpHandlers {
     metafileUpload?: (input: {
         actorId?: string;
         from?: string;
-    } & Record<string, unknown>) => Awaitable<BrowserCommandResult<Record<string, unknown>>>;
+    } & Record<string, unknown>) => Awaitable<BrowserCommandResult<BrowserTrustedActionResult>>;
 }
 export interface BrowserHttpRouteContext {
     method: string;

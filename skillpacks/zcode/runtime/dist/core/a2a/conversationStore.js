@@ -337,6 +337,26 @@ function createA2AConversationStore(input) {
             });
             return appended;
         },
+        async replaceMessage(messageId, replacement) {
+            const normalizedMessageId = normalizeText(messageId);
+            if (!normalizedMessageId)
+                return null;
+            let replacedMessage = null;
+            await this.updateConversation(state => {
+                const messageIndex = state.messages.findIndex(message => message.messageId === normalizedMessageId);
+                if (messageIndex < 0)
+                    return state;
+                const normalizedReplacement = {
+                    ...replacement,
+                    messageId: normalizedMessageId,
+                };
+                const messages = state.messages.slice();
+                messages[messageIndex] = normalizedReplacement;
+                replacedMessage = normalizedReplacement;
+                return { ...state, messages };
+            });
+            return replacedMessage;
+        },
         async upsertSession(session) {
             await this.updateConversation(state => ({
                 ...state,

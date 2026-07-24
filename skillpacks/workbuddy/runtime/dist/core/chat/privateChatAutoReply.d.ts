@@ -4,7 +4,7 @@ import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './p
 import type { ChatStrategyStore } from './chatStrategyStore';
 import type { MetabotPaths } from '../state/paths';
 import type { Signer } from '../signing/signer';
-import type { PrivateChatInboundMessage, ChatReplyRunner, PrivateChatAutoReplyConfig } from './privateChatTypes';
+import type { PrivateChatInboundMessage, PrivateChatMessage, ChatReplyRunner, PrivateChatAutoReplyConfig } from './privateChatTypes';
 export interface PrivateChatAutoReplyDependencies {
     stateStore: PrivateChatStateStore;
     strategyStore: ChatStrategyStore;
@@ -19,6 +19,7 @@ export interface PrivateChatAutoReplyDependencies {
 }
 export interface PrivateChatAutoReplyOrchestrator {
     handleInboundMessage(message: PrivateChatInboundMessage): Promise<void>;
+    retryOutboundMessage(peerGlobalMetaId: string, message: PrivateChatMessage): Promise<boolean>;
     handleLocalGuidedTurn(peerGlobalMetaId: string, options?: {
         guidanceToConsume?: PrivateChatPendingGuidanceClaim | null;
     }): Promise<void>;

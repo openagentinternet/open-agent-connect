@@ -27,6 +27,7 @@ export interface PrivateChatStateStore {
     releasePendingGuidanceClaimIfMatches(conversationId: string, claim: PrivateChatPendingGuidanceClaim): Promise<PrivateChatConversation | null>;
     clearPendingGuidanceIfMatches(conversationId: string, guidanceText: string, createdAt: number, leaseId?: string | null): Promise<PrivateChatConversation | null>;
     appendMessages(messages: PrivateChatMessage[]): Promise<PrivateChatMessage[]>;
+    replaceMessage(messageId: string, replacement: PrivateChatMessage): Promise<PrivateChatMessage | null>;
     getConversationByPeer(peerGlobalMetaId: string): Promise<PrivateChatConversation | null>;
     getRecentMessages(conversationId: string, limit?: number): Promise<PrivateChatMessage[]>;
 }

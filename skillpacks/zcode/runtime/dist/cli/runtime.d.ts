@@ -6,7 +6,7 @@ import { type A2ASimplemsgListenerManager, type A2ASimplemsgListenerStartReport 
 import { type A2ASimplemsgPresenceWatchdog } from '../core/a2a/simplemsgPresenceWatchdog';
 import { type PrivateChatAutoReplyDependencies, type PrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
 import { type PrivateChatAutoReplyBackfillProfileManager } from '../core/chat/privateChatAutoReplyBackfill';
-import type { ChatReplyRunner, PrivateChatAutoReplyConfig, PrivateChatInboundMessage } from '../core/chat/privateChatTypes';
+import type { ChatReplyRunner, PrivateChatAutoReplyConfig, PrivateChatInboundMessage, PrivateChatMessage } from '../core/chat/privateChatTypes';
 import { createLlmRuntimeStore } from '../core/llm/llmRuntimeStore';
 import { createLlmBindingStore } from '../core/llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../core/llm/llmRuntimeResolver';
@@ -54,6 +54,7 @@ export interface DaemonStatusProbe {
 export declare function probeDaemonStatus(baseUrl: string, timeoutMs?: number): Promise<DaemonStatusProbe>;
 export interface PrivateChatAutoReplyProfileDispatcher {
     handleInboundMessage(profile: IdentityProfileRecord, message: PrivateChatInboundMessage): Promise<void>;
+    retryOutboundMessage(profile: IdentityProfileRecord, peerGlobalMetaId: string, message: PrivateChatMessage): Promise<boolean>;
 }
 export interface PrivateChatAutoReplyProfileDispatcherOptions {
     autoReplyConfig: PrivateChatAutoReplyConfig;
@@ -70,7 +71,7 @@ export interface PrivateChatAutoReplyProfileDispatcherOptions {
         llmExecutor: Pick<LlmExecutor, 'execute' | 'getSession'>;
     }) => ChatReplyRunner;
     createOrchestrator?: (deps: PrivateChatAutoReplyDependencies, config: PrivateChatAutoReplyConfig) => PrivateChatAutoReplyOrchestrator;
-    resolveAutoReplyConfigForHome?: (homeDir: string) => PrivateChatAutoReplyConfig;
+    resolveAutoReplyConfigForHome?: (homeDir: string) => PrivateChatAutoReplyConfig | Promise<PrivateChatAutoReplyConfig>;
 }
 type A2ARecoveredOrderProtocolMessage = A2ASimplemsgInboundDispatcherMessage & {
     localProfileSlug?: string | null;

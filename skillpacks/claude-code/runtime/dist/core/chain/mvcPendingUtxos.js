@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.MVC_PENDING_UTXO_TTL_MS = void 0;
 exports.getMvcUtxoOutpointKey = getMvcUtxoOutpointKey;
 exports.rememberPendingMvcTransaction = rememberPendingMvcTransaction;
 exports.resolveSpendableMvcUtxos = resolveSpendableMvcUtxos;
 exports.__clearPendingMvcUtxosForTests = __clearPendingMvcUtxosForTests;
-const PENDING_SPENT_OUTPOINT_TTL_MS = 10 * 60 * 1000;
+exports.MVC_PENDING_UTXO_TTL_MS = 10 * 60 * 1000;
 /** Maps address:txid:outputIndex to pending spent outpoint state. */
 const pendingSpentOutpoints = new Map();
 const pendingAvailableUtxos = new Map();
@@ -34,7 +35,7 @@ function prunePendingMvcUtxos(now = Date.now()) {
 function rememberPendingMvcTransaction(input) {
     const now = input.now ?? Date.now();
     prunePendingMvcUtxos(now);
-    const expiresAt = now + PENDING_SPENT_OUTPOINT_TTL_MS;
+    const expiresAt = now + exports.MVC_PENDING_UTXO_TTL_MS;
     for (const utxo of input.spentUtxos) {
         const key = getMvcUtxoOutpointKey({
             address: input.address,

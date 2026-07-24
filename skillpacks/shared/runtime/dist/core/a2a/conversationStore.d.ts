@@ -14,6 +14,7 @@ export interface A2AConversationStore {
     writeConversation(nextState: A2AConversationState): Promise<A2AConversationState>;
     updateConversation(updater: (state: A2AConversationState) => A2AConversationState | Promise<A2AConversationState>): Promise<A2AConversationState>;
     appendMessages(messages: A2AConversationMessage[]): Promise<A2AConversationMessage[]>;
+    replaceMessage(messageId: string, replacement: A2AConversationMessage): Promise<A2AConversationMessage | null>;
     upsertSession(session: A2AConversationSession): Promise<A2AConversationSession>;
     findSessionById(sessionId: string): Promise<A2AConversationSession | null>;
     findSessionByOrderTxid(orderTxid: string): Promise<A2AConversationSession | null>;

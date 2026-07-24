@@ -57,7 +57,7 @@ test('Browser module keeps exported page script English-only even for zh-CN call
   assert.match(definition.script, /View conversation/);
   assert.match(definition.script, /Close/);
 
-  assert.match(html, /<html lang="en">/);
+  assert.match(html, /<html lang="en"(?:\s|>)/);
   assert.doesNotMatch(html, /消息已发送|查看对话|关闭|访问主页|发送信息|复制 GlobalMetaId|创建你的第一个 Bot/);
 });
 

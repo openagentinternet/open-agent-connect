@@ -7,12 +7,15 @@ exports.createPrivateChatAutoReplyBackfillLoop = createPrivateChatAutoReplyBackf
 exports.createPrivateChatAutoReplyBackfillProfileManager = createPrivateChatAutoReplyBackfillProfileManager;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const mvcPendingUtxos_1 = require("../chain/mvcPendingUtxos");
+const simplemsgClassifier_1 = require("../a2a/simplemsgClassifier");
 const identityProfiles_1 = require("../identity/identityProfiles");
 const privateConversation_1 = require("./privateConversation");
 const CURSOR_STATE_VERSION = 1;
 const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_RECENT_LIMIT = 100;
 const DEFAULT_STARTUP_CATCH_UP_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS = 3;
 const UNABLE_TO_DECRYPT_TEXT = '[Unable to decrypt message]';
 const UNSUPPORTED_FILE_TEXT = '[Unsupported file message]';
 function normalizeText(value) {
@@ -277,10 +280,41 @@ function createDefaultHistoryClient(options) {
 function getMessageDedupId(message) {
     return normalizeText(message.pinId) || normalizeText(message.txId) || normalizeText(message.id);
 }
+function normalizePinTransactionId(value) {
+    return normalizeText(value).replace(/i\d+$/iu, '');
+}
+function collectHistoryMessageIds(messages) {
+    const ids = new Set();
+    for (const message of messages) {
+        for (const value of [message.id, message.pinId, message.txId]) {
+            const normalized = normalizeText(value);
+            if (normalized)
+                ids.add(normalized);
+            const transactionId = normalizePinTransactionId(normalized);
+            if (transactionId)
+                ids.add(transactionId);
+        }
+    }
+    return ids;
+}
+function isOutboundMessageVisible(message, historyMessages) {
+    const historyIds = collectHistoryMessageIds(historyMessages);
+    const attemptedPinIds = [
+        message.messagePinId,
+        ...(message.deliveryRecovery?.failedPinIds ?? []),
+    ];
+    return attemptedPinIds.some((value) => {
+        const normalized = normalizeText(value);
+        return Boolean(normalized) && (historyIds.has(normalized)
+            || historyIds.has(normalizePinTransactionId(normalized)));
+    });
+}
 function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
     const intervalMs = normalizePositiveInteger(options.intervalMs, DEFAULT_INTERVAL_MS);
     const recentLimit = normalizePositiveInteger(options.recentLimit, DEFAULT_RECENT_LIMIT);
     const startupCatchUpMs = normalizePositiveInteger(options.startupCatchUpMs, DEFAULT_STARTUP_CATCH_UP_MS);
+    const outboundRecoveryDelayMs = normalizePositiveInteger(options.outboundRecoveryDelayMs, mvcPendingUtxos_1.MVC_PENDING_UTXO_TTL_MS);
+    const maxOutboundRecoveryAttempts = normalizePositiveInteger(options.maxOutboundRecoveryAttempts, DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS);
     const cursorPath = options.cursorPath
         ?? node_path_1.default.join(deps.paths.stateRoot, 'private-chat-auto-reply-backfill.json');
     const historyClient = deps.historyClient ?? createDefaultHistoryClient({
@@ -293,12 +327,12 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
     const syncOnce = async () => {
         const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
         if (!selfGlobalMetaId) {
-            return { peers: 0, processed: 0, skipped: 0, failed: 0 };
+            return { peers: 0, processed: 0, skipped: 0, failed: 0, recovered: 0 };
         }
         const localIdentity = await deps.getLocalPrivateChatIdentity();
         const localPrivateKeyHex = normalizeText(localIdentity.privateKeyHex);
         if (!localPrivateKeyHex) {
-            return { peers: 0, processed: 0, skipped: 0, failed: 0 };
+            return { peers: 0, processed: 0, skipped: 0, failed: 0, recovered: 0 };
         }
         const state = await deps.stateStore.readState();
         const processedIds = collectProcessedMessageIds(state);
@@ -309,6 +343,7 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
         let processed = 0;
         let skipped = 0;
         let failed = 0;
+        let recovered = 0;
         for (const peerGlobalMetaId of peers) {
             const peerKey = normalizeGlobalMetaId(peerGlobalMetaId);
             const peerChatPublicKey = normalizeText(await deps.resolvePeerChatPublicKey(peerGlobalMetaId));
@@ -325,7 +360,9 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
                         peerGlobalMetaId,
                         localPrivateKeyHex,
                         peerChatPublicKey,
-                        afterIndex: existingCursor.afterIndex,
+                        // MetaSO can assign the same index to messages from opposite directions.
+                        // Re-read the cursor index and rely on message IDs to deduplicate it.
+                        afterIndex: Math.max(-1, existingCursor.afterIndex - 1),
                         limit: recentLimit,
                     })
                     : await historyClient.fetchRecent({
@@ -384,6 +421,42 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
                 };
                 cursorChanged = true;
             }
+            if (deps.recoverOutboundMessage) {
+                const conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
+                const latestMessages = conversation
+                    ? await deps.stateStore.getRecentMessages(conversation.conversationId, 1)
+                    : [];
+                const latestMessage = latestMessages.at(-1) ?? null;
+                const retryCount = latestMessage?.deliveryRecovery?.retryCount ?? 0;
+                const recoveryEligible = Boolean(latestMessage
+                    && latestMessage.direction === 'outbound'
+                    && normalizeText(latestMessage.messagePinId)
+                    && (0, simplemsgClassifier_1.classifySimplemsgContent)(latestMessage.content).kind === 'private_chat'
+                    && getNow() - latestMessage.timestamp >= outboundRecoveryDelayMs
+                    && retryCount < maxOutboundRecoveryAttempts);
+                if (recoveryEligible && latestMessage) {
+                    try {
+                        const recoveryHistory = existingCursor
+                            ? await historyClient.fetchRecent({
+                                selfGlobalMetaId,
+                                peerGlobalMetaId,
+                                localPrivateKeyHex,
+                                peerChatPublicKey,
+                                limit: recentLimit,
+                            })
+                            : response;
+                        if (!isOutboundMessageVisible(latestMessage, recoveryHistory.messages)) {
+                            if (await deps.recoverOutboundMessage(peerGlobalMetaId, latestMessage)) {
+                                recovered += 1;
+                            }
+                        }
+                    }
+                    catch (error) {
+                        failed += 1;
+                        deps.onError?.(error instanceof Error ? error : new Error(String(error)));
+                    }
+                }
+            }
         }
         if (cursorChanged) {
             await writeCursorState(cursorPath, cursorState);
@@ -393,6 +466,7 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
             processed,
             skipped,
             failed,
+            recovered,
         };
     };
     const runBackgroundSync = () => {

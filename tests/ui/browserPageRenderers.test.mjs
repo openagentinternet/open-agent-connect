@@ -11,16 +11,45 @@ class FakeElement {
   constructor() {
     this.value = '';
     this.textContent = '';
-    this.innerHTML = '';
+    this._innerHTML = '';
     this.hidden = false;
     this.attrs = {};
     this.listeners = new Map();
+    this.children = [];
+    this.firstElementChild = null;
+    this.nextElementSibling = null;
+    this.parentElement = null;
     this.classList = { add() {}, remove() {}, toggle() {} };
   }
+  get innerHTML() {
+    return this._innerHTML + this.children.map((child) => child.innerHTML).join('');
+  }
+  set innerHTML(value) { this._innerHTML = String(value); }
   addEventListener(eventName, handler) { this.listeners.set(eventName, handler); }
+  appendChild(child) {
+    const previous = this.children.at(-1);
+    if (previous) previous.nextElementSibling = child;
+    child.parentElement = this;
+    child.nextElementSibling = null;
+    this.children.push(child);
+    this.firstElementChild = this.children[0];
+    return child;
+  }
+  removeChild(child) {
+    const index = this.children.indexOf(child);
+    if (index < 0) return child;
+    this.children.splice(index, 1);
+    const previous = this.children[index - 1];
+    if (previous) previous.nextElementSibling = this.children[index] || null;
+    child.parentElement = null;
+    child.nextElementSibling = null;
+    this.firstElementChild = this.children[0] || null;
+    return child;
+  }
   setAttribute(name, value) { this.attrs[name] = String(value); }
   getAttribute(name) { return this.attrs[name] || ''; }
   hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name); }
+  removeAttribute(name) { delete this.attrs[name]; }
 }
 
 function waitFor(condition, label) {
@@ -81,6 +110,7 @@ function runWithResolve(resolvePayload) {
       readyState: 'complete',
       querySelector: (selector) => nodes[selector] ?? null,
       querySelectorAll: () => [],
+      createElement: () => new FakeElement(),
       addEventListener: () => {},
     },
     fetch: async (url) => {

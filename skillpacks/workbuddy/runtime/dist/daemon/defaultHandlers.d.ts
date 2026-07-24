@@ -78,5 +78,5 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     conversationProfileFetch?: typeof fetch;
     env?: NodeJS.ProcessEnv;
 }): MetabotDaemonHttpHandlers & {
-    resolveAutoReplyConfigForHome: (homeDir: string) => PrivateChatAutoReplyConfig;
+    resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
 };

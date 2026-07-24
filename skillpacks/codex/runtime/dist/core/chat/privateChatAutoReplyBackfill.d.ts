@@ -1,7 +1,7 @@
 import { type IdentityProfileRecord } from '../identity/identityProfiles';
 import type { MetabotPaths } from '../state/paths';
 import type { PrivateChatStateStore } from './privateChatStateStore';
-import type { PrivateChatInboundMessage } from './privateChatTypes';
+import type { PrivateChatInboundMessage, PrivateChatMessage } from './privateChatTypes';
 import { type PrivateConversationResponse } from './privateConversation';
 export interface LocalPrivateChatIdentity {
     globalMetaId?: string | null;
@@ -29,6 +29,7 @@ export interface PrivateChatAutoReplyBackfillDependencies {
     getLocalPrivateChatIdentity: () => Promise<LocalPrivateChatIdentity>;
     resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
     handleInboundMessage: (message: PrivateChatInboundMessage) => Promise<void>;
+    recoverOutboundMessage?: (peerGlobalMetaId: string, message: PrivateChatMessage) => Promise<boolean>;
     historyClient?: PrivateChatAutoReplyBackfillHistoryClient;
     listPeerGlobalMetaIds?: () => Promise<string[]>;
     resolveChatApiBaseUrl?: () => Promise<string | undefined> | string | undefined;
@@ -40,6 +41,8 @@ export interface PrivateChatAutoReplyBackfillOptions {
     intervalMs?: number;
     recentLimit?: number;
     startupCatchUpMs?: number;
+    outboundRecoveryDelayMs?: number;
+    maxOutboundRecoveryAttempts?: number;
     cursorPath?: string;
 }
 export interface PrivateChatAutoReplyBackfillSyncResult {
@@ -47,6 +50,7 @@ export interface PrivateChatAutoReplyBackfillSyncResult {
     processed: number;
     skipped: number;
     failed: number;
+    recovered: number;
 }
 export interface PrivateChatAutoReplyBackfillLoop {
     syncOnce(): Promise<PrivateChatAutoReplyBackfillSyncResult>;

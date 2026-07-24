@@ -36,6 +36,40 @@ type OacBrowserMetaIdPinWriteHandler = (input: {
     resourceUri: string;
     request: OacBrowserMetaIdPinWriteRequest;
 }) => Promise<MetabotCommandResult<OacBrowserMetaIdPinWriteResult>>;
+export interface OacBrowserMetaFileUploadEntry {
+    /** Original file name selected by the host picker. */
+    name: string;
+    /** MIME type, inferred from the extension when omitted. */
+    contentType?: string;
+    /** Raw file bytes (host picker reads them from disk before posting). */
+    data: Buffer;
+}
+export interface OacBrowserMetaFileUploadRequest {
+    /** Whether the host file picker accepted multiple files. */
+    multiple: boolean;
+    /** Content-type accept hints from the MetaApp (e.g. ['image/*']). */
+    accept: string[];
+    /** Picked file entries to upload on chain. */
+    entries: OacBrowserMetaFileUploadEntry[];
+    /** Optional upload purpose label from the MetaApp. */
+    purpose?: string;
+}
+export interface OacBrowserMetaFileUploadResult {
+    files: Array<{
+        pinId: string;
+        uri: string;
+        name: string;
+        size: number;
+        contentType: string;
+        contentHash?: string;
+        actor: OacBrowserMetaAppBridgeActor;
+    }>;
+}
+type OacBrowserMetaFileUploadHandler = (input: {
+    actorId?: string;
+    resourceUri: string;
+    request: OacBrowserMetaFileUploadRequest;
+}) => Promise<MetabotCommandResult<OacBrowserMetaFileUploadResult>>;
 export interface OacBrowserActorContext {
     homeDir: string;
 }
@@ -49,6 +83,7 @@ export interface CreateOacBrowserHostAdapterInput {
     privateChat?: OacBrowserActionHandler;
     serviceCall?: OacBrowserActionHandler;
     writeMetaIdPin?: OacBrowserMetaIdPinWriteHandler;
+    uploadMetaFile?: OacBrowserMetaFileUploadHandler;
     fetch?: typeof fetch;
     env?: NodeJS.ProcessEnv;
     now?: () => number;
