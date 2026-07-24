@@ -1113,6 +1113,333 @@ test('LlmExecutor strict skill isolation preserves app-backed provider home auth
   }
 });
 
+async function runCompletedTurn(executor, request) {
+  const sessionId = await executor.execute(request);
+  await collectEvents(executor.streamEvents(sessionId));
+  const session = await executor.getSession(sessionId);
+  assert.equal(session.result.status, 'completed');
+  return session;
+}
+
+test('LlmExecutor strict skill isolation reuses the cached scope across turns and skips re-copying platform home files', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalCodexHome = path.join(originalHome, '.codex');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+  await fs.mkdir(originalCodexHome, { recursive: true });
+  await fs.writeFile(path.join(originalCodexHome, 'auth.json'), '{"token":"codex-auth"}\n', 'utf8');
+  await fs.writeFile(path.join(originalCodexHome, 'config.toml'), 'model = "gpt-5.5"\n', 'utf8');
+
+  const captured = [];
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: sourceRoot,
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      CODEX_HOME: originalCodexHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      codex: () => ({
+        provider: 'codex',
+        async execute(request) {
+          captured.push({ cwd: request.cwd, codexHome: request.env.CODEX_HOME });
+          return {
+            status: 'completed',
+            output: 'isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const turnRequest = {
+    runtimeId: 'runtime-codex',
+    runtime: { ...runtime, provider: 'codex', binaryPath: '/bin/codex' },
+    prompt: 'Use weather only',
+    cwd: originalCwd,
+    skills: ['metabot-weather'],
+    skillSourcePaths: {
+      'metabot-weather': allowedSource,
+    },
+    skillIsolation: 'strict',
+    metaBotSlug: 'rin',
+  };
+
+  await runCompletedTurn(executor, turnRequest);
+  assert.equal(captured.length, 1);
+  const firstScopeRoot = path.dirname(captured[0].cwd);
+  assert.equal(path.basename(path.dirname(firstScopeRoot)), '.skill-scope-cache');
+  assert.equal(path.basename(firstScopeRoot).startsWith('scope-'), true);
+  assert.equal(await pathExists(path.join(firstScopeRoot, '.last-used')), true);
+
+  // Mutate the cached copy; a fresh copy on the next turn would reset it.
+  const cachedAuthPath = path.join(captured[0].codexHome, 'auth.json');
+  await fs.writeFile(cachedAuthPath, '{"token":"mutated-in-cache"}\n', 'utf8');
+
+  await runCompletedTurn(executor, turnRequest);
+  assert.equal(captured.length, 2);
+  assert.equal(captured[1].cwd, captured[0].cwd);
+  assert.equal(captured[1].codexHome, captured[0].codexHome);
+  assert.equal(await fs.readFile(cachedAuthPath, 'utf8'), '{"token":"mutated-in-cache"}\n');
+  assert.equal(await pathExists(firstScopeRoot), true);
+});
+
+test('LlmExecutor strict skill isolation keys a fresh scope when platform home files change', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalCodexHome = path.join(originalHome, '.codex');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+  await fs.mkdir(originalCodexHome, { recursive: true });
+  await fs.writeFile(path.join(originalCodexHome, 'auth.json'), '{"token":"codex-auth"}\n', 'utf8');
+  await fs.writeFile(path.join(originalCodexHome, 'config.toml'), 'model = "gpt-5.5"\n', 'utf8');
+
+  const captured = [];
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: sourceRoot,
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      CODEX_HOME: originalCodexHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      codex: () => ({
+        provider: 'codex',
+        async execute(request) {
+          captured.push({ cwd: request.cwd, codexHome: request.env.CODEX_HOME });
+          return {
+            status: 'completed',
+            output: 'isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const turnRequest = {
+    runtimeId: 'runtime-codex',
+    runtime: { ...runtime, provider: 'codex', binaryPath: '/bin/codex' },
+    prompt: 'Use weather only',
+    cwd: originalCwd,
+    skills: ['metabot-weather'],
+    skillSourcePaths: {
+      'metabot-weather': allowedSource,
+    },
+    skillIsolation: 'strict',
+    metaBotSlug: 'rin',
+  };
+
+  await runCompletedTurn(executor, turnRequest);
+  const firstScopeRoot = path.dirname(captured[0].cwd);
+  assert.equal(
+    await fs.readFile(path.join(captured[0].codexHome, 'auth.json'), 'utf8'),
+    '{"token":"codex-auth"}\n',
+  );
+
+  // Changing the source platform-home files must key a fresh scope (spec R7).
+  await fs.writeFile(path.join(originalCodexHome, 'auth.json'), '{"token":"codex-auth-v2","extra":true}\n', 'utf8');
+  await runCompletedTurn(executor, turnRequest);
+  assert.equal(captured.length, 2);
+  assert.notEqual(captured[1].cwd, captured[0].cwd);
+  assert.equal(
+    await fs.readFile(path.join(captured[1].codexHome, 'auth.json'), 'utf8'),
+    '{"token":"codex-auth-v2","extra":true}\n',
+  );
+  // The previous scope stays around within the LRU cap.
+  assert.equal(await pathExists(firstScopeRoot), true);
+});
+
+test('LlmExecutor strict skill isolation keys a fresh scope when the skill allowlist changes', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalCodexHome = path.join(originalHome, '.codex');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+  await fs.mkdir(originalCodexHome, { recursive: true });
+  await fs.writeFile(path.join(originalCodexHome, 'auth.json'), '{"token":"codex-auth"}\n', 'utf8');
+
+  const captured = [];
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: sourceRoot,
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      CODEX_HOME: originalCodexHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      codex: () => ({
+        provider: 'codex',
+        async execute(request) {
+          captured.push({ cwd: request.cwd });
+          return {
+            status: 'completed',
+            output: 'isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const turnRequest = {
+    runtimeId: 'runtime-codex',
+    runtime: { ...runtime, provider: 'codex', binaryPath: '/bin/codex' },
+    prompt: 'Use weather only',
+    cwd: originalCwd,
+    skills: ['metabot-weather'],
+    skillSourcePaths: {
+      'metabot-weather': allowedSource,
+    },
+    skillIsolation: 'strict',
+    metaBotSlug: 'rin',
+  };
+
+  await runCompletedTurn(executor, turnRequest);
+  await runCompletedTurn(executor, {
+    ...turnRequest,
+    skills: [],
+    skillSourcePaths: {},
+  });
+  assert.equal(captured.length, 2);
+  assert.notEqual(captured[1].cwd, captured[0].cwd);
+});
+
+test('LlmExecutor strict skill isolation cache evicts least recently used scopes beyond the cap', async () => {
+  const base = await createTempDir();
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const originalCodexHome = path.join(originalHome, '.codex');
+  await fs.mkdir(originalCodexHome, { recursive: true });
+  await fs.writeFile(path.join(originalCodexHome, 'auth.json'), '{"token":"codex-auth"}\n', 'utf8');
+
+  const captured = [];
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: path.join(base, 'source-skills'),
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      CODEX_HOME: originalCodexHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      codex: () => ({
+        provider: 'codex',
+        async execute(request) {
+          captured.push({ cwd: request.cwd });
+          return {
+            status: 'completed',
+            output: 'isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  // Nine distinct metaBot slugs produce nine distinct scope keys; the cache
+  // cap from spec R7 keeps at most eight of them.
+  const scopeRoots = [];
+  for (let index = 1; index <= 9; index += 1) {
+    await runCompletedTurn(executor, {
+      runtimeId: 'runtime-codex',
+      runtime: { ...runtime, provider: 'codex', binaryPath: '/bin/codex' },
+      prompt: `Turn ${index}`,
+      cwd: originalCwd,
+      skillIsolation: 'strict',
+      metaBotSlug: `bot-${index}`,
+    });
+    scopeRoots.push(path.dirname(captured[index - 1].cwd));
+  }
+
+  const cacheRoot = path.join(base, 'sessions', '.skill-scope-cache');
+  const remaining = (await fs.readdir(cacheRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('scope-'));
+  assert.equal(remaining.length, 8);
+  assert.equal(await pathExists(scopeRoots[0]), false);
+  assert.equal(await pathExists(scopeRoots[8]), true);
+});
+
+test('LlmExecutor strict skill isolation keeps per-turn scopes for source-home providers', async () => {
+  const base = await createTempDir();
+  const sourceRoot = path.join(base, 'source-skills');
+  const originalCwd = path.join(base, 'work');
+  const originalHome = path.join(base, 'home');
+  const allowedSource = path.join(sourceRoot, 'metabot-weather');
+  await fs.mkdir(allowedSource, { recursive: true });
+  await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
+
+  const captured = [];
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: sourceRoot,
+    systemHomeDir: originalHome,
+    env: {
+      HOME: originalHome,
+      PWD: originalCwd,
+    },
+    backends: {
+      cursor: () => ({
+        provider: 'cursor',
+        async execute(request) {
+          captured.push({ cwd: request.cwd, home: request.env.HOME });
+          return {
+            status: 'completed',
+            output: 'cursor-isolated',
+            durationMs: 1,
+          };
+        },
+      }),
+    },
+  });
+
+  const turnRequest = {
+    runtimeId: 'runtime-cursor',
+    runtime: { ...runtime, provider: 'cursor', binaryPath: '/bin/cursor-agent' },
+    prompt: 'Use weather only',
+    cwd: originalCwd,
+    skills: ['metabot-weather'],
+    skillSourcePaths: {
+      'metabot-weather': allowedSource,
+    },
+    skillIsolation: 'strict',
+    metaBotSlug: 'rin',
+  };
+
+  await runCompletedTurn(executor, turnRequest);
+  await runCompletedTurn(executor, turnRequest);
+  assert.equal(captured.length, 2);
+  // Source-home providers keep per-turn scopes (spec R7: behavior unchanged).
+  assert.notEqual(captured[1].cwd, captured[0].cwd);
+  assert.equal(path.resolve(captured[0].home), path.resolve(originalHome));
+  // Per-turn scopes are removed after the turn and never enter the cache.
+  assert.equal(await pathExists(path.dirname(captured[0].cwd)), false);
+  assert.equal(await pathExists(path.join(base, 'sessions', '.skill-scope-cache')), false);
+});
+
 test('LlmExecutor preserves the provided system prompt and single-item skills array', async () => {
   const base = await createTempDir();
   const executor = new LlmExecutor({
