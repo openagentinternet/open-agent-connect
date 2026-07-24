@@ -23,7 +23,7 @@ export interface BrowserHttpHandlers {
   getCache?: (input?: { actorId?: string; from?: string }) => Awaitable<BrowserCommandResult<BrowserCacheSnapshot>>;
   clearCache?: (input: { actorId?: string; from?: string; scope?: string; pinId?: string; cacheKey?: string } & Record<string, unknown>) => Awaitable<BrowserCommandResult<BrowserCacheClearResult>>;
   runTrustedAction?: (input: BrowserTrustedActionInput & { from?: string }) => Awaitable<BrowserCommandResult<BrowserTrustedActionResult>>;
-  metafileUpload?: (input: { actorId?: string; from?: string } & Record<string, unknown>) => Awaitable<BrowserCommandResult<Record<string, unknown>>>;
+  metafileUpload?: (input: { actorId?: string; from?: string } & Record<string, unknown>) => Awaitable<BrowserCommandResult<BrowserTrustedActionResult>>;
 }
 
 export interface BrowserHttpRouteContext {
