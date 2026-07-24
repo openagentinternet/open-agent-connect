@@ -9,6 +9,8 @@ const {
 } = require('../../dist/core/chat/privateChat.js');
 const {
   buildPrivateConversationResponse,
+  extractPrivateChatPeerGlobalMetaIds,
+  fetchPrivateChatPeerGlobalMetaIds,
 } = require('../../dist/core/chat/privateConversation.js');
 
 function createIdentityPair() {
@@ -19,6 +21,80 @@ function createIdentityPair() {
     publicKeyHex: ecdh.getPublicKey('hex', 'uncompressed'),
   };
 }
+
+test('private chat peer directory discovers modern peers and maps legacy addresses by chat public key', () => {
+  const selfGlobalMetaId = 'idq1local0000000000000000000000000000';
+  const remoteGlobalMetaId = 'idq1remote000000000000000000000000000';
+  const mappedGlobalMetaId = 'idq1mapped000000000000000000000000000';
+  const mappedChatPublicKey = '04mapped-chat-public-key';
+
+  const peers = extractPrivateChatPeerGlobalMetaIds({
+    data: {
+      list: [
+        {
+          type: '2',
+          globalMetaId: remoteGlobalMetaId,
+          lastMessage: { toGlobalMetaId: selfGlobalMetaId },
+        },
+        {
+          type: '2',
+          globalMetaId: '1LegacyMvcAddress',
+          userInfo: { chatPublicKey: mappedChatPublicKey },
+          lastMessage: { toGlobalMetaId: selfGlobalMetaId },
+        },
+        {
+          type: '1',
+          globalMetaId: 'idq1group0000000000000000000000000000',
+        },
+      ],
+    },
+  }, selfGlobalMetaId, [{
+    globalMetaId: mappedGlobalMetaId,
+    chatPublicKey: mappedChatPublicKey,
+  }]);
+
+  assert.deepEqual(peers, [remoteGlobalMetaId, mappedGlobalMetaId]);
+});
+
+test('fetchPrivateChatPeerGlobalMetaIds uses the MetaSO conversation directory endpoint', async () => {
+  const requestedUrls = [];
+  const selfGlobalMetaId = 'idq1local0000000000000000000000000000';
+  const peerGlobalMetaId = 'idq1peer00000000000000000000000000000';
+
+  const peers = await fetchPrivateChatPeerGlobalMetaIds({
+    selfGlobalMetaId,
+    chatApiBaseUrl: 'https://metaso.test/chat-api/group-chat/',
+    fetchImpl: async (url) => {
+      requestedUrls.push(String(url));
+      return new Response(JSON.stringify({
+        code: 0,
+        data: {
+          list: [{ type: '2', globalMetaId: peerGlobalMetaId }],
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  assert.deepEqual(peers, [peerGlobalMetaId]);
+  assert.equal(requestedUrls.length, 1);
+  const requestedUrl = new URL(requestedUrls[0]);
+  assert.equal(requestedUrl.pathname, '/chat-api/group-chat/user/latest-chat-info-list');
+  assert.equal(requestedUrl.searchParams.get('metaId'), selfGlobalMetaId);
+  assert.equal(requestedUrl.searchParams.has('metaid'), false);
+});
+
+test('fetchPrivateChatPeerGlobalMetaIds rejects MetaSO business errors returned with HTTP 200', async () => {
+  await assert.rejects(
+    fetchPrivateChatPeerGlobalMetaIds({
+      selfGlobalMetaId: 'idq1local0000000000000000000000000000',
+      fetchImpl: async () => new Response(JSON.stringify({
+        code: 1,
+        message: 'metaId is required',
+      }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    }),
+    /peer_directory_fetch_api_1/,
+  );
+});
 
 test('buildPrivateConversationResponse fetches private history and returns decrypted normalized viewer messages', async () => {
   const alice = createIdentityPair();

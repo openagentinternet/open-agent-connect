@@ -20,6 +20,220 @@ async function createTempProfileHome() {
   return { base, profileRoot };
 }
 
+test('auto-reply backfill discovers and processes a first message from a directory peer', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1newpeer000000000000000000000000000';
+  const handledMessages = [];
+  const listedFor = [];
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async (message) => {
+      handledMessages.push(message);
+    },
+    listPeerGlobalMetaIds: async (requestedSelf) => {
+      listedFor.push(requestedSelf);
+      return [peerGlobalMetaId];
+    },
+    historyClient: {
+      async fetchRecent() {
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 1,
+          serverTime: 1_770_008_000_000,
+          messages: [{
+            id: 'first-incoming-pin',
+            pinId: 'first-incoming-pin',
+            protocol: '/protocols/simplemsg',
+            content: 'first hello',
+            timestamp: 1_770_007_000,
+            index: 1,
+            fromGlobalMetaId: peerGlobalMetaId,
+            toGlobalMetaId: selfGlobalMetaId,
+          }],
+        };
+      },
+      async fetchAfter() {
+        throw new Error('fetchAfter should not be used for a first peer');
+      },
+    },
+    now: () => 1_770_008_000_000,
+  });
+
+  const result = await loop.syncOnce();
+
+  assert.deepEqual(listedFor, [selfGlobalMetaId]);
+  assert.equal(result.peers, 1);
+  assert.equal(result.processed, 1);
+  assert.equal(handledMessages.length, 1);
+  assert.equal(handledMessages[0].fromGlobalMetaId, peerGlobalMetaId);
+  assert.equal(handledMessages[0].content, 'first hello');
+});
+
+test('auto-reply backfill keeps known-peer recovery running when peer discovery fails', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const peerGlobalMetaId = 'idq1knownpeer0000000000000000000000000';
+  const errors = [];
+  let historyCalls = 0;
+
+  await stateStore.upsertConversation({
+    conversationId: `pc-${selfGlobalMetaId}-${peerGlobalMetaId}`,
+    peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 0,
+    lastDirection: 'outbound',
+    createdAt: 1_770_000_000_000,
+    updatedAt: 1_770_000_000_000,
+  });
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async () => {},
+    listPeerGlobalMetaIds: async () => {
+      throw new Error('directory unavailable');
+    },
+    historyClient: {
+      async fetchRecent() {
+        historyCalls += 1;
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          nextPollAfterIndex: 0,
+          serverTime: 1_770_008_000_000,
+          messages: [],
+        };
+      },
+      async fetchAfter() {
+        throw new Error('fetchAfter should not be used without a cursor');
+      },
+    },
+    onError: (error) => errors.push(error.message),
+  });
+
+  const result = await loop.syncOnce();
+
+  assert.equal(result.peers, 1);
+  assert.equal(historyCalls, 1);
+  assert.deepEqual(errors, ['directory unavailable']);
+});
+
+test('auto-reply backfill does not let a blocked peer delay a newly discovered peer', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  const stateStore = createPrivateChatStateStore(paths);
+  const selfGlobalMetaId = 'idq1localbot0000000000000000000000000';
+  const knownPeerGlobalMetaId = 'idq1knownpeer0000000000000000000000000';
+  const discoveredPeerGlobalMetaId = 'idq1newpeer000000000000000000000000000';
+
+  await stateStore.upsertConversation({
+    conversationId: `pc-${selfGlobalMetaId}-${knownPeerGlobalMetaId}`,
+    peerGlobalMetaId: knownPeerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 0,
+    lastDirection: 'outbound',
+    createdAt: 1_770_000_000_000,
+    updatedAt: 1_770_000_000_000,
+  });
+
+  let releaseKnownHistory = () => {};
+  const knownHistoryBlocked = new Promise(resolve => {
+    releaseKnownHistory = resolve;
+  });
+  let markDiscoveredHandled = () => {};
+  const discoveredHandled = new Promise(resolve => {
+    markDiscoveredHandled = resolve;
+  });
+
+  const loop = createPrivateChatAutoReplyBackfillLoop({
+    paths,
+    stateStore,
+    selfGlobalMetaId: async () => selfGlobalMetaId,
+    getLocalPrivateChatIdentity: async () => ({
+      globalMetaId: selfGlobalMetaId,
+      privateKeyHex: 'local-private-key',
+    }),
+    resolvePeerChatPublicKey: async () => 'peer-chat-public-key',
+    handleInboundMessage: async (message) => {
+      if (message.fromGlobalMetaId === discoveredPeerGlobalMetaId) {
+        markDiscoveredHandled();
+      }
+    },
+    listPeerGlobalMetaIds: async () => [discoveredPeerGlobalMetaId],
+    historyClient: {
+      async fetchRecent(input) {
+        if (input.peerGlobalMetaId === knownPeerGlobalMetaId) {
+          await knownHistoryBlocked;
+          return {
+            ok: true,
+            selfGlobalMetaId,
+            peerGlobalMetaId: knownPeerGlobalMetaId,
+            nextPollAfterIndex: 0,
+            serverTime: 1_770_008_000_000,
+            messages: [],
+          };
+        }
+        return {
+          ok: true,
+          selfGlobalMetaId,
+          peerGlobalMetaId: discoveredPeerGlobalMetaId,
+          nextPollAfterIndex: 1,
+          serverTime: 1_770_008_000_000,
+          messages: [{
+            id: 'discovered-incoming-pin',
+            pinId: 'discovered-incoming-pin',
+            protocol: '/protocols/simplemsg',
+            content: 'hello from the new peer',
+            timestamp: 1_770_007_000,
+            index: 1,
+            fromGlobalMetaId: discoveredPeerGlobalMetaId,
+            toGlobalMetaId: selfGlobalMetaId,
+          }],
+        };
+      },
+      async fetchAfter() {
+        throw new Error('fetchAfter should not be used without a cursor');
+      },
+    },
+    now: () => 1_770_008_000_000,
+  });
+
+  const syncing = loop.syncOnce();
+  await discoveredHandled;
+  releaseKnownHistory();
+  const result = await syncing;
+
+  assert.equal(result.processed, 1);
+});
+
 test('auto-reply backfill processes missed incoming private messages for known peers', async () => {
   const { profileRoot } = await createTempProfileHome();
   const paths = resolveMetabotPaths(profileRoot);
