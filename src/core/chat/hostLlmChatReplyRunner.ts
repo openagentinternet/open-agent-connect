@@ -304,6 +304,14 @@ type StickyRuntimePreference = {
   onFailure: (runtimeId: string) => void;
 };
 
+// Consecutive poll-deadline timeouts per runtime id (spec R6): a single cold
+// start must not wedge a runtime into `unavailable`; only the second
+// consecutive deadline marks it. Any successful completion resets the count.
+type PollDeadlineTracker = {
+  recordTimeout: (runtimeId: string) => number;
+  reset: (runtimeId: string) => void;
+};
+
 async function tryExecute(
   resolver: LlmRuntimeResolver,
   llmExecutor: ChatLlmExecutor,
@@ -315,6 +323,8 @@ async function tryExecute(
   allowedSkillScope: PrivateChatAllowedSkillScope,
   enforceSkillScope: boolean,
   stickyRuntime: StickyRuntimePreference,
+  pollDeadlineTracker: PollDeadlineTracker,
+  turnState: { attemptedExecution: boolean },
 ): Promise<{ result: ChatReplyRunnerResult; bindingId?: string } | null> {
   const shouldMarkRuntimeUnavailable = !enforceSkillScope;
   const stickyRuntimeId = stickyRuntime.get();
@@ -346,6 +356,7 @@ async function tryExecute(
       request.skillSourcePaths = allowedSkillScope.skillSourcePaths;
     }
 
+    turnState.attemptedExecution = true;
     const sessionId = await llmExecutor.execute(request);
 
     const deadline = Date.now() + timeoutMs;
@@ -357,6 +368,7 @@ async function tryExecute(
           const parsed = parseRunnerOutput(result.output);
           if (parsed.state !== 'skip') {
             stickyRuntime.onSuccess(resolved.runtime.id);
+            pollDeadlineTracker.reset(resolved.runtime.id);
             return { result: parsed, bindingId: resolved.bindingId };
           }
           excludeRuntimeIds.add(resolved.runtime.id);
@@ -381,9 +393,13 @@ async function tryExecute(
 
     excludeRuntimeIds.add(resolved.runtime.id);
     stickyRuntime.onFailure(resolved.runtime.id);
-    // A session that hangs until the poll deadline is a runtime-side signal
-    // regardless of skill isolation, so always cool the runtime down here.
-    await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
+    // A session that hangs until the poll deadline is usually a cold start,
+    // not a dead runtime (spec R6): the first consecutive deadline excludes
+    // the runtime for this turn and clears the sticky preference, but only
+    // the SECOND consecutive deadline marks it unavailable.
+    if (pollDeadlineTracker.recordTimeout(resolved.runtime.id) >= 2) {
+      await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
+    }
     return null;
   } catch {
     stickyRuntime.onFailure(resolved.runtime.id);
@@ -406,6 +422,11 @@ export function createHostLlmChatReplyRunner(options?: {
   allowedChatSkillsResolver?: PrivateChatAllowedSkillsResolver;
   logWarning?: (scope: string, message: string) => void;
   allowTemplateFallback?: boolean;
+  /**
+   * Fired once per turn when no runtime could even be attempted (spec R5) —
+   * fire-and-forget, never awaited; the turn still falls back as before.
+   */
+  requestAvailabilityRecovery?: (input: { metaBotSlug?: string }) => void;
 }): ChatReplyRunner {
   const runtimeResolver = options?.runtimeResolver;
   const llmExecutor = options?.llmExecutor;
@@ -432,6 +453,17 @@ export function createHostLlmChatReplyRunner(options?: {
       }
     },
   };
+  const consecutivePollDeadlineTimeouts = new Map<string, number>();
+  const pollDeadlineTracker: PollDeadlineTracker = {
+    recordTimeout: (runtimeId) => {
+      const count = (consecutivePollDeadlineTimeouts.get(runtimeId) ?? 0) + 1;
+      consecutivePollDeadlineTimeouts.set(runtimeId, count);
+      return count;
+    },
+    reset: (runtimeId) => {
+      consecutivePollDeadlineTimeouts.delete(runtimeId);
+    },
+  };
 
   // If no resolver provided, either fall back to template-only replies or skip.
   if (!runtimeResolver || !llmExecutor) {
@@ -456,6 +488,7 @@ export function createHostLlmChatReplyRunner(options?: {
     const excludeRuntimeIds = new Set<string>();
     const templateFallbackAllowedForTurn = allowTemplateFallback
       && !normalizeText(input.operatorGuidanceText);
+    const turnState = { attemptedExecution: false };
 
     // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
     for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
@@ -470,6 +503,8 @@ export function createHostLlmChatReplyRunner(options?: {
         allowedSkillScope,
         enforceSkillScope,
         stickyRuntime,
+        pollDeadlineTracker,
+        turnState,
       );
       if (outcome) {
         // Track lastUsedAt on the binding that was successfully used.
@@ -477,6 +512,17 @@ export function createHostLlmChatReplyRunner(options?: {
           runtimeResolver.markBindingUsed(outcome.bindingId).catch(() => { /* best effort */ });
         }
         return outcome.result;
+      }
+    }
+
+    // No runtime could even be attempted this turn (nothing selectable): ask
+    // the availability recovery loop to re-probe this profile's runtimes
+    // (fire-and-forget, spec R5), then fall back exactly as before.
+    if (!turnState.attemptedExecution) {
+      try {
+        options?.requestAvailabilityRecovery?.({ metaBotSlug });
+      } catch {
+        // Recovery hints must never affect the reply path.
       }
     }
 

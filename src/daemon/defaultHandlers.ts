@@ -1146,6 +1146,15 @@ class RequestedMetabotHostUnavailableError extends Error {
   }
 }
 
+// Kept in sync with cli/runtime.ts: end-to-end tests set this to keep daemon
+// behavior hermetic on machines that really have provider CLIs installed.
+// Injected discover functions always win over this gate (unit tests).
+const TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV = 'METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY';
+
+function createTimeLlmDiscoveryDisabled(discover?: typeof discoverLlmRuntimes): boolean {
+  return !discover && process.env[TEST_SKIP_BACKGROUND_LLM_DISCOVERY_ENV] === '1';
+}
+
 function mergeMetabotCreateRuntimeCandidates(...groups: LlmRuntime[][]): LlmRuntime[] {
   const runtimeById = new Map<string, LlmRuntime>();
   for (const group of groups) {
@@ -1185,7 +1194,10 @@ async function resolveDefaultMetabotCreateProviders(input: {
   // feeds selection here — it writes nothing to either store and never
   // retires known runtimes.
   let presenceScanRan = false;
-  if (!candidateRuntimes.some((runtime) => runtime.provider !== 'custom')) {
+  if (
+    !candidateRuntimes.some((runtime) => runtime.provider !== 'custom')
+    && !createTimeLlmDiscoveryDisabled(input.discover)
+  ) {
     const scan = await discover({
       env: process.env,
       knownRuntimes: [],
@@ -1207,6 +1219,7 @@ async function resolveDefaultMetabotCreateProviders(input: {
     && input.primaryProvider === undefined
     && !presenceScanRan
     && !hasMetabotCreateProviderCandidate(candidateRuntimes, preferredProvider)
+    && !createTimeLlmDiscoveryDisabled(input.discover)
   ) {
     const discoveryResult = await discover({
       env: process.env,
@@ -4684,13 +4697,19 @@ const llmDiscoverySweepChainByHomeDir = new Map<string, Promise<unknown>>();
 type LlmDiscoveryStatusView = Pick<LlmDiscoverySweepStatus, 'running' | 'lastStartedAt' | 'lastFinishedAt'>;
 
 function llmDiscoveryStatusForHomeDir(homeDir: string): LlmDiscoveryStatusView | undefined {
-  const status = llmDiscoverySweepStatusByHomeDir.get(homeDir);
+  const status = llmDiscoverySweepStatusByHomeDir.get(path.resolve(homeDir));
   if (!status) return undefined;
   return {
     running: status.running,
     ...(status.lastStartedAt ? { lastStartedAt: status.lastStartedAt } : {}),
     ...(status.lastFinishedAt ? { lastFinishedAt: status.lastFinishedAt } : {}),
   };
+}
+
+// Cross-module read for the availability recovery loop (spec R4.4): skip a
+// store's recovery cycle while any discovery sweep owns it.
+export function llmDiscoverySweepRunningForHomeDir(homeDir: string): boolean {
+  return llmDiscoverySweepStatusByHomeDir.get(path.resolve(homeDir))?.running === true;
 }
 
 function normalizeDiscoveryProviders(value: unknown): LlmProvider[] {
@@ -4735,19 +4754,20 @@ async function runTrackedLlmDiscoverySweep(
   // Every sweep — blocking or background — joins one serialized chain per
   // store, so concurrent triggers cannot interleave store writes or flip the
   // shared status early. `running` clears only when the last queued sweep
-  // settles.
-  const status = llmDiscoverySweepStatusByHomeDir.get(homeDir) ?? { running: false, activeSweeps: 0 };
+  // settles. Keys are normalized so cross-module readers see the same entry.
+  const statusKey = path.resolve(homeDir);
+  const status = llmDiscoverySweepStatusByHomeDir.get(statusKey) ?? { running: false, activeSweeps: 0 };
   status.activeSweeps += 1;
   status.running = true;
   if (status.activeSweeps === 1) {
     status.lastStartedAt = new Date().toISOString();
   }
-  llmDiscoverySweepStatusByHomeDir.set(homeDir, status);
-  const previous = llmDiscoverySweepChainByHomeDir.get(homeDir) ?? Promise.resolve();
+  llmDiscoverySweepStatusByHomeDir.set(statusKey, status);
+  const previous = llmDiscoverySweepChainByHomeDir.get(statusKey) ?? Promise.resolve();
   const current = previous
     .catch(() => undefined)
     .then(() => runLlmDiscoverySweep(homeDir, providers, discover));
-  llmDiscoverySweepChainByHomeDir.set(homeDir, current);
+  llmDiscoverySweepChainByHomeDir.set(statusKey, current);
   try {
     return await current;
   } finally {
@@ -4756,8 +4776,8 @@ async function runTrackedLlmDiscoverySweep(
       status.running = false;
       status.lastFinishedAt = new Date().toISOString();
     }
-    if (llmDiscoverySweepChainByHomeDir.get(homeDir) === current) {
-      llmDiscoverySweepChainByHomeDir.delete(homeDir);
+    if (llmDiscoverySweepChainByHomeDir.get(statusKey) === current) {
+      llmDiscoverySweepChainByHomeDir.delete(statusKey);
     }
   }
 }
@@ -4768,7 +4788,7 @@ function startBackgroundLlmDiscoverySweep(
   discover: typeof discoverLlmRuntimes,
 ): void {
   // Single-flight: one in-flight sweep per store; concurrent triggers coalesce.
-  if (llmDiscoverySweepStatusByHomeDir.get(homeDir)?.running) return;
+  if (llmDiscoverySweepStatusByHomeDir.get(path.resolve(homeDir))?.running) return;
   runTrackedLlmDiscoverySweep(homeDir, providers, discover).catch((error) => {
     console.warn('[llm] background runtime discovery failed', error);
   });
@@ -15214,7 +15234,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             primaryProvider: profile.primaryProvider,
             fallbackProvider: profile.fallbackProvider,
           });
-          if (pendingProviders.length > 0) {
+          if (pendingProviders.length > 0 && !createTimeLlmDiscoveryDisabled(input.discoverLlmRuntimes)) {
             // Post-create upgrade probe (spec R3.1): fire-and-forget, joins the
             // serialized sweep chain of the NEW profile's store, so a pending
             // binding flips healthy as soon as its runtime answers readiness.
