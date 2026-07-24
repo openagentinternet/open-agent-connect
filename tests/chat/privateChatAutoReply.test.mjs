@@ -1435,13 +1435,36 @@ test('guided local turns still run when inbound auto-reply is disabled', async (
   assert.equal(harness.writes.length, 1);
 });
 
-test('disabled auto-reply does not run the LLM or send a private-chat response', async () => {
+test('disabled auto-reply persists inbound messages without running the LLM or sending a response', async () => {
   const harness = await createAutoReplyHarness({ enabled: false });
 
   await harness.handleInbound();
 
   assert.equal(harness.runnerInputs.length, 0);
   assert.equal(harness.writes.length, 0);
+
+  const privateChatMessages = await harness.stateStore.getRecentMessages(
+    `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`,
+    10,
+  );
+  assert.equal(privateChatMessages.length, 1);
+  assert.equal(privateChatMessages[0].direction, 'inbound');
+  assert.equal(privateChatMessages[0].messagePinId, 'incoming-pin-1');
+
+  const conversation = await createA2AConversationStore({
+    paths: harness.paths,
+    local: {
+      globalMetaId: harness.localGlobalMetaId,
+      chatPublicKey: harness.localKeys.publicKeyHex,
+    },
+    peer: {
+      globalMetaId: harness.peerGlobalMetaId,
+      chatPublicKey: harness.peerKeys.publicKeyHex,
+    },
+  }).readConversation();
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].direction, 'incoming');
+  assert.equal(conversation.messages[0].pinId, 'incoming-pin-1');
 });
 
 test('auto-reply reopens closed conversations after the idle window elapses', async () => {

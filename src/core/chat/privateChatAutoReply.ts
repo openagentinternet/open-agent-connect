@@ -565,8 +565,6 @@ export function createPrivateChatAutoReplyOrchestrator(
       return true;
     },
     async handleInboundMessage(message) {
-      if (!config.enabled) return;
-
       const selfGlobalMetaId = await deps.selfGlobalMetaId();
       if (!selfGlobalMetaId) return;
 
@@ -693,6 +691,7 @@ export function createPrivateChatAutoReplyOrchestrator(
       }
 
       // Check auto-reply eligibility.
+      if (!config.enabled) return;
       if (conversation.state !== 'active') return;
       if (!checkRateLimit(rateLimiter, now)) return;
 
