@@ -321,6 +321,10 @@ import { createMvcSponsorV2Client } from '../core/subsidy/mvcSponsorV2Client';
 import type { BrowserContextResult } from '@openagentinternet/agent-browser-core';
 import { createOacBrowserHostAdapter } from './browser/oacBrowserHostAdapter';
 import {
+  AUTO_REPLY_COOLDOWN_MS_OPTIONS,
+  AUTO_REPLY_MAX_TURNS_OPTIONS,
+  DEFAULT_AUTO_REPLY_COOLDOWN_MS,
+  DEFAULT_AUTO_REPLY_MAX_TURNS,
   DEFAULT_WRITE_NETWORKS,
   type DefaultWriteNetwork,
 } from '../core/config/configTypes';
@@ -5009,6 +5013,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     enabled: true,
     acceptPolicy: 'accept_all',
     defaultStrategyId: null,
+    maxTurns: DEFAULT_AUTO_REPLY_MAX_TURNS,
+    cooldownMs: DEFAULT_AUTO_REPLY_COOLDOWN_MS,
   };
   const scopedAutoReplyConfigs = new Map<string, PrivateChatAutoReplyConfig>();
   const sessionEngine = createA2ASessionEngine();
@@ -6206,20 +6212,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
       enabled: persistedConfig.autoReply.enabled,
       acceptPolicy: autoReplyConfig.acceptPolicy,
       defaultStrategyId: autoReplyConfig.defaultStrategyId,
+      maxTurns: persistedConfig.autoReply.maxTurns,
+      cooldownMs: persistedConfig.autoReply.cooldownMs,
     };
     scopedAutoReplyConfigs.set(normalizedProfileHomeDir, created);
     return created;
   }
 
-  async function persistAutoReplyEnabled(homeDir: string, enabled: boolean): Promise<void> {
+  async function persistAutoReplyConfig(
+    homeDir: string,
+    update: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
+  ): Promise<void> {
     const store = createConfigStore(homeDir);
     const config = await store.read();
-    if (config.autoReply.enabled === enabled) {
+    const nextAutoReply = { ...config.autoReply };
+    if (update.enabled !== undefined) {
+      nextAutoReply.enabled = update.enabled;
+    }
+    if (update.maxTurns !== undefined) {
+      nextAutoReply.maxTurns = update.maxTurns;
+    }
+    if (update.cooldownMs !== undefined) {
+      nextAutoReply.cooldownMs = update.cooldownMs;
+    }
+    if (
+      nextAutoReply.enabled === config.autoReply.enabled
+      && nextAutoReply.maxTurns === config.autoReply.maxTurns
+      && nextAutoReply.cooldownMs === config.autoReply.cooldownMs
+    ) {
       return;
     }
     await store.set({
       ...config,
-      autoReply: { enabled },
+      autoReply: nextAutoReply,
     });
   }
 
@@ -14499,6 +14524,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
           enabled: actor.autoReplyConfig.enabled,
           acceptPolicy: actor.autoReplyConfig.acceptPolicy,
           defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
+          maxTurns: actor.autoReplyConfig.maxTurns ?? DEFAULT_AUTO_REPLY_MAX_TURNS,
+          cooldownMs: actor.autoReplyConfig.cooldownMs ?? DEFAULT_AUTO_REPLY_COOLDOWN_MS,
         });
       },
 
@@ -14507,24 +14534,59 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if ('failure' in actor) {
           return actor.failure;
         }
-        const enabled = autoReplyInput.enabled === true;
+        const enabled = autoReplyInput.enabled;
+        const maxTurns = autoReplyInput.maxTurns;
+        const cooldownMs = autoReplyInput.cooldownMs;
+        if (
+          enabled === undefined
+          && maxTurns === undefined
+          && cooldownMs === undefined
+          && autoReplyInput.defaultStrategyId === undefined
+        ) {
+          return commandFailed(
+            'missing_auto_reply_update',
+            'At least one auto-reply setting (enabled, maxTurns, cooldownMs, defaultStrategyId) is required.',
+          );
+        }
+        if (maxTurns !== undefined && !AUTO_REPLY_MAX_TURNS_OPTIONS.includes(maxTurns)) {
+          return commandFailed(
+            'invalid_auto_reply_max_turns',
+            `maxTurns must be one of: ${AUTO_REPLY_MAX_TURNS_OPTIONS.join(', ')}.`,
+          );
+        }
+        if (cooldownMs !== undefined && !AUTO_REPLY_COOLDOWN_MS_OPTIONS.includes(cooldownMs)) {
+          return commandFailed(
+            'invalid_auto_reply_cooldown_ms',
+            `cooldownMs must be one of: ${AUTO_REPLY_COOLDOWN_MS_OPTIONS.join(', ')}.`,
+          );
+        }
         try {
-          await persistAutoReplyEnabled(actor.homeDir, enabled);
+          await persistAutoReplyConfig(actor.homeDir, { enabled, maxTurns, cooldownMs });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          console.warn('[chat] failed to persist auto-reply enabled flag', error);
+          console.warn('[chat] failed to persist auto-reply config', error);
           return commandFailed(
             'auto_reply_persist_failed',
             `Failed to save the auto-reply setting: ${message}`,
           );
         }
-        actor.autoReplyConfig.enabled = enabled;
+        if (enabled !== undefined) {
+          actor.autoReplyConfig.enabled = enabled;
+        }
+        if (maxTurns !== undefined) {
+          actor.autoReplyConfig.maxTurns = maxTurns;
+        }
+        if (cooldownMs !== undefined) {
+          actor.autoReplyConfig.cooldownMs = cooldownMs;
+        }
         if (autoReplyInput.defaultStrategyId !== undefined) {
           actor.autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
         }
         return commandSuccess({
           enabled: actor.autoReplyConfig.enabled,
           defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
+          maxTurns: actor.autoReplyConfig.maxTurns ?? DEFAULT_AUTO_REPLY_MAX_TURNS,
+          cooldownMs: actor.autoReplyConfig.cooldownMs ?? DEFAULT_AUTO_REPLY_COOLDOWN_MS,
         });
       },
 

@@ -1544,6 +1544,136 @@ test('bot page rolls back the Auto-Reply toggle when persistence fails', async (
   assert.equal(status.textContent, 'Failed to save the auto-reply setting.');
 });
 
+test('bot page renders Auto-Reply param selects with the server-provided values', async () => {
+  const root = { innerHTML: '' };
+  const activeChatSkillsPanel = {
+    getAttribute: (name) => (name === 'data-chat-skills-profile-slug' ? 'alice-bot' : null),
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-chat-skills-content]': root,
+      '[data-chat-skills-profile-slug]': activeChatSkillsPanel,
+    },
+    fetch: (url) => {
+      if (url === '/api/chat/auto-reply/status?from=alice-bot') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: true,
+            data: { enabled: true, defaultStrategyId: null, maxTurns: 10, cooldownMs: 600000 },
+          }),
+        });
+      }
+      assert.equal(url, '/api/services/skills?from=alice-bot&allowFallbackRuntime=true');
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: { skills: [] } }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice', allowChatSkills: [] }];
+  context.state.selectedTab = 'chatSkills';
+  context.renderChatSkillsTab();
+
+  await context.loadAutoReplyStatus('alice-bot');
+
+  assert.match(root.innerHTML, /data-auto-reply-max-turns/);
+  assert.match(root.innerHTML, /<option value="5">5<\/option>/);
+  assert.match(root.innerHTML, /<option value="10" selected>10<\/option>/);
+  assert.match(root.innerHTML, /<option value="30">30<\/option>/);
+  assert.match(root.innerHTML, /data-auto-reply-cooldown/);
+  assert.match(root.innerHTML, /<option value="60000">1 min<\/option>/);
+  assert.match(root.innerHTML, /<option value="600000" selected>10 min<\/option>/);
+  assert.match(root.innerHTML, /<option value="3600000">60 min<\/option>/);
+  assert.match(root.innerHTML, /Max messages per round/);
+  assert.match(root.innerHTML, /Cooldown after end/);
+
+  const keys = [
+    'bot.autoReplyMaxTurns',
+    'bot.autoReplyMaxTurnsHint',
+    'bot.autoReplyCooldown',
+    'bot.autoReplyCooldownHint',
+    'bot.autoReplyCooldownMinutes',
+  ];
+  for (const key of keys) {
+    assert.equal(typeof DICTIONARIES.en[key], 'string', key);
+    assert.equal(typeof DICTIONARIES['zh-CN'][key], 'string', key);
+  }
+});
+
+test('bot page posts Auto-Reply param changes and reverts the select on failure', async () => {
+  const maxTurnsSelect = field('10');
+  maxTurnsSelect.addEventListener = (_event, handler) => {
+    maxTurnsSelect.change = handler;
+  };
+  maxTurnsSelect.setAttribute('data-auto-reply-slug', 'alice-bot');
+  const status = field();
+  const panel = panelElement('data-chat-skills-profile-slug', 'alice-bot', {
+    '[data-auto-reply-status]': status,
+  });
+  const requests = [];
+  let failNext = false;
+  const context = createBotScriptContext({
+    elements: {
+      '[data-auto-reply-status]': status,
+      '[data-chat-skills-profile-slug]': panel,
+    },
+    querySelectorAll: (selector) => {
+      if (selector === '[data-auto-reply-max-turns]') return [maxTurnsSelect];
+      return [];
+    },
+    fetch: (url, opts) => {
+      requests.push({ url, opts });
+      if (failNext) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            ok: false,
+            code: 'auto_reply_persist_failed',
+            message: 'Failed to save the auto-reply setting.',
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: { enabled: true, defaultStrategyId: null, maxTurns: 10, cooldownMs: 300000 },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  const profile = { slug: 'alice-bot' };
+  context.state.profiles = [profile];
+  context.state.selectedSlug = 'alice-bot';
+  context.state.selectedTab = 'chatSkills';
+  context.state.autoReplyMaxTurnsBySlug['alice-bot'] = 5;
+
+  context.wireAutoReplyParams();
+  maxTurnsSelect.change();
+  await waitFor(() => requests.length === 1, 'auto-reply maxTurns save request');
+
+  assert.equal(requests[0].url, '/api/chat/auto-reply/config');
+  assert.equal(requests[0].opts.method, 'POST');
+  assert.deepEqual(JSON.parse(requests[0].opts.body), { from: 'alice-bot', maxTurns: 10 });
+  await waitFor(() => context.state.autoReplyMaxTurnsBySlug['alice-bot'] === 10, 'cached maxTurns update');
+  assert.equal(status.className, 'save-status success');
+
+  failNext = true;
+  maxTurnsSelect.value = '15';
+  maxTurnsSelect.change();
+  await waitFor(() => requests.length === 2, 'auto-reply maxTurns failing save request');
+  assert.deepEqual(JSON.parse(requests[1].opts.body), { from: 'alice-bot', maxTurns: 15 });
+  await waitFor(() => status.className === 'save-status error', 'save-status error');
+  assert.equal(maxTurnsSelect.value, '10');
+  assert.equal(context.state.autoReplyMaxTurnsBySlug['alice-bot'], 10);
+});
+
 test('bot page preserves info form drafts when chat skill controls rerender the tab', () => {
   const root = { innerHTML: '' };
   const activeInfoPanel = {

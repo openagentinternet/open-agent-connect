@@ -144,7 +144,9 @@ export interface MetabotDaemonHttpHandlers {
     autoReplyStatus?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     setAutoReply?: (input: {
       from?: string;
-      enabled: boolean;
+      enabled?: boolean;
+      maxTurns?: number;
+      cooldownMs?: number;
       defaultStrategyId?: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
     stopConversation?: (input: {

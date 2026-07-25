@@ -1127,6 +1127,53 @@
         min-width: 24px;
         text-align: left;
       }
+      .auto-reply-params {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+      .auto-reply-param {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+      }
+      .auto-reply-param-text {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .auto-reply-param-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .auto-reply-param-hint {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .auto-reply-param select {
+        min-height: 36px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
+        padding: 7px 9px;
+        font-size: 12px;
+        min-width: 120px;
+      }
+      .auto-reply-param select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-dim);
+      }
+      .auto-reply-param select:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
 
       .settings-form {
         max-width: 520px;

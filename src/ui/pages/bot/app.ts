@@ -24,8 +24,12 @@ function buildBotPageScript(): string {
   return String.raw`var q=function(s){return document.querySelector(s)};
 var qq=function(s){return document.querySelectorAll(s)};
 var HOMEPAGE_UPLOAD_MAX_BYTES=50*1024*1024;
+var AUTO_REPLY_MAX_TURNS_OPTIONS=[5,10,15,20,25,30];
+var AUTO_REPLY_COOLDOWN_MS_OPTIONS=[60000,300000,600000,1800000,3600000];
+var DEFAULT_AUTO_REPLY_MAX_TURNS=5;
+var DEFAULT_AUTO_REPLY_COOLDOWN_MS=300000;
 var PERSONA_PRESET_CATALOG=${inlineScriptJson(PERSONA_PRESET_CATALOG)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},autoReplyMaxTurnsBySlug:{},autoReplyCooldownMsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
 var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
@@ -667,6 +671,14 @@ function loadChatSkillOptions(slug){
     return [];
   });
 }
+function normalizeAutoReplyMaxTurns(value){
+  value=Number(value);
+  return AUTO_REPLY_MAX_TURNS_OPTIONS.indexOf(value)>=0?value:DEFAULT_AUTO_REPLY_MAX_TURNS;
+}
+function normalizeAutoReplyCooldownMs(value){
+  value=Number(value);
+  return AUTO_REPLY_COOLDOWN_MS_OPTIONS.indexOf(value)>=0?value:DEFAULT_AUTO_REPLY_COOLDOWN_MS;
+}
 function loadAutoReplyStatus(slug){
   slug=String(slug||'').trim();
   if(!slug)return Promise.resolve();
@@ -675,11 +687,24 @@ function loadAutoReplyStatus(slug){
   return api('/api/chat/auto-reply/status?from='+encodeURIComponent(slug)).then(function(r){
     var data=r&&r.data?r.data:r;
     var enabled=Boolean(data&&data.enabled);
+    var maxTurns=normalizeAutoReplyMaxTurns(data&&data.maxTurns);
+    var cooldownMs=normalizeAutoReplyCooldownMs(data&&data.cooldownMs);
     var previous=state.autoReplyBySlug[slug];
+    var previousMaxTurns=state.autoReplyMaxTurnsBySlug[slug];
+    var previousCooldownMs=state.autoReplyCooldownMsBySlug[slug];
     state.autoReplyBySlug[slug]=enabled;
+    state.autoReplyMaxTurnsBySlug[slug]=maxTurns;
+    state.autoReplyCooldownMsBySlug[slug]=cooldownMs;
     state.autoReplyStatusBySlug[slug]='ready';
-    // Only re-render if the value actually changed, to avoid clobbering an in-flight toggle click.
-    if(previous!==undefined&&previous!==enabled){rerenderChatSkillsTabForLoad(slug)}
+    // Only re-render if a value actually changed, to avoid clobbering an in-flight toggle click.
+    // On first load the markup was rendered with optimistic defaults, so re-render
+    // when the persisted params differ from them.
+    if(
+      (previous!==undefined&&previous!==enabled)
+      ||(previousMaxTurns!==undefined&&previousMaxTurns!==maxTurns)
+      ||(previousCooldownMs!==undefined&&previousCooldownMs!==cooldownMs)
+      ||(previous===undefined&&(maxTurns!==DEFAULT_AUTO_REPLY_MAX_TURNS||cooldownMs!==DEFAULT_AUTO_REPLY_COOLDOWN_MS))
+    ){rerenderChatSkillsTabForLoad(slug)}
     else{var note=q('[data-auto-reply-status]');if(note)note.textContent='';var toggle=q('[data-auto-reply-toggle]');if(toggle)toggle.classList.toggle('loading',false)}
     return enabled;
   }).catch(function(error){
@@ -700,6 +725,30 @@ function autoReplyToggleMarkup(profile){
   var note=status==='loading'&&!Object.prototype.hasOwnProperty.call(state.autoReplyBySlug,slug)
     ? '<span class="save-status saving" data-auto-reply-status>'+esc(uiText('bot.loadingAutoReply','Loading...'))+'</span>'
     : (status==='error'?'<span class="save-status error" data-auto-reply-status>'+esc(uiText('bot.autoReplyLoadFailed','Failed to load auto-reply status.'))+'</span>':'<span class="save-status" data-auto-reply-status></span>');
+  var maxTurns=normalizeAutoReplyMaxTurns(state.autoReplyMaxTurnsBySlug[slug]);
+  var cooldownMs=normalizeAutoReplyCooldownMs(state.autoReplyCooldownMsBySlug[slug]);
+  var maxTurnsOptionHtml=AUTO_REPLY_MAX_TURNS_OPTIONS.map(function(value){
+    return '<option value="'+value+'"'+(value===maxTurns?' selected':'')+'>'+value+'</option>';
+  }).join('');
+  var cooldownOptionHtml=AUTO_REPLY_COOLDOWN_MS_OPTIONS.map(function(value){
+    return '<option value="'+value+'"'+(value===cooldownMs?' selected':'')+'>'+(value/60000)+' '+esc(uiText('bot.autoReplyCooldownMinutes','min'))+'</option>';
+  }).join('');
+  var paramsMarkup='<div class="auto-reply-params">'+
+    '<div class="auto-reply-param">'+
+      '<div class="auto-reply-param-text">'+
+        '<span class="auto-reply-param-label">'+esc(uiText('bot.autoReplyMaxTurns','Max messages per round'))+'</span>'+
+        '<span class="auto-reply-param-hint">'+esc(uiText('bot.autoReplyMaxTurnsHint','After this many replies in one session, the Bot wraps up and ends with "Bye".'))+'</span>'+
+      '</div>'+
+      '<select data-auto-reply-max-turns data-auto-reply-slug="'+esc(slug)+'"'+(status==='loading'?' disabled':'')+'>'+maxTurnsOptionHtml+'</select>'+
+    '</div>'+
+    '<div class="auto-reply-param">'+
+      '<div class="auto-reply-param-text">'+
+        '<span class="auto-reply-param-label">'+esc(uiText('bot.autoReplyCooldown','Cooldown after end'))+'</span>'+
+        '<span class="auto-reply-param-hint">'+esc(uiText('bot.autoReplyCooldownHint','After a chat ends, new messages arriving within the cooldown are recorded but not replied to.'))+'</span>'+
+      '</div>'+
+      '<select data-auto-reply-cooldown data-auto-reply-slug="'+esc(slug)+'"'+(status==='loading'?' disabled':'')+'>'+cooldownOptionHtml+'</select>'+
+    '</div>'+
+  '</div>';
   return '<div class="field field-full auto-reply-field">'+
     '<div class="auto-reply-row">'+
       '<div class="auto-reply-label">'+
@@ -711,6 +760,7 @@ function autoReplyToggleMarkup(profile){
         '<span class="toggle-text">'+esc(enabled?onLabel:offLabel)+'</span>'+
       '</button>'+
     '</div>'+
+    paramsMarkup+
     note+
   '</div>';
 }
@@ -800,6 +850,52 @@ function toggleAutoReply(profile,nextEnabled){
       var toggle=queryWithin(panel,'[data-auto-reply-toggle]');
       var enabled=Boolean(state.autoReplyBySlug[slug]);
       if(toggle){toggle.classList.toggle('on',enabled);toggle.classList.toggle('loading',false);toggle.setAttribute('aria-checked',enabled?'true':'false');var labelEl=queryWithin(toggle,'.toggle-text');if(labelEl)labelEl.textContent=enabled?uiText('bot.autoReplyOn','On'):uiText('bot.autoReplyOff','Off')}
+      var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=error&&error.message?error.message:String(error||'Failed to save.');status.className='save-status error'}
+    }
+  });
+}
+function wireAutoReplyParams(){
+  qq('[data-auto-reply-max-turns]').forEach(function(el){
+    el.addEventListener('change',function(){
+      var slug=el.getAttribute('data-auto-reply-slug')||'';
+      var profile=selectedProfile();
+      if(!slug||!profile||profile.slug!==slug)return;
+      saveAutoReplyParams(profile,el,{maxTurns:normalizeAutoReplyMaxTurns(el.value)});
+    });
+  });
+  qq('[data-auto-reply-cooldown]').forEach(function(el){
+    el.addEventListener('change',function(){
+      var slug=el.getAttribute('data-auto-reply-slug')||'';
+      var profile=selectedProfile();
+      if(!slug||!profile||profile.slug!==slug)return;
+      saveAutoReplyParams(profile,el,{cooldownMs:normalizeAutoReplyCooldownMs(el.value)});
+    });
+  });
+}
+function saveAutoReplyParams(profile,select,update){
+  if(!profile||!profile.slug)return Promise.resolve();
+  var slug=profile.slug;
+  var key=typeof update.maxTurns==='number'?'maxTurns':'cooldownMs';
+  var note=q('[data-auto-reply-status]');
+  if(note){note.textContent=uiText('bot.autoReplySaving','Saving...');note.className='save-status saving'}
+  var body={from:slug};
+  body[key]=update[key];
+  return api('/api/chat/auto-reply/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    var data=r&&r.data?r.data:r;
+    var savedValue=typeof (data&&data[key])==='number'?data[key]:update[key];
+    if(key==='maxTurns')state.autoReplyMaxTurnsBySlug[slug]=normalizeAutoReplyMaxTurns(savedValue);
+    else state.autoReplyCooldownMsBySlug[slug]=normalizeAutoReplyCooldownMs(savedValue);
+    if(state.selectedTab==='chatSkills'&&state.selectedSlug===slug){
+      var panel=chatSkillsPanelForProfile(profile);
+      var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=uiText('bot.autoReplySaved','Auto-reply setting saved.');status.className='save-status success'}
+    }
+    return savedValue;
+  }).catch(function(error){
+    // Revert the select to the last saved value on failure.
+    var cached=key==='maxTurns'?normalizeAutoReplyMaxTurns(state.autoReplyMaxTurnsBySlug[slug]):normalizeAutoReplyCooldownMs(state.autoReplyCooldownMsBySlug[slug]);
+    if(select)select.value=String(cached);
+    if(state.selectedTab==='chatSkills'&&state.selectedSlug===slug){
+      var panel=chatSkillsPanelForProfile(profile);
       var status=queryWithin(panel,'[data-auto-reply-status]');if(status){status.textContent=error&&error.message?error.message:String(error||'Failed to save.');status.className='save-status error'}
     }
   });
@@ -1144,6 +1240,7 @@ function renderChatSkillsTab(){
     '<div class="info-save-row"><button class="btn btn-primary" data-act="save-chat-skills">'+esc(uiText('bot.saveChatSkills','Save Chat Skills'))+'</button><span class="save-status" data-save-status></span></div></div>';
   wireChatSkillControls();
   wireAutoReplyToggle();
+  wireAutoReplyParams();
   if(!state.chatSkillOptionsStatusBySlug[profile.slug])loadChatSkillOptions(profile.slug);
   if(!state.autoReplyStatusBySlug[profile.slug])loadAutoReplyStatus(profile.slug);
   var panel=chatSkillsPanelForProfile(profile);

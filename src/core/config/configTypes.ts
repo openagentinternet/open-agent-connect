@@ -10,7 +10,14 @@ export interface A2AConfig {
 
 export interface AutoReplyConfig {
   enabled: boolean;
+  maxTurns: number;
+  cooldownMs: number;
 }
+
+export const AUTO_REPLY_MAX_TURNS_OPTIONS: readonly number[] = [5, 10, 15, 20, 25, 30];
+export const AUTO_REPLY_COOLDOWN_MS_OPTIONS: readonly number[] = [60_000, 300_000, 600_000, 1_800_000, 3_600_000];
+export const DEFAULT_AUTO_REPLY_MAX_TURNS = 5;
+export const DEFAULT_AUTO_REPLY_COOLDOWN_MS = 300_000;
 
 export type DefaultWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
 
@@ -55,6 +62,8 @@ export function createDefaultConfig(): MetabotConfig {
     },
     autoReply: {
       enabled: true,
+      maxTurns: DEFAULT_AUTO_REPLY_MAX_TURNS,
+      cooldownMs: DEFAULT_AUTO_REPLY_COOLDOWN_MS,
     },
     browser: {
       botHomepageTemplateId: browserDefaults.botHomepageTemplateId,

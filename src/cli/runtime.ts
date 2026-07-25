@@ -9,6 +9,8 @@ import { commandAwaitingConfirmation, commandFailed, commandManualActionRequired
 import { createConfigStore, type ConfigStore } from '../core/config/configStore';
 import { createInfrastructureConfigStore } from '../core/config/infrastructureConfigStore';
 import {
+  DEFAULT_AUTO_REPLY_COOLDOWN_MS,
+  DEFAULT_AUTO_REPLY_MAX_TURNS,
   DEFAULT_WRITE_NETWORKS,
   type DefaultWriteNetwork,
 } from '../core/config/configTypes';
@@ -3187,6 +3189,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     enabled: persistedAutoReplyConfig ? persistedAutoReplyConfig.enabled : true,
     acceptPolicy: 'accept_all' as const,
     defaultStrategyId: null as string | null,
+    maxTurns: persistedAutoReplyConfig ? persistedAutoReplyConfig.maxTurns : DEFAULT_AUTO_REPLY_MAX_TURNS,
+    cooldownMs: persistedAutoReplyConfig ? persistedAutoReplyConfig.cooldownMs : DEFAULT_AUTO_REPLY_COOLDOWN_MS,
   };
   const providerLlmBackends = createRegistryBackendFactories();
   const fakeProviderLlmReply = normalizeEnvText(context.env[TEST_FAKE_PROVIDER_LLM_REPLY_ENV]);
