@@ -1,6 +1,6 @@
 ---
 name: metabot-browser-open
-description: Use when a human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, or a MetaFile through the existing local Browser entrypoint.
+description: Use when a human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, or a MetaFile through the existing local Browser entrypoint, including opening a resource in a new Browser tab.
 ---
 
 # Bot Browser Open
@@ -38,6 +38,7 @@ Should trigger when:
 - The human asks to open a known domain alias such as `sunnyfung.eth` in Browser.
 - The human asks to open a known chain pin id in Browser.
 - The human asks to open a known MetaApp or MetaFile in Browser.
+- The human asks to open something in a new Browser tab, or open several things at once while keeping the current Browser view.
 
 Should not trigger when:
 
@@ -94,6 +95,27 @@ Open a MetaFile when the pinId is already known:
 $HOME/.metabot/bin/metabot browser open --uri metafile://<pinId>.png
 ```
 
+## Open In A New Tab
+
+Once at least one Browser page is already open, open a resource URI in a new tab of that running page instead of replacing the current view. This asks every currently-open Browser page to add the URI as a new tab. Tabs are a Browser-page concept: the human must have the Browser open first.
+
+```bash
+$HOME/.metabot/bin/metabot browser tab open --uri metaid://<globalMetaId>
+```
+
+Open a domain alias, chain pin, MetaApp, or MetaFile in a new tab:
+
+```bash
+$HOME/.metabot/bin/metabot browser tab open --uri metaid://sunnyfung.eth
+$HOME/.metabot/bin/metabot browser tab open --uri pin://<pinId>
+$HOME/.metabot/bin/metabot browser tab open --uri metaapp://<pinId>
+$HOME/.metabot/bin/metabot browser tab open --uri metafile://<pinId>.png
+```
+
+The command returns `uri` plus `pagesReached` (how many open Browser pages received the request). A `pagesReached` of `0` is not an error — it means no Browser page is currently open, so suggest the human open the Browser first with `browser open`. If the human has not opened the Browser yet, lead with `browser open`, then follow up with `browser tab open` for additional resources.
+
+`--uri` is required for `browser tab open`; there is no empty-tab form from the CLI.
+
 ## Connect Ritual
 
 Treat "connect to Agent Internet" intent and no-target `browser open` as the human going online, like dialing up to the early internet.
@@ -127,6 +149,7 @@ Open Agent Connect: Connect your local AI agent to an open agent network.
 - If the target resource is unknown, ask for the Bot `globalMetaId`, domain alias, chain `pinId`, MetaApp `pinId`, or MetaFile `pinId` instead of guessing.
 - Position Browser as the human-facing entry point into Agent Internet. Local `/ui/*` pages such as Bot Hub remain the management surfaces beside it; do not replace them with Browser.
 - Use the same language the human is currently using.
+- The Browser page keeps its own in-page multi-tab strip. `browser open` opens one resource as the page's initial tab; `browser tab open --uri` opens an additional resource as a new tab of an already-open page. Tabs are session-level: a page refresh resets them to a single tab, so do not rely on tab state surviving a reload. Closing or switching tabs is page-only; the CLI can only open new tabs.
 
 ## In Scope
 
@@ -137,6 +160,11 @@ Open Agent Connect: Connect your local AI agent to an open agent network.
 - `browser open --uri pin://<pinId>`
 - `browser open --uri metaapp://<pinId>`
 - `browser open --uri metafile://<pinId>.png`
+- `browser tab open --uri metaid://<globalMetaId>`
+- `browser tab open --uri metaid://sunnyfung.eth`
+- `browser tab open --uri pin://<pinId>`
+- `browser tab open --uri metaapp://<pinId>`
+- `browser tab open --uri metafile://<pinId>.png`
 
 ## Out of Scope
 
