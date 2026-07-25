@@ -39,6 +39,9 @@ async function readJsonFile(filePath) {
 function normalizeBoolean(value, fallback) {
     return typeof value === 'boolean' ? value : fallback;
 }
+function normalizeNumberOption(value, options, fallback) {
+    return typeof value === 'number' && options.includes(value) ? value : fallback;
+}
 function normalizeString(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -117,6 +120,8 @@ function normalizeConfig(input) {
         },
         autoReply: {
             enabled: normalizeBoolean(autoReplySource.enabled, defaults.autoReply.enabled),
+            maxTurns: normalizeNumberOption(autoReplySource.maxTurns, configTypes_1.AUTO_REPLY_MAX_TURNS_OPTIONS, defaults.autoReply.maxTurns),
+            cooldownMs: normalizeNumberOption(autoReplySource.cooldownMs, configTypes_1.AUTO_REPLY_COOLDOWN_MS_OPTIONS, defaults.autoReply.cooldownMs),
         },
         browser: {
             blockExplorerBaseUrl: normalizeString(browserSource.blockExplorerBaseUrl) || defaults.browser.blockExplorerBaseUrl,

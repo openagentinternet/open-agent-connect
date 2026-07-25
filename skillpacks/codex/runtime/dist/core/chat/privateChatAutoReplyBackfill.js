@@ -16,6 +16,7 @@ const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_RECENT_LIMIT = 100;
 const DEFAULT_STARTUP_CATCH_UP_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS = 3;
+const DEFAULT_PEER_CONCURRENCY = 4;
 const UNABLE_TO_DECRYPT_TEXT = '[Unable to decrypt message]';
 const UNSUPPORTED_FILE_TEXT = '[Unsupported file message]';
 function normalizeText(value) {
@@ -178,8 +179,13 @@ async function collectKnownPeerGlobalMetaIds(deps, state, selfGlobalMetaId) {
         addPeer(peer);
     }
     if (deps.listPeerGlobalMetaIds) {
-        for (const peer of await deps.listPeerGlobalMetaIds()) {
-            addPeer(peer);
+        try {
+            for (const peer of await deps.listPeerGlobalMetaIds(selfGlobalMetaId)) {
+                addPeer(peer);
+            }
+        }
+        catch (error) {
+            deps.onError?.(error instanceof Error ? error : new Error(String(error)));
         }
     }
     return Array.from(peers.values());
@@ -198,6 +204,23 @@ function isReplyableIncomingMessage(message, selfGlobalMetaId, peerGlobalMetaId)
     return Boolean(content)
         && content !== UNABLE_TO_DECRYPT_TEXT
         && content !== UNSUPPORTED_FILE_TEXT;
+}
+// Rows that match a peer-to-self simplemsg but failed decryption are skipped
+// like any other non-replyable row — but skipping them while still advancing
+// the cursor would lose them permanently when the decrypt failure was
+// transient (e.g. peer chat key lookup hiccup). Detect them so the caller can
+// hold the cursor and retry on the next tick.
+function isUndecryptableIncomingMessage(message, selfGlobalMetaId, peerGlobalMetaId) {
+    if (normalizeGlobalMetaId(message.fromGlobalMetaId) !== normalizeGlobalMetaId(peerGlobalMetaId)) {
+        return false;
+    }
+    if (normalizeGlobalMetaId(message.toGlobalMetaId) !== normalizeGlobalMetaId(selfGlobalMetaId)) {
+        return false;
+    }
+    if (message.protocol && message.protocol !== '/protocols/simplemsg') {
+        return false;
+    }
+    return normalizeText(message.content) === UNABLE_TO_DECRYPT_TEXT;
 }
 function shouldProcessInitialMessage(input) {
     const messageTimestampSeconds = normalizeEpochSeconds(input.message.timestamp);
@@ -309,12 +332,25 @@ function isOutboundMessageVisible(message, historyMessages) {
             || historyIds.has(normalizePinTransactionId(normalized)));
     });
 }
+async function runWithConcurrency(values, concurrency, worker) {
+    let nextIndex = 0;
+    const runWorker = async () => {
+        while (nextIndex < values.length) {
+            const value = values[nextIndex];
+            nextIndex += 1;
+            await worker(value);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => runWorker()));
+}
 function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
     const intervalMs = normalizePositiveInteger(options.intervalMs, DEFAULT_INTERVAL_MS);
     const recentLimit = normalizePositiveInteger(options.recentLimit, DEFAULT_RECENT_LIMIT);
     const startupCatchUpMs = normalizePositiveInteger(options.startupCatchUpMs, DEFAULT_STARTUP_CATCH_UP_MS);
     const outboundRecoveryDelayMs = normalizePositiveInteger(options.outboundRecoveryDelayMs, mvcPendingUtxos_1.MVC_PENDING_UTXO_TTL_MS);
     const maxOutboundRecoveryAttempts = normalizePositiveInteger(options.maxOutboundRecoveryAttempts, DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS);
+    const inboundRecoveryDelayMs = normalizePositiveInteger(options.inboundRecoveryDelayMs, DEFAULT_INTERVAL_MS);
+    const peerConcurrency = normalizePositiveInteger(options.peerConcurrency, DEFAULT_PEER_CONCURRENCY);
     const cursorPath = options.cursorPath
         ?? node_path_1.default.join(deps.paths.stateRoot, 'private-chat-auto-reply-backfill.json');
     const historyClient = deps.historyClient ?? createDefaultHistoryClient({
@@ -344,12 +380,17 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
         let skipped = 0;
         let failed = 0;
         let recovered = 0;
-        for (const peerGlobalMetaId of peers) {
+        const orderedPeers = [...peers].sort((left, right) => {
+            const leftHasCursor = Boolean(cursorState.peers[normalizeGlobalMetaId(left)]);
+            const rightHasCursor = Boolean(cursorState.peers[normalizeGlobalMetaId(right)]);
+            return Number(leftHasCursor) - Number(rightHasCursor);
+        });
+        await runWithConcurrency(orderedPeers, peerConcurrency, async (peerGlobalMetaId) => {
             const peerKey = normalizeGlobalMetaId(peerGlobalMetaId);
             const peerChatPublicKey = normalizeText(await deps.resolvePeerChatPublicKey(peerGlobalMetaId));
             if (!peerChatPublicKey) {
                 skipped += 1;
-                continue;
+                return;
             }
             const existingCursor = cursorState.peers[peerKey];
             let response;
@@ -376,11 +417,18 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
             catch (error) {
                 failed += 1;
                 deps.onError?.(error instanceof Error ? error : new Error(String(error)));
-                continue;
+                return;
             }
             let peerFailed = false;
             for (const message of response.messages) {
                 if (!isReplyableIncomingMessage(message, selfGlobalMetaId, peerGlobalMetaId)) {
+                    if (isUndecryptableIncomingMessage(message, selfGlobalMetaId, peerGlobalMetaId)) {
+                        // Hold the cursor so the row is retried instead of permanently lost.
+                        peerFailed = true;
+                        failed += 1;
+                        deps.onError?.(new Error(`undecryptable simplemsg from ${peerGlobalMetaId} at history index ${message.index}; cursor held for retry`));
+                        continue;
+                    }
                     skipped += 1;
                     continue;
                 }
@@ -457,7 +505,31 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
                     }
                 }
             }
-        }
+            if (deps.recoverInboundReply) {
+                const conversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId);
+                const latestMessages = conversation
+                    ? await deps.stateStore.getRecentMessages(conversation.conversationId, 1)
+                    : [];
+                const latestMessage = latestMessages.at(-1) ?? null;
+                const recoveryEligible = Boolean(conversation?.state === 'active'
+                    && conversation.lastDirection === 'inbound'
+                    && latestMessage
+                    && latestMessage.direction === 'inbound'
+                    && (0, simplemsgClassifier_1.classifySimplemsgContent)(latestMessage.content).kind === 'private_chat'
+                    && getNow() - latestMessage.timestamp >= inboundRecoveryDelayMs);
+                if (recoveryEligible) {
+                    try {
+                        if (await deps.recoverInboundReply(peerGlobalMetaId)) {
+                            recovered += 1;
+                        }
+                    }
+                    catch (error) {
+                        failed += 1;
+                        deps.onError?.(error instanceof Error ? error : new Error(String(error)));
+                    }
+                }
+            }
+        });
         if (cursorChanged) {
             await writeCursorState(cursorPath, cursorState);
         }

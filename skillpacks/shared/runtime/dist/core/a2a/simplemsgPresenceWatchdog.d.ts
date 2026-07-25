@@ -27,7 +27,7 @@ export interface A2ASimplemsgPresenceWatchdogOptions {
     restartCooldownMs?: number;
     socketPresenceLimit?: number;
     now?: () => number;
-    readOnlineMetaBots?: () => Promise<Pick<ReadOnlineMetaBotsFromSocketPresenceResult, 'bots'>>;
+    readOnlineMetaBots?: () => Promise<Pick<ReadOnlineMetaBotsFromSocketPresenceResult, 'bots' | 'total'>>;
     onRestart?: (event: A2ASimplemsgPresenceWatchdogRestartEvent) => void;
     onError?: (error: Error) => void;
 }

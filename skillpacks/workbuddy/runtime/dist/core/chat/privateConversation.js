@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeConversationLimit = normalizeConversationLimit;
 exports.normalizeConversationAfterIndex = normalizeConversationAfterIndex;
+exports.extractPrivateChatPeerGlobalMetaIds = extractPrivateChatPeerGlobalMetaIds;
+exports.fetchPrivateChatPeerGlobalMetaIds = fetchPrivateChatPeerGlobalMetaIds;
 exports.fetchPrivateChatHistoryPage = fetchPrivateChatHistoryPage;
 exports.fetchPrivateChatHistory = fetchPrivateChatHistory;
 exports.buildPrivateConversationResponse = buildPrivateConversationResponse;
@@ -73,6 +75,91 @@ function extractHistoryPage(rawData) {
         nextTimestamp: Number.isFinite(nextTimestamp) ? Math.floor(nextTimestamp) : null,
     };
 }
+function isModernGlobalMetaId(value) {
+    return /^idq1[a-z0-9]+$/iu.test(value);
+}
+function extractPrivateChatPeerGlobalMetaIds(rawData, selfGlobalMetaId, knownPeers = []) {
+    const normalizedSelf = normalizeText(selfGlobalMetaId).toLowerCase();
+    const peers = new Map();
+    const knownPeerByChatPublicKey = new Map();
+    for (const knownPeer of knownPeers) {
+        const globalMetaId = normalizeText(knownPeer.globalMetaId);
+        const chatPublicKey = normalizeText(knownPeer.chatPublicKey).toLowerCase();
+        if (globalMetaId && globalMetaId.toLowerCase() !== normalizedSelf && chatPublicKey) {
+            knownPeerByChatPublicKey.set(chatPublicKey, globalMetaId);
+        }
+    }
+    for (const rawRow of extractList(rawData)) {
+        const row = readObject(rawRow);
+        if (!row)
+            continue;
+        const chatType = firstText(row.type, row.chatType, row.chat_type).toLowerCase();
+        if (chatType && chatType !== '2' && chatType !== 'msg')
+            continue;
+        const userInfo = readObject(row.userInfo);
+        const lastMessage = readObject(row.lastMessage) ?? readObject(row.last_message);
+        let foundPeerGlobalMetaId = false;
+        const candidates = [
+            row.globalMetaId,
+            row.global_meta_id,
+            userInfo?.globalMetaId,
+            userInfo?.globalmetaid,
+            lastMessage?.fromGlobalMetaId,
+            lastMessage?.toGlobalMetaId,
+        ];
+        for (const candidate of candidates) {
+            const peer = normalizeText(candidate);
+            const normalizedPeer = peer.toLowerCase();
+            if (!isModernGlobalMetaId(peer) || normalizedPeer === normalizedSelf)
+                continue;
+            peers.set(normalizedPeer, peer);
+            foundPeerGlobalMetaId = true;
+        }
+        if (!foundPeerGlobalMetaId) {
+            const chatPublicKey = firstText(userInfo?.chatPublicKey, userInfo?.chatpubkey, row.chatPublicKey, row.chatpubkey).toLowerCase();
+            const mappedPeer = knownPeerByChatPublicKey.get(chatPublicKey);
+            if (mappedPeer) {
+                peers.set(mappedPeer.toLowerCase(), mappedPeer);
+            }
+        }
+    }
+    return Array.from(peers.values());
+}
+async function fetchPrivateChatPeerGlobalMetaIds(input) {
+    const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
+    if (!selfGlobalMetaId) {
+        throw new Error('selfGlobalMetaId is required');
+    }
+    const url = new URL(`${normalizeBaseUrl(input.chatApiBaseUrl)}/user/latest-chat-info-list`);
+    url.searchParams.set('metaId', selfGlobalMetaId);
+    const timeoutMs = Number.isFinite(Number(input.timeoutMs))
+        ? Math.max(1, Math.floor(Number(input.timeoutMs)))
+        : 10_000;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+        response = await getFetchImpl(input.fetchImpl)(url.toString(), {
+            method: 'GET',
+            headers: {
+                'content-type': 'application/json',
+            },
+            signal: controller.signal,
+        });
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+    if (!response.ok) {
+        throw new Error(`peer_directory_fetch_http_${response.status}`);
+    }
+    const rawData = await response.json();
+    const apiCode = Number(readObject(rawData)?.code);
+    if (Number.isFinite(apiCode) && apiCode !== 0) {
+        throw new Error(`peer_directory_fetch_api_${Math.floor(apiCode)}`);
+    }
+    return extractPrivateChatPeerGlobalMetaIds(rawData, selfGlobalMetaId, input.knownPeers);
+}
 async function fetchPrivateChatHistoryPage(input) {
     const selfGlobalMetaId = normalizeText(input.selfGlobalMetaId);
     const peerGlobalMetaId = normalizeText(input.peerGlobalMetaId);
@@ -88,12 +175,26 @@ async function fetchPrivateChatHistoryPage(input) {
         ? Math.floor(startIndex)
         : 0));
     url.searchParams.set('size', String(normalizeConversationLimit(input.limit)));
-    const response = await fetchImpl(url.toString(), {
-        method: 'GET',
-        headers: {
-            'content-type': 'application/json',
-        },
-    });
+    // A hung history request must not wedge the backfill loop that relies on this
+    // fetch for all gap recovery, so bound it with an explicit timeout.
+    const timeoutMs = Number.isFinite(Number(input.timeoutMs))
+        ? Math.max(1, Math.floor(Number(input.timeoutMs)))
+        : 15_000;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+        response = await fetchImpl(url.toString(), {
+            method: 'GET',
+            headers: {
+                'content-type': 'application/json',
+            },
+            signal: controller.signal,
+        });
+    }
+    finally {
+        clearTimeout(timeout);
+    }
     if (!response.ok) {
         throw new Error(`history_fetch_http_${response.status}`);
     }

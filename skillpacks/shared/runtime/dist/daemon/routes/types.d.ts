@@ -185,7 +185,9 @@ export interface MetabotDaemonHttpHandlers {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         setAutoReply?: (input: {
             from?: string;
-            enabled: boolean;
+            enabled?: boolean;
+            maxTurns?: number;
+            cooldownMs?: number;
             defaultStrategyId?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         stopConversation?: (input: {
@@ -297,6 +299,9 @@ export interface MetabotDaemonHttpHandlers {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         createProfile?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         retryProfileSetup?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        activateProfile?: (input: {
             slug: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         updateProfile?: (input: {

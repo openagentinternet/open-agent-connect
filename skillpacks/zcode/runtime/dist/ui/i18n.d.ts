@@ -28,6 +28,11 @@ export declare const DICTIONARIES: {
         readonly 'bot.copy': "Copy";
         readonly 'bot.openPublicBotPage': "Open Public Bot Page";
         readonly 'bot.viewConversations': "View Conversations";
+        readonly 'bot.defaultBadge': "Default";
+        readonly 'bot.setAsDefault': "Set as default";
+        readonly 'bot.isDefaultBot': "This is the default Bot";
+        readonly 'bot.defaultBotSaved': "Default Bot updated.";
+        readonly 'bot.defaultBotSaveFailed': "Failed to update the default Bot.";
         readonly 'bot.publicIdentity': "Basic";
         readonly 'bot.behavior': "Persona";
         readonly 'bot.chatSkills': "Chat Skills";
@@ -106,6 +111,11 @@ export declare const DICTIONARIES: {
         readonly 'bot.autoReplySaving': "Saving...";
         readonly 'bot.autoReplySaved': "Auto-reply setting saved.";
         readonly 'bot.autoReplyLoadFailed': "Failed to load auto-reply status.";
+        readonly 'bot.autoReplyMaxTurns': "Max messages per round";
+        readonly 'bot.autoReplyMaxTurnsHint': "After this many replies in one session, the Bot wraps up and ends with \"Bye\".";
+        readonly 'bot.autoReplyCooldown': "Cooldown after end";
+        readonly 'bot.autoReplyCooldownHint': "After a chat ends, new messages arriving within the cooldown are recorded but not replied to.";
+        readonly 'bot.autoReplyCooldownMinutes': "min";
         readonly 'bot.reset': "Reset";
         readonly 'bot.behaviorPlaceholder': "Behavior controls will be available here.";
         readonly 'bot.chatSkillsPlaceholder': "Chat skill controls will be available here.";
@@ -630,6 +640,11 @@ export declare const DICTIONARIES: {
         readonly 'bot.copy': "复制";
         readonly 'bot.openPublicBotPage': "打开公开 Bot Page";
         readonly 'bot.viewConversations': "查看对话";
+        readonly 'bot.defaultBadge': "默认";
+        readonly 'bot.setAsDefault': "设为默认";
+        readonly 'bot.isDefaultBot': "当前默认 Bot";
+        readonly 'bot.defaultBotSaved': "默认 Bot 已更新。";
+        readonly 'bot.defaultBotSaveFailed': "设置默认 Bot 失败。";
         readonly 'bot.publicIdentity': "基础";
         readonly 'bot.behavior': "人格";
         readonly 'bot.chatSkills': "聊天技能";
@@ -708,6 +723,11 @@ export declare const DICTIONARIES: {
         readonly 'bot.autoReplySaving': "保存中...";
         readonly 'bot.autoReplySaved': "自动回复设置已保存。";
         readonly 'bot.autoReplyLoadFailed': "加载自动回复状态失败。";
+        readonly 'bot.autoReplyMaxTurns': "每轮最大消息数";
+        readonly 'bot.autoReplyMaxTurnsHint': "单个会话中回复达到该数量后，Bot 会收尾并以 “Bye” 结束本轮对话。";
+        readonly 'bot.autoReplyCooldown': "结束冷却时间";
+        readonly 'bot.autoReplyCooldownHint': "对话结束后，冷却期内收到的新消息只记录、不回复。";
+        readonly 'bot.autoReplyCooldownMinutes': "分钟";
         readonly 'bot.reset': "重置";
         readonly 'bot.behaviorPlaceholder': "行为设置将在这里显示。";
         readonly 'bot.chatSkillsPlaceholder': "聊天技能设置将在这里显示。";

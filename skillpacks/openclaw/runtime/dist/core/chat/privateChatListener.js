@@ -150,17 +150,28 @@ function createPrivateChatListener(input) {
             }
         }
         const plaintext = decryptPrivateChatSocketMessage(message, identity, peerChatPublicKey);
-        if (!plaintext)
+        if (!plaintext) {
+            // Allow a redelivery to succeed once the peer key becomes resolvable,
+            // and keep the drop observable instead of silent.
+            if (messagePinId) {
+                seenPinIds.delete(messagePinId);
+            }
+            input.callbacks.onError?.(new Error(`dropped undecryptable private chat push (pinId: ${messagePinId ?? 'unknown'}, from: ${fromGlobalMetaId})`));
             return;
+        }
+        const timestamp = typeof message.timestamp === 'number'
+            && Number.isFinite(message.timestamp)
+            && message.timestamp > 0
+            // MetaSO delivers timestamps in Unix seconds; normalize to milliseconds.
+            ? Math.trunc(message.timestamp < 1_000_000_000_000 ? message.timestamp * 1000 : message.timestamp)
+            : Date.now();
         const inboundMessage = {
             fromGlobalMetaId,
             content: plaintext,
             contentType: normalizeText(message.contentType) || normalizeText(message.content_type) || null,
             messagePinId,
             fromChatPublicKey: peerChatPublicKey,
-            timestamp: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
-                ? message.timestamp
-                : Date.now(),
+            timestamp,
             rawMessage: normalizeObject(message),
         };
         try {

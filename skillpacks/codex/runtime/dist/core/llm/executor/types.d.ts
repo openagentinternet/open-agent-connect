@@ -23,6 +23,7 @@ export interface LlmExecutionRequest {
     metaBotSlug?: string;
     env?: Record<string, string>;
     extraArgs?: string[];
+    outputMode?: 'final';
 }
 export interface LlmExecutionResult {
     status: 'completed' | 'failed' | 'timeout' | 'cancelled';

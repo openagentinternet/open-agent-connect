@@ -60,6 +60,8 @@ const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
 const privateChatSendFailureLog_1 = require("../core/chat/privateChatSendFailureLog");
 const privateChatAutoReplyBackfill_1 = require("../core/chat/privateChatAutoReplyBackfill");
 const privateChatStateStore_1 = require("../core/chat/privateChatStateStore");
+const privateConversation_1 = require("../core/chat/privateConversation");
+const privateChatPeerDiscovery_1 = require("../core/chat/privateChatPeerDiscovery");
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
 const privateChatAllowedSkills_1 = require("../core/chat/privateChatAllowedSkills");
@@ -1415,11 +1417,16 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
             },
             resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
             replyRunner,
+            logSendFailure: (0, privateChatSendFailureLog_1.createPrivateChatSendFailureFileLogger)(profilePaths),
         }, profileAutoReplyConfig);
         orchestrators.set(cacheKey, orchestrator);
         return orchestrator;
     }
     return {
+        async retryPendingInboundMessage(profile, peerGlobalMetaId) {
+            const orchestrator = await getOrCreateOrchestrator(profile);
+            return orchestrator?.retryPendingInboundMessage(peerGlobalMetaId) ?? false;
+        },
         async retryOutboundMessage(profile, peerGlobalMetaId, message) {
             const orchestrator = await getOrCreateOrchestrator(profile);
             return orchestrator?.retryOutboundMessage(peerGlobalMetaId, message) ?? false;
@@ -1672,6 +1679,22 @@ function createDefaultCliDependencies(context) {
             localUiUrl: `${baseUrl}${browserPath}`,
         });
     }
+    // Ask every currently-open Browser page to open a URI in a new tab. The daemon
+    // fans the request out via the Browser tab SSE transport; ABC's client-only
+    // AgentBrowserTabs.openTab performs the actual open. No tab id is returned —
+    // tab ids are client-only and never reach the daemon.
+    async function openBrowserTab(input) {
+        const response = await requestJson(context, 'POST', '/api/browser/tabs/open', { uri: input.uri });
+        if (!response.ok) {
+            return (0, commandResult_1.commandFailed)(response.code ?? 'browser_tab_open_failed', response.message ?? 'Browser tab open failed.');
+        }
+        const data = response.data ?? {};
+        return (0, commandResult_1.commandSuccess)({
+            uri: typeof data.uri === 'string' ? data.uri : input.uri,
+            pagesReached: typeof data.pagesReached === 'number' ? data.pagesReached : 0,
+            ...(data.note ? { note: data.note } : {}),
+        });
+    }
     return {
         config: {
             get: async (input) => {
@@ -1767,6 +1790,7 @@ function createDefaultCliDependencies(context) {
         },
         browser: {
             open: async (input) => openLocalBrowserPage(input),
+            tabOpen: async (input) => openBrowserTab(input),
         },
         chain: {
             write: async (input) => requestJsonForSelectedActor('POST', '/api/chain/write', typeof input.from === 'string' ? input.from : undefined, input),
@@ -2082,7 +2106,12 @@ function createDefaultCliDependencies(context) {
             settleRefund: async (input) => requestJsonForSelectedActor('POST', '/api/services/refunds/settle', typeof input.from === 'string' ? input.from : undefined, input),
         },
         chat: {
-            private: async (input) => requestJsonForSelectedActor('POST', '/api/chat/private', typeof input.from === 'string' ? input.from : undefined, input),
+            private: async (input) => {
+                if (context.env[hostLlmChatReplyRunner_1.PRIVATE_CHAT_REPLY_GENERATION_ENV] === '1') {
+                    return (0, commandResult_1.commandFailed)('private_chat_delivery_owned_by_orchestrator', 'Private-chat reply generation cannot send messages directly; Open Agent Connect owns delivery.');
+                }
+                return requestJsonForSelectedActor('POST', '/api/chat/private', typeof input.from === 'string' ? input.from : undefined, input);
+            },
             conversations: async (input = {}) => {
                 const params = new URLSearchParams();
                 if (input.from)
@@ -2423,6 +2452,8 @@ async function serveCliDaemonProcess(context) {
         enabled: persistedAutoReplyConfig ? persistedAutoReplyConfig.enabled : true,
         acceptPolicy: 'accept_all',
         defaultStrategyId: null,
+        maxTurns: persistedAutoReplyConfig ? persistedAutoReplyConfig.maxTurns : configTypes_1.DEFAULT_AUTO_REPLY_MAX_TURNS,
+        cooldownMs: persistedAutoReplyConfig ? persistedAutoReplyConfig.cooldownMs : configTypes_1.DEFAULT_AUTO_REPLY_COOLDOWN_MS,
     };
     const providerLlmBackends = (0, executor_1.createRegistryBackendFactories)();
     const fakeProviderLlmReply = normalizeEnvText(context.env[TEST_FAKE_PROVIDER_LLM_REPLY_ENV]);
@@ -2680,6 +2711,79 @@ async function serveCliDaemonProcess(context) {
             });
         },
     });
+    let peerDiscoverySnapshot = null;
+    let peerDiscoverySnapshotPending = null;
+    const loadPeerDiscoverySnapshot = async () => {
+        if (peerDiscoverySnapshot && peerDiscoverySnapshot.expiresAt > Date.now()) {
+            return peerDiscoverySnapshot;
+        }
+        if (peerDiscoverySnapshotPending)
+            return peerDiscoverySnapshotPending;
+        peerDiscoverySnapshotPending = (async () => {
+            const profiles = await (0, identityProfiles_1.listIdentityProfiles)(paths.systemHomeDir).catch(() => []);
+            const [knownPeers, localProjectedPeerIndex] = await Promise.all([
+                Promise.all(profiles.map(async (candidate) => {
+                    const runtimeState = await (0, runtimeStateStore_1.createRuntimeStateStore)(candidate.homeDir)
+                        .readState()
+                        .catch(() => null);
+                    return {
+                        globalMetaId: normalizeEnvText(runtimeState?.identity?.globalMetaId || candidate.globalMetaId),
+                        chatPublicKey: normalizeEnvText(runtimeState?.identity?.chatPublicKey),
+                    };
+                })),
+                (0, privateChatPeerDiscovery_1.buildLocalA2AProjectedPeerIndex)(profiles),
+            ]);
+            const snapshot = {
+                expiresAt: Date.now() + 30_000,
+                knownPeers: knownPeers.filter((candidate) => candidate.globalMetaId),
+                localProjectedPeerIndex,
+            };
+            peerDiscoverySnapshot = snapshot;
+            return snapshot;
+        })();
+        try {
+            return await peerDiscoverySnapshotPending;
+        }
+        finally {
+            peerDiscoverySnapshotPending = null;
+        }
+    };
+    const peerDirectoryCache = new Map();
+    const peerDirectoryPending = new Map();
+    const peerDirectoryLanes = Array.from({ length: 4 }, () => Promise.resolve());
+    let nextPeerDirectoryLane = 0;
+    const readCachedPeerDirectory = (selfGlobalMetaId, knownPeers) => {
+        const key = normalizeEnvText(selfGlobalMetaId).toLowerCase();
+        const cached = peerDirectoryCache.get(key);
+        if (!key || (cached && cached.expiresAt > Date.now())) {
+            return cached?.peers ?? [];
+        }
+        if (!peerDirectoryPending.has(key)) {
+            const laneIndex = nextPeerDirectoryLane % peerDirectoryLanes.length;
+            nextPeerDirectoryLane += 1;
+            const request = peerDirectoryLanes[laneIndex].then(async () => {
+                const infrastructure = await infrastructureConfigStore.read();
+                const chatApiBaseUrl = (0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)(infrastructure.metasoP2PBaseUrl).chatApiBaseUrl;
+                return (0, privateConversation_1.fetchPrivateChatPeerGlobalMetaIds)({
+                    selfGlobalMetaId,
+                    knownPeers,
+                    chatApiBaseUrl,
+                    timeoutMs: 10_000,
+                });
+            });
+            peerDirectoryLanes[laneIndex] = request.then(() => undefined, () => undefined);
+            peerDirectoryPending.set(key, request);
+            void request.then((peers) => {
+                peerDirectoryCache.set(key, { peers, expiresAt: Date.now() + 60_000 });
+            }).catch((error) => {
+                peerDirectoryCache.set(key, { peers: cached?.peers ?? [], expiresAt: Date.now() + 30_000 });
+                console.warn(`[private chat peer directory:${key}]`, error instanceof Error ? error.message : String(error));
+            }).finally(() => {
+                peerDirectoryPending.delete(key);
+            });
+        }
+        return cached?.peers ?? [];
+    };
     const chatAutoReplyBackfill = (0, privateChatAutoReplyBackfill_1.createPrivateChatAutoReplyBackfillProfileManager)({
         systemHomeDir: paths.systemHomeDir,
         createLoop: (profile) => {
@@ -2707,6 +2811,12 @@ async function serveCliDaemonProcess(context) {
                     const infrastructure = await infrastructureConfigStore.read();
                     return (0, metasoInfrastructure_1.resolveMetasoInfrastructureEndpoints)(infrastructure.metasoP2PBaseUrl).chatApiBaseUrl;
                 },
+                listPeerGlobalMetaIds: async (selfGlobalMetaId) => {
+                    const snapshot = await loadPeerDiscoverySnapshot();
+                    const localProjectedPeers = snapshot.localProjectedPeerIndex.get(normalizeEnvText(selfGlobalMetaId).toLowerCase()) ?? [];
+                    const directoryPeers = readCachedPeerDirectory(selfGlobalMetaId, snapshot.knownPeers);
+                    return [...localProjectedPeers, ...directoryPeers];
+                },
                 handleInboundMessage: async (message) => {
                     if (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)) {
                         await chatAutoReplyOrchestrator.handleInboundMessage(message);
@@ -2719,6 +2829,12 @@ async function serveCliDaemonProcess(context) {
                         return chatAutoReplyOrchestrator.retryOutboundMessage(peerGlobalMetaId, message);
                     }
                     return profileAutoReplyDispatcher.retryOutboundMessage(profile, peerGlobalMetaId, message);
+                },
+                recoverInboundReply: async (peerGlobalMetaId) => {
+                    if (node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)) {
+                        return chatAutoReplyOrchestrator.retryPendingInboundMessage(peerGlobalMetaId);
+                    }
+                    return profileAutoReplyDispatcher.retryPendingInboundMessage(profile, peerGlobalMetaId);
                 },
                 onError: (error) => {
                     console.warn(`[private chat auto-reply backfill:${profile.slug}]`, error.message);

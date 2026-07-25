@@ -21,6 +21,10 @@ export interface CliDependencies {
         open?: (input: {
             uri?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Ask every currently-open Browser page to open a URI in a new tab. */
+        tabOpen?: (input: {
+            uri: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     metaapp?: {
         preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

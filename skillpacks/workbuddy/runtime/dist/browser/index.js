@@ -1,8 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderBrowserPageHtml = exports.statusForBrowserResult = exports.handleBrowserApiRoutes = void 0;
+exports.renderBrowserPageHtml = exports.browserTabSinkCount = exports.broadcastBrowserTabOpen = exports.registerBrowserTabSink = exports.statusForBrowserResult = exports.handleBrowserApiRoutes = void 0;
 var http_1 = require("./http");
 Object.defineProperty(exports, "handleBrowserApiRoutes", { enumerable: true, get: function () { return http_1.handleBrowserApiRoutes; } });
 Object.defineProperty(exports, "statusForBrowserResult", { enumerable: true, get: function () { return http_1.statusForBrowserResult; } });
+Object.defineProperty(exports, "registerBrowserTabSink", { enumerable: true, get: function () { return http_1.registerBrowserTabSink; } });
+Object.defineProperty(exports, "broadcastBrowserTabOpen", { enumerable: true, get: function () { return http_1.broadcastBrowserTabOpen; } });
+Object.defineProperty(exports, "browserTabSinkCount", { enumerable: true, get: function () { return http_1.browserTabSinkCount; } });
 var page_1 = require("./page");
 Object.defineProperty(exports, "renderBrowserPageHtml", { enumerable: true, get: function () { return page_1.renderBrowserPageHtml; } });

@@ -30,8 +30,9 @@ export interface PrivateChatAutoReplyBackfillDependencies {
     resolvePeerChatPublicKey: (globalMetaId: string) => Promise<string | null>;
     handleInboundMessage: (message: PrivateChatInboundMessage) => Promise<void>;
     recoverOutboundMessage?: (peerGlobalMetaId: string, message: PrivateChatMessage) => Promise<boolean>;
+    recoverInboundReply?: (peerGlobalMetaId: string) => Promise<boolean>;
     historyClient?: PrivateChatAutoReplyBackfillHistoryClient;
-    listPeerGlobalMetaIds?: () => Promise<string[]>;
+    listPeerGlobalMetaIds?: (selfGlobalMetaId: string) => Promise<string[]>;
     resolveChatApiBaseUrl?: () => Promise<string | undefined> | string | undefined;
     fetchImpl?: typeof fetch;
     now?: () => number;
@@ -43,7 +44,9 @@ export interface PrivateChatAutoReplyBackfillOptions {
     startupCatchUpMs?: number;
     outboundRecoveryDelayMs?: number;
     maxOutboundRecoveryAttempts?: number;
+    inboundRecoveryDelayMs?: number;
     cursorPath?: string;
+    peerConcurrency?: number;
 }
 export interface PrivateChatAutoReplyBackfillSyncResult {
     peers: number;

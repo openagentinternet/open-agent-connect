@@ -24,9 +24,12 @@ function normalizeObject(value) {
         : null;
 }
 function toFiniteTimestamp(value) {
-    return typeof value === 'number' && Number.isFinite(value)
-        ? Math.trunc(value)
-        : Date.now();
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return Date.now();
+    }
+    // MetaSO delivers timestamps in Unix seconds; normalize to milliseconds so
+    // stored messages order correctly next to locally persisted millisecond ones.
+    return Math.trunc(value < 1_000_000_000_000 ? value * 1000 : value);
 }
 function defaultSocketClientFactory(endpoint, options) {
     return (0, socket_io_client_1.io)(endpoint.url, options);
@@ -147,8 +150,15 @@ function createProfileSimplemsgListener(input) {
             }
         }
         const plaintext = (0, privateChatListener_1.decryptPrivateChatSocketMessage)(message, input.identity, peerChatPublicKey);
-        if (!plaintext)
+        if (!plaintext) {
+            // Allow a redelivery (e.g. after reconnect) to succeed once the peer key
+            // becomes resolvable, and keep the drop observable instead of silent.
+            if (messagePinId) {
+                seenPinIds.delete(messagePinId);
+            }
+            input.onError?.(new Error(`dropped undecryptable simplemsg push (pinId: ${messagePinId ?? 'unknown'}, from: ${fromGlobalMetaId})`));
             return;
+        }
         const inboundMessage = {
             fromGlobalMetaId,
             content: plaintext,
@@ -158,7 +168,7 @@ function createProfileSimplemsgListener(input) {
             timestamp: toFiniteTimestamp(message.timestamp),
             rawMessage: normalizeObject(message),
         };
-        await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
+        const persistResult = await (0, conversationPersistence_1.persistA2AConversationMessageBestEffort)({
             paths: input.paths,
             local: {
                 profileSlug: input.profile.slug,
@@ -185,6 +195,9 @@ function createProfileSimplemsgListener(input) {
                 raw: inboundMessage.rawMessage,
             },
         }, input.persister);
+        if (!persistResult.persisted) {
+            input.onError?.(new Error(`failed to persist simplemsg push (pinId: ${messagePinId ?? 'unknown'}, from: ${fromGlobalMetaId}): ${persistResult.errorMessage ?? 'unknown error'}`));
+        }
         await input.onMessage?.(input.profile, inboundMessage);
     };
     const registerSocket = (socket, endpointIndex) => {

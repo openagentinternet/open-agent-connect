@@ -234,7 +234,6 @@ export async function fetchPrivateChatPeerGlobalMetaIds(
     : 10_000;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  timeout.unref?.();
   let response: Response;
   try {
     response = await getFetchImpl(input.fetchImpl)(url.toString(), {
@@ -291,7 +290,6 @@ export async function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPage
     : 15_000;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  timeout.unref?.();
   let response: Response;
   try {
     response = await fetchImpl(url.toString(), {

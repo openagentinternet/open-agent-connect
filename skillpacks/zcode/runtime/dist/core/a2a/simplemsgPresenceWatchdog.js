@@ -88,6 +88,23 @@ function createA2ASimplemsgPresenceWatchdog(input) {
                 error: normalizedError,
             };
         }
+        // The presence API only serves a single capped page (see
+        // MAX_SOCKET_PRESENCE_SIZE) and ignores pagination cursors, so when the
+        // server reports more online identities than the page returned, any local
+        // profile could simply be beyond the page — absence is not evidence of a
+        // dead socket. Restarting every profile listener on that false signal
+        // creates the very receive gaps the watchdog is meant to prevent.
+        const presenceTotal = Number.isFinite(Number(presence.total))
+            ? Math.floor(Number(presence.total))
+            : presence.bots.length;
+        if (presenceTotal > presence.bots.length) {
+            resetMissingState();
+            return {
+                status: 'healthy',
+                report,
+                missing: [],
+            };
+        }
         const missing = findMissingPresenceProfiles(report, presence);
         if (missing.length === 0) {
             resetMissingState();

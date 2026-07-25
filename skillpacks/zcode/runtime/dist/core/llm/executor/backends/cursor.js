@@ -173,8 +173,9 @@ function createCursorBackend(binaryPath, env) {
                         const candidateOutput = typeof message.result === 'string'
                             ? message.result
                             : (0, jsonProcess_1.stringifyContent)(message.output ?? message.text);
-                        if (!output)
+                        if (candidateOutput && (request.outputMode === 'final' || !output)) {
                             resultOutput = candidateOutput;
+                        }
                         const model = (0, jsonProcess_1.getString)(message.model) ?? 'cursor';
                         hasResultUsage = addUsageToRecord(resultUsage, model, (0, jsonProcess_1.extractUsage)(message.usage)) || hasResultUsage;
                         if (message.is_error === true || message.status === 'error' || message.subtype === 'error') {
@@ -188,7 +189,9 @@ function createCursorBackend(binaryPath, env) {
             const usage = hasResultUsage ? resultUsage : stepUsage;
             return {
                 status,
-                output: resultOutput || output,
+                output: request.outputMode === 'final'
+                    ? resultOutput || output
+                    : output || resultOutput || '',
                 error: (0, jsonProcess_1.resolveJsonProcessError)(processResult, protocolStatus, protocolError),
                 providerSessionId: sessionId,
                 durationMs: processResult.durationMs,

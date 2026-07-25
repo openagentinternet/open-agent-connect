@@ -188,7 +188,7 @@ function createSocketIoMetaWebReplyWaiter(options = {}) {
                         transports: ['websocket'],
                     });
                     sockets.push(socket);
-                    socket.on('message', (data) => {
+                    const handleSocketData = (data) => {
                         if (settled)
                             return;
                         const message = extractSocketMessage(data);
@@ -263,6 +263,16 @@ function createSocketIoMetaWebReplyWaiter(options = {}) {
                                 ...pendingDelivery,
                             });
                         }, DEFAULT_NEEDS_RATING_GRACE_MS);
+                    };
+                    // MetaSO may deliver private-chat pushes either on the raw 'message'
+                    // channel or as named socket.io events; subscribe to all of them so a
+                    // reply delivered via a named event does not silently time out.
+                    socket.on('message', handleSocketData);
+                    socket.on('WS_SERVER_NOTIFY_PRIVATE_CHAT', (data) => {
+                        handleSocketData(['WS_SERVER_NOTIFY_PRIVATE_CHAT', data]);
+                    });
+                    socket.on('WS_RESPONSE_SUCCESS', (data) => {
+                        handleSocketData(['WS_RESPONSE_SUCCESS', data]);
                     });
                 }
             });

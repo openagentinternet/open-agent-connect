@@ -29,7 +29,39 @@ function parseBrowserOpenArgs(args) {
     }
     return { uri };
 }
+/**
+ * Parse `browser tab open --uri <uri>`. The `tab open` form requires a URI:
+ * opening an empty tab is a page-only affordance, not a CLI one (the CLI has no
+ * way to target a specific open page, so an empty open would be a no-op).
+ * `args` starts at `open` (i.e. everything after `browser tab`).
+ */
+function parseBrowserTabOpenArgs(args) {
+    if (args[0] !== 'open') {
+        return { error: (0, helpers_1.commandUnknownSubcommand)(`browser tab ${args.join(' ')}`.trim()) };
+    }
+    const parsed = parseBrowserOpenArgs(args);
+    if (parsed.error) {
+        return parsed;
+    }
+    if (!parsed.uri) {
+        return {
+            error: (0, commandResult_1.commandFailed)('invalid_flag', 'Missing value for --uri. Use "browser open" to open the Browser itself.'),
+        };
+    }
+    return { uri: parsed.uri };
+}
 async function runBrowserCommand(args, context) {
+    if (args[0] === 'tab') {
+        const parsed = parseBrowserTabOpenArgs(args.slice(1));
+        if (parsed.error) {
+            return parsed.error;
+        }
+        const handler = context.dependencies.browser?.tabOpen;
+        if (!handler) {
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Browser tab open handler is not configured.');
+        }
+        return handler({ uri: parsed.uri });
+    }
     if (args[0] !== 'open') {
         return (0, helpers_1.commandUnknownSubcommand)(`browser ${args.join(' ')}`.trim());
     }

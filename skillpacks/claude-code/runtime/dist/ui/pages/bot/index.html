@@ -167,6 +167,22 @@
         white-space: nowrap;
         flex-shrink: 0;
       }
+      .metabot-default-label {
+        display: inline-flex;
+        align-items: center;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 4px;
+        background: var(--green);
+        color: #fff;
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: 0;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
       .metabot-item-id-row {
         display: flex;
         align-items: center;
@@ -433,6 +449,20 @@
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
+      }
+      .default-bot-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 4px;
+        padding-left: 12px;
+        border-left: 1px solid var(--border);
+      }
+      .default-bot-control-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        white-space: nowrap;
       }
       .advanced-danger-actions {
         display: flex;
@@ -1126,6 +1156,53 @@
         font-weight: 600;
         min-width: 24px;
         text-align: left;
+      }
+      .auto-reply-params {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+      .auto-reply-param {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+      }
+      .auto-reply-param-text {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .auto-reply-param-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .auto-reply-param-hint {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .auto-reply-param select {
+        min-height: 36px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text);
+        padding: 7px 9px;
+        font-size: 12px;
+        min-width: 120px;
+      }
+      .auto-reply-param select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-dim);
+      }
+      .auto-reply-param select:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
 
       .settings-form {
@@ -2185,6 +2262,14 @@
               <div class="hero-actions">
                 <button class="btn btn-sm" data-act="view-bot-page" data-i18n-key="bot.openPublicBotPage">Open Public Bot Page</button>
                 <button class="btn btn-sm" data-act="view-conversations" data-i18n-key="bot.viewConversations">View Conversations</button>
+                <div class="default-bot-control" data-default-bot-control>
+                  <span class="default-bot-control-label" data-i18n-key="bot.defaultBadge">Default</span>
+                  <button type="button" class="toggle-switch" data-default-bot-toggle role="switch" aria-checked="false" aria-label="Set as default" title="Set as default">
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    <span class="toggle-text">Off</span>
+                  </button>
+                </div>
+                <span class="save-status" data-default-bot-status></span>
               </div>
             </div>
           </section>

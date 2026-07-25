@@ -19,6 +19,7 @@ export interface PrivateChatAutoReplyDependencies {
 }
 export interface PrivateChatAutoReplyOrchestrator {
     handleInboundMessage(message: PrivateChatInboundMessage): Promise<void>;
+    retryPendingInboundMessage(peerGlobalMetaId: string): Promise<boolean>;
     retryOutboundMessage(peerGlobalMetaId: string, message: PrivateChatMessage): Promise<boolean>;
     handleLocalGuidedTurn(peerGlobalMetaId: string, options?: {
         guidanceToConsume?: PrivateChatPendingGuidanceClaim | null;

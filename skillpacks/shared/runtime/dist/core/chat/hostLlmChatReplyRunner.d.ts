@@ -2,6 +2,7 @@ import type { LlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import type { LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
 import { type PrivateChatAllowedSkillScope, type PrivateChatAllowedSkillsResolver } from './privateChatAllowedSkills';
 import type { ChatReplyRunner, ChatReplyRunnerInput, ChatReplyRunnerResult } from './privateChatTypes';
+export declare const PRIVATE_CHAT_REPLY_GENERATION_ENV = "METABOT_PRIVATE_CHAT_REPLY_GENERATION";
 declare function isPlanningPreambleLine(line: string): boolean;
 declare function stripPlanningPreamble(value: string): string;
 type ChatLlmExecutor = {

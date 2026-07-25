@@ -38,11 +38,22 @@ export interface FetchPrivateHistoryPageInput {
     peerGlobalMetaId: string;
     startIndex?: number;
     limit: number;
+    timeoutMs?: number;
 }
 export interface PrivateChatHistoryPage {
     rows: unknown[];
     total: number | null;
     nextTimestamp: number | null;
+}
+export interface FetchPrivateChatPeerGlobalMetaIdsInput {
+    selfGlobalMetaId: string;
+    knownPeers?: Array<{
+        globalMetaId: string;
+        chatPublicKey?: string | null;
+    }>;
+    fetchImpl?: typeof fetch;
+    chatApiBaseUrl?: string;
+    timeoutMs?: number;
 }
 export type FetchPrivateHistory = (input: FetchPrivateHistoryInput) => Promise<unknown[]>;
 export interface PrivateConversationResponse {
@@ -55,6 +66,8 @@ export interface PrivateConversationResponse {
 }
 export declare function normalizeConversationLimit(value: unknown): number;
 export declare function normalizeConversationAfterIndex(value: unknown): number | undefined;
+export declare function extractPrivateChatPeerGlobalMetaIds(rawData: unknown, selfGlobalMetaId: string, knownPeers?: FetchPrivateChatPeerGlobalMetaIdsInput['knownPeers']): string[];
+export declare function fetchPrivateChatPeerGlobalMetaIds(input: FetchPrivateChatPeerGlobalMetaIdsInput): Promise<string[]>;
 export declare function fetchPrivateChatHistoryPage(input: FetchPrivateHistoryPageInput & {
     fetchImpl?: typeof fetch;
     chatApiBaseUrl?: string;

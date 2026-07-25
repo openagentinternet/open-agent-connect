@@ -4,7 +4,13 @@ export interface A2AConfig {
 }
 export interface AutoReplyConfig {
     enabled: boolean;
+    maxTurns: number;
+    cooldownMs: number;
 }
+export declare const AUTO_REPLY_MAX_TURNS_OPTIONS: readonly number[];
+export declare const AUTO_REPLY_COOLDOWN_MS_OPTIONS: readonly number[];
+export declare const DEFAULT_AUTO_REPLY_MAX_TURNS = 5;
+export declare const DEFAULT_AUTO_REPLY_COOLDOWN_MS = 300000;
 export type DefaultWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
 export declare const DEFAULT_WRITE_NETWORKS: DefaultWriteNetwork[];
 export interface ChainConfig {

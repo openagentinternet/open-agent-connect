@@ -3837,6 +3837,8 @@ function createDefaultMetabotDaemonHandlers(input) {
         enabled: true,
         acceptPolicy: 'accept_all',
         defaultStrategyId: null,
+        maxTurns: configTypes_1.DEFAULT_AUTO_REPLY_MAX_TURNS,
+        cooldownMs: configTypes_1.DEFAULT_AUTO_REPLY_COOLDOWN_MS,
     };
     const scopedAutoReplyConfigs = new Map();
     const sessionEngine = (0, sessionEngine_1.createA2ASessionEngine)();
@@ -4845,19 +4847,33 @@ function createDefaultMetabotDaemonHandlers(input) {
             enabled: persistedConfig.autoReply.enabled,
             acceptPolicy: autoReplyConfig.acceptPolicy,
             defaultStrategyId: autoReplyConfig.defaultStrategyId,
+            maxTurns: persistedConfig.autoReply.maxTurns,
+            cooldownMs: persistedConfig.autoReply.cooldownMs,
         };
         scopedAutoReplyConfigs.set(normalizedProfileHomeDir, created);
         return created;
     }
-    async function persistAutoReplyEnabled(homeDir, enabled) {
+    async function persistAutoReplyConfig(homeDir, update) {
         const store = (0, configStore_1.createConfigStore)(homeDir);
         const config = await store.read();
-        if (config.autoReply.enabled === enabled) {
+        const nextAutoReply = { ...config.autoReply };
+        if (update.enabled !== undefined) {
+            nextAutoReply.enabled = update.enabled;
+        }
+        if (update.maxTurns !== undefined) {
+            nextAutoReply.maxTurns = update.maxTurns;
+        }
+        if (update.cooldownMs !== undefined) {
+            nextAutoReply.cooldownMs = update.cooldownMs;
+        }
+        if (nextAutoReply.enabled === config.autoReply.enabled
+            && nextAutoReply.maxTurns === config.autoReply.maxTurns
+            && nextAutoReply.cooldownMs === config.autoReply.cooldownMs) {
             return;
         }
         await store.set({
             ...config,
-            autoReply: { enabled },
+            autoReply: nextAutoReply,
         });
     }
     async function resolveActorChatContext(rawActor) {
@@ -12259,6 +12275,8 @@ function createDefaultMetabotDaemonHandlers(input) {
                     enabled: actor.autoReplyConfig.enabled,
                     acceptPolicy: actor.autoReplyConfig.acceptPolicy,
                     defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
+                    maxTurns: actor.autoReplyConfig.maxTurns ?? configTypes_1.DEFAULT_AUTO_REPLY_MAX_TURNS,
+                    cooldownMs: actor.autoReplyConfig.cooldownMs ?? configTypes_1.DEFAULT_AUTO_REPLY_COOLDOWN_MS,
                 });
             },
             setAutoReply: async (autoReplyInput) => {
@@ -12266,22 +12284,46 @@ function createDefaultMetabotDaemonHandlers(input) {
                 if ('failure' in actor) {
                     return actor.failure;
                 }
-                const enabled = autoReplyInput.enabled === true;
+                const enabled = autoReplyInput.enabled;
+                const maxTurns = autoReplyInput.maxTurns;
+                const cooldownMs = autoReplyInput.cooldownMs;
+                if (enabled === undefined
+                    && maxTurns === undefined
+                    && cooldownMs === undefined
+                    && autoReplyInput.defaultStrategyId === undefined) {
+                    return (0, commandResult_1.commandFailed)('missing_auto_reply_update', 'At least one auto-reply setting (enabled, maxTurns, cooldownMs, defaultStrategyId) is required.');
+                }
+                if (maxTurns !== undefined && !configTypes_1.AUTO_REPLY_MAX_TURNS_OPTIONS.includes(maxTurns)) {
+                    return (0, commandResult_1.commandFailed)('invalid_auto_reply_max_turns', `maxTurns must be one of: ${configTypes_1.AUTO_REPLY_MAX_TURNS_OPTIONS.join(', ')}.`);
+                }
+                if (cooldownMs !== undefined && !configTypes_1.AUTO_REPLY_COOLDOWN_MS_OPTIONS.includes(cooldownMs)) {
+                    return (0, commandResult_1.commandFailed)('invalid_auto_reply_cooldown_ms', `cooldownMs must be one of: ${configTypes_1.AUTO_REPLY_COOLDOWN_MS_OPTIONS.join(', ')}.`);
+                }
                 try {
-                    await persistAutoReplyEnabled(actor.homeDir, enabled);
+                    await persistAutoReplyConfig(actor.homeDir, { enabled, maxTurns, cooldownMs });
                 }
                 catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
-                    console.warn('[chat] failed to persist auto-reply enabled flag', error);
+                    console.warn('[chat] failed to persist auto-reply config', error);
                     return (0, commandResult_1.commandFailed)('auto_reply_persist_failed', `Failed to save the auto-reply setting: ${message}`);
                 }
-                actor.autoReplyConfig.enabled = enabled;
+                if (enabled !== undefined) {
+                    actor.autoReplyConfig.enabled = enabled;
+                }
+                if (maxTurns !== undefined) {
+                    actor.autoReplyConfig.maxTurns = maxTurns;
+                }
+                if (cooldownMs !== undefined) {
+                    actor.autoReplyConfig.cooldownMs = cooldownMs;
+                }
                 if (autoReplyInput.defaultStrategyId !== undefined) {
                     actor.autoReplyConfig.defaultStrategyId = normalizeText(autoReplyInput.defaultStrategyId) || null;
                 }
                 return (0, commandResult_1.commandSuccess)({
                     enabled: actor.autoReplyConfig.enabled,
                     defaultStrategyId: actor.autoReplyConfig.defaultStrategyId,
+                    maxTurns: actor.autoReplyConfig.maxTurns ?? configTypes_1.DEFAULT_AUTO_REPLY_MAX_TURNS,
+                    cooldownMs: actor.autoReplyConfig.cooldownMs ?? configTypes_1.DEFAULT_AUTO_REPLY_COOLDOWN_MS,
                 });
             },
             stopConversation: async ({ from, peer }) => {
@@ -12844,7 +12886,12 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
             listProfiles: async () => {
                 const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(normalizedSystemHomeDir);
-                const activeHomeDir = node_path_1.default.resolve(input.homeDir);
+                // Reflect the live CLI-managed default Bot (active home) instead of the
+                // home this daemon process was started with, so `metabot identity assign`
+                // and UI activation stay in sync while the daemon keeps running. Fall
+                // back to the startup home when no valid active home is recorded.
+                const liveActiveHome = await (0, identityProfiles_1.readActiveMetabotHome)(normalizedSystemHomeDir).catch(() => null);
+                const activeHomeDir = node_path_1.default.resolve(liveActiveHome ?? input.homeDir);
                 const profilesWithSetup = await Promise.all(profiles.map(async (profile) => {
                     const runtimeState = await (0, runtimeStateStore_1.createRuntimeStateStore)(profile.homeDir).readState().catch(() => null);
                     return {
@@ -12863,6 +12910,22 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
                 }
                 return (0, commandResult_1.commandSuccess)({ profile });
+            },
+            activateProfile: async ({ slug }) => {
+                const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);
+                if (!profile) {
+                    return (0, commandResult_1.commandFailed)('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+                }
+                // Same mechanism as `metabot identity assign`: the default Bot is the
+                // CLI-managed active home, so setting it here replaces the previous one.
+                await (0, identityProfiles_1.setActiveMetabotHome)({
+                    systemHomeDir: normalizedSystemHomeDir,
+                    homeDir: profile.homeDir,
+                });
+                return (0, commandResult_1.commandSuccess)({
+                    activeHomeDir: profile.homeDir,
+                    slug: profile.slug,
+                });
             },
             getConfig: async ({ slug }) => {
                 const profile = await (0, metabotProfileManager_1.getMetabotProfile)(normalizedSystemHomeDir, slug);

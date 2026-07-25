@@ -55,6 +55,7 @@ export declare function probeDaemonStatus(baseUrl: string, timeoutMs?: number): 
 export interface PrivateChatAutoReplyProfileDispatcher {
     handleInboundMessage(profile: IdentityProfileRecord, message: PrivateChatInboundMessage): Promise<void>;
     retryOutboundMessage(profile: IdentityProfileRecord, peerGlobalMetaId: string, message: PrivateChatMessage): Promise<boolean>;
+    retryPendingInboundMessage(profile: IdentityProfileRecord, peerGlobalMetaId: string): Promise<boolean>;
 }
 export interface PrivateChatAutoReplyProfileDispatcherOptions {
     autoReplyConfig: PrivateChatAutoReplyConfig;

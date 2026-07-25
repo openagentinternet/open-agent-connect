@@ -1,8 +1,41 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.registerBrowserTabSink = registerBrowserTabSink;
+exports.browserTabSinkCount = browserTabSinkCount;
+exports.broadcastBrowserTabOpen = broadcastBrowserTabOpen;
 exports.statusForBrowserResult = statusForBrowserResult;
 exports.handleBrowserApiRoutes = handleBrowserApiRoutes;
 const agent_browser_host_contract_1 = require("@openagentinternet/agent-browser-host-contract");
+const browserTabSinks = new Set();
+/** Register a sink. Returns an unregister function for cleanup. */
+function registerBrowserTabSink(sink) {
+    browserTabSinks.add(sink);
+    return () => {
+        browserTabSinks.delete(sink);
+    };
+}
+/** Number of currently-subscribed Browser pages (used to report "no page open"). */
+function browserTabSinkCount() {
+    return browserTabSinks.size;
+}
+/**
+ * Fan an open-tab request out to every subscribed Browser page. Never throws:
+ * each sink is its own best-effort try/catch boundary. Returns the number of
+ * pages reached.
+ */
+function broadcastBrowserTabOpen(uri) {
+    let reached = 0;
+    for (const sink of browserTabSinks) {
+        try {
+            sink({ type: 'agent-browser:open-tab', uri });
+            reached += 1;
+        }
+        catch {
+            /* a single failing sink must not block the others */
+        }
+    }
+    return reached;
+}
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -137,6 +170,32 @@ async function handleBrowserApiRoutes(context) {
             ? await handlers.metafileUpload({ ...input, ...actorRouteInput(url, input) })
             : (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC Browser MetaFile upload requires a host-owned file picker.');
         context.sendJson(statusForBrowserResult(result), result);
+        return true;
+    }
+    if (url.pathname === '/api/browser/tabs/open') {
+        if (method !== 'POST') {
+            context.sendMethodNotAllowed(['POST']);
+            return true;
+        }
+        const input = await context.readJsonBody();
+        const uri = normalizeText(input.uri);
+        if (!uri) {
+            context.sendJson(400, (0, agent_browser_host_contract_1.browserFailure)('missing_uri', 'uri is required to open a Browser tab.'));
+            return true;
+        }
+        if (uri.startsWith('--')) {
+            context.sendJson(400, (0, agent_browser_host_contract_1.browserFailure)('invalid_browser_uri', 'uri does not look like a Browser resource URI.'));
+            return true;
+        }
+        // Fire-and-forget: fan out to every currently-open Browser page, which feeds
+        // ABC's client-only AgentBrowserTabs.openTab. No tab id is returned because
+        // tab ids are client-only (the daemon never learns them). Reaching zero
+        // pages is not an error — the open is simply pending until a page connects.
+        const reached = broadcastBrowserTabOpen(uri);
+        const data = { ok: true, uri, pagesReached: reached };
+        if (reached === 0)
+            data.note = 'no Browser page currently open; open the Browser first';
+        context.sendJson(200, (0, agent_browser_host_contract_1.browserSuccess)(data));
         return true;
     }
     return false;
