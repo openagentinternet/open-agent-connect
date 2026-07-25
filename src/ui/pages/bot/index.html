@@ -167,6 +167,22 @@
         white-space: nowrap;
         flex-shrink: 0;
       }
+      .metabot-default-label {
+        display: inline-flex;
+        align-items: center;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 4px;
+        background: var(--green);
+        color: #fff;
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: 0;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
       .metabot-item-id-row {
         display: flex;
         align-items: center;
@@ -433,6 +449,20 @@
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
+      }
+      .default-bot-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 4px;
+        padding-left: 12px;
+        border-left: 1px solid var(--border);
+      }
+      .default-bot-control-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        white-space: nowrap;
       }
       .advanced-danger-actions {
         display: flex;
@@ -2232,6 +2262,14 @@
               <div class="hero-actions">
                 <button class="btn btn-sm" data-act="view-bot-page" data-i18n-key="bot.openPublicBotPage">Open Public Bot Page</button>
                 <button class="btn btn-sm" data-act="view-conversations" data-i18n-key="bot.viewConversations">View Conversations</button>
+                <div class="default-bot-control" data-default-bot-control>
+                  <span class="default-bot-control-label" data-i18n-key="bot.defaultBadge">Default</span>
+                  <button type="button" class="toggle-switch" data-default-bot-toggle role="switch" aria-checked="false" aria-label="Set as default" title="Set as default">
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    <span class="toggle-text">Off</span>
+                  </button>
+                </div>
+                <span class="save-status" data-default-bot-status></span>
               </div>
             </div>
           </section>
