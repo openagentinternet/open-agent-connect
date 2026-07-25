@@ -39,6 +39,27 @@ function field(value = '') {
   return element;
 }
 
+function toggleElement() {
+  const attrs = new Map();
+  const classes = new Set();
+  const textEl = { textContent: '' };
+  const element = {
+    disabled: false,
+    classList: {
+      toggle: (name, enabled) => {
+        if (enabled) classes.add(name);
+        else classes.delete(name);
+      },
+      contains: (name) => classes.has(name),
+    },
+    querySelector: (selector) => (selector === '.toggle-text' ? textEl : null),
+    getAttribute: (name) => attrs.get(name) ?? null,
+    setAttribute: (name, next) => attrs.set(name, String(next)),
+    textEl,
+  };
+  return element;
+}
+
 function panelElement(attributeName, attributeValue, selectors = {}) {
   return {
     querySelector: (selector) => selectors[selector] ?? null,
@@ -196,6 +217,198 @@ test('bot page hero renders bio copy and keeps online status icon-only', () => {
   assert.equal(summary.hidden, false);
   assert.equal(summary.textContent, 'Builds wallet automation.');
   assert.equal(copyUri.getAttribute('aria-label'), 'Copy Homepage URI');
+});
+
+test('bot page template ships a set-as-default toggle in the hero actions and Default badge styles', () => {
+  const template = readFileSync(new URL('../../src/ui/pages/bot/index.html', import.meta.url), 'utf8');
+
+  assert.match(template, /data-act="view-conversations"[\s\S]*data-default-bot-toggle/);
+  assert.match(template, /data-default-bot-toggle[^>]*role="switch"/);
+  assert.match(template, /data-i18n-key="bot\.defaultBadge"/);
+  assert.match(template, /data-default-bot-status/);
+  assert.match(template, /\.metabot-default-label\s*\{/);
+});
+
+test('bot page list marks only the default Bot with a Default badge', () => {
+  const list = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': list,
+      '[data-metabot-count]': { textContent: '' },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.profiles = [
+    { slug: 'alice-bot', name: 'Alice', isActive: true },
+    { slug: 'bob-bot', name: 'Bob', isActive: false },
+  ];
+
+  context.renderMetabotList();
+
+  assert.equal((list.innerHTML.match(/metabot-default-label/g) || []).length, 1);
+  assert.match(list.innerHTML, /data-slug="alice-bot"[\s\S]*metabot-default-label[\s\S]*>Default<\/span>[\s\S]*data-slug="bob-bot"/);
+});
+
+test('bot page list hides the Default badge when only one Bot exists', () => {
+  const list = { innerHTML: '' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-metabot-list]': list,
+      '[data-metabot-count]': { textContent: '' },
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice', isActive: true }];
+
+  context.renderMetabotList();
+
+  assert.equal((list.innerHTML.match(/metabot-default-label/g) || []).length, 0);
+});
+
+test('bot page hero syncs the set-as-default toggle from the active profile', () => {
+  const toggle = toggleElement();
+  const control = { hidden: false };
+  const status = { textContent: 'stale', className: 'save-status error', hidden: false };
+  const elements = {
+    '[data-bot-hero]': { hidden: true },
+    '[data-hero-avatar]': { innerHTML: '' },
+    '[data-hero-name]': field(),
+    '[data-live-indicator]': field(),
+    '[data-hero-summary]': { textContent: '', hidden: true },
+    '[data-hero-global-meta-id]': field(),
+    '[data-hero-bot-uri]': field(),
+    '[data-copy-global-meta-id]': field(),
+    '[data-copy-bot-uri]': field(),
+    '[data-act="view-bot-page"]': field(),
+    '[data-act="view-conversations"]': field(),
+    '[data-default-bot-control]': control,
+    '[data-default-bot-toggle]': toggle,
+    '[data-default-bot-status]': status,
+  };
+  const context = createBotScriptContext({ elements });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.profiles = [
+    { slug: 'alice-bot', name: 'Alice', isActive: false },
+    { slug: 'bob-bot', name: 'Bob', isActive: true },
+  ];
+  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: false });
+
+  assert.equal(control.hidden, false);
+  assert.equal(status.hidden, false);
+  assert.equal(toggle.classList.contains('on'), false);
+  assert.equal(toggle.disabled, false);
+  assert.equal(toggle.getAttribute('aria-checked'), 'false');
+  assert.equal(toggle.getAttribute('title'), 'Set as default');
+  assert.equal(toggle.textEl.textContent, 'Off');
+  assert.equal(status.textContent, '');
+  assert.equal(status.className, 'save-status');
+
+  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: true });
+
+  assert.equal(toggle.classList.contains('on'), true);
+  assert.equal(toggle.disabled, true);
+  assert.equal(toggle.getAttribute('aria-checked'), 'true');
+  assert.equal(toggle.getAttribute('title'), 'This is the default Bot');
+  assert.equal(toggle.textEl.textContent, 'On');
+});
+
+test('bot page hero hides the set-as-default toggle when only one Bot exists', () => {
+  const toggle = toggleElement();
+  const control = { hidden: false };
+  const status = { textContent: '', className: 'save-status', hidden: false };
+  const elements = {
+    '[data-bot-hero]': { hidden: true },
+    '[data-hero-avatar]': { innerHTML: '' },
+    '[data-hero-name]': field(),
+    '[data-live-indicator]': field(),
+    '[data-hero-summary]': { textContent: '', hidden: true },
+    '[data-hero-global-meta-id]': field(),
+    '[data-hero-bot-uri]': field(),
+    '[data-copy-global-meta-id]': field(),
+    '[data-copy-bot-uri]': field(),
+    '[data-act="view-bot-page"]': field(),
+    '[data-act="view-conversations"]': field(),
+    '[data-default-bot-control]': control,
+    '[data-default-bot-toggle]': toggle,
+    '[data-default-bot-status]': status,
+  };
+  const context = createBotScriptContext({ elements });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.profiles = [{ slug: 'alice-bot', name: 'Alice', isActive: true }];
+  context.renderBotHero({ slug: 'alice-bot', name: 'Alice', globalMetaId: 'gm-alice', isActive: true });
+
+  assert.equal(control.hidden, true);
+  assert.equal(status.hidden, true);
+});
+
+test('bot page set-as-default toggle activates the profile through the daemon API', async () => {
+  const toggle = toggleElement();
+  const status = { textContent: '', className: 'save-status' };
+  const requests = [];
+  const context = createBotScriptContext({
+    elements: {
+      '[data-default-bot-status]': status,
+    },
+    fetch: (url, options) => {
+      requests.push({ url, options });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, data: { slug: 'bob-bot', activeHomeDir: '/tmp/bob' } }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'bob-bot';
+  context.state.profiles = [
+    { slug: 'alice-bot', name: 'Alice', isActive: true },
+    { slug: 'bob-bot', name: 'Bob', isActive: false },
+  ];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+
+  await context.setSelectedBotDefault(toggle);
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/bot/profiles/bob-bot/activate');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(context.state.profiles[0].isActive, false);
+  assert.equal(context.state.profiles[1].isActive, true);
+  assert.equal(status.textContent, 'Default Bot updated.');
+  assert.equal(status.className, 'save-status success');
+});
+
+test('bot page set-as-default failure keeps the previous default and shows the error', async () => {
+  const toggle = toggleElement();
+  const status = { textContent: '', className: 'save-status' };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-default-bot-status]': status,
+    },
+    fetch: () => Promise.resolve({
+      ok: false,
+      json: () => Promise.resolve({ ok: false, code: 'profile_not_found', message: 'MetaBot profile not found: bob-bot' }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'bob-bot';
+  context.state.profiles = [
+    { slug: 'alice-bot', name: 'Alice', isActive: true },
+    { slug: 'bob-bot', name: 'Bob', isActive: false },
+  ];
+
+  await context.setSelectedBotDefault(toggle);
+
+  assert.equal(context.state.profiles[0].isActive, true);
+  assert.equal(context.state.profiles[1].isActive, false);
+  assert.equal(toggle.classList.contains('loading'), false);
+  assert.equal(status.textContent, 'MetaBot profile not found: bob-bot');
+  assert.equal(status.className, 'save-status error');
 });
 
 test('bot page Basic tab owns LLM providers and Persona tab owns role fields', () => {

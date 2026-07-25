@@ -15188,7 +15188,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       listProfiles: async () => {
         const profiles = await listMetabotProfiles(normalizedSystemHomeDir);
-        const activeHomeDir = path.resolve(input.homeDir);
+        // Reflect the live CLI-managed default Bot (active home) instead of the
+        // home this daemon process was started with, so `metabot identity assign`
+        // and UI activation stay in sync while the daemon keeps running. Fall
+        // back to the startup home when no valid active home is recorded.
+        const liveActiveHome = await readActiveMetabotHome(normalizedSystemHomeDir).catch(() => null);
+        const activeHomeDir = path.resolve(liveActiveHome ?? input.homeDir);
         const profilesWithSetup = await Promise.all(profiles.map(async (profile) => {
           const runtimeState = await createRuntimeStateStore(profile.homeDir).readState().catch(() => null);
           return {
@@ -15207,6 +15212,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
         }
         return commandSuccess({ profile });
+      },
+      activateProfile: async ({ slug }) => {
+        const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
+        if (!profile) {
+          return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
+        }
+        // Same mechanism as `metabot identity assign`: the default Bot is the
+        // CLI-managed active home, so setting it here replaces the previous one.
+        await setActiveMetabotHome({
+          systemHomeDir: normalizedSystemHomeDir,
+          homeDir: profile.homeDir,
+        });
+        return commandSuccess({
+          activeHomeDir: profile.homeDir,
+          slug: profile.slug,
+        });
       },
       getConfig: async ({ slug }) => {
         const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);

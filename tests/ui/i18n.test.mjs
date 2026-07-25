@@ -45,6 +45,11 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
     'bot.copy',
     'bot.openPublicBotPage',
     'bot.viewConversations',
+    'bot.defaultBadge',
+    'bot.setAsDefault',
+    'bot.isDefaultBot',
+    'bot.defaultBotSaved',
+    'bot.defaultBotSaveFailed',
     'bot.publicIdentity',
     'bot.behavior',
     'bot.chatSkills',
@@ -140,6 +145,10 @@ test('i18n dictionaries include Bot Page Console copy in English and Simplified 
   assert.equal(translate('zh-CN', 'bot.botUri'), 'Homepage URI');
   assert.equal(translate('en', 'bot.localBots'), 'Local Bots');
   assert.equal(translate('zh-CN', 'bot.localBots'), '本地 Bots');
+  assert.equal(translate('en', 'bot.defaultBadge'), 'Default');
+  assert.equal(translate('zh-CN', 'bot.defaultBadge'), '默认');
+  assert.equal(translate('en', 'bot.setAsDefault'), 'Set as default');
+  assert.equal(translate('zh-CN', 'bot.setAsDefault'), '设为默认');
   assert.equal(translate('en', 'bot.defaultRenderer'), 'Default home page renderer');
   assert.equal(translate('zh-CN', 'bot.defaultRenderer'), '默认主页渲染器');
   assert.equal(translate('en', 'bot.homepageUploadLater'), 'Homepage package upload will be available later. This Bot is using the default home page renderer.');

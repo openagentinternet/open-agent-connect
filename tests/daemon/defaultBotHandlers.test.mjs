@@ -13,7 +13,7 @@ const {
   getMetabotProfile,
   updateMetabotProfile,
 } = require('../../dist/core/bot/metabotProfileManager.js');
-const { listIdentityProfiles, setActiveMetabotHome, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { listIdentityProfiles, readActiveMetabotHome, setActiveMetabotHome, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
@@ -287,6 +287,47 @@ test('default bot handlers create, list, and fetch MetaBot profiles', async (t) 
   assert.equal(fetched.ok, true);
   assert.equal(fetched.data.profile.name, 'Alice Bot');
   assert.equal(fetched.data.profile.bio, 'Builds small tools on the Agent Internet.');
+});
+
+test('default bot handlers activate a profile as the CLI-managed default Bot', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const alice = await createMetabotProfile(systemHomeDir, { name: 'Alice Bot' });
+  const eric = await createMetabotProfile(systemHomeDir, { name: 'Eric Bot' });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const missing = await handlers.bot.activateProfile({ slug: 'missing' });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'profile_not_found');
+
+  const activated = await handlers.bot.activateProfile({ slug: eric.slug });
+  assert.equal(activated.ok, true);
+  assert.equal(activated.data.slug, eric.slug);
+  assert.equal(activated.data.activeHomeDir, eric.homeDir);
+
+  // The CLI view agrees: the active home pointer now names Eric's home.
+  assert.equal(await readActiveMetabotHome(systemHomeDir), eric.homeDir);
+
+  // listProfiles reflects the live active home, not the daemon startup home.
+  const listed = await handlers.bot.listProfiles();
+  const bySlug = new Map(listed.data.profiles.map((profile) => [profile.slug, profile]));
+  assert.equal(bySlug.get(eric.slug).isActive, true);
+  assert.equal(bySlug.get(alice.slug).isActive, false);
+
+  // Activating Alice replaces Eric as the single default Bot.
+  await handlers.bot.activateProfile({ slug: alice.slug });
+  const relisted = await handlers.bot.listProfiles();
+  const reBySlug = new Map(relisted.data.profiles.map((profile) => [profile.slug, profile]));
+  assert.equal(reBySlug.get(alice.slug).isActive, true);
+  assert.equal(reBySlug.get(eric.slug).isActive, false);
 });
 
 test('default bot config handlers persist chain config per MetaBot profile', async (t) => {
