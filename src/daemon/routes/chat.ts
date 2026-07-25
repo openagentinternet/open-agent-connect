@@ -150,7 +150,9 @@ export const handleChatRoutes: RouteHandler = async (context) => {
     const body = await context.readJsonBody();
     const result = await handler({
       from: normalizeText(body.from) || undefined,
-      enabled: body.enabled === true,
+      enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+      maxTurns: typeof body.maxTurns === 'number' ? body.maxTurns : undefined,
+      cooldownMs: typeof body.cooldownMs === 'number' ? body.cooldownMs : undefined,
       defaultStrategyId: normalizeText(body.defaultStrategyId) || undefined,
     });
     context.sendJson(200, result);

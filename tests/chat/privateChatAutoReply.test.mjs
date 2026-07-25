@@ -164,6 +164,8 @@ async function createAutoReplyHarness(options = {}) {
     enabled: options.enabled ?? true,
     acceptPolicy: 'accept_all',
     defaultStrategyId: options.defaultStrategyId ?? null,
+    maxTurns: options.maxTurns,
+    cooldownMs: options.cooldownMs,
   });
 
   return {
@@ -1606,6 +1608,69 @@ test('auto-reply reopens closed conversations after the idle window elapses', as
   assert.equal(conversation.turnCount, 1);
 });
 
+test('auto-reply reopens closed conversations earlier when config cooldownMs shortens the window', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now, cooldownMs: 60_000 });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'closed',
+    turnCount: 5,
+    lastDirection: 'outbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 120_000,
+  });
+
+  await withImmediateTimers(() => harness.handleInbound({
+    content: 'New topic after the configured cooldown window.',
+    messagePinId: 'incoming-pin-after-config-cooldown',
+  }));
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.writes.length, 1);
+  assert.equal(harness.runnerInputs[0].conversation.turnCount, 1);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('auto-reply keeps closed conversations closed longer when config cooldownMs lengthens the window', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now, cooldownMs: 3_600_000 });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'closed',
+    turnCount: 5,
+    lastDirection: 'outbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 300_001,
+  });
+
+  await withImmediateTimers(() => harness.handleInbound({
+    content: 'Still inside the configured cooldown window.',
+    messagePinId: 'incoming-pin-inside-config-cooldown',
+  }));
+
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 5);
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.ok(messages.some((message) => message.messagePinId === 'incoming-pin-inside-config-cooldown'));
+});
+
 test('auto-reply treats final Goodbye with punctuation as an inbound close signal', async () => {
   const harness = await createAutoReplyHarness();
 
@@ -1713,6 +1778,40 @@ test('auto-reply hard limit emits canonical visible Bye without close extensions
   const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
   assert.equal(conversation.state, 'closed');
   assert.equal(conversation.turnCount, 30);
+});
+
+test('auto-reply force-closes on the configured maxTurns without a strategy', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({ now, maxTurns: 2 });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: now - 1_000_000,
+    updatedAt: now - 1_000,
+  });
+
+  await withImmediateTimers(() => harness.handleInbound({
+    content: 'one more question',
+    messagePinId: 'incoming-pin-config-limit',
+  }));
+
+  assert.equal(harness.runnerInputs.length, 0);
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const outbound = messages.find((message) => message.direction === 'outbound');
+  assert.ok(outbound);
+  assert.match(outbound.content, /\nBye$/);
+  assert.equal(outbound.extensions, null);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+  assert.equal(conversation.turnCount, 2);
 });
 
 test('auto-reply applies pending guidance before falling back to the hard turn limit close', async () => {

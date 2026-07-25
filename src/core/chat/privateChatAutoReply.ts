@@ -18,6 +18,7 @@ import type {
   PrivateChatConversation,
   PrivateChatMessage,
   ChatReplyRunner,
+  ChatStrategy,
   PrivateChatAutoReplyConfig,
 } from './privateChatTypes';
 
@@ -208,6 +209,20 @@ function checkRateLimit(rateLimiter: RateLimiterState, now: number): boolean {
   const repliesLastHour = rateLimiter.replyTimestamps.length;
 
   return repliesLastMinute < MAX_REPLIES_PER_MINUTE && repliesLastHour < MAX_REPLIES_PER_HOUR;
+}
+
+// Per-bot config values win over strategy values; the defaults are the last
+// resort for runtime configs constructed without the new fields.
+function resolveEffectiveStrategy(
+  strategy: ChatStrategy | null,
+  config: PrivateChatAutoReplyConfig,
+): ChatStrategy {
+  return {
+    id: strategy?.id ?? 'default',
+    maxTurns: config.maxTurns ?? strategy?.maxTurns ?? DEFAULT_MAX_TURNS,
+    maxIdleMs: config.cooldownMs ?? strategy?.maxIdleMs ?? DEFAULT_MAX_IDLE_MS,
+    exitCriteria: strategy?.exitCriteria ?? '',
+  };
 }
 
 export function createPrivateChatAutoReplyOrchestrator(
@@ -596,9 +611,12 @@ export function createPrivateChatAutoReplyOrchestrator(
       ) {
         return false;
       }
-      const strategy = conversation.strategyId
-        ? await deps.strategyStore.getStrategy(conversation.strategyId)
-        : null;
+      const strategy = resolveEffectiveStrategy(
+        conversation.strategyId
+          ? await deps.strategyStore.getStrategy(conversation.strategyId)
+          : null,
+        config,
+      );
       return replyToInboundMessage({
         selfGlobalMetaId,
         peerGlobalMetaId: normalizedPeerGlobalMetaId,
@@ -709,10 +727,13 @@ export function createPrivateChatAutoReplyOrchestrator(
         pendingGuidanceLeaseExpiresAt: null,
       };
 
-      const strategy = conversation.strategyId
-        ? await deps.strategyStore.getStrategy(conversation.strategyId)
-        : null;
-      const maxIdleMs = strategy?.maxIdleMs ?? DEFAULT_MAX_IDLE_MS;
+      const strategy = resolveEffectiveStrategy(
+        conversation.strategyId
+          ? await deps.strategyStore.getStrategy(conversation.strategyId)
+          : null,
+        config,
+      );
+      const maxIdleMs = strategy.maxIdleMs;
       const shouldReopenClosedConversation = conversation.state === 'closed'
         && now - conversation.updatedAt > maxIdleMs;
       if (shouldReopenClosedConversation) {
@@ -829,9 +850,12 @@ export function createPrivateChatAutoReplyOrchestrator(
       if (!conversation) return;
       if (conversation.state !== 'active' && conversation.state !== 'closed') return;
 
-      const strategy = conversation.strategyId
-        ? await deps.strategyStore.getStrategy(conversation.strategyId)
-        : null;
+      const strategy = resolveEffectiveStrategy(
+        conversation.strategyId
+          ? await deps.strategyStore.getStrategy(conversation.strategyId)
+          : null,
+        config,
+      );
       const guidanceToConsume = options.guidanceToConsume
         ?? await deps.stateStore.claimPendingGuidance(
           conversation.conversationId,

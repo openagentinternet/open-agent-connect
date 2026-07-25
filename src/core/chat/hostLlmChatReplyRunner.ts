@@ -197,8 +197,8 @@ function buildChatPrompt(
   strategyLines.push('- Keep replies concise and natural, 2-4 sentences per message.');
   strategyLines.push('- Do not repeat what you have already said.');
   strategyLines.push('- Actively steer the conversation toward the objective.');
-  if (conversation.turnCount > 20) {
-    strategyLines.push('- This private chat has passed 20 inbound turns; converge the topic and end naturally soon.');
+  if (conversation.turnCount >= maxTurns - 1) {
+    strategyLines.push(`- This chat will be force-closed after turn ${maxTurns}. Steer the topic toward a natural close in THIS reply; if the conversation is ready to end, write your farewell and add ${CLOSE_CONVERSATION_SIGNAL} on the final line.`);
   }
   sections.push(strategyLines.join('\n'));
 

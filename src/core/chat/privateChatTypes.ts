@@ -86,4 +86,6 @@ export interface PrivateChatAutoReplyConfig {
   enabled: boolean;
   acceptPolicy: 'accept_all';
   defaultStrategyId: string | null;
+  maxTurns?: number;
+  cooldownMs?: number;
 }

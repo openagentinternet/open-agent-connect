@@ -5,6 +5,8 @@ import { normalizeBotHomepageTemplateId } from '@openagentinternet/agent-browser
 import { resolveMetabotHomeSelection } from '../state/homeSelection';
 import { resolveMetabotPaths, type MetabotPaths } from '../state/paths';
 import {
+  AUTO_REPLY_COOLDOWN_MS_OPTIONS,
+  AUTO_REPLY_MAX_TURNS_OPTIONS,
   createDefaultConfig,
   type DefaultWriteNetwork,
   isDefaultWriteNetwork,
@@ -39,6 +41,10 @@ async function readJsonFile(filePath: string): Promise<unknown | null> {
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+function normalizeNumberOption(value: unknown, options: readonly number[], fallback: number): number {
+  return typeof value === 'number' && options.includes(value) ? value : fallback;
 }
 
 function normalizeString(value: unknown): string {
@@ -139,6 +145,16 @@ function normalizeConfig(input: unknown): MetabotConfig {
       enabled: normalizeBoolean(
         autoReplySource.enabled,
         defaults.autoReply.enabled,
+      ),
+      maxTurns: normalizeNumberOption(
+        autoReplySource.maxTurns,
+        AUTO_REPLY_MAX_TURNS_OPTIONS,
+        defaults.autoReply.maxTurns,
+      ),
+      cooldownMs: normalizeNumberOption(
+        autoReplySource.cooldownMs,
+        AUTO_REPLY_COOLDOWN_MS_OPTIONS,
+        defaults.autoReply.cooldownMs,
       ),
     },
     browser: {

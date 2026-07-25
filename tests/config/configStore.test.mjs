@@ -35,6 +35,8 @@ const DEFAULT_CONFIG = {
   },
   autoReply: {
     enabled: true,
+    maxTurns: 5,
+    cooldownMs: 300000,
   },
   browser: DEFAULT_BROWSER_CONFIG,
 };
@@ -109,6 +111,8 @@ test('createConfigStore defaults to the active runtime config and persists updat
       },
       autoReply: {
         enabled: false,
+        maxTurns: 10,
+        cooldownMs: 600000,
       },
       browser: {
         blockExplorerBaseUrl: 'https://explorer.example.test/tx',
@@ -172,6 +176,8 @@ test('read ignores retired askMaster and evolution_network config fields', async
       },
       autoReply: {
         enabled: true,
+        maxTurns: 5,
+        cooldownMs: 300000,
       },
       browser: DEFAULT_BROWSER_CONFIG,
     });
@@ -231,6 +237,8 @@ test('set drops retired askMaster and evolution_network fields from persisted co
       },
       autoReply: {
         enabled: true,
+        maxTurns: 5,
+        cooldownMs: 300000,
       },
       browser: DEFAULT_BROWSER_CONFIG,
     });
@@ -263,9 +271,32 @@ test('set persists the auto-reply enabled flag and round-trips it through disk',
     await store.set(disabled);
 
     const persisted = JSON.parse(await fs.readFile(store.paths.configPath, 'utf8'));
-    assert.deepEqual(persisted.autoReply, { enabled: false });
+    assert.deepEqual(persisted.autoReply, { enabled: false, maxTurns: 5, cooldownMs: 300000 });
 
     const reloaded = await store.read();
     assert.equal(reloaded.autoReply.enabled, false);
+  });
+});
+
+test('read keeps valid persisted autoReply params and falls back to defaults for invalid ones', async () => {
+  await withTempProfileHome(async () => {
+    const store = createConfigStore();
+    await store.ensureLayout();
+
+    await fs.writeFile(store.paths.configPath, `${JSON.stringify({
+      autoReply: { enabled: true, maxTurns: 10, cooldownMs: 600000 },
+    }, null, 2)}\n`, 'utf8');
+    const valid = await store.read();
+    assert.equal(valid.autoReply.maxTurns, 10);
+    assert.equal(valid.autoReply.cooldownMs, 600000);
+
+    for (const invalid of [7, -1, '10', null]) {
+      await fs.writeFile(store.paths.configPath, `${JSON.stringify({
+        autoReply: { enabled: true, maxTurns: invalid, cooldownMs: invalid },
+      }, null, 2)}\n`, 'utf8');
+      const reloaded = await store.read();
+      assert.equal(reloaded.autoReply.maxTurns, 5, `maxTurns falls back for ${JSON.stringify(invalid)}`);
+      assert.equal(reloaded.autoReply.cooldownMs, 300000, `cooldownMs falls back for ${JSON.stringify(invalid)}`);
+    }
   });
 });

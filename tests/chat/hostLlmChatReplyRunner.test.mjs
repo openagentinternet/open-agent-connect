@@ -84,15 +84,26 @@ test('buildChatPrompt includes exit mechanism', () => {
   assert.ok(prompt.includes('turn 5 of 30'));
 });
 
-test('buildChatPrompt tells long conversations to converge and end naturally after inbound turn 20', () => {
+test('buildChatPrompt nudges a natural close on the last composed turn before the force-close limit', () => {
+  const prompt = buildChatPrompt(makeInput({
+    conversation: {
+      ...makeInput().conversation,
+      turnCount: 29,
+    },
+  }));
+  assert.ok(prompt.includes('force-closed after turn 30'));
+  assert.ok(prompt.includes('natural close'));
+  assert.ok(prompt.includes('Bye'));
+});
+
+test('buildChatPrompt does not nudge a natural close well before the force-close limit', () => {
   const prompt = buildChatPrompt(makeInput({
     conversation: {
       ...makeInput().conversation,
       turnCount: 21,
     },
   }));
-  assert.ok(prompt.includes('converge'));
-  assert.ok(prompt.includes('end naturally'));
+  assert.ok(!prompt.includes('force-closed'));
 });
 
 test('buildChatPrompt includes chat history with names', () => {
