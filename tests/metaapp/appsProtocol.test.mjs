@@ -118,6 +118,17 @@ test('buildMetaAppProtocolPayload normalizes MetaAPP protocol fields', () => {
   assert.deepEqual(payload.metadata, { homepage: false });
 });
 
+test('buildMetaAppProtocolPayload passes forkedFrom lineage through', () => {
+  const withFork = buildMetaAppProtocolPayload(validInput({ forkedFrom: ` ${SECOND_PIN} ` }));
+  assert.equal(withFork.forkedFrom, SECOND_PIN);
+
+  const withoutFork = buildMetaAppProtocolPayload(validInput({ forkedFrom: ' ' }));
+  assert.equal(withoutFork.forkedFrom, undefined);
+
+  const omitted = buildMetaAppProtocolPayload(validInput());
+  assert.equal(omitted.forkedFrom, undefined);
+});
+
 test('buildMetaAppProtocolPayload preserves http image fields', () => {
   const payload = buildMetaAppProtocolPayload(validInput({
     icon: 'https://cdn.example.test/icon.png',

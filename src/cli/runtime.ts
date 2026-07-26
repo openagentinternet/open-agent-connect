@@ -65,6 +65,7 @@ import {
   searchMetaApps,
   trimMetaAppSearchItems,
 } from '../core/metaapp/metaAppSearchApi';
+import { materializeMetaAppSource } from '../core/metaapp/metaAppSource';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import type { LocalIdentitySecrets } from '../core/secrets/secretStore';
 import {
@@ -2328,6 +2329,42 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     }
   }
 
+  // MetaApp source materialization runs in-process like search/forks: it is
+  // read-only (download into the local artifact cache plus an optional
+  // workspace copy) and shares the artifact cache with the daemon Browser
+  // flow by using the same actor home directory.
+  async function runMetaAppSource(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+    if (!pinId) {
+      return commandFailed('invalid_argument', 'pinId is required to materialize MetaApp source.');
+    }
+    const actor = await resolveActorHomeDir(
+      context,
+      normalizeEnvText(typeof input.from === 'string' ? input.from : undefined) || undefined,
+    );
+    if (!('homeDir' in actor)) {
+      return actor;
+    }
+    // The indexer endpoints the daemon Browser adapter resolves pins and
+    // metafile content against; they live in the infrastructure config.
+    const infrastructure = await createInfrastructureConfigStore(
+      normalizeSystemHomeDir(context.env, context.cwd),
+    ).read();
+    return materializeMetaAppSource(
+      {
+        pinId,
+        ...(typeof input.outDir === 'string' && input.outDir.trim()
+          ? { outDir: resolveRuntimeInputPath(context, input.outDir) }
+          : {}),
+      },
+      {
+        homeDir: actor.homeDir,
+        manApiBaseUrl: infrastructure.manApiBaseUrl,
+        metafileContentBaseUrl: infrastructure.metafileContentBaseUrl,
+      },
+    );
+  }
+
   return {
     config: {
       get: async (input) => {
@@ -2472,6 +2509,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       ),
       search: async (input) => runMetaAppSearch(input),
       forks: async (input) => runMetaAppForks(input),
+      source: async (input) => runMetaAppSource(input),
     },
     buzz: {
       post: async (input) => requestJsonForSelectedActor(

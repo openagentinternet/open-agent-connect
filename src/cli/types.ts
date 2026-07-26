@@ -31,6 +31,7 @@ export interface CliDependencies {
     comment?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     search?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     forks?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    source?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

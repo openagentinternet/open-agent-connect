@@ -205,6 +205,34 @@ export async function runMetaAppCommand(args: string[], context: CliRuntimeConte
     });
   }
 
+  if (subcommand === 'source') {
+    const pinIdInput = readRequiredFlag(args, '--pin-id');
+    if (!pinIdInput.ok) {
+      return pinIdInput.result;
+    }
+    const pinId = normalizeMetaAppPinIdOrUri(pinIdInput.value);
+    if (!pinId) {
+      return commandInvalidFlag('--pin-id must be a MetaApp pinId or a metaapp://<pinId> URI.');
+    }
+
+    const out = readOptionalValueFlag(args, '--out');
+    if (!out.ok) {
+      return out.result;
+    }
+
+    const handler = context.dependencies.metaapp?.source;
+    if (!handler) {
+      return commandNotImplemented('source');
+    }
+
+    const from = readFromFlag(args);
+    return handler({
+      pinId,
+      ...(out.value ? { outDir: out.value } : {}),
+      ...(from ? { from } : {}),
+    });
+  }
+
   if (subcommand === 'publish') {
     if (args.includes('--project-dir')) {
       return migrationError('Use metabot metaapp publish-project for project-directory publishing. metabot metaapp publish now requires --payload-file.');

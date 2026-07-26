@@ -872,6 +872,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'list', summary: 'List MetaApps owned by one local MetaBot actor.' },
       { name: 'search', summary: 'Search the on-chain MetaApp aggregation index.' },
       { name: 'forks', summary: 'List the direct remixes (forkedFrom children) of a MetaApp.' },
+      { name: 'source', summary: 'Download a MetaApp package source for reading or remixing.' },
       { name: 'publish', summary: 'Publish a new MetaApp from a prepared protocol payload file.' },
       { name: 'update', summary: 'Publish a new version of an existing MetaApp from a payload file.' },
       { name: 'delete', summary: 'Revoke an owned MetaApp record.' },
@@ -886,6 +887,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot metaapp list --from alice',
       'metabot metaapp search --query "mini game" --since-days 7',
       'metabot metaapp forks --pin-id <pinid>',
+      'metabot metaapp source --pin-id <pinid>',
+      'metabot metaapp source --pin-id <pinid> --out ./my-remix',
       'metabot metaapp publish --from alice --payload-file metaapp.json --chain mvc --confirm',
       'metabot metaapp update --from alice --target-pin-id <pinid> --payload-file metaapp.json --confirm',
       'metabot metaapp delete --from alice --target-pin-id <pinid> --confirm',
@@ -1003,6 +1006,40 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [
       { flag: '--limit', value: '<1-20>', description: 'Page size between 1 and 20. Defaults to 8.' },
       { flag: '--cursor', value: '<cursor>', description: 'Cursor returned as nextCursor by the previous forks response.' },
+      HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['metaapp', 'source'],
+    summary: 'Download a MetaApp package through the local artifact cache so its source can be read or remixed. Read-only; requires no --confirm.',
+    usage: 'metabot metaapp source --pin-id <pinid|metaapp://pinid> [--out <dir>] [--from <bot-slug>]',
+    requiredFlags: [
+      { flag: '--pin-id', value: '<pinid|metaapp://pinid>', description: 'MetaApp pinId, bare or as a metaapp:// URI.' },
+    ],
+    requestShape: {
+      pinId: 'MetaApp pinId to resolve and download',
+      outDir: 'optional workspace directory the extracted source is copied into',
+      from: 'optional local MetaBot actor whose artifact cache is used',
+    },
+    successFields: [
+      'Without --out: data = { dir, indexFile, title, sourcePinId } pointing at the shared local artifact cache; treat it as read-only.',
+      'With --out: data = { dir, indexFile, title, sourcePinId, sourceUri, markerPath }; dir receives a copy of the source plus a .metaapp-fork.json provenance marker.',
+    ],
+    failureSemantics: [
+      'The .metaapp-fork.json marker records { sourcePinId, sourceUri, title, indexFile, tags?, forkedAt }; metabot metaapp publish-project defaults forkedFrom and tags from it.',
+      '--out must name a new or empty directory; fails with metaapp_source_out_not_empty otherwise so existing files are never overwritten.',
+      'Fails with missing_flag when --pin-id is absent, or invalid_flag when it is not a valid pinId.',
+      'Fails with metaapp_not_found when the pin does not exist, metaapp_protocol_mismatch when it is not a MetaApp pin, metaapp_disabled when the owner disabled it.',
+      'Fails with metaapp_source_unsupported when the package content is not a ZIP archive, or metaapp_source_download_failed when the archive cannot be fetched.',
+    ],
+    examples: [
+      'metabot metaapp source --pin-id <pinid>',
+      'metabot metaapp source --pin-id metaapp://<pinid>',
+      'metabot metaapp source --pin-id <pinid> --out ./my-remix',
+    ],
+    optionalFlags: [
+      { flag: '--out', value: '<dir>', description: 'Copy the extracted source into this directory and write a .metaapp-fork.json provenance marker.' },
+      FROM_BOT_FLAG,
       HELP_JSON_FLAG,
     ],
   },
