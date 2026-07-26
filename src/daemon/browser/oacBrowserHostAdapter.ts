@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { listMetabotProfiles, type MetabotProfileFull } from '../../core/bot/metabotProfileManager';
 import { buildConversationHref } from '../../core/a2a/conversationUrl';
@@ -32,6 +33,7 @@ import {
   type BrowserCommandResult as CoreBrowserCommandResult,
   createBrowserSettingsSnapshot,
   type MetaAppGalleryRecord,
+  type PreviewMetaAppLocalResolve,
   resolveBrowserConfig,
   resolveBrowserResource,
   resolveMetaAppPinToRecord,
@@ -307,6 +309,29 @@ function buildMetaAppPreviewAssetUrl(previewId: string, assetPath: string): stri
     .map((segment) => encodeURIComponent(segment))
     .join('/');
   return `/api/metaapp/preview-assets/${encodedPreviewId}/${normalizedAssetPath}`;
+}
+
+// Renderer content types for preview-metaapp://localhost entry files, mirroring
+// the IDBots host wiring. Unknown extensions preview as HTML, matching the
+// reference hosts' default.
+const PREVIEW_METAAPP_CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+};
+
+function previewMetaAppContentType(filePath: string): string {
+  return PREVIEW_METAAPP_CONTENT_TYPES[path.extname(filePath).toLowerCase()] || 'text/html';
 }
 
 function browserActorCapabilities(profile: MetabotProfileFull): BrowserActorCapability[] {
@@ -1362,6 +1387,59 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     }
   }
 
+  // preview-metaapp://localhost: resolve a live local file or directory into a
+  // MetaApp preview session rooted at that path. Mirrors the ABC standalone
+  // host's resolveLocalPreviewPath. The daemon preview-assets route reads files
+  // from disk on every request, so reloads pick up edits; the session registry
+  // confines serving to the session root. Local-dev only, 127.0.0.1 binding;
+  // METABOT_BROWSER_DISABLE_PREVIEW_METAAPP=1 disables the whole scheme.
+  const resolveLocalPreviewPath: PreviewMetaAppLocalResolve = async ({ path: localPath }) => {
+    let stats;
+    try {
+      stats = await fs.stat(localPath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') {
+        throw new Error(`Local path not found: ${localPath}`);
+      }
+      if (code === 'EACCES') {
+        throw new Error(`Permission denied: ${localPath}`);
+      }
+      throw error;
+    }
+
+    let artifactDir: string;
+    let indexFile: string;
+    if (stats.isDirectory()) {
+      const candidates = ['index.html', 'index.htm'];
+      const found = await Promise.all(
+        candidates.map(async (name) => {
+          try {
+            await fs.access(path.join(localPath, name));
+            return name;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      indexFile = found.find((name): name is string => name !== null) ?? '';
+      if (!indexFile) {
+        throw new Error(`No index.html found in directory: ${localPath}`);
+      }
+      artifactDir = localPath;
+    } else {
+      artifactDir = path.dirname(localPath);
+      indexFile = path.basename(localPath);
+    }
+
+    const session = input.metaAppPreviewSessions.create({ artifactDir, indexFile });
+    return {
+      localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+      previewId: session.previewId,
+      contentType: previewMetaAppContentType(indexFile),
+    };
+  };
+
   async function resolveResource(resolveInput: BrowserResolveInput & { from?: string }): Promise<BrowserCommandResult<BrowserResolveResult>> {
     const actor = await resolveActor(resolveInput);
     if ('failure' in actor) return toBrowserResult(actor.failure);
@@ -1385,6 +1463,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       config: browserConfig,
       fetch: fetchImpl,
       nameAliasProviders,
+      previewMetaAppLocalResolve: resolveLocalPreviewPath,
       metaAppResolve: async (pinId): Promise<CoreBrowserCommandResult<MetaAppGalleryRecord>> => {
         return resolveMetaAppPinToRecord({
           pinId,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../helpers/profileHome.mjs';
@@ -263,6 +263,39 @@ test('GET /api/metaapp/preview-assets from default handlers preserves registry f
   assert.equal(response.status, 404);
   assert.equal(payload.ok, false);
   assert.equal(payload.code, 'preview_session_not_found');
+});
+
+test('GET /api/browser/resolve serves preview-metaapp://localhost assets live from the workspace', async (t) => {
+  const systemHomeDir = await mkdtempTempRoot('metabot-metaapp-route-preview-metaapp-');
+  const homeDir = path.join(systemHomeDir, '.metabot', 'profiles', 'alice');
+  await mkdir(homeDir, { recursive: true });
+  const workspaceDir = await mkdtempTempRoot('metabot-preview-metaapp-live-');
+  await writeFile(path.join(workspaceDir, 'index.html'), '<!doctype html><title>live-v1</title>', 'utf8');
+  const server = await startServer(createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+  }));
+  t.after(async () => server.close());
+
+  const uri = `preview-metaapp://localhost${workspaceDir}`;
+  const resolvedResponse = await fetch(`${server.baseUrl}/api/browser/resolve?uri=${encodeURIComponent(uri)}`);
+  const resolved = await resolvedResponse.json();
+
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.data.resourceType, 'metaapp');
+  assert.equal(resolved.data.renderer.type, 'html-iframe');
+  assert.match(resolved.data.renderer.url, /^\/api\/metaapp\/preview-assets\/metaapp-preview-[^/]+\/index\.html$/);
+
+  const assetResponse = await fetch(`${server.baseUrl}${resolved.data.renderer.url}`);
+  assert.equal(assetResponse.status, 200);
+  assert.equal(await assetResponse.text(), '<!doctype html><title>live-v1</title>');
+
+  // Serving is live: edits on disk are picked up on the next fetch.
+  await writeFile(path.join(workspaceDir, 'index.html'), '<!doctype html><title>live-v2</title>', 'utf8');
+  const reloadedResponse = await fetch(`${server.baseUrl}${resolved.data.renderer.url}`);
+  assert.equal(reloadedResponse.status, 200);
+  assert.equal(await reloadedResponse.text(), '<!doctype html><title>live-v2</title>');
 });
 
 test('GET /api/metaapp/list forwards owner list query params to metaapp.list', async (t) => {
