@@ -58,6 +58,13 @@ import { buildRemoteServicesPrompt } from '../core/delegation/remoteCall';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import { readOnlineMetaBotsFromSocketPresence } from '../core/discovery/socketPresenceDirectory';
 import { resolveMetasoInfrastructureEndpoints } from '../core/network/metasoInfrastructure';
+import {
+  listMetaAppForks,
+  MetaAppSearchApiError,
+  MetaAppSearchNotFoundError,
+  searchMetaApps,
+  trimMetaAppSearchItems,
+} from '../core/metaapp/metaAppSearchApi';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import type { LocalIdentitySecrets } from '../core/secrets/secretStore';
 import {
@@ -2235,6 +2242,92 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     });
   }
 
+  // MetaApp aggregation search/forks run directly against the metaso-p2p API:
+  // they are read-only and the only local state they need (the Bot registry
+  // globalMetaIds behind `isOwn`) is readable from this process.
+  async function listOwnGlobalMetaIds(): Promise<Set<string>> {
+    // Same local Bot registry that backs `bot list` (the daemon's
+    // /api/bot/profiles handler builds its full profiles on these records).
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+    const profiles = await listIdentityProfiles(systemHomeDir).catch(() => [] as IdentityProfileRecord[]);
+    return new Set(
+      profiles
+        .map((profile) => normalizeEnvText(profile.globalMetaId))
+        .filter(Boolean),
+    );
+  }
+
+  function mapMetaAppSearchError(error: unknown): MetabotCommandResult<never> {
+    if (error instanceof MetaAppSearchNotFoundError) {
+      return commandFailed('metaapp_not_found', error.message);
+    }
+    if (error instanceof MetaAppSearchApiError && error.apiCode === 40000) {
+      return commandFailed('invalid_argument', error.message);
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return commandFailed('metaapp_search_failed', message);
+  }
+
+  function readMetaAppSearchOptions(): { baseUrl?: string } {
+    const baseUrl = normalizeEnvText(context.env.METASO_P2P_BASE_URL);
+    return baseUrl ? { baseUrl } : {};
+  }
+
+  function readPositiveField(value: unknown): number | undefined {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : undefined;
+  }
+
+  async function runMetaAppSearch(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const [page, ownGlobalMetaIds] = await Promise.all([
+        searchMetaApps({
+          keyword: normalizeEnvText(typeof input.query === 'string' ? input.query : undefined) || undefined,
+          tag: normalizeEnvText(typeof input.tag === 'string' ? input.tag : undefined) || undefined,
+          chainName: normalizeEnvText(typeof input.chain === 'string' ? input.chain : undefined) || undefined,
+          runtime: normalizeEnvText(typeof input.runtime === 'string' ? input.runtime : undefined) || undefined,
+          publisher: normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) || undefined,
+          since: readPositiveField(input.since),
+          until: readPositiveField(input.until),
+          size: readPositiveField(input.limit),
+          cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
+        }, readMetaAppSearchOptions()),
+        listOwnGlobalMetaIds(),
+      ]);
+      return commandSuccess({
+        items: trimMetaAppSearchItems(page.items, ownGlobalMetaIds),
+        hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+      });
+    } catch (error) {
+      return mapMetaAppSearchError(error);
+    }
+  }
+
+  async function runMetaAppForks(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+    if (!pinId) {
+      return commandFailed('invalid_argument', 'pinId is required to list MetaApp forks.');
+    }
+    try {
+      const [page, ownGlobalMetaIds] = await Promise.all([
+        listMetaAppForks({
+          pinId,
+          size: readPositiveField(input.limit),
+          cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
+        }, readMetaAppSearchOptions()),
+        listOwnGlobalMetaIds(),
+      ]);
+      return commandSuccess({
+        items: trimMetaAppSearchItems(page.items, ownGlobalMetaIds),
+        hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+      });
+    } catch (error) {
+      return mapMetaAppSearchError(error);
+    }
+  }
+
   return {
     config: {
       get: async (input) => {
@@ -2377,6 +2470,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         typeof input.from === 'string' ? input.from : undefined,
         input,
       ),
+      search: async (input) => runMetaAppSearch(input),
+      forks: async (input) => runMetaAppForks(input),
     },
     buzz: {
       post: async (input) => requestJsonForSelectedActor(
