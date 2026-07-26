@@ -19,6 +19,7 @@
   },
   "files": [
     "dist/",
+    "SKILLs/metabot-browser/SKILL.md",
     "SKILLs/metabot-browser-open/SKILL.md",
     "SKILLs/metabot-call-remote-service/SKILL.md",
     "SKILLs/metabot-chat-privatechat/SKILL.md",
