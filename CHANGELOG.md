@@ -7,6 +7,25 @@ tags for releases.
 
 ## Unreleased
 
+### Added
+
+- Added `metabot metaapp search` and `metabot metaapp forks` backed by the
+  metaso-p2p MetaApp aggregation API, with trimmed results and local `isOwn`
+  marking.
+- Added `metabot metaapp source` to materialize a MetaApp package from the
+  shared artifact cache into a workspace directory with a `.metaapp-fork.json`
+  provenance marker.
+- Added fork-aware publishing: `metaapp publish` / `publish-project` default
+  `forkedFrom` and `tags` from `.metaapp-fork.json`, report `hasAppDoc`, and
+  ship a root `APP.md` while excluding the marker from the zip.
+- Added `preview-metaapp://localhost/<path>` resolution in the Bot Browser for
+  live workspace previews (kill switch:
+  `METABOT_BROWSER_DISABLE_PREVIEW_METAAPP=1`).
+- Renamed the `metabot-browser-open` skill to `metabot-browser` with in-app
+  browser routing, MetaApp discovery/remix guidance, and the APP.md authoring
+  convention in `metabot-metaapp`. `metabot-browser-open` remains for one
+  release as a deprecated stub.
+
 ### Security
 
 - Hardened order protocol parsing for protocol-path pin ids.
