@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtempTempRootSync } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -249,4 +249,23 @@ test('conversation store quarantines corrupt JSON and starts a clean conversatio
 
   await store.appendMessages([createMessage(2)]);
   assert.match(readFileSync(store.conversationPath, 'utf8'), /msg-2/);
+});
+
+test('conversation store reclaims a stale lock whose recorded pid is still alive', async () => {
+  const store = createStore(createProfileHome('metabot-a2a-live-pid-stale-lock-'));
+  await store.readConversation();
+
+  const staleTimestamp = (Date.now() - (10 * 60 * 1000)) / 1000;
+  writeFileSync(
+    store.lockPath,
+    JSON.stringify({ pid: process.pid, acquiredAt: Date.now() - (10 * 60 * 1000) }),
+    'utf8',
+  );
+  utimesSync(store.lockPath, staleTimestamp, staleTimestamp);
+
+  await store.appendMessages([createMessage(1)]);
+
+  const state = await store.readConversation();
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].messageId, 'msg-1');
 });

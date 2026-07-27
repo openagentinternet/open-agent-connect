@@ -381,6 +381,27 @@ test('session state store recovers from a stale lock without pid metadata', asyn
   assert.equal(state.taskRuns[0].runId, 'run-1');
 });
 
+test('session state store reclaims a stale lock whose recorded pid is still alive', async () => {
+  const homeDir = createProfileHome('metabot-a2a-live-pid-stale-lock-');
+  const store = createSessionStateStore(homeDir);
+
+  await store.ensureLayout();
+  const lockPath = `${store.sessionStatePath}.lock`;
+  writeFileSync(
+    lockPath,
+    JSON.stringify({ pid: process.pid, acquiredAt: Date.now() - (10 * 60 * 1000) }),
+    'utf8',
+  );
+  const staleTimestamp = (Date.now() - (10 * 60 * 1000)) / 1000;
+  utimesSync(lockPath, staleTimestamp, staleTimestamp);
+
+  await store.writeSession(createSessionRecord());
+
+  const state = await store.readState();
+  assert.equal(state.sessions.length, 1);
+  assert.equal(state.sessions[0].sessionId, 'session-1');
+});
+
 test('session state store caps transcript and public status history in canonical storage', async () => {
   const homeDir = createProfileHome('metabot-a2a-caps-');
   const store = createSessionStateStore(homeDir);
