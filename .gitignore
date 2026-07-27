@@ -12,6 +12,7 @@ coverage/
 .zcode/
 .playwright-cli/
 .superpowers/
+.tmp-inbox/
 generated/*
 output/*
 
