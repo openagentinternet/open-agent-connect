@@ -160,6 +160,18 @@ function ensureFinalByeLine(value: string): string {
   return `${content}\n${CLOSE_CONVERSATION_SIGNAL}`;
 }
 
+// Drop a trailing close marker from an outbound turn that must not close the
+// conversation (session-opening guided turns); the farewell text above it
+// stays, only the marker line is removed.
+function stripFinalByeLine(value: string): string {
+  const lines = value.split(/\r?\n/u);
+  const finalIndex = findFinalNonEmptyLineIndex(lines);
+  if (finalIndex >= 0 && CLOSE_CONVERSATION_FINAL_LINE_PATTERN.test(lines[finalIndex].trim())) {
+    lines.splice(finalIndex, 1);
+  }
+  return lines.join('\n').trim();
+}
+
 async function shouldResetIdleTurnCount(input: {
   stateStore: PrivateChatStateStore;
   conversationId: string;
@@ -320,7 +332,9 @@ export function createPrivateChatAutoReplyOrchestrator(
     strategy: Awaited<ReturnType<ChatStrategyStore['getStrategy']>>;
     inboundMessage: PrivateChatMessage | null;
     operatorGuidanceText?: string | null;
+    conversationCloseAllowed?: boolean;
   }): Promise<PreparedOutboundTurn | null> {
+    const conversationCloseAllowed = input.conversationCloseAllowed !== false;
     let runnerResult;
     try {
       runnerResult = await deps.replyRunner({
@@ -330,6 +344,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         strategy: input.strategy,
         inboundMessage: input.inboundMessage,
         operatorGuidanceText: input.operatorGuidanceText ?? null,
+        conversationCloseAllowed,
       });
     } catch {
       return null;
@@ -340,7 +355,11 @@ export function createPrivateChatAutoReplyOrchestrator(
     }
 
     let content = normalizeText(runnerResult.content);
-    const shouldClose = runnerResult.state === 'end_conversation' || hasFinalByeLine(content);
+    let shouldClose = runnerResult.state === 'end_conversation' || hasFinalByeLine(content);
+    if (shouldClose && !conversationCloseAllowed) {
+      content = normalizeText(stripFinalByeLine(content));
+      shouldClose = false;
+    }
     if (shouldClose) {
       content = ensureFinalByeLine(content);
     }
@@ -884,6 +903,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         strategy,
         inboundMessage: null,
         operatorGuidanceText: guidanceToConsume.guidanceText,
+        // A guided turn that opens a new session (turnCount 1, fresh or
+        // reopened) is the operator reaching out — it must not carry a close
+        // marker, or the peer side would instantly re-close the conversation.
+        conversationCloseAllowed: runnerConversation.turnCount > 1,
       });
       if (!preparedTurn) {
         await deps.stateStore.releasePendingGuidanceClaimIfMatches(
