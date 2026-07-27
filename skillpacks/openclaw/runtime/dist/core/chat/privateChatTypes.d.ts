@@ -63,6 +63,7 @@ export interface ChatReplyRunnerInput {
     strategy: ChatStrategy | null;
     inboundMessage?: PrivateChatMessage | null;
     operatorGuidanceText?: string | null;
+    conversationCloseAllowed?: boolean;
 }
 export interface ChatReplyRunnerResult {
     state: 'reply' | 'end_conversation' | 'skip';
