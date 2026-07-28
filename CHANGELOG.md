@@ -34,6 +34,11 @@ tags for releases.
   resolves and report the outcome in the envelope `resolve` field, so agents
   can skip broken app versions (for example pins missing a content reference)
   and open the next candidate instead of handing the human an error page.
+- Publish and upload handoffs now lead with the local Bot Browser: after a
+  MetaApp publish or a file upload, agents open the result in the local
+  Browser first (`browser tab open`), present the local Browser http URL as
+  the Open/View link, and reserve the MetaWeb (openagentinternet.org) URL for
+  sharing to other people.
 - Renamed the `metabot-browser-open` skill to `metabot-browser` with in-app
   browser routing, MetaApp discovery/remix guidance, and the APP.md authoring
   convention in `metabot-metaapp`. Casual discovery phrasing ("what on-chain X

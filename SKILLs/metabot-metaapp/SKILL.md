@@ -527,7 +527,16 @@ Show the final MetaAPP JSON and actor. Tell the human they can edit any field by
 
 7. Return the result.
 
-Surface `pinId` as the latest chain-write pin, `firstPinId` as the stable view pin, and txids. When `firstPinId` is present, use it for `metaapp://...`, the MetaWeb URL, `/browser/metaapp/<pinId>`, and `/ui/apps?pinId=<pinId>`; fall back to `pinId` only when `firstPinId` is absent.
+Surface `pinId` as the latest chain-write pin, `firstPinId` as the stable view pin, and txids. When `firstPinId` is present, use it for `metaapp://...`, the Browser URL, and `/ui/apps?pinId=<pinId>`; fall back to `pinId` only when `firstPinId` is absent.
+
+Open the published app for the human right away: run `browser tab open --uri metaapp://<viewPinId>` to push it into every Browser page they already have open (`browser open --uri metaapp://<viewPinId>` when none is running), following the `metabot-browser` In-App Browser Rule. Check the envelope `resolve` field; when `resolve.ok` is `false`, say the app was published but does not load yet instead of claiming it works.
+
+Then hand off with this shape, in the human's language:
+
+- URI: `metaapp://<viewPinId>`
+- Open: the clickable local Browser http URL resolved with `browser link --uri metaapp://<viewPinId>`. The local Bot Browser is always the primary way to open the app; never invent localhost URLs.
+- Manage: the publish envelope `localUiUrl` (`/ui/apps?pinId=<viewPinId>`).
+- Share: the envelope `metawebUrl` (`https://openagentinternet.org/browser/metaapp/<viewPinId>`). The MetaWeb URL is only for sending to other people — never present it as the way the local human opens the app.
 
 ## Direct MetaAPP Protocol Publish
 
@@ -628,7 +637,7 @@ Comment on a MetaApp:
 - Final MetaAPP JSON is shown before `metaapp publish` or `metaapp update`.
 - Publish/update/delete/share announcements/comments confirm the actor before writes.
 - If the MetaApp is meant to become a Bot homepage, `/info/homepage` is set only after explicit user confirmation.
-- Results include the latest MetaApp pin plus stable Browser/public/local Apps follow-ups that use `firstPinId` when present.
+- Publish handoffs open the app in the local Bot Browser first (`browser tab open`), give the local Browser http URL as the Open link, keep `/ui/apps?pinId=<pinId>` as the Manage link, and use the MetaWeb URL only as the Share link; follow-ups use `firstPinId` when present.
 
 ## Handoff To
 
