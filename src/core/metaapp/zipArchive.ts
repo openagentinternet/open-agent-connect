@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { inflateRaw } from 'node:zlib';
+import { METAAPP_FORK_MARKER } from './forkMarker';
 
 const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
 const ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE = 0x02014b50;
@@ -12,7 +13,9 @@ const DEFLATE_COMPRESSION_METHOD = 8;
 const DEFAULT_MAX_EXTRACTED_ENTRIES = 2_000;
 const DEFAULT_MAX_EXTRACTED_BYTES = 100 * 1024 * 1024;
 
-const SKIP_NAMES = new Set(['.DS_Store', '.git', 'node_modules', '.runtime']);
+// The fork marker is local provenance for the publish flow, never package
+// content, so it is excluded from published archives at any depth.
+const SKIP_NAMES = new Set(['.DS_Store', '.git', 'node_modules', '.runtime', METAAPP_FORK_MARKER]);
 const inflateRawAsync = promisify(inflateRaw);
 
 function normalizeEntryName(entryName: string): string {

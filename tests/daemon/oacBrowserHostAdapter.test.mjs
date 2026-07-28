@@ -111,7 +111,7 @@ async function createAdapter(input) {
   return createOacBrowserHostAdapter({
     homeDir: input.homeDir,
     systemHomeDir: input.systemHomeDir,
-    metaAppPreviewSessions: createMetaAppPreviewSessionRegistry(),
+    metaAppPreviewSessions: input.metaAppPreviewSessions ?? createMetaAppPreviewSessionRegistry(),
     env: input.env ?? {},
     fetch: input.fetch,
     now: input.now,
@@ -747,6 +747,199 @@ test('OAC browser host adapter resolves zip-backed metaapp URIs to local preview
   assert.equal(resolved.data.resourceType, 'metaapp');
   assert.equal(resolved.data.renderer.type, 'html-iframe');
   assert.match(resolved.data.renderer.url, /^\/api\/metaapp\/preview-assets\/metaapp-preview-[^/]+\/index\.html$/);
+});
+
+function previewIdFromRendererUrl(url) {
+  const match = /^\/api\/metaapp\/preview-assets\/([^/]+)\//.exec(String(url ?? ''));
+  assert.ok(match, `renderer url should contain a preview id: ${url}`);
+  return decodeURIComponent(match[1]);
+}
+
+test('OAC browser host adapter previews a local directory live via preview-metaapp://localhost', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-preview-local-dir');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const workspaceDir = await mkdtempTempRoot('oac-preview-metaapp-dir-');
+  await writeFile(path.join(workspaceDir, 'index.html'), '<!doctype html><title>v1</title>', 'utf8');
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Local Preview Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1localpreviewbot',
+    mvcAddress: '18LocalPreview',
+  });
+  const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry();
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    metaAppPreviewSessions,
+  });
+
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: `preview-metaapp://localhost${workspaceDir}`,
+  });
+
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.data.resourceType, 'metaapp');
+  assert.equal(resolved.data.renderer.type, 'html-iframe');
+  assert.match(resolved.data.renderer.url, /^\/api\/metaapp\/preview-assets\/metaapp-preview-[^/]+\/index\.html$/);
+
+  // Serving is live: the preview session reads the entry file from disk per request.
+  const previewId = previewIdFromRendererUrl(resolved.data.renderer.url);
+  const first = await metaAppPreviewSessions.resolveAsset({ previewId, assetPath: 'index.html' });
+  assert.equal(first.body.toString('utf8'), '<!doctype html><title>v1</title>');
+  await writeFile(path.join(workspaceDir, 'index.html'), '<!doctype html><title>v2</title>', 'utf8');
+  const second = await metaAppPreviewSessions.resolveAsset({ previewId, assetPath: 'index.html' });
+  assert.equal(second.body.toString('utf8'), '<!doctype html><title>v2</title>');
+});
+
+test('OAC browser host adapter falls back to index.htm for local preview directories', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-preview-index-htm');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const workspaceDir = await mkdtempTempRoot('oac-preview-metaapp-htm-');
+  await writeFile(path.join(workspaceDir, 'index.htm'), '<!doctype html><title>htm</title>', 'utf8');
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Index Htm Preview Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1indexhtmpreviewbot',
+    mvcAddress: '18IndexHtmPreview',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: `preview-metaapp://localhost${workspaceDir}`,
+  });
+
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.data.renderer.type, 'html-iframe');
+  assert.match(resolved.data.renderer.url, /\/index\.htm$/);
+});
+
+test('OAC browser host adapter rejects a local preview directory without an index file', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-preview-no-index');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const workspaceDir = await mkdtempTempRoot('oac-preview-metaapp-no-index-');
+  await writeFile(path.join(workspaceDir, 'app.js'), 'console.log(1);', 'utf8');
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'No Index Preview Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1noindexpreviewbot',
+    mvcAddress: '18NoIndexPreview',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: `preview-metaapp://localhost${workspaceDir}`,
+  });
+
+  assert.equal(resolved.ok, false);
+  assert.equal(resolved.code, 'browser_resolve_failed');
+  assert.match(resolved.message, /No index\.html found in directory/);
+});
+
+test('OAC browser host adapter rejects a missing local preview path', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-preview-missing');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const workspaceDir = await mkdtempTempRoot('oac-preview-metaapp-missing-');
+  const missingPath = path.join(workspaceDir, 'does-not-exist');
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Missing Path Preview Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1missingpathbot',
+    mvcAddress: '18MissingPath',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: `preview-metaapp://localhost${missingPath}`,
+  });
+
+  assert.equal(resolved.ok, false);
+  assert.equal(resolved.code, 'browser_resolve_failed');
+  assert.match(resolved.message, /Local path not found/);
+});
+
+test('OAC browser host adapter maps preview-metaapp file content types to renderers', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-preview-file-types');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const workspaceDir = await mkdtempTempRoot('oac-preview-metaapp-files-');
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'File Preview Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1filepreviewbot',
+    mvcAddress: '18FilePreview',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+  });
+
+  const cases = [
+    ['report.pdf', 'pdf', 'application/pdf'],
+    ['photo.png', 'image', 'image/png'],
+    ['clip.mp4', 'video', 'video/mp4'],
+    ['notes.xyz', 'html-iframe', 'text/html'],
+  ];
+  for (const [fileName, rendererType, contentType] of cases) {
+    await writeFile(path.join(workspaceDir, fileName), 'stub');
+    const resolved = await adapter.resolveResource({
+      actorId: active.slug,
+      uri: `preview-metaapp://localhost${path.join(workspaceDir, fileName)}`,
+    });
+    assert.equal(resolved.ok, true, fileName);
+    assert.equal(resolved.data.renderer.type, rendererType, fileName);
+    assert.equal(resolved.data.renderer.contentType, contentType, fileName);
+    assert.ok(resolved.data.renderer.url.endsWith(`/${fileName}`), fileName);
+  }
+});
+
+test('OAC browser host adapter honors METABOT_BROWSER_DISABLE_PREVIEW_METAAPP', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-adapter-preview-disabled');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const workspaceDir = await mkdtempTempRoot('oac-preview-metaapp-disabled-');
+  await writeFile(path.join(workspaceDir, 'index.html'), '<!doctype html><title>disabled</title>', 'utf8');
+
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Disabled Preview Bot',
+    homeDir: profileHome,
+    globalMetaId: 'idq1disabledpreviewbot',
+    mvcAddress: '18DisabledPreview',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    env: { METABOT_BROWSER_DISABLE_PREVIEW_METAAPP: '1' },
+  });
+
+  const resolved = await adapter.resolveResource({
+    actorId: active.slug,
+    uri: `preview-metaapp://localhost${workspaceDir}`,
+  });
+
+  assert.equal(resolved.ok, false);
+  assert.equal(resolved.code, 'browser_resource_disabled');
 });
 
 test('OAC browser host adapter satisfies the published host conformance harness', async (t) => {

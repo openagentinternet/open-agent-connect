@@ -182,6 +182,7 @@ export function buildMetaAppProtocolPayload(input: Record<string, unknown>): Met
   const appName = normalizeText(input.appName);
   if (!appName) throw new Error('appName is required.');
   const title = normalizeText(input.title) || appName;
+  const forkedFrom = normalizeText(input.forkedFrom);
 
   return {
     title,
@@ -200,6 +201,9 @@ export function buildMetaAppProtocolPayload(input: Record<string, unknown>): Met
     contentHash: normalizeText(input.contentHash) || undefined,
     metadata: normalizeMetadata(input.metadata),
     tags: normalizeTags(input.tags),
+    // Omitted entirely when absent so the field never materializes as an
+    // undefined key in the on-chain payload object.
+    ...(forkedFrom ? { forkedFrom } : {}),
     disabled: input.disabled === true,
     codeType: normalizeOption(input.codeType, 'codeType', METAAPP_CODE_TYPE_OPTIONS, undefined),
   };

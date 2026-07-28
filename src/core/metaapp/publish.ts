@@ -9,6 +9,7 @@ import {
   type MetabotCommandResult,
 } from '../contracts/commandResult';
 import { appendMetafileUriExtension, extensionFromContentType, metafileUriFromPinId } from '../files/metafileUri';
+import { readMetaAppForkMarker } from './forkMarker';
 import { buildMetaAppManifestDraft } from './manifest';
 import { assertMetaAppPinId } from './pinId';
 import { inspectMetaAppProject } from './projectInspector';
@@ -176,6 +177,7 @@ function cleanManifestForPayload(manifest: MetaAppManifestInput): Record<string,
     'contentHash',
     'metadata',
     'tags',
+    'forkedFrom',
     'disabled',
     'codeType',
   ]) {
@@ -297,10 +299,32 @@ async function inspectAndDraft(input: MetaAppProjectInput): Promise<{
     projectDir: input.projectDir,
     manifestFile: input.manifestFile,
   });
-  return {
-    plan,
-    manifest: buildMetaAppManifestDraft(plan),
-  };
+  const manifest = buildMetaAppManifestDraft(plan);
+  // A `.metaapp-fork.json` marker (written by `metabot metaapp source --out`)
+  // supplies fork provenance defaults: forkedFrom lineage and inherited tags.
+  // Explicit manifest values always win over marker defaults.
+  const forkMarker = await readMetaAppForkMarker(plan.projectDir);
+  if (forkMarker) {
+    if (manifest.forkedFrom === undefined) {
+      manifest.forkedFrom = forkMarker.sourcePinId;
+    }
+    if (manifest.tags === undefined && forkMarker.tags?.length) {
+      manifest.tags = [...forkMarker.tags];
+    }
+  }
+  return { plan, manifest };
+}
+
+/** Whether the package root ships an APP.md self-description document. */
+async function hasMetaAppDoc(artifactDir: string | null): Promise<boolean> {
+  if (!artifactDir) {
+    return false;
+  }
+  try {
+    return (await fs.stat(path.join(artifactDir, 'APP.md'))).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function createPreviewData(
@@ -401,6 +425,7 @@ async function createConfirmationData(
   manifest: MetaAppManifestInput,
 ): Promise<Record<string, unknown>> {
   const data = createPreviewData(input, deps, plan, manifest);
+  data.hasAppDoc = await hasMetaAppDoc(plan.artifactDir);
   if (!plan.artifactDir) {
     return data;
   }
@@ -546,6 +571,7 @@ async function writePublishedMetaApp(input: {
       firstPinId,
       metawebUrl: buildMetaAppCanonicalUrl(pinId, firstPinId),
       localUiUrl: buildLocalUiUrl(pinId, firstPinId),
+      hasAppDoc: await hasMetaAppDoc(input.plan.artifactDir),
       archive: publicArchive(archive),
       upload,
       chainWrite,

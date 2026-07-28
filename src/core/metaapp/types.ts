@@ -19,6 +19,8 @@ export interface MetaAppManifestInput {
   contentHash?: string;
   metadata?: Record<string, unknown>;
   tags?: string[];
+  /** Remix lineage: pinId of the MetaApp this app was forked from. */
+  forkedFrom?: string;
   disabled?: boolean;
   codeType?: string;
   artifactDir?: string;

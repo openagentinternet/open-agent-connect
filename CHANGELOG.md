@@ -7,6 +7,47 @@ tags for releases.
 
 ## Unreleased
 
+### Added
+
+- Added `metabot metaapp search` and `metabot metaapp forks` backed by the
+  metaso-p2p MetaApp aggregation API, with trimmed results and local `isOwn`
+  marking. Result items now carry clickable per-item `localUiUrl` and
+  `publisherLocalUiUrl` http links whenever a daemon base URL is configured or
+  reachable, so hosts without a deep-link interceptor can open apps and
+  publisher Bot pages in the local Browser.
+- Added `metabot metaapp source` to materialize a MetaApp package from the
+  shared artifact cache into a workspace directory with a `.metaapp-fork.json`
+  provenance marker.
+- Added fork-aware publishing: `metaapp publish` / `publish-project` default
+  `forkedFrom` and `tags` from `.metaapp-fork.json`, report `hasAppDoc`, and
+  ship a root `APP.md` while excluding the marker from the zip.
+- Added `preview-metaapp://localhost/<path>` resolution in the Bot Browser for
+  live workspace previews (kill switch:
+  `METABOT_BROWSER_DISABLE_PREVIEW_METAAPP=1`).
+- Added `metabot browser link --uri <uri>`, a pure resolver that normalizes any
+  Browser deep-link URI (`metaid://`, `metaapp://`, `metafile://`, `pin://`,
+  `map://`) into its clickable local Browser http URL without opening anything
+  or starting a stopped daemon. The `metabot-browser` skill now always opens
+  the best search match first and renders every mentioned Agent Internet URI
+  or id as a clickable markdown link.
+- `browser open --uri` and `browser tab open --uri` now probe `metaapp://`
+  resolves and report the outcome in the envelope `resolve` field, so agents
+  can skip broken app versions (for example pins missing a content reference)
+  and open the next candidate instead of handing the human an error page.
+- Publish and upload handoffs now lead with the local Bot Browser: after a
+  MetaApp publish or a file upload, agents open the result in the local
+  Browser first (`browser tab open`), present the local Browser http URL as
+  the Open/View link, and reserve the MetaWeb (openagentinternet.org) URL for
+  sharing to other people.
+- Renamed the `metabot-browser-open` skill to `metabot-browser` with in-app
+  browser routing, MetaApp discovery/remix guidance, and the APP.md authoring
+  convention in `metabot-metaapp`. Casual discovery phrasing ("what on-chain X
+  exists", "published in the last N days", "open the on-chain X app") now
+  routes to `metaapp search`, candidate bullets prefer the clickable per-item
+  http links, and understanding an app is explicitly source-first through the
+  local artifact cache (never screenshots or page snapshots).
+  `metabot-browser-open` remains for one release as a deprecated stub.
+
 ### Security
 
 - Hardened order protocol parsing for protocol-path pin ids.

@@ -866,10 +866,13 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['metaapp'],
-    summary: 'MetaApp commands for owner management, publishing, project packaging, sharing, viewing, and commenting.',
+    summary: 'MetaApp commands for discovery, owner management, publishing, project packaging, sharing, viewing, and commenting.',
     usage: 'metabot metaapp <subcommand>',
     subcommands: [
       { name: 'list', summary: 'List MetaApps owned by one local MetaBot actor.' },
+      { name: 'search', summary: 'Search the on-chain MetaApp aggregation index.' },
+      { name: 'forks', summary: 'List the direct remixes (forkedFrom children) of a MetaApp.' },
+      { name: 'source', summary: 'Download a MetaApp package source for reading or remixing.' },
       { name: 'publish', summary: 'Publish a new MetaApp from a prepared protocol payload file.' },
       { name: 'update', summary: 'Publish a new version of an existing MetaApp from a payload file.' },
       { name: 'delete', summary: 'Revoke an owned MetaApp record.' },
@@ -882,6 +885,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     examples: [
       'metabot metaapp list --from alice',
+      'metabot metaapp search --query "mini game" --since-days 7',
+      'metabot metaapp forks --pin-id <pinid>',
+      'metabot metaapp source --pin-id <pinid>',
+      'metabot metaapp source --pin-id <pinid> --out ./my-remix',
       'metabot metaapp publish --from alice --payload-file metaapp.json --chain mvc --confirm',
       'metabot metaapp update --from alice --target-pin-id <pinid> --payload-file metaapp.json --confirm',
       'metabot metaapp delete --from alice --target-pin-id <pinid> --confirm',
@@ -918,6 +925,121 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       FROM_BOT_FLAG,
       { flag: '--size', value: '<number>', description: 'Positive page size. Defaults to 12.' },
       { flag: '--cursor', value: '<cursor>', description: 'Cursor returned by the previous list response.' },
+      HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['metaapp', 'search'],
+    summary: 'Search the on-chain MetaApp aggregation index by keyword, tag, publisher, runtime, chain, or time window. Read-only; requires no --confirm.',
+    usage: 'metabot metaapp search [--query <text>] [--tag <tag>] [--publisher <id>] [--since-days <n>] [--until-days <n>] [--runtime <runtime>] [--chain <chain>] [--limit <1-20>] [--cursor <cursor>]',
+    requestShape: {
+      query: 'optional keyword; space-separated AND matching over title/appName/intro/tags',
+      tag: 'optional capability/protocol tag, such as simplebuzz',
+      publisher: 'optional publisher globalMetaId, metaId, or address',
+      since: 'unix-second lower updatedAt bound, derived from --since-days',
+      until: 'unix-second upper updatedAt bound, derived from --until-days',
+      runtime: 'optional runtime contains filter, such as browser',
+      chain: 'optional chain filter: mvc, btc, doge, or opcat',
+      limit: 'page size 1-20, default 8',
+      cursor: 'optional pagination cursor',
+    },
+    successFields: [
+      'items[] = { pinId, title, appName, intro, tags, runtime, version, updatedAt, publisherGlobalMetaId, publisherName, publisherAvatarId, forkedFrom, isOwn }',
+      'hasMore',
+      'nextCursor',
+    ],
+    failureSemantics: [
+      'Open apps with metaapp://<pinId> from items[].pinId via metabot browser open --uri.',
+      'isOwn is true when publisherGlobalMetaId belongs to a local Bot registry profile.',
+      'Fails with invalid_flag when --limit or the day flags are not positive integers, or --limit exceeds 20.',
+      'Fails with invalid_argument when the aggregation API rejects the parameters (usage error 40000).',
+      'Fails with metaapp_search_failed when the aggregation API is unreachable or returns an internal error.',
+    ],
+    examples: [
+      'metabot metaapp search --query "mini game" --since-days 7',
+      'metabot metaapp search --tag simplebuzz --limit 5',
+      'metabot metaapp search --publisher <globalMetaId> --limit 1',
+      'metabot metaapp search --query timer --cursor <cursor>',
+    ],
+    optionalFlags: [
+      { flag: '--query', value: '<text>', description: 'Keyword search over title/appName/intro/tags.' },
+      { flag: '--tag', value: '<tag>', description: 'Filter by a declared capability/protocol tag.' },
+      { flag: '--publisher', value: '<id>', description: 'Filter by publisher globalMetaId, metaId, or address.' },
+      { flag: '--since-days', value: '<n>', description: 'Only apps updated within the last n days.' },
+      { flag: '--until-days', value: '<n>', description: 'Only apps updated at least n days ago.' },
+      { flag: '--runtime', value: '<runtime>', description: 'Filter by runtime (contains match), such as browser.' },
+      { flag: '--chain', value: '<chain>', description: 'Filter by chain: mvc, btc, doge, or opcat.' },
+      { flag: '--limit', value: '<1-20>', description: 'Page size between 1 and 20. Defaults to 8.' },
+      { flag: '--cursor', value: '<cursor>', description: 'Cursor returned as nextCursor by the previous search response.' },
+      HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['metaapp', 'forks'],
+    summary: 'List the direct remixes (forkedFrom children) of a MetaApp, newest first. Read-only; requires no --confirm.',
+    usage: 'metabot metaapp forks --pin-id <pinid|metaapp://pinid> [--limit <1-20>] [--cursor <cursor>]',
+    requiredFlags: [
+      { flag: '--pin-id', value: '<pinid|metaapp://pinid>', description: 'Parent MetaApp pinId, bare or as a metaapp:// URI.' },
+    ],
+    requestShape: {
+      pinId: 'parent MetaApp pinId',
+      limit: 'page size 1-20, default 8',
+      cursor: 'optional pagination cursor',
+    },
+    successFields: [
+      'items[] = { pinId, title, appName, intro, tags, runtime, version, updatedAt, publisherGlobalMetaId, publisherName, publisherAvatarId, forkedFrom, isOwn }',
+      'hasMore',
+      'nextCursor',
+    ],
+    failureSemantics: [
+      'Only direct children are returned; call forks again on a child to walk deeper.',
+      'isOwn is true when publisherGlobalMetaId belongs to a local Bot registry profile.',
+      'Fails with missing_flag when --pin-id is absent, or invalid_flag when it is not a valid pinId.',
+      'Fails with metaapp_not_found when the parent app does not exist (aggregation API 40400).',
+      'Fails with metaapp_search_failed when the aggregation API is unreachable or returns an internal error.',
+    ],
+    examples: [
+      'metabot metaapp forks --pin-id <pinid>',
+      'metabot metaapp forks --pin-id metaapp://<pinid> --limit 5',
+      'metabot metaapp forks --pin-id <pinid> --cursor <cursor>',
+    ],
+    optionalFlags: [
+      { flag: '--limit', value: '<1-20>', description: 'Page size between 1 and 20. Defaults to 8.' },
+      { flag: '--cursor', value: '<cursor>', description: 'Cursor returned as nextCursor by the previous forks response.' },
+      HELP_JSON_FLAG,
+    ],
+  },
+  {
+    commandPath: ['metaapp', 'source'],
+    summary: 'Download a MetaApp package through the local artifact cache so its source can be read or remixed. Read-only; requires no --confirm.',
+    usage: 'metabot metaapp source --pin-id <pinid|metaapp://pinid> [--out <dir>] [--from <bot-slug>]',
+    requiredFlags: [
+      { flag: '--pin-id', value: '<pinid|metaapp://pinid>', description: 'MetaApp pinId, bare or as a metaapp:// URI.' },
+    ],
+    requestShape: {
+      pinId: 'MetaApp pinId to resolve and download',
+      outDir: 'optional workspace directory the extracted source is copied into',
+      from: 'optional local MetaBot actor whose artifact cache is used',
+    },
+    successFields: [
+      'Without --out: data = { dir, indexFile, title, sourcePinId } pointing at the shared local artifact cache; treat it as read-only.',
+      'With --out: data = { dir, indexFile, title, sourcePinId, sourceUri, markerPath }; dir receives a copy of the source plus a .metaapp-fork.json provenance marker.',
+    ],
+    failureSemantics: [
+      'The .metaapp-fork.json marker records { sourcePinId, sourceUri, title, indexFile, tags?, forkedAt }; metabot metaapp publish-project defaults forkedFrom and tags from it.',
+      '--out must name a new or empty directory; fails with metaapp_source_out_not_empty otherwise so existing files are never overwritten.',
+      'Fails with missing_flag when --pin-id is absent, or invalid_flag when it is not a valid pinId.',
+      'Fails with metaapp_not_found when the pin does not exist, metaapp_protocol_mismatch when it is not a MetaApp pin, metaapp_disabled when the owner disabled it.',
+      'Fails with metaapp_source_unsupported when the package content is not a ZIP archive, or metaapp_source_download_failed when the archive cannot be fetched.',
+    ],
+    examples: [
+      'metabot metaapp source --pin-id <pinid>',
+      'metabot metaapp source --pin-id metaapp://<pinid>',
+      'metabot metaapp source --pin-id <pinid> --out ./my-remix',
+    ],
+    optionalFlags: [
+      { flag: '--out', value: '<dir>', description: 'Copy the extracted source into this directory and write a .metaapp-fork.json provenance marker.' },
+      FROM_BOT_FLAG,
       HELP_JSON_FLAG,
     ],
   },
@@ -2180,6 +2302,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     subcommands: [
       { name: 'open', summary: 'Open the Agent Internet Browser page, optionally deep-linked to one resource URI.' },
       { name: 'tab', summary: 'Ask an already-open Browser page to open a resource URI in a new tab.' },
+      { name: 'link', summary: 'Resolve a Browser resource URI into its clickable local Browser http URL without opening anything.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -2197,9 +2320,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     successFields: [
       'localUiUrl',
+      'resolve',
     ],
     failureSemantics: [
       'Fails when --uri is provided without a non-empty value or the local daemon cannot build the browser URL.',
+      'For metaapp:// URIs the resolve field reports whether the app actually loads; resolve.ok false means the candidate is broken and the agent should pick another one.',
     ],
     examples: [
       'metabot browser open',
@@ -2234,16 +2359,44 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     successFields: [
       'uri',
       'pagesReached',
+      'resolve',
     ],
     failureSemantics: [
       'Fails when --uri is missing, empty, or looks like a flag, or when the daemon cannot be reached.',
       'pagesReached 0 is not a failure: the open is pending until a Browser page connects.',
+      'For metaapp:// URIs the resolve field reports whether the app actually loads; resolve.ok false means the candidate is broken and the agent should pick another one.',
     ],
     examples: [
       'metabot browser tab open --uri metaid://<globalMetaId>',
       'metabot browser tab open --uri metaid://sunnyfung.eth',
       'metabot browser tab open --uri metaapp://<pinId>',
       'metabot browser tab open --uri pin://<pinId>',
+    ],
+  },
+  {
+    commandPath: ['browser', 'link'],
+    summary: 'Resolve a Browser resource URI into its clickable local Browser http URL without opening anything and without starting a stopped daemon.',
+    usage: 'metabot browser link --uri <resource-uri>',
+    optionalFlags: [
+      {
+        flag: '--uri',
+        value: '<resource-uri>',
+        description: 'Browser resource URI to resolve, such as metaid://<globalMetaId>, metaid://sunnyfung.eth, metaapp://<pinId>, metafile://<pinId>.png, pin://<pinId>, or map://<...>.',
+      },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'uri',
+      'localUiUrl',
+    ],
+    failureSemantics: [
+      'Fails when --uri is missing, empty, or looks like a flag.',
+      'localUiUrl is omitted when no daemon base URL is configured or reachable; link the scheme URI itself in that case.',
+    ],
+    examples: [
+      'metabot browser link --uri metaapp://<pinId>',
+      'metabot browser link --uri metaid://<globalMetaId>',
+      'metabot browser link --uri metafile://<pinId>.png',
     ],
   },
   {

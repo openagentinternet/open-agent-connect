@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { listMetabotProfiles, type MetabotProfileFull } from '../../core/bot/metabotProfileManager';
 import { buildConversationHref } from '../../core/a2a/conversationUrl';
@@ -32,6 +33,7 @@ import {
   type BrowserCommandResult as CoreBrowserCommandResult,
   createBrowserSettingsSnapshot,
   type MetaAppGalleryRecord,
+  type PreviewMetaAppLocalResolve,
   resolveBrowserConfig,
   resolveBrowserResource,
   resolveMetaAppPinToRecord,
@@ -57,13 +59,12 @@ import type { BrowserConfig, MetabotConfig } from '../../core/config/configTypes
 import {
   type MetabotCommandResult,
 } from '../../core/contracts/commandResult';
-import { buildMetafileContentUrls } from '../../core/files/metafileUrls';
 import { isLlmProvider } from '../../core/llm/llmTypes';
 import {
   createMetaAppArtifactCacheStore,
-  normalizeMetaAppModifyHistory,
   type MetaAppArtifactCacheStore,
 } from '../../core/metaapp/artifactCache';
+import { resolveMetaAppArtifact } from '../../core/metaapp/artifactDownload';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
 
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
@@ -308,6 +309,29 @@ function buildMetaAppPreviewAssetUrl(previewId: string, assetPath: string): stri
     .map((segment) => encodeURIComponent(segment))
     .join('/');
   return `/api/metaapp/preview-assets/${encodedPreviewId}/${normalizedAssetPath}`;
+}
+
+// Renderer content types for preview-metaapp://localhost entry files, mirroring
+// the IDBots host wiring. Unknown extensions preview as HTML, matching the
+// reference hosts' default.
+const PREVIEW_METAAPP_CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+};
+
+function previewMetaAppContentType(filePath: string): string {
+  return PREVIEW_METAAPP_CONTENT_TYPES[path.extname(filePath).toLowerCase()] || 'text/html';
 }
 
 function browserActorCapabilities(profile: MetabotProfileFull): BrowserActorCapability[] {
@@ -788,56 +812,6 @@ function browserFailureMessage(result: MetabotCommandResult<unknown>): string {
   return normalizeText((result as { message?: unknown }).message) || 'OAC Browser command failed.';
 }
 
-function isZipMetaAppContent(contentType: string, contentReference: string): boolean {
-  const normalizedContentType = normalizeText(contentType).toLowerCase();
-  const normalizedReference = normalizeText(contentReference).toLowerCase().split(/[?#]/u, 1)[0] ?? '';
-  return normalizedContentType === 'application/zip'
-    || normalizedContentType.includes('/zip')
-    || normalizedContentType.includes('+zip')
-    || normalizedReference.endsWith('.zip');
-}
-
-function extractMetafilePinId(contentReference: string): string {
-  if (!/^metafile:\/\//iu.test(contentReference)) {
-    return '';
-  }
-  const withoutScheme = contentReference.slice('metafile://'.length).split(/[?#]/u, 1)[0] ?? '';
-  if (!withoutScheme || withoutScheme.includes('/') || withoutScheme.includes('\\')) {
-    return '';
-  }
-  return withoutScheme.replace(/\.[A-Za-z0-9]+$/u, '');
-}
-
-function metaAppArchiveUrls(contentReference: string): string[] {
-  const normalizedReference = normalizeText(contentReference);
-  if (!normalizedReference) {
-    return [];
-  }
-  const metafilePinId = extractMetafilePinId(normalizedReference);
-  if (metafilePinId) {
-    const urls = buildMetafileContentUrls(metafilePinId);
-    return [urls.accelerateUrl, urls.contentUrl, urls.legacyContentUrl];
-  }
-  return /^https?:\/\//iu.test(normalizedReference) ? [normalizedReference] : [];
-}
-
-async function downloadMetaAppArchive(
-  fetchImpl: typeof fetch,
-  contentReference: string,
-): Promise<Buffer | null> {
-  for (const url of metaAppArchiveUrls(contentReference)) {
-    const response = await fetchImpl(url).catch(() => null);
-    if (!response?.ok || typeof response.arrayBuffer !== 'function') {
-      continue;
-    }
-    const archive = Buffer.from(await response.arrayBuffer());
-    if (archive.byteLength > 0) {
-      return archive;
-    }
-  }
-  return null;
-}
-
 async function resolveMetaAppPreviewUrl(input: {
   pinId: string;
   contentReference: string;
@@ -848,27 +822,17 @@ async function resolveMetaAppPreviewUrl(input: {
   metaAppPreviewSessions: MetaAppPreviewSessions;
   fetchImpl: typeof fetch;
 }): Promise<string> {
-  if (!isZipMetaAppContent(input.contentType, input.contentReference)) {
-    return '';
-  }
-
-  const modifyHistory = normalizeMetaAppModifyHistory(
-    input.pinRecord.modify_history ?? input.pinRecord.modifyHistory,
-  );
-  const descriptor = {
-    metaAppPinId: input.pinId,
-    contentReference: normalizeText(input.contentReference),
-    contentType: normalizeText(input.contentType) || 'application/octet-stream',
-    indexFile: normalizeText(input.indexFile) || 'index.html',
-    modifyHistory,
-  };
-  let artifact = await input.artifactCache.getArtifact(descriptor);
+  const artifact = await resolveMetaAppArtifact({
+    pinId: input.pinId,
+    contentReference: input.contentReference,
+    contentType: input.contentType,
+    indexFile: input.indexFile,
+    pinRecord: input.pinRecord,
+    artifactCache: input.artifactCache,
+    fetchImpl: input.fetchImpl,
+  });
   if (!artifact) {
-    const archive = await downloadMetaAppArchive(input.fetchImpl, descriptor.contentReference);
-    if (!archive) {
-      throw new Error('MetaApp ZIP content could not be downloaded.');
-    }
-    artifact = await input.artifactCache.writeArtifact({ ...descriptor, archive });
+    return '';
   }
 
   const session = input.metaAppPreviewSessions.create({
@@ -1423,6 +1387,59 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     }
   }
 
+  // preview-metaapp://localhost: resolve a live local file or directory into a
+  // MetaApp preview session rooted at that path. Mirrors the ABC standalone
+  // host's resolveLocalPreviewPath. The daemon preview-assets route reads files
+  // from disk on every request, so reloads pick up edits; the session registry
+  // confines serving to the session root. Local-dev only, 127.0.0.1 binding;
+  // METABOT_BROWSER_DISABLE_PREVIEW_METAAPP=1 disables the whole scheme.
+  const resolveLocalPreviewPath: PreviewMetaAppLocalResolve = async ({ path: localPath }) => {
+    let stats;
+    try {
+      stats = await fs.stat(localPath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') {
+        throw new Error(`Local path not found: ${localPath}`);
+      }
+      if (code === 'EACCES') {
+        throw new Error(`Permission denied: ${localPath}`);
+      }
+      throw error;
+    }
+
+    let artifactDir: string;
+    let indexFile: string;
+    if (stats.isDirectory()) {
+      const candidates = ['index.html', 'index.htm'];
+      const found = await Promise.all(
+        candidates.map(async (name) => {
+          try {
+            await fs.access(path.join(localPath, name));
+            return name;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      indexFile = found.find((name): name is string => name !== null) ?? '';
+      if (!indexFile) {
+        throw new Error(`No index.html found in directory: ${localPath}`);
+      }
+      artifactDir = localPath;
+    } else {
+      artifactDir = path.dirname(localPath);
+      indexFile = path.basename(localPath);
+    }
+
+    const session = input.metaAppPreviewSessions.create({ artifactDir, indexFile });
+    return {
+      localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+      previewId: session.previewId,
+      contentType: previewMetaAppContentType(indexFile),
+    };
+  };
+
   async function resolveResource(resolveInput: BrowserResolveInput & { from?: string }): Promise<BrowserCommandResult<BrowserResolveResult>> {
     const actor = await resolveActor(resolveInput);
     if ('failure' in actor) return toBrowserResult(actor.failure);
@@ -1446,6 +1463,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       config: browserConfig,
       fetch: fetchImpl,
       nameAliasProviders,
+      previewMetaAppLocalResolve: resolveLocalPreviewPath,
       metaAppResolve: async (pinId): Promise<CoreBrowserCommandResult<MetaAppGalleryRecord>> => {
         return resolveMetaAppPinToRecord({
           pinId,

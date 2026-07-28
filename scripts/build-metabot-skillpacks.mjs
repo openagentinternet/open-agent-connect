@@ -18,6 +18,7 @@ const METABOT_SKILLS = [
   'metabot-help',
   'metabot-identity-manage',
   'metabot-network-manage',
+  'metabot-browser',
   'metabot-browser-open',
   'metabot-call-remote-service',
   'metabot-chat-privatechat',
@@ -53,6 +54,30 @@ const HOSTS = {
   },
 };
 
+// Deprecated skills kept in the packs for backward compatibility, mapped to
+// the skill that replaces them. Surfaced in pack README skill lists.
+const DEPRECATED_SKILLS = {
+  'metabot-browser-open': 'metabot-browser',
+};
+
+// Per-skill, per-host extra markdown appended to the rendered
+// {{HOST_ADAPTER_SECTION}} (host packs only). A `default` entry renders for
+// every host without an explicit note and receives the host descriptor.
+const SKILL_HOST_ADAPTER_NOTES = {
+  'metabot-browser': {
+    codex: [
+      '### In-App Browser',
+      '',
+      'Codex has its own in-app browser. Open every `localUiUrl` returned by the MetaBot CLI inside the Codex in-app browser (its web preview surface) — never in the external system browser, and never through external browser automation such as Playwright.',
+    ].join('\n'),
+    default: (host) => [
+      '### In-App Browser',
+      '',
+      `This ${host.displayName} pack has no documented in-app browser or preview surface. Present every \`localUiUrl\` returned by the MetaBot CLI as a clickable markdown link for the human to open. If the running session does provide a web preview surface, prefer opening the \`localUiUrl\` there instead of handing it to the external browser.`,
+    ].join('\n'),
+  },
+};
+
 const GENERATED_JUNK_FILENAMES = new Set(['.DS_Store']);
 
 function replaceAll(source, replacements) {
@@ -63,7 +88,11 @@ function replaceAll(source, replacements) {
 }
 
 function listSkills(skills) {
-  return skills.map((skill) => `- \`${skill}\``).join('\n');
+  return skills.map((skill) => {
+    const replacement = DEPRECATED_SKILLS[skill];
+    const suffix = replacement ? ` (deprecated — use \`${replacement}\`)` : '';
+    return `- \`${skill}\`${suffix}`;
+  }).join('\n');
 }
 
 function renderHostMetadata(hostKey, host) {
@@ -78,6 +107,18 @@ function renderHostMetadata(hostKey, host) {
 
 function renderHostAdapterSection(hostKey, host) {
   return `## Host Adapter\n\n${renderHostMetadata(hostKey, host)}`;
+}
+
+function resolveSkillHostAdapterNote(skillName, hostKey, host) {
+  const notes = SKILL_HOST_ADAPTER_NOTES[skillName];
+  if (!notes) {
+    return '';
+  }
+  const note = Object.hasOwn(notes, hostKey) ? notes[hostKey] : notes.default;
+  if (typeof note === 'function') {
+    return note(host);
+  }
+  return note ?? '';
 }
 
 function buildSharedReadme({ packageVersion }) {
@@ -426,7 +467,7 @@ function replaceNarrativeTerms(source) {
   return source;
 }
 
-function renderSourceSkill(source, { mode, hostKey, host, templates }) {
+function renderSourceSkill(source, { mode, hostKey, host, templates, skillName }) {
   const renderedTemplates = {
     confirmationContract: replaceAll(templates.confirmationContract, {
       '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
@@ -437,7 +478,10 @@ function renderSourceSkill(source, { mode, hostKey, host, templates }) {
   };
 
   const hostAdapterSection = mode === 'host' && hostKey && host
-    ? renderHostAdapterSection(hostKey, host)
+    ? [
+        renderHostAdapterSection(hostKey, host),
+        resolveSkillHostAdapterNote(skillName, hostKey, host),
+      ].filter(Boolean).join('\n\n')
     : '';
 
   return replaceAll(source, {
@@ -466,6 +510,7 @@ async function renderSkill({
     hostKey,
     host,
     templates,
+    skillName: legacySkillName,
   });
   return replaceNarrativeTerms(rendered);
 }
