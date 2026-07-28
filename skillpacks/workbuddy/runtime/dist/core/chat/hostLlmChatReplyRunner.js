@@ -117,6 +117,7 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     const maxTurns = strategy?.maxTurns ?? 30;
     const metaBotSlug = normalizeText(options.metaBotSlug);
     const operatorGuidanceText = normalizeText(input.operatorGuidanceText);
+    const conversationCloseAllowed = input.conversationCloseAllowed !== false;
     const sections = [];
     sections.push('You are a MetaBot having a private conversation with another MetaBot through the Open Agent Connect network.');
     if (persona.role) {
@@ -152,20 +153,27 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     strategyLines.push('- Keep replies concise and natural, 2-4 sentences per message.');
     strategyLines.push('- Do not repeat what you have already said.');
     strategyLines.push('- Actively steer the conversation toward the objective.');
-    if (conversation.turnCount >= maxTurns - 1) {
+    if (conversationCloseAllowed && conversation.turnCount >= maxTurns - 1) {
         strategyLines.push(`- This chat will be force-closed after turn ${maxTurns}. Steer the topic toward a natural close in THIS reply; if the conversation is ready to end, write your farewell and add ${CLOSE_CONVERSATION_SIGNAL} on the final line.`);
     }
     sections.push(strategyLines.join('\n'));
-    const exitLines = [
-        '## Exit Mechanism',
-        `End the conversation ONLY when the exchange is clearly finished. When ending, add ${CLOSE_CONVERSATION_SIGNAL} on its own final line at the very end of your reply:`,
-        '- The other party explicitly says goodbye or signals the end in the CURRENT session',
-        '- The conversation objective has been fully achieved over several substantive turns',
-        '- Several consecutive turns from both sides contained no new, substantive content',
-        `- Approaching the turn limit (currently turn ${conversation.turnCount} of ${maxTurns})`,
-        '- Do NOT end the conversation just because one reply was short, generic, or low-value; answer it and steer toward a concrete next topic instead.',
-        '- Greetings and capability introductions are openings, not a reason to end.',
-    ];
+    const exitLines = conversationCloseAllowed
+        ? [
+            '## Exit Mechanism',
+            `End the conversation ONLY when the exchange is clearly finished. When ending, add ${CLOSE_CONVERSATION_SIGNAL} on its own final line at the very end of your reply:`,
+            '- The other party explicitly says goodbye or signals the end in the CURRENT session',
+            '- The conversation objective has been fully achieved over several substantive turns',
+            '- Several consecutive turns from both sides contained no new, substantive content',
+            `- Approaching the turn limit (currently turn ${conversation.turnCount} of ${maxTurns})`,
+            '- Do NOT end the conversation just because one reply was short, generic, or low-value; answer it and steer toward a concrete next topic instead.',
+            '- Greetings and capability introductions are openings, not a reason to end.',
+        ]
+        : [
+            '## Exit Mechanism',
+            'This reply is the opening message of a new session, sent on behalf of the local operator.',
+            '- Do NOT end the conversation in this reply: no farewells and no closing remarks.',
+            `- Never output the ${CLOSE_CONVERSATION_SIGNAL} close marker in this reply.`,
+        ];
     sections.push(exitLines.join('\n'));
     sections.push([
         '## Persona Immersion (critical)',
@@ -199,7 +207,9 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
         '- Output ONLY the reply text itself, no prefixes, labels, or markdown formatting.',
         '- Do NOT open with a plan sentence (for example: "先读…技能，再…"). Start directly with the in-character answer.',
         '- Reply in the same language the other party is using.',
-        `- If ending the conversation, write your farewell first, then ${CLOSE_CONVERSATION_SIGNAL} on a separate final line.`,
+        ...(conversationCloseAllowed
+            ? [`- If ending the conversation, write your farewell first, then ${CLOSE_CONVERSATION_SIGNAL} on a separate final line.`]
+            : ['- This reply must not end the conversation; do not add a farewell or closing line.']),
     ].join('\n'));
     const selfName = 'Me';
     const peerName = conversation.peerName || 'Peer';

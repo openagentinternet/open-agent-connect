@@ -214,7 +214,11 @@ async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promi
         await handle.writeFile(`${JSON.stringify({ pid: process.pid, acquiredAt: Date.now() })}\n`, 'utf8');
         return await operation();
       } finally {
-        await handle.close();
+        try {
+          await handle.close();
+        } catch {
+          // Best effort; releasing the lock file below is what matters.
+        }
         try {
           await fs.rm(lockPath, { force: true });
         } catch {
@@ -239,7 +243,10 @@ async function withLock<T>(lockPath: string, operation: () => Promise<T>): Promi
         }
         const staleThreshold = lockPid ? LOCKFILE_STALE_WITH_PID_MS : LOCKFILE_STALE_WITHOUT_PID_MS;
         const stale = Date.now() - acquiredAt > staleThreshold;
-        if (!lockPid && stale) {
+        // A lock older than the stale threshold is reclaimed even when the
+        // recorded pid is still alive: a wedged holder (hung operation, PID
+        // reuse) must not block every later writer until a manual cleanup.
+        if (stale) {
           await fs.rm(lockPath, { force: true });
           continue;
         }

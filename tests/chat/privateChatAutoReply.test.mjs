@@ -1281,6 +1281,90 @@ test('guided local turns can reopen a closed conversation when pending guidance 
   assert.equal(harness.runnerInputs[1].conversation.turnCount, 2);
 });
 
+test('guided session-opening turns strip the close marker and keep the conversation active', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    replyResult: {
+      state: 'end_conversation',
+      content: 'Picking up right where we left off — let us ship the walkthrough next.\nBye',
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'closed',
+    turnCount: 30,
+    lastDirection: 'outbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'Reopen the thread.',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.runnerInputs[0].conversationCloseAllowed, false);
+  assert.equal(harness.writes.length, 1);
+
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const outbound = messages.filter((message) => message.direction === 'outbound').at(-1);
+  assert.equal(
+    outbound?.content,
+    'Picking up right where we left off — let us ship the walkthrough next.',
+  );
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'active');
+  assert.equal(conversation.turnCount, 1);
+});
+
+test('guided follow-up turns may still close the conversation', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    replyResult: {
+      state: 'end_conversation',
+      content: 'That wraps it up, thanks!\nBye',
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 3,
+    lastDirection: 'inbound',
+    createdAt: now - 100_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: 'Wrap it up politely.',
+    pendingGuidanceCreatedAt: now - 500,
+  });
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.runnerInputs[0].conversationCloseAllowed, true);
+  assert.equal(harness.writes.length, 1);
+
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const outbound = messages.filter((message) => message.direction === 'outbound').at(-1);
+  assert.equal(outbound?.content, 'That wraps it up, thanks!\nBye');
+
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.state, 'closed');
+});
+
 test('guided local turns do not send a stale claimed guidance after a newer guidance replaces it', async () => {
   const now = 1_770_000_000_000;
   let harness;

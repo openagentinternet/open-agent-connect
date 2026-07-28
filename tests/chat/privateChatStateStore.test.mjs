@@ -493,3 +493,19 @@ test('claimPendingGuidance can replace a stale lease and clearPendingGuidanceIfM
   assert.equal(cleared?.pendingGuidanceLeaseId ?? null, null);
   assert.equal(cleared?.pendingGuidanceLeaseExpiresAt ?? null, null);
 });
+
+test('private chat state store reclaims a stale lock whose recorded pid is still alive', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+  await store.readState();
+
+  const lockPath = `${store.paths.privateChatStatePath}.lock`;
+  const staleMs = Date.now() - (10 * 60 * 1000);
+  await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, acquiredAt: staleMs }), 'utf8');
+  await fs.utimes(lockPath, staleMs / 1000, staleMs / 1000);
+
+  await store.updateState((state) => state);
+
+  const state = await store.readState();
+  assert.equal(state.version, 1);
+});

@@ -70,6 +70,10 @@ export interface ChatReplyRunnerInput {
   strategy: ChatStrategy | null;
   inboundMessage?: PrivateChatMessage | null;
   operatorGuidanceText?: string | null;
+  // When false, the reply must not close the conversation: the prompt forbids
+  // farewell output and the orchestrator strips any close marker the model
+  // still emits. Used for session-opening guided turns.
+  conversationCloseAllowed?: boolean;
 }
 
 export interface ChatReplyRunnerResult {

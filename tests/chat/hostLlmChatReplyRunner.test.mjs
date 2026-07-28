@@ -106,6 +106,27 @@ test('buildChatPrompt does not nudge a natural close well before the force-close
   assert.ok(!prompt.includes('force-closed'));
 });
 
+test('buildChatPrompt forbids closing when conversationCloseAllowed is false', () => {
+  const prompt = buildChatPrompt(makeInput({
+    conversationCloseAllowed: false,
+    conversation: {
+      ...makeInput().conversation,
+      turnCount: 29,
+    },
+  }));
+  assert.ok(prompt.includes('## Exit Mechanism'));
+  assert.ok(prompt.includes('Do NOT end the conversation in this reply'));
+  assert.ok(prompt.includes('Never output the Bye close marker'));
+  assert.ok(!prompt.includes('force-closed'));
+  assert.ok(!prompt.includes('If ending the conversation'));
+});
+
+test('buildChatPrompt keeps the close mechanism when conversationCloseAllowed is true', () => {
+  const prompt = buildChatPrompt(makeInput({ conversationCloseAllowed: true }));
+  assert.ok(prompt.includes('End the conversation ONLY when the exchange is clearly finished'));
+  assert.ok(prompt.includes('If ending the conversation'));
+});
+
 test('buildChatPrompt includes chat history with names', () => {
   const prompt = buildChatPrompt(makeInput());
   assert.ok(prompt.includes('AliceBot: Hi there!'));
