@@ -1614,6 +1614,54 @@ test('browser tab with an unknown subcommand fails', async (t) => {
   assert.equal(opened.payload.ok, false);
 });
 
+test('browser open --uri metaapp:// reports the resolve outcome in the envelope', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  // `not-a-real-pin` fails resolve validation locally, so the probe is fast
+  // and deterministic without any chain access.
+  const opened = await runCommand(homeDir, ['browser', 'open', '--uri', 'metaapp://not-a-real-pin']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  const browserUrl = new URL(opened.payload.data.localUiUrl);
+  assert.equal(browserUrl.pathname, '/browser/metaapp/not-a-real-pin');
+  assert.equal(opened.payload.data.resolve.ok, false);
+  assert.equal(opened.payload.data.resolve.code, 'invalid_browser_uri');
+});
+
+test('browser tab open --uri metaapp:// reports the resolve outcome in the envelope', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['browser', 'tab', 'open', '--uri', 'metaapp://not-a-real-pin']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  assert.equal(opened.payload.data.resolve.ok, false);
+  assert.equal(opened.payload.data.resolve.code, 'invalid_browser_uri');
+});
+
+test('browser open --uri metaid:// skips the metaapp resolve probe', async (t) => {
+  const homeDir = await createProfileHomeTemp('');
+  t.after(async () => stopDaemon(homeDir));
+
+  const created = await runCommand(homeDir, ['identity', 'create', '--name', 'Alice']);
+  assert.equal(created.exitCode, 0);
+
+  const opened = await runCommand(homeDir, ['browser', 'open', '--uri', 'metaid://idq1alice']);
+
+  assert.equal(opened.exitCode, 0);
+  assert.equal(opened.payload.ok, true);
+  assert.equal('resolve' in opened.payload.data, false);
+});
+
 test('metaapp view returns a local apps owner console url for one pin id', async (t) => {
   const homeDir = await createProfileHomeTemp('');
   t.after(async () => stopDaemon(homeDir));

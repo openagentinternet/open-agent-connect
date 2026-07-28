@@ -2249,6 +2249,42 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     });
   }
 
+  // Non-fatal resolve probe for metaapp:// opens. Broken app versions (for
+  // example a pin whose MetaApp protocol lacks a content reference) otherwise
+  // surface only as an error page inside the Browser; reporting the resolve
+  // outcome in the envelope lets the agent skip to the next candidate. Other
+  // schemes stay fire-and-forget so metaid/metafile/map opens are not slowed
+  // by chain lookups.
+  async function probeMetaAppResolve(uri: string): Promise<{
+    ok: boolean;
+    title?: string;
+    code?: string;
+    message?: string;
+  } | null> {
+    const trimmed = uri.trim();
+    if (!/^metaapp:\/\//iu.test(trimmed)) {
+      return null;
+    }
+    const response = await requestJson<{
+      ok?: boolean;
+      title?: string;
+      code?: string;
+      message?: string;
+    }>(context, 'GET', `/api/browser/resolve?uri=${encodeURIComponent(trimmed)}`);
+    if (!response.ok) {
+      return {
+        ok: false,
+        code: response.code ?? 'browser_resolve_failed',
+        message: response.message ?? 'MetaApp resolve failed.',
+      };
+    }
+    const data = response.data ?? {};
+    return {
+      ok: true,
+      ...(typeof data.title === 'string' && data.title ? { title: data.title } : {}),
+    };
+  }
+
   async function openLocalBrowserPage(input: {
     uri?: string;
   }): Promise<MetabotCommandResult<unknown>> {
@@ -2256,9 +2292,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     const browserPath = input.uri
       ? resolveLocalBrowserPath(input.uri)
       : '/browser';
+    const resolve = input.uri ? await probeMetaAppResolve(input.uri) : null;
     return commandSuccess({
       ...(input.uri ? { uri: input.uri } : {}),
       localUiUrl: `${baseUrl}${browserPath}`,
+      ...(resolve ? { resolve } : {}),
     });
   }
 
@@ -2269,6 +2307,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
   async function openBrowserTab(input: {
     uri: string;
   }): Promise<MetabotCommandResult<unknown>> {
+    const resolve = await probeMetaAppResolve(input.uri);
     const response = await requestJson<{
       ok?: boolean;
       uri?: string;
@@ -2286,6 +2325,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       uri: typeof data.uri === 'string' ? data.uri : input.uri,
       pagesReached: typeof data.pagesReached === 'number' ? data.pagesReached : 0,
       ...(data.note ? { note: data.note } : {}),
+      ...(resolve ? { resolve } : {}),
     });
   }
 

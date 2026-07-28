@@ -2320,9 +2320,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     successFields: [
       'localUiUrl',
+      'resolve',
     ],
     failureSemantics: [
       'Fails when --uri is provided without a non-empty value or the local daemon cannot build the browser URL.',
+      'For metaapp:// URIs the resolve field reports whether the app actually loads; resolve.ok false means the candidate is broken and the agent should pick another one.',
     ],
     examples: [
       'metabot browser open',
@@ -2357,10 +2359,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     successFields: [
       'uri',
       'pagesReached',
+      'resolve',
     ],
     failureSemantics: [
       'Fails when --uri is missing, empty, or looks like a flag, or when the daemon cannot be reached.',
       'pagesReached 0 is not a failure: the open is pending until a Browser page connects.',
+      'For metaapp:// URIs the resolve field reports whether the app actually loads; resolve.ok false means the candidate is broken and the agent should pick another one.',
     ],
     examples: [
       'metabot browser tab open --uri metaid://<globalMetaId>',

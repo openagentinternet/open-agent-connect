@@ -30,13 +30,18 @@ tags for releases.
   or starting a stopped daemon. The `metabot-browser` skill now always opens
   the best search match first and renders every mentioned Agent Internet URI
   or id as a clickable markdown link.
+- `browser open --uri` and `browser tab open --uri` now probe `metaapp://`
+  resolves and report the outcome in the envelope `resolve` field, so agents
+  can skip broken app versions (for example pins missing a content reference)
+  and open the next candidate instead of handing the human an error page.
 - Renamed the `metabot-browser-open` skill to `metabot-browser` with in-app
   browser routing, MetaApp discovery/remix guidance, and the APP.md authoring
   convention in `metabot-metaapp`. Casual discovery phrasing ("what on-chain X
   exists", "published in the last N days", "open the on-chain X app") now
-  routes to `metaapp search`, and candidate bullets prefer the clickable
-  per-item http links. `metabot-browser-open` remains for one release as a
-  deprecated stub.
+  routes to `metaapp search`, candidate bullets prefer the clickable per-item
+  http links, and understanding an app is explicitly source-first through the
+  local artifact cache (never screenshots or page snapshots).
+  `metabot-browser-open` remains for one release as a deprecated stub.
 
 ### Security
 

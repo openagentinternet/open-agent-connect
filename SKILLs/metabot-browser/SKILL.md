@@ -203,9 +203,10 @@ Formatting rules:
 
 A search reply is never just a list. The backend returns coarse candidates; you own the final pick, exactly like skill selection. Always:
 
-1. Pick the single best match for the human's intent.
+1. Pick the single best match for the human's intent. When several candidates are versions of the same app (same or near-identical titles), prefer the one with the most complete metadata (`runtime` and `tags` filled in) and the latest `updatedAt`.
 2. Open it immediately with `browser tab open --uri metaapp://<pinId>` — this pushes a new tab into every Browser page the human already has open, which is the in-app browsing experience. When `pagesReached` is `0`, no Browser page is open yet: run `browser open --uri metaapp://<pinId>` and open the returned `localUiUrl` per the In-App Browser Rule instead.
-3. Then present the remaining candidates (2–3) as bullets in case the pick is not what they meant.
+3. Check the envelope's `resolve` field, which reports whether the app actually loads. When `resolve.ok` is `false`, the candidate is broken — immediately open the next best candidate instead and tell the human you switched (name the broken one and why). Keep walking down the list until one opens or none fit.
+4. Then present the remaining candidates (2–3) as bullets in case the pick is not what they meant.
 
 Never end a search reply by asking the human which app to open, and never open nothing when at least one candidate fits — opening the best match is the default, not an opt-in. If nothing fits, say so honestly — never invent apps and never open a random candidate.
 
@@ -216,6 +217,8 @@ If a `--query` search returns zero items, drop the weakest query token once (usu
 ## Read And Remix An App
 
 When the human asks what an app does, or asks to modify or remix it:
+
+Understanding an on-chain app always starts from its local source, never from screenshots, accessibility snapshots, or page scraping. The same artifact cache that serves the Browser holds the extracted package, so reading the source is local, complete, and current — and it is exactly what you will modify later. When the human refers to the app currently open in the Browser ("this app", "the current MetaApp"), its pinId is the URI you opened or the one the human gave; ask only when it is genuinely ambiguous.
 
 1. Materialize the source with `metaapp source`:
 
