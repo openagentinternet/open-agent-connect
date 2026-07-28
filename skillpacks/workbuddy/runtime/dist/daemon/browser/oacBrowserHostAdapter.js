@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createOacBrowserHostAdapter = createOacBrowserHostAdapter;
 const node_crypto_1 = require("node:crypto");
+const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const metabotProfileManager_1 = require("../../core/bot/metabotProfileManager");
 const conversationUrl_1 = require("../../core/a2a/conversationUrl");
@@ -13,9 +14,9 @@ const agent_browser_name_resolvers_1 = require("@openagentinternet/agent-browser
 const agent_browser_host_contract_1 = require("@openagentinternet/agent-browser-host-contract");
 const configStore_1 = require("../../core/config/configStore");
 const infrastructureConfigStore_1 = require("../../core/config/infrastructureConfigStore");
-const metafileUrls_1 = require("../../core/files/metafileUrls");
 const llmTypes_1 = require("../../core/llm/llmTypes");
 const artifactCache_1 = require("../../core/metaapp/artifactCache");
+const artifactDownload_1 = require("../../core/metaapp/artifactDownload");
 const DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 const PIN_ID_PATTERN = /^[0-9a-f]{64}i\d+$/iu;
 function normalizeText(value) {
@@ -113,6 +114,27 @@ function buildMetaAppPreviewAssetUrl(previewId, assetPath) {
         .map((segment) => encodeURIComponent(segment))
         .join('/');
     return `/api/metaapp/preview-assets/${encodedPreviewId}/${normalizedAssetPath}`;
+}
+// Renderer content types for preview-metaapp://localhost entry files, mirroring
+// the IDBots host wiring. Unknown extensions preview as HTML, matching the
+// reference hosts' default.
+const PREVIEW_METAAPP_CONTENT_TYPES = {
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.pdf': 'application/pdf',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.webp': 'image/webp',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+};
+function previewMetaAppContentType(filePath) {
+    return PREVIEW_METAAPP_CONTENT_TYPES[node_path_1.default.extname(filePath).toLowerCase()] || 'text/html';
 }
 function browserActorCapabilities(profile) {
     const capabilities = ['template-settings'];
@@ -540,68 +562,18 @@ function browserFailureCode(result) {
 function browserFailureMessage(result) {
     return normalizeText(result.message) || 'OAC Browser command failed.';
 }
-function isZipMetaAppContent(contentType, contentReference) {
-    const normalizedContentType = normalizeText(contentType).toLowerCase();
-    const normalizedReference = normalizeText(contentReference).toLowerCase().split(/[?#]/u, 1)[0] ?? '';
-    return normalizedContentType === 'application/zip'
-        || normalizedContentType.includes('/zip')
-        || normalizedContentType.includes('+zip')
-        || normalizedReference.endsWith('.zip');
-}
-function extractMetafilePinId(contentReference) {
-    if (!/^metafile:\/\//iu.test(contentReference)) {
-        return '';
-    }
-    const withoutScheme = contentReference.slice('metafile://'.length).split(/[?#]/u, 1)[0] ?? '';
-    if (!withoutScheme || withoutScheme.includes('/') || withoutScheme.includes('\\')) {
-        return '';
-    }
-    return withoutScheme.replace(/\.[A-Za-z0-9]+$/u, '');
-}
-function metaAppArchiveUrls(contentReference) {
-    const normalizedReference = normalizeText(contentReference);
-    if (!normalizedReference) {
-        return [];
-    }
-    const metafilePinId = extractMetafilePinId(normalizedReference);
-    if (metafilePinId) {
-        const urls = (0, metafileUrls_1.buildMetafileContentUrls)(metafilePinId);
-        return [urls.accelerateUrl, urls.contentUrl, urls.legacyContentUrl];
-    }
-    return /^https?:\/\//iu.test(normalizedReference) ? [normalizedReference] : [];
-}
-async function downloadMetaAppArchive(fetchImpl, contentReference) {
-    for (const url of metaAppArchiveUrls(contentReference)) {
-        const response = await fetchImpl(url).catch(() => null);
-        if (!response?.ok || typeof response.arrayBuffer !== 'function') {
-            continue;
-        }
-        const archive = Buffer.from(await response.arrayBuffer());
-        if (archive.byteLength > 0) {
-            return archive;
-        }
-    }
-    return null;
-}
 async function resolveMetaAppPreviewUrl(input) {
-    if (!isZipMetaAppContent(input.contentType, input.contentReference)) {
-        return '';
-    }
-    const modifyHistory = (0, artifactCache_1.normalizeMetaAppModifyHistory)(input.pinRecord.modify_history ?? input.pinRecord.modifyHistory);
-    const descriptor = {
-        metaAppPinId: input.pinId,
-        contentReference: normalizeText(input.contentReference),
-        contentType: normalizeText(input.contentType) || 'application/octet-stream',
-        indexFile: normalizeText(input.indexFile) || 'index.html',
-        modifyHistory,
-    };
-    let artifact = await input.artifactCache.getArtifact(descriptor);
+    const artifact = await (0, artifactDownload_1.resolveMetaAppArtifact)({
+        pinId: input.pinId,
+        contentReference: input.contentReference,
+        contentType: input.contentType,
+        indexFile: input.indexFile,
+        pinRecord: input.pinRecord,
+        artifactCache: input.artifactCache,
+        fetchImpl: input.fetchImpl,
+    });
     if (!artifact) {
-        const archive = await downloadMetaAppArchive(input.fetchImpl, descriptor.contentReference);
-        if (!archive) {
-            throw new Error('MetaApp ZIP content could not be downloaded.');
-        }
-        artifact = await input.artifactCache.writeArtifact({ ...descriptor, archive });
+        return '';
     }
     const session = input.metaAppPreviewSessions.create({
         artifactDir: artifact.artifactDir,
@@ -1082,6 +1054,57 @@ function createOacBrowserHostAdapter(input) {
             return (0, agent_browser_host_contract_1.browserFailure)('invalid_argument', error instanceof Error ? error.message : String(error));
         }
     }
+    // preview-metaapp://localhost: resolve a live local file or directory into a
+    // MetaApp preview session rooted at that path. Mirrors the ABC standalone
+    // host's resolveLocalPreviewPath. The daemon preview-assets route reads files
+    // from disk on every request, so reloads pick up edits; the session registry
+    // confines serving to the session root. Local-dev only, 127.0.0.1 binding;
+    // METABOT_BROWSER_DISABLE_PREVIEW_METAAPP=1 disables the whole scheme.
+    const resolveLocalPreviewPath = async ({ path: localPath }) => {
+        let stats;
+        try {
+            stats = await node_fs_1.promises.stat(localPath);
+        }
+        catch (error) {
+            const code = error?.code;
+            if (code === 'ENOENT') {
+                throw new Error(`Local path not found: ${localPath}`);
+            }
+            if (code === 'EACCES') {
+                throw new Error(`Permission denied: ${localPath}`);
+            }
+            throw error;
+        }
+        let artifactDir;
+        let indexFile;
+        if (stats.isDirectory()) {
+            const candidates = ['index.html', 'index.htm'];
+            const found = await Promise.all(candidates.map(async (name) => {
+                try {
+                    await node_fs_1.promises.access(node_path_1.default.join(localPath, name));
+                    return name;
+                }
+                catch {
+                    return null;
+                }
+            }));
+            indexFile = found.find((name) => name !== null) ?? '';
+            if (!indexFile) {
+                throw new Error(`No index.html found in directory: ${localPath}`);
+            }
+            artifactDir = localPath;
+        }
+        else {
+            artifactDir = node_path_1.default.dirname(localPath);
+            indexFile = node_path_1.default.basename(localPath);
+        }
+        const session = input.metaAppPreviewSessions.create({ artifactDir, indexFile });
+        return {
+            localPreviewUrl: buildMetaAppPreviewAssetUrl(session.previewId, indexFile),
+            previewId: session.previewId,
+            contentType: previewMetaAppContentType(indexFile),
+        };
+    };
     async function resolveResource(resolveInput) {
         const actor = await resolveActor(resolveInput);
         if ('failure' in actor)
@@ -1103,6 +1126,7 @@ function createOacBrowserHostAdapter(input) {
             config: browserConfig,
             fetch: fetchImpl,
             nameAliasProviders,
+            previewMetaAppLocalResolve: resolveLocalPreviewPath,
             metaAppResolve: async (pinId) => {
                 return (0, agent_browser_core_1.resolveMetaAppPinToRecord)({
                     pinId,

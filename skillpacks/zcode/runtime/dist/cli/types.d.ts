@@ -25,6 +25,10 @@ export interface CliDependencies {
         tabOpen?: (input: {
             uri: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        /** Resolve a deep-link URI into its clickable local Browser http URL. */
+        link?: (input: {
+            uri: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     metaapp?: {
         preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -37,6 +41,9 @@ export interface CliDependencies {
         share?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         view?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         comment?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        search?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        forks?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        source?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     chain?: {
         write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

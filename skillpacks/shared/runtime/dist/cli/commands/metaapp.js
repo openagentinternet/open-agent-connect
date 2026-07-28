@@ -2,7 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runMetaAppCommand = runMetaAppCommand;
 const commandResult_1 = require("../../core/contracts/commandResult");
+const pinId_1 = require("../../core/metaapp/pinId");
 const helpers_1 = require("./helpers");
+const METAAPP_SEARCH_LIMIT_DEFAULT = 8;
+const METAAPP_SEARCH_LIMIT_MAX = 20;
+const SECONDS_PER_DAY = 86_400;
 function readRequiredFlag(args, flag) {
     const value = (0, helpers_1.readFlagValue)(args, flag);
     if (!value || value.startsWith('--')) {
@@ -47,6 +51,16 @@ function readPositiveIntegerFlag(args, flag, fallback) {
     }
     return { ok: true, value: Number.parseInt(raw, 10) };
 }
+function readSearchLimitFlag(args) {
+    const limit = readPositiveIntegerFlag(args, '--limit', METAAPP_SEARCH_LIMIT_DEFAULT);
+    if (!limit.ok) {
+        return limit;
+    }
+    if (limit.value > METAAPP_SEARCH_LIMIT_MAX) {
+        return { ok: false, result: commandInvalidFlag(`--limit must be between 1 and ${METAAPP_SEARCH_LIMIT_MAX}.`) };
+    }
+    return limit;
+}
 async function runMetaAppCommand(args, context) {
     const subcommand = args[0];
     if (subcommand === 'preview') {
@@ -80,6 +94,92 @@ async function runMetaAppCommand(args, context) {
             ...(from ? { from } : {}),
             size: size.value,
             ...(cursor ? { cursor } : {}),
+        });
+    }
+    if (subcommand === 'search') {
+        const limit = readSearchLimitFlag(args);
+        if (!limit.ok) {
+            return limit.result;
+        }
+        const sinceDays = readPositiveIntegerFlag(args, '--since-days', 0);
+        if (!sinceDays.ok) {
+            return sinceDays.result;
+        }
+        const untilDays = readPositiveIntegerFlag(args, '--until-days', 0);
+        if (!untilDays.ok) {
+            return untilDays.result;
+        }
+        const handler = context.dependencies.metaapp?.search;
+        if (!handler) {
+            return commandNotImplemented('search');
+        }
+        // The aggregation API only understands unix-second bounds, so the
+        // day-based flags are converted here relative to the current time.
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const query = readOptionalFlag(args, '--query');
+        const tag = readOptionalFlag(args, '--tag');
+        const publisher = readOptionalFlag(args, '--publisher');
+        const runtime = readOptionalFlag(args, '--runtime');
+        const chain = readOptionalFlag(args, '--chain');
+        const cursor = readOptionalFlag(args, '--cursor');
+        return handler({
+            ...(query ? { query } : {}),
+            ...(tag ? { tag } : {}),
+            ...(publisher ? { publisher } : {}),
+            ...(runtime ? { runtime } : {}),
+            ...(chain ? { chain: chain.trim().toLowerCase() } : {}),
+            ...(sinceDays.value > 0 ? { since: nowSeconds - sinceDays.value * SECONDS_PER_DAY } : {}),
+            ...(untilDays.value > 0 ? { until: nowSeconds - untilDays.value * SECONDS_PER_DAY } : {}),
+            limit: limit.value,
+            ...(cursor ? { cursor } : {}),
+        });
+    }
+    if (subcommand === 'forks') {
+        const pinIdInput = readRequiredFlag(args, '--pin-id');
+        if (!pinIdInput.ok) {
+            return pinIdInput.result;
+        }
+        const pinId = (0, pinId_1.normalizeMetaAppPinIdOrUri)(pinIdInput.value);
+        if (!pinId) {
+            return commandInvalidFlag('--pin-id must be a MetaApp pinId or a metaapp://<pinId> URI.');
+        }
+        const limit = readSearchLimitFlag(args);
+        if (!limit.ok) {
+            return limit.result;
+        }
+        const handler = context.dependencies.metaapp?.forks;
+        if (!handler) {
+            return commandNotImplemented('forks');
+        }
+        const cursor = readOptionalFlag(args, '--cursor');
+        return handler({
+            pinId,
+            limit: limit.value,
+            ...(cursor ? { cursor } : {}),
+        });
+    }
+    if (subcommand === 'source') {
+        const pinIdInput = readRequiredFlag(args, '--pin-id');
+        if (!pinIdInput.ok) {
+            return pinIdInput.result;
+        }
+        const pinId = (0, pinId_1.normalizeMetaAppPinIdOrUri)(pinIdInput.value);
+        if (!pinId) {
+            return commandInvalidFlag('--pin-id must be a MetaApp pinId or a metaapp://<pinId> URI.');
+        }
+        const out = readOptionalValueFlag(args, '--out');
+        if (!out.ok) {
+            return out.result;
+        }
+        const handler = context.dependencies.metaapp?.source;
+        if (!handler) {
+            return commandNotImplemented('source');
+        }
+        const from = (0, helpers_1.readFromFlag)(args);
+        return handler({
+            pinId,
+            ...(out.value ? { outDir: out.value } : {}),
+            ...(from ? { from } : {}),
         });
     }
     if (subcommand === 'publish') {

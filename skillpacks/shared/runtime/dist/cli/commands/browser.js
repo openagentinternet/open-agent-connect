@@ -62,6 +62,20 @@ async function runBrowserCommand(args, context) {
         }
         return handler({ uri: parsed.uri });
     }
+    if (args[0] === 'link') {
+        const parsed = parseBrowserOpenArgs(args);
+        if (parsed.error) {
+            return parsed.error;
+        }
+        if (!parsed.uri) {
+            return (0, commandResult_1.commandFailed)('invalid_flag', 'Missing value for --uri. "browser link" requires a URI to resolve.');
+        }
+        const handler = context.dependencies.browser?.link;
+        if (!handler) {
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Browser link handler is not configured.');
+        }
+        return handler({ uri: parsed.uri });
+    }
     if (args[0] !== 'open') {
         return (0, helpers_1.commandUnknownSubcommand)(`browser ${args.join(' ')}`.trim());
     }

@@ -7,6 +7,7 @@ export interface MvcSponsorV2ClientError extends Error {
     serviceMessage: string;
     status?: number;
     data?: unknown;
+    retryable?: boolean;
 }
 export interface MvcSponsorAddressInfo {
     exists: boolean;
@@ -38,9 +39,22 @@ export interface MvcSponsorCommitResult {
     minerFee?: number;
     raw: Record<string, unknown>;
 }
+export interface MvcSponsorOrder {
+    orderId: string;
+    status: string;
+    txId?: string;
+    txSize: number;
+    minerFee: number;
+    pending: boolean;
+    final: boolean;
+    failureReason?: string;
+    raw: Record<string, unknown>;
+}
 export interface CreateMvcSponsorV2ClientInput {
     baseUrl?: string;
     fetchImpl?: typeof fetch;
+    requestTimeoutMs?: number;
+    retryDelaysMs?: number[];
 }
 export declare function createMvcSponsorV2Client(input?: CreateMvcSponsorV2ClientInput): {
     baseUrl: string;
@@ -55,6 +69,9 @@ export declare function createMvcSponsorV2Client(input?: CreateMvcSponsorV2Clien
         publicKey: string;
         signature: string;
     }): Promise<MvcSponsorPreResult>;
+    getSponsorOrder(payload: {
+        orderId: string;
+    }): Promise<MvcSponsorOrder>;
     commitSponsor(payload: {
         orderId: string;
         signedTxHex: string;

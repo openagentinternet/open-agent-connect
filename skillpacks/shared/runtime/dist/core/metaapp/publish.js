@@ -14,6 +14,7 @@ const node_os_1 = __importDefault(require("node:os"));
 const node_path_1 = __importDefault(require("node:path"));
 const commandResult_1 = require("../contracts/commandResult");
 const metafileUri_1 = require("../files/metafileUri");
+const forkMarker_1 = require("./forkMarker");
 const manifest_1 = require("./manifest");
 const pinId_1 = require("./pinId");
 const projectInspector_1 = require("./projectInspector");
@@ -77,6 +78,7 @@ function cleanManifestForPayload(manifest) {
         'contentHash',
         'metadata',
         'tags',
+        'forkedFrom',
         'disabled',
         'codeType',
     ]) {
@@ -166,10 +168,32 @@ async function inspectAndDraft(input) {
         projectDir: input.projectDir,
         manifestFile: input.manifestFile,
     });
-    return {
-        plan,
-        manifest: (0, manifest_1.buildMetaAppManifestDraft)(plan),
-    };
+    const manifest = (0, manifest_1.buildMetaAppManifestDraft)(plan);
+    // A `.metaapp-fork.json` marker (written by `metabot metaapp source --out`)
+    // supplies fork provenance defaults: forkedFrom lineage and inherited tags.
+    // Explicit manifest values always win over marker defaults.
+    const forkMarker = await (0, forkMarker_1.readMetaAppForkMarker)(plan.projectDir);
+    if (forkMarker) {
+        if (manifest.forkedFrom === undefined) {
+            manifest.forkedFrom = forkMarker.sourcePinId;
+        }
+        if (manifest.tags === undefined && forkMarker.tags?.length) {
+            manifest.tags = [...forkMarker.tags];
+        }
+    }
+    return { plan, manifest };
+}
+/** Whether the package root ships an APP.md self-description document. */
+async function hasMetaAppDoc(artifactDir) {
+    if (!artifactDir) {
+        return false;
+    }
+    try {
+        return (await node_fs_1.promises.stat(node_path_1.default.join(artifactDir, 'APP.md'))).isFile();
+    }
+    catch {
+        return false;
+    }
 }
 function createPreviewData(input, deps, plan, manifest) {
     const data = {
@@ -240,6 +264,7 @@ function publicArchive(archive) {
 }
 async function createConfirmationData(input, deps, plan, manifest) {
     const data = createPreviewData(input, deps, plan, manifest);
+    data.hasAppDoc = await hasMetaAppDoc(plan.artifactDir);
     if (!plan.artifactDir) {
         return data;
     }
@@ -368,6 +393,7 @@ async function writePublishedMetaApp(input) {
             firstPinId,
             metawebUrl: (0, share_1.buildMetaAppCanonicalUrl)(pinId, firstPinId),
             localUiUrl: buildLocalUiUrl(pinId, firstPinId),
+            hasAppDoc: await hasMetaAppDoc(input.plan.artifactDir),
             archive: publicArchive(archive),
             upload,
             chainWrite,

@@ -46,6 +46,8 @@ const remoteCall_1 = require("../core/delegation/remoteCall");
 const ratingDetailState_1 = require("../core/ratings/ratingDetailState");
 const socketPresenceDirectory_1 = require("../core/discovery/socketPresenceDirectory");
 const metasoInfrastructure_1 = require("../core/network/metasoInfrastructure");
+const metaAppSearchApi_1 = require("../core/metaapp/metaAppSearchApi");
+const metaAppSource_1 = require("../core/metaapp/metaAppSource");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
@@ -580,6 +582,44 @@ function resolveLocalBrowserPath(uri) {
     const query = new URLSearchParams();
     query.set('uri', uri);
     return `/browser?${query.toString()}`;
+}
+/**
+ * Best-effort daemon base URL for decorating read-only results with clickable
+ * http links. Unlike ensureDaemonBaseUrl this never starts or restarts a
+ * daemon: links are only attached when a base URL is already configured or a
+ * running daemon is reachable.
+ */
+async function readReachableDaemonBaseUrl(context) {
+    const explicitBaseUrl = normalizeEnvText(context.env.METABOT_DAEMON_BASE_URL);
+    if (explicitBaseUrl) {
+        return normalizeBaseUrl(explicitBaseUrl);
+    }
+    const daemonRecord = await resolveDaemonRecord(context);
+    if (daemonRecord?.baseUrl
+        && daemonConfigMatchesContext(daemonRecord, context)
+        && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)) {
+        return normalizeBaseUrl(daemonRecord.baseUrl);
+    }
+    return null;
+}
+/**
+ * Adds clickable per-item http links for hosts whose markdown renderer cannot
+ * intercept metaapp:// or metaid:// deep links: `localUiUrl` opens the app in
+ * the local Browser, `publisherLocalUiUrl` opens the publisher's Bot page.
+ */
+function withMetaAppCandidateLinks(items, daemonBaseUrl) {
+    if (!daemonBaseUrl) {
+        return items;
+    }
+    return items.map((item) => ({
+        ...item,
+        ...(item.pinId
+            ? { localUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metaapp://${item.pinId}`)}` }
+            : {}),
+        ...(item.publisherGlobalMetaId
+            ? { publisherLocalUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metaid://${item.publisherGlobalMetaId}`)}` }
+            : {}),
+    }));
 }
 async function sleep(ms) {
     await new Promise((resolve) => setTimeout(resolve, ms));
@@ -1669,14 +1709,41 @@ function createDefaultCliDependencies(context) {
             localUiUrl: `${baseUrl}${resolveLocalUiPath(input.page)}${suffix}`,
         });
     }
+    // Non-fatal resolve probe for metaapp:// opens. Broken app versions (for
+    // example a pin whose MetaApp protocol lacks a content reference) otherwise
+    // surface only as an error page inside the Browser; reporting the resolve
+    // outcome in the envelope lets the agent skip to the next candidate. Other
+    // schemes stay fire-and-forget so metaid/metafile/map opens are not slowed
+    // by chain lookups.
+    async function probeMetaAppResolve(uri) {
+        const trimmed = uri.trim();
+        if (!/^metaapp:\/\//iu.test(trimmed)) {
+            return null;
+        }
+        const response = await requestJson(context, 'GET', `/api/browser/resolve?uri=${encodeURIComponent(trimmed)}`);
+        if (!response.ok) {
+            return {
+                ok: false,
+                code: response.code ?? 'browser_resolve_failed',
+                message: response.message ?? 'MetaApp resolve failed.',
+            };
+        }
+        const data = response.data ?? {};
+        return {
+            ok: true,
+            ...(typeof data.title === 'string' && data.title ? { title: data.title } : {}),
+        };
+    }
     async function openLocalBrowserPage(input) {
         const baseUrl = await ensureDaemonBaseUrl(context);
         const browserPath = input.uri
             ? resolveLocalBrowserPath(input.uri)
             : '/browser';
+        const resolve = input.uri ? await probeMetaAppResolve(input.uri) : null;
         return (0, commandResult_1.commandSuccess)({
             ...(input.uri ? { uri: input.uri } : {}),
             localUiUrl: `${baseUrl}${browserPath}`,
+            ...(resolve ? { resolve } : {}),
         });
     }
     // Ask every currently-open Browser page to open a URI in a new tab. The daemon
@@ -1684,6 +1751,7 @@ function createDefaultCliDependencies(context) {
     // AgentBrowserTabs.openTab performs the actual open. No tab id is returned —
     // tab ids are client-only and never reach the daemon.
     async function openBrowserTab(input) {
+        const resolve = await probeMetaAppResolve(input.uri);
         const response = await requestJson(context, 'POST', '/api/browser/tabs/open', { uri: input.uri });
         if (!response.ok) {
             return (0, commandResult_1.commandFailed)(response.code ?? 'browser_tab_open_failed', response.message ?? 'Browser tab open failed.');
@@ -1693,6 +1761,130 @@ function createDefaultCliDependencies(context) {
             uri: typeof data.uri === 'string' ? data.uri : input.uri,
             pagesReached: typeof data.pagesReached === 'number' ? data.pagesReached : 0,
             ...(data.note ? { note: data.note } : {}),
+            ...(resolve ? { resolve } : {}),
+        });
+    }
+    // Pure URI -> localUiUrl resolver for agents that need to render a clickable
+    // http link for a deep-link URI (metaapp://, metaid://, metafile://, pin://,
+    // map://, ...) without opening anything. Never starts a daemon: when no
+    // daemon base URL is reachable the URI itself is returned without a link.
+    async function resolveBrowserDeepLink(input) {
+        const baseUrl = await readReachableDaemonBaseUrl(context);
+        if (!baseUrl) {
+            return (0, commandResult_1.commandSuccess)({ uri: input.uri });
+        }
+        return (0, commandResult_1.commandSuccess)({
+            uri: input.uri,
+            localUiUrl: `${baseUrl}${resolveLocalBrowserPath(input.uri)}`,
+        });
+    }
+    // MetaApp aggregation search/forks run directly against the metaso-p2p API:
+    // they are read-only and the only local state they need (the Bot registry
+    // globalMetaIds behind `isOwn`) is readable from this process.
+    async function listOwnGlobalMetaIds() {
+        // Same local Bot registry that backs `bot list` (the daemon's
+        // /api/bot/profiles handler builds its full profiles on these records).
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const profiles = await (0, identityProfiles_1.listIdentityProfiles)(systemHomeDir).catch(() => []);
+        return new Set(profiles
+            .map((profile) => normalizeEnvText(profile.globalMetaId))
+            .filter(Boolean));
+    }
+    function mapMetaAppSearchError(error) {
+        if (error instanceof metaAppSearchApi_1.MetaAppSearchNotFoundError) {
+            return (0, commandResult_1.commandFailed)('metaapp_not_found', error.message);
+        }
+        if (error instanceof metaAppSearchApi_1.MetaAppSearchApiError && error.apiCode === 40000) {
+            return (0, commandResult_1.commandFailed)('invalid_argument', error.message);
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return (0, commandResult_1.commandFailed)('metaapp_search_failed', message);
+    }
+    function readMetaAppSearchOptions() {
+        const baseUrl = normalizeEnvText(context.env.METASO_P2P_BASE_URL);
+        return baseUrl ? { baseUrl } : {};
+    }
+    function readPositiveField(value) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : undefined;
+    }
+    async function runMetaAppSearch(input) {
+        try {
+            const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
+                (0, metaAppSearchApi_1.searchMetaApps)({
+                    keyword: normalizeEnvText(typeof input.query === 'string' ? input.query : undefined) || undefined,
+                    tag: normalizeEnvText(typeof input.tag === 'string' ? input.tag : undefined) || undefined,
+                    chainName: normalizeEnvText(typeof input.chain === 'string' ? input.chain : undefined) || undefined,
+                    runtime: normalizeEnvText(typeof input.runtime === 'string' ? input.runtime : undefined) || undefined,
+                    publisher: normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) || undefined,
+                    since: readPositiveField(input.since),
+                    until: readPositiveField(input.until),
+                    size: readPositiveField(input.limit),
+                    cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
+                }, readMetaAppSearchOptions()),
+                listOwnGlobalMetaIds(),
+                readReachableDaemonBaseUrl(context),
+            ]);
+            return (0, commandResult_1.commandSuccess)({
+                items: withMetaAppCandidateLinks((0, metaAppSearchApi_1.trimMetaAppSearchItems)(page.items, ownGlobalMetaIds), daemonBaseUrl),
+                hasMore: page.hasMore,
+                nextCursor: page.nextCursor,
+            });
+        }
+        catch (error) {
+            return mapMetaAppSearchError(error);
+        }
+    }
+    async function runMetaAppForks(input) {
+        const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+        if (!pinId) {
+            return (0, commandResult_1.commandFailed)('invalid_argument', 'pinId is required to list MetaApp forks.');
+        }
+        try {
+            const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
+                (0, metaAppSearchApi_1.listMetaAppForks)({
+                    pinId,
+                    size: readPositiveField(input.limit),
+                    cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
+                }, readMetaAppSearchOptions()),
+                listOwnGlobalMetaIds(),
+                readReachableDaemonBaseUrl(context),
+            ]);
+            return (0, commandResult_1.commandSuccess)({
+                items: withMetaAppCandidateLinks((0, metaAppSearchApi_1.trimMetaAppSearchItems)(page.items, ownGlobalMetaIds), daemonBaseUrl),
+                hasMore: page.hasMore,
+                nextCursor: page.nextCursor,
+            });
+        }
+        catch (error) {
+            return mapMetaAppSearchError(error);
+        }
+    }
+    // MetaApp source materialization runs in-process like search/forks: it is
+    // read-only (download into the local artifact cache plus an optional
+    // workspace copy) and shares the artifact cache with the daemon Browser
+    // flow by using the same actor home directory.
+    async function runMetaAppSource(input) {
+        const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+        if (!pinId) {
+            return (0, commandResult_1.commandFailed)('invalid_argument', 'pinId is required to materialize MetaApp source.');
+        }
+        const actor = await resolveActorHomeDir(context, normalizeEnvText(typeof input.from === 'string' ? input.from : undefined) || undefined);
+        if (!('homeDir' in actor)) {
+            return actor;
+        }
+        // The indexer endpoints the daemon Browser adapter resolves pins and
+        // metafile content against; they live in the infrastructure config.
+        const infrastructure = await (0, infrastructureConfigStore_1.createInfrastructureConfigStore)(normalizeSystemHomeDir(context.env, context.cwd)).read();
+        return (0, metaAppSource_1.materializeMetaAppSource)({
+            pinId,
+            ...(typeof input.outDir === 'string' && input.outDir.trim()
+                ? { outDir: resolveRuntimeInputPath(context, input.outDir) }
+                : {}),
+        }, {
+            homeDir: actor.homeDir,
+            manApiBaseUrl: infrastructure.manApiBaseUrl,
+            metafileContentBaseUrl: infrastructure.metafileContentBaseUrl,
         });
     }
     return {
@@ -1784,6 +1976,9 @@ function createDefaultCliDependencies(context) {
                 ...(input.mine === true ? { mine: true } : {}),
             }),
             comment: async (input) => requestJsonForSelectedActor('POST', '/api/metaapp/comment', typeof input.from === 'string' ? input.from : undefined, input),
+            search: async (input) => runMetaAppSearch(input),
+            forks: async (input) => runMetaAppForks(input),
+            source: async (input) => runMetaAppSource(input),
         },
         buzz: {
             post: async (input) => requestJsonForSelectedActor('POST', '/api/buzz/post', typeof input.from === 'string' ? input.from : undefined, input),
@@ -1791,6 +1986,7 @@ function createDefaultCliDependencies(context) {
         browser: {
             open: async (input) => openLocalBrowserPage(input),
             tabOpen: async (input) => openBrowserTab(input),
+            link: async (input) => resolveBrowserDeepLink(input),
         },
         chain: {
             write: async (input) => requestJsonForSelectedActor('POST', '/api/chain/write', typeof input.from === 'string' ? input.from : undefined, input),

@@ -20,6 +20,7 @@ const STRING_FIELDS = new Set([
     'contentHash',
     'codeType',
     'artifactDir',
+    'forkedFrom',
 ]);
 const STRING_ARRAY_FIELDS = new Set(['introImgs', 'tags']);
 const BOOLEAN_FIELDS = new Set(['disabled', 'sourceArchive']);

@@ -10,6 +10,7 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const node_util_1 = require("node:util");
 const node_zlib_1 = require("node:zlib");
+const forkMarker_1 = require("./forkMarker");
 const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
 const ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE = 0x02014b50;
 const ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
@@ -17,7 +18,9 @@ const STORE_COMPRESSION_METHOD = 0;
 const DEFLATE_COMPRESSION_METHOD = 8;
 const DEFAULT_MAX_EXTRACTED_ENTRIES = 2_000;
 const DEFAULT_MAX_EXTRACTED_BYTES = 100 * 1024 * 1024;
-const SKIP_NAMES = new Set(['.DS_Store', '.git', 'node_modules', '.runtime']);
+// The fork marker is local provenance for the publish flow, never package
+// content, so it is excluded from published archives at any depth.
+const SKIP_NAMES = new Set(['.DS_Store', '.git', 'node_modules', '.runtime', forkMarker_1.METAAPP_FORK_MARKER]);
 const inflateRawAsync = (0, node_util_1.promisify)(node_zlib_1.inflateRaw);
 function normalizeEntryName(entryName) {
     return entryName.replace(/\\/g, '/');

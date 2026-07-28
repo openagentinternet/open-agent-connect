@@ -1,6 +1,6 @@
 ---
 name: metabot-browser
-description: Use when a human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, a MetaFile, or a map through the existing local Browser entrypoint, including opening a resource in a new Browser tab; also use when the human wants to find or discover on-chain MetaApps by topic, tag, publisher, or time range, list the remixes of a known app, read what an app does, or remix and republish an existing MetaApp.
+description: Use when a human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, a MetaFile, or a map through the existing local Browser entrypoint, including opening a resource in a new Browser tab; also use when the human wants to find or discover on-chain MetaApps by topic, tag, publisher, or time range — such as "what on-chain mini-games exist", "apps published in the last 30 days", or "open the on-chain buzz app" — list the remixes of a known app, read what an app does, or remix and republish an existing MetaApp.
 ---
 
 # MetaBot Browser
@@ -34,6 +34,8 @@ Should trigger when:
 - The human asks to open a known MetaApp, MetaFile, or map URI in Browser.
 - The human asks to open something in a new Browser tab, or open several things at once while keeping the current Browser view.
 - The human asks to find or discover MetaApps by topic, capability, tag, publisher, or time range, such as "mini-games published in the last 7 days", "Bob's latest app", or "apps that support simplebuzz".
+- The human asks what on-chain apps, games, or tools exist, or what was published recently — for example "what on-chain mini-games are there", "what new apps appeared in the last 30 days", or "any music players on-chain", in any language. These are always `metaapp search` intent, even when the phrasing sounds like a casual question.
+- The human asks to open an on-chain app by name or topic rather than by pinId — for example "open the on-chain buzz app" or "open that on-chain music player". Search first with `metaapp search`, then open the best match; never answer from memory.
 - The human asks to see the remixes or forks of a known app.
 - The human asks what an on-chain app does, or asks to modify, remix, or build on top of an existing app.
 
@@ -107,6 +109,12 @@ Open a map URI when one is already known:
 $HOME/.metabot/bin/metabot browser open --uri map://<...>
 ```
 
+Resolve any Agent Internet URI into its clickable local Browser http URL without opening anything:
+
+```bash
+$HOME/.metabot/bin/metabot browser link --uri metaapp://<pinId>
+```
+
 ## Open In A New Tab
 
 Once at least one Browser page is already open, open a resource URI in a new tab of that running page instead of replacing the current view. This asks every currently-open Browser page to add the URI as a new tab. Tabs are a Browser-page concept: the human must have the Browser open first.
@@ -163,6 +171,7 @@ Map the human's intent to flags:
 | Human intent | Command flags |
 | --- | --- |
 | "latest N days of X" / "X from the last N days" | `--query "X" --since-days N` |
+| "what X apps are on-chain" / "open the on-chain X app" (buzz, music player, games, ...) | `--query "X"`, then open the best match |
 | "publisher's latest" / "Bob's latest app" | `--publisher <globalMetaId> --limit 1` |
 | "apps that support simplebuzz" | `--tag simplebuzz` |
 | "remixes of this app" | use `metaapp forks --pin-id <pinId>` instead |
@@ -179,13 +188,15 @@ Additional filters: `--tag <tag>`, `--publisher <globalMetaId>`, `--until-days <
 Render each candidate as a ready-to-quote markdown bullet and reuse these bullet lines verbatim in the reply:
 
 ```markdown
-- [Title](metaapp://<pinId>) — <intro>
-  by [PublisherName](metaid://<fullGlobalMetaId>) | tags: <tag1, tag2> | updated: YYYY-MM-DD
+- [Title](<localUiUrl or metaapp://<pinId>>) — <intro>
+  by [PublisherName](<publisherLocalUiUrl or metaid://<fullGlobalMetaId>>) | tags: <tag1, tag2> | updated: YYYY-MM-DD
 ```
 
 Formatting rules:
 
+- Render candidates only as these bullet lines — never as a plain-text table or plain list. Tables and bare lists drop the links, and links are mandatory.
 - App titles and author names are always markdown links; never restate an app or an author as plain text.
+- Link the title to the item's `localUiUrl` and the author to the item's `publisherLocalUiUrl` whenever the envelope provides them. These are plain http URLs that every host renders as clickable, and they open the app or the publisher's Bot page in the local Browser. Fall back to `metaapp://<pinId>` and `metaid://<fullGlobalMetaId>` only when an item has no link fields (no reachable daemon).
 - Never shorten, truncate, or ellipsis ids: pinIds and globalMetaIds always appear in full.
 - Use `title` for the app link text, falling back to `appName`, then the pinId.
 - Use `publisherName` for the author link text when present, otherwise the full `publisherGlobalMetaId`.
@@ -193,9 +204,16 @@ Formatting rules:
 - Format `updatedAt` (unix seconds) as `YYYY-MM-DD`; omit `tags:` or `updated:` segments that have no value.
 - When a candidate has `isOwn: true`, mark the bullet with `(your Bot)` after the author link.
 
-### Open The Best Match
+### Open The Best Match First
 
-Pick the single best match for the human's intent and open it with `browser tab open --uri metaapp://<pinId>` (in-app, per the In-App Browser Rule), then offer 2–3 alternatives from the candidate list in case the best one is not what they meant. If nothing fits, say so honestly — never invent apps and never open a random candidate.
+A search reply is never just a list. The backend returns coarse candidates; you own the final pick, exactly like skill selection. Always:
+
+1. Pick the single best match for the human's intent. When several candidates are versions of the same app (same or near-identical titles), prefer the one with the most complete metadata (`runtime` and `tags` filled in) and the latest `updatedAt`.
+2. Open it immediately with `browser tab open --uri metaapp://<pinId>` — this pushes a new tab into every Browser page the human already has open, which is the in-app browsing experience. When `pagesReached` is `0`, no Browser page is open yet: run `browser open --uri metaapp://<pinId>` and open the returned `localUiUrl` per the In-App Browser Rule instead.
+3. Check the envelope's `resolve` field, which reports whether the app actually loads. When `resolve.ok` is `false`, the candidate is broken — immediately open the next best candidate instead and tell the human you switched (name the broken one and why). Keep walking down the list until one opens or none fit.
+4. Then present the remaining candidates (2–3) as bullets in case the pick is not what they meant.
+
+Never end a search reply by asking the human which app to open, and never open nothing when at least one candidate fits — opening the best match is the default, not an opt-in. If nothing fits, say so honestly — never invent apps and never open a random candidate.
 
 ### Empty Results
 
@@ -204,6 +222,8 @@ If a `--query` search returns zero items, drop the weakest query token once (usu
 ## Read And Remix An App
 
 When the human asks what an app does, or asks to modify or remix it:
+
+Understanding an on-chain app always starts from its local source, never from screenshots, accessibility snapshots, or page scraping. The same artifact cache that serves the Browser holds the extracted package, so reading the source is local, complete, and current — and it is exactly what you will modify later. When the human refers to the app currently open in the Browser ("this app", "the current MetaApp"), its pinId is the URI you opened or the one the human gave; ask only when it is genuinely ambiguous.
 
 1. Materialize the source with `metaapp source`:
 
@@ -228,9 +248,19 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 
 ## Output Conventions
 
-- Link apps as `[title](metaapp://<pinId>)` and Bots or authors as `[name](metaid://<fullGlobalMetaId>)`. Full ids always; never shorten, truncate, or ellipsis them.
+- Link apps to their envelope `localUiUrl` when present (falling back to `metaapp://<pinId>`) and Bots or authors to their `publisherLocalUiUrl` when present (falling back to `metaid://<fullGlobalMetaId>`). Full ids always; never shorten, truncate, or ellipsis them.
 - Reuse the candidate bullet lines from Find And Discover MetaApps verbatim when listing apps.
 - `localUiUrl` values always come from the CLI envelope; never invent localhost URLs.
+
+### Normalizing URIs Into Clickable Links
+
+Whenever a reply mentions an Agent Internet URI or id — `metaid://`, `metaapp://`, `metafile://`, `pin://`, `map://`, a bare pinId, or a bare globalMetaId — render it as a markdown link, never as bare text, so the human can click straight into the Browser. Resolve the clickable http target with `browser link`:
+
+```bash
+$HOME/.metabot/bin/metabot browser link --uri <URI>
+```
+
+`browser link` is a pure resolver: it returns the URI plus the `localUiUrl` that opens it in the local Browser, without navigating anything and without starting a stopped daemon. Link to the returned `localUiUrl`; when the envelope has no `localUiUrl` (no reachable daemon), link the scheme URI itself. This applies to every URI-shaped string in the reply, including URIs quoted from tool output or app metadata.
 
 ## Expectations
 
@@ -246,7 +276,8 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 
 - connect intent: going online through `browser open` with no URI
 - `browser open` and `browser tab open` for `metaid://`, domain aliases, `pin://`, `metaapp://`, `metafile://`, and `map://` targets
-- `metaapp search` for MetaApp discovery by query, tag, publisher, time range, runtime, or chain
+- `browser link` for normalizing any Agent Internet URI into a clickable local Browser http URL
+- `metaapp search` for MetaApp discovery by query, tag, publisher, time range, runtime, or chain, always opening the best match first
 - `metaapp forks` for the remix lineage of a known app
 - `metaapp source` for reading or remixing an app's source, including `APP.md`-first reading
 - `preview-metaapp://` live preview of a workspace app directory in Browser
