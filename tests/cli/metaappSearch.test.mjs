@@ -301,6 +301,44 @@ test('runCli default `metabot metaapp search` handler trims items and marks own 
   });
 });
 
+test('runCli default `metabot metaapp search` handler attaches clickable links when a daemon base URL is configured', async () => {
+  const systemHome = await mkdtempTempRoot('oac-cli-metaapp-search-links-');
+  const daemonBaseUrl = 'http://127.0.0.1:10001';
+
+  await withStubAggregationServer(() => ({
+    status: 200,
+    body: {
+      code: 0,
+      data: {
+        items: [
+          stubbedSearchItem(),
+          stubbedSearchItem({ pinId: `${'b2c3d4e5'.repeat(8)}i0`, publisherGlobalMetaId: '', publisherName: '' }),
+        ],
+        nextCursor: null,
+        hasMore: false,
+      },
+    },
+  }), async ({ baseUrl }) => {
+    const { exitCode, envelope } = await runMetaAppCli([
+      'metaapp',
+      'search',
+      '--query', 'pomodoro',
+    ], {
+      env: { HOME: systemHome, METASO_P2P_BASE_URL: baseUrl, METABOT_DAEMON_BASE_URL: daemonBaseUrl },
+    });
+
+    assert.equal(exitCode, 0);
+    const linked = envelope.data.items[0];
+    assert.equal(linked.localUiUrl, `${daemonBaseUrl}/browser/metaapp/${VALID_PIN_ID}`);
+    assert.equal(linked.publisherLocalUiUrl, `${daemonBaseUrl}/browser/metaid/gmid-own-123`);
+
+    // No publisher id means no publisher link; the app link is always present.
+    const noPublisher = envelope.data.items[1];
+    assert.equal(noPublisher.localUiUrl, `${daemonBaseUrl}/browser/metaapp/${'b2c3d4e5'.repeat(8)}i0`);
+    assert.equal('publisherLocalUiUrl' in noPublisher, false);
+  });
+});
+
 test('runCli default `metabot metaapp forks` handler queries forks and maps not-found', async () => {
   const systemHome = await mkdtempTempRoot('oac-cli-metaapp-forks-');
 

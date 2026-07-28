@@ -64,6 +64,7 @@ import {
   MetaAppSearchNotFoundError,
   searchMetaApps,
   trimMetaAppSearchItems,
+  type TrimmedMetaAppSearchItem,
 } from '../core/metaapp/metaAppSearchApi';
 import { materializeMetaAppSource } from '../core/metaapp/metaAppSource';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
@@ -777,6 +778,51 @@ function resolveLocalBrowserPath(uri: string): string {
   const query = new URLSearchParams();
   query.set('uri', uri);
   return `/browser?${query.toString()}`;
+}
+
+/**
+ * Best-effort daemon base URL for decorating read-only results with clickable
+ * http links. Unlike ensureDaemonBaseUrl this never starts or restarts a
+ * daemon: links are only attached when a base URL is already configured or a
+ * running daemon is reachable.
+ */
+async function readReachableDaemonBaseUrl(context: CliRuntimeContext): Promise<string | null> {
+  const explicitBaseUrl = normalizeEnvText(context.env.METABOT_DAEMON_BASE_URL);
+  if (explicitBaseUrl) {
+    return normalizeBaseUrl(explicitBaseUrl);
+  }
+  const daemonRecord = await resolveDaemonRecord(context);
+  if (
+    daemonRecord?.baseUrl
+    && daemonConfigMatchesContext(daemonRecord, context)
+    && await isDaemonReachable(daemonRecord.baseUrl, daemonRecord.ownerId)
+  ) {
+    return normalizeBaseUrl(daemonRecord.baseUrl);
+  }
+  return null;
+}
+
+/**
+ * Adds clickable per-item http links for hosts whose markdown renderer cannot
+ * intercept metaapp:// or metaid:// deep links: `localUiUrl` opens the app in
+ * the local Browser, `publisherLocalUiUrl` opens the publisher's Bot page.
+ */
+function withMetaAppCandidateLinks(
+  items: TrimmedMetaAppSearchItem[],
+  daemonBaseUrl: string | null,
+): Array<TrimmedMetaAppSearchItem & { localUiUrl?: string; publisherLocalUiUrl?: string }> {
+  if (!daemonBaseUrl) {
+    return items;
+  }
+  return items.map((item) => ({
+    ...item,
+    ...(item.pinId
+      ? { localUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metaapp://${item.pinId}`)}` }
+      : {}),
+    ...(item.publisherGlobalMetaId
+      ? { publisherLocalUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metaid://${item.publisherGlobalMetaId}`)}` }
+      : {}),
+  }));
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -2281,7 +2327,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
 
   async function runMetaAppSearch(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
     try {
-      const [page, ownGlobalMetaIds] = await Promise.all([
+      const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
         searchMetaApps({
           keyword: normalizeEnvText(typeof input.query === 'string' ? input.query : undefined) || undefined,
           tag: normalizeEnvText(typeof input.tag === 'string' ? input.tag : undefined) || undefined,
@@ -2294,9 +2340,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
         }, readMetaAppSearchOptions()),
         listOwnGlobalMetaIds(),
+        readReachableDaemonBaseUrl(context),
       ]);
       return commandSuccess({
-        items: trimMetaAppSearchItems(page.items, ownGlobalMetaIds),
+        items: withMetaAppCandidateLinks(trimMetaAppSearchItems(page.items, ownGlobalMetaIds), daemonBaseUrl),
         hasMore: page.hasMore,
         nextCursor: page.nextCursor,
       });
@@ -2311,16 +2358,17 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       return commandFailed('invalid_argument', 'pinId is required to list MetaApp forks.');
     }
     try {
-      const [page, ownGlobalMetaIds] = await Promise.all([
+      const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
         listMetaAppForks({
           pinId,
           size: readPositiveField(input.limit),
           cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
         }, readMetaAppSearchOptions()),
         listOwnGlobalMetaIds(),
+        readReachableDaemonBaseUrl(context),
       ]);
       return commandSuccess({
-        items: trimMetaAppSearchItems(page.items, ownGlobalMetaIds),
+        items: withMetaAppCandidateLinks(trimMetaAppSearchItems(page.items, ownGlobalMetaIds), daemonBaseUrl),
         hasMore: page.hasMore,
         nextCursor: page.nextCursor,
       });

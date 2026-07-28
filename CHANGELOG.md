@@ -11,7 +11,10 @@ tags for releases.
 
 - Added `metabot metaapp search` and `metabot metaapp forks` backed by the
   metaso-p2p MetaApp aggregation API, with trimmed results and local `isOwn`
-  marking.
+  marking. Result items now carry clickable per-item `localUiUrl` and
+  `publisherLocalUiUrl` http links whenever a daemon base URL is configured or
+  reachable, so hosts without a deep-link interceptor can open apps and
+  publisher Bot pages in the local Browser.
 - Added `metabot metaapp source` to materialize a MetaApp package from the
   shared artifact cache into a workspace directory with a `.metaapp-fork.json`
   provenance marker.
@@ -23,8 +26,11 @@ tags for releases.
   `METABOT_BROWSER_DISABLE_PREVIEW_METAAPP=1`).
 - Renamed the `metabot-browser-open` skill to `metabot-browser` with in-app
   browser routing, MetaApp discovery/remix guidance, and the APP.md authoring
-  convention in `metabot-metaapp`. `metabot-browser-open` remains for one
-  release as a deprecated stub.
+  convention in `metabot-metaapp`. Casual discovery phrasing ("what on-chain X
+  exists", "published in the last N days", "open the on-chain X app") now
+  routes to `metaapp search`, and candidate bullets prefer the clickable
+  per-item http links. `metabot-browser-open` remains for one release as a
+  deprecated stub.
 
 ### Security
 

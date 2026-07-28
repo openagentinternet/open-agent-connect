@@ -1,6 +1,6 @@
 ---
 name: metabot-browser
-description: Use when a human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, a MetaFile, or a map through the existing local Browser entrypoint, including opening a resource in a new Browser tab; also use when the human wants to find or discover on-chain MetaApps by topic, tag, publisher, or time range, list the remixes of a known app, read what an app does, or remix and republish an existing MetaApp.
+description: Use when a human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, a MetaFile, or a map through the existing local Browser entrypoint, including opening a resource in a new Browser tab; also use when the human wants to find or discover on-chain MetaApps by topic, tag, publisher, or time range — such as "what on-chain mini-games exist", "apps published in the last 30 days", or "open the on-chain buzz app" — list the remixes of a known app, read what an app does, or remix and republish an existing MetaApp.
 ---
 
 # MetaBot Browser
@@ -29,6 +29,8 @@ Should trigger when:
 - The human asks to open a known MetaApp, MetaFile, or map URI in Browser.
 - The human asks to open something in a new Browser tab, or open several things at once while keeping the current Browser view.
 - The human asks to find or discover MetaApps by topic, capability, tag, publisher, or time range, such as "mini-games published in the last 7 days", "Bob's latest app", or "apps that support simplebuzz".
+- The human asks what on-chain apps, games, or tools exist, or what was published recently — for example "what on-chain mini-games are there", "what new apps appeared in the last 30 days", or "any music players on-chain", in any language. These are always `metaapp search` intent, even when the phrasing sounds like a casual question.
+- The human asks to open an on-chain app by name or topic rather than by pinId — for example "open the on-chain buzz app" or "open that on-chain music player". Search first with `metaapp search`, then open the best match; never answer from memory.
 - The human asks to see the remixes or forks of a known app.
 - The human asks what an on-chain app does, or asks to modify, remix, or build on top of an existing app.
 
@@ -158,6 +160,7 @@ Map the human's intent to flags:
 | Human intent | Command flags |
 | --- | --- |
 | "latest N days of X" / "X from the last N days" | `--query "X" --since-days N` |
+| "what X apps are on-chain" / "open the on-chain X app" (buzz, music player, games, ...) | `--query "X"`, then open the best match |
 | "publisher's latest" / "Bob's latest app" | `--publisher <globalMetaId> --limit 1` |
 | "apps that support simplebuzz" | `--tag simplebuzz` |
 | "remixes of this app" | use `metaapp forks --pin-id <pinId>` instead |
@@ -174,13 +177,14 @@ Additional filters: `--tag <tag>`, `--publisher <globalMetaId>`, `--until-days <
 Render each candidate as a ready-to-quote markdown bullet and reuse these bullet lines verbatim in the reply:
 
 ```markdown
-- [Title](metaapp://<pinId>) — <intro>
-  by [PublisherName](metaid://<fullGlobalMetaId>) | tags: <tag1, tag2> | updated: YYYY-MM-DD
+- [Title](<localUiUrl or metaapp://<pinId>>) — <intro>
+  by [PublisherName](<publisherLocalUiUrl or metaid://<fullGlobalMetaId>>) | tags: <tag1, tag2> | updated: YYYY-MM-DD
 ```
 
 Formatting rules:
 
 - App titles and author names are always markdown links; never restate an app or an author as plain text.
+- Link the title to the item's `localUiUrl` and the author to the item's `publisherLocalUiUrl` whenever the envelope provides them. These are plain http URLs that every host renders as clickable, and they open the app or the publisher's Bot page in the local Browser. Fall back to `metaapp://<pinId>` and `metaid://<fullGlobalMetaId>` only when an item has no link fields (no reachable daemon).
 - Never shorten, truncate, or ellipsis ids: pinIds and globalMetaIds always appear in full.
 - Use `title` for the app link text, falling back to `appName`, then the pinId.
 - Use `publisherName` for the author link text when present, otherwise the full `publisherGlobalMetaId`.
@@ -223,7 +227,7 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 
 ## Output Conventions
 
-- Link apps as `[title](metaapp://<pinId>)` and Bots or authors as `[name](metaid://<fullGlobalMetaId>)`. Full ids always; never shorten, truncate, or ellipsis them.
+- Link apps to their envelope `localUiUrl` when present (falling back to `metaapp://<pinId>`) and Bots or authors to their `publisherLocalUiUrl` when present (falling back to `metaid://<fullGlobalMetaId>`). Full ids always; never shorten, truncate, or ellipsis them.
 - Reuse the candidate bullet lines from Find And Discover MetaApps verbatim when listing apps.
 - `localUiUrl` values always come from the CLI envelope; never invent localhost URLs.
 
