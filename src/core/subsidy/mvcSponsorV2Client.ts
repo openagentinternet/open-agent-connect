@@ -7,14 +7,20 @@ type FetchResponseLike = {
   json(): Promise<unknown>;
 };
 
-type FetchImpl = (input: string, init?: {
+type FetchRequestInitLike = {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
-}) => Promise<FetchResponseLike>;
+  signal?: AbortSignal;
+};
+
+type FetchImpl = (input: string, init?: FetchRequestInitLike) => Promise<FetchResponseLike>;
 
 type SponsorStage = 'address_info' | 'challenge' | 'pre' | 'commit';
 type SponsorReason = 'insufficient_quota' | 'service_unavailable' | 'commit_failed' | 'pre_rejected' | 'invalid_request';
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+const DEFAULT_RETRY_DELAYS_MS = [250, 750] as const;
 
 export interface MvcSponsorV2ClientError extends Error {
   code: string;
@@ -23,6 +29,7 @@ export interface MvcSponsorV2ClientError extends Error {
   serviceMessage: string;
   status?: number;
   data?: unknown;
+  retryable?: boolean;
 }
 
 export interface MvcSponsorAddressInfo {
@@ -59,9 +66,23 @@ export interface MvcSponsorCommitResult {
   raw: Record<string, unknown>;
 }
 
+export interface MvcSponsorOrder {
+  orderId: string;
+  status: string;
+  txId?: string;
+  txSize: number;
+  minerFee: number;
+  pending: boolean;
+  final: boolean;
+  failureReason?: string;
+  raw: Record<string, unknown>;
+}
+
 export interface CreateMvcSponsorV2ClientInput {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
+  retryDelaysMs?: number[];
 }
 
 function normalizeText(value: unknown): string {
@@ -106,6 +127,7 @@ function createSponsorError(stage: SponsorStage, message: string, extra: {
   status?: number;
   data?: unknown;
   reason?: SponsorReason;
+  retryable?: boolean;
 } = {}): MvcSponsorV2ClientError {
   const serviceMessage = normalizeText(message) || `MVC sponsor ${stage} failed.`;
   const error = new Error(serviceMessage) as MvcSponsorV2ClientError;
@@ -118,6 +140,9 @@ function createSponsorError(stage: SponsorStage, message: string, extra: {
   }
   if (extra.data !== undefined) {
     error.data = extra.data;
+  }
+  if (extra.retryable !== undefined) {
+    error.retryable = extra.retryable;
   }
   return error;
 }
@@ -146,7 +171,10 @@ function unwrapEnvelope(body: unknown, stage: SponsorStage): Record<string, unkn
   throw createSponsorError(
     stage,
     pickText(record, 'message', 'msg', 'error') || `Sponsor service returned code ${normalizeText(record.code) || 'unknown'}.`,
-    { data: record.data },
+    {
+      data: record.data,
+      retryable: normalizeBoolean(readObject(record.data)?.retryable) === true,
+    },
   );
 }
 
@@ -157,8 +185,93 @@ async function parseJsonResponse(response: FetchResponseLike, stage: SponsorStag
     throw createSponsorError(
       stage,
       `Sponsor service returned invalid JSON${response.status ? ` (HTTP ${response.status})` : ''}.`,
-      { status: response.status },
+      {
+        status: response.status,
+        retryable: isRetryableHttpStatus(response.status),
+      },
     );
+  }
+}
+
+function isRetryableHttpStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 504);
+}
+
+function isRetryableSponsorError(error: unknown): boolean {
+  return (error as { retryable?: unknown } | undefined)?.retryable === true;
+}
+
+function isSponsorClientError(error: unknown): error is MvcSponsorV2ClientError {
+  return typeof (error as { code?: unknown } | undefined)?.code === 'string'
+    && (error as { code: string }).code.startsWith('mvc_fee_assist_');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeRequestTimeout(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0
+    ? Math.floor(numeric)
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+function normalizeRetryDelays(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [...DEFAULT_RETRY_DELAYS_MS];
+  }
+  return value
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item) && item >= 0)
+    .map((item) => Math.floor(item));
+}
+
+async function requestJsonAttempt(
+  fetchImpl: FetchImpl,
+  url: string,
+  init: {
+    method: string;
+    headers: Record<string, string>;
+    body?: string;
+  },
+  stage: SponsorStage,
+  timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      ...init,
+      signal: controller.signal,
+    });
+    const body = await parseJsonResponse(response, stage);
+    if (!response.ok) {
+      const record = readObject(body);
+      throw createSponsorError(
+        stage,
+        record ? pickText(record, 'message', 'msg', 'error') || `Sponsor service request failed with HTTP ${response.status}.`
+          : `Sponsor service request failed with HTTP ${response.status}.`,
+        {
+          status: response.status,
+          data: record?.data,
+          retryable: isRetryableHttpStatus(response.status),
+        },
+      );
+    }
+
+    return unwrapEnvelope(body, stage);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw createSponsorError(stage, `Sponsor service request timed out after ${timeoutMs}ms.`, { retryable: true });
+    }
+    if (isSponsorClientError(error)) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw createSponsorError(stage, message, { retryable: true });
+  } finally {
+    clearTimeout(timeoutHandle);
   }
 }
 
@@ -171,29 +284,23 @@ async function requestJson(
     body?: string;
   },
   stage: SponsorStage,
+  options: {
+    retry: boolean;
+    timeoutMs: number;
+    retryDelaysMs: number[];
+  },
 ): Promise<Record<string, unknown>> {
-  let response: FetchResponseLike;
-  try {
-    response = await fetchImpl(url, init);
-  } catch (error) {
-    throw createSponsorError(stage, error instanceof Error ? error.message : String(error));
+  const retryDelaysMs = options.retry ? options.retryDelaysMs : [];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await requestJsonAttempt(fetchImpl, url, init, stage, options.timeoutMs);
+    } catch (error) {
+      if (!isRetryableSponsorError(error) || attempt >= retryDelaysMs.length) {
+        throw error;
+      }
+      await delay(retryDelaysMs[attempt]);
+    }
   }
-
-  const body = await parseJsonResponse(response, stage);
-  if (!response.ok) {
-    const record = readObject(body);
-    throw createSponsorError(
-      stage,
-      record ? pickText(record, 'message', 'msg', 'error') || `Sponsor service request failed with HTTP ${response.status}.`
-        : `Sponsor service request failed with HTTP ${response.status}.`,
-      {
-        status: response.status,
-        data: record?.data,
-      },
-    );
-  }
-
-  return unwrapEnvelope(body, stage);
 }
 
 function normalizeBoolean(value: unknown): boolean | null {
@@ -352,6 +459,32 @@ function normalizeCommitResult(record: Record<string, unknown>): MvcSponsorCommi
   return result;
 }
 
+function normalizeSponsorOrder(record: Record<string, unknown>): MvcSponsorOrder {
+  const orderId = pickText(record, 'orderId', 'order_id');
+  const status = pickText(record, 'status');
+  const pending = normalizeBoolean(record.pending);
+  const final = normalizeBoolean(record.final);
+  if (!orderId || !status || pending === null || final === null) {
+    throw createSponsorError('commit', 'Sponsor order response is missing required fields.', {
+      data: record,
+      reason: 'commit_failed',
+    });
+  }
+  const txId = pickText(record, 'txId', 'txid');
+  const failureReason = pickText(record, 'failureReason', 'failure_reason');
+  return {
+    orderId,
+    status,
+    txId: txId || undefined,
+    txSize: normalizeRequiredNumber('commit', record, 'txSize', 'tx_size'),
+    minerFee: normalizeRequiredNumber('commit', record, 'minerFee', 'miner_fee'),
+    pending,
+    final,
+    failureReason: failureReason || undefined,
+    raw: record,
+  };
+}
+
 function createJsonHeaders(): Record<string, string> {
   return {
     accept: 'application/json',
@@ -372,6 +505,26 @@ function requireText(stage: SponsorStage, field: string, value: unknown): string
 export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = {}) {
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const fetchImpl = (input.fetchImpl ?? fetch) as FetchImpl;
+  const timeoutMs = normalizeRequestTimeout(input.requestTimeoutMs);
+  const retryDelaysMs = normalizeRetryDelays(input.retryDelaysMs);
+  const requestOptions = (retry: boolean) => ({ retry, timeoutMs, retryDelaysMs });
+
+  async function getSponsorOrder(orderIdValue: unknown): Promise<MvcSponsorOrder> {
+    const orderId = requireText('commit', 'orderId', orderIdValue);
+    const record = await requestJson(
+      fetchImpl,
+      `${baseUrl}/v2/assist/gas/mvc/order/${encodeURIComponent(orderId)}`,
+      {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+        },
+      },
+      'commit',
+      requestOptions(true),
+    );
+    return normalizeSponsorOrder(record);
+  }
 
   return {
     baseUrl,
@@ -385,7 +538,7 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
         headers: {
           accept: 'application/json',
         },
-      }, 'address_info');
+      }, 'address_info', requestOptions(true));
       return normalizeAddressInfo(record);
     },
     async getChallenge(): Promise<MvcSponsorChallenge> {
@@ -393,7 +546,7 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
         method: 'POST',
         headers: createJsonHeaders(),
         body: JSON.stringify({}),
-      }, 'challenge');
+      }, 'challenge', requestOptions(true));
       return normalizeChallenge(record);
     },
     async preSponsor(payload: {
@@ -413,8 +566,11 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
           publicKey: requireText('pre', 'publicKey', payload?.publicKey),
           signature: requireText('pre', 'signature', payload?.signature),
         }),
-      }, 'pre');
+      }, 'pre', requestOptions(false));
       return normalizePreResult(record);
+    },
+    async getSponsorOrder(payload: { orderId: string }): Promise<MvcSponsorOrder> {
+      return getSponsorOrder(payload?.orderId);
     },
     async commitSponsor(payload: {
       orderId: string;
@@ -422,17 +578,43 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
       publicKey: string;
       signature: string;
     }): Promise<MvcSponsorCommitResult> {
-      const record = await requestJson(fetchImpl, `${baseUrl}/v2/assist/gas/mvc/commit`, {
-        method: 'POST',
-        headers: createJsonHeaders(),
-        body: JSON.stringify({
-          orderId: requireText('commit', 'orderId', payload?.orderId),
-          signedTxHex: requireText('commit', 'signedTxHex', payload?.signedTxHex),
-          publicKey: requireText('commit', 'publicKey', payload?.publicKey),
-          signature: requireText('commit', 'signature', payload?.signature),
-        }),
-      }, 'commit');
-      return normalizeCommitResult(record);
+      const orderId = requireText('commit', 'orderId', payload?.orderId);
+      try {
+        const record = await requestJson(fetchImpl, `${baseUrl}/v2/assist/gas/mvc/commit`, {
+          method: 'POST',
+          headers: createJsonHeaders(),
+          body: JSON.stringify({
+            orderId,
+            signedTxHex: requireText('commit', 'signedTxHex', payload?.signedTxHex),
+            publicKey: requireText('commit', 'publicKey', payload?.publicKey),
+            signature: requireText('commit', 'signature', payload?.signature),
+          }),
+        }, 'commit', requestOptions(true));
+        return normalizeCommitResult(record);
+      } catch (error) {
+        if (!isRetryableSponsorError(error)) {
+          throw error;
+        }
+        try {
+          const order = await getSponsorOrder(orderId);
+          if (order.final && order.status === 'broadcasted' && order.txId) {
+            return {
+              txId: order.txId,
+              txSize: order.txSize,
+              minerFee: order.minerFee,
+              raw: order.raw,
+            };
+          }
+          const sponsorError = error as MvcSponsorV2ClientError;
+          sponsorError.data = {
+            transportError: sponsorError.data,
+            order: order.raw,
+          };
+        } catch {
+          // Preserve the original commit failure when status recovery is unavailable.
+        }
+        throw error;
+      }
     },
   };
 }

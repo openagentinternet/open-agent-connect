@@ -41,6 +41,7 @@ test('mvcSponsorV2Client normalizes v2 quota snapshots into numeric fields', asy
 
   const snapshot = await client.getAddressInfo({ address: ' mvc-address-1 ' });
 
+  assert.equal(calls[0].init.signal instanceof AbortSignal, true);
   assert.deepEqual(calls, [{
     url: 'https://www.metaso.network/assist-open-api/v2/assist/gas/address/info?address=mvc-address-1&gasChain=mvc',
     init: {
@@ -48,6 +49,7 @@ test('mvcSponsorV2Client normalizes v2 quota snapshots into numeric fields', asy
       headers: {
         accept: 'application/json',
       },
+      signal: calls[0].init.signal,
     },
   }]);
   assert.deepEqual(snapshot, {
@@ -125,6 +127,7 @@ test('mvcSponsorV2Client posts challenge without forcing an address payload', as
 
   const challenge = await client.getChallenge();
 
+  assert.equal(calls[0].init.signal instanceof AbortSignal, true);
   assert.deepEqual(calls, [{
     url: 'https://www.metaso.network/assist-open-api/v2/assist/gas/mvc/challenge',
     init: {
@@ -134,6 +137,7 @@ test('mvcSponsorV2Client posts challenge without forcing an address payload', as
         'content-type': 'application/json',
       },
       body: JSON.stringify({}),
+      signal: calls[0].init.signal,
     },
   }]);
   assert.deepEqual(challenge, {
@@ -192,6 +196,8 @@ test('mvcSponsorV2Client strictly normalizes pre and commit success payloads', a
     signature: 'commit-signature',
   });
 
+  assert.equal(calls[0].init.signal instanceof AbortSignal, true);
+  assert.equal(calls[1].init.signal instanceof AbortSignal, true);
   assert.deepEqual(calls, [
     {
       url: 'https://www.metaso.network/assist-open-api/v2/assist/gas/mvc/pre',
@@ -208,6 +214,7 @@ test('mvcSponsorV2Client strictly normalizes pre and commit success payloads', a
           publicKey: 'public-key-hex',
           signature: 'base64-signature',
         }),
+        signal: calls[0].init.signal,
       },
     },
     {
@@ -224,6 +231,7 @@ test('mvcSponsorV2Client strictly normalizes pre and commit success payloads', a
           publicKey: 'public-key-hex',
           signature: 'commit-signature',
         }),
+        signal: calls[1].init.signal,
       },
     },
   ]);
@@ -512,4 +520,172 @@ test('mvcSponsorV2Client keeps service failures separate from validation failure
       return true;
     },
   );
+});
+
+test('mvcSponsorV2Client retries transport and retryable HTTP failures on safe stages', async () => {
+  let attempts = 0;
+  const client = createMvcSponsorV2Client({
+    retryDelaysMs: [0, 0],
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new TypeError('fetch failed');
+      }
+      if (attempts === 2) {
+        return jsonResponse({ message: 'gateway unavailable' }, { ok: false, status: 503 });
+      }
+      return jsonResponse({
+        code: 0,
+        data: {
+          exists: true,
+          balance: 100,
+          grantedAmount: 100,
+          reservedAmount: 0,
+          spentAmount: 0,
+          availableAmount: 100,
+          status: 'active',
+        },
+      });
+    },
+  });
+
+  const snapshot = await client.getAddressInfo({ address: 'mvc-address-1' });
+
+  assert.equal(attempts, 3);
+  assert.equal(snapshot.availableAmount, 100);
+});
+
+test('mvcSponsorV2Client never retries pre after an ambiguous transport failure', async () => {
+  let attempts = 0;
+  const client = createMvcSponsorV2Client({
+    retryDelaysMs: [0, 0],
+    fetchImpl: async () => {
+      attempts += 1;
+      throw new TypeError('fetch failed');
+    },
+  });
+
+  await assert.rejects(
+    () => client.preSponsor({
+      address: 'mvc-address-1',
+      txHex: 'unsigned-tx-hex',
+      challengeId: 'challenge-1',
+      publicKey: 'public-key-hex',
+      signature: 'base64-signature',
+    }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+  assert.equal(attempts, 1);
+});
+
+test('mvcSponsorV2Client recovers a lost commit response from final order status', async () => {
+  let commitAttempts = 0;
+  let statusAttempts = 0;
+  const client = createMvcSponsorV2Client({
+    retryDelaysMs: [0, 0],
+    fetchImpl: async (url) => {
+      if (String(url).endsWith('/v2/assist/gas/mvc/commit')) {
+        commitAttempts += 1;
+        throw new TypeError('fetch failed');
+      }
+      if (String(url).endsWith('/v2/assist/gas/mvc/order/order-1')) {
+        statusAttempts += 1;
+        return jsonResponse({
+          code: 0,
+          data: {
+            orderId: 'order-1',
+            orderState: 15,
+            status: 'broadcasted',
+            txId: 'tx-1',
+            txSize: 345,
+            minerFee: 111,
+            pending: false,
+            final: true,
+          },
+        });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    },
+  });
+
+  const result = await client.commitSponsor({
+    orderId: 'order-1',
+    signedTxHex: 'signed-tx-hex',
+    publicKey: 'public-key-hex',
+    signature: 'commit-signature',
+  });
+
+  assert.equal(commitAttempts, 3);
+  assert.equal(statusAttempts, 1);
+  assert.deepEqual(result, {
+    txId: 'tx-1',
+    txSize: 345,
+    minerFee: 111,
+    raw: {
+      orderId: 'order-1',
+      orderState: 15,
+      status: 'broadcasted',
+      txId: 'tx-1',
+      txSize: 345,
+      minerFee: 111,
+      pending: false,
+      final: true,
+    },
+  });
+});
+
+test('mvcSponsorV2Client aborts a stalled request at the configured timeout', async () => {
+  const client = createMvcSponsorV2Client({
+    requestTimeoutMs: 5,
+    retryDelaysMs: [],
+    fetchImpl: async (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }),
+  });
+
+  await assert.rejects(
+    () => client.getAddressInfo({ address: 'mvc-address-1' }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_address_info_failed');
+      assert.equal(error.reason, 'service_unavailable');
+      assert.equal(error.retryable, true);
+      assert.match(error.message, /timed out after 5ms/i);
+      return true;
+    },
+  );
+});
+
+test('mvcSponsorV2Client keeps the configured timeout active while reading the response body', async () => {
+  let calls = 0;
+  const client = createMvcSponsorV2Client({
+    requestTimeoutMs: 10,
+    retryDelaysMs: [],
+    fetchImpl: async (_url, init) => {
+      calls += 1;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () => reject(new Error('body aborted')), { once: true });
+          });
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    () => client.getAddressInfo({ address: 'mvc-address-1' }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_address_info_failed');
+      assert.equal(error.retryable, true);
+      assert.match(error.serviceMessage, /timed out after 10ms/i);
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
 });
