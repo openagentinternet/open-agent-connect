@@ -24,6 +24,12 @@ tags for releases.
 - Added `preview-metaapp://localhost/<path>` resolution in the Bot Browser for
   live workspace previews (kill switch:
   `METABOT_BROWSER_DISABLE_PREVIEW_METAAPP=1`).
+- Added `metabot browser link --uri <uri>`, a pure resolver that normalizes any
+  Browser deep-link URI (`metaid://`, `metaapp://`, `metafile://`, `pin://`,
+  `map://`) into its clickable local Browser http URL without opening anything
+  or starting a stopped daemon. The `metabot-browser` skill now always opens
+  the best search match first and renders every mentioned Agent Internet URI
+  or id as a clickable markdown link.
 - Renamed the `metabot-browser-open` skill to `metabot-browser` with in-app
   browser routing, MetaApp discovery/remix guidance, and the APP.md authoring
   convention in `metabot-metaapp`. Casual discovery phrasing ("what on-chain X

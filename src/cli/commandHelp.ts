@@ -2302,6 +2302,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     subcommands: [
       { name: 'open', summary: 'Open the Agent Internet Browser page, optionally deep-linked to one resource URI.' },
       { name: 'tab', summary: 'Ask an already-open Browser page to open a resource URI in a new tab.' },
+      { name: 'link', summary: 'Resolve a Browser resource URI into its clickable local Browser http URL without opening anything.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -2366,6 +2367,32 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'metabot browser tab open --uri metaid://sunnyfung.eth',
       'metabot browser tab open --uri metaapp://<pinId>',
       'metabot browser tab open --uri pin://<pinId>',
+    ],
+  },
+  {
+    commandPath: ['browser', 'link'],
+    summary: 'Resolve a Browser resource URI into its clickable local Browser http URL without opening anything and without starting a stopped daemon.',
+    usage: 'metabot browser link --uri <resource-uri>',
+    optionalFlags: [
+      {
+        flag: '--uri',
+        value: '<resource-uri>',
+        description: 'Browser resource URI to resolve, such as metaid://<globalMetaId>, metaid://sunnyfung.eth, metaapp://<pinId>, metafile://<pinId>.png, pin://<pinId>, or map://<...>.',
+      },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'uri',
+      'localUiUrl',
+    ],
+    failureSemantics: [
+      'Fails when --uri is missing, empty, or looks like a flag.',
+      'localUiUrl is omitted when no daemon base URL is configured or reachable; link the scheme URI itself in that case.',
+    ],
+    examples: [
+      'metabot browser link --uri metaapp://<pinId>',
+      'metabot browser link --uri metaid://<globalMetaId>',
+      'metabot browser link --uri metafile://<pinId>.png',
     ],
   },
   {

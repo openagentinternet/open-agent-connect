@@ -104,6 +104,12 @@ Open a map URI when one is already known:
 {{METABOT_CLI}} browser open --uri map://<...>
 ```
 
+Resolve any Agent Internet URI into its clickable local Browser http URL without opening anything:
+
+```bash
+{{METABOT_CLI}} browser link --uri metaapp://<pinId>
+```
+
 ## Open In A New Tab
 
 Once at least one Browser page is already open, open a resource URI in a new tab of that running page instead of replacing the current view. This asks every currently-open Browser page to add the URI as a new tab. Tabs are a Browser-page concept: the human must have the Browser open first.
@@ -183,6 +189,7 @@ Render each candidate as a ready-to-quote markdown bullet and reuse these bullet
 
 Formatting rules:
 
+- Render candidates only as these bullet lines — never as a plain-text table or plain list. Tables and bare lists drop the links, and links are mandatory.
 - App titles and author names are always markdown links; never restate an app or an author as plain text.
 - Link the title to the item's `localUiUrl` and the author to the item's `publisherLocalUiUrl` whenever the envelope provides them. These are plain http URLs that every host renders as clickable, and they open the app or the publisher's Bot page in the local Browser. Fall back to `metaapp://<pinId>` and `metaid://<fullGlobalMetaId>` only when an item has no link fields (no reachable daemon).
 - Never shorten, truncate, or ellipsis ids: pinIds and globalMetaIds always appear in full.
@@ -192,9 +199,15 @@ Formatting rules:
 - Format `updatedAt` (unix seconds) as `YYYY-MM-DD`; omit `tags:` or `updated:` segments that have no value.
 - When a candidate has `isOwn: true`, mark the bullet with `(your Bot)` after the author link.
 
-### Open The Best Match
+### Open The Best Match First
 
-Pick the single best match for the human's intent and open it with `browser tab open --uri metaapp://<pinId>` (in-app, per the In-App Browser Rule), then offer 2–3 alternatives from the candidate list in case the best one is not what they meant. If nothing fits, say so honestly — never invent apps and never open a random candidate.
+A search reply is never just a list. The backend returns coarse candidates; you own the final pick, exactly like skill selection. Always:
+
+1. Pick the single best match for the human's intent.
+2. Open it immediately with `browser tab open --uri metaapp://<pinId>` — this pushes a new tab into every Browser page the human already has open, which is the in-app browsing experience. When `pagesReached` is `0`, no Browser page is open yet: run `browser open --uri metaapp://<pinId>` and open the returned `localUiUrl` per the In-App Browser Rule instead.
+3. Then present the remaining candidates (2–3) as bullets in case the pick is not what they meant.
+
+Never end a search reply by asking the human which app to open, and never open nothing when at least one candidate fits — opening the best match is the default, not an opt-in. If nothing fits, say so honestly — never invent apps and never open a random candidate.
 
 ### Empty Results
 
@@ -231,6 +244,16 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 - Reuse the candidate bullet lines from Find And Discover MetaApps verbatim when listing apps.
 - `localUiUrl` values always come from the CLI envelope; never invent localhost URLs.
 
+### Normalizing URIs Into Clickable Links
+
+Whenever a reply mentions an Agent Internet URI or id — `metaid://`, `metaapp://`, `metafile://`, `pin://`, `map://`, a bare pinId, or a bare globalMetaId — render it as a markdown link, never as bare text, so the human can click straight into the Browser. Resolve the clickable http target with `browser link`:
+
+```bash
+{{METABOT_CLI}} browser link --uri <URI>
+```
+
+`browser link` is a pure resolver: it returns the URI plus the `localUiUrl` that opens it in the local Browser, without navigating anything and without starting a stopped daemon. Link to the returned `localUiUrl`; when the envelope has no `localUiUrl` (no reachable daemon), link the scheme URI itself. This applies to every URI-shaped string in the reply, including URIs quoted from tool output or app metadata.
+
 ## Expectations
 
 - Use Browser CLI directly. Open Browser with no URI when the human asks for the Browser itself or asks to connect to Agent Internet, then follow the Connect Ritual.
@@ -245,7 +268,8 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 
 - connect intent: going online through `browser open` with no URI
 - `browser open` and `browser tab open` for `metaid://`, domain aliases, `pin://`, `metaapp://`, `metafile://`, and `map://` targets
-- `metaapp search` for MetaApp discovery by query, tag, publisher, time range, runtime, or chain
+- `browser link` for normalizing any Agent Internet URI into a clickable local Browser http URL
+- `metaapp search` for MetaApp discovery by query, tag, publisher, time range, runtime, or chain, always opening the best match first
 - `metaapp forks` for the remix lineage of a known app
 - `metaapp source` for reading or remixing an app's source, including `APP.md`-first reading
 - `preview-metaapp://` live preview of a workspace app directory in Browser

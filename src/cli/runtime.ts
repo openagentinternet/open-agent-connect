@@ -2289,6 +2289,23 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     });
   }
 
+  // Pure URI -> localUiUrl resolver for agents that need to render a clickable
+  // http link for a deep-link URI (metaapp://, metaid://, metafile://, pin://,
+  // map://, ...) without opening anything. Never starts a daemon: when no
+  // daemon base URL is reachable the URI itself is returned without a link.
+  async function resolveBrowserDeepLink(input: {
+    uri: string;
+  }): Promise<MetabotCommandResult<unknown>> {
+    const baseUrl = await readReachableDaemonBaseUrl(context);
+    if (!baseUrl) {
+      return commandSuccess({ uri: input.uri });
+    }
+    return commandSuccess({
+      uri: input.uri,
+      localUiUrl: `${baseUrl}${resolveLocalBrowserPath(input.uri)}`,
+    });
+  }
+
   // MetaApp aggregation search/forks run directly against the metaso-p2p API:
   // they are read-only and the only local state they need (the Bot registry
   // globalMetaIds behind `isOwn`) is readable from this process.
@@ -2570,6 +2587,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     browser: {
       open: async (input) => openLocalBrowserPage(input),
       tabOpen: async (input) => openBrowserTab(input),
+      link: async (input) => resolveBrowserDeepLink(input),
     },
     chain: {
       write: async (input) => requestJsonForSelectedActor(
