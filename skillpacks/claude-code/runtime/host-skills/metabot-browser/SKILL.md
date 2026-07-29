@@ -17,7 +17,7 @@ Generated for Claude Code.
 
 ### In-App Browser
 
-This Claude Code setup has no documented in-app browser or preview surface. Present every `localUiUrl` returned by the MetaBot CLI as a clickable markdown link for the human to open. If the running session does provide a web preview surface, prefer opening the `localUiUrl` there instead of handing it to the external browser.
+Open pages exactly as this skill instructs — through the MetaBot CLI open commands (`browser tab open` first, `browser open` when no Browser page is running); the daemon pushes the page into every open Browser page regardless of host. Always also present every `localUiUrl` returned by the MetaBot CLI as a clickable absolute-URL markdown link for the human. If this Claude Code session provides a web preview surface, prefer opening the `localUiUrl` there instead of handing it to the external browser; never use the external system browser or external browser automation.
 
 ## Routing
 
@@ -64,12 +64,12 @@ Should not trigger when:
 
 ## In-App Browser Rule
 
-When the human asks to open an Agent Internet resource (`metaid://`, `metaapp://`, `pin://`, `metafile://`, `map://`, or a `/browser/*` localUiUrl), call the CLI, take `localUiUrl` from the returned envelope, and open it **in the platform's own browser or preview surface**, following the Host Adapter section when the current host pack provides one. Only when the platform has no such surface, present the `localUiUrl` as a clickable markdown link for the human to open.
+When the human asks to open an Agent Internet resource (`metaid://`, `metaapp://`, `pin://`, `metafile://`, `map://`, or a `/browser/*` localUiUrl), call the CLI and take `localUiUrl` from the returned envelope. Opening always goes through the CLI open commands: `browser tab open --uri <uri>` pushes the page into every Browser page the human already has open — this works on every host, including chat platforms with an integrated browser — and `browser open --uri <uri>` covers the case where no Browser page is running yet. Then, whatever the host, also present the `localUiUrl` as a clickable absolute-URL markdown link so the human can open or re-open it. The Host Adapter section adds host-specific presentation notes; follow it for presentation, never as a reason to skip the CLI open or the link.
 
 The chat is the console and the Browser is the display. Whenever a search or lookup identifies an openable resource — a person, an app, a file — open the best match in the in-app browser right away and tell the human it is open. Opening is the default, never an opt-in extra, and it applies to MetaApp matches, MetaID matches, and detail lookups alike: even when the human asked for textual details, open the Bot page or app alongside the textual answer.
 
 - Never invent a local UI URL: always take `localUiUrl` from the CLI envelope. Never guess daemon ports or paths.
-- Never shell out to the external system browser or external browser automation to display a `localUiUrl`; either open it in the platform's own surface or present the link.
+- Never shell out to the external system browser or external browser automation to display a `localUiUrl`; open through the CLI open commands and present the link.
 
 ## Target Routing
 
@@ -329,7 +329,7 @@ Use `metaid detail --identity <globalMetaId|metaId|address>` when the human asks
 $HOME/.metabot/bin/metabot metaid detail --identity <globalMetaId>
 ```
 
-When the human asked to view someone's page or details, text is only half the reply: also open the identity's Bot page in the in-app browser with `browser tab open --uri metaid://<globalMetaId>` (fall back to `browser open --uri metaid://<globalMetaId>` when no Browser page is running, per the In-App Browser Rule), then say it is open and link the person's name to the opened page in your answer.
+When the human asked to view someone's page or details, text is only half the reply. Always do both: (1) open the identity's Bot page with `browser tab open --uri metaid://<globalMetaId>` (fall back to `browser open --uri metaid://<globalMetaId>` when no Browser page is running, per the In-App Browser Rule), and (2) link the person's name in your answer to the detail envelope's `localUiUrl`, copied verbatim — the detail envelope always carries it. Never present the `metaid://` URI as bare trailing text; if no `localUiUrl` is available (no reachable daemon), make the name a markdown link to `metaid://<fullGlobalMetaId>` instead.
 
 When the human's goal is a private message to a found person ("send a greeting to a music-loving Bot"), search with `--chat-pubkey`, pick the single best candidate, draft the greeting, then hand off to `metabot-chat-privatechat` with the chosen `globalMetaId` and the drafted message — that skill owns actor resolution and the `chat private` send flow. Never send the message from this skill.
 
