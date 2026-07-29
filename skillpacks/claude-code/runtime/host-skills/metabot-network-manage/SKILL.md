@@ -90,28 +90,30 @@ $HOME/.metabot/bin/metabot network sources remove --base-url http://127.0.0.1:48
 - For first-run discovery, lead with online Bots and Bot pages. Treat service discovery as an optional follow-up unless the user explicitly asks for services or a remote capability.
 
 - When the user asks for "online Bots", "online bot", or "online MetaBots", call `network bots --online --limit 20` first.
-- Return a Markdown table (max 20 rows): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
-- The CLI always produces this exact header; preserve it verbatim (including the `bio` and `🟢` columns even when bio cells are empty):
+- Return a Markdown table (max 20 rows): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order the data, and keep the name and bio cells verbatim. The one transformation you apply is turning each `globalmetaid` cell (and the Bot `name` when it is non-empty) into a clickable Bot-page link, following the universal convention in the `metabot-browser` skill ("Resource To Local Browser Link").
+- The CLI always produces this exact header; preserve it verbatim (including the `bio` and `🟢` columns even when bio cells are empty). Render the table the same way, with the id and name linked:
 
 ```markdown
 | # | name | globalmetaid | bio | Last Seen |
 |---|------|-------------|-----|-----------|
-| 1 | TestBot | idq1example... | help users | 12s 🟢 |
+| 1 | [TestBot](http://127.0.0.1:10001/browser/metaid/idq1example) | [idq1example](http://127.0.0.1:10001/browser/metaid/idq1example) | help users | 12s 🟢 |
 ```
 
+- Every `globalMetaId` shown to the human — in the table, in the `provider(id)` form, and in any follow-up sentence — must be a clickable Bot-page link of the form `http://127.0.0.1:10001/browser/metaid/<globalMetaId>`. A bare globalMetaId with no link is a mistake. Link the Bot `name` to the same target when a name is present. Never shorten, truncate, or ellipsis an id inside a link.
+- `globalMetaId` and `pinId` values are URL-safe by construction, so the path segment can hold the id as-is. For any id you are not sure about, or to avoid building links by hand, resolve the clickable target with `$HOME/.metabot/bin/metabot browser link --uri metaid://<globalMetaId>` and copy the returned `localUiUrl` verbatim.
 - When the user asks for "online Bot services", "online bot services", or "online MetaBot services", call `network services --online` first.
 - When the user provides a service intent or topic and only machine selection is needed, call `network services --cached --online --query "<short task keywords>"` first so the runtime reads the local service cache without waiting on chain discovery.
 - If the cached result is empty or stale, call `network services --online --query "<short task keywords>"` so the runtime refreshes the local cache and returns the best matching online skill services.
-- Return a Markdown table (max 20 rows by default): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order.
-- The CLI always produces this exact header; preserve it verbatim (including the `price` and `🟢` columns):
+- Return a Markdown table (max 20 rows by default): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order the data. Apply the same link transformation as the Bots table: the `provider` id is rendered as a clickable Bot-page link.
+- The CLI always produces this exact header; preserve it verbatim (including the `price` and `🟢` columns). Render the table the same way, with the provider id linked:
 
 ```markdown
 | # | service | provider | price | Last Seen |
 |---|---------|----------|-------|-----------|
-| 1 | Weather Service | WeatherBot(idq1provider...) | 0.0001SPACE | 5s 🟢 |
+| 1 | Weather Service | [WeatherBot](http://127.0.0.1:10001/browser/metaid/idq1provider) | 0.0001SPACE | 5s 🟢 |
 ```
 
-- The `provider` column format is `name(globalmetaid)` when the provider name is known, or just `globalmetaid` when it is not.
+- The `provider` column format is `name(globalmetaid)` when the provider name is known, or just `globalmetaid` when it is not. Render it as a clickable link either way: link the provider `name` to `http://127.0.0.1:10001/browser/metaid/<globalMetaId>` when a name is present, otherwise link the bare `globalMetaId` itself to the same target. Never show a bare, unlinked globalMetaId.
 - The `price` column shows the service price and currency (e.g. `0.0001SPACE`), or `-` if not available.
 - The `Last Seen` column shows seconds since last seen with a 🟢 emoji when online, or `-` when offline.
 - The JSON payload may include `ratingAvg`, `ratingCount`, `updatedAt`, `providerSkill`, and other fields. Preserve those fields for downstream selection and remote-call handoff even when the table does not display them.

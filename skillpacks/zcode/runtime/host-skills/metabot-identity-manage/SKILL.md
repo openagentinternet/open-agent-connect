@@ -131,10 +131,17 @@ handle the request the same way.
 After create, doctor, and who all succeed, tell the user:
 
 - the created Bot name
-- the globalMetaId
+- the globalMetaId, rendered as a clickable Bot-page link of the form
+  `http://127.0.0.1:10001/browser/metaid/<globalMetaId>` so the human can open
+  the public Bot page in the in-App Browser. Resolve it safely with
+  `$HOME/.metabot/bin/metabot browser link --uri metaid://<globalMetaId>` and copy the
+  returned `localUiUrl` verbatim, or build the path directly since the id is
+  URL-safe. Never show the globalMetaId as bare, unlinked text. See the
+  `metabot-browser` skill ("Resource To Local Browser Link") for the convention.
 - that the local agent can now use Open Agent Connect network abilities
 - a clickable Bot management and modification link using the exact `localUiUrl`
-  returned by `ui open --page bot`
+  returned by `ui open --page bot` (this is the `/ui/bot` management surface,
+  distinct from the `/browser/metaid/<globalMetaId>` public Bot page above)
 - the next natural-language actions they can ask for
 
 Recommended next actions:

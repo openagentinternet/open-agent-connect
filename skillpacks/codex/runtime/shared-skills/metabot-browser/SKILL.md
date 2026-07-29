@@ -71,6 +71,49 @@ The chat is the console and the Browser is the display. Whenever a search or loo
 - MetaFile: pass `metafile://<pinId>` and keep a file extension when the human supplied one.
 - Map URI: pass `map://<...>` through unchanged.
 
+### Resource To Local Browser Link
+
+Every openable resource maps to one local Browser http path (the same target the
+CLI returns as `localUiUrl`). Use this as the canonical quick reference when you
+need to render an id or pin as a clickable link directly in a reply:
+
+| Resource | Local Browser link |
+|----------|--------------------|
+| globalMetaId | `http://127.0.0.1:10001/browser/metaid/<globalMetaId>` |
+| MetaApp pinId | `http://127.0.0.1:10001/browser/metaapp/<pinId>` |
+| MetaFile pinId | `http://127.0.0.1:10001/browser/metafile/<pinId>` |
+| Generic chain pin (64 hex + `i0`) | `http://127.0.0.1:10001/browser/pin/<pinId>` |
+| Domain alias (e.g. `sunnyfung.eth`) | `http://127.0.0.1:10001/browser/metaid/<domainAlias>` |
+
+Prefer taking the ready-made `localUiUrl` from the CLI envelope (open/tab/link
+commands) and copying it verbatim into the link target. When you must build the
+link from a bare id yourself — for example wrapping many ids in a table without
+one resolver call per row — follow the URI-escape rule below.
+
+### URI Escaping When Building A Link From A Bare Id
+
+`globalMetaId` and `pinId` values are URL-safe by construction (hex characters
+plus a trailing `i0` for pins, or `idq1` + base32 for globalMetaIds), so they can
+be placed into the path segment as-is:
+
+```text
+http://127.0.0.1:10001/browser/metaid/idq14hmv23j5fnlx4ccnmvlyldjd38xjsechzwg9xz
+```
+
+When the resource id is anything else (a domain alias with a dot, an id carrying
+a file extension, or any id you are not sure about), percent-encode the path
+segment, or — safer — let the resolver build it:
+
+```bash
+$HOME/.metabot/bin/metabot browser link --uri metaid://<globalMetaId>
+$HOME/.metabot/bin/metabot browser link --uri metafile://<pinId>.png
+```
+
+`browser link` returns `{ uri, localUiUrl }`; copy the returned `localUiUrl` into
+the markdown link target verbatim, never retype or shorten the id inside it. If
+the envelope has no `localUiUrl` (no reachable daemon), link the scheme URI
+(`metaid://<globalMetaId>`) itself instead of inventing a localhost URL.
+
 ## Commands
 
 Open Browser with no target URI:
@@ -360,13 +403,13 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 
 ### Normalizing URIs Into Clickable Links
 
-Whenever a reply mentions an Agent Internet URI or id — `metaid://`, `metaapp://`, `metafile://`, `pin://`, `map://`, a bare pinId, or a bare globalMetaId — render it as a markdown link, never as bare text, so the human can click straight into the Browser. Resolve the clickable http target with `browser link`:
+Whenever a reply mentions an Agent Internet URI or id — `metaid://`, `metaapp://`, `metafile://`, `pin://`, `map://`, a bare pinId, or a bare globalMetaId — render it as a markdown link, never as bare text, so the human can click straight into the Browser. This is the universal convention every skill follows; see the **Resource To Local Browser Link** table above for the exact id-to-path mapping. Resolve the clickable http target with `browser link`:
 
 ```bash
 $HOME/.metabot/bin/metabot browser link --uri <URI>
 ```
 
-`browser link` is a pure resolver: it returns the URI plus the `localUiUrl` that opens it in the local Browser, without navigating anything and without starting a stopped daemon. Link to the returned `localUiUrl`; when the envelope has no `localUiUrl` (no reachable daemon), link the scheme URI itself. This applies to every URI-shaped string in the reply, including URIs quoted from tool output or app metadata.
+`browser link` is a pure resolver: it returns the URI plus the `localUiUrl` that opens it in the local Browser, without navigating anything and without starting a stopped daemon. Link to the returned `localUiUrl`; when the envelope has no `localUiUrl` (no reachable daemon), link the scheme URI itself. This applies to every URI-shaped string in the reply, including URIs quoted from tool output or app metadata. When you must build many links inline (for example one per row in a table), you may build the `/browser/<scheme>/<id>` path directly using the URI-escape rule above instead of calling the resolver once per row.
 
 ## Expectations
 

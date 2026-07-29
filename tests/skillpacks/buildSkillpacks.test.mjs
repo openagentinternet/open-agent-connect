@@ -340,6 +340,20 @@ test('buildAgentConnectSkillpacks includes the Browser open workflow skill', asy
   assert.match(content, /64 hex characters followed by `i0`/i);
 });
 
+test('metabot-browser skill is the canonical source for id-to-local-Browser-link mapping and URI escaping', async () => {
+  const { outputRoot } = await getBuiltSkillpacks();
+
+  const content = await readFile(sharedSkillFile(outputRoot, 'metabot-browser'), 'utf8');
+  assert.match(content, /^name:\s*metabot-browser$/m);
+  assert.match(content, /Resource To Local Browser Link/i);
+  assert.match(content, /http:\/\/127\.0\.0\.1:10001\/browser\/metaid\/<globalMetaId>/);
+  assert.match(content, /http:\/\/127\.0\.0\.1:10001\/browser\/metaapp\/<pinId>/);
+  assert.match(content, /http:\/\/127\.0\.0\.1:10001\/browser\/metafile\/<pinId>/);
+  assert.match(content, /http:\/\/127\.0\.0\.1:10001\/browser\/pin\/<pinId>/);
+  assert.match(content, /URI Escaping When Building A Link From A Bare Id/i);
+  assert.match(content, /URL-safe by construction/i);
+});
+
 test('buildAgentConnectSkillpacks includes the unified MetaApp workflow skill', async () => {
   const { outputRoot } = await getBuiltSkillpacks();
 
@@ -792,6 +806,10 @@ test('buildAgentConnectSkillpacks publishes merged network-manage workflow in th
   assert.match(content, /Markdown table \(max 20 rows\)/i);
   assert.match(content, /\|\s*#\s*\|\s*name\s*\|\s*globalmetaid\s*\|\s*bio\s*\|\s*Last Seen\s*\|/);
   assert.match(content, /When no online bots or services are found, explicitly say the list is currently empty/i);
+  assert.match(content, /http:\/\/127\.0\.0\.1:10001\/browser\/metaid\/<globalMetaId>/);
+  assert.match(content, /Every `globalMetaId` shown to the human[\s\S]*?must be a clickable Bot-page link/i);
+  assert.match(content, /A bare globalMetaId with no link is a mistake/i);
+  assert.match(content, /Resource To Local Browser Link/i);
   assert.match(content, /metabot chat private --from <bot-slug> --request-file/);
   assert.match(content, /offer natural-language follow-up prompts/i);
   assert.match(content, /Do not ask the human to type CLI commands directly/i);
@@ -826,6 +844,9 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /localUiUrl/);
   assert.match(content, /management and modification/i);
   assert.match(content, /## First Bot Creation Handoff/);
+  assert.match(content, /rendered as a clickable Bot-page link of the form[\s\S]*?http:\/\/127\.0\.0\.1:10001\/browser\/metaid\/<globalMetaId>/i);
+  assert.match(content, /Never show the globalMetaId as bare, unlinked text/i);
+  assert.match(content, /browser link --uri metaid:\/\/<globalMetaId>/);
   assert.match(content, /Bot, bot, and MetaBot as equivalent and case-insensitive/i);
   assert.match(content, /user chosen\s+name as part of the onboarding experience/i);
   assert.match(content, /show online Agents/i);
