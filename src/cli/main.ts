@@ -23,6 +23,7 @@ import { runWalletCommand } from './commands/wallet';
 import { runSystemCommand } from './commands/system';
 import { runLlmCommand } from './commands/llm';
 import { runMetaAppCommand } from './commands/metaapp';
+import { runMetaIdCommand } from './commands/metaid';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
 import { createCliRuntimeContext, type CliContext } from './types';
@@ -133,6 +134,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'metaapp':
           result = await runMetaAppCommand(rest, context);
+          break;
+        case 'metaid':
+          result = await runMetaIdCommand(rest, context);
           break;
         case undefined:
           result = commandFailed('missing_command', 'No command provided.');

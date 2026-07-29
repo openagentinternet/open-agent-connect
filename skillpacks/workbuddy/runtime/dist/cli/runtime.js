@@ -47,6 +47,7 @@ const ratingDetailState_1 = require("../core/ratings/ratingDetailState");
 const socketPresenceDirectory_1 = require("../core/discovery/socketPresenceDirectory");
 const metasoInfrastructure_1 = require("../core/network/metasoInfrastructure");
 const metaAppSearchApi_1 = require("../core/metaapp/metaAppSearchApi");
+const metaIdSearchApi_1 = require("../core/metaid/metaIdSearchApi");
 const metaAppSource_1 = require("../core/metaapp/metaAppSource");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
@@ -620,6 +621,51 @@ function withMetaAppCandidateLinks(items, daemonBaseUrl) {
             ? { publisherLocalUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metaid://${item.publisherGlobalMetaId}`)}` }
             : {}),
     }));
+}
+/**
+ * Same link decoration for MetaID directory candidates: `localUiUrl` opens the
+ * identity's Bot page in the local Browser, `avatarLocalUiUrl` the avatar
+ * metafile. Only attached when a daemon base URL is reachable.
+ */
+function withMetaIdCandidateLinks(items, daemonBaseUrl) {
+    if (!daemonBaseUrl) {
+        return items;
+    }
+    return items.map((item) => ({
+        ...item,
+        ...(item.globalMetaId
+            ? { localUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metaid://${item.globalMetaId}`)}` }
+            : {}),
+        ...(item.avatarId
+            ? { avatarLocalUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metafile://${item.avatarId}`)}` }
+            : {}),
+    }));
+}
+/**
+ * Link decoration for a MetaID detail record: Bot page, avatar metafile, and
+ * the declared custom homepage when its URI resolves to a Browser surface.
+ */
+function withMetaIdDetailLinks(detail, daemonBaseUrl) {
+    if (!daemonBaseUrl) {
+        return detail;
+    }
+    const homepage = detail.homepage;
+    const homepageRecord = homepage && typeof homepage === 'object' && !Array.isArray(homepage)
+        ? homepage
+        : null;
+    const homepageUri = normalizeEnvText(typeof homepageRecord?.uri === 'string' ? homepageRecord.uri : undefined);
+    return {
+        ...detail,
+        ...(detail.globalMetaId
+            ? { localUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metaid://${detail.globalMetaId}`)}` }
+            : {}),
+        ...(detail.avatarId
+            ? { avatarLocalUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(`metafile://${detail.avatarId}`)}` }
+            : {}),
+        ...(homepageUri
+            ? { homepageLocalUiUrl: `${daemonBaseUrl}${resolveLocalBrowserPath(homepageUri)}` }
+            : {}),
+    };
 }
 async function sleep(ms) {
     await new Promise((resolve) => setTimeout(resolve, ms));
@@ -1860,6 +1906,62 @@ function createDefaultCliDependencies(context) {
             return mapMetaAppSearchError(error);
         }
     }
+    // MetaID directory search/detail run directly against the metaso-p2p API,
+    // sharing the MetaApp aggregation client conventions (same base URL env,
+    // same envelope) and the same local Bot registry behind `isOwn`.
+    function mapMetaIdSearchError(error) {
+        if (error instanceof metaIdSearchApi_1.MetaIdSearchNotFoundError) {
+            return (0, commandResult_1.commandFailed)('metaid_not_found', error.message);
+        }
+        if (error instanceof metaIdSearchApi_1.MetaIdSearchApiError && error.apiCode === 40000) {
+            return (0, commandResult_1.commandFailed)('invalid_argument', error.message);
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return (0, commandResult_1.commandFailed)('metaid_search_failed', message);
+    }
+    async function runMetaIdSearch(input) {
+        try {
+            const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
+                (0, metaIdSearchApi_1.searchMetaIds)({
+                    keyword: normalizeEnvText(typeof input.query === 'string' ? input.query : undefined) || undefined,
+                    skill: normalizeEnvText(typeof input.skill === 'string' ? input.skill : undefined) || undefined,
+                    chainName: normalizeEnvText(typeof input.chain === 'string' ? input.chain : undefined) || undefined,
+                    hasChatPubkey: input.chatPubkey === true,
+                    hasHomepage: input.homepage === true,
+                    since: readPositiveField(input.since),
+                    until: readPositiveField(input.until),
+                    size: readPositiveField(input.limit),
+                    cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
+                }, readMetaAppSearchOptions()),
+                listOwnGlobalMetaIds(),
+                readReachableDaemonBaseUrl(context),
+            ]);
+            return (0, commandResult_1.commandSuccess)({
+                items: withMetaIdCandidateLinks((0, metaIdSearchApi_1.trimMetaIdSearchItems)(page.items, ownGlobalMetaIds), daemonBaseUrl),
+                hasMore: page.hasMore,
+                nextCursor: page.nextCursor,
+            });
+        }
+        catch (error) {
+            return mapMetaIdSearchError(error);
+        }
+    }
+    async function runMetaIdDetail(input) {
+        const identity = normalizeEnvText(typeof input.identity === 'string' ? input.identity : undefined);
+        if (!identity) {
+            return (0, commandResult_1.commandFailed)('invalid_argument', 'identity is required to read a MetaID detail.');
+        }
+        try {
+            const [detail, daemonBaseUrl] = await Promise.all([
+                (0, metaIdSearchApi_1.getMetaIdDetail)(identity, readMetaAppSearchOptions()),
+                readReachableDaemonBaseUrl(context),
+            ]);
+            return (0, commandResult_1.commandSuccess)(withMetaIdDetailLinks(detail, daemonBaseUrl));
+        }
+        catch (error) {
+            return mapMetaIdSearchError(error);
+        }
+    }
     // MetaApp source materialization runs in-process like search/forks: it is
     // read-only (download into the local artifact cache plus an optional
     // workspace copy) and shares the artifact cache with the daemon Browser
@@ -1979,6 +2081,10 @@ function createDefaultCliDependencies(context) {
             search: async (input) => runMetaAppSearch(input),
             forks: async (input) => runMetaAppForks(input),
             source: async (input) => runMetaAppSource(input),
+        },
+        metaid: {
+            search: async (input) => runMetaIdSearch(input),
+            detail: async (input) => runMetaIdDetail(input),
         },
         buzz: {
             post: async (input) => requestJsonForSelectedActor('POST', '/api/buzz/post', typeof input.from === 'string' ? input.from : undefined, input),
@@ -2593,6 +2699,7 @@ function mergeCliDependencies(context) {
         buzz: { ...defaults.buzz, ...provided.buzz },
         browser: { ...defaults.browser, ...provided.browser },
         metaapp: { ...defaults.metaapp, ...provided.metaapp },
+        metaid: { ...defaults.metaid, ...provided.metaid },
         chain: { ...defaults.chain, ...provided.chain },
         daemon: { ...defaults.daemon, ...provided.daemon },
         doctor: { ...defaults.doctor, ...provided.doctor },

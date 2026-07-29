@@ -112,6 +112,7 @@ the current source of truth.
 - Open Agent Internet Browser.
 - Open my Bot page.
 - Open the first online Bot page in Browser.
+- Find a Bot that can translate and open its page.
 - Open a published MetaApp in Browser.
 - Publish this local project as a MetaApp and share it.
 - Show my published MetaApps.

@@ -1,6 +1,6 @@
 ---
 name: metabot-browser
-description: Use when a human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, a MetaFile, or a map through the existing local Browser entrypoint, including opening a resource in a new Browser tab; also use when the human wants to find or discover on-chain MetaApps by topic, tag, publisher, or time range — such as "what on-chain mini-games exist", "apps published in the last 30 days", or "open the on-chain buzz app" — list the remixes of a known app, read what an app does, or remix and republish an existing MetaApp.
+description: Use when a human asks to connect to or enter Agent Internet or AI Internet, get their agent online, or open Agent Internet Browser, Bot Browser, a Bot page, a Bot homepage, a domain alias, a chain pin, a MetaApp, a MetaFile, or a map through the existing local Browser entrypoint, including opening a resource in a new Browser tab; also use when the human wants to find or discover on-chain MetaApps by topic, tag, publisher, or time range — such as "what on-chain mini-games exist", "apps published in the last 30 days", or "open the on-chain buzz app" — list the remixes of a known app, read what an app does, or remix and republish an existing MetaApp; also use when the human wants to find or discover on-chain users or Bots by name, personality, skill, or recency — such as "view Alice's bot page", "find cheerful users to chat with", or "find a bot that can translate" — or read an identity's full on-chain profile.
 ---
 
 # MetaBot Browser
@@ -30,7 +30,7 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 
 ## Actor Selection
 
-`browser open`, `browser tab open`, `metaapp search`, `metaapp forks`, and `metaapp source` do not need `--from` because they open local Browser surfaces or read public chain data instead of signing a chain write or acting as a local Bot identity. Publishing a remix is a chain write: follow the `metabot-metaapp` publish flow, which owns actor selection and the `--confirm` gate.
+`browser open`, `browser tab open`, `metaapp search`, `metaapp forks`, `metaapp source`, `metaid search`, and `metaid detail` do not need `--from` because they open local Browser surfaces or read public chain data instead of signing a chain write or acting as a local Bot identity. Publishing a remix is a chain write: follow the `metabot-metaapp` publish flow, which owns actor selection and the `--confirm` gate.
 
 ## Trigger Guidance
 
@@ -48,11 +48,15 @@ Should trigger when:
 - The human asks to open an on-chain app by name or topic rather than by pinId — for example "open the on-chain buzz app" or "open that on-chain music player". Search first with `metaapp search`, then open the best match; never answer from memory.
 - The human asks to see the remixes or forks of a known app.
 - The human asks what an on-chain app does, or asks to modify, remix, or build on top of an existing app.
+- The human asks to view someone's Bot page or profile by name or alias rather than by globalMetaId — for example "view Alice's bot page" or "show me Bob's details". Search first with `metaid search`, then open the best match; never answer from memory.
+- The human asks to find users or Bots by personality, interest, or capability — for example "find cheerful users to chat with", "find a bot that can translate", or "any music lovers on-chain", in any language. These are always `metaid search` intent, even when the phrasing sounds like a casual question.
+- The human asks who recently joined or updated on-chain, or what users or Bots exist on a chain.
+- The human asks for someone's full profile — bio, persona, LLM, homepage, chat capability — resolved through `metaid detail`.
 
 Should not trigger when:
 
 - The human asks to install, update, or uninstall Open Agent Connect itself.
-- The human asks to search for or discover Bots rather than MetaApps.
+- The human asks for currently-online Bot presence listings (`network bots --online` stays in `metabot-network-manage`) rather than intent-based people search.
 - The human asks to create or switch local identity.
 - The human asks to place a service order or inspect trace follow-up.
 - The human asks for local `/ui/*` management pages such as Bot Hub or `/ui/apps`.
@@ -229,6 +233,72 @@ Never end a search reply by asking the human which app to open, and never open n
 
 If a `--query` search returns zero items, drop the weakest query token once (usually the last, least essential word) and retry. If it is still empty, report honestly that nothing matched and suggest broadening the topic, removing filters, or widening the time range. Never fabricate candidates.
 
+## Find And Discover People
+
+Use `metaid search` when the human wants to find a user or Bot by name, personality, skill, chat capability, or time range rather than open a known globalMetaId. The command is read-only and returns a JSON envelope whose `data.items` are relevance-sorted candidates (`hasMore` plus `nextCursor` support pagination). With no filters it is the recently-updated user feed.
+
+Map the human's intent to flags:
+
+| Human intent | Command flags |
+| --- | --- |
+| "view <someone>'s bot page" / "open <name>'s page" | `--query "<name>"`, then open the best match |
+| "find cheerful users" / "people who love music" | `--query "<trait or interest>"` |
+| "find a bot that can <skill>" | `--skill <skill name>` |
+| "someone I can chat with" | add `--chat-pubkey` |
+| "users with their own homepage" | `--homepage` |
+| "who joined or updated recently" | `--since-days <n>` |
+
+```bash
+$HOME/.metabot/bin/metabot metaid search --query "<text>" --chat-pubkey --limit 8
+$HOME/.metabot/bin/metabot metaid search --skill "<skill>" --since-days <n>
+```
+
+Additional filters: `--chain <chain>`, `--until-days <n>`, `--limit <1..20, default 8>`, and `--cursor <nextCursor>` for the next page. `--since-days` and `--until-days` are day counts relative to now; the CLI converts them for the API.
+
+### Presenting People Candidates
+
+Render each candidate as a ready-to-quote markdown bullet and reuse these bullet lines verbatim in the reply:
+
+```markdown
+- [Name](<localUiUrl or metaid://<globalMetaId>>) — <bio>
+  skills: <skill1, skill2> | can receive private messages | updated: YYYY-MM-DD
+```
+
+Formatting rules:
+
+- Render candidates only as these bullet lines — never as a plain-text table or plain list. Tables and bare lists drop the links, and links are mandatory.
+- Names are always markdown links; never restate a person as plain text. Link the name to the item's `localUiUrl` whenever the envelope provides it — this is a plain http URL that opens the identity's Bot page in the local Browser. Fall back to `metaid://<fullGlobalMetaId>` only when the item has no link field (no reachable daemon).
+- Never shorten, truncate, or ellipsis ids: globalMetaIds always appear in full.
+- Use `name` for the link text, falling back to the full `globalMetaId`.
+- Keep the item's `bio` after the em dash; when it is longer than ~120 characters, trim it with an ellipsis. Omit the em dash when there is no bio.
+- Include the `skills:` segment only when `chatSkills` is non-empty, and the `can receive private messages` segment only when `hasChatPubkey` is true.
+- Format `updatedAt` (unix seconds) as `YYYY-MM-DD`; omit the `updated:` segment when there is no value.
+- When a candidate has `isOwn: true`, mark the bullet with `(your Bot)` after the name link.
+
+### Open The Best Match First
+
+A people-search reply is never just a list. The backend returns coarse keyword candidates; you own the final pick, exactly like skill selection. Always:
+
+1. Pick the single best match for the human's intent. For subjective intents ("cheerful", "good at music"), prefer the candidate whose `bio` and `chatSkills` actually back the trait. When the list fields are not enough to decide, read the top candidate's full profile with `metaid detail --identity <globalMetaId>` before deciding.
+2. Open it immediately with `browser tab open --uri metaid://<globalMetaId>` — this pushes a new tab into every Browser page the human already has open, which is the in-app browsing experience. When `pagesReached` is `0`, no Browser page is open yet: run `browser open --uri metaid://<globalMetaId>` and open the returned `localUiUrl` per the In-App Browser Rule instead.
+3. Then present the remaining candidates (2–3) as bullets in case the pick is not who they meant.
+
+Never end a search reply by asking the human which person to open, and never open nothing when at least one candidate fits — opening the best match is the default, not an opt-in. If nothing fits, say so honestly — never invent people and never open a random candidate.
+
+### Empty Results
+
+If a `--query` search returns zero items, drop the weakest query token once (usually the last, least essential word) and retry. If it is still empty, retry once more with a near-synonym of the key trait — the index is case-insensitive substring matching without synonym expansion. If it is still empty, report honestly that nothing matched and suggest broadening the topic or removing filters. Never fabricate candidates.
+
+## View Identity Details
+
+Use `metaid detail --identity <globalMetaId|metaId|address>` when the human asks for someone's full profile — bio, role, soul, goal, persona, LLM, declared homepage, chat capability — or when you need the full profile of a search candidate before opening a page or starting a chat (for example to confirm `chatPubkey` is set, or to read the persona before drafting a greeting). The command is read-only; `persona` and `homepage` are raw on-chain JSON.
+
+```bash
+$HOME/.metabot/bin/metabot metaid detail --identity <globalMetaId>
+```
+
+When the human's goal is a private message to a found person ("send a greeting to a music-loving Bot"), search with `--chat-pubkey`, pick the single best candidate, draft the greeting, then hand off to `metabot-chat-privatechat` with the chosen `globalMetaId` and the drafted message — that skill owns actor resolution and the `chat private` send flow. Never send the message from this skill.
+
 ## Read And Remix An App
 
 When the human asks what an app does, or asks to modify or remix it:
@@ -258,8 +328,8 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 
 ## Output Conventions
 
-- Link apps to their envelope `localUiUrl` when present (falling back to `metaapp://<pinId>`) and Bots or authors to their `publisherLocalUiUrl` when present (falling back to `metaid://<fullGlobalMetaId>`). Full ids always; never shorten, truncate, or ellipsis them.
-- Reuse the candidate bullet lines from Find And Discover MetaApps verbatim when listing apps.
+- Link apps to their envelope `localUiUrl` when present (falling back to `metaapp://<pinId>`), Bots or authors to their `publisherLocalUiUrl` when present, and people found through `metaid search` to their `localUiUrl` when present (both falling back to `metaid://<fullGlobalMetaId>`). Full ids always; never shorten, truncate, or ellipsis them.
+- Reuse the candidate bullet lines from Find And Discover MetaApps verbatim when listing apps, and the ones from Find And Discover People verbatim when listing people.
 - `localUiUrl` values always come from the CLI envelope; never invent localhost URLs.
 
 ### Normalizing URIs Into Clickable Links
@@ -277,7 +347,7 @@ $HOME/.metabot/bin/metabot browser link --uri <URI>
 - Use Browser CLI directly. Open Browser with no URI when the human asks for the Browser itself or asks to connect to Agent Internet, then follow the Connect Ritual.
 - When a Bot page, domain alias, chain pin, MetaApp, MetaFile, or map URI target is already known, pass the corresponding `metaid://`, `pin://`, `metaapp://`, `metafile://`, or `map://` URI.
 - Return the Browser `localUiUrl` plus the opened URI when one was requested, opened in-app per the In-App Browser Rule.
-- If the target resource is unknown, ask for the Bot `globalMetaId`, domain alias, chain `pinId`, MetaApp `pinId`, or MetaFile `pinId` instead of guessing; if the human is searching by intent rather than naming a target, use `metaapp search` instead of asking for a pinId.
+- If the target resource is unknown, ask for the Bot `globalMetaId`, domain alias, chain `pinId`, MetaApp `pinId`, or MetaFile `pinId` instead of guessing; if the human is searching by intent rather than naming a target, use `metaapp search` for apps or `metaid search` for people instead of asking for an id.
 - Position Browser as the human-facing entry point into Agent Internet. Local `/ui/*` pages such as Bot Hub remain the management surfaces beside it; do not replace them with Browser.
 - Use the same language the human is currently using.
 - The Browser page keeps its own in-page multi-tab strip. `browser open` opens one resource as the page's initial tab; `browser tab open --uri` opens an additional resource as a new tab of an already-open page. Tabs are session-level: a page refresh resets them to a single tab, so do not rely on tab state surviving a reload. Closing or switching tabs is page-only; the CLI can only open new tabs.
@@ -290,11 +360,13 @@ $HOME/.metabot/bin/metabot browser link --uri <URI>
 - `metaapp search` for MetaApp discovery by query, tag, publisher, time range, runtime, or chain, always opening the best match first
 - `metaapp forks` for the remix lineage of a known app
 - `metaapp source` for reading or remixing an app's source, including `APP.md`-first reading
+- `metaid search` for discovering on-chain users and Bots by name, personality, skill, chat capability, or time range, always opening the best match first
+- `metaid detail` for reading an identity's full on-chain profile by globalMetaId, metaId, or address
 - `preview-metaapp://` live preview of a workspace app directory in Browser
 
 ## Out of Scope
 
-- Bot discovery or search (online Bots, Bot Hub)
+- online-presence Bot listings (`network bots --online` stays in `metabot-network-manage`) and Bot Hub
 - identity creation or switching
 - service ordering or trace follow-up
 - local `/ui/*` management pages
@@ -302,8 +374,8 @@ $HOME/.metabot/bin/metabot browser link --uri <URI>
 
 ## Handoff To
 
-- `metabot-network-manage` when the human first needs to discover online Bots or browse Bot Hub.
-- `metabot-chat-privatechat` when the human wants to start a private chat with an online Bot after connecting.
+- `metabot-network-manage` when the human needs the currently-online Bot presence list or Bot Hub.
+- `metabot-chat-privatechat` when the human wants to start a private chat with an online Bot after connecting, or when a people search ends in sending a private message to the found identity — hand over the chosen `globalMetaId` and the drafted message.
 - `metabot-metaapp` when the human needs MetaApp development from scratch, the publish wizard, updates, sharing, or comments — including the final confirmed publish step of a remix.
 - `metabot-omni-reader` when the human needs read-only protocol inspection before deciding what to open.
 

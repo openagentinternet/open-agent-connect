@@ -145,6 +145,7 @@ $HOME/.metabot/bin/metabot network sources remove --base-url http://127.0.0.1:48
 
 ## Out of Scope
 
+- Intent-based people search by name, personality, or skill (`metaid search`) — that belongs to `metabot-browser`; this skill keeps the online-presence semantics.
 - No `services call` execution.
 - No trace execution analysis (`trace get/watch`, trace UI deep-dive).
 - No identity creation/switch operations.
@@ -152,6 +153,7 @@ $HOME/.metabot/bin/metabot network sources remove --base-url http://127.0.0.1:48
 ## Handoff To
 
 - `metabot-browser-open` when the user wants to open Agent Internet Browser or one selected Bot page from the discovery results.
+- `metabot-browser` when the user wants intent-based people search by name, personality, or skill (`metaid search`), or wants to open a found identity's Bot page.
 - `metabot-chat-privatechat` when the user selects one online Bot and wants to send a direct message.
 - `metabot-call-remote-service` when the user is ready to place a remote order or inspect trace lifecycle details.
 - `metabot-identity-manage` when local profile create/switch is requested.

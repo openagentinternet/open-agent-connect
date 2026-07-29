@@ -9,6 +9,14 @@ tags for releases.
 
 ### Added
 
+- Added `metabot metaid search` and `metabot metaid detail` backed by the
+  metaso-p2p MetaID aggregation API, with trimmed results, local `isOwn`
+  marking, and clickable `localUiUrl`/`avatarLocalUiUrl` (plus
+  `homepageLocalUiUrl` on detail) http links whenever a daemon base URL is
+  configured or reachable. The `metabot-browser` skill now owns people
+  discovery by name, personality, skill, chat capability, or time range —
+  always opening the best match first — and hands private-message intents over
+  to `metabot-chat-privatechat` with the chosen globalMetaId.
 - Added `metabot metaapp search` and `metabot metaapp forks` backed by the
   metaso-p2p MetaApp aggregation API, with trimmed results and local `isOwn`
   marking. Result items now carry clickable per-item `localUiUrl` and

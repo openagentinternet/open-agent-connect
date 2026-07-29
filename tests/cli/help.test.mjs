@@ -43,6 +43,8 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.doesNotMatch(output, /^\s+loom\s+/m);
   assert.match(output, /^\s+metaapp\s+/m);
   assert.match(output, /^\s+metaapp\s+.*owner list\/delete.*project packaging/m);
+  assert.match(output, /^\s+metaid\s+/m);
+  assert.match(output, /^\s+metaid\s+.*global MetaID directory/m);
   assert.doesNotMatch(output, /^\s+master\s+/m);
   assert.doesNotMatch(output, /^\s+evolution\s+/m);
   assert.equal(output.includes('"ok"'), false);
@@ -68,6 +70,7 @@ test('runCli prints machine-readable top-level help for `metabot --help --json`'
   assert.equal(output.subcommands.some((entry) => entry.name === 'loom'), false);
   assert.ok(output.subcommands.some((entry) => entry.name === 'browser'));
   assert.ok(output.subcommands.some((entry) => entry.name === 'metaapp'));
+  assert.ok(output.subcommands.some((entry) => entry.name === 'metaid'));
   assert.ok(output.subcommands.some((entry) => (
     entry.name === 'metaapp'
     && /owner list\/delete/.test(entry.summary)
@@ -154,6 +157,39 @@ test('runCli prints machine-readable help for every metaapp leaf command', async
     const output = JSON.parse(stdout.join(''));
     assert.deepEqual(output.commandPath, ['metaapp', command]);
     assert.equal(output.command, `metabot metaapp ${command}`);
+    assert.ok(output.optionalFlags.some((entry) => entry.flag === '--json'));
+  }
+});
+
+test('runCli prints metaid group help with all leaf commands', async () => {
+  const stdout = [];
+
+  const exitCode = await runCli(['metaid', '--help'], {
+    stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(exitCode, 0);
+  const output = stdout.join('');
+  assert.match(output, /^Usage:\s+metabot metaid <subcommand>/m);
+  for (const command of ['search', 'detail']) {
+    assert.match(output, new RegExp(`\\s+${command}\\s+`));
+  }
+});
+
+test('runCli prints machine-readable help for every metaid leaf command', async () => {
+  for (const command of ['search', 'detail']) {
+    const stdout = [];
+
+    const exitCode = await runCli(['metaid', command, '--help', '--json'], {
+      stdout: { write: (chunk) => { stdout.push(String(chunk)); return true; } },
+      stderr: { write: () => true },
+    });
+
+    assert.equal(exitCode, 0);
+    const output = JSON.parse(stdout.join(''));
+    assert.deepEqual(output.commandPath, ['metaid', command]);
+    assert.equal(output.command, `metabot metaid ${command}`);
     assert.ok(output.optionalFlags.some((entry) => entry.flag === '--json'));
   }
 });
