@@ -1,4 +1,4 @@
-# MetaID Directory Search Integration — Design Spec
+# MetaID Search Integration — Design Spec
 
 Status: implemented 2026-07-28
 Upstream API contract: metaso-p2p `docs/specs/2026-07-28-metaid-search-api.md` (`GET /api/metaid/list`, `GET /api/metaid/detail/:identity`, production `https://so.metaid.io`)

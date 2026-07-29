@@ -66,6 +66,8 @@ Should not trigger when:
 
 When the human asks to open an Agent Internet resource (`metaid://`, `metaapp://`, `pin://`, `metafile://`, `map://`, or a `/browser/*` localUiUrl), call the CLI, take `localUiUrl` from the returned envelope, and open it **in the platform's own browser or preview surface**, following the Host Adapter section when the current host pack provides one. Only when the platform has no such surface, present the `localUiUrl` as a clickable markdown link for the human to open.
 
+The chat is the console and the Browser is the display. Whenever a search or lookup identifies an openable resource — a person, an app, a file — open the best match in the in-app browser right away and tell the human it is open. Opening is the default, never an opt-in extra, and it applies to MetaApp matches, MetaID matches, and detail lookups alike: even when the human asked for textual details, open the Bot page or app alongside the textual answer.
+
 - Never invent a local UI URL: always take `localUiUrl` from the CLI envelope. Never guess daemon ports or paths.
 - Never shell out to the external system browser or external browser automation to display a `localUiUrl`; either open it in the platform's own surface or present the link.
 
@@ -297,6 +299,8 @@ Use `metaid detail --identity <globalMetaId|metaId|address>` when the human asks
 $HOME/.metabot/bin/metabot metaid detail --identity <globalMetaId>
 ```
 
+When the human asked to view someone's page or details, text is only half the reply: also open the identity's Bot page in the in-app browser with `browser tab open --uri metaid://<globalMetaId>` (fall back to `browser open --uri metaid://<globalMetaId>` when no Browser page is running, per the In-App Browser Rule), then say it is open and link the person's name to the opened page in your answer.
+
 When the human's goal is a private message to a found person ("send a greeting to a music-loving Bot"), search with `--chat-pubkey`, pick the single best candidate, draft the greeting, then hand off to `metabot-chat-privatechat` with the chosen `globalMetaId` and the drafted message — that skill owns actor resolution and the `chat private` send flow. Never send the message from this skill.
 
 ## Read And Remix An App
@@ -331,6 +335,8 @@ Use the directory when its entry file is `index.html`, otherwise the single entr
 - Link apps to their envelope `localUiUrl` when present (falling back to `metaapp://<pinId>`), Bots or authors to their `publisherLocalUiUrl` when present, and people found through `metaid search` to their `localUiUrl` when present (both falling back to `metaid://<fullGlobalMetaId>`). Full ids always; never shorten, truncate, or ellipsis them.
 - Reuse the candidate bullet lines from Find And Discover MetaApps verbatim when listing apps, and the ones from Find And Discover People verbatim when listing people.
 - `localUiUrl` values always come from the CLI envelope; never invent localhost URLs.
+- Names of people and apps are links everywhere in the reply — in candidate bullets, in summary sentences ("opened [AI_Sunny](...)"), in comparisons, and in next-step hints. A person or app name without a link is a mistake; never render candidates as plain-text tables or unlinked lists.
+- Describe people and apps found through search as on-chain or Agent Internet identities and apps (链上 / Agent 互联网), never as a "directory" or "catalog" (目录) — results are chain-indexed, not a listing.
 
 ### Normalizing URIs Into Clickable Links
 

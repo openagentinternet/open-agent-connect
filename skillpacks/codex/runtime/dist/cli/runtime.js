@@ -623,7 +623,7 @@ function withMetaAppCandidateLinks(items, daemonBaseUrl) {
     }));
 }
 /**
- * Same link decoration for MetaID directory candidates: `localUiUrl` opens the
+ * Same link decoration for MetaID search candidates: `localUiUrl` opens the
  * identity's Bot page in the local Browser, `avatarLocalUiUrl` the avatar
  * metafile. Only attached when a daemon base URL is reachable.
  */
@@ -1906,9 +1906,9 @@ function createDefaultCliDependencies(context) {
             return mapMetaAppSearchError(error);
         }
     }
-    // MetaID directory search/detail run directly against the metaso-p2p API,
-    // sharing the MetaApp aggregation client conventions (same base URL env,
-    // same envelope) and the same local Bot registry behind `isOwn`.
+    // MetaID search/detail run directly against the metaso-p2p API, sharing the
+    // MetaApp aggregation client conventions (same base URL env, same envelope)
+    // and the same local Bot registry behind `isOwn`.
     function mapMetaIdSearchError(error) {
         if (error instanceof metaIdSearchApi_1.MetaIdSearchNotFoundError) {
             return (0, commandResult_1.commandFailed)('metaid_not_found', error.message);

@@ -44,7 +44,7 @@ test('runCli prints top-level help text for `metabot --help` without a JSON enve
   assert.match(output, /^\s+metaapp\s+/m);
   assert.match(output, /^\s+metaapp\s+.*owner list\/delete.*project packaging/m);
   assert.match(output, /^\s+metaid\s+/m);
-  assert.match(output, /^\s+metaid\s+.*global MetaID directory/m);
+  assert.match(output, /^\s+metaid\s+.*on-chain MetaID identities/m);
   assert.doesNotMatch(output, /^\s+master\s+/m);
   assert.doesNotMatch(output, /^\s+evolution\s+/m);
   assert.equal(output.includes('"ok"'), false);

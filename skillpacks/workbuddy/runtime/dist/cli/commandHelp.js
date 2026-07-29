@@ -159,7 +159,7 @@ exports.ROOT_COMMAND_HELP = {
         { name: 'file', summary: 'Upload local files to MetaWeb.' },
         { name: 'buzz', summary: 'Publish simplebuzz posts to MetaWeb.' },
         { name: 'metaapp', summary: 'Manage MetaApp owner list/delete, payload publishing, project packaging, sharing, viewing, and commenting.' },
-        { name: 'metaid', summary: 'Search the global MetaID directory and read on-chain identity profiles.' },
+        { name: 'metaid', summary: 'Search on-chain MetaID identities (users and Bots) and read their profiles.' },
         { name: 'chain', summary: 'Write arbitrary MetaID tuples and protocol payloads on-chain.' },
         { name: 'wallet', summary: 'Inspect local wallet balances across supported chains.' },
         { name: 'network', summary: 'Inspect the MetaWeb yellow-pages directory and local source seeds.' },
@@ -1305,7 +1305,7 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['metaid'],
-        summary: 'MetaID directory commands for finding on-chain users and Bots and reading their profiles. Distinct from identity, which manages the local MetaBot identity.',
+        summary: 'MetaID search commands for finding on-chain users and Bots and reading their profiles. Distinct from identity, which manages the local MetaBot identity.',
         usage: 'metabot metaid <subcommand>',
         subcommands: [
             { name: 'search', summary: 'Search the global MetaID aggregation index.' },
@@ -1319,7 +1319,7 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['metaid', 'search'],
-        summary: 'Search the global MetaID directory by name keyword, skill, chain, chat capability, homepage, or time window. Read-only; requires no --confirm.',
+        summary: 'Search on-chain MetaID identities by name keyword, skill, chain, chat capability, homepage, or time window. Read-only; requires no --confirm.',
         usage: 'metabot metaid search [--query <text>] [--skill <name>] [--chain <chain>] [--chat-pubkey] [--homepage] [--since-days <n>] [--until-days <n>] [--limit <1-20>] [--cursor <cursor>]',
         requestShape: {
             query: 'optional keyword; space-separated AND matching over name/skills/profile text',

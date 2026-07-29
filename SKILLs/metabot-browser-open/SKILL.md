@@ -5,7 +5,7 @@ description: Deprecated alias of metabot-browser, kept for one release for backw
 
 # Bot Browser Open (Deprecated)
 
-This skill is deprecated and kept for one release for backward compatibility. The `metabot-browser` skill replaces it and covers everything this skill did: connecting to Agent Internet and opening Agent Internet Browser through `{{METABOT_CLI}} browser open`, plus opening Bot pages (`metaid://<globalMetaId>`), domain aliases such as `sunnyfung.eth`, chain pins (`pin://<pinId>`, 64 hex characters followed by `i0`), MetaApps (`metaapp://<pinId>`), and MetaFiles (`metafile://<pinId>`) in Browser tabs. `metabot-browser` also adds MetaApp search, MetaID directory search and identity profiles, remix lineage, source reading, and live preview.
+This skill is deprecated and kept for one release for backward compatibility. The `metabot-browser` skill replaces it and covers everything this skill did: connecting to Agent Internet and opening Agent Internet Browser through `{{METABOT_CLI}} browser open`, plus opening Bot pages (`metaid://<globalMetaId>`), domain aliases such as `sunnyfung.eth`, chain pins (`pin://<pinId>`, 64 hex characters followed by `i0`), MetaApps (`metaapp://<pinId>`), and MetaFiles (`metafile://<pinId>`) in Browser tabs. `metabot-browser` also adds MetaApp search, on-chain MetaID people search and identity profiles, remix lineage, source reading, and live preview.
 
 ## Actor Selection
 
