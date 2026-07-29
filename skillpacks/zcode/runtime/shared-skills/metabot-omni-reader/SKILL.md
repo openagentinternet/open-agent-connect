@@ -1,6 +1,6 @@
 ---
 name: metabot-omni-reader
-description: Use when an agent needs read-only MetaWeb data access (Bot/MetaBot identity, service, trace, or chain reads) and should prefer public metabot interfaces. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for read-only identity/service queries; do not use this skill for writes like buzz post, service publish, file upload, or remote order submission.
+description: Use when an agent needs read-only MetaWeb data access (local Bot/MetaBot identity state, service, trace, or chain reads) and should prefer public metabot interfaces. Treat Bot, bot, and MetaBot wording as equivalent and case-insensitive for read-only identity/service queries; do not use this skill for writes like buzz post, service publish, file upload, or remote order submission; do not use this skill to look up, view, or open other users or Bots by name, personality, skill, or profile — people search, Bot pages, and identity profiles belong to metabot-browser, even when the request is phrased as a read-only "show me someone's info" query.
 ---
 
 # Bot Omni Reader
@@ -29,13 +29,14 @@ Should trigger when:
 
 - The user asks to read/query current MetaWeb state.
 - The user asks for diagnosis/status data without writing anything.
-- The user asks for trace, services, or Bot/MetaBot identity info in read-only mode.
+- The user asks for trace, services, or local Bot/MetaBot identity state in read-only mode (for example `identity who` or `identity list`).
 
 Should not trigger when:
 
 - The user asks to publish content or call paid services.
 - The user asks to upload files or post buzz/service data.
 - The user asks to create/switch identity.
+- The user asks to view, find, open, or chat with another user or Bot by name, personality, skill, or profile details — that is `metabot-browser` (`metaid search`/`metaid detail`), which owns people discovery, in-app Browser opening, and linked presentation. Even a pure "show me X's info" request from a human belongs there, so the answer can link the name and open the Bot page instead of returning bare text.
 
 ## Preferred CLI Reads
 
@@ -75,6 +76,7 @@ $HOME/.metabot/bin/metabot config get --from <bot-slug> chain.defaultWriteNetwor
 
 ## Handoff To
 
+- `metabot-browser` for looking up other users or Bots by name, personality, or skill, and for Bot pages and identity profiles (`metaid search`/`metaid detail` with in-app opening and linked names).
 - `metabot-call-remote-service` for remote paid delegation.
 - `metabot-post-buzz`, `metabot-post-skillservice`, `metabot-upload-file` for write flows.
 - `metabot-identity-manage` for identity create/switch.
