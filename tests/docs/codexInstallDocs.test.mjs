@@ -174,19 +174,22 @@ test('unified install guide keeps first-run prompts focused on Agents, Browser, 
   assert.match(guide, /check current Bot identity/i);
   assert.match(guide, /list currently online Agents/i);
   assert.match(guide, /create the first Bot with a user-chosen name/i);
-  assert.match(guide, /open Agent Internet Browser/i);
   assert.match(guide, /open my Bot page in Browser/i);
   assert.match(guide, /publish a local project as a MetaApp/i);
   assert.match(guide, /send the first private hello to one online Agent/i);
   assert.match(guide, /ask what OAC can do or what capabilities MetaBot provides/i);
   assert.match(
     guide,
-    /one clear next action to open Agent Internet Browser or open the current Bot page in Browser/i
+    /one clear next action to open the current Bot page in Browser/i
   );
   assert.match(
     guide,
     /one clear next action to publish a local project as a MetaApp or view published MetaApps/i
   );
+  assert.match(guide, /http:\/\/127\.0\.0\.1:10001\/ui\/bot/);
+  assert.match(guide, /http:\/\/127\.0\.0\.1:10001\/browser/);
+  assert.match(guide, /do not lead first-run onboarding with the external Agent Internet\s+Browser/i);
+  assert.doesNotMatch(guide, /one clear next action to open Agent Internet Browser/i);
   assert.doesNotMatch(guide, /one clear next action to discover available Bot services/i);
   assert.match(firstRunSection, /metabot browser open/);
   assert.match(firstRunSection, /metabot metaapp view --mine/);
@@ -260,7 +263,6 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Only run `metabot identity create --name \.\.\.` after the user has supplied/i);
   assert.match(runbook, /Create a Bot named <your chosen name>/);
   assert.match(runbook, /online Agents/i);
-  assert.match(runbook, /open Agent Internet Browser/i);
   assert.match(runbook, /open my Bot page in Browser/i);
   assert.match(runbook, /publish a local project as a MetaApp/i);
   assert.match(runbook, /published MetaApps/i);
@@ -280,8 +282,12 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Do not lock prompts to fixed English phrases/i);
   assert.match(runbook, /Prompt wording can vary as long as intent is equivalent/i);
   assert.match(runbook, /if identity already exists, report current name and globalMetaId/i);
-  assert.match(runbook, /one clear next action to open Agent Internet Browser/i);
+  assert.match(runbook, /one clear next action to open the current Bot page in Browser/i);
   assert.match(runbook, /one clear next action to publish a local project as a MetaApp or view published MetaApps/i);
+  assert.match(runbook, /http:\/\/127\.0\.0\.1:10001\/ui\/bot/);
+  assert.match(runbook, /http:\/\/127\.0\.0\.1:10001\/browser/);
+  assert.match(runbook, /do not lead first-run onboarding with the external Agent Internet\s+Browser/i);
+  assert.doesNotMatch(runbook, /one clear next action to open Agent Internet Browser/i);
   assert.doesNotMatch(runbook, /one clear next action to discover available Bot services/i);
   assert.match(runbook, /## Welcome Message Shape \(Required\)/);
   assert.match(runbook, /Do not use one fixed canned paragraph/i);
