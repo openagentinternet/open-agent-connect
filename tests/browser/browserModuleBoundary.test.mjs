@@ -83,9 +83,10 @@ test('OAC Browser page script injects host bridge adapters for ABC gaps', () => 
   // Problem 1: host-owned file picker for metafile.upload.
   assert.match(script, /oacHandleBridgeMetafileUpload/);
   assert.match(script, /createElement\('input'\)/);
-  // Problem 2: two-phase pin-write confirmation round-trip.
-  assert.match(script, /oacHandleBridgePinWrite/);
-  assert.match(script, /oac-pin-confirm/);
+  // Problem 2: shared ABC client owns two-phase pin-write confirmation.
+  assert.match(script, /submitMetaIdPinWrite/);
+  assert.doesNotMatch(script, /oacHandleBridgePinWrite/);
+  assert.doesNotMatch(script, /oac-pin-confirm/);
   assert.match(script, /confirmRequest\.payload/);
   // Problem 3: daemon-pushed tab opens feed ABC's client-only AgentBrowserTabs.
   assert.match(script, /\/api\/browser\/events/);
