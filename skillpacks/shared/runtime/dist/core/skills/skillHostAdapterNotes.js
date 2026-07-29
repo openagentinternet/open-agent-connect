@@ -18,14 +18,14 @@ const BROWSER_HOST_NOTES = {
     cursor: [
         IN_APP_BROWSER_HEADING,
         '',
-        'Cursor has an embedded Browser Tab beside the chat. When the Cursor session exposes the browser automation `browser_navigate` tool, open every `localUiUrl` returned by the MetaBot CLI with it (`position: "active"` so the tab reveals) — never in the external system browser, and never through external browser automation such as Playwright. When no such tool is exposed in the session, present the `localUiUrl` as a full absolute-URL markdown link (for example `[AI_Sunny](http://127.0.0.1:10001/browser/metaid/<globalMetaId>)`); localhost links clicked in Cursor chat open in the integrated Browser Tab when the user\'s Browser Automation setting is "Browser Tab".',
+        'Cursor has an integrated Browser Tab beside the chat. Open pages exactly as this skill instructs — through the MetaBot CLI open commands (`browser tab open` first, `browser open` when no Browser page is running); the daemon pushes the page into every open Browser tab, and this works in Cursor like on any other host. Always also present the returned `localUiUrl` as a full absolute-URL markdown link (for example `[AI_Sunny](http://127.0.0.1:10001/browser/metaid/<globalMetaId>)`) so the human can click it: localhost links clicked in Cursor chat open in the integrated Browser Tab when the user\'s Browser Automation setting is "Browser Tab". Never open a `localUiUrl` in the external system browser or through external browser automation such as Playwright.',
     ].join('\n'),
 };
 function defaultBrowserNote(displayName) {
     return [
         IN_APP_BROWSER_HEADING,
         '',
-        `This ${displayName} setup has no documented in-app browser or preview surface. Present every \`localUiUrl\` returned by the MetaBot CLI as a clickable markdown link for the human to open. If the running session does provide a web preview surface, prefer opening the \`localUiUrl\` there instead of handing it to the external browser.`,
+        `Open pages exactly as this skill instructs — through the MetaBot CLI open commands (\`browser tab open\` first, \`browser open\` when no Browser page is running); the daemon pushes the page into every open Browser page regardless of host. Always also present every \`localUiUrl\` returned by the MetaBot CLI as a clickable absolute-URL markdown link for the human. If this ${displayName} session provides a web preview surface, prefer opening the \`localUiUrl\` there instead of handing it to the external browser; never use the external system browser or external browser automation.`,
     ].join('\n');
 }
 /**
