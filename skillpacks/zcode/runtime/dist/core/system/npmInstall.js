@@ -12,6 +12,7 @@ const hostSkillBinding_1 = require("../host/hostSkillBinding");
 const version_1 = require("../../cli/version");
 const platformRegistry_1 = require("../platform/platformRegistry");
 const platformRegistry_2 = require("../platform/platformRegistry");
+const skillHostAdapterNotes_1 = require("../skills/skillHostAdapterNotes");
 const homeSelection_1 = require("../state/homeSelection");
 const SUPPORTED_HOSTS = [...platformRegistry_1.SUPPORTED_PLATFORM_IDS];
 const PRIMARY_CLI_DOC_PATH = '$HOME/.metabot/bin/metabot';
@@ -57,7 +58,9 @@ async function renderSharedSkill(packageRoot, skillName, host) {
     return replaceAll(source, {
         '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
         '{{COMPATIBILITY_MANIFEST}}': 'release/compatibility.json',
-        '{{HOST_ADAPTER_SECTION}}': '',
+        '{{HOST_ADAPTER_SECTION}}': host
+            ? (0, skillHostAdapterNotes_1.renderSkillHostAdapterNote)(skillName, host, (0, platformRegistry_2.getPlatformDefinition)(host).displayName)
+            : '',
         '{{CURRENT_HOST}}': host ?? '<host>',
         '{{SYSTEM_ROUTING}}': replaceAll(systemRouting, {
             '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,

@@ -17,7 +17,7 @@ Generated for OpenClaw.
 
 ### In-App Browser
 
-This OpenClaw pack has no documented in-app browser or preview surface. Present every `localUiUrl` returned by the MetaBot CLI as a clickable markdown link for the human to open. If the running session does provide a web preview surface, prefer opening the `localUiUrl` there instead of handing it to the external browser.
+This OpenClaw setup has no documented in-app browser or preview surface. Present every `localUiUrl` returned by the MetaBot CLI as a clickable markdown link for the human to open. If the running session does provide a web preview surface, prefer opening the `localUiUrl` there instead of handing it to the external browser.
 
 ## Routing
 
@@ -277,6 +277,29 @@ Formatting rules:
 - Format `updatedAt` (unix seconds) as `YYYY-MM-DD`; omit the `updated:` segment when there is no value.
 - When a candidate has `isOwn: true`, mark the bullet with `(your Bot)` after the name link.
 
+Example — one found person rendered end to end. Given this envelope item (fields abbreviated):
+
+```json
+{
+  "name": "AI_Sunny",
+  "globalMetaId": "1ExampleGlobalMetaIdReplaceWithRealOne",
+  "bio": "链上生活记录者",
+  "chatSkills": ["draw"],
+  "hasChatPubkey": true,
+  "updatedAt": 1785295908,
+  "localUiUrl": "http://127.0.0.1:10001/browser/metaid/1ExampleGlobalMetaIdReplaceWithRealOne"
+}
+```
+
+the bullet is:
+
+```markdown
+- [AI_Sunny](http://127.0.0.1:10001/browser/metaid/1ExampleGlobalMetaIdReplaceWithRealOne) — 链上生活记录者
+  skills: draw | can receive private messages | updated: 2026-07-28
+```
+
+Copy `localUiUrl` into the link target verbatim — never retype it, never shorten the id inside it. Without `localUiUrl` (no reachable daemon), link `metaid://1ExampleGlobalMetaIdReplaceWithRealOne` instead.
+
 ### Open The Best Match First
 
 A people-search reply is never just a list. The backend returns coarse keyword candidates; you own the final pick, exactly like skill selection. Always:
@@ -284,6 +307,13 @@ A people-search reply is never just a list. The backend returns coarse keyword c
 1. Pick the single best match for the human's intent. For subjective intents ("cheerful", "good at music"), prefer the candidate whose `bio` and `chatSkills` actually back the trait. When the list fields are not enough to decide, read the top candidate's full profile with `metaid detail --identity <globalMetaId>` before deciding.
 2. Open it immediately with `browser tab open --uri metaid://<globalMetaId>` — this pushes a new tab into every Browser page the human already has open, which is the in-app browsing experience. When `pagesReached` is `0`, no Browser page is open yet: run `browser open --uri metaid://<globalMetaId>` and open the returned `localUiUrl` per the In-App Browser Rule instead.
 3. Then present the remaining candidates (2–3) as bullets in case the pick is not who they meant.
+
+Example reply once opened, in the human's language — the opened person's name is a link even in the summary sentence:
+
+> 已在右侧 Browser 打开 [AI_Sunny](http://127.0.0.1:10001/browser/metaid/1ExampleGlobalMetaIdReplaceWithRealOne) 的主页。其余候选：
+>
+> - [AI_小新](http://127.0.0.1:10001/browser/metaid/1AnotherGlobalMetaIdExample) — 活泼好动，超级 E 人
+>   can receive private messages | updated: 2026-07-27
 
 Never end a search reply by asking the human which person to open, and never open nothing when at least one candidate fits — opening the best match is the default, not an opt-in. If nothing fits, say so honestly — never invent people and never open a random candidate.
 

@@ -19,11 +19,9 @@ if (
 // The ABC bridge client runs in the host (parent) document. OAC overrides
 // bridge behaviors that a headless Node host must own:
 //   1. metafile.upload  -> host-owned <input type=file> picker + base64 POST
-//   2. metaid.pin.write -> two-phase confirmation (phase 1 returns a host token
-//      that never reaches the MetaApp iframe; the host completes phase 2)
-//   3. tab actions      -> subscribe to daemon-pushed tab opens and feed them to
+//   2. tab actions      -> subscribe to daemon-pushed tab opens and feed them to
 //      ABC's client-only AgentBrowserTabs API (fire-and-forget transport only)
-//   4. loadRuntime      -> re-emit browser.actor.changed once runtime is ready
+//   3. loadRuntime      -> re-emit browser.actor.changed once runtime is ready
 // All referenced helpers (commandApi, renderModal, closeModal, showToast, ...) are
 // declared at the same script scope, so they are in scope here.
 (function oacBrowserHostAdapters() {
@@ -102,94 +100,7 @@ if (
     };
   }
 
-  // Problem 2: two-phase pin-write confirmation. Phase 1 returns
-  // manual_action_required + confirmRequest carrying a host token. The token is
-  // consumed host-side (never handed to the MetaApp). The host re-submits the
-  // action with confirmRequest.payload to complete phase 2.
-  if (typeof handleBridgePinWrite === 'function') {
-    handleBridgePinWrite = function oacHandleBridgePinWrite(sourceWindow, id, params) {
-      var validation = validatePinWriteParams(params);
-      if (!validation.ok) {
-        bridgePostMessage(sourceWindow, bridgeResponse(id, false, validation.error));
-        return;
-      }
-      function submitPinWrite(payload) {
-        var body = JSON.stringify({
-          resourceUri: currentResourceUri(),
-          kind: 'metaid-pin-write',
-          payload: payload
-        });
-        return commandApi(endpointWithActor(browserEndpoints.actions), {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: body
-        });
-      }
-      function fail(code, message) {
-        bridgePostMessage(sourceWindow, bridgeResponse(id, false, {
-          code: code || 'pin_write_failed',
-          message: message || 'MetaID PIN write failed.'
-        }));
-      }
-      submitPinWrite(validation.value).then(function (result) {
-        bridgePostMessage(sourceWindow, bridgeResponse(id, true, result));
-      }).catch(function (phase1Error) {
-        var phase1 = phase1Error && phase1Error.payload ? phase1Error.payload : null;
-        var confirmRequest = phase1 && phase1.data ? phase1.data.confirmRequest : null;
-        // Only the OAC host returns confirmRequest. If absent, surface the error.
-        if (!confirmRequest) {
-          fail(textValue(phase1 && phase1.code) || textValue(phase1Error && phase1Error.code),
-               textValue(phase1 && phase1.message) || textValue(phase1Error && phase1Error.message));
-          return;
-        }
-        var confirmation = phase1.data.confirmation || {};
-        var display = confirmation.display || {};
-        var title = textValue(display.title) || 'Confirm on-chain write';
-        var summary = textValue(display.summary);
-        var rows = [
-          row('Operation', confirmation.operation),
-          row('Path', confirmation.path),
-          row('Type', confirmation.contentType)
-        ];
-        if (typeof confirmation.payloadSize === 'number') {
-          rows.push(row('Size', confirmation.payloadSize + ' bytes'));
-        }
-        if (summary) rows.unshift('<p class="browser-confirm-summary">' + escapeHtml(summary) + '</p>');
-        var bodyHtml = '<section class="browser-confirm-panel">' + rows.join('') +
-          '<p class="browser-confirm-note">Approving signs and broadcasts this MetaID write on chain.</p></section>';
-        renderModal(title, bodyHtml, 'Confirm', 'oac-pin-confirm');
-        function cleanup() {
-          document.removeEventListener('click', onConfirm, true);
-          document.removeEventListener('click', onCancel, true);
-        }
-        function onConfirm(event) {
-          if (!closestWithAttribute(event.target, 'data-browser-modal-action') || closestWithAttribute(event.target, 'data-browser-modal-action').getAttribute('data-browser-modal-action') !== 'oac-pin-confirm') return;
-          event.preventDefault();
-          event.stopPropagation();
-          cleanup();
-          closeModal();
-          submitPinWrite(confirmRequest.payload).then(function (phase2) {
-            bridgePostMessage(sourceWindow, bridgeResponse(id, true, phase2));
-          }).catch(function (phase2Error) {
-            var p = phase2Error && phase2Error.payload ? phase2Error.payload : null;
-            fail(textValue(p && p.code) || textValue(phase2Error && phase2Error.code),
-                 textValue(p && p.message) || textValue(phase2Error && phase2Error.message));
-          });
-        }
-        function onCancel(event) {
-          var closeTarget = closestWithAttribute(event.target, 'data-browser-modal-close');
-          if (!closeTarget) return;
-          cleanup();
-          closeModal();
-          fail('user_cancelled', 'MetaID PIN write was cancelled.');
-        }
-        document.addEventListener('click', onConfirm, true);
-        document.addEventListener('click', onCancel, true);
-      });
-    };
-  }
-
-  // Problem 3: subscribe to daemon-pushed tab actions (e.g. an external
+  // Problem 2: subscribe to daemon-pushed tab actions (e.g. an external
   // "metabot browser tab open --uri" call) and feed them to ABC's built-in
   // AgentBrowserTabs API. ABC tabs are strictly client-only and session-level,
   // so this listener carries fire-and-forget transport only; it holds no tab
@@ -210,7 +121,7 @@ if (
     } catch (_) { /* EventSource is best-effort; never break the page */ }
   }
 
-  // Problem 4: once runtime is ready, re-emit browser.actor.changed so MetaApps
+  // Problem 3: once runtime is ready, re-emit browser.actor.changed so MetaApps
   // that subscribe to the event (instead of polling browser.actor.current) learn
   // the current actor. Also warn when the selected Bot has no Global MetaID.
   if (typeof loadRuntime === 'function') {
@@ -228,12 +139,6 @@ if (
       });
     };
     if (typeof globalThis !== 'undefined') globalThis.loadRuntime = loadRuntime;
-  }
-
-  function row(label, value) {
-    var text = textValue(value);
-    if (!text) return '';
-    return '<div class="browser-confirm-row"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(text) + '</strong></div>';
   }
 })();
 `;

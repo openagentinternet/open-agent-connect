@@ -9,7 +9,8 @@ import {
 } from '../host/hostSkillBinding';
 import { CLI_VERSION } from '../../cli/version';
 import { SUPPORTED_PLATFORM_IDS, isPlatformId, resolvePlatformSkillRootPath } from '../platform/platformRegistry';
-import { getInstallSkillRoots, getPlatformSkillRoots } from '../platform/platformRegistry';
+import { getInstallSkillRoots, getPlatformDefinition, getPlatformSkillRoots } from '../platform/platformRegistry';
+import { renderSkillHostAdapterNote } from '../skills/skillHostAdapterNotes';
 import { normalizeSystemHomeDir } from '../state/homeSelection';
 import type { PlatformId } from '../platform/platformRegistry';
 
@@ -106,7 +107,9 @@ async function renderSharedSkill(
   return replaceAll(source, {
     '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,
     '{{COMPATIBILITY_MANIFEST}}': 'release/compatibility.json',
-    '{{HOST_ADAPTER_SECTION}}': '',
+    '{{HOST_ADAPTER_SECTION}}': host
+      ? renderSkillHostAdapterNote(skillName, host, getPlatformDefinition(host).displayName)
+      : '',
     '{{CURRENT_HOST}}': host ?? '<host>',
     '{{SYSTEM_ROUTING}}': replaceAll(systemRouting, {
       '{{METABOT_CLI}}': PRIMARY_CLI_DOC_PATH,

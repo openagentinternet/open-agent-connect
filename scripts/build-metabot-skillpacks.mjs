@@ -60,23 +60,11 @@ const DEPRECATED_SKILLS = {
   'metabot-browser-open': 'metabot-browser',
 };
 
-// Per-skill, per-host extra markdown appended to the rendered
-// {{HOST_ADAPTER_SECTION}} (host packs only). A `default` entry renders for
-// every host without an explicit note and receives the host descriptor.
-const SKILL_HOST_ADAPTER_NOTES = {
-  'metabot-browser': {
-    codex: [
-      '### In-App Browser',
-      '',
-      'Codex has its own in-app browser. Open every `localUiUrl` returned by the MetaBot CLI inside the Codex in-app browser (its web preview surface) — never in the external system browser, and never through external browser automation such as Playwright.',
-    ].join('\n'),
-    default: (host) => [
-      '### In-App Browser',
-      '',
-      `This ${host.displayName} pack has no documented in-app browser or preview surface. Present every \`localUiUrl\` returned by the MetaBot CLI as a clickable markdown link for the human to open. If the running session does provide a web preview surface, prefer opening the \`localUiUrl\` there instead of handing it to the external browser.`,
-    ].join('\n'),
-  },
-};
+// Per-skill, per-host adapter notes live in the compiled runtime module
+// dist/core/skills/skillHostAdapterNotes.js (source:
+// src/core/skills/skillHostAdapterNotes.ts) so `oac install` and this build
+// render identical adapter knowledge. Loaded lazily inside
+// buildAgentConnectSkillpacks.
 
 const GENERATED_JUNK_FILENAMES = new Set(['.DS_Store']);
 
@@ -109,16 +97,11 @@ function renderHostAdapterSection(hostKey, host) {
   return `## Host Adapter\n\n${renderHostMetadata(hostKey, host)}`;
 }
 
-function resolveSkillHostAdapterNote(skillName, hostKey, host) {
-  const notes = SKILL_HOST_ADAPTER_NOTES[skillName];
-  if (!notes) {
-    return '';
-  }
-  const note = Object.hasOwn(notes, hostKey) ? notes[hostKey] : notes.default;
-  if (typeof note === 'function') {
-    return note(host);
-  }
-  return note ?? '';
+async function loadSkillHostAdapterNotes(repoRoot) {
+  const moduleUrl = pathToFileURL(
+    path.join(repoRoot, 'dist', 'core', 'skills', 'skillHostAdapterNotes.js'),
+  ).href;
+  return import(moduleUrl);
 }
 
 function buildSharedReadme({ packageVersion }) {
@@ -467,7 +450,7 @@ function replaceNarrativeTerms(source) {
   return source;
 }
 
-function renderSourceSkill(source, { mode, hostKey, host, templates, skillName }) {
+function renderSourceSkill(source, { mode, hostKey, host, templates, skillName, skillHostAdapterNotes }) {
   const renderedTemplates = {
     confirmationContract: replaceAll(templates.confirmationContract, {
       '{{METABOT_CLI}}': PRIMARY_CLI_PATH,
@@ -480,7 +463,7 @@ function renderSourceSkill(source, { mode, hostKey, host, templates, skillName }
   const hostAdapterSection = mode === 'host' && hostKey && host
     ? [
         renderHostAdapterSection(hostKey, host),
-        resolveSkillHostAdapterNote(skillName, hostKey, host),
+        skillHostAdapterNotes.renderSkillHostAdapterNote(skillName, hostKey, host.displayName),
       ].filter(Boolean).join('\n\n')
     : '';
 
@@ -501,6 +484,7 @@ async function renderSkill({
   hostKey,
   host,
   templates,
+  skillHostAdapterNotes,
 }) {
   const sourcePath = path.join(repoRoot, 'SKILLs', legacySkillName, 'SKILL.md');
   const source = await fs.readFile(sourcePath, 'utf8');
@@ -511,6 +495,7 @@ async function renderSkill({
     host,
     templates,
     skillName: legacySkillName,
+    skillHostAdapterNotes,
   });
   return replaceNarrativeTerms(rendered);
 }
@@ -734,6 +719,7 @@ export async function buildAgentConnectSkillpacks(options = {}) {
     confirmationContract: await readTemplate(repoRoot, 'skillpacks/common/templates/confirmation-contract.md'),
     systemRouting: await readTemplate(repoRoot, 'skillpacks/common/templates/system-routing.md'),
   };
+  const skillHostAdapterNotes = await loadSkillHostAdapterNotes(repoRoot);
   const bundledRuntimeDependencies = await collectBundledRuntimeDependencies(repoRoot);
 
   const hostKeys = Object.keys(HOSTS);
@@ -769,6 +755,7 @@ export async function buildAgentConnectSkillpacks(options = {}) {
       repoRoot,
       legacySkillName,
       templates,
+      skillHostAdapterNotes,
     });
     sharedRenderedSkills.set(legacySkillName, renderedSharedSkill);
     const sharedSkillDir = path.join(sharedRoot, 'skills', legacySkillName);
@@ -825,6 +812,7 @@ export async function buildAgentConnectSkillpacks(options = {}) {
           hostKey,
           host,
           templates,
+          skillHostAdapterNotes,
         }),
       );
     }
