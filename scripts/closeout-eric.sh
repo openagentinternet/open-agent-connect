@@ -115,8 +115,11 @@ git commit -m "$COMMIT_MESSAGE"
 COMMIT_HASH="$(git rev-parse --short HEAD)"
 COMMIT_SUBJECT="$(git log -1 --format=%s)"
 STAGED_FILES="$(git show --pretty='' --name-only HEAD)"
-REQUEST_FILE="$(mktemp /tmp/oac-closeout-request-XXXXXX.json)"
-OUTPUT_FILE="$(mktemp /tmp/oac-closeout-output-XXXXXX.json)"
+# Templates keep the X's at the end: mid-name X's are treated literally on
+# macOS, so every run would share one fixed filename and collide after any
+# unclean exit leaves the file behind.
+REQUEST_FILE="$(mktemp /tmp/oac-closeout-request-XXXXXX)"
+OUTPUT_FILE="$(mktemp /tmp/oac-closeout-output-XXXXXX)"
 trap 'rm -f "$REQUEST_FILE" "$OUTPUT_FILE"' EXIT
 
 BUZZ_CONTENT="$(cat <<EOF
