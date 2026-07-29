@@ -11,6 +11,7 @@ import type { RuntimePlatformDefinition } from '../platform/platformRegistry';
 import type { LlmRuntime, LlmProvider, LlmAuthState } from './llmTypes';
 import { createRegistryBackendFactories } from './executor/backends/registry';
 import type { LlmExecutionEvent } from './executor/types';
+import { resolveProviderProcessEnv } from './providerProcessEnv';
 
 export interface DiscoveryInput {
   env?: NodeJS.ProcessEnv;
@@ -565,11 +566,19 @@ export async function discoverProvider(
     options?.shellResolvedExecutables,
   );
   for (const binaryPath of binaryPaths) {
+    const processEnv = await resolveProviderProcessEnv(provider, binaryPath, env);
+    if (processEnv.error) {
+      firstUnavailableCandidate ??= {
+        binaryPath,
+        versionProbe: { ok: false, message: processEnv.error },
+      };
+      continue;
+    }
     const versionProbe = await probeExecutableVersion(
       binaryPath,
       platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
       versionProbeTimeoutForProvider(provider),
-      env,
+      processEnv.env,
     );
     if (versionProbe.ok) {
       const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
@@ -598,7 +607,7 @@ export async function discoverProvider(
       }
       const readiness = await readinessProbe({
         runtime,
-        env,
+        env: processEnv.env,
         timeoutMs: readinessTimeoutMs,
         cwd: options?.cwd,
       });
@@ -673,11 +682,19 @@ export async function testLlmRuntimeReadiness(
   }
 
   const platform = getRuntimePlatformDefinition(runtime.provider);
+  const processEnv = await resolveProviderProcessEnv(runtime.provider, runtime.binaryPath, env);
+  if (processEnv.error) {
+    return {
+      ...base,
+      health: 'unavailable',
+      healthReason: processEnv.error,
+    };
+  }
   const versionProbe = await probeExecutableVersion(
     runtime.binaryPath,
     platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'],
     versionProbeTimeoutForProvider(runtime.provider),
-    env,
+    processEnv.env,
   );
   const probedRuntime: LlmRuntime = {
     ...buildDiscoveredRuntime(runtime.provider, platform, runtime.binaryPath, versionProbe, {
@@ -710,7 +727,7 @@ export async function testLlmRuntimeReadiness(
       health: 'detected',
       healthReason: undefined,
     },
-    env,
+    env: processEnv.env,
     timeoutMs: readinessTimeoutForProvider(runtime.provider, options?.readinessTimeoutMs),
     cwd: options?.cwd,
   });

@@ -5533,9 +5533,9 @@ test('bot page does not auto-fire background discovery when a healthy runtime ex
   assert.equal(harness.context.state._runtimeDiscoveryPolling, false);
 });
 
-test('bot page manual refresh uses background mode and polling stops when a healthy runtime appears', async () => {
+test('bot page manual refresh waits for the requested sweep even when another runtime is healthy', async () => {
   const harness = createDiscoveryPollingHarness([
-    { runtimes: [], discoveryStatus: { running: true } },
+    { runtimes: [{ id: 'rt-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' }], discoveryStatus: { running: true } },
     { runtimes: [{ id: 'rt-codex', provider: 'codex', displayName: 'Codex', health: 'healthy' }], discoveryStatus: { running: false } },
   ]);
   harness.context.state._runtimeDiscoveryAutoTriggered = true;
@@ -5558,6 +5558,30 @@ test('bot page manual refresh uses background mode and polling stops when a heal
   assert.equal(harness.context.state._runtimeDiscoveryPolling, false);
   assert.equal(harness.button.disabled, false);
   assert.equal(harness.button.textContent, 'Refresh Runtimes');
+});
+
+test('bot page provider modal refresh starts runtime discovery instead of only reloading stored state', async () => {
+  const refreshButton = field();
+  let clickHandler;
+  refreshButton.addEventListener = (eventName, handler) => {
+    if (eventName === 'click') clickHandler = handler;
+  };
+  const harness = createDiscoveryPollingHarness([
+    { runtimes: [], discoveryStatus: { running: true } },
+  ]);
+  harness.context.document.querySelectorAll = (selector) => (
+    selector === '[data-act="refresh-runtime-modal"]' ? [refreshButton] : []
+  );
+  harness.context.state._runtimeDiscoveryAutoTriggered = true;
+  harness.context.openRuntimeModal();
+
+  assert.equal(typeof clickHandler, 'function');
+  clickHandler();
+  await flushPromises();
+
+  assert.equal(harness.discoverPosts.length, 1);
+  assert.deepEqual(harness.discoverPosts[0], { background: true });
+  assert.equal(harness.context.state._runtimeDiscoveryPolling, true);
 });
 
 test('bot page runtime discovery polling stops when the sweep reports not running', async () => {

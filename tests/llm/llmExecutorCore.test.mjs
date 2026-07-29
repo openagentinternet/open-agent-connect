@@ -1477,6 +1477,49 @@ test('LlmExecutor preserves the provided system prompt and single-item skills ar
   assert.equal(events.at(-1).type, 'result');
 });
 
+test('LlmExecutor launches a Node-shebang provider with a compatible Node from PATH', async () => {
+  const base = await createTempDir('metabot-llm-node-runtime-');
+  const oldBinDir = path.join(base, 'node-20', 'bin');
+  const compatibleBinDir = path.join(base, 'node-24', 'bin');
+  const providerDir = path.join(base, 'provider');
+  await fs.mkdir(oldBinDir, { recursive: true });
+  await fs.mkdir(compatibleBinDir, { recursive: true });
+  await fs.mkdir(providerDir, { recursive: true });
+  const oldNodePath = await writeExecutableScript(oldBinDir, 'node', '#!/bin/sh\necho v20.20.0\n');
+  const compatibleNodePath = await writeExecutableScript(compatibleBinDir, 'node', '#!/bin/sh\necho v24.13.1\n');
+  const binaryPath = await writeExecutableScript(providerDir, 'zcode.cjs', '#!/usr/bin/env node\n');
+  let factoryEnv;
+  let requestEnv;
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: path.join(base, 'skills'),
+    env: { PATH: [path.dirname(oldNodePath), path.dirname(compatibleNodePath)].join(path.delimiter) },
+    backends: {
+      zcode: (_binaryPath, env) => {
+        factoryEnv = env;
+        return {
+          provider: 'zcode',
+          async execute(request) {
+            requestEnv = request.env;
+            return { status: 'completed', output: 'done', durationMs: 1 };
+          },
+        };
+      },
+    },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: 'runtime-zcode',
+    runtime: { ...runtime, id: 'runtime-zcode', provider: 'zcode', binaryPath },
+    prompt: 'Run with a compatible Node',
+  });
+  await collectEvents(executor.streamEvents(sessionId));
+
+  assert.equal(factoryEnv.PATH.split(path.delimiter)[0], compatibleBinDir);
+  assert.equal(requestEnv.PATH.split(path.delimiter)[0], compatibleBinDir);
+});
+
 test('LlmExecutor cancel preserves completed session history', async () => {
   const base = await createTempDir();
   const executor = new LlmExecutor({

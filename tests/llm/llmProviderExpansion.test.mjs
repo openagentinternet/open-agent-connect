@@ -31,6 +31,7 @@ const {
   getRuntimePlatforms,
   resolvePlatformSkillRootPath,
 } = require('../../dist/core/platform/platformRegistry.js');
+const { resolveProviderProcessEnv } = require('../../dist/core/llm/providerProcessEnv.js');
 
 async function withDefaultExecutablePathsDisabled(callback) {
   const originals = PLATFORM_DEFINITIONS
@@ -127,6 +128,8 @@ test('platform registry defines managed runtime metadata and install skill roots
   ]);
   assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'codebuddy').executor.backendFactoryExport, 'codeBuddyBackendFactory');
   assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'zcode').executor.backendFactoryExport, 'zcodeBackendFactory');
+  assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'openclaw').runtime.nodeRuntime.minimumVersion, '22.14.0');
+  assert.equal(PLATFORM_DEFINITIONS.find((platform) => platform.id === 'zcode').runtime.nodeRuntime.minimumVersion, '22.5.0');
   const workbuddy = PLATFORM_DEFINITIONS.find((platform) => platform.id === 'workbuddy');
   assert.equal(workbuddy.executor.backendFactoryExport, 'codeBuddyBackendFactory');
   assert.deepEqual(workbuddy.runtime.authEnv, ['WORKBUDDY_API_KEY']);
@@ -539,6 +542,69 @@ test('runtime discovery ignores a broken PATH shadow when a later binary is heal
     assert.equal(result.runtimes[0].binaryPath, healthyCodexPath);
     assert.equal(result.runtimes[0].health, 'healthy');
     assert.equal(result.runtimes[0].version, '0.131.0-alpha.9');
+  });
+});
+
+test('Node-shebang providers use a compatible Node later in PATH', async () => {
+  const tempRoot = await mkdtempTempRoot('oac-provider-node-runtime-');
+  const oldBinDir = path.join(tempRoot, 'node-20', 'bin');
+  const compatibleBinDir = path.join(tempRoot, 'node-24', 'bin');
+  const providerDir = path.join(tempRoot, 'provider');
+  await mkdir(oldBinDir, { recursive: true });
+  await mkdir(compatibleBinDir, { recursive: true });
+  await mkdir(providerDir, { recursive: true });
+
+  const oldNodePath = path.join(oldBinDir, 'node');
+  const compatibleNodePath = path.join(compatibleBinDir, 'node');
+  const zcodePath = path.join(providerDir, 'zcode.cjs');
+  await writeFile(oldNodePath, '#!/bin/sh\necho v20.20.0\n', 'utf8');
+  await writeFile(compatibleNodePath, '#!/bin/sh\necho v24.13.1\n', 'utf8');
+  await writeFile(zcodePath, '#!/usr/bin/env node\nconsole.log("zcode 0.15.2")\n', 'utf8');
+  await chmod(oldNodePath, 0o755);
+  await chmod(compatibleNodePath, 0o755);
+  await chmod(zcodePath, 0o755);
+
+  const resolution = await resolveProviderProcessEnv('zcode', zcodePath, {
+    PATH: [oldBinDir, compatibleBinDir].join(path.delimiter),
+  });
+
+  assert.equal(resolution.error, undefined);
+  assert.equal(resolution.nodePath, compatibleNodePath);
+  assert.equal(resolution.env.PATH.split(path.delimiter)[0], compatibleBinDir);
+});
+
+test('runtime discovery reports a clear error when a Node-shebang provider has no compatible Node', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-node-runtime-missing-');
+    const binDir = path.join(tempRoot, 'bin');
+    await mkdir(binDir, { recursive: true });
+    const nodePath = path.join(binDir, 'node');
+    const zcodePath = path.join(binDir, 'zcode');
+    await writeFile(nodePath, '#!/bin/sh\necho v20.20.0\n', 'utf8');
+    await writeFile(zcodePath, '#!/usr/bin/env node\nconsole.log("zcode 0.15.2")\n', 'utf8');
+    await chmod(nodePath, 0o755);
+    await chmod(zcodePath, 0o755);
+
+    const zcode = PLATFORM_DEFINITIONS.find((platform) => platform.id === 'zcode');
+    const originalMinimumVersion = zcode.runtime.nodeRuntime.minimumVersion;
+    let result;
+    try {
+      zcode.runtime.nodeRuntime.minimumVersion = '99.0.0';
+      result = await discoverLlmRuntimes({
+        providers: ['zcode'],
+        env: { PATH: binDir, OAC_NODE_PATH: nodePath },
+        shellResolvedExecutables: {},
+      });
+    } finally {
+      zcode.runtime.nodeRuntime.minimumVersion = originalMinimumVersion;
+    }
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].provider, 'zcode');
+    assert.equal(result.runtimes[0].health, 'unavailable');
+    assert.match(result.runtimes[0].healthReason, /requires Node\.js >=99\.0\.0/);
+    assert.match(result.runtimes[0].healthReason, /v20\.20\.0/);
   });
 });
 
