@@ -4,9 +4,11 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const playwright = await import('playwright');
+const { buildBrowserPageDefinition: buildOacBrowserPageDefinition } = require('../../dist/browser/app.js');
 const { buildBrowserPageDefinition } = require('../../dist/ui/pages/browser/app.js');
 const { renderBrowserPageHtml } = require('../../dist/browser/page.js');
 const browserDefinition = buildBrowserPageDefinition();
+const oacBrowserDefinition = buildOacBrowserPageDefinition();
 const template = await renderBrowserPageHtml(browserDefinition);
 
 function cssBlock(selector) {
@@ -40,6 +42,12 @@ function assertNoDeclaration(block, property, value) {
   const pattern = new RegExp(`${property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:\\s*${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*;`);
   assert.doesNotMatch(block, pattern);
 }
+
+test('OAC leaves PIN write confirmation to the shared ABC client', () => {
+  assert.match(oacBrowserDefinition.script, /submitMetaIdPinWrite/);
+  assert.doesNotMatch(oacBrowserDefinition.script, /oacHandleBridgePinWrite/);
+  assert.doesNotMatch(oacBrowserDefinition.script, /handleBridgePinWrite\s*=\s*function/);
+});
 
 test('Browser page locks outer document while renderer viewport owns content scrolling', () => {
   const bodyBlock = cssBlock('body:has(.browser-shell)');
