@@ -9,9 +9,11 @@ import type { LlmExecutionEvent, LlmExecutionRequest, LlmExecutionResult, LlmSes
 import {
   getPlatformSkillRoots,
   isPlatformId,
+  isRuntimePlatformId,
   resolvePlatformSkillRootPath,
   type PlatformSkillRoot,
 } from '../../platform/platformRegistry';
+import { resolveProviderProcessEnv } from '../providerProcessEnv';
 
 interface LlmExecutorOptions {
   sessionsRoot: string;
@@ -643,7 +645,13 @@ export class LlmExecutor {
       const isolationScope = isolation?.scope ?? null;
       const cwd = isolationScope?.cwd ?? request.cwd ?? process.cwd();
       const requestEnv = isolationScope?.env ?? request.env;
-      const backendRequest: LlmExecutionRequest = { ...request, cwd, env: requestEnv };
+      const baseProcessEnv = mergeStringEnvValues(process.env, this.env, requestEnv);
+      const processEnv = isRuntimePlatformId(request.runtime.provider)
+        ? await resolveProviderProcessEnv(request.runtime.provider, binaryPath, baseProcessEnv)
+        : { env: baseProcessEnv };
+      if (processEnv.error) throw new Error(processEnv.error);
+      const backendEnv = mergeStringEnvValues(processEnv.env);
+      const backendRequest: LlmExecutionRequest = { ...request, cwd, env: backendEnv };
       await this.sessionManager.update(sessionId, { status: 'running', startedAt, cwd });
 
       if (request.skills && request.skills.length > 0) {
@@ -665,7 +673,7 @@ export class LlmExecutor {
         }
       }
 
-      const backend = factory(binaryPath, requestEnv);
+      const backend = factory(binaryPath, backendEnv);
       let accumulatedOutput = '';
       const emitter = {
         emit: (event: LlmExecutionEvent) => {

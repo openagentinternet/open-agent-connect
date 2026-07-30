@@ -45,6 +45,10 @@ export interface PlatformDefinition {
     envAliases?: string[];
     pathSearchBinaryNames?: string[];
     defaultExecutablePaths?: string[];
+    /** Minimum Node.js version for CLIs launched through a Node shebang. */
+    nodeRuntime?: {
+      minimumVersion: string;
+    };
     /**
      * Optional probe timing policy. App-embedded CLIs start slowly, so they
      * get wider windows. Missing fields fall back to the discovery defaults
@@ -209,6 +213,7 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       versionArgs: ['--version'],
       authEnv: ['OPENCLAW_API_KEY'],
       capabilities: DEFAULT_CAPABILITIES,
+      nodeRuntime: { minimumVersion: '22.14.0' },
     },
     skills: {
       roots: [
@@ -399,6 +404,7 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       authEnv: ['ZCODE_API_KEY', 'Z_AI_API_KEY', 'ZAI_API_KEY', 'BIGMODEL_API_KEY'],
       capabilities: DEFAULT_CAPABILITIES,
       defaultExecutablePaths: ['/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'],
+      nodeRuntime: { minimumVersion: '22.5.0' },
       probeHints: { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 },
     },
     skills: {
