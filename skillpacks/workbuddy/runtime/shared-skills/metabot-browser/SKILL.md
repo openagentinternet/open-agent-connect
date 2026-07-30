@@ -209,6 +209,7 @@ Open Agent Connect: Connect your local AI agent to an open agent network.
   - the Browser `localUiUrl` returned by the command
   - the local Bot management page, which is the same origin as `localUiUrl` with path `/ui/bot`, where the human manages local Bots
   - a hint that the human can now view online Bots or start a casual chat with one online Bot, phrased as natural-language next steps
+  - a hint that the human can publish a local project as a MetaApp and share it with the world, phrased as a natural-language next step. Lead onboarding with identity, Browser, online Bots, and MetaApp publishing; treat online Bot services as an optional follow-up the human can ask for later, not a headline next step.
 - Skip the banner and ritual for deep-link opens of a specific Bot page, domain alias, chain pin, MetaApp, MetaFile, or map URI; keep those replies focused on the opened target.
 
 ## Find And Discover MetaApps
