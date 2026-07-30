@@ -1435,3 +1435,171 @@ test('createProviderServiceRunner falls back before session creation when primar
   assert.equal(result.metadata.fallbackSelected, true);
   await cleanupProfileHome(homeDir);
 });
+
+test('resolveProviderOrderExecutionTimeoutMs gives video 20 minutes and other output types 5 minutes', async () => {
+  const {
+    resolveProviderOrderExecutionTimeoutMs,
+    DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS,
+    VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS,
+  } = require('../../dist/core/a2a/provider/providerServiceRunner.js');
+
+  assert.equal(DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS, 5 * 60_000);
+  assert.equal(VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS, 20 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video' }), 20 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video/mp4' }), 20 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'text' }), 5 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'image' }), 5 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'audio' }), 5 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: null }), 5 * 60_000);
+});
+
+test('resolveProviderOrderExecutionTimeoutMs honors a service timeout override with clamps', async () => {
+  const {
+    resolveProviderOrderExecutionTimeoutMs,
+  } = require('../../dist/core/a2a/provider/providerServiceRunner.js');
+
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video', executionTimeoutMs: 10 * 60_000 }), 10 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'text', executionTimeoutMs: 5_000 }), 30_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'text', executionTimeoutMs: 60 * 60_000 }), 30 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video', executionTimeoutMs: 0 }), 20 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video', executionTimeoutMs: Number.NaN }), 20 * 60_000);
+});
+
+test('createProviderServiceRunner passes the 5 minute default session timeout to the executor', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'It will rain tomorrow.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].timeout, 5 * 60_000);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner delivers an existing workspace artifact as a partial result on execution timeout', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        await fs.writeFile(path.join(request.cwd, 'forecast.png'), 'png bytes', 'utf8');
+        return 'session-timeout-partial';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'timeout',
+          error: 'provider execution timed out',
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.match(result.responseText, /timed out/i);
+  assert.match(result.responseText, /may be incomplete/i);
+  assert.match(result.responseText, /artifactPath: forecast\.png/);
+  assert.equal(result.metadata.executionTimedOut, true);
+  assert.equal(typeof result.metadata.attemptWorkspaceCwd, 'string');
+  // The partial delivery takes precedence over the fallback-runtime retry.
+  assert.equal(calls.length, 1);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner keeps the failure path when a timeout produced no artifact', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return `session-${calls.length}`;
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'timeout',
+          error: 'provider execution timed out',
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'provider_execution_timeout');
+  // The selected runtime was already the fallback, so no further retry happens.
+  assert.equal(calls.length, 1);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner does not partial-deliver an ambiguous workspace on timeout', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        await fs.writeFile(path.join(request.cwd, 'first.png'), 'png bytes', 'utf8');
+        await fs.writeFile(path.join(request.cwd, 'second.png'), 'png bytes', 'utf8');
+        return 'session-timeout-ambiguous';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'timeout',
+          error: 'provider execution timed out',
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'provider_execution_timeout');
+  await cleanupProfileHome(homeDir);
+});

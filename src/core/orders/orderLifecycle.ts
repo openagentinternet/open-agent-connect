@@ -3,6 +3,9 @@ export const SERVICE_ORDER_SELF_ORDER_NOT_ALLOWED_ERROR_CODE = 'self_order_not_a
 export const DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS = 60_000;
 export const SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON = 'free_order_no_refund_required';
 export const SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON = 'self_directed_order_no_external_refund_required';
+// How long a delivered seller order may wait for the buyer's rating before the
+// seller closes it as a rating timeout (IDBots reference parity).
+export const SERVICE_ORDER_RATING_TIMEOUT_MS = 15 * 60_000;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

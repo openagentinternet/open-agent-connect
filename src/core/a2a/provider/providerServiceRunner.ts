@@ -7,6 +7,10 @@ import type { LlmBinding, LlmRuntime } from '../../llm/llmTypes';
 import { isSafeProviderSkillName, type PlatformSkillCatalogEntry, type PlatformSkillRootDiagnostic } from '../../services/platformSkillCatalog';
 import { createServiceRunnerFailedResult, type ProviderServiceRunnerResult } from './serviceRunnerContracts';
 import {
+  classifyProviderOutputType,
+  findProviderWorkspaceArtifactCandidate,
+} from './providerDeliveryArtifacts';
+import {
   getPlatformDefinition,
   getPlatformSkillRoots,
   getRuntimePortableSkillRoots,
@@ -731,8 +735,36 @@ export function buildProviderServiceOrderPrompt(input: {
   });
 }
 
+export const DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = 5 * 60_000;
+export const VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = 20 * 60_000;
+export const MIN_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = 30_000;
+export const MAX_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * Execution timeout for one provider service order. The published service
+ * schema carries no timeout field and none is added; a service record that
+ * nevertheless has a positive `executionTimeoutMs` is honored as an override,
+ * clamped to [30s, 30min]. Otherwise video output gets 20 minutes and every
+ * other output type gets 5 minutes (mirrors the IDBots reference behavior).
+ */
+export function resolveProviderOrderExecutionTimeoutMs(service: {
+  outputType?: string | null;
+  executionTimeoutMs?: number | null;
+}): number {
+  const override = Number(service.executionTimeoutMs);
+  if (Number.isFinite(override) && override > 0) {
+    return Math.min(
+      MAX_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS,
+      Math.max(MIN_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS, Math.trunc(override)),
+    );
+  }
+  return classifyProviderOutputType(service.outputType) === 'video'
+    ? VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS
+    : DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS;
+}
+
 export function createProviderServiceRunner(input: ProviderServiceRunnerDependencies) {
-  const sessionTimeoutMs = input.sessionTimeoutMs ?? 120_000;
+  const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS;
   const pollIntervalMs = input.pollIntervalMs ?? 500;
 
   return {
@@ -841,6 +873,46 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
           },
         );
 
+      // IDBots resolveTimeoutFallback parity: when the runtime session times
+      // out but a deliverable artifact already exists in the attempt
+      // workspace, deliver that artifact as a partial success with an explicit
+      // timeout note instead of failing the order.
+      const tryResolveTimeoutPartialResult = async (
+        timedOutRun: ProviderRuntimeRun,
+      ): Promise<ProviderServiceRunnerResultWithRuntime | null> => {
+        const artifactPath = await findProviderWorkspaceArtifactCandidate({
+          workspaceCwd: timedOutRun.attemptWorkspaceCwd,
+          outputType: order.outputType,
+        });
+        if (!artifactPath) {
+          return null;
+        }
+        const relativeArtifactPath = path.relative(timedOutRun.executionCwd, artifactPath);
+        if (!relativeArtifactPath || relativeArtifactPath.startsWith('..') || path.isAbsolute(relativeArtifactPath)) {
+          return null;
+        }
+        return withRuntimeMetadata({
+          state: 'completed',
+          responseText: [
+            'Execution timed out before the provider finished.',
+            'The attached artifact was produced before the timeout and the result may be incomplete.',
+            `artifactPath: ${relativeArtifactPath.split(path.sep).join('/')}`,
+          ].join('\n'),
+          metadata: {
+            outputType: normalizeText(order.outputType) || 'text',
+            sessionCwd: timedOutRun.executionCwd,
+            attemptWorkspaceCwd: timedOutRun.attemptWorkspaceCwd,
+            executionTimedOut: true,
+          },
+        }, {
+          runtime: timedOutRun.runtime,
+          providerSkill,
+          providerSkills,
+          sessionId: timedOutRun.sessionId,
+          selection: timedOutRun.selection,
+        });
+      };
+
       let run: ProviderRuntimeRun;
       try {
         run = await executeWithSelection(selection);
@@ -857,6 +929,12 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
       }
 
       let failure = buildSessionFailure(run, providerSkill, providerSkills);
+      if (failure?.result.state === 'failed' && failure.result.code === 'provider_execution_timeout') {
+        const partialResult = await tryResolveTimeoutPartialResult(run);
+        if (partialResult) {
+          return partialResult;
+        }
+      }
       if (failure?.retryable) {
         const fallbackSelection = await resolveFallbackSelection(run.runtime, run.selection);
         if (fallbackSelection) {
@@ -864,6 +942,12 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
             const fallbackRun = await executeWithSelection(fallbackSelection);
             const fallbackFailure = buildSessionFailure(fallbackRun, providerSkill, providerSkills);
             if (fallbackFailure) {
+              if (fallbackFailure.result.state === 'failed' && fallbackFailure.result.code === 'provider_execution_timeout') {
+                const partialResult = await tryResolveTimeoutPartialResult(fallbackRun);
+                if (partialResult) {
+                  return partialResult;
+                }
+              }
               return fallbackFailure.result;
             }
             run = fallbackRun;

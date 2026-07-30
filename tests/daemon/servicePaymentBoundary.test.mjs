@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createECDH } from 'node:crypto';
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -26,7 +26,8 @@ const {
   SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON,
   SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
 } = require('../../dist/core/orders/orderLifecycle.js');
-const { parseDeliveryMessage, parseNeedsRatingMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
+const { parseDeliveryMessage, parseNeedsRatingMessage, buildOrderEndMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { buildA2ASimplemsgInboundDispatcher } = require('../../dist/cli/runtime.js');
 const { upsertIdentityProfile, setActiveMetabotHome } = require('../../dist/core/identity/identityProfiles.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
@@ -5481,4 +5482,487 @@ test('boot recovery skips terminal sessions and orders with a recorded refund', 
     refundedHarness.writes.some((entry) => entry.path === '/protocols/service-refund-request'),
     false,
   );
+});
+
+test('inbound buyer ORDER_END rated closes a rating_pending seller order as completed', async (t) => {
+  const orderTxid = 'e'.repeat(64);
+  const paymentTxid = 'f'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const delivered = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+  assert.equal(delivered.ok, true);
+  const beforeRating = await harness.runtimeStateStore.readState();
+  assert.equal(
+    beforeRating.sellerOrders.find((entry) => entry.orderTxid === orderTxid)?.state,
+    'rating_pending',
+  );
+
+  const rated = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: buildOrderEndMessage(orderTxid, 'rated', 'Forecast was spot on.'),
+    messagePinId: `${orderTxid}i1`,
+    timestamp: 1_775_000_002_000,
+  });
+
+  assert.equal(rated.ok, true);
+  assert.equal(rated.data.handled, true);
+  assert.equal(rated.data.rated, true);
+  assert.equal(rated.data.sellerOrder, true);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder);
+  assert.equal(sellerOrder.state, 'completed');
+
+  const conversation = await createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: {
+      globalMetaId: harness.identity.globalMetaId,
+      name: harness.identity.name,
+      chatPublicKey: harness.identity.chatPublicKey,
+    },
+    peer: {
+      globalMetaId: harness.buyerGlobalMetaId,
+      chatPublicKey: harness.buyerPair.publicKeyHex,
+    },
+  }).readConversation();
+  const orderSession = conversation.sessions.find((entry) => entry.sessionId === `a2a-order-${orderTxid}`);
+  assert.ok(orderSession);
+  assert.equal(orderSession.state, 'completed');
+  assert.equal(orderSession.endReason, 'rated');
+});
+
+test('inbound ORDER_END rated with an unknown order txid is ignored cleanly', async (t) => {
+  const harness = await createInboundProviderOrderHarness(t);
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: buildOrderEndMessage('0'.repeat(64), 'rated', 'No such order.'),
+    messagePinId: `${'0'.repeat(64)}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.handled, false);
+  const state = await harness.runtimeStateStore.readState();
+  assert.equal(state.sellerOrders.length, 0);
+});
+
+test('seller rating timeout sweep closes stale rating_pending orders and leaves fresh ones waiting', async (t) => {
+  const chain = await createRefundChainServer(t);
+  const staleOrderTxid = 'a'.repeat(64);
+  const stalePaymentTxid = 'b'.repeat(64);
+  const freshOrderTxid = 'c'.repeat(64);
+  const freshPaymentTxid = 'd'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    chainApiBaseUrl: chain.baseUrl,
+    rawTxs: {
+      [stalePaymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+      [freshPaymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  for (const [orderTxid, paymentTxid] of [
+    [staleOrderTxid, stalePaymentTxid],
+    [freshOrderTxid, freshPaymentTxid],
+  ]) {
+    const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+      fromGlobalMetaId: harness.buyerGlobalMetaId,
+      content: harness.makeOrderContent({ paymentTxid }),
+      messagePinId: `${orderTxid}i0`,
+      timestamp: 1_775_000_001_000,
+    });
+    assert.equal(result.ok, true);
+  }
+  const beforeSweep = await harness.runtimeStateStore.readState();
+  assert.equal(beforeSweep.sellerOrders.filter((entry) => entry.state === 'rating_pending').length, 2);
+
+  // Age the stale order past the 15 minute rating window.
+  await harness.runtimeStateStore.writeState({
+    ...beforeSweep,
+    sellerOrders: beforeSweep.sellerOrders.map((entry) => (
+      entry.orderTxid === staleOrderTxid
+        ? { ...entry, ratingRequestedAt: Date.now() - 16 * 60_000 }
+        : entry
+    )),
+  });
+
+  const sync = await harness.handlers.services.syncRefunds({});
+  assert.equal(sync.ok, true);
+
+  const state = await harness.runtimeStateStore.readState();
+  const staleOrder = state.sellerOrders.find((entry) => entry.orderTxid === staleOrderTxid);
+  const freshOrder = state.sellerOrders.find((entry) => entry.orderTxid === freshOrderTxid);
+  assert.equal(staleOrder.state, 'completed');
+  assert.equal(staleOrder.endReason, 'rating_timeout');
+  assert.equal(freshOrder.state, 'rating_pending');
+
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_END:${staleOrderTxid} rating_timeout]`)), true);
+  assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_END:${freshOrderTxid}`)), false);
+});
+
+test('seller rating timeout sweep closes silently when the buyer rating already exists on chain', async (t) => {
+  const chain = await createRefundChainServer(t);
+  const orderTxid = '5'.repeat(64);
+  const paymentTxid = '6'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    chainApiBaseUrl: chain.baseUrl,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const delivered = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+  assert.equal(delivered.ok, true);
+
+  // The buyer's rating pin arrived but its ORDER_END follow-up was lost.
+  const ratingStore = createRatingDetailStateStore(harness.homeDir);
+  await ratingStore.write({
+    items: [{
+      pinId: 'rating-pin-1',
+      serviceId: harness.service.currentPinId,
+      serviceOrderPinId: null,
+      servicePaidTx: paymentTxid,
+      serviceSkills: [harness.service.providerSkill],
+      rate: 5,
+      comment: 'Great forecast.',
+      raterGlobalMetaId: harness.buyerGlobalMetaId,
+      raterMetaId: null,
+      createdAt: Date.now(),
+    }],
+    latestPinId: 'rating-pin-1',
+    backfillCursor: null,
+    lastSyncedAt: Date.now(),
+  });
+
+  const beforeSweep = await harness.runtimeStateStore.readState();
+  await harness.runtimeStateStore.writeState({
+    ...beforeSweep,
+    sellerOrders: beforeSweep.sellerOrders.map((entry) => (
+      entry.orderTxid === orderTxid
+        ? { ...entry, ratingRequestedAt: Date.now() - 16 * 60_000 }
+        : entry
+    )),
+  });
+
+  const writesBefore = harness.writes.length;
+  const sync = await harness.handlers.services.syncRefunds({});
+  assert.equal(sync.ok, true);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.equal(sellerOrder.state, 'completed');
+  assert.notEqual(sellerOrder.endReason, 'rating_timeout');
+
+  const newContents = harness.writes
+    .slice(writesBefore)
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(newContents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid}`)), false);
+});
+
+test('inbound provider ORDER reaches terminal failed state when the runner throws before producing a result', async (t) => {
+  const orderTxid = '9'.repeat(64);
+  const paymentTxid = 'a'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+  // Corrupt the LLM binding store path so the runner startup read throws.
+  const bindingsPath = resolveMetabotPaths(harness.homeDir).llmBindingsPath;
+  await rm(bindingsPath, { force: true });
+  await mkdir(bindingsPath, { recursive: true });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(typeof result.code, 'string');
+  assert.notEqual(result.code, '');
+  assert.equal(harness.llmCalls.length, 0);
+
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
+  assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder, 'expected terminal seller order for a runner startup throw');
+  assert.equal(sellerOrder.state, 'failed');
+});
+
+test('/api services.execute returns a structured failure when the runner throws before producing a result', async (t) => {
+  const paymentTxid = '8'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t);
+  const bindingsPath = resolveMetabotPaths(harness.homeDir).llmBindingsPath;
+  await rm(bindingsPath, { force: true });
+  await mkdir(bindingsPath, { recursive: true });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-throw',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(typeof result.code, 'string');
+  assert.notEqual(result.code, '');
+  assert.equal(harness.llmCalls.length, 0);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.paymentTxid === paymentTxid);
+  assert.ok(sellerOrder, 'expected terminal seller order for a direct execute runner throw');
+  assert.equal(sellerOrder.state, 'failed');
+});
+
+test('inbound provider ORDER still reaches rating_pending when trace artifact export fails after delivery', async (t) => {
+  const orderTxid = '1'.repeat(64);
+  const paymentTxid = '2'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+  // Block the traces export directory with a plain file so exportSessionArtifacts throws.
+  const exportsRoot = resolveMetabotPaths(harness.homeDir).exportsRoot;
+  await mkdir(exportsRoot, { recursive: true });
+  await writeFile(path.join(exportsRoot, 'traces'), 'blocked', 'utf8');
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.delivered, true);
+
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.filter((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)).length, 1);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder, 'expected seller order despite the artifact export failure');
+  assert.equal(sellerOrder.state, 'rating_pending');
+});
+
+test('inbound provider ORDER passes a 5 minute execution timeout for text services and 20 minutes for video services', async (t) => {
+  const textOrderTxid = '3'.repeat(64);
+  const textPaymentTxid = '4'.repeat(64);
+  const textHarness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [textPaymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const textResult = await textHarness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: textHarness.buyerGlobalMetaId,
+    content: textHarness.makeOrderContent({ paymentTxid: textPaymentTxid }),
+    messagePinId: `${textOrderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(textResult.ok, true);
+  assert.equal(textHarness.llmCalls.length, 1);
+  assert.equal(textHarness.llmCalls[0].timeout, 5 * 60_000);
+
+  const videoOrderTxid = '6'.repeat(64);
+  const videoPaymentTxid = '7'.repeat(64);
+  const uploadCalls = [];
+  const output = createAttemptOutputController('forecast.mp4');
+  const videoHarness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'video' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Created the requested video deliverable.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [videoPaymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const videoResult = await videoHarness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: videoHarness.buyerGlobalMetaId,
+    content: videoHarness.makeOrderContent({ paymentTxid: videoPaymentTxid }),
+    messagePinId: `${videoOrderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(videoResult.ok, true);
+  assert.equal(videoHarness.llmCalls.length, 1);
+  assert.equal(videoHarness.llmCalls[0].timeout, 20 * 60_000);
+});
+
+test('inbound provider ORDER delivers the produced artifact with a timeout note when execution times out', async (t) => {
+  const orderTxid = '2'.repeat(64);
+  const paymentTxid = '3'.repeat(64);
+  const uploadCalls = [];
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: async (request) => {
+      await writeFile(path.join(request.cwd, 'forecast.png'), 'png bytes', 'utf8');
+    },
+    llmSession: (sessionId) => ({
+      sessionId,
+      status: 'timeout',
+      error: 'provider execution timed out',
+    }),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.delivered, true);
+  assert.equal(uploadCalls.length, 1);
+
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  const deliveryMessages = contents.filter((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  assert.equal(deliveryMessages.length, 1);
+  assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), false);
+  const delivery = parseDeliveryMessage(deliveryMessages[0]);
+  assert.ok(delivery);
+  assert.match(delivery.result, /timed out/i);
+  assert.match(delivery.result, /may be incomplete/i);
+  assert.equal(delivery.artifacts.length, 1);
+  assert.equal(delivery.artifacts[0].kind, 'image');
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder);
+  assert.equal(sellerOrder.state, 'rating_pending');
+});
+
+test('inbound provider ORDER stays reprocessable when the chain API is unavailable and succeeds on retry', async (t) => {
+  const orderTxid = '0'.repeat(64);
+  const paymentTxid = '1'.repeat(64);
+  const rawTx = buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000);
+  let chainDown = true;
+  const harness = await createInboundProviderOrderHarness(t, {
+    adapters: new Map([
+      ['mvc', {
+        network: 'mvc',
+        explorerBaseUrl: 'https://www.mvcscan.com',
+        feeRateUnit: 'sat/byte',
+        minTransferSatoshis: 600,
+        async deriveAddress() { return 'mvc-provider-address'; },
+        async fetchUtxos() {
+          if (chainDown) {
+            throw new Error('chain API unavailable');
+          }
+          return [];
+        },
+        async fetchBalance() {
+          return {
+            chain: 'mvc',
+            address: 'mvc-provider-address',
+            totalSatoshis: 0,
+            confirmedSatoshis: 0,
+            unconfirmedSatoshis: 0,
+            utxoCount: 0,
+          };
+        },
+        async fetchFeeRate() { return 1; },
+        async fetchRawTx() {
+          if (chainDown) {
+            throw new Error('chain API unavailable');
+          }
+          return rawTx;
+        },
+        async broadcastTx() { throw new Error('not used'); },
+        async buildTransfer() { throw new Error('not used'); },
+        async buildInscription() { throw new Error('not used'); },
+      }],
+    ]),
+  });
+
+  const first = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(first.ok, false);
+  assert.equal(first.code, 'order_payment_verification_unavailable');
+  assert.equal(first.data.transient, true);
+  assert.equal(first.data.retryable, true);
+  assert.equal(harness.llmCalls.length, 0);
+  // No terminal failed order, no ORDER_END failure notice, no poisoned session.
+  const stateAfterOutage = await harness.runtimeStateStore.readState();
+  assert.equal(stateAfterOutage.sellerOrders.length, 0);
+  assert.equal(
+    harness.writes.filter((entry) => entry.path === '/protocols/simplemsg').length,
+    0,
+  );
+
+  chainDown = false;
+  const retry = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_002_000,
+  });
+
+  assert.equal(retry.ok, true);
+  assert.equal(retry.data.delivered, true);
+  assert.equal(retry.data.duplicate, undefined);
+  assert.equal(harness.llmCalls.length, 1);
+  const stateAfterRetry = await harness.runtimeStateStore.readState();
+  const sellerOrder = stateAfterRetry.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder, 'expected the retried order to execute');
+  assert.equal(sellerOrder.state, 'rating_pending');
 });

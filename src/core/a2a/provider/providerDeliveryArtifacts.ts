@@ -704,6 +704,62 @@ async function scanWorkspaceForCandidates(
   return candidates;
 }
 
+/**
+ * Tolerant variant of scanWorkspaceForCandidates for the provider execution
+ * timeout fallback: it never throws, silently skips secret-like files and
+ * hidden directories, and only returns a path when exactly one workspace file
+ * matches the expected artifact family. Text-like output types have no
+ * deliverable file artifact and always return null.
+ */
+export async function findProviderWorkspaceArtifactCandidate(input: {
+  workspaceCwd: string | null | undefined;
+  outputType: unknown;
+}): Promise<string | null> {
+  const expectedFamily = classifyProviderOutputType(input.outputType);
+  if (expectedFamily === 'text') {
+    return null;
+  }
+  const workspaceCwd = normalizeText(input.workspaceCwd);
+  if (!workspaceCwd) {
+    return null;
+  }
+
+  const candidates: string[] = [];
+  const ignoredDirectories = new Set(['.git', 'node_modules', 'dist']);
+
+  async function visit(directory: string, inHiddenDirectory = false): Promise<void> {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (ignoredDirectories.has(entry.name)) {
+          continue;
+        }
+        await visit(path.join(directory, entry.name), inHiddenDirectory || entry.name.startsWith('.'));
+        continue;
+      }
+      if (!entry.isFile() || inHiddenDirectory) {
+        continue;
+      }
+      const filePath = path.join(directory, entry.name);
+      if (isSecretLikeFileName(path.relative(workspaceCwd, filePath))) {
+        continue;
+      }
+      if (shouldScanFile(filePath, expectedFamily)) {
+        candidates.push(filePath);
+      }
+    }
+  }
+
+  await visit(workspaceCwd);
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 async function resolveLocalArtifact(input: {
   responseText: string;
   executionCwd?: string | null;

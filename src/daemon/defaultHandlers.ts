@@ -114,7 +114,10 @@ import {
   HostPersonaProjectionError,
   unbindHostPersonaProjection,
 } from '../core/host/hostPersonaProjection';
-import { createProviderServiceRunner } from '../core/a2a/provider/providerServiceRunner';
+import {
+  createProviderServiceRunner,
+  resolveProviderOrderExecutionTimeoutMs,
+} from '../core/a2a/provider/providerServiceRunner';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
   buildProviderSellerOrderInspection,
@@ -131,6 +134,7 @@ import {
 import {
   DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS,
   SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON,
+  SERVICE_ORDER_RATING_TIMEOUT_MS,
   SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
   isSelfDirectedPair,
 } from '../core/orders/orderLifecycle';
@@ -349,6 +353,7 @@ import {
   parseNeedsRatingMessage,
   parseOrderEndMessage,
   parseOrderStatusMessage,
+  type ParsedOrderEndMessage,
 } from '../core/a2a/protocol/orderProtocol';
 import { generateBuyerServiceRating } from '../core/a2a/callerRating';
 import {
@@ -8544,6 +8549,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
   async function syncServiceRefundsForCurrentProfile(nowMs = Date.now()): Promise<ServiceRefundSyncResponse> {
     return withRefundMutationLock(input.homeDir, async () => {
+      // Close rating-timed-out seller orders first; a sweep failure must not
+      // block the refund lifecycle work below.
+      await runSellerRatingTimeoutSweep(nowMs).catch((error) => {
+        console.warn(`[seller rating sweep] ${error instanceof Error ? error.message : String(error)}`);
+      });
       const lifecycle = await runBuyerRefundRequestLifecycleForDueTraces(nowMs);
       const stateAfterLifecycle = await runtimeStateStore.readState();
       const reader = createServiceRefundChainReader({
@@ -9301,8 +9311,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
       paymentAddress: service.paymentAddress,
       amount: serviceAmount,
       currency: serviceCurrency,
-    }).catch(() => null);
-    if (!paymentVerification?.verified) {
+    }).catch((error): { verified: false; outcome: 'error' } => {
+      // Unexpected verifier failures must not burn a paid order either; treat
+      // them as transient like chain transport outages.
+      console.warn(`[provider order] payment verification threw for ${orderTxid || paymentTxid}: ${error instanceof Error ? error.message : String(error)}`);
+      return { verified: false, outcome: 'error' };
+    });
+    if (!paymentVerification.verified && paymentVerification.outcome === 'error') {
+      // Chain transport/indexer outage: do NOT record a terminal failed seller
+      // order and do NOT send ORDER_END failed. The buyer's retry (or the boot
+      // replay of unreplied [ORDER] messages) must be able to reprocess this
+      // order once the chain API recovers.
+      console.warn(`[provider order] payment verification unavailable for ${orderTxid || paymentTxid}: chain lookup failed; keeping the order reprocessable.`);
+      return commandFailed(
+        'order_payment_verification_unavailable',
+        'Inbound ORDER payment could not be verified because the chain API is unavailable; the order was not failed and can be retried.',
+        {
+          data: {
+            handled: true,
+            transient: true,
+            retryable: true,
+            orderTxid: orderTxid || null,
+            paymentTxid: paymentTxid || null,
+            orderReference: orderReference || null,
+          },
+        },
+      );
+    }
+    if (!paymentVerification.verified) {
       return failValidation('order_payment_unverified', 'Inbound ORDER payment could not be verified on chain.');
     }
 
@@ -9713,7 +9749,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       env: process.env,
       canStartRuntime: input.providerRuntimeCanStart,
+      sessionTimeoutMs: resolveProviderOrderExecutionTimeoutMs(service),
     });
+    // A synchronous/startup throw from the runner (corrupt binding store, fs
+    // failure) must still drive the order to a terminal failed state with an
+    // ORDER_END notice instead of stranding it in_progress.
     const runnerResult = await providerRunner.execute({
       servicePinId: service.currentPinId,
       providerSkill: service.providerSkill,
@@ -9736,7 +9776,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           paymentCurrency: amountLine.currency || service.currency,
         },
       },
-    });
+    }).catch((error) => createServiceRunnerFailedResult(
+      readErrorCode(error, 'provider_execution_failed'),
+      readErrorMessage(error, 'provider_execution_failed', 'Provider execution failed before a runner result was produced.'),
+    ));
     const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
 
     const deferCompletedPersistence = runnerResult.state === 'completed'
@@ -10366,36 +10409,61 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       providerRuntime: providerRuntimeDiagnostics,
     });
-    const artifacts = await exportSessionArtifacts({
-      trace,
-      transcript: {
-        sessionId: trace.session.id,
-        title: trace.session.title,
-        messages: [
-          {
-            id: `${trace.traceId}-buyer`,
-            type: 'user',
-            timestamp: trace.createdAt,
-            content: userTask,
-            metadata: {
-              orderTxid,
-              paymentTxid: paymentTxid || null,
-              providerSkill: service.providerSkill,
+    // Post-delivery finalization is guarded step by step: DELIVERY has already
+    // reached the buyer, so a local failure here must not strand the order
+    // in_progress.
+    let artifacts = trace.artifacts;
+    try {
+      artifacts = await exportSessionArtifacts({
+        trace,
+        transcript: {
+          sessionId: trace.session.id,
+          title: trace.session.title,
+          messages: [
+            {
+              id: `${trace.traceId}-buyer`,
+              type: 'user',
+              timestamp: trace.createdAt,
+              content: userTask,
+              metadata: {
+                orderTxid,
+                paymentTxid: paymentTxid || null,
+                providerSkill: service.providerSkill,
+              },
             },
-          },
-          {
-            id: `${trace.traceId}-provider`,
-            type: 'assistant',
-            timestamp: trace.createdAt,
-            content: responseText,
-            metadata: {
-              deliveryPinId: deliveryWrite.pinId,
-              ratingMessagePinId: ratingWrite.pinId,
+            {
+              id: `${trace.traceId}-provider`,
+              type: 'assistant',
+              timestamp: trace.createdAt,
+              content: responseText,
+              metadata: {
+                deliveryPinId: deliveryWrite.pinId,
+                ratingMessagePinId: ratingWrite.pinId,
+              },
             },
+          ],
+        },
+      });
+    } catch (error) {
+      const failureText = error instanceof Error ? error.message : String(error);
+      console.warn(`[provider order] trace artifact export failed after delivery for ${orderTxid}: ${failureText}`);
+      await appendA2ATranscriptItems(sessionStateStore, [
+        {
+          id: `${traceId}-provider-artifact-export-failure`,
+          sessionId: received.session.sessionId,
+          taskRunId: applied.taskRun.runId,
+          timestamp: Date.now(),
+          type: 'failure',
+          sender: 'system',
+          content: `Trace artifact export failed after delivery: ${failureText}`,
+          metadata: {
+            event: 'provider_artifact_export_failed',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
           },
-        ],
-      },
-    });
+        },
+      ]).catch(() => undefined);
+    }
     const finalOrderState: SellerOrderState = ratingWrite.pinId || ratingWrite.txids.length
       ? 'rating_pending'
       : 'completed';
@@ -10427,17 +10495,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ratingRequestedAt: finalOrderState === 'rating_pending' ? finalOrderTimestamp : null,
       updatedAt: finalOrderTimestamp,
     });
-    await runtimeStateStore.updateState((current) => ({
-      ...current,
-      traces: [
+    try {
+      await runtimeStateStore.updateState((current) => ({
+        ...current,
+        traces: [
+          {
+            ...trace,
+            artifacts,
+          },
+          ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
+        ],
+        sellerOrders: upsertSellerOrderRecord(current.sellerOrders, finalSellerOrder),
+      }));
+    } catch (error) {
+      const failureText = error instanceof Error ? error.message : String(error);
+      console.warn(`[provider order] final seller order persistence failed after delivery for ${orderTxid}: ${failureText}`);
+      await appendA2ATranscriptItems(sessionStateStore, [
         {
-          ...trace,
-          artifacts,
+          id: `${traceId}-provider-final-persistence-failure`,
+          sessionId: received.session.sessionId,
+          taskRunId: applied.taskRun.runId,
+          timestamp: Date.now(),
+          type: 'failure',
+          sender: 'system',
+          content: `Final seller order persistence failed after delivery: ${failureText}`,
+          metadata: {
+            event: 'provider_final_persistence_failed',
+            orderTxid,
+            paymentTxid: paymentTxid || null,
+            intendedState: finalOrderState,
+          },
         },
-        ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
-      ],
-      sellerOrders: upsertSellerOrderRecord(current.sellerOrders, finalSellerOrder),
-    }));
+      ]).catch(() => undefined);
+    }
 
     return commandSuccess({
       handled: true,
@@ -10451,6 +10541,266 @@ export function createDefaultMetabotDaemonHandlers(input: {
       deliveryPinId: deliveryWrite.pinId,
       ratingMessagePinId: ratingWrite.pinId,
     });
+  }
+
+  async function applyInboundSellerOrderRated(inputRating: {
+    state: RuntimeState;
+    fromGlobalMetaId: string;
+    content: string;
+    orderEnd: ParsedOrderEndMessage;
+    messagePinId?: string | null;
+    timestamp?: number | null;
+  }): Promise<MetabotCommandResult<Record<string, unknown>> | null> {
+    // Only a buyer's rating receipt ([ORDER_END:<txid> rated]) is actionable on
+    // the seller side; every other ORDER_END reason keeps the existing drop.
+    if (normalizeText(inputRating.orderEnd.reason).toLowerCase() !== 'rated') {
+      return null;
+    }
+    const state = inputRating.state;
+    if (!state.identity) {
+      return null;
+    }
+    const orderTxid = normalizeOrderProtocolReference(inputRating.orderEnd.orderTxid);
+    const orderPinId = normalizeText(inputRating.orderEnd.orderPinId);
+    const sellerOrder = state.sellerOrders.find((entry) => {
+      if (normalizeText(entry.buyerGlobalMetaId) !== normalizeText(inputRating.fromGlobalMetaId)) {
+        return false;
+      }
+      return Boolean(
+        (orderTxid && normalizeOrderProtocolReference(entry.orderTxid) === orderTxid)
+        || (orderPinId && (
+          normalizeText(entry.serviceOrderPinId) === orderPinId
+          || normalizeText(entry.orderReference) === orderPinId
+          || normalizeText(entry.orderPinId) === orderPinId
+        ))
+      );
+    });
+    if (!sellerOrder || (sellerOrder.state !== 'rating_pending' && sellerOrder.state !== 'completed')) {
+      return null;
+    }
+
+    let peerChatPublicKey = '';
+    try {
+      peerChatPublicKey = await resolvePeerChatPublicKey(inputRating.fromGlobalMetaId) ?? '';
+    } catch {
+      peerChatPublicKey = '';
+    }
+    const observedAt = Number.isFinite(inputRating.timestamp)
+      ? Math.trunc(Number(inputRating.timestamp))
+      : Date.now();
+    const sellerOrderTxid = normalizeText(sellerOrder.orderTxid);
+    const serviceOrderPinId = normalizeText(sellerOrder.serviceOrderPinId)
+      || normalizeText(sellerOrder.orderReference)
+      || null;
+    await persistA2AConversationMessageBestEffort({
+      paths: runtimeStateStore.paths,
+      local: {
+        profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+        globalMetaId: state.identity.globalMetaId,
+        name: state.identity.name,
+        chatPublicKey: state.identity.chatPublicKey,
+      },
+      peer: {
+        globalMetaId: inputRating.fromGlobalMetaId,
+        chatPublicKey: peerChatPublicKey || null,
+      },
+      message: {
+        messageId: normalizeText(inputRating.messagePinId) || undefined,
+        direction: 'incoming',
+        content: inputRating.content,
+        pinId: normalizeText(inputRating.messagePinId) || null,
+        txid: sellerOrderTxid || null,
+        txids: sellerOrderTxid ? [sellerOrderTxid] : [],
+        chain: 'mvc',
+        orderTxid: sellerOrderTxid || null,
+        serviceOrderPinId,
+        paymentTxid: normalizeText(sellerOrder.paymentTxid) || null,
+        timestamp: observedAt,
+        raw: {
+          protocol: 'ORDER_END',
+          reason: 'rated',
+        },
+      },
+      orderSession: {
+        role: 'provider',
+        state: 'completed',
+        orderTxid: sellerOrderTxid,
+        serviceOrderPinId,
+        paymentTxid: normalizeText(sellerOrder.paymentTxid) || null,
+        servicePinId: normalizeText(sellerOrder.currentServicePinId) || normalizeText(sellerOrder.servicePinId) || null,
+        serviceName: normalizeText(sellerOrder.serviceName) || null,
+        outputType: null,
+        endedAt: observedAt,
+        endReason: 'rated',
+      },
+    }, a2aConversationPersister);
+
+    if (sellerOrder.state === 'rating_pending') {
+      await runtimeStateStore.updateState((current) => {
+        const currentOrder = current.sellerOrders.find((entry) => entry.id === sellerOrder.id);
+        if (!currentOrder || currentOrder.state !== 'rating_pending') {
+          return current;
+        }
+        return {
+          ...current,
+          sellerOrders: upsertSellerOrderRecord(current.sellerOrders, {
+            ...currentOrder,
+            state: 'completed',
+            updatedAt: Date.now(),
+          }),
+        };
+      });
+    }
+
+    return commandSuccess({
+      handled: true,
+      rated: true,
+      sellerOrder: true,
+      traceId: sellerOrder.traceId,
+      orderTxid: sellerOrderTxid || orderTxid || null,
+      orderEnded: true,
+    });
+  }
+
+  // Rating-timeout sweep (IDBots scanTimedOutOrders parity): seller orders
+  // stuck in rating_pending past SERVICE_ORDER_RATING_TIMEOUT_MS are closed as
+  // completed. When the buyer's rating already arrived on chain (its ORDER_END
+  // follow-up may have been lost) the order closes silently; otherwise a
+  // best-effort [ORDER_END:<txid> rating_timeout] notice goes to the buyer.
+  async function runSellerRatingTimeoutSweep(nowMs = Date.now()): Promise<{
+    scanned: number;
+    completed: number;
+    notified: number;
+  }> {
+    const state = await runtimeStateStore.readState();
+    if (!state.identity) {
+      return { scanned: 0, completed: 0, notified: 0 };
+    }
+    const staleOrders = state.sellerOrders.filter((entry) => {
+      if (entry.state !== 'rating_pending') {
+        return false;
+      }
+      const requestedAt = entry.ratingRequestedAt ?? entry.deliveredAt ?? entry.updatedAt;
+      return Number.isFinite(requestedAt) && requestedAt + SERVICE_ORDER_RATING_TIMEOUT_MS <= nowMs;
+    });
+    if (staleOrders.length === 0) {
+      return { scanned: 0, completed: 0, notified: 0 };
+    }
+    const ratingState = await ratingDetailStateStore.read().catch(() => null);
+
+    let completed = 0;
+    let notified = 0;
+    for (const staleOrder of staleOrders) {
+      try {
+        const serviceOrderPinId = normalizeText(staleOrder.serviceOrderPinId)
+          || normalizeText(staleOrder.orderReference)
+          || null;
+        const lookupRating = (serviceId: string) => ratingState && serviceId
+          ? findRatingDetailByServicePayment(ratingState, {
+            serviceId,
+            serviceOrderPinId,
+            servicePaidTx: normalizeText(staleOrder.paymentTxid) || null,
+          })
+          : null;
+        const ratingDetail = lookupRating(normalizeText(staleOrder.currentServicePinId))
+          ?? lookupRating(normalizeText(staleOrder.servicePinId));
+
+        let notifiedOrder = false;
+        const orderTxid = normalizeText(staleOrder.orderTxid);
+        if (!ratingDetail && orderTxid) {
+          const orderEndContent = buildOrderEndMessage(
+            orderTxid,
+            'rating_timeout',
+            'Rating wait timed out; the delivered order is now closed.',
+            serviceOrderPinId,
+          );
+          let peerChatPublicKey = '';
+          try {
+            peerChatPublicKey = await resolvePeerChatPublicKey(staleOrder.buyerGlobalMetaId) ?? '';
+          } catch {
+            peerChatPublicKey = '';
+          }
+          let orderEndWrite: { pinId: string | null; txids: string[] } = { pinId: null, txids: [] };
+          let orderEndSendFailure: string | null = null;
+          if (peerChatPublicKey) {
+            try {
+              orderEndWrite = await sendProviderOrderPrivateMessage({
+                toGlobalMetaId: staleOrder.buyerGlobalMetaId,
+                peerChatPublicKey,
+                content: orderEndContent,
+              });
+            } catch (error) {
+              orderEndSendFailure = error instanceof Error ? error.message : String(error);
+            }
+          } else {
+            orderEndSendFailure = 'Buyer has no published chat public key on chain.';
+          }
+          await persistA2AConversationMessageBestEffort({
+            paths: runtimeStateStore.paths,
+            local: {
+              profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+              globalMetaId: state.identity.globalMetaId,
+              name: state.identity.name,
+              chatPublicKey: state.identity.chatPublicKey,
+            },
+            peer: {
+              globalMetaId: staleOrder.buyerGlobalMetaId,
+              chatPublicKey: peerChatPublicKey || null,
+            },
+            message: {
+              direction: 'outgoing',
+              content: orderEndContent,
+              pinId: orderEndWrite.pinId,
+              txid: orderEndWrite.txids[0] ?? orderEndWrite.pinId,
+              txids: orderEndWrite.txids,
+              chain: 'mvc',
+              orderTxid,
+              serviceOrderPinId,
+              paymentTxid: normalizeText(staleOrder.paymentTxid) || null,
+              timestamp: nowMs,
+              raw: orderEndSendFailure ? { sendFailure: orderEndSendFailure } : null,
+            },
+            orderSession: {
+              role: 'provider',
+              state: 'completed',
+              orderTxid,
+              serviceOrderPinId,
+              paymentTxid: normalizeText(staleOrder.paymentTxid) || null,
+              servicePinId: normalizeText(staleOrder.currentServicePinId) || normalizeText(staleOrder.servicePinId) || null,
+              serviceName: normalizeText(staleOrder.serviceName) || null,
+              outputType: null,
+              endedAt: nowMs,
+              endReason: 'rating_timeout',
+            },
+          }, a2aConversationPersister);
+          notifiedOrder = Boolean(orderEndWrite.pinId || orderEndWrite.txids.length);
+        }
+
+        // Close the order regardless of whether the notice went out.
+        await runtimeStateStore.updateState((current) => {
+          const currentOrder = current.sellerOrders.find((entry) => entry.id === staleOrder.id);
+          if (!currentOrder || currentOrder.state !== 'rating_pending') {
+            return current;
+          }
+          return {
+            ...current,
+            sellerOrders: upsertSellerOrderRecord(current.sellerOrders, {
+              ...currentOrder,
+              state: 'completed',
+              endReason: ratingDetail ? currentOrder.endReason : 'rating_timeout',
+              updatedAt: nowMs,
+            }),
+          };
+        });
+        completed += 1;
+        if (notifiedOrder) {
+          notified += 1;
+        }
+      } catch (error) {
+        console.warn(`[seller rating sweep] failed to close ${staleOrder.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { scanned: staleOrders.length, completed, notified };
   }
 
   async function handleInboundOrderProtocolMessage(inputMessage: {
@@ -10538,6 +10888,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
       paymentTxid: delivery?.paymentTxid ?? null,
     });
     if (!trace) {
+      // No buyer-side trace owns this order reference. When a matching seller
+      // order exists, the ORDER_END came from the buyer of one of our own
+      // sales (a rating receipt) and is routed to the seller side instead of
+      // being dropped; routing is decided by which side owns the order.
+      if (orderEnd && !delivery && !needsRating) {
+        const sellerRated = await applyInboundSellerOrderRated({
+          state: runtimeState,
+          fromGlobalMetaId: inputMessage.fromGlobalMetaId,
+          content,
+          orderEnd,
+          messagePinId: inputMessage.messagePinId,
+          timestamp: inputMessage.timestamp,
+        });
+        if (sellerRated) {
+          return sellerRated;
+        }
+      }
       return commandSuccess({ handled: false, rated: false });
     }
 
@@ -13945,7 +14312,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           },
           env: process.env,
           canStartRuntime: input.providerRuntimeCanStart,
+          sessionTimeoutMs: resolveProviderOrderExecutionTimeoutMs(service),
         });
+        // A synchronous/startup throw from the runner must still produce a
+        // structured failure result so the order reaches a terminal state.
         const runnerResult = await providerRunner.execute({
           servicePinId: service.currentPinId,
           providerSkill: service.providerSkill,
@@ -13963,7 +14333,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
             buyer: execution.buyer,
             payment: execution.payment,
           },
-        });
+        }).catch((error) => createServiceRunnerFailedResult(
+          readErrorCode(error, 'provider_execution_failed'),
+          readErrorMessage(error, 'provider_execution_failed', 'Provider execution failed before a runner result was produced.'),
+        ));
         const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
         const deferCompletedPersistence = runnerResult.state === 'completed'
           && !isTextLikeProviderOutputType(service.outputType);
@@ -14412,43 +14785,68 @@ export function createDefaultMetabotDaemonHandlers(input: {
           providerRuntime: providerRuntimeDiagnostics,
         });
 
-        const artifacts = await exportSessionArtifacts({
-          trace,
-          transcript: {
-            sessionId: trace.session.id,
-            title: trace.session.title,
-            messages: [
-              {
-                id: `${trace.traceId}-buyer`,
-                type: 'user',
-                timestamp: trace.createdAt,
-                content: execution.request.userTask,
-                metadata: {
-                  taskContext: execution.request.taskContext || null,
-                  buyerHost: execution.buyer.host || null,
-                  buyerGlobalMetaId: execution.buyer.globalMetaId || null,
-                  paymentTxid: execution.payment.paymentTxid,
-                  orderReference: execution.payment.orderReference,
-                  serviceOrderPinId: execution.payment.serviceOrderPinId,
+        // Guarded like the simplemsg post-delivery finalization: the runner
+        // already produced a result, so a local export/persistence failure
+        // must not strand the seller order in_progress.
+        let artifacts = trace.artifacts;
+        try {
+          artifacts = await exportSessionArtifacts({
+            trace,
+            transcript: {
+              sessionId: trace.session.id,
+              title: trace.session.title,
+              messages: [
+                {
+                  id: `${trace.traceId}-buyer`,
+                  type: 'user',
+                  timestamp: trace.createdAt,
+                  content: execution.request.userTask,
+                  metadata: {
+                    taskContext: execution.request.taskContext || null,
+                    buyerHost: execution.buyer.host || null,
+                    buyerGlobalMetaId: execution.buyer.globalMetaId || null,
+                    paymentTxid: execution.payment.paymentTxid,
+                    orderReference: execution.payment.orderReference,
+                    serviceOrderPinId: execution.payment.serviceOrderPinId,
+                  },
                 },
-              },
-              {
-                id: `${trace.traceId}-provider`,
-                type: 'assistant',
-                timestamp: trace.createdAt,
-                content: providerMessage,
-                metadata: {
-                  servicePinId: service.currentPinId,
-                  providerGlobalMetaId: state.identity.globalMetaId,
-                  providerSessionId: received.session.sessionId,
-                  providerTaskRunId: received.taskRun.runId,
-                  providerEvent: applied.event,
-                  ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
+                {
+                  id: `${trace.traceId}-provider`,
+                  type: 'assistant',
+                  timestamp: trace.createdAt,
+                  content: providerMessage,
+                  metadata: {
+                    servicePinId: service.currentPinId,
+                    providerGlobalMetaId: state.identity.globalMetaId,
+                    providerSessionId: received.session.sessionId,
+                    providerTaskRunId: received.taskRun.runId,
+                    providerEvent: applied.event,
+                    ...(deliveryArtifacts.length ? { deliveryArtifacts } : {}),
+                  },
                 },
+              ],
+            },
+          });
+        } catch (error) {
+          const failureText = error instanceof Error ? error.message : String(error);
+          console.warn(`[provider execute] trace artifact export failed for ${traceId}: ${failureText}`);
+          await appendA2ATranscriptItems(sessionStateStore, [
+            {
+              id: `${traceId}-provider-artifact-export-failure`,
+              sessionId: received.session.sessionId,
+              taskRunId: applied.taskRun.runId,
+              timestamp: Date.now(),
+              type: 'failure',
+              sender: 'system',
+              content: `Trace artifact export failed after completion: ${failureText}`,
+              metadata: {
+                event: 'provider_artifact_export_failed',
+                paymentTxid: execution.payment.paymentTxid,
+                orderReference: execution.payment.orderReference,
               },
-            ],
-          },
-        });
+            },
+          ]).catch(() => undefined);
+        }
 
         const completedAt = applied.taskRun.completedAt ?? applied.session.updatedAt;
         const completedOrder = buildProviderSellerOrderRecord({
@@ -14479,17 +14877,39 @@ export function createDefaultMetabotDaemonHandlers(input: {
           deliveredAt: completedAt,
           updatedAt: completedAt,
         });
-        await runtimeStateStore.updateState((current) => ({
-          ...current,
-          traces: [
+        try {
+          await runtimeStateStore.updateState((current) => ({
+            ...current,
+            traces: [
+              {
+                ...trace,
+                artifacts,
+              },
+              ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
+            ],
+            sellerOrders: upsertSellerOrderRecord(current.sellerOrders, completedOrder),
+          }));
+        } catch (error) {
+          const failureText = error instanceof Error ? error.message : String(error);
+          console.warn(`[provider execute] final seller order persistence failed for ${traceId}: ${failureText}`);
+          await appendA2ATranscriptItems(sessionStateStore, [
             {
-              ...trace,
-              artifacts,
+              id: `${traceId}-provider-final-persistence-failure`,
+              sessionId: received.session.sessionId,
+              taskRunId: applied.taskRun.runId,
+              timestamp: Date.now(),
+              type: 'failure',
+              sender: 'system',
+              content: `Final seller order persistence failed after completion: ${failureText}`,
+              metadata: {
+                event: 'provider_final_persistence_failed',
+                paymentTxid: execution.payment.paymentTxid,
+                orderReference: execution.payment.orderReference,
+                intendedState: 'completed',
+              },
             },
-            ...current.traces.filter((entry) => entry.traceId !== trace.traceId),
-          ],
-          sellerOrders: upsertSellerOrderRecord(current.sellerOrders, completedOrder),
-        }));
+          ]).catch(() => undefined);
+        }
 
         return commandSuccess({
           traceId: trace.traceId,
