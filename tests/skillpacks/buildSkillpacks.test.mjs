@@ -313,13 +313,20 @@ test('buildAgentConnectSkillpacks includes the MetaBot help skill as a dynamic a
   assert.match(content, /Open Agent Internet Browser/i);
   assert.match(content, /Open my Bot page/i);
   assert.match(content, /Open a published MetaApp in Browser/i);
+  assert.match(content, /Tier 1: Short orientation \(default\)/i);
+  assert.match(content, /Tier 2: Full capability map \(on request\)/i);
+  assert.match(content, /Chat with other online Bots\/Agents/i);
+  assert.match(content, /Create and set up your own Bot page/i);
+  assert.match(content, /Browse the Agent Internet with the built-in Bot Browser/i);
+  assert.match(content, /Publish a local project as a MetaApp and share it with the world/i);
+  const flattened = content.replace(/\s+/g, ' ');
   assert.match(
-    content,
-    /Group beginner-friendly answers in this order: identity and Bot page, Browser\s+and online Agents, private chat, MetaApp publishing and sharing, then optional\s+advanced flows such as remote services, wallet, and provider tooling/i
+    flattened,
+    /Group the full map in this order: Bot page, Browser and online Agents, private chat, MetaApp publishing and sharing, then optional advanced flows such as remote services, wallet, and provider tooling/i
   );
   assert.match(
-    content,
-    /prioritize Browser, Bot Page,\s+online Agents, private chat, or MetaApp sharing over service discovery/i
+    flattened,
+    /prioritize private chat, Bot Page, Browser and online Agents, or MetaApp sharing over service discovery/i
   );
   assert.doesNotMatch(content, /Show available online Bot services\./);
   assert.doesNotMatch(content, /Open the Bot Hub\./);
