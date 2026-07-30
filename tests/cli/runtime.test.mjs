@@ -440,7 +440,9 @@ test('createPrivateChatReplyRunnerForProfile wires allowed chat skills for the a
   assert.equal(executorCalls.length, 1);
   assert.deepEqual(executorCalls[0].skills, ['metabot-weather']);
   assert.match(executorCalls[0].skillSourcePaths['metabot-weather'], /\.codex[/\\]skills[/\\]metabot-weather$/);
-  assert.equal(executorCalls[0].skillIsolation, 'strict');
+  // Chat turns run with the host's normal environment so allowed skills can
+  // fully execute (IDBots-style); the allow-list is scoped in the prompt.
+  assert.equal(Object.hasOwn(executorCalls[0], 'skillIsolation'), false);
 });
 
 test('refreshA2ASimplemsgListenerForIdentityProfileRegistration is a no-op when disabled', async () => {

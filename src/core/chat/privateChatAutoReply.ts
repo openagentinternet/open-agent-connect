@@ -1,5 +1,6 @@
 import { sendPrivateChat } from './privateChat';
 import { loadChatPersona } from './chatPersonaLoader';
+import type { ChatSkillWaitNoticeGenerator } from './chatSkillWaitNotice';
 import {
   persistA2AConversationMessageBestEffort,
   type A2AConversationMessagePersister,
@@ -29,6 +30,22 @@ const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 const CLOSE_CONVERSATION_FINAL_LINE_PATTERN = /^(?:bye|goodbye)[.!。！]?$/iu;
 const MAX_REPLIES_PER_MINUTE = 10;
 const MAX_REPLIES_PER_HOUR = 100;
+// Outbound-message extension markers for the chat-skill wait notice: they let
+// retries dedupe against conversation history and let the staleness guard
+// skip notices when checking whether a newer peer message has arrived.
+const CHAT_SKILL_WAIT_NOTICE_EXTENSION = 'chatSkillWaitNotice';
+const CHAT_SKILL_WAIT_NOTICE_FOR_EXTENSION = 'chatSkillWaitNoticeForMessageId';
+
+function hasSentChatSkillWaitNotice(
+  messages: PrivateChatMessage[],
+  forMessageId: string,
+): boolean {
+  return messages.some((message) => (
+    message.direction === 'outbound'
+    && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] === true
+    && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_FOR_EXTENSION] === forMessageId
+  ));
+}
 
 // Order-protocol records (ORDER/ORDER_STATUS/DELIVERY/NeedsRating/ORDER_END)
 // are service traffic, not conversation. Keep them out of the LLM chat
@@ -48,6 +65,10 @@ export interface PrivateChatAutoReplyDependencies {
   replyRunner: ChatReplyRunner;
   a2aConversationPersister?: A2AConversationMessagePersister;
   logSendFailure?: (event: PrivateChatSendFailureEvent) => void;
+  // Generates the persona-voiced "please wait" notice sent to the peer once
+  // per inbound message when an allowed chat skill actually starts executing
+  // (IDBots-style interim reply). Null/absent disables the notice.
+  chatSkillWaitNotice?: ChatSkillWaitNoticeGenerator | null;
   now?: () => number;
 }
 
@@ -207,9 +228,15 @@ async function latestConversationMessageMatches(input: {
   conversationId: string;
   expectedMessageId: string;
 }): Promise<boolean> {
-  const latestMessages = await input.stateStore.getRecentMessages(input.conversationId, 1);
-  const latestMessage = latestMessages.at(-1) ?? null;
-  return Boolean(latestMessage && latestMessage.messageId === input.expectedMessageId);
+  // Scan a small tail instead of only the very last record: our own interim
+  // chat-skill wait notices are appended to the store while the turn is still
+  // being composed, and must not count as "a newer message arrived".
+  const latestMessages = await input.stateStore.getRecentMessages(input.conversationId, 5);
+  const latestSignificantMessage = [...latestMessages].reverse().find((message) => !(
+    message.direction === 'outbound'
+    && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] === true
+  ));
+  return Boolean(latestSignificantMessage && latestSignificantMessage.messageId === input.expectedMessageId);
 }
 
 function checkRateLimit(rateLimiter: RateLimiterState, now: number): boolean {
@@ -325,6 +352,71 @@ export function createPrivateChatAutoReplyOrchestrator(
     }
   }
 
+  // Sends the interim "please wait" notice for a chat-skill execution and
+  // records it like a normal outbound message, so conversation history (and
+  // later retry dedupe) reflects what the peer actually saw.
+  async function sendChatSkillWaitNotice(input: {
+    selfGlobalMetaId: string;
+    peerGlobalMetaId: string;
+    conversation: PrivateChatConversation;
+    inboundMessage: PrivateChatMessage;
+    persona: Awaited<ReturnType<typeof loadChatPersona>>;
+  }): Promise<void> {
+    if (!deps.chatSkillWaitNotice) return;
+    try {
+      const text = normalizeText(await deps.chatSkillWaitNotice({
+        conversation: input.conversation,
+        inboundMessage: input.inboundMessage,
+        persona: input.persona,
+      }));
+      if (!text) return;
+      const extensions: Record<string, unknown> = {
+        [CHAT_SKILL_WAIT_NOTICE_EXTENSION]: true,
+        [CHAT_SKILL_WAIT_NOTICE_FOR_EXTENSION]: input.inboundMessage.messageId,
+      };
+      const sent = await sendReplyMessage(
+        input.selfGlobalMetaId,
+        input.peerGlobalMetaId,
+        text,
+        extensions,
+      );
+      if (!sent) return;
+      const timestamp = getNow();
+      const outboundRecord: PrivateChatMessage = {
+        conversationId: input.conversation.conversationId,
+        messageId: sent.pinId || buildMessageId(timestamp),
+        direction: 'outbound',
+        senderGlobalMetaId: input.selfGlobalMetaId,
+        content: text,
+        messagePinId: sent.pinId,
+        extensions,
+        timestamp,
+      };
+      await deps.stateStore.appendMessages([outboundRecord]).catch(() => undefined);
+      await persistA2AConversationMessageBestEffort({
+        paths: deps.paths,
+        local: {
+          globalMetaId: input.selfGlobalMetaId,
+        },
+        peer: {
+          globalMetaId: input.peerGlobalMetaId,
+        },
+        message: {
+          messageId: outboundRecord.messageId,
+          direction: 'outgoing',
+          content: outboundRecord.content,
+          pinId: outboundRecord.messagePinId,
+          txid: sent.txids[0] ?? null,
+          txids: sent.txids,
+          chain: sent.network ?? 'mvc',
+          timestamp: outboundRecord.timestamp,
+        },
+      }, deps.a2aConversationPersister);
+    } catch {
+      // The wait notice is strictly best-effort; skill execution continues.
+    }
+  }
+
   async function prepareOutboundTurn(input: {
     conversation: PrivateChatConversation;
     recentMessages: PrivateChatMessage[];
@@ -333,6 +425,7 @@ export function createPrivateChatAutoReplyOrchestrator(
     inboundMessage: PrivateChatMessage | null;
     operatorGuidanceText?: string | null;
     conversationCloseAllowed?: boolean;
+    onSkillExecutionStart?: () => void;
   }): Promise<PreparedOutboundTurn | null> {
     const conversationCloseAllowed = input.conversationCloseAllowed !== false;
     let runnerResult;
@@ -345,6 +438,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         inboundMessage: input.inboundMessage,
         operatorGuidanceText: input.operatorGuidanceText ?? null,
         conversationCloseAllowed,
+        onSkillExecutionStart: input.onSkillExecutionStart,
       });
     } catch {
       return null;
@@ -573,6 +667,28 @@ export function createPrivateChatAutoReplyOrchestrator(
         input.conversation.conversationId,
         DEFAULT_RECENT_MESSAGES_LIMIT,
       ));
+      // Interim "please wait" notice (IDBots-style): fired by the reply runner
+      // when an allowed chat skill actually starts executing. Sent at most once
+      // per inbound message, deduped against history so a later retry of the
+      // same message does not re-notify the peer.
+      const waitNoticeState: { sent: boolean; promise: Promise<void> | null } = {
+        sent: false,
+        promise: null,
+      };
+      const onSkillExecutionStart = deps.chatSkillWaitNotice
+        ? () => {
+          if (waitNoticeState.sent) return;
+          waitNoticeState.sent = true;
+          if (hasSentChatSkillWaitNotice(recentMessages, input.inboundMessage.messageId)) return;
+          waitNoticeState.promise = sendChatSkillWaitNotice({
+            selfGlobalMetaId: input.selfGlobalMetaId,
+            peerGlobalMetaId: input.peerGlobalMetaId,
+            conversation: input.conversation,
+            inboundMessage: input.inboundMessage,
+            persona,
+          });
+        }
+        : undefined;
       const preparedTurn = await prepareOutboundTurn({
         conversation: input.conversation,
         recentMessages,
@@ -580,6 +696,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         strategy: input.strategy,
         inboundMessage: input.inboundMessage,
         operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
+        onSkillExecutionStart,
       });
       if (!preparedTurn) {
         if (guidanceToConsume) {
@@ -590,6 +707,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         }
         return false;
       }
+
+      // Keep wire order for the peer: the wait notice (if one went out during
+      // the LLM turn) must settle before the final reply is sent.
+      await waitNoticeState.promise;
 
       const committedConversation = await commitOutboundTurn({
         selfGlobalMetaId: input.selfGlobalMetaId,

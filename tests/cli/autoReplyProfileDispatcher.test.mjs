@@ -439,7 +439,9 @@ test('auto-reply dispatcher default runner wires allowed chat skills for non-act
   assert.equal(executorCalls.length, 1);
   assert.deepEqual(executorCalls[0].skills, ['metabot-weather']);
   assert.match(executorCalls[0].skillSourcePaths['metabot-weather'], /\.codex[/\\]skills[/\\]metabot-weather$/);
-  assert.equal(executorCalls[0].skillIsolation, 'strict');
+  // Chat turns run with the host's normal environment so allowed skills can
+  // fully execute (IDBots-style); the allow-list is scoped in the prompt.
+  assert.equal(Object.hasOwn(executorCalls[0], 'skillIsolation'), false);
 });
 
 test('startup recovery replays persisted inbound ORDER messages without provider sessions', async (t) => {

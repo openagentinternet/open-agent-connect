@@ -93,6 +93,10 @@ test('private chat allowed skills resolver returns exact executable skills and s
 
   assert.deepEqual(result.skills, ['metabot-weather']);
   assert.match(result.skillSourcePaths['metabot-weather'], /\.codex[/\\]skills[/\\]metabot-weather$/);
+  assert.equal(result.skillDetails.length, 1);
+  assert.equal(result.skillDetails[0].name, 'metabot-weather');
+  assert.equal(result.skillDetails[0].description, null);
+  assert.match(result.skillDetails[0].location, /\.codex[/\\]skills[/\\]metabot-weather[/\\]SKILL\.md$/);
   assert.deepEqual(result.skippedSkills, ['metabot-missing']);
 });
 
@@ -111,6 +115,7 @@ test('private chat allowed skills resolver returns empty scope for profiles with
 
   assert.deepEqual(result.skills, []);
   assert.deepEqual(result.skillSourcePaths, {});
+  assert.deepEqual(result.skillDetails, []);
   assert.deepEqual(result.skippedSkills, []);
   assert.equal(result.warning, null);
 });

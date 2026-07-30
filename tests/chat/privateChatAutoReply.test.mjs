@@ -150,6 +150,7 @@ async function createAutoReplyHarness(options = {}) {
     logSendFailure: options.logSendFailure === undefined
       ? (event) => sendFailureEvents.push(event)
       : options.logSendFailure ?? undefined,
+    chatSkillWaitNotice: options.chatSkillWaitNotice,
     replyRunner: async (input) => {
       runnerInputs.push(input);
       if (options.replyRunner) {
@@ -2395,4 +2396,99 @@ test('auto-reply keeps order-protocol traffic out of the runner chat context', a
   // The protocol records stay in the state store; only the prompt context is filtered.
   const stored = await harness.stateStore.getRecentMessages(conversationId, 10);
   assert.ok(stored.some((message) => message.content.startsWith(`[ORDER_STATUS:${orderTxid}]`)));
+});
+
+
+test('orchestrator sends a wait notice before the final reply when a chat skill starts', async () => {
+  const harness = await createAutoReplyHarness({
+    chatSkillWaitNotice: async () => '稍等,我来看一下。',
+    replyRunner: async (input) => {
+      input.onSkillExecutionStart?.();
+      return { state: 'reply', content: 'final answer' };
+    },
+  });
+
+  await harness.handleInbound();
+
+  assert.equal(harness.writes.length, 2, 'the notice and the final reply each produce one pin write');
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const outbound = messages.filter((message) => message.direction === 'outbound');
+  assert.equal(outbound.length, 2);
+  const [notice, finalReply] = outbound;
+  assert.equal(notice.content, '稍等,我来看一下。');
+  assert.equal(notice.extensions?.chatSkillWaitNotice, true);
+  assert.equal(notice.extensions?.chatSkillWaitNoticeForMessageId, 'incoming-pin-1');
+  assert.equal(finalReply.content, 'final answer');
+  assert.equal(finalReply.extensions?.chatSkillWaitNotice ?? false, false);
+  assert.ok(
+    messages.indexOf(notice) < messages.indexOf(finalReply),
+    'the wait notice must be recorded before the final reply',
+  );
+});
+
+test('orchestrator sends the wait notice only once per inbound message', async () => {
+  const harness = await createAutoReplyHarness({
+    chatSkillWaitNotice: async () => 'One moment please.',
+    replyRunner: async (input) => {
+      input.onSkillExecutionStart?.();
+      input.onSkillExecutionStart?.();
+      return { state: 'reply', content: 'done' };
+    },
+  });
+
+  await harness.handleInbound();
+
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const notices = messages.filter((message) => message.extensions?.chatSkillWaitNotice === true);
+  assert.equal(notices.length, 1, 'repeated skill-start signals must not duplicate the notice');
+  assert.equal(harness.writes.length, 2);
+});
+
+test('orchestrator sends no wait notice when skill execution does not start', async () => {
+  const harness = await createAutoReplyHarness({
+    chatSkillWaitNotice: async () => 'One moment please.',
+    replyRunner: async () => ({ state: 'reply', content: 'plain reply' }),
+  });
+
+  await harness.handleInbound();
+
+  assert.equal(harness.writes.length, 1);
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(
+    messages.filter((message) => message.extensions?.chatSkillWaitNotice === true).length,
+    0,
+  );
+});
+
+test('orchestrator does not resend the wait notice when history already has one for the message', async () => {
+  const harness = await createAutoReplyHarness({
+    chatSkillWaitNotice: async () => 'One moment please.',
+    replyRunner: async (input) => {
+      input.onSkillExecutionStart?.();
+      return { state: 'reply', content: 'late final answer' };
+    },
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  // Simulate an earlier attempt that sent the notice but failed before the
+  // final reply: a retry of the same inbound message must not re-notify.
+  await harness.stateStore.appendMessages([{
+    conversationId,
+    messageId: 'notice-pin-seed',
+    direction: 'outbound',
+    senderGlobalMetaId: harness.localGlobalMetaId,
+    content: 'One moment please.',
+    messagePinId: 'notice-pin-seed',
+    extensions: { chatSkillWaitNotice: true, chatSkillWaitNoticeForMessageId: 'incoming-pin-1' },
+    timestamp: 1_770_000_000_000 - 1000,
+  }]);
+
+  await harness.handleInbound();
+
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const notices = messages.filter((message) => message.extensions?.chatSkillWaitNotice === true);
+  assert.equal(notices.length, 1, 'the seeded notice must not be duplicated');
+  assert.equal(harness.writes.length, 1, 'only the final reply is written');
 });

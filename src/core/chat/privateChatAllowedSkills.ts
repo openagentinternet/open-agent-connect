@@ -4,9 +4,18 @@ import type { MetabotPaths } from '../state/paths';
 import { getMetabotProfile } from '../bot/metabotProfileManager';
 import { resolveAllowChatSkillsForRuntime } from '../services/chatSkillPolicy';
 
+export interface PrivateChatAllowedSkillDetail {
+  name: string;
+  description: string | null;
+  // Absolute path to the skill's SKILL.md in its source root. The chat prompt
+  // points the model here so it always reads the fresh skill document.
+  location: string | null;
+}
+
 export interface PrivateChatAllowedSkillScope {
   skills: string[];
   skillSourcePaths: Record<string, string>;
+  skillDetails: PrivateChatAllowedSkillDetail[];
   skippedSkills: string[];
   warning: string | null;
 }
@@ -17,6 +26,7 @@ export function emptyPrivateChatAllowedSkillScope(): PrivateChatAllowedSkillScop
   return {
     skills: [],
     skillSourcePaths: {},
+    skillDetails: [],
     skippedSkills: [],
     warning: null,
   };
@@ -53,6 +63,15 @@ export function createPrivateChatAllowedSkillsResolver(input: {
     return {
       skills: result.skills.map((skill) => skill.skillName),
       skillSourcePaths: result.skillSourcePaths,
+      skillDetails: result.skills.map((skill) => ({
+        name: skill.skillName,
+        description: typeof skill.description === 'string' && skill.description.trim()
+          ? skill.description.trim()
+          : null,
+        location: typeof skill.skillDocumentPath === 'string' && skill.skillDocumentPath.trim()
+          ? skill.skillDocumentPath.trim()
+          : null,
+      })),
       skippedSkills: result.skippedSkills,
       warning: result.warning ?? null,
     };

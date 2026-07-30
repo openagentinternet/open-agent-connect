@@ -195,6 +195,17 @@ This keeps runtime behavior safe when skills are uninstalled, renamed, or when t
 
 ### Executor-Level Enforcement
 
+> **Superseded 2026-07-30** (branch `fix-a2a-skill-execution`, plan:
+> `docs/a2a-chat-skill-order-maturity-plan-v1.md`): chat turns no longer run
+> under `skillIsolation: 'strict'`. To match the IDBots reference behavior,
+> allowed chat skills execute with the host's normal environment so they can
+> perform their documented actions (including on-chain writes, uploads, and
+> messaging). The allow-list is now scoped **at prompt level**: the routing
+> block lists only the allowed skills (name, description, SKILL.md location)
+> and instructs the model to use only those. Chat turns run in a per-profile
+> workspace (`<profile>/.runtime/private-chat-work/`). The executor's
+> strict-isolation machinery remains available for other callers.
+
 Private chat skill enablement must be enforced through:
 
 ```ts

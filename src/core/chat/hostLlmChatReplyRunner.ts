@@ -1,6 +1,7 @@
+import { promises as fs } from 'node:fs';
 import { createDefaultChatReplyRunner } from './defaultChatReplyRunner';
 import type { LlmRuntimeResolver } from '../llm/llmRuntimeResolver';
-import type { LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
+import type { LlmExecutionEvent, LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
 import {
   emptyPrivateChatAllowedSkillScope,
   type PrivateChatAllowedSkillScope,
@@ -97,6 +98,7 @@ function stripPlanningPreamble(value: string): string {
 type ChatLlmExecutor = {
   execute(request: LlmExecutionRequest): Promise<string>;
   getSession(sessionId: string): Promise<LlmSessionRecord | null>;
+  streamEvents?(sessionId: string): AsyncIterable<LlmExecutionEvent>;
 };
 
 function normalizeText(value: unknown): string {
@@ -214,15 +216,9 @@ function buildChatPrompt(
     const actorLines = [
       '## Reply Delivery Boundary (critical)',
       `You are replying as local bot profile \`${metaBotSlug}\`.`,
-      '- Generate reply text only. Open Agent Connect owns delivery and will publish the returned text exactly once.',
-      '- NEVER call `metabot chat private`, a private-chat send skill, or any other command that sends this reply.',
-      '- Do not perform chain writes, uploads, or external side effects while generating this reply.',
+      '- Generate reply text only as your final output. Open Agent Connect owns delivery of that text and will publish it exactly once.',
+      '- NEVER call `metabot chat private`, a private-chat send skill, or any other command that sends this reply yourself.',
     ];
-    if (allowedSkillScope.skills.length > 0) {
-      actorLines.push(
-        '- Use allowed private-chat skills only for read-only context needed to compose the reply.',
-      );
-    }
     sections.push(actorLines.join('\n'));
   }
 
@@ -264,20 +260,39 @@ function buildChatPrompt(
   sections.push([
     '## Persona Immersion (critical)',
     '- Stay fully in character from the very first word of your reply.',
-    '- NEVER announce plans or internal actions: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
-    '- Never say you are reading skills, checking context, or preparing to send a reply.',
-    allowedSkillScope.skills.length > 0
-      ? '- Skill reading, research, and checkpoints are invisible — output only what the persona would say.'
-      : '- No private chat skills are available for this turn unless they are explicitly listed below.',
+    '- Do not narrate plans or internal steps in your reply: no "先读/先查 skill", no workflow/Step narration, no "按角色风格回复".',
+    '- After using a skill, reply concisely with the result the persona would give. Do not paste full skill logs or raw tool output.',
   ].join('\n'));
 
   if (allowedSkillScope.skills.length > 0) {
+    const skillLines = allowedSkillScope.skillDetails.map((skill) => {
+      const lines = [`- name: ${skill.name}`];
+      if (skill.description) {
+        lines.push(`  description: ${skill.description}`);
+      }
+      if (skill.location) {
+        lines.push(`  location: ${skill.location}`);
+      }
+      return lines.join('\n');
+    });
     sections.push([
-      '## Available Private Chat Skills',
-      'These are the only skills available for this private chat turn.',
-      'Read and apply them silently when they help answer the sender request.',
-      'Never tell the user you are reading, loading, or following a skill.',
-      ...allowedSkillScope.skills.map((skillName) => `- ${skillName}`),
+      '## Available Private Chat Skills (evaluate every turn)',
+      'Before replying, scan the skill descriptions below and decide whether one should handle the latest message:',
+      '- If exactly one skill clearly applies, use it: read its SKILL.md at the listed location, follow it, and run the documented commands before replying.',
+      '- If several could apply, choose the most specific one, then read and follow it.',
+      '- If none clearly applies, do not use any skill; reply directly.',
+      '- Never read more than one skill up front; only read another skill if the first one explicitly references it.',
+      '- Use ONLY the skills listed here, even if the host runtime offers other skills.',
+      '- Skills may perform their documented actions (including on-chain writes, uploads, or sending messages) when the task calls for it — but never to send this chat reply itself (see Reply Delivery Boundary).',
+      '- When skill execution actually starts, the host sends a brief wait notice to the peer automatically. Do not preface normal replies with wait notices, and do not repeat the notice as your final answer.',
+      '<available_skills>',
+      ...skillLines,
+      '</available_skills>',
+    ].join('\n'));
+  } else {
+    sections.push([
+      '## Private Chat Skills',
+      '- No private chat skills are available for this turn. Do not claim local tool access or execute local skills in this regular private chat.',
     ].join('\n'));
   }
 
@@ -381,12 +396,14 @@ async function tryExecute(
   pollIntervalMs: number,
   excludeRuntimeIds: Set<string>,
   allowedSkillScope: PrivateChatAllowedSkillScope,
-  enforceSkillScope: boolean,
+  markRuntimeUnavailableOnFailure: boolean,
   stickyRuntime: StickyRuntimePreference,
   pollDeadlineTracker: PollDeadlineTracker,
   turnState: { attemptedExecution: boolean },
+  onSkillExecutionStart?: () => void,
+  chatWorkspaceDir?: string,
 ): Promise<{ result: ChatReplyRunnerResult; bindingId?: string } | null> {
-  const shouldMarkRuntimeUnavailable = !enforceSkillScope;
+  const shouldMarkRuntimeUnavailable = markRuntimeUnavailableOnFailure;
   const stickyRuntimeId = stickyRuntime.get();
   const resolved = await resolver.resolveRuntime({
     metaBotSlug,
@@ -413,8 +430,8 @@ async function tryExecute(
         [PRIVATE_CHAT_REPLY_GENERATION_ENV]: '1',
       },
     };
-    if (enforceSkillScope) {
-      request.skillIsolation = 'strict';
+    if (chatWorkspaceDir) {
+      request.cwd = chatWorkspaceDir;
     }
     if (allowedSkillScope.skills.length > 0) {
       request.skills = allowedSkillScope.skills;
@@ -424,48 +441,78 @@ async function tryExecute(
     turnState.attemptedExecution = true;
     const sessionId = await llmExecutor.execute(request);
 
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() <= deadline) {
-      const session = await llmExecutor.getSession(sessionId);
-      const result = session?.result;
-      if (result) {
-        if (result.status === 'completed') {
-          const parsed = parseRunnerOutput(result.output);
-          if (parsed.state !== 'skip') {
-            stickyRuntime.onSuccess(resolved.runtime.id);
-            pollDeadlineTracker.reset(resolved.runtime.id);
-            return { result: parsed, bindingId: resolved.bindingId };
+    // Wait-notice trigger: the first tool_use event means an allowed chat
+    // skill actually started executing (mirrors the IDBots design). Watch the
+    // session event stream in the background; the flag keeps a finished
+    // attempt from firing notices, and the orchestrator dedupes per turn.
+    let attemptActive = true;
+    if (
+      onSkillExecutionStart
+      && allowedSkillScope.skills.length > 0
+      && typeof llmExecutor.streamEvents === 'function'
+    ) {
+      const streamEvents = llmExecutor.streamEvents.bind(llmExecutor);
+      void (async () => {
+        try {
+          for await (const event of streamEvents(sessionId)) {
+            if (!attemptActive) return;
+            if (event.type === 'tool_use') {
+              onSkillExecutionStart();
+              return;
+            }
+          }
+        } catch {
+          // The wait-notice trigger must never affect the reply path.
+        }
+      })();
+    }
+
+    try {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() <= deadline) {
+        const session = await llmExecutor.getSession(sessionId);
+        const result = session?.result;
+        if (result) {
+          if (result.status === 'completed') {
+            const parsed = parseRunnerOutput(result.output);
+            if (parsed.state !== 'skip') {
+              stickyRuntime.onSuccess(resolved.runtime.id);
+              pollDeadlineTracker.reset(resolved.runtime.id);
+              return { result: parsed, bindingId: resolved.bindingId };
+            }
+            excludeRuntimeIds.add(resolved.runtime.id);
+            stickyRuntime.onFailure(resolved.runtime.id);
+            if (shouldMarkRuntimeUnavailable) {
+              await resolver.markRuntimeUnavailable(
+                resolved.runtime.id,
+                'LLM runtime completed without returning output.',
+              ).catch(() => {});
+            }
+            return null;
           }
           excludeRuntimeIds.add(resolved.runtime.id);
           stickyRuntime.onFailure(resolved.runtime.id);
           if (shouldMarkRuntimeUnavailable) {
-            await resolver.markRuntimeUnavailable(
-              resolved.runtime.id,
-              'LLM runtime completed without returning output.',
-            ).catch(() => {});
+            await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => {});
           }
           return null;
         }
-        excludeRuntimeIds.add(resolved.runtime.id);
-        stickyRuntime.onFailure(resolved.runtime.id);
-        if (shouldMarkRuntimeUnavailable) {
-          await resolver.markRuntimeUnavailable(resolved.runtime.id, result.error || `LLM runtime ended with status ${result.status}.`).catch(() => {});
-        }
-        return null;
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       }
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-    }
 
-    excludeRuntimeIds.add(resolved.runtime.id);
-    stickyRuntime.onFailure(resolved.runtime.id);
-    // A session that hangs until the poll deadline is usually a cold start,
-    // not a dead runtime (spec R6): the first consecutive deadline excludes
-    // the runtime for this turn and clears the sticky preference, but only
-    // the SECOND consecutive deadline marks it unavailable.
-    if (pollDeadlineTracker.recordTimeout(resolved.runtime.id) >= 2) {
-      await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
+      excludeRuntimeIds.add(resolved.runtime.id);
+      stickyRuntime.onFailure(resolved.runtime.id);
+      // A session that hangs until the poll deadline is usually a cold start,
+      // not a dead runtime (spec R6): the first consecutive deadline excludes
+      // the runtime for this turn and clears the sticky preference, but only
+      // the SECOND consecutive deadline marks it unavailable.
+      if (pollDeadlineTracker.recordTimeout(resolved.runtime.id) >= 2) {
+        await resolver.markRuntimeUnavailable(resolved.runtime.id, 'LLM runtime timed out while running chat reply.').catch(() => {});
+      }
+      return null;
+    } finally {
+      attemptActive = false;
     }
-    return null;
   } catch {
     stickyRuntime.onFailure(resolved.runtime.id);
     if (!excludeRuntimeIds.has(resolved.runtime.id)) {
@@ -488,6 +535,13 @@ export function createHostLlmChatReplyRunner(options?: {
   logWarning?: (scope: string, message: string) => void;
   allowTemplateFallback?: boolean;
   /**
+   * Working directory for chat reply turns. Allowed chat skills run with the
+   * host's normal environment (IDBots-style), so they need a stable per-profile
+   * workspace instead of the daemon's process cwd: injected project-level
+   * skills and any files a skill produces land here.
+   */
+  chatWorkspaceDir?: string;
+  /**
    * Fired once per turn when no runtime could even be attempted (spec R5) —
    * fire-and-forget, never awaited; the turn still falls back as before.
    */
@@ -499,7 +553,7 @@ export function createHostLlmChatReplyRunner(options?: {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const allowedChatSkillsResolver = options?.allowedChatSkillsResolver;
-  const enforceSkillScope = Boolean(allowedChatSkillsResolver);
+  const chatWorkspaceDir = normalizeText(options?.chatWorkspaceDir);
   const logWarning = options?.logWarning;
   const allowTemplateFallback = options?.allowTemplateFallback ?? true;
   const fallbackRunner = createDefaultChatReplyRunner();
@@ -556,6 +610,28 @@ export function createHostLlmChatReplyRunner(options?: {
       && !normalizeText(input.operatorGuidanceText);
     const turnState = { attemptedExecution: false };
 
+    if (chatWorkspaceDir) {
+      await fs.mkdir(chatWorkspaceDir, { recursive: true }).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        logWarning?.('[private chat workspace]', message);
+      });
+    }
+
+    // The wait notice goes out at most once per turn, even when several
+    // runtime attempts in a row start using tools.
+    let skillExecutionStartNotified = false;
+    const notifySkillExecutionStart = input.onSkillExecutionStart
+      ? () => {
+        if (skillExecutionStartNotified) return;
+        skillExecutionStartNotified = true;
+        try {
+          input.onSkillExecutionStart?.();
+        } catch {
+          // The wait-notice trigger must never break a reply turn.
+        }
+      }
+      : undefined;
+
     // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
     for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
       const outcome = await tryExecute(
@@ -568,10 +644,12 @@ export function createHostLlmChatReplyRunner(options?: {
         pollIntervalMs,
         excludeRuntimeIds,
         allowedSkillScope,
-        enforceSkillScope,
+        !allowedChatSkillsResolver,
         stickyRuntime,
         pollDeadlineTracker,
         turnState,
+        notifySkillExecutionStart,
+        chatWorkspaceDir || undefined,
       );
       if (outcome) {
         // Track lastUsedAt on the binding that was successfully used.

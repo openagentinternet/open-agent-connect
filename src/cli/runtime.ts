@@ -124,6 +124,7 @@ import {
   PRIVATE_CHAT_REPLY_GENERATION_ENV,
 } from '../core/chat/hostLlmChatReplyRunner';
 import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
+import { createChatSkillWaitNoticeGenerator } from '../core/chat/chatSkillWaitNotice';
 import { createLlmOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
 import type {
   ChatReplyRunner,
@@ -1599,6 +1600,7 @@ export function createPrivateChatReplyRunnerForProfile(input: {
     runtimeResolver: input.runtimeResolver,
     llmExecutor: input.llmExecutor,
     metaBotSlug: input.metaBotSlug,
+    chatWorkspaceDir: path.join(input.paths.profileRoot, '.runtime', 'private-chat-work'),
     requestAvailabilityRecovery: () => {
       activeLlmAvailabilityRecovery?.requestSoon(input.paths.profileRoot);
     },
@@ -1974,6 +1976,11 @@ export function createPrivateChatAutoReplyProfileDispatcher(
       resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
       replyRunner,
       logSendFailure: createPrivateChatSendFailureFileLogger(profilePaths),
+      chatSkillWaitNotice: createChatSkillWaitNoticeGenerator({
+        runtimeResolver: profileRuntimeResolver,
+        llmExecutor: input.llmExecutor,
+        metaBotSlug,
+      }),
     }, profileAutoReplyConfig);
 
     orchestrators.set(cacheKey, orchestrator);
@@ -3795,6 +3802,11 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       llmExecutor,
       env: process.env,
       logWarning: (scope, message) => console.warn(scope, message),
+    }),
+    chatSkillWaitNotice: createChatSkillWaitNoticeGenerator({
+      runtimeResolver: llmResolver,
+      llmExecutor,
+      metaBotSlug,
     }),
   }, sharedAutoReplyConfig);
   const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({

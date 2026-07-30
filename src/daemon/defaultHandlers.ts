@@ -6423,6 +6423,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           llmExecutor: input.llmExecutor,
           metaBotSlug: profileMetaBotSlug,
           allowTemplateFallback: false,
+          chatWorkspaceDir: path.join(profileRuntimeStateStore.paths.profileRoot, '.runtime', 'private-chat-work'),
           allowedChatSkillsResolver: createPrivateChatAllowedSkillsResolver({
             paths: profileRuntimeStateStore.paths,
             metaBotSlug: profileMetaBotSlug,
