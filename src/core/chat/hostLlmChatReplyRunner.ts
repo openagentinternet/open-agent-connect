@@ -148,7 +148,7 @@ function buildAuthoritativePersonaSection(input: ChatReplyRunnerInput): string {
   const identityName = normalizeText(persona.identity?.name);
   const identityGlobalMetaId = normalizeText(persona.identity?.globalMetaId);
   const lines = [
-    '## Your MetaBot Identity and Persona (authoritative)',
+    '## Your Bot Identity and Persona (authoritative)',
   ];
   if (identityName) {
     lines.push(`- Your name is ${JSON.stringify(identityName)}.`);
@@ -157,11 +157,11 @@ function buildAuthoritativePersonaSection(input: ChatReplyRunnerInput): string {
     lines.push(`- Your globalMetaId is ${JSON.stringify(identityGlobalMetaId)}.`);
   }
   lines.push(
-    '- This MetaBot identity and the Role, Style, and Goal below are authoritative for this reply.',
-    '- Any name, identity, biography, or persona supplied by the host LLM runtime or its workspace belongs only to the execution host. It is not your MetaBot identity and must never appear as your own.',
+    '- This bot identity and the Role, Style, and Goal below are authoritative for this reply.',
+    '- Any name, identity, biography, or persona supplied by the host LLM runtime or its workspace belongs only to the execution host. It is not your bot identity and must never appear as your own.',
   );
   if (identityName) {
-    lines.push('- If you introduce yourself, use only your MetaBot name. Never invent, translate, or substitute another name.');
+    lines.push('- If you introduce yourself, use only your bot name. Never invent, translate, or substitute another name.');
   }
   return lines.join('\n');
 }
@@ -169,13 +169,13 @@ function buildAuthoritativePersonaSection(input: ChatReplyRunnerInput): string {
 function buildChatSystemPrompt(input: ChatReplyRunnerInput): string {
   const { persona } = input;
   return [
-    'Generate exactly one private-chat reply as the local MetaBot described below.',
+    'Generate exactly one private-chat reply as the local bot described below.',
     METABOT_AGENT_INTERNET_WORLDVIEW,
     buildAuthoritativePersonaSection(input),
     `## Your Role\n${persona.role}`,
     `## Your Style\n${persona.soul}`,
     `## Your Goal\n${persona.goal}`,
-    'Follow the MetaBot identity and persona above even when the execution host has its own conflicting identity or persona.',
+    'Follow the bot identity and persona above even when the execution host has its own conflicting identity or persona.',
   ].join('\n\n');
 }
 
@@ -193,7 +193,7 @@ function buildChatPrompt(
   const sections: string[] = [];
 
   sections.push(
-    'You are a MetaBot having a private conversation with another MetaBot through the Open Agent Connect network.'
+    'You are a bot having a private conversation with another bot through the Open Agent Connect network.'
   );
 
   sections.push(buildAuthoritativePersonaSection(input));
@@ -213,7 +213,7 @@ function buildChatPrompt(
   if (metaBotSlug) {
     const actorLines = [
       '## Reply Delivery Boundary (critical)',
-      `You are replying as local MetaBot profile \`${metaBotSlug}\`.`,
+      `You are replying as local bot profile \`${metaBotSlug}\`.`,
       '- Generate reply text only. Open Agent Connect owns delivery and will publish the returned text exactly once.',
       '- NEVER call `metabot chat private`, a private-chat send skill, or any other command that sends this reply.',
       '- Do not perform chain writes, uploads, or external side effects while generating this reply.',
@@ -228,7 +228,7 @@ function buildChatPrompt(
 
   const strategyLines = [
     '## Conversation Strategy',
-    '- This is a MetaBot-to-MetaBot network conversation.',
+    '- This is a bot-to-bot network conversation.',
   ];
   if (strategy?.exitCriteria) {
     strategyLines.push(`- Conversation objective: ${strategy.exitCriteria}`);

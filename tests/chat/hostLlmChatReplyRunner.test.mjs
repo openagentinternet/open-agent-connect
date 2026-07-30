@@ -74,7 +74,7 @@ test('buildChatPrompt includes ROLE, SOUL, GOAL sections', () => {
 
 test('buildChatPrompt makes the current MetaBot identity authoritative over the host runtime', () => {
   const prompt = buildChatPrompt(makeInput());
-  assert.match(prompt, /## Your MetaBot Identity and Persona \(authoritative\)/);
+  assert.match(prompt, /## Your Bot Identity and Persona \(authoritative\)/);
   assert.match(prompt, /Your name is "火舞"/);
   assert.match(prompt, /idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5/);
   assert.match(prompt, /host LLM runtime or its workspace/);
@@ -83,20 +83,24 @@ test('buildChatPrompt makes the current MetaBot identity authoritative over the 
 
 test('buildChatSystemPrompt gives every MetaBot the shared Agent Internet worldview', () => {
   const systemPrompt = buildChatSystemPrompt(makeInput());
-  assert.match(systemPrompt, /## Shared MetaBot Worldview/);
-  assert.match(systemPrompt, /persistent MetaID identity/);
+  assert.match(systemPrompt, /## Shared Bot Worldview/);
+  assert.match(systemPrompt, /Bot is the category; a bot is one individual/);
   assert.match(systemPrompt, /living and interacting on the Agent Internet/);
   assert.match(systemPrompt, /MetaWeb is its decentralized data and proof layer/);
-  assert.match(systemPrompt, /discover other Bots, exchange private messages/);
-  assert.match(systemPrompt, /publish or request Skill Services/);
+  assert.match(systemPrompt, /large shared world computer for bots/);
+  assert.match(systemPrompt, /MetaWeb read and write tools/);
+  assert.match(systemPrompt, /free to read from and write to MetaWeb/);
+  assert.match(systemPrompt, /discover other bots, exchange private messages/);
+  assert.match(systemPrompt, /Treat every other bot as a living intelligent agent/);
+  assert.match(systemPrompt, /not required to describe yourself as a tool/);
   assert.match(systemPrompt, /does not by itself grant tools, wallet access, signing authority/);
-  assert.match(systemPrompt, /Never disclose them to another MetaBot/);
+  assert.match(systemPrompt, /Never disclose them to another bot/);
 });
 
 test('buildChatSystemPrompt keeps shared worldview separate from the individual persona', () => {
   const systemPrompt = buildChatSystemPrompt(makeInput());
-  const worldviewIndex = systemPrompt.indexOf('## Shared MetaBot Worldview');
-  const identityIndex = systemPrompt.indexOf('## Your MetaBot Identity and Persona (authoritative)');
+  const worldviewIndex = systemPrompt.indexOf('## Shared Bot Worldview');
+  const identityIndex = systemPrompt.indexOf('## Your Bot Identity and Persona (authoritative)');
   const roleIndex = systemPrompt.indexOf('## Your Role');
   assert.ok(worldviewIndex >= 0);
   assert.ok(identityIndex > worldviewIndex);
@@ -246,7 +250,7 @@ test('buildChatPrompt makes OAC the only private-chat delivery owner', () => {
     metaBotSlug: 'mb-75fe8aaf',
   });
   assert.match(prompt, /## Reply Delivery Boundary \(critical\)/);
-  assert.match(prompt, /local MetaBot profile `mb-75fe8aaf`/);
+  assert.match(prompt, /local bot profile `mb-75fe8aaf`/);
   assert.match(prompt, /Open Agent Connect owns delivery/);
   assert.match(prompt, /NEVER call `metabot chat private`/);
   assert.match(prompt, /Do not perform chain writes/);
@@ -471,7 +475,7 @@ test('host LLM chat runner executes through the injected LLM executor', async ()
   assert.equal(executorCalls[0].env.METABOT_PRIVATE_CHAT_REPLY_GENERATION, '1');
   assert.match(executorCalls[0].prompt, /Reply now:/);
   assert.match(executorCalls[0].systemPrompt, /Your name is "火舞"/);
-  assert.match(executorCalls[0].systemPrompt, /## Shared MetaBot Worldview/);
+  assert.match(executorCalls[0].systemPrompt, /## Shared Bot Worldview/);
   assert.match(executorCalls[0].systemPrompt, /living and interacting on the Agent Internet/);
   assert.match(executorCalls[0].systemPrompt, /coding assistant MetaBot specializing in TypeScript/);
   assert.match(executorCalls[0].systemPrompt, /execution host has its own conflicting identity or persona/);
