@@ -35,6 +35,10 @@ function makeInput(overrides = {}) {
       soul: 'I am curious and friendly.',
       goal: 'Explore collaboration opportunities.',
       role: 'I am a coding assistant MetaBot specializing in TypeScript.',
+      identity: {
+        name: '火舞',
+        globalMetaId: 'idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5',
+      },
     },
     strategy: {
       id: 'friendly-intro',
@@ -65,6 +69,15 @@ test('buildChatPrompt includes ROLE, SOUL, GOAL sections', () => {
   assert.ok(prompt.includes('curious and friendly'));
   assert.ok(prompt.includes('## Your Goal'));
   assert.ok(prompt.includes('Explore collaboration'));
+});
+
+test('buildChatPrompt makes the current MetaBot identity authoritative over the host runtime', () => {
+  const prompt = buildChatPrompt(makeInput());
+  assert.match(prompt, /## Your MetaBot Identity and Persona \(authoritative\)/);
+  assert.match(prompt, /Your name is "火舞"/);
+  assert.match(prompt, /idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5/);
+  assert.match(prompt, /host LLM runtime or its workspace/);
+  assert.match(prompt, /must never appear as your own/);
 });
 
 test('buildChatPrompt includes conversation strategy with turn count', () => {
@@ -130,7 +143,7 @@ test('buildChatPrompt keeps the close mechanism when conversationCloseAllowed is
 test('buildChatPrompt includes chat history with names', () => {
   const prompt = buildChatPrompt(makeInput());
   assert.ok(prompt.includes('AliceBot: Hi there!'));
-  assert.ok(prompt.includes('Me: Hello! Nice to meet you.'));
+  assert.ok(prompt.includes('火舞: Hello! Nice to meet you.'));
   assert.ok(prompt.includes('AliceBot: What can you do?'));
 });
 
@@ -347,9 +360,9 @@ test('buildChatPrompt strips local execution narration from outbound history bef
       },
     ],
   }));
-  assert.match(prompt, /Me: 这是干净回复。/);
-  assert.doesNotMatch(prompt, /Me: 正在读取私聊技能/);
-  assert.doesNotMatch(prompt, /Me: 正在以 `agent-internet` 身份发送私聊回复/);
+  assert.match(prompt, /火舞: 这是干净回复。/);
+  assert.doesNotMatch(prompt, /火舞: 正在读取私聊技能/);
+  assert.doesNotMatch(prompt, /火舞: 正在以 `agent-internet` 身份发送私聊回复/);
 });
 
 function createFakeRuntimeResolver(runtime, calls = {}) {
@@ -432,6 +445,9 @@ test('host LLM chat runner executes through the injected LLM executor', async ()
   assert.equal(executorCalls[0].outputMode, 'final');
   assert.equal(executorCalls[0].env.METABOT_PRIVATE_CHAT_REPLY_GENERATION, '1');
   assert.match(executorCalls[0].prompt, /Reply now:/);
+  assert.match(executorCalls[0].systemPrompt, /Your name is "火舞"/);
+  assert.match(executorCalls[0].systemPrompt, /coding assistant MetaBot specializing in TypeScript/);
+  assert.match(executorCalls[0].systemPrompt, /execution host has its own conflicting identity or persona/);
   assert.deepEqual(resolverCalls.resolveRuntime, [{ metaBotSlug: 'alice', excludeRuntimeIds: [] }]);
   assert.deepEqual(resolverCalls.markBindingUsed, ['binding-1']);
 });
@@ -1261,9 +1277,9 @@ test('buildChatPrompt strips the close marker from outbound history but keeps th
       },
     ],
   }));
-  assert.match(prompt, /Me: 我也很开心，下次继续聊。/);
-  assert.doesNotMatch(prompt, /Me: .*\n+\s*Bye\s*\n/u);
-  assert.doesNotMatch(prompt, /Me: Bye/);
+  assert.match(prompt, /火舞: 我也很开心，下次继续聊。/);
+  assert.doesNotMatch(prompt, /火舞: .*\n+\s*Bye\s*\n/u);
+  assert.doesNotMatch(prompt, /火舞: Bye/);
   assert.match(prompt, /AliceBot: 我们聊得很开心！/);
 });
 
@@ -1399,7 +1415,7 @@ test('buildChatPrompt still marks the boundary when the closing outbound message
       },
     ],
   }));
-  assert.doesNotMatch(prompt, /Me: Bye/);
+  assert.doesNotMatch(prompt, /火舞: Bye/);
   assert.match(prompt, /Earlier conversation session ended\./);
   assert.match(prompt, /fresh hello after the break/);
 });

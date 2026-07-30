@@ -142,6 +142,41 @@ export interface BuildChatPromptOptions {
   metaBotSlug?: string;
 }
 
+function buildAuthoritativePersonaSection(input: ChatReplyRunnerInput): string {
+  const { persona } = input;
+  const identityName = normalizeText(persona.identity?.name);
+  const identityGlobalMetaId = normalizeText(persona.identity?.globalMetaId);
+  const lines = [
+    '## Your MetaBot Identity and Persona (authoritative)',
+  ];
+  if (identityName) {
+    lines.push(`- Your name is ${JSON.stringify(identityName)}.`);
+  }
+  if (identityGlobalMetaId) {
+    lines.push(`- Your globalMetaId is ${JSON.stringify(identityGlobalMetaId)}.`);
+  }
+  lines.push(
+    '- This MetaBot identity and the Role, Style, and Goal below are authoritative for this reply.',
+    '- Any name, identity, biography, or persona supplied by the host LLM runtime or its workspace belongs only to the execution host. It is not your MetaBot identity and must never appear as your own.',
+  );
+  if (identityName) {
+    lines.push('- If you introduce yourself, use only your MetaBot name. Never invent, translate, or substitute another name.');
+  }
+  return lines.join('\n');
+}
+
+function buildChatSystemPrompt(input: ChatReplyRunnerInput): string {
+  const { persona } = input;
+  return [
+    'Generate exactly one private-chat reply as the local MetaBot described below.',
+    buildAuthoritativePersonaSection(input),
+    `## Your Role\n${persona.role}`,
+    `## Your Style\n${persona.soul}`,
+    `## Your Goal\n${persona.goal}`,
+    'Follow the MetaBot identity and persona above even when the execution host has its own conflicting identity or persona.',
+  ].join('\n\n');
+}
+
 function buildChatPrompt(
   input: ChatReplyRunnerInput,
   allowedSkillScope: PrivateChatAllowedSkillScope = emptyPrivateChatAllowedSkillScope(),
@@ -158,6 +193,8 @@ function buildChatPrompt(
   sections.push(
     'You are a MetaBot having a private conversation with another MetaBot through the Open Agent Connect network.'
   );
+
+  sections.push(buildAuthoritativePersonaSection(input));
 
   if (persona.role) {
     sections.push(`## Your Role\n${persona.role}`);
@@ -262,7 +299,7 @@ function buildChatPrompt(
       : ['- This reply must not end the conversation; do not add a farewell or closing line.']),
   ].join('\n'));
 
-  const selfName = 'Me';
+  const selfName = normalizeText(persona.identity?.name) || 'Me';
   const peerName = conversation.peerName || 'Peer';
   const sessionGapMs = strategy?.maxIdleMs ?? DEFAULT_SESSION_GAP_MS;
   const historyLines: string[] = [];
@@ -337,6 +374,7 @@ async function tryExecute(
   llmExecutor: ChatLlmExecutor,
   metaBotSlug: string | undefined,
   prompt: string,
+  systemPrompt: string,
   timeoutMs: number,
   pollIntervalMs: number,
   excludeRuntimeIds: Set<string>,
@@ -365,6 +403,7 @@ async function tryExecute(
       runtimeId: resolved.runtime.id,
       runtime: resolved.runtime,
       prompt,
+      systemPrompt,
       timeout: timeoutMs,
       metaBotSlug,
       outputMode: 'final',
@@ -509,6 +548,7 @@ export function createHostLlmChatReplyRunner(options?: {
       }
     }
     const prompt = buildChatPrompt(input, allowedSkillScope, { metaBotSlug });
+    const systemPrompt = buildChatSystemPrompt(input);
     const excludeRuntimeIds = new Set<string>();
     const templateFallbackAllowedForTurn = allowTemplateFallback
       && !normalizeText(input.operatorGuidanceText);
@@ -521,6 +561,7 @@ export function createHostLlmChatReplyRunner(options?: {
         llmExecutor,
         metaBotSlug,
         prompt,
+        systemPrompt,
         timeoutMs,
         pollIntervalMs,
         excludeRuntimeIds,
@@ -556,4 +597,10 @@ export function createHostLlmChatReplyRunner(options?: {
 }
 
 // Exported for testing.
-export { buildChatPrompt, parseRunnerOutput, stripPlanningPreamble, isPlanningPreambleLine };
+export {
+  buildChatPrompt,
+  buildChatSystemPrompt,
+  parseRunnerOutput,
+  stripPlanningPreamble,
+  isPlanningPreambleLine,
+};

@@ -8,6 +8,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { createPrivateChatStateStore } = require('../../dist/core/chat/privateChatStateStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
 const { createChatStrategyStore } = require('../../dist/core/chat/chatStrategyStore.js');
@@ -220,6 +221,40 @@ test('chatPersonaLoader reads SOUL.md, GOAL.md, ROLE.md', async () => {
   assert.equal(persona.soul, 'I am friendly and curious.');
   assert.equal(persona.goal, 'Explore collaboration.');
   assert.equal(persona.role, 'I am a coding assistant.');
+});
+
+test('chatPersonaLoader includes the current MetaBot identity with its persona', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const paths = resolveMetabotPaths(profileRoot);
+  await fs.writeFile(paths.soulMdPath, 'I am energetic and direct.', 'utf8');
+  await fs.writeFile(paths.goalMdPath, 'Make collaboration enjoyable.', 'utf8');
+  await fs.writeFile(paths.roleMdPath, 'I am a creative collaboration MetaBot.', 'utf8');
+  await createRuntimeStateStore(paths).writeState({
+    identity: {
+      metabotId: 1,
+      name: '火舞',
+      createdAt: 1,
+      path: profileRoot,
+      publicKey: 'public-key',
+      chatPublicKey: 'chat-public-key',
+      addresses: {},
+      mvcAddress: '',
+      metaId: 'meta-id',
+      globalMetaId: 'idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+
+  const persona = await loadChatPersona(paths);
+  assert.deepEqual(persona.identity, {
+    name: '火舞',
+    globalMetaId: 'idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5',
+  });
+  assert.equal(persona.soul, 'I am energetic and direct.');
+  assert.equal(persona.goal, 'Make collaboration enjoyable.');
+  assert.equal(persona.role, 'I am a creative collaboration MetaBot.');
 });
 
 test('chatStrategyStore reads and writes strategies', async () => {

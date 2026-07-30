@@ -916,7 +916,7 @@ test('LlmExecutor strict skill isolation preserves Claude auth files in the isol
   assert.equal(session.result.output, 'claude-isolated');
 });
 
-test('LlmExecutor strict skill isolation preserves OpenClaw state env while isolating home', async () => {
+test('LlmExecutor strict skill isolation preserves OpenClaw state while isolating its workspace persona', async () => {
   const base = await createTempDir();
   const sourceRoot = path.join(base, 'source-skills');
   const originalCwd = path.join(base, 'work');
@@ -926,7 +926,14 @@ test('LlmExecutor strict skill isolation preserves OpenClaw state env while isol
   await fs.mkdir(allowedSource, { recursive: true });
   await fs.writeFile(path.join(allowedSource, 'SKILL.md'), '# Weather\n', 'utf8');
   await fs.mkdir(originalOpenClawHome, { recursive: true });
-  await fs.writeFile(path.join(originalOpenClawHome, 'openclaw.json'), '{"profile":"default"}\n', 'utf8');
+  const originalOpenClawConfigPath = path.join(originalOpenClawHome, 'openclaw.json');
+  await fs.writeFile(originalOpenClawConfigPath, JSON.stringify({
+    profile: 'default',
+    agents: {
+      defaults: { workspace: path.join(originalOpenClawHome, 'workspace'), model: 'test-model' },
+      list: [{ id: 'main', workspace: path.join(originalOpenClawHome, 'workspace-main') }],
+    },
+  }), 'utf8');
 
   const executor = new LlmExecutor({
     sessionsRoot: path.join(base, 'sessions'),
@@ -947,10 +954,13 @@ test('LlmExecutor strict skill isolation preserves OpenClaw state env while isol
           assert.notEqual(path.resolve(request.env.OPENCLAW_HOME), path.resolve(originalOpenClawHome));
           assert.equal(path.resolve(request.env.PWD), path.resolve(request.cwd));
           assert.equal(path.resolve(request.env.OPENCLAW_STATE_DIR), path.resolve(originalOpenClawHome));
-          assert.equal(
-            path.resolve(request.env.OPENCLAW_CONFIG_PATH),
-            path.resolve(path.join(originalOpenClawHome, 'openclaw.json')),
-          );
+          assert.notEqual(path.resolve(request.env.OPENCLAW_CONFIG_PATH), path.resolve(originalOpenClawConfigPath));
+          const isolatedConfig = JSON.parse(await fs.readFile(request.env.OPENCLAW_CONFIG_PATH, 'utf8'));
+          assert.equal(path.resolve(isolatedConfig.agents.defaults.workspace), path.resolve(request.cwd));
+          assert.equal(path.resolve(isolatedConfig.agents.list[0].workspace), path.resolve(request.cwd));
+          assert.equal(isolatedConfig.agents.defaults.model, 'test-model');
+          const originalConfig = JSON.parse(await fs.readFile(originalOpenClawConfigPath, 'utf8'));
+          assert.equal(path.resolve(originalConfig.agents.defaults.workspace), path.resolve(path.join(originalOpenClawHome, 'workspace')));
           assert.equal(
             await pathExists(path.join(request.cwd, '.openclaw', 'skills', 'metabot-weather', 'SKILL.md')),
             true,

@@ -156,6 +156,50 @@ function applyOpenClawStrictIsolationEnv(env: Record<string, string>, sourceHome
   }
 }
 
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function prepareOpenClawStrictIsolationConfig(input: {
+  env: Record<string, string>;
+  isolatedHome: string;
+  isolatedCwd: string;
+}): Promise<void> {
+  const sourceConfigPath = input.env.OPENCLAW_CONFIG_PATH;
+  if (!sourceConfigPath) return;
+
+  let rawConfig: string;
+  try {
+    rawConfig = await fs.readFile(sourceConfigPath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+
+  const parsed = JSON.parse(rawConfig) as unknown;
+  if (!isJsonRecord(parsed)) {
+    throw new Error('OpenClaw config must be a JSON object.');
+  }
+  const agents = isJsonRecord(parsed.agents) ? { ...parsed.agents } : {};
+  const defaults = isJsonRecord(agents.defaults) ? { ...agents.defaults } : {};
+  defaults.workspace = input.isolatedCwd;
+  agents.defaults = defaults;
+  if (Array.isArray(agents.list)) {
+    agents.list = agents.list.map((agent) => (
+      isJsonRecord(agent) ? { ...agent, workspace: input.isolatedCwd } : agent
+    ));
+  }
+
+  const isolatedConfigPath = path.join(input.isolatedHome, '.openclaw', 'openclaw.json');
+  await fs.mkdir(path.dirname(isolatedConfigPath), { recursive: true });
+  await fs.writeFile(
+    isolatedConfigPath,
+    `${JSON.stringify({ ...parsed, agents }, null, 2)}\n`,
+    'utf8',
+  );
+  input.env.OPENCLAW_CONFIG_PATH = isolatedConfigPath;
+}
+
 function buildStrictSkillIsolationEnv(input: {
   provider: string;
   sourceHome: string;
@@ -188,10 +232,14 @@ async function prepareStrictSkillIsolationPlatformHome(input: {
   provider: string;
   sourceHome: string;
   isolatedHome: string;
+  isolatedCwd: string;
   env: Record<string, string>;
   baseEnv?: NodeJS.ProcessEnv;
   requestEnv?: Record<string, string>;
 }): Promise<void> {
+  if (input.provider === 'openclaw') {
+    await prepareOpenClawStrictIsolationConfig(input);
+  }
   if (!isPlatformId(input.provider)) return;
 
   await copyStrictIsolationUserHomeFiles({
@@ -255,6 +303,7 @@ async function createStrictSkillIsolationScope(input: {
     provider: input.provider,
     sourceHome,
     isolatedHome: systemHomeDir,
+    isolatedCwd: cwd,
     env,
     baseEnv: input.baseEnv,
     requestEnv: input.requestEnv,
@@ -399,11 +448,15 @@ async function acquireStrictSkillIsolationScope(input: {
     baseEnv: input.baseEnv,
     requestEnv: input.requestEnv,
   });
-  if (!reused) {
+  // OpenClaw keeps its auth state in the source state directory, but its
+  // config must be refreshed on every turn so a cached scope never restores
+  // the host agent's workspace persona.
+  if (!reused || input.provider === 'openclaw') {
     await prepareStrictSkillIsolationPlatformHome({
       provider: input.provider,
       sourceHome,
       isolatedHome: systemHomeDir,
+      isolatedCwd: cwd,
       env,
       baseEnv: input.baseEnv,
       requestEnv: input.requestEnv,
