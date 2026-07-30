@@ -5,6 +5,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const {
   buildChatPrompt,
+  buildChatSystemPrompt,
   createHostLlmChatReplyRunner,
   parseRunnerOutput,
 } = require('../../dist/core/chat/hostLlmChatReplyRunner.js');
@@ -78,6 +79,30 @@ test('buildChatPrompt makes the current MetaBot identity authoritative over the 
   assert.match(prompt, /idq1u3y952nxuypavlh23zzzqhvqm07me3ecgv58s5/);
   assert.match(prompt, /host LLM runtime or its workspace/);
   assert.match(prompt, /must never appear as your own/);
+});
+
+test('buildChatSystemPrompt gives every MetaBot the shared Agent Internet worldview', () => {
+  const systemPrompt = buildChatSystemPrompt(makeInput());
+  assert.match(systemPrompt, /## Shared MetaBot Worldview/);
+  assert.match(systemPrompt, /persistent MetaID identity/);
+  assert.match(systemPrompt, /living and interacting on the Agent Internet/);
+  assert.match(systemPrompt, /MetaWeb is its decentralized data and proof layer/);
+  assert.match(systemPrompt, /discover other Bots, exchange private messages/);
+  assert.match(systemPrompt, /publish or request Skill Services/);
+  assert.match(systemPrompt, /does not by itself grant tools, wallet access, signing authority/);
+  assert.match(systemPrompt, /Never disclose them to another MetaBot/);
+});
+
+test('buildChatSystemPrompt keeps shared worldview separate from the individual persona', () => {
+  const systemPrompt = buildChatSystemPrompt(makeInput());
+  const worldviewIndex = systemPrompt.indexOf('## Shared MetaBot Worldview');
+  const identityIndex = systemPrompt.indexOf('## Your MetaBot Identity and Persona (authoritative)');
+  const roleIndex = systemPrompt.indexOf('## Your Role');
+  assert.ok(worldviewIndex >= 0);
+  assert.ok(identityIndex > worldviewIndex);
+  assert.ok(roleIndex > identityIndex);
+  assert.match(systemPrompt, /Your name is "火舞"/);
+  assert.match(systemPrompt, /coding assistant MetaBot specializing in TypeScript/);
 });
 
 test('buildChatPrompt includes conversation strategy with turn count', () => {
@@ -446,6 +471,8 @@ test('host LLM chat runner executes through the injected LLM executor', async ()
   assert.equal(executorCalls[0].env.METABOT_PRIVATE_CHAT_REPLY_GENERATION, '1');
   assert.match(executorCalls[0].prompt, /Reply now:/);
   assert.match(executorCalls[0].systemPrompt, /Your name is "火舞"/);
+  assert.match(executorCalls[0].systemPrompt, /## Shared MetaBot Worldview/);
+  assert.match(executorCalls[0].systemPrompt, /living and interacting on the Agent Internet/);
   assert.match(executorCalls[0].systemPrompt, /coding assistant MetaBot specializing in TypeScript/);
   assert.match(executorCalls[0].systemPrompt, /execution host has its own conflicting identity or persona/);
   assert.deepEqual(resolverCalls.resolveRuntime, [{ metaBotSlug: 'alice', excludeRuntimeIds: [] }]);

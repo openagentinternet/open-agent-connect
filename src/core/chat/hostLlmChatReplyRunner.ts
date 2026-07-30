@@ -11,6 +11,7 @@ import type {
   ChatReplyRunnerInput,
   ChatReplyRunnerResult,
 } from './privateChatTypes';
+import { METABOT_AGENT_INTERNET_WORLDVIEW } from './metaBotWorldview';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
@@ -169,6 +170,7 @@ function buildChatSystemPrompt(input: ChatReplyRunnerInput): string {
   const { persona } = input;
   return [
     'Generate exactly one private-chat reply as the local MetaBot described below.',
+    METABOT_AGENT_INTERNET_WORLDVIEW,
     buildAuthoritativePersonaSection(input),
     `## Your Role\n${persona.role}`,
     `## Your Style\n${persona.soul}`,
