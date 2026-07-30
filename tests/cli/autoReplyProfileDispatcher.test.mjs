@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const {
   createPrivateChatAutoReplyProfileDispatcher,
   replayUnhandledA2AOrderMessagesForProfiles,
+  resumePendingA2ACallerReplyWaitsForProfiles,
 } = require('../../dist/cli/runtime.js');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
@@ -660,6 +661,65 @@ test('startup recovery skips persisted ORDER messages that already have provider
 
   assert.equal(result.replayed, 0);
   assert.equal(result.skipped, 1);
+});
+
+test('startup recovery resumes pending caller reply waits across profiles', async (t) => {
+  const systemHomeDir = await mkdtempTempRoot('metabot-a2a-caller-resume-');
+  const didiGlobalMetaId = 'idq1didi00000000000000000000000000000';
+  const ericGlobalMetaId = 'idq1eric00000000000000000000000000000';
+  const didiHomeDir = await createRegisteredProfile(t, systemHomeDir, {
+    name: 'didi',
+    slug: 'didi',
+    globalMetaId: didiGlobalMetaId,
+  });
+  await createRegisteredProfile(t, systemHomeDir, {
+    name: 'eric',
+    slug: 'eric',
+    globalMetaId: ericGlobalMetaId,
+  });
+
+  const calls = [];
+  const result = await resumePendingA2ACallerReplyWaitsForProfiles({
+    systemHomeDir,
+    activeHomeDir: didiHomeDir,
+    resumeCallerReplyWait: async (input) => {
+      calls.push(input);
+      return { scanned: 2, armed: 1, timedOut: 1, skipped: 0, failed: 0 };
+    },
+  });
+
+  assert.equal(result.profiles, 2);
+  assert.equal(result.scanned, 4);
+  assert.equal(result.armed, 2);
+  assert.equal(result.timedOut, 2);
+  assert.equal(result.failed, 0);
+  const slugs = calls.map((call) => call.localProfileSlug ?? null).sort();
+  assert.deepEqual(slugs, [null, 'eric'].sort());
+});
+
+test('startup recovery counts caller reply resume handler failures', async (t) => {
+  const systemHomeDir = await mkdtempTempRoot('metabot-a2a-caller-resume-');
+  const didiGlobalMetaId = 'idq1didi00000000000000000000000000000';
+  const didiHomeDir = await createRegisteredProfile(t, systemHomeDir, {
+    name: 'didi',
+    slug: 'didi',
+    globalMetaId: didiGlobalMetaId,
+  });
+
+  const warnings = [];
+  const result = await resumePendingA2ACallerReplyWaitsForProfiles({
+    systemHomeDir,
+    activeHomeDir: didiHomeDir,
+    resumeCallerReplyWait: async () => {
+      throw new Error('simulated resume failure');
+    },
+    logWarning: (label, error) => warnings.push([label, error]),
+  });
+
+  assert.equal(result.profiles, 1);
+  assert.equal(result.failed, 1);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0][0], '[A2A caller reply resume]');
 });
 
 // Regression: toggling Auto-Reply off (via the UI or the CLI) for a non-default

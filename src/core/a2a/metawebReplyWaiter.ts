@@ -3,6 +3,7 @@ import { receivePrivateChat } from '../chat/privateChat';
 import {
   normalizeOrderProtocolTxid,
   parseNeedsRatingMessage as parseA2ANeedsRatingMessage,
+  parseOrderEndMessage as parseA2AOrderEndMessage,
 } from './protocol/orderProtocol';
 import {
   cleanServiceResultText,
@@ -44,6 +45,14 @@ export type AwaitMetaWebServiceReplyResult =
       ratingRequestPinId?: string | null;
       ratingRequestObservedAt?: number | null;
       ratingRawMessage?: Record<string, unknown> | null;
+    }
+  | {
+      state: 'failed';
+      failureCode: string;
+      failureReason: string;
+      orderEndPinId: string | null;
+      observedAt: number | null;
+      rawMessage: Record<string, unknown> | null;
     }
   | {
       state: 'timeout';
@@ -137,6 +146,24 @@ export function shouldAcceptServiceRatingRequestForReplyWaiter(input: {
 
   const pendingDeliveryOrderTxid = normalizeOrderProtocolReference(input.pendingDeliveryOrderTxid);
   return Boolean(pendingDeliveryOrderTxid && ratingOrderTxid === pendingDeliveryOrderTxid);
+}
+
+export function shouldAcceptServiceOrderEndForReplyWaiter(input: {
+  orderEndOrderTxid?: unknown;
+  expectedOrderTxid?: unknown;
+}): boolean {
+  const orderEndOrderTxid = normalizeOrderProtocolReference(input.orderEndOrderTxid);
+  if (!orderEndOrderTxid) {
+    // Legacy [ORDER_END <reason>] messages carry no txid; the peer filter has
+    // already scoped this wait to a single provider, so accept the terminal reply.
+    return true;
+  }
+
+  const expectedOrderTxid = normalizeOrderProtocolReference(input.expectedOrderTxid);
+  if (!expectedOrderTxid) {
+    return true;
+  }
+  return orderEndOrderTxid === expectedOrderTxid;
 }
 
 function normalizeObject(value: unknown): Record<string, unknown> | null {
@@ -321,6 +348,29 @@ export function createSocketIoMetaWebReplyWaiter(options: {
                   ? message.timestamp
                   : null,
                 ratingRawMessage: normalizeObject(message),
+              });
+              return;
+            }
+
+            const orderEnd = parseA2AOrderEndMessage(plaintext);
+            if (orderEnd) {
+              if (!shouldAcceptServiceOrderEndForReplyWaiter({
+                orderEndOrderTxid: orderEnd.orderTxid,
+                expectedOrderTxid: input.orderTxid,
+              })) {
+                return;
+              }
+              const failureCode = normalizeText(orderEnd.reason) || 'provider_order_ended';
+              finish({
+                state: 'failed',
+                failureCode,
+                failureReason: normalizeText(orderEnd.content)
+                  || `Provider ended the order (${failureCode}).`,
+                orderEndPinId: pinIdFromMessage(message),
+                observedAt: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
+                  ? message.timestamp
+                  : null,
+                rawMessage: normalizeObject(message),
               });
               return;
             }

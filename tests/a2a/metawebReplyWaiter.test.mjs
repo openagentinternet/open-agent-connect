@@ -361,3 +361,132 @@ test('rating request scope must match expected or pending delivery order scope',
     pendingDeliveryOrderTxid: null,
   }), false);
 });
+
+test('metaweb reply waiter resolves promptly with failed state when ORDER_END arrives', async () => {
+  const callerPair = createIdentityPair();
+  const providerPair = createIdentityPair();
+  const socketMock = installSocketIoMock();
+  try {
+    const { createSocketIoMetaWebReplyWaiter } = require('../../dist/core/a2a/metawebReplyWaiter.js');
+    const waiter = createSocketIoMetaWebReplyWaiter();
+    const startedAt = Date.now();
+    const replyPromise = waiter.awaitServiceReply({
+      callerGlobalMetaId: CALLER_GLOBAL_META_ID,
+      callerPrivateKeyHex: callerPair.privateKeyHex,
+      providerGlobalMetaId: PROVIDER_GLOBAL_META_ID,
+      providerChatPublicKey: providerPair.publicKeyHex,
+      servicePinId: SERVICE_PIN_ID,
+      paymentTxid: PAYMENT_TXID,
+      orderTxid: ORDER_TXID,
+      timeoutMs: 60_000,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(socketMock.sockets.length > 0, 'expected reply waiter to open socket listeners');
+
+    socketMock.sockets[0].emitMessage([
+      'WS_SERVER_NOTIFY_PRIVATE_CHAT',
+      encryptProviderMessage({
+        content: `[ORDER_END:${ORDER_TXID} provider_skill_missing] Provider does not have the requested skill.`,
+        callerPair,
+        providerPair,
+        pinId: `${'5'.repeat(64)}i0`,
+        timestamp: BASE_TIME,
+      }),
+    ]);
+
+    const reply = await replyPromise;
+
+    assert.equal(reply.state, 'failed');
+    assert.equal(reply.failureCode, 'provider_skill_missing');
+    assert.equal(reply.failureReason, 'Provider does not have the requested skill.');
+    assert.equal(reply.orderEndPinId, `${'5'.repeat(64)}i0`);
+    assert.equal(reply.observedAt, BASE_TIME);
+    assert.ok(
+      Date.now() - startedAt < 30_000,
+      'expected ORDER_END to settle the waiter immediately instead of waiting for the full timeout',
+    );
+  } finally {
+    socketMock.restore();
+  }
+});
+
+test('metaweb reply waiter accepts legacy ORDER_END without a txid from the expected peer', async () => {
+  const reply = await awaitReplyFromEncryptedMessages([
+    '[ORDER_END provider_busy] Provider is busy, order ended.',
+  ]);
+
+  assert.equal(reply.state, 'failed');
+  assert.equal(reply.failureCode, 'provider_busy');
+  assert.equal(reply.failureReason, 'Provider is busy, order ended.');
+});
+
+test('metaweb reply waiter ignores ORDER_END scoped to a different order txid', async () => {
+  const callerPair = createIdentityPair();
+  const providerPair = createIdentityPair();
+  const socketMock = installSocketIoMock();
+  try {
+    const { createSocketIoMetaWebReplyWaiter } = require('../../dist/core/a2a/metawebReplyWaiter.js');
+    const waiter = createSocketIoMetaWebReplyWaiter();
+    const replyPromise = waiter.awaitServiceReply({
+      callerGlobalMetaId: CALLER_GLOBAL_META_ID,
+      callerPrivateKeyHex: callerPair.privateKeyHex,
+      providerGlobalMetaId: PROVIDER_GLOBAL_META_ID,
+      providerChatPublicKey: providerPair.publicKeyHex,
+      servicePinId: SERVICE_PIN_ID,
+      paymentTxid: PAYMENT_TXID,
+      orderTxid: ORDER_TXID,
+      timeoutMs: 300,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(socketMock.sockets.length > 0, 'expected reply waiter to open socket listeners');
+
+    socketMock.sockets[0].emitMessage([
+      'WS_SERVER_NOTIFY_PRIVATE_CHAT',
+      encryptProviderMessage({
+        content: `[ORDER_END:${'9'.repeat(64)} provider_skill_missing] Other order ended.`,
+        callerPair,
+        providerPair,
+        pinId: `${'6'.repeat(64)}i0`,
+        timestamp: BASE_TIME,
+      }),
+    ]);
+
+    const reply = await replyPromise;
+
+    assert.equal(reply.state, 'timeout');
+  } finally {
+    socketMock.restore();
+  }
+});
+
+test('order end scope must match the expected order txid when both are known', () => {
+  const {
+    shouldAcceptServiceOrderEndForReplyWaiter,
+  } = require('../../dist/core/a2a/metawebReplyWaiter.js');
+
+  const expectedOrderTxid = 'a'.repeat(64);
+  const otherOrderTxid = 'b'.repeat(64);
+
+  assert.equal(shouldAcceptServiceOrderEndForReplyWaiter({
+    orderEndOrderTxid: otherOrderTxid,
+    expectedOrderTxid,
+  }), false);
+  assert.equal(shouldAcceptServiceOrderEndForReplyWaiter({
+    orderEndOrderTxid: expectedOrderTxid,
+    expectedOrderTxid,
+  }), true);
+  assert.equal(shouldAcceptServiceOrderEndForReplyWaiter({
+    orderEndOrderTxid: `${expectedOrderTxid}i0`,
+    expectedOrderTxid,
+  }), true);
+  assert.equal(shouldAcceptServiceOrderEndForReplyWaiter({
+    orderEndOrderTxid: null,
+    expectedOrderTxid,
+  }), true);
+  assert.equal(shouldAcceptServiceOrderEndForReplyWaiter({
+    orderEndOrderTxid: otherOrderTxid,
+    expectedOrderTxid: null,
+  }), true);
+});

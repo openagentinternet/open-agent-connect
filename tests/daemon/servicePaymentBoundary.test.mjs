@@ -812,6 +812,111 @@ async function seedBuyerTraceForRating(harness, overrides = {}) {
   return sessionStateStore;
 }
 
+async function seedBuyerWaitingTrace(harness, overrides = {}) {
+  const state = await harness.runtimeStateStore.readState();
+  const orderTxid = overrides.orderTxid ?? 'c'.repeat(64);
+  const paymentTxid = overrides.paymentTxid === undefined ? 'd'.repeat(64) : overrides.paymentTxid;
+  const traceId = overrides.traceId ?? 'trace-buyer-waiting';
+  const sessionId = overrides.sessionId ?? 'session-buyer-waiting-1';
+  const taskRunId = overrides.taskRunId ?? 'run-buyer-waiting-1';
+  const createdAt = overrides.createdAt ?? Date.now();
+  const trace = buildSessionTrace({
+    traceId,
+    channel: 'a2a',
+    exportRoot: harness.runtimeStateStore.paths.exportsRoot,
+    createdAt,
+    session: {
+      id: `session-${traceId}`,
+      title: 'Weather Oracle Call',
+      type: 'a2a',
+      metabotId: 1,
+      peerGlobalMetaId: overrides.providerGlobalMetaId ?? 'idq1provider',
+      peerName: 'Weather Oracle',
+      externalConversationId: `a2a-session:idq1provider:${traceId}`,
+    },
+    order: {
+      id: `order-${traceId}`,
+      role: 'buyer',
+      serviceId: 'chain-service-pin-1',
+      serviceName: 'Weather Oracle',
+      orderPinId: overrides.orderPinId ?? `${orderTxid}i0`,
+      orderTxid,
+      orderTxids: overrides.orderTxids ?? [orderTxid],
+      paymentTxid,
+      orderReference: overrides.orderReference ?? null,
+      serviceOrderPinId: overrides.serviceOrderPinId ?? null,
+      paymentCurrency: 'SPACE',
+      paymentAmount: overrides.paymentAmount ?? '0.00001',
+      paymentChain: overrides.paymentChain ?? 'mvc',
+      settlementKind: overrides.settlementKind ?? 'native',
+      providerSkill: overrides.providerSkill ?? 'metabot-weather-oracle',
+      providerSkills: overrides.providerSkills ?? ['metabot-weather-oracle'],
+      status: overrides.orderStatus ?? null,
+      refundRequestPinId: overrides.refundRequestPinId ?? null,
+      failureReason: overrides.failureReason ?? null,
+    },
+    a2a: {
+      sessionId,
+      taskRunId,
+      role: 'caller',
+      publicStatus: overrides.publicStatus ?? 'requesting_remote',
+      latestEvent: overrides.latestEvent ?? 'request_sent',
+      taskRunState: overrides.taskRunState ?? 'queued',
+      callerGlobalMetaId: 'idq1caller',
+      providerGlobalMetaId: overrides.providerGlobalMetaId ?? 'idq1provider',
+      providerName: 'Weather Oracle',
+      servicePinId: 'chain-service-pin-1',
+    },
+  });
+
+  await harness.runtimeStateStore.writeState({
+    ...state,
+    traces: [...state.traces.filter((entry) => entry.traceId !== traceId), trace],
+  });
+
+  const sessionStateStore = createSessionStateStore(harness.homeDir);
+  await sessionStateStore.writeState({
+    version: 1,
+    sessions: [
+      {
+        sessionId,
+        traceId,
+        role: 'caller',
+        state: overrides.sessionState ?? 'requesting_remote',
+        createdAt,
+        updatedAt: overrides.sessionUpdatedAt ?? createdAt,
+        callerGlobalMetaId: 'idq1caller',
+        providerGlobalMetaId: overrides.providerGlobalMetaId ?? 'idq1provider',
+        servicePinId: 'chain-service-pin-1',
+        currentTaskRunId: taskRunId,
+        latestTaskRunState: overrides.taskRunState ?? 'queued',
+      },
+    ],
+    taskRuns: [
+      {
+        runId: taskRunId,
+        sessionId,
+        state: overrides.taskRunState ?? 'queued',
+        createdAt,
+        updatedAt: overrides.sessionUpdatedAt ?? createdAt,
+        startedAt: null,
+        completedAt: null,
+        failureCode: null,
+        failureReason: null,
+        clarificationRounds: [],
+      },
+    ],
+    transcriptItems: [],
+    publicStatusSnapshots: [],
+    cursors: {
+      caller: null,
+      provider: null,
+    },
+  });
+
+  return { sessionStateStore, traceId, sessionId, taskRunId, orderTxid, paymentTxid, createdAt };
+}
+
 function decryptSimplemsgOrder(write, harness) {
   const payload = JSON.parse(write.payload);
   return receivePrivateChat({
@@ -4920,4 +5025,460 @@ test('simplemsg inbound dispatcher does not route ORDER messages to generic auto
     ['order', 'ordinary hello'],
     ['generic', 'ordinary hello'],
   ]);
+});
+
+test('inbound buyer ORDER_END fails the waiting caller session and seeds the refund with the provider reason', async (t) => {
+  const orderTxid = 'c'.repeat(64);
+  const paymentTxid = 'd'.repeat(64);
+  const harness = await createServiceCallHarness(t);
+  const seeded = await seedBuyerWaitingTrace(harness, { orderTxid, paymentTxid });
+
+  const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[ORDER_END:${orderTxid} provider_skill_missing] Provider does not have the requested skill.`,
+    messagePinId: `${'5'.repeat(64)}i0`,
+    timestamp: 1_775_000_003_000,
+  });
+
+  assert.equal(handled.ok, true, JSON.stringify(handled));
+  assert.equal(handled.data.handled, true);
+  assert.equal(handled.data.orderEnded, true);
+  assert.equal(handled.data.traceId, seeded.traceId);
+
+  const sessionState = await seeded.sessionStateStore.readState();
+  const session = sessionState.sessions.find((entry) => entry.sessionId === seeded.sessionId);
+  const taskRun = sessionState.taskRuns.find((entry) => entry.runId === seeded.taskRunId);
+  assert.equal(session.state, 'remote_failed');
+  assert.equal(taskRun.state, 'failed');
+  assert.equal(taskRun.failureCode, 'provider_skill_missing');
+  assert.match(taskRun.failureReason, /does not have the requested skill/);
+
+  const refundWrite = harness.writes.find((entry) => entry.path === '/protocols/service-refund-request');
+  assert.ok(refundWrite, 'expected ORDER_END to publish a refund request pin');
+  const payload = JSON.parse(refundWrite.payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'provider_skill_missing');
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === seeded.traceId);
+  assert.equal(trace.order.status, 'refund_pending');
+  assert.equal(trace.order.failureReason, 'provider_skill_missing');
+  assert.ok(trace.order.refundRequestPinId, 'expected the trace to record the refund request pin');
+});
+
+test('inbound buyer legacy ORDER_END without txid matches by the order pin id line', async (t) => {
+  const orderTxid = 'c'.repeat(64);
+  const paymentTxid = 'd'.repeat(64);
+  const serviceOrderPinId = 'skill-service-order-pin-legacy-1';
+  const harness = await createServiceCallHarness(t);
+  const seeded = await seedBuyerWaitingTrace(harness, { orderTxid, paymentTxid, serviceOrderPinId });
+
+  const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[ORDER_END failed] Provider runtime crashed.\norder pin id: ${serviceOrderPinId}`,
+    messagePinId: `${'6'.repeat(64)}i0`,
+    timestamp: 1_775_000_003_000,
+  });
+
+  assert.equal(handled.ok, true, JSON.stringify(handled));
+  assert.equal(handled.data.handled, true);
+  assert.equal(handled.data.orderEnded, true);
+  assert.equal(handled.data.traceId, seeded.traceId);
+
+  const refundWrite = harness.writes.find((entry) => entry.path === '/protocols/service-refund-request');
+  assert.ok(refundWrite, 'expected legacy ORDER_END to publish a refund request pin');
+  assert.equal(JSON.parse(refundWrite.payload).failureReason, 'failed');
+});
+
+test('inbound ORDER_END with an unknown order txid is ignored cleanly', async (t) => {
+  const orderTxid = 'c'.repeat(64);
+  const paymentTxid = 'd'.repeat(64);
+  const harness = await createServiceCallHarness(t);
+  const seeded = await seedBuyerWaitingTrace(harness, { orderTxid, paymentTxid });
+
+  const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[ORDER_END:${'9'.repeat(64)} provider_skill_missing] Unknown order ended.`,
+    messagePinId: `${'7'.repeat(64)}i0`,
+    timestamp: 1_775_000_003_000,
+  });
+
+  assert.equal(handled.ok, true, JSON.stringify(handled));
+  assert.equal(handled.data.handled, false);
+  assert.equal(handled.data.rated, false);
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+
+  const sessionState = await seeded.sessionStateStore.readState();
+  const session = sessionState.sessions.find((entry) => entry.sessionId === seeded.sessionId);
+  assert.equal(session.state, 'requesting_remote');
+});
+
+test('buyer-side caller reply waiter ORDER_END fails the session fast with the provider reason', async (t) => {
+  const paymentTxid = '8'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return {
+          state: 'failed',
+          failureCode: 'provider_skill_missing',
+          failureReason: 'Provider does not have the requested skill.',
+          orderEndPinId: `${'5'.repeat(64)}i0`,
+          observedAt: 1_775_000_003_000,
+          rawMessage: null,
+        };
+      },
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(called.state, 'waiting');
+
+  const refundWrite = await waitForCondition(() => (
+    harness.writes.find((entry) => entry.path === '/protocols/service-refund-request') ?? null
+  ));
+  assert.ok(refundWrite, 'expected ORDER_END waiter failure to publish a refund request pin');
+  const payload = JSON.parse(refundWrite.payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'provider_skill_missing');
+
+  const trace = await waitForCondition(async () => {
+    const state = await harness.runtimeStateStore.readState();
+    return state.traces.find((entry) => (
+      entry.order?.paymentTxid === paymentTxid
+      && entry.order?.status === 'refund_pending'
+      && entry.order?.failureReason === 'provider_skill_missing'
+    )) ?? null;
+  });
+  assert.ok(trace, 'expected caller trace to enter the refund flow with the provider reason');
+
+  const sessionStateStore = createSessionStateStore(harness.homeDir);
+  const sessionState = await sessionStateStore.readState();
+  const session = sessionState.sessions.find((entry) => entry.traceId === trace.traceId);
+  assert.equal(session.state, 'remote_failed');
+  assert.equal(session.latestTaskRunState, 'failed');
+});
+
+test('simplemsg order record publish failure seeds a buyer refund request for paid orders', async (t) => {
+  const paymentTxid = '1'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/skill-service-order') {
+        throw new Error('simulated order publish outage');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(called.code, 'skill_service_order_publish_failed');
+  const refundWrites = harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request');
+  assert.equal(refundWrites.length, 1, 'expected exactly one refund request for the paid unpublished order');
+  const payload = JSON.parse(refundWrites[0].payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'skill_service_order_publish_failed');
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.paymentTxid === paymentTxid);
+  assert.equal(trace.order.status, 'refund_pending');
+  assert.equal(trace.order.failureReason, 'skill_service_order_publish_failed');
+});
+
+test('simplemsg order broadcast failure seeds a buyer refund request for paid orders', async (t) => {
+  const paymentTxid = '2'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/simplemsg') {
+        throw new Error('simulated order broadcast outage');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(called.code, 'remote_order_broadcast_failed');
+  const refundWrites = harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request');
+  assert.equal(refundWrites.length, 1, 'expected exactly one refund request for the paid unsent order');
+  const payload = JSON.parse(refundWrites[0].payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'remote_order_broadcast_failed');
+});
+
+test('simplemsg order publish failure does not write a refund request for free orders', async (t) => {
+  const harness = await createServiceCallHarness(t, {
+    service: { price: '0', currency: 'SPACE' },
+    servicePaymentExecutor: {
+      async execute() {
+        throw new Error('payment executor must not run for free services');
+      },
+    },
+    writePin(input, { writes, identity }) {
+      if (input.path === '/protocols/skill-service-order') {
+        throw new Error('simulated order publish outage');
+      }
+      return {
+        txids: [`${input.path}-tx-${writes.length}`],
+        pinId: `${input.path}-pin-${writes.length}`,
+        totalCost: 1,
+        network: input.network,
+        operation: input.operation,
+        path: input.path,
+        contentType: input.contentType,
+        encoding: input.encoding,
+        globalMetaId: identity.globalMetaId,
+        mvcAddress: identity.mvcAddress,
+      };
+    },
+  });
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, false);
+  assert.equal(harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'), false);
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === called.data?.traceId)
+    ?? state.traces[0];
+  assert.ok(trace, 'expected the failed free order trace to be persisted');
+  assert.equal(trace.order.status, 'refunded');
+  assert.equal(trace.order.failureReason, SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON);
+});
+
+test('boot recovery times out an exhausted caller wait and seeds the refund without arming the waiter', async (t) => {
+  const orderTxid = 'c'.repeat(64);
+  const paymentTxid = 'd'.repeat(64);
+  const waiterCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        waiterCalls.push(input);
+        return { state: 'timeout' };
+      },
+    },
+  });
+  const seeded = await seedBuyerWaitingTrace(harness, {
+    orderTxid,
+    paymentTxid,
+    createdAt: Date.now() - 31 * 60 * 1000,
+  });
+
+  const report = await harness.handlers.resumePendingCallerReplyContinuations();
+
+  assert.equal(report.scanned, 1);
+  assert.equal(report.timedOut, 1);
+  assert.equal(report.armed, 0);
+  assert.equal(waiterCalls.length, 0, 'expired waits must settle without opening a socket waiter');
+
+  const sessionState = await seeded.sessionStateStore.readState();
+  const session = sessionState.sessions.find((entry) => entry.sessionId === seeded.sessionId);
+  assert.equal(session.state, 'timeout');
+
+  const refundWrite = harness.writes.find((entry) => entry.path === '/protocols/service-refund-request');
+  assert.ok(refundWrite, 'expected boot recovery to publish a refund request for the expired wait');
+  const payload = JSON.parse(refundWrite.payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'delivery_timeout');
+});
+
+test('boot recovery re-arms a fresh caller wait with the remaining budget and does not double-arm', async (t) => {
+  const orderTxid = 'c'.repeat(64);
+  const paymentTxid = 'd'.repeat(64);
+  const waiterCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      awaitServiceReply(input) {
+        waiterCalls.push(input);
+        return new Promise(() => {});
+      },
+    },
+  });
+  await seedBuyerWaitingTrace(harness, { orderTxid, paymentTxid, createdAt: Date.now() });
+
+  const first = await harness.handlers.resumePendingCallerReplyContinuations();
+
+  assert.equal(first.scanned, 1);
+  assert.equal(first.armed, 1);
+  assert.equal(first.timedOut, 0);
+  assert.equal(waiterCalls.length, 1);
+  assert.equal(waiterCalls[0].paymentTxid, paymentTxid);
+  assert.equal(waiterCalls[0].orderTxid, orderTxid);
+  assert.ok(waiterCalls[0].timeoutMs > 0, 'expected a positive remaining wait budget');
+  assert.ok(
+    waiterCalls[0].timeoutMs <= 30 * 60 * 1000,
+    'expected the re-armed budget to be capped at the standard background wait',
+  );
+
+  const second = await harness.handlers.resumePendingCallerReplyContinuations();
+  assert.equal(second.armed, 0);
+  assert.equal(second.skipped, 1);
+  assert.equal(waiterCalls.length, 1, 'the in-memory continuation must not be armed twice');
+});
+
+test('boot recovery skips terminal sessions and orders with a recorded refund', async (t) => {
+  const waiterCalls = [];
+  const completedHarness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        waiterCalls.push(input);
+        return { state: 'timeout' };
+      },
+    },
+  });
+  await seedBuyerWaitingTrace(completedHarness, {
+    traceId: 'trace-buyer-completed',
+    sessionId: 'session-buyer-completed-1',
+    taskRunId: 'run-buyer-completed-1',
+    orderTxid: 'e'.repeat(64),
+    paymentTxid: 'f'.repeat(64),
+    sessionState: 'completed',
+    taskRunState: 'completed',
+    publicStatus: 'completed',
+    latestEvent: 'provider_completed',
+  });
+
+  const completedReport = await completedHarness.handlers.resumePendingCallerReplyContinuations();
+  assert.equal(completedReport.scanned, 0);
+  assert.equal(completedReport.armed, 0);
+  assert.equal(completedReport.timedOut, 0);
+
+  const refundedHarness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        waiterCalls.push(input);
+        return { state: 'timeout' };
+      },
+    },
+  });
+  await seedBuyerWaitingTrace(refundedHarness, {
+    traceId: 'trace-buyer-refunded',
+    sessionId: 'session-buyer-refunded-1',
+    taskRunId: 'run-buyer-refunded-1',
+    orderTxid: 'a'.repeat(64),
+    paymentTxid: 'b'.repeat(64),
+    orderStatus: 'refund_pending',
+    refundRequestPinId: 'refund-request-pin-1',
+    failureReason: 'delivery_timeout',
+  });
+
+  const refundedReport = await refundedHarness.handlers.resumePendingCallerReplyContinuations();
+  assert.equal(refundedReport.scanned, 1);
+  assert.equal(refundedReport.skipped, 1);
+  assert.equal(refundedReport.armed, 0);
+  assert.equal(refundedReport.timedOut, 0);
+
+  assert.equal(waiterCalls.length, 0, 'terminal or refunded orders must not re-arm the waiter');
+  assert.equal(
+    completedHarness.writes.some((entry) => entry.path === '/protocols/service-refund-request'),
+    false,
+  );
+  assert.equal(
+    refundedHarness.writes.some((entry) => entry.path === '/protocols/service-refund-request'),
+    false,
+  );
 });

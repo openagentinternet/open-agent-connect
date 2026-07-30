@@ -91,7 +91,7 @@ import {
 } from '../core/wallet/nativeWallet';
 import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
-import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain, llmDiscoverySweepRunningForHomeDir } from '../daemon/defaultHandlers';
+import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain, llmDiscoverySweepRunningForHomeDir, type A2ACallerReplyResumeReport } from '../daemon/defaultHandlers';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import {
@@ -1891,6 +1891,73 @@ export async function replayUnhandledA2AOrderMessagesForProfiles(
         result.failed += 1;
         input.logWarning?.('[A2A order replay handler]', error);
       }
+    }
+  }
+
+  return result;
+}
+
+export interface A2ACallerReplyResumeResult {
+  profiles: number;
+  scanned: number;
+  armed: number;
+  timedOut: number;
+  skipped: number;
+  failed: number;
+}
+
+export interface A2ACallerReplyResumeOptions {
+  systemHomeDir: string;
+  activeHomeDir?: string | null;
+  resumeCallerReplyWait?: (input: {
+    localProfileSlug?: string | null;
+  }) => Promise<A2ACallerReplyResumeReport | null | undefined> | A2ACallerReplyResumeReport | null | undefined;
+  listProfiles?: (systemHomeDir: string) => Promise<IdentityProfileRecord[]>;
+  logWarning?: (scope: string, error: unknown) => void;
+}
+
+// Buyer-side counterpart of replayUnhandledA2AOrderMessagesForProfiles: caller
+// reply waits live in daemon memory, so a restart would otherwise strand paid
+// orders in 'requesting_remote' with no timeout and no refund. Re-arm them (or
+// settle already-expired waits straight into the timeout + refund path).
+export async function resumePendingA2ACallerReplyWaitsForProfiles(
+  input: A2ACallerReplyResumeOptions,
+): Promise<A2ACallerReplyResumeResult> {
+  const result: A2ACallerReplyResumeResult = {
+    profiles: 0,
+    scanned: 0,
+    armed: 0,
+    timedOut: 0,
+    skipped: 0,
+    failed: 0,
+  };
+  const resume = input.resumeCallerReplyWait;
+  if (!resume) {
+    return result;
+  }
+  const listProfilesForResume = input.listProfiles ?? listIdentityProfiles;
+  const profiles = await listProfilesForResume(input.systemHomeDir).catch((error) => {
+    input.logWarning?.('[A2A caller reply resume profiles]', error);
+    return [];
+  });
+  const activeHomeDir = normalizeReplayText(input.activeHomeDir);
+
+  for (const profile of profiles) {
+    result.profiles += 1;
+    const profileHomeDir = normalizeReplayText(profile.homeDir);
+    const localProfileSlug = activeHomeDir && profileHomeDir && path.resolve(profileHomeDir) === path.resolve(activeHomeDir)
+      ? null
+      : profile.slug;
+    try {
+      const report = await resume({ localProfileSlug });
+      result.scanned += Number(report?.scanned) || 0;
+      result.armed += Number(report?.armed) || 0;
+      result.timedOut += Number(report?.timedOut) || 0;
+      result.skipped += Number(report?.skipped) || 0;
+      result.failed += Number(report?.failed) || 0;
+    } catch (error) {
+      result.failed += 1;
+      input.logWarning?.('[A2A caller reply resume]', error);
     }
   }
 
@@ -4105,6 +4172,20 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       console.warn('[A2A order replay]', error instanceof Error ? error.message : String(error));
     });
   }
+  // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
+  // them (with their remaining budget) or settle expired waits into the
+  // timeout + refund path. Runs even when the simplemsg listener is disabled —
+  // the refund safety net must not depend on inbound listener config.
+  void resumePendingA2ACallerReplyWaitsForProfiles({
+    systemHomeDir: paths.systemHomeDir,
+    activeHomeDir: homeDir,
+    resumeCallerReplyWait: (input) => handlers.resumePendingCallerReplyContinuations(input),
+    logWarning: (scope, error) => {
+      console.warn(scope, error instanceof Error ? error.message : String(error));
+    },
+  }).catch((error) => {
+    console.warn('[A2A caller reply resume]', error instanceof Error ? error.message : String(error));
+  });
   if (pendingA2ASimplemsgRefreshAfterIdentityRegistration) {
     pendingA2ASimplemsgRefreshAfterIdentityRegistration = false;
     await refreshA2ASimplemsgListenerAfterIdentityRegistration();

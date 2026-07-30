@@ -4798,6 +4798,14 @@ function startBackgroundLlmDiscoverySweep(
   });
 }
 
+export interface A2ACallerReplyResumeReport {
+  scanned: number;
+  armed: number;
+  timedOut: number;
+  skipped: number;
+  failed: number;
+}
+
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
   systemHomeDir?: string;
@@ -4848,6 +4856,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
   // profile auto-reply dispatcher) can read the same reference and observe
   // runtime toggles immediately.
   resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
+  // Internal helper (not an HTTP route). Re-arms caller reply waits for
+  // persisted buyer sessions still waiting on a provider reply after a daemon
+  // restart, so their timeout + refund path cannot be lost with the process.
+  resumePendingCallerReplyContinuations: (inputResume?: {
+    localProfileSlug?: string | null;
+  }) => Promise<A2ACallerReplyResumeReport>;
 } {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
@@ -10508,7 +10522,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
     const delivery = parseDeliveryMessage(content);
     const needsRating = parseNeedsRatingMessage(content);
-    if (!delivery && !needsRating) {
+    const orderEnd = parseOrderEndMessage(content);
+    if (!delivery && !needsRating && !orderEnd) {
       return commandSuccess({ handled: false, rated: false });
     }
 
@@ -10516,12 +10531,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const trace = findBuyerTraceForInboundOrderProtocol({
       traces: runtimeState.traces,
       providerGlobalMetaId: inputMessage.fromGlobalMetaId,
-      orderTxid: delivery?.orderTxid ?? needsRating?.orderTxid ?? null,
-      serviceOrderPinId: normalizeText(delivery?.serviceOrderPinId) || normalizeText(needsRating?.orderPinId),
+      orderTxid: delivery?.orderTxid ?? needsRating?.orderTxid ?? orderEnd?.orderTxid ?? null,
+      serviceOrderPinId: normalizeText(delivery?.serviceOrderPinId)
+        || normalizeText(needsRating?.orderPinId)
+        || normalizeText(orderEnd?.orderPinId),
       paymentTxid: delivery?.paymentTxid ?? null,
     });
     if (!trace) {
       return commandSuccess({ handled: false, rated: false });
+    }
+
+    if (orderEnd && !delivery && !needsRating) {
+      await applyCallerOrderEndFailure({
+        trace,
+        failureCode: normalizeText(orderEnd.reason) || 'provider_order_ended',
+        failureText: normalizeText(orderEnd.content)
+          || `Provider ended the order (${normalizeText(orderEnd.reason) || 'provider_order_ended'}).`,
+        orderEndPinId: normalizeText(inputMessage.messagePinId) || null,
+        observedAt: Number.isFinite(inputMessage.timestamp) ? Number(inputMessage.timestamp) : null,
+      });
+      return commandSuccess({
+        handled: true,
+        rated: false,
+        traceId: trace.traceId,
+        orderEnded: true,
+      });
     }
 
     if (!needsRating) {
@@ -10574,6 +10608,165 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  async function applyCallerReplyTimeout(inputTimeout: {
+    trace: SessionTraceRecord;
+    sessionId: string;
+  }): Promise<void> {
+    const current = await loadCallerContinuationState({
+      traceId: inputTimeout.trace.traceId,
+      sessionId: inputTimeout.sessionId,
+      runtimeStateStore,
+      sessionStateStore,
+      fallbackTrace: inputTimeout.trace,
+    });
+    if (!current || current.session.state === 'completed' || current.taskRun.state === 'completed') {
+      return;
+    }
+    const timedOut = sessionEngine.markForegroundTimeout({
+      session: current.session,
+      taskRun: current.taskRun,
+    });
+    await persistSessionMutation(sessionStateStore, timedOut);
+    const timeoutTrace = {
+      ...current.trace,
+      a2a: {
+        ...(current.trace.a2a ?? {
+          sessionId: current.session.sessionId,
+          taskRunId: current.taskRun.runId,
+          role: current.session.role,
+          publicStatus: null,
+          latestEvent: null,
+          taskRunState: null,
+          callerGlobalMetaId: current.session.callerGlobalMetaId,
+          callerName: null,
+          providerGlobalMetaId: current.session.providerGlobalMetaId,
+          providerName: current.trace.session.peerName,
+          servicePinId: current.session.servicePinId,
+        }),
+        publicStatus: 'timeout',
+        latestEvent: 'timeout',
+        taskRunState: 'timeout',
+      },
+    };
+    const rebuilt = await rebuildTraceArtifactsFromSessionState({
+      baseTrace: timeoutTrace,
+      runtimeStateStore,
+      sessionStateStore,
+    });
+    await ensureBuyerRefundRequestForTrace({
+      trace: rebuilt.trace,
+      failureReason: 'delivery_timeout',
+      failedAt: Date.now(),
+      evidencePinIds: uniqueNonEmpty([
+        normalizeText(rebuilt.trace.order?.orderPinId),
+        normalizeText(rebuilt.trace.order?.orderTxid),
+      ]),
+    });
+  }
+
+  async function applyCallerOrderEndFailure(inputFailure: {
+    trace: SessionTraceRecord;
+    sessionId?: string | null;
+    failureCode: string;
+    failureText: string;
+    orderEndPinId?: string | null;
+    observedAt?: number | null;
+  }): Promise<void> {
+    const failureCode = normalizeText(inputFailure.failureCode) || 'provider_order_ended';
+    const failureText = normalizeText(inputFailure.failureText)
+      || `Provider ended the order (${failureCode}).`;
+    const failedAt = Number.isFinite(inputFailure.observedAt)
+      ? Math.trunc(Number(inputFailure.observedAt))
+      : Date.now();
+    const current = await loadCallerContinuationState({
+      traceId: inputFailure.trace.traceId,
+      sessionId: normalizeText(inputFailure.sessionId) || normalizeText(inputFailure.trace.a2a?.sessionId),
+      runtimeStateStore,
+      sessionStateStore,
+      fallbackTrace: inputFailure.trace,
+    });
+    if (!current) {
+      return;
+    }
+    const sessionTerminal = current.session.state === 'completed'
+      || current.session.state === 'remote_failed'
+      || current.session.state === 'timeout'
+      || current.taskRun.state === 'completed'
+      || current.taskRun.state === 'failed'
+      || current.taskRun.state === 'timeout';
+    if (sessionTerminal) {
+      // The order already reached a terminal state (delivery applied or an
+      // earlier failure/timeout seeded its refund); the ORDER_END is a late duplicate.
+      return;
+    }
+
+    const failedResult = createServiceRunnerFailedResult(failureCode, failureText);
+    const failed = sessionEngine.applyProviderRunnerResult({
+      session: current.session,
+      taskRun: current.taskRun,
+      result: failedResult,
+    });
+    const failedStatus = await persistSessionMutation(sessionStateStore, failed);
+    await appendA2ATranscriptItems(sessionStateStore, [
+      {
+        id: `${current.trace.traceId}-provider-order-end`,
+        sessionId: current.session.sessionId,
+        taskRunId: failed.taskRun.runId,
+        timestamp: failed.session.updatedAt,
+        type: 'order_end',
+        sender: 'provider',
+        content: failureText,
+        metadata: {
+          publicStatus: failedStatus.status,
+          event: failed.event,
+          protocolTag: 'ORDER_END',
+          orderEnd: true,
+          endReason: failureCode,
+          endState: 'remote_failed',
+          failureCode,
+          orderTxid: normalizeText(current.trace.order?.orderTxid) || null,
+          pinId: normalizeText(inputFailure.orderEndPinId) || null,
+        },
+      },
+    ]);
+    const failedTrace = {
+      ...current.trace,
+      a2a: {
+        ...(current.trace.a2a ?? {
+          sessionId: current.session.sessionId,
+          taskRunId: current.taskRun.runId,
+          role: current.session.role,
+          publicStatus: null,
+          latestEvent: null,
+          taskRunState: null,
+          callerGlobalMetaId: current.session.callerGlobalMetaId,
+          callerName: null,
+          providerGlobalMetaId: current.session.providerGlobalMetaId,
+          providerName: current.trace.session.peerName,
+          servicePinId: current.session.servicePinId,
+        }),
+        publicStatus: failedStatus.status,
+        latestEvent: failed.event,
+        taskRunState: failed.taskRun.state,
+      },
+    };
+    const rebuilt = await rebuildTraceArtifactsFromSessionState({
+      baseTrace: failedTrace,
+      runtimeStateStore,
+      sessionStateStore,
+    });
+    await ensureBuyerRefundRequestForTrace({
+      trace: rebuilt.trace,
+      failureReason: failureCode,
+      failedAt,
+      evidencePinIds: uniqueNonEmpty([
+        normalizeText(rebuilt.trace.order?.orderPinId),
+        normalizeText(rebuilt.trace.order?.orderTxid),
+        normalizeText(inputFailure.orderEndPinId),
+      ]),
+    });
+  }
+
   function scheduleCallerReplyContinuation(input: {
     trace: SessionTraceRecord;
     sessionId: string;
@@ -10582,63 +10775,31 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (pendingCallerReplyContinuations.has(input.trace.traceId)) {
       return;
     }
+    const waitTimeoutMs = Number.isFinite(input.waiterInput.timeoutMs)
+      ? Math.max(250, Math.floor(Number(input.waiterInput.timeoutMs)))
+      : DEFAULT_CALLER_BACKGROUND_WAIT_MS;
 
     const continuation = (async () => {
       try {
         const reply = await callerReplyWaiter.awaitServiceReply({
           ...input.waiterInput,
-          timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+          timeoutMs: waitTimeoutMs,
         });
-        if (reply.state !== 'completed') {
-          const current = await loadCallerContinuationState({
-            traceId: input.trace.traceId,
+        if (reply.state === 'failed') {
+          await applyCallerOrderEndFailure({
+            trace: input.trace,
             sessionId: input.sessionId,
-            runtimeStateStore,
-            sessionStateStore,
-            fallbackTrace: input.trace,
+            failureCode: reply.failureCode,
+            failureText: reply.failureReason,
+            orderEndPinId: reply.orderEndPinId,
+            observedAt: reply.observedAt,
           });
-          if (!current || current.session.state === 'completed' || current.taskRun.state === 'completed') {
-            return;
-          }
-          const timedOut = sessionEngine.markForegroundTimeout({
-            session: current.session,
-            taskRun: current.taskRun,
-          });
-          await persistSessionMutation(sessionStateStore, timedOut);
-          const timeoutTrace = {
-            ...current.trace,
-            a2a: {
-              ...(current.trace.a2a ?? {
-                sessionId: current.session.sessionId,
-                taskRunId: current.taskRun.runId,
-                role: current.session.role,
-                publicStatus: null,
-                latestEvent: null,
-                taskRunState: null,
-                callerGlobalMetaId: current.session.callerGlobalMetaId,
-                callerName: null,
-                providerGlobalMetaId: current.session.providerGlobalMetaId,
-                providerName: current.trace.session.peerName,
-                servicePinId: current.session.servicePinId,
-              }),
-              publicStatus: 'timeout',
-              latestEvent: 'timeout',
-              taskRunState: 'timeout',
-            },
-          };
-          const rebuilt = await rebuildTraceArtifactsFromSessionState({
-            baseTrace: timeoutTrace,
-            runtimeStateStore,
-            sessionStateStore,
-          });
-          await ensureBuyerRefundRequestForTrace({
-            trace: rebuilt.trace,
-            failureReason: 'delivery_timeout',
-            failedAt: Date.now(),
-            evidencePinIds: uniqueNonEmpty([
-              normalizeText(rebuilt.trace.order?.orderPinId),
-              normalizeText(rebuilt.trace.order?.orderTxid),
-            ]),
+          return;
+        }
+        if (reply.state !== 'completed') {
+          await applyCallerReplyTimeout({
+            trace: input.trace,
+            sessionId: input.sessionId,
           });
           return;
         }
@@ -10747,6 +10908,136 @@ export function createDefaultMetabotDaemonHandlers(input: {
     })();
 
     pendingCallerReplyContinuations.set(input.trace.traceId, continuation);
+  }
+
+  async function resumePendingCallerReplyContinuations(inputResume?: {
+    localProfileSlug?: string | null;
+  }): Promise<A2ACallerReplyResumeReport> {
+    const report: A2ACallerReplyResumeReport = {
+      scanned: 0,
+      armed: 0,
+      timedOut: 0,
+      skipped: 0,
+      failed: 0,
+    };
+    const localProfileSlug = normalizeText(inputResume?.localProfileSlug);
+    if (localProfileSlug) {
+      const selectedProfile = await getMetabotProfile(normalizedSystemHomeDir, localProfileSlug);
+      if (!selectedProfile) {
+        return report;
+      }
+      const profileHomeDir = path.resolve(selectedProfile.homeDir);
+      if (profileHomeDir !== path.resolve(input.homeDir)) {
+        const scopedHandlers = createDefaultMetabotDaemonHandlers({
+          ...input,
+          homeDir: profileHomeDir,
+          secretStore: createFileSecretStore(profileHomeDir),
+          signer: createSignerForProfileHome(profileHomeDir),
+          servicePaymentExecutor: undefined,
+        });
+        return scopedHandlers.resumePendingCallerReplyContinuations();
+      }
+    }
+
+    const runtimeState = await runtimeStateStore.readState();
+    const identity = runtimeState.identity;
+    if (!identity) {
+      return report;
+    }
+    const sessionState = await sessionStateStore.readState();
+    const waitingSessions = sessionState.sessions
+      .filter((entry) => entry.role === 'caller' && entry.state === 'requesting_remote')
+      .sort((left, right) => left.updatedAt - right.updatedAt);
+    const handledTraceIds = new Set<string>();
+
+    for (const session of waitingSessions) {
+      if (handledTraceIds.has(session.traceId)) {
+        report.skipped += 1;
+        continue;
+      }
+      handledTraceIds.add(session.traceId);
+      report.scanned += 1;
+      try {
+        const trace = runtimeState.traces.find((entry) => entry.traceId === session.traceId) ?? null;
+        const order = (trace?.order ?? null) as Record<string, unknown> | null;
+        const taskRun = (
+          session.currentTaskRunId
+            ? sessionState.taskRuns.find((entry) => (
+              entry.sessionId === session.sessionId && entry.runId === session.currentTaskRunId
+            ))
+            : null
+        ) ?? sessionState.taskRuns
+          .filter((entry) => entry.sessionId === session.sessionId)
+          .sort((left, right) => left.updatedAt - right.updatedAt)
+          .at(-1)
+          ?? null;
+        const taskRunWaiting = taskRun?.state === 'queued' || taskRun?.state === 'running';
+        const orderStatus = normalizeText(order?.status);
+        const orderSettled = orderStatus === 'failed'
+          || orderStatus === 'refund_pending'
+          || orderStatus === 'refunded'
+          || Boolean(normalizeText(order?.refundRequestPinId));
+        const deliveryRecorded = normalizeText(trace?.a2a?.publicStatus) === 'completed'
+          || normalizeText(trace?.a2a?.taskRunState) === 'completed';
+        if (
+          !trace
+          || normalizeText(order?.role) !== 'buyer'
+          || !taskRun
+          || !taskRunWaiting
+          || orderSettled
+          || deliveryRecorded
+          || pendingCallerReplyContinuations.has(session.traceId)
+        ) {
+          report.skipped += 1;
+          continue;
+        }
+
+        // Re-arm only the budget left over from before the restart: an order
+        // that already waited 25 minutes gets at most ~5 more, and an order
+        // past the full budget goes straight to the timeout + refund path.
+        const waitStartedAt = normalizeTimestamp(session.createdAt)
+          ?? normalizeTimestamp(session.updatedAt)
+          ?? Date.now();
+        const remainingMs = DEFAULT_CALLER_BACKGROUND_WAIT_MS - (Date.now() - waitStartedAt);
+        if (remainingMs <= 0) {
+          await applyCallerReplyTimeout({
+            trace,
+            sessionId: session.sessionId,
+          });
+          report.timedOut += 1;
+          continue;
+        }
+
+        const privateChatIdentity = await signer.getPrivateChatIdentity();
+        const providerChatPublicKey = (
+          session.providerGlobalMetaId === identity.globalMetaId
+            ? normalizeText(identity.chatPublicKey)
+            : ''
+        ) || await resolvePeerChatPublicKey(session.providerGlobalMetaId)
+          || '';
+        scheduleCallerReplyContinuation({
+          trace,
+          sessionId: session.sessionId,
+          waiterInput: {
+            callerGlobalMetaId: normalizeText(session.callerGlobalMetaId) || privateChatIdentity.globalMetaId,
+            callerPrivateKeyHex: privateChatIdentity.privateKeyHex,
+            providerGlobalMetaId: session.providerGlobalMetaId,
+            providerChatPublicKey: providerChatPublicKey || null,
+            servicePinId: session.servicePinId,
+            paymentTxid: normalizeText(order?.paymentTxid),
+            orderTxid: normalizeOrderProtocolReference(order?.orderTxid)
+              || normalizeOrderProtocolReference(order?.orderPinId)
+              || null,
+            timeoutMs: remainingMs,
+          },
+        });
+        report.armed += 1;
+      } catch {
+        report.failed += 1;
+      }
+    }
+
+    return report;
   }
 
   async function inspectProviderSellerOrder(inputOrder: {
@@ -13188,9 +13479,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
           applyOrderPayment(paymentResult.payment);
           const serviceOrderResult = await publishServiceOrderRecord(paymentResult.payment);
           if (!serviceOrderResult.ok) {
-            await persistCallerTraceSnapshot({
+            const persisted = await persistCallerTraceSnapshot({
               code: normalizeText(serviceOrderResult.failure.code) || 'skill_service_order_publish_failed',
               message: normalizeText(serviceOrderResult.failure.message) || 'Skill service order publish failed.',
+            });
+            await ensureBuyerRefundRequestForTrace({
+              trace: persisted.trace,
+              failureReason: normalizeText(serviceOrderResult.failure.code) || 'skill_service_order_publish_failed',
+              failedAt: Date.now(),
+              evidencePinIds: uniqueNonEmpty([
+                normalizeText(serviceOrderPinId),
+                normalizeText(serviceOrderTxid),
+              ]),
             });
             return serviceOrderResult.failure;
           }
@@ -13244,9 +13544,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
             });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            await persistCallerTraceSnapshot({
+            const persisted = await persistCallerTraceSnapshot({
               code: 'remote_order_build_failed',
               message,
+            });
+            await ensureBuyerRefundRequestForTrace({
+              trace: persisted.trace,
+              failureReason: 'remote_order_build_failed',
+              failedAt: Date.now(),
+              evidencePinIds: uniqueNonEmpty([
+                normalizeText(serviceOrderPinId),
+                normalizeText(serviceOrderTxid),
+              ]),
             });
             return commandFailed(
               'remote_order_build_failed',
@@ -13272,9 +13581,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
             });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            await persistCallerTraceSnapshot({
+            const persisted = await persistCallerTraceSnapshot({
               code: 'remote_order_broadcast_failed',
               message,
+            });
+            await ensureBuyerRefundRequestForTrace({
+              trace: persisted.trace,
+              failureReason: 'remote_order_broadcast_failed',
+              failedAt: Date.now(),
+              evidencePinIds: uniqueNonEmpty([
+                normalizeText(serviceOrderPinId),
+                normalizeText(serviceOrderTxid),
+              ]),
             });
             return commandFailed(
               'remote_order_broadcast_failed',
@@ -15960,8 +16278,19 @@ export function createDefaultMetabotDaemonHandlers(input: {
   (handlers as MetabotDaemonHttpHandlers & {
     resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
   }).resolveAutoReplyConfigForHome = resolveAutoReplyConfigForHome;
+  // Attach the buyer-side boot recovery so the CLI runtime can re-arm caller
+  // reply waits (and their timeout + refund path) after a daemon restart.
+  // Not an HTTP route; ignored by the router.
+  (handlers as MetabotDaemonHttpHandlers & {
+    resumePendingCallerReplyContinuations: (inputResume?: {
+      localProfileSlug?: string | null;
+    }) => Promise<A2ACallerReplyResumeReport>;
+  }).resumePendingCallerReplyContinuations = resumePendingCallerReplyContinuations;
   daemonHandlers = handlers;
   return handlers as MetabotDaemonHttpHandlers & {
     resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
+    resumePendingCallerReplyContinuations: (inputResume?: {
+      localProfileSlug?: string | null;
+    }) => Promise<A2ACallerReplyResumeReport>;
   };
 }
