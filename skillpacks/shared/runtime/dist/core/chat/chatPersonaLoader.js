@@ -16,11 +16,38 @@ async function readMdFile(filePath) {
         throw error;
     }
 }
+async function readRuntimeIdentity(filePath) {
+    let raw;
+    try {
+        raw = await node_fs_1.promises.readFile(filePath, 'utf8');
+    }
+    catch (error) {
+        if (error.code === 'ENOENT') {
+            return null;
+        }
+        throw error;
+    }
+    const state = JSON.parse(raw);
+    if (!state || typeof state !== 'object' || Array.isArray(state))
+        return null;
+    const identity = state.identity;
+    if (!identity || typeof identity !== 'object' || Array.isArray(identity))
+        return null;
+    const fields = identity;
+    const name = typeof fields.name === 'string' ? fields.name.trim() : '';
+    const globalMetaId = typeof fields.globalMetaId === 'string' ? fields.globalMetaId.trim() : '';
+    return (name || globalMetaId) ? { name, globalMetaId } : null;
+}
 async function loadChatPersona(paths) {
-    const [soul, goal, role] = await Promise.all([
+    const [soul, goal, role, identity] = await Promise.all([
         readMdFile(paths.soulMdPath),
         readMdFile(paths.goalMdPath),
         readMdFile(paths.roleMdPath),
+        readRuntimeIdentity(paths.runtimeStatePath),
     ]);
-    return (0, metabotPersona_1.withRuntimeMetabotPersonaFallback)({ soul, goal, role });
+    const persona = (0, metabotPersona_1.withRuntimeMetabotPersonaFallback)({ soul, goal, role });
+    return {
+        ...persona,
+        ...(identity ? { identity } : {}),
+    };
 }

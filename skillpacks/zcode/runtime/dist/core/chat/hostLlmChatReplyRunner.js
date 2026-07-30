@@ -3,11 +3,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PRIVATE_CHAT_REPLY_GENERATION_ENV = void 0;
 exports.createHostLlmChatReplyRunner = createHostLlmChatReplyRunner;
 exports.buildChatPrompt = buildChatPrompt;
+exports.buildChatSystemPrompt = buildChatSystemPrompt;
 exports.parseRunnerOutput = parseRunnerOutput;
 exports.stripPlanningPreamble = stripPlanningPreamble;
 exports.isPlanningPreambleLine = isPlanningPreambleLine;
 const defaultChatReplyRunner_1 = require("./defaultChatReplyRunner");
 const privateChatAllowedSkills_1 = require("./privateChatAllowedSkills");
+const metaBotWorldview_1 = require("./metaBotWorldview");
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const MAX_FALLBACK_ATTEMPTS = 5;
@@ -112,6 +114,37 @@ function stripFinalByeLineFromHistory(value) {
     }
     return lines.join('\n').trim();
 }
+function buildAuthoritativePersonaSection(input) {
+    const { persona } = input;
+    const identityName = normalizeText(persona.identity?.name);
+    const identityGlobalMetaId = normalizeText(persona.identity?.globalMetaId);
+    const lines = [
+        '## Your Bot Identity and Persona (authoritative)',
+    ];
+    if (identityName) {
+        lines.push(`- Your name is ${JSON.stringify(identityName)}.`);
+    }
+    if (identityGlobalMetaId) {
+        lines.push(`- Your globalMetaId is ${JSON.stringify(identityGlobalMetaId)}.`);
+    }
+    lines.push('- This bot identity and the Role, Style, and Goal below are authoritative for this reply.', '- Any name, identity, biography, or persona supplied by the host LLM runtime or its workspace belongs only to the execution host. It is not your bot identity and must never appear as your own.');
+    if (identityName) {
+        lines.push('- If you introduce yourself, use only your bot name. Never invent, translate, or substitute another name.');
+    }
+    return lines.join('\n');
+}
+function buildChatSystemPrompt(input) {
+    const { persona } = input;
+    return [
+        'Generate exactly one private-chat reply as the local bot described below.',
+        metaBotWorldview_1.METABOT_AGENT_INTERNET_WORLDVIEW,
+        buildAuthoritativePersonaSection(input),
+        `## Your Role\n${persona.role}`,
+        `## Your Style\n${persona.soul}`,
+        `## Your Goal\n${persona.goal}`,
+        'Follow the bot identity and persona above even when the execution host has its own conflicting identity or persona.',
+    ].join('\n\n');
+}
 function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills_1.emptyPrivateChatAllowedSkillScope)(), options = {}) {
     const { conversation, recentMessages, persona, strategy } = input;
     const maxTurns = strategy?.maxTurns ?? 30;
@@ -119,7 +152,8 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     const operatorGuidanceText = normalizeText(input.operatorGuidanceText);
     const conversationCloseAllowed = input.conversationCloseAllowed !== false;
     const sections = [];
-    sections.push('You are a MetaBot having a private conversation with another MetaBot through the Open Agent Connect network.');
+    sections.push('You are a bot having a private conversation with another bot through the Open Agent Connect network.');
+    sections.push(buildAuthoritativePersonaSection(input));
     if (persona.role) {
         sections.push(`## Your Role\n${persona.role}`);
     }
@@ -132,7 +166,7 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     if (metaBotSlug) {
         const actorLines = [
             '## Reply Delivery Boundary (critical)',
-            `You are replying as local MetaBot profile \`${metaBotSlug}\`.`,
+            `You are replying as local bot profile \`${metaBotSlug}\`.`,
             '- Generate reply text only. Open Agent Connect owns delivery and will publish the returned text exactly once.',
             '- NEVER call `metabot chat private`, a private-chat send skill, or any other command that sends this reply.',
             '- Do not perform chain writes, uploads, or external side effects while generating this reply.',
@@ -144,7 +178,7 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
     }
     const strategyLines = [
         '## Conversation Strategy',
-        '- This is a MetaBot-to-MetaBot network conversation.',
+        '- This is a bot-to-bot network conversation.',
     ];
     if (strategy?.exitCriteria) {
         strategyLines.push(`- Conversation objective: ${strategy.exitCriteria}`);
@@ -211,7 +245,7 @@ function buildChatPrompt(input, allowedSkillScope = (0, privateChatAllowedSkills
             ? [`- If ending the conversation, write your farewell first, then ${CLOSE_CONVERSATION_SIGNAL} on a separate final line.`]
             : ['- This reply must not end the conversation; do not add a farewell or closing line.']),
     ].join('\n'));
-    const selfName = 'Me';
+    const selfName = normalizeText(persona.identity?.name) || 'Me';
     const peerName = conversation.peerName || 'Peer';
     const sessionGapMs = strategy?.maxIdleMs ?? DEFAULT_SESSION_GAP_MS;
     const historyLines = [];
@@ -260,7 +294,7 @@ function parseRunnerOutput(rawOutput) {
         content,
     };
 }
-async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime, pollDeadlineTracker, turnState) {
+async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, systemPrompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime, pollDeadlineTracker, turnState) {
     const shouldMarkRuntimeUnavailable = !enforceSkillScope;
     const stickyRuntimeId = stickyRuntime.get();
     const resolved = await resolver.resolveRuntime({
@@ -281,6 +315,7 @@ async function tryExecute(resolver, llmExecutor, metaBotSlug, prompt, timeoutMs,
             runtimeId: resolved.runtime.id,
             runtime: resolved.runtime,
             prompt,
+            systemPrompt,
             timeout: timeoutMs,
             metaBotSlug,
             outputMode: 'final',
@@ -402,13 +437,14 @@ function createHostLlmChatReplyRunner(options) {
             }
         }
         const prompt = buildChatPrompt(input, allowedSkillScope, { metaBotSlug });
+        const systemPrompt = buildChatSystemPrompt(input);
         const excludeRuntimeIds = new Set();
         const templateFallbackAllowedForTurn = allowTemplateFallback
             && !normalizeText(input.operatorGuidanceText);
         const turnState = { attemptedExecution: false };
         // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
         for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
-            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime, pollDeadlineTracker, turnState);
+            const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, systemPrompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, enforceSkillScope, stickyRuntime, pollDeadlineTracker, turnState);
             if (outcome) {
                 // Track lastUsedAt on the binding that was successfully used.
                 if (outcome.bindingId) {

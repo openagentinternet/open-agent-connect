@@ -12,6 +12,7 @@ type ChatLlmExecutor = {
 export interface BuildChatPromptOptions {
     metaBotSlug?: string;
 }
+declare function buildChatSystemPrompt(input: ChatReplyRunnerInput): string;
 declare function buildChatPrompt(input: ChatReplyRunnerInput, allowedSkillScope?: PrivateChatAllowedSkillScope, options?: BuildChatPromptOptions): string;
 declare function parseRunnerOutput(rawOutput: string): ChatReplyRunnerResult;
 export declare function createHostLlmChatReplyRunner(options?: {
@@ -31,4 +32,4 @@ export declare function createHostLlmChatReplyRunner(options?: {
         metaBotSlug?: string;
     }) => void;
 }): ChatReplyRunner;
-export { buildChatPrompt, parseRunnerOutput, stripPlanningPreamble, isPlanningPreambleLine };
+export { buildChatPrompt, buildChatSystemPrompt, parseRunnerOutput, stripPlanningPreamble, isPlanningPreambleLine, };

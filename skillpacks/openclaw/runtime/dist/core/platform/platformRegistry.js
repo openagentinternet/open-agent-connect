@@ -139,6 +139,7 @@ exports.PLATFORM_DEFINITIONS = [
             versionArgs: ['--version'],
             authEnv: ['OPENCLAW_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
+            nodeRuntime: { minimumVersion: '22.14.0' },
         },
         skills: {
             roots: [
@@ -329,6 +330,7 @@ exports.PLATFORM_DEFINITIONS = [
             authEnv: ['ZCODE_API_KEY', 'Z_AI_API_KEY', 'ZAI_API_KEY', 'BIGMODEL_API_KEY'],
             capabilities: DEFAULT_CAPABILITIES,
             defaultExecutablePaths: ['/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'],
+            nodeRuntime: { minimumVersion: '22.5.0' },
             probeHints: { readinessTimeoutMs: 45_000, semanticInactivityTimeoutMs: 45_000 },
         },
         skills: {

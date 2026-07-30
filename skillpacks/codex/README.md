@@ -95,4 +95,4 @@ rating closure end to end.
 - Bundled compatibility copy: `runtime/compatibility.json`
 - Bundled shared installer: `runtime/shared-install.sh`
 - Host pack id: `codex`
-- Package version: `0.3.2`
+- Package version: `0.3.3`

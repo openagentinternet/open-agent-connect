@@ -29,7 +29,7 @@ var AUTO_REPLY_COOLDOWN_MS_OPTIONS=[60000,300000,600000,1800000,3600000];
 var DEFAULT_AUTO_REPLY_MAX_TURNS=5;
 var DEFAULT_AUTO_REPLY_COOLDOWN_MS=300000;
 var PERSONA_PRESET_CATALOG=${inlineScriptJson(PERSONA_PRESET_CATALOG)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},autoReplyMaxTurnsBySlug:{},autoReplyCooldownMsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},autoReplyMaxTurnsBySlug:{},autoReplyCooldownMsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryStopWhenHealthy:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
 var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
@@ -370,11 +370,12 @@ function runtimeDetailMarkup(runtime){
 }
 function runtimeModalBodyMarkup(){
   var rows=visibleRuntimeRows();
+  var refreshing=state._runtimeDiscoveryPolling;
   var summaryKey=rows.length===1?'bot.runtimeSummaryOne':'bot.runtimeSummaryMany';
   var summaryFallback=rows.length===1?'{count} detected provider visible. Unavailable providers are hidden from this list.':'{count} detected providers visible. Unavailable providers are hidden from this list.';
   var body='<div class="runtime-modal-head">'+
     '<div><div class="runtime-modal-title">'+esc(uiText('bot.llmProviders','LLM Providers'))+'</div><div class="runtime-modal-summary" data-runtime-modal-status>'+esc(uiText(summaryKey,summaryFallback,{count:rows.length}))+'</div></div>'+
-    '<div class="runtime-modal-actions"><button class="btn btn-sm" data-act="refresh-runtime-modal">'+esc(uiText('bot.refresh','Refresh'))+'</button><button class="icon-btn" data-act="close-runtime-modal" aria-label="Close">x</button></div>'+
+    '<div class="runtime-modal-actions"><button class="btn btn-sm" data-act="refresh-runtime-modal"'+(refreshing?' disabled':'')+'>'+esc(refreshing?uiText('bot.refreshing','Refreshing...'):uiText('bot.refresh','Refresh'))+'</button><button class="icon-btn" data-act="close-runtime-modal" aria-label="Close">x</button></div>'+
   '</div>';
   if(!rows.length){
     return body+'<div class="runtime-empty">'+esc(uiText('bot.noRuntimesFound','No healthy or detected LLM providers were found.'))+'</div>';
@@ -402,7 +403,7 @@ function renderRuntimeModal(){
   root.classList.remove('hidden');
   root.onclick=function(event){if(event.target===root)closeRuntimeModal()};
   qq('[data-act="close-runtime-modal"]').forEach(function(el){el.addEventListener('click',closeRuntimeModal)});
-  qq('[data-act="refresh-runtime-modal"]').forEach(function(el){el.addEventListener('click',function(){loadRuntimes()})});
+  qq('[data-act="refresh-runtime-modal"]').forEach(function(el){el.addEventListener('click',discoverRuntimes)});
   qq('[data-act="test-runtime"]').forEach(function(el){el.addEventListener('click',function(){testRuntime(this.getAttribute('data-runtime-id')||'')})});
 }
 function openRuntimeModal(){
@@ -2078,6 +2079,7 @@ function updateDiscoverRuntimesButton(){
 function stopRuntimeDiscoveryPolling(){
   state._runtimeDiscoveryPolling=false;
   state._runtimeDiscoveryObservedRunning=false;
+  state._runtimeDiscoveryStopWhenHealthy=false;
   // Drop the last-polled status: once we stop polling it will never refresh,
   // so a stale running:true must not keep the UI on the checking state.
   state.runtimeDiscoveryStatus=null;
@@ -2088,16 +2090,17 @@ function stopRuntimeDiscoveryPolling(){
 }
 function pollRuntimeDiscoveryOnce(){
   return loadRuntimes().then(function(){
-    if(anyHealthyRuntime()){stopRuntimeDiscoveryPolling();return}
+    if(state._runtimeDiscoveryStopWhenHealthy&&anyHealthyRuntime()){stopRuntimeDiscoveryPolling();return}
     var status=state.runtimeDiscoveryStatus;
     if(status&&status.running===true){state._runtimeDiscoveryObservedRunning=true;return}
     if(status&&status.running===false&&state._runtimeDiscoveryObservedRunning)stopRuntimeDiscoveryPolling();
   });
 }
-function startRuntimeDiscoveryPolling(){
+function startRuntimeDiscoveryPolling(stopWhenHealthy){
   if(state._runtimeDiscoveryPolling)return false;
   state._runtimeDiscoveryPolling=true;
   state._runtimeDiscoveryObservedRunning=false;
+  state._runtimeDiscoveryStopWhenHealthy=stopWhenHealthy===true;
   updateDiscoverRuntimesButton();
   state._runtimeDiscoveryPollTimer=setInterval(pollRuntimeDiscoveryOnce,2000);
   state._runtimeDiscoveryStopTimer=setTimeout(stopRuntimeDiscoveryPolling,60000);
@@ -2105,7 +2108,10 @@ function startRuntimeDiscoveryPolling(){
 }
 function triggerBackgroundRuntimeDiscovery(){
   return api('/api/bot/runtimes/discover',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({background:true})})
-    .then(function(){return pollRuntimeDiscoveryOnce()})
+    .then(function(r){
+      if(r.data&&r.data.status==='running')state._runtimeDiscoveryObservedRunning=true;
+      return pollRuntimeDiscoveryOnce();
+    })
     .catch(function(error){showToast(error.message||uiText('bot.runtimeRefreshFailed','Runtime refresh failed'));stopRuntimeDiscoveryPolling()});
 }
 function maybeAutoDiscoverRuntimes(){
@@ -2113,12 +2119,12 @@ function maybeAutoDiscoverRuntimes(){
   if(!state._runtimesLoaded)return;
   if(anyHealthyRuntime())return;
   state._runtimeDiscoveryAutoTriggered=true;
-  if(!startRuntimeDiscoveryPolling())return;
+  if(!startRuntimeDiscoveryPolling(true))return;
   triggerBackgroundRuntimeDiscovery();
 }
 function discoverRuntimes(){
   if(state._runtimeDiscoveryPolling)return;
-  if(!startRuntimeDiscoveryPolling())return;
+  if(!startRuntimeDiscoveryPolling(false))return;
   triggerBackgroundRuntimeDiscovery();
 }
 function testRuntime(runtimeId){

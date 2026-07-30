@@ -16,6 +16,7 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const platformRegistry_1 = require("../platform/platformRegistry");
 const registry_1 = require("./executor/backends/registry");
+const providerProcessEnv_1 = require("./providerProcessEnv");
 const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
 const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
@@ -442,7 +443,15 @@ async function discoverProvider(provider, pathDirs, options) {
     const readinessTimeoutMs = readinessTimeoutForProvider(provider, options?.readinessTimeoutMs);
     const binaryPaths = await executableCandidatesForProvider(provider, platform, pathDirs, env, options?.shellResolvedExecutables);
     for (const binaryPath of binaryPaths) {
-        const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], versionProbeTimeoutForProvider(provider), env);
+        const processEnv = await (0, providerProcessEnv_1.resolveProviderProcessEnv)(provider, binaryPath, env);
+        if (processEnv.error) {
+            firstUnavailableCandidate ??= {
+                binaryPath,
+                versionProbe: { ok: false, message: processEnv.error },
+            };
+            continue;
+        }
+        const versionProbe = await probeExecutableVersion(binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], versionProbeTimeoutForProvider(provider), processEnv.env);
         if (versionProbe.ok) {
             const runtime = buildDiscoveredRuntime(provider, platform, binaryPath, versionProbe, options);
             const knownRuntime = options?.knownRuntimesById?.get(runtime.id);
@@ -466,7 +475,7 @@ async function discoverProvider(provider, pathDirs, options) {
             }
             const readiness = await readinessProbe({
                 runtime,
-                env,
+                env: processEnv.env,
                 timeoutMs: readinessTimeoutMs,
                 cwd: options?.cwd,
             });
@@ -523,7 +532,15 @@ async function testLlmRuntimeReadiness(runtime, options) {
         };
     }
     const platform = (0, platformRegistry_1.getRuntimePlatformDefinition)(runtime.provider);
-    const versionProbe = await probeExecutableVersion(runtime.binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], versionProbeTimeoutForProvider(runtime.provider), env);
+    const processEnv = await (0, providerProcessEnv_1.resolveProviderProcessEnv)(runtime.provider, runtime.binaryPath, env);
+    if (processEnv.error) {
+        return {
+            ...base,
+            health: 'unavailable',
+            healthReason: processEnv.error,
+        };
+    }
+    const versionProbe = await probeExecutableVersion(runtime.binaryPath, platform.runtime.versionArgs.length ? platform.runtime.versionArgs : ['--version'], versionProbeTimeoutForProvider(runtime.provider), processEnv.env);
     const probedRuntime = {
         ...buildDiscoveredRuntime(runtime.provider, platform, runtime.binaryPath, versionProbe, {
             env,
@@ -553,7 +570,7 @@ async function testLlmRuntimeReadiness(runtime, options) {
             health: 'detected',
             healthReason: undefined,
         },
-        env,
+        env: processEnv.env,
         timeoutMs: readinessTimeoutForProvider(runtime.provider, options?.readinessTimeoutMs),
         cwd: options?.cwd,
     });

@@ -46,6 +46,10 @@ export interface ChatPersona {
     soul: string;
     goal: string;
     role: string;
+    identity?: {
+        name: string;
+        globalMetaId: string;
+    };
 }
 export interface PrivateChatInboundMessage {
     fromGlobalMetaId: string;

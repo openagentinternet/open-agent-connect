@@ -13,6 +13,10 @@ export interface PlatformDefinition {
         envAliases?: string[];
         pathSearchBinaryNames?: string[];
         defaultExecutablePaths?: string[];
+        /** Minimum Node.js version for CLIs launched through a Node shebang. */
+        nodeRuntime?: {
+            minimumVersion: string;
+        };
         /**
          * Optional probe timing policy. App-embedded CLIs start slowly, so they
          * get wider windows. Missing fields fall back to the discovery defaults

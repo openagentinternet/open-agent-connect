@@ -11,6 +11,7 @@ const backend_1 = require("./backends/backend");
 const session_manager_1 = require("./session-manager");
 const skill_injector_1 = require("./skill-injector");
 const platformRegistry_1 = require("../../platform/platformRegistry");
+const providerProcessEnv_1 = require("../providerProcessEnv");
 const STRICT_ISOLATION_PLATFORM_HOME_FILES = {
     'claude-code': ['config.json', 'settings.json'],
     codex: ['auth.json', 'config.toml'],
@@ -100,6 +101,38 @@ function applyOpenClawStrictIsolationEnv(env, sourceHome) {
         env.OPENCLAW_CONFIG_PATH = node_path_1.default.join(stateDir, 'openclaw.json');
     }
 }
+function isJsonRecord(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+async function prepareOpenClawStrictIsolationConfig(input) {
+    const sourceConfigPath = input.env.OPENCLAW_CONFIG_PATH;
+    if (!sourceConfigPath)
+        return;
+    let rawConfig;
+    try {
+        rawConfig = await node_fs_1.promises.readFile(sourceConfigPath, 'utf8');
+    }
+    catch (error) {
+        if (error.code === 'ENOENT')
+            return;
+        throw error;
+    }
+    const parsed = JSON.parse(rawConfig);
+    if (!isJsonRecord(parsed)) {
+        throw new Error('OpenClaw config must be a JSON object.');
+    }
+    const agents = isJsonRecord(parsed.agents) ? { ...parsed.agents } : {};
+    const defaults = isJsonRecord(agents.defaults) ? { ...agents.defaults } : {};
+    defaults.workspace = input.isolatedCwd;
+    agents.defaults = defaults;
+    if (Array.isArray(agents.list)) {
+        agents.list = agents.list.map((agent) => (isJsonRecord(agent) ? { ...agent, workspace: input.isolatedCwd } : agent));
+    }
+    const isolatedConfigPath = node_path_1.default.join(input.isolatedHome, '.openclaw', 'openclaw.json');
+    await node_fs_1.promises.mkdir(node_path_1.default.dirname(isolatedConfigPath), { recursive: true });
+    await node_fs_1.promises.writeFile(isolatedConfigPath, `${JSON.stringify({ ...parsed, agents }, null, 2)}\n`, 'utf8');
+    input.env.OPENCLAW_CONFIG_PATH = isolatedConfigPath;
+}
 function buildStrictSkillIsolationEnv(input) {
     const env = mergeStringEnvValues(input.baseEnv, input.requestEnv);
     const useSourceHome = shouldUseSourceHomeForStrictIsolation(input.provider);
@@ -121,6 +154,9 @@ function buildStrictSkillIsolationEnv(input) {
     return env;
 }
 async function prepareStrictSkillIsolationPlatformHome(input) {
+    if (input.provider === 'openclaw') {
+        await prepareOpenClawStrictIsolationConfig(input);
+    }
     if (!(0, platformRegistry_1.isPlatformId)(input.provider))
         return;
     await copyStrictIsolationUserHomeFiles({
@@ -172,6 +208,7 @@ async function createStrictSkillIsolationScope(input) {
         provider: input.provider,
         sourceHome,
         isolatedHome: systemHomeDir,
+        isolatedCwd: cwd,
         env,
         baseEnv: input.baseEnv,
         requestEnv: input.requestEnv,
@@ -297,11 +334,15 @@ async function acquireStrictSkillIsolationScope(input) {
         baseEnv: input.baseEnv,
         requestEnv: input.requestEnv,
     });
-    if (!reused) {
+    // OpenClaw keeps its auth state in the source state directory, but its
+    // config must be refreshed on every turn so a cached scope never restores
+    // the host agent's workspace persona.
+    if (!reused || input.provider === 'openclaw') {
         await prepareStrictSkillIsolationPlatformHome({
             provider: input.provider,
             sourceHome,
             isolatedHome: systemHomeDir,
+            isolatedCwd: cwd,
             env,
             baseEnv: input.baseEnv,
             requestEnv: input.requestEnv,
@@ -468,7 +509,14 @@ class LlmExecutor {
             const isolationScope = isolation?.scope ?? null;
             const cwd = isolationScope?.cwd ?? request.cwd ?? process.cwd();
             const requestEnv = isolationScope?.env ?? request.env;
-            const backendRequest = { ...request, cwd, env: requestEnv };
+            const baseProcessEnv = mergeStringEnvValues(process.env, this.env, requestEnv);
+            const processEnv = (0, platformRegistry_1.isRuntimePlatformId)(request.runtime.provider)
+                ? await (0, providerProcessEnv_1.resolveProviderProcessEnv)(request.runtime.provider, binaryPath, baseProcessEnv)
+                : { env: baseProcessEnv };
+            if (processEnv.error)
+                throw new Error(processEnv.error);
+            const backendEnv = mergeStringEnvValues(processEnv.env);
+            const backendRequest = { ...request, cwd, env: backendEnv };
             await this.sessionManager.update(sessionId, { status: 'running', startedAt, cwd });
             if (request.skills && request.skills.length > 0) {
                 const injection = await (0, skill_injector_1.injectSkills)({
@@ -488,7 +536,7 @@ class LlmExecutor {
                     });
                 }
             }
-            const backend = factory(binaryPath, requestEnv);
+            const backend = factory(binaryPath, backendEnv);
             let accumulatedOutput = '';
             const emitter = {
                 emit: (event) => {
