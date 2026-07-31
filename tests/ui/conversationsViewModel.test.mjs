@@ -445,3 +445,46 @@ test('buildConversationsPageViewModelRuntimeSource formats timestamps with local
   assert.equal(context.result.conversations[0].latestAtLabel, '2026-07-06 08:19');
   assert.equal(context.result.messages[0].timestampLabel, '2026-07-06 08:19');
 });
+
+test('buildConversationsPageViewModel defaults to the system default Bot (isActive) rather than the first listed Bot', () => {
+  const model = buildConversationsPageViewModel({
+    localBots: [
+      { name: 'First Bot', slug: 'first-bot', globalMetaId: 'gm-first' },
+      { name: 'Default Bot', slug: 'default-bot', globalMetaId: 'gm-default', isActive: true },
+      { name: 'Other Bot', slug: 'other-bot', globalMetaId: 'gm-other' },
+    ],
+    conversations: [],
+    messages: [],
+  });
+
+  assert.equal(model.selectedLocalGlobalMetaId, 'gm-default');
+  const selectedBot = model.localBots.find((bot) => bot.isSelected);
+  assert.equal(selectedBot?.globalMetaId, 'gm-default');
+});
+
+test('buildConversationsPageViewModel falls back to the first Bot when no Bot is marked isActive', () => {
+  const model = buildConversationsPageViewModel({
+    localBots: [
+      { name: 'First Bot', slug: 'first-bot', globalMetaId: 'gm-first' },
+      { name: 'Other Bot', slug: 'other-bot', globalMetaId: 'gm-other' },
+    ],
+    conversations: [],
+    messages: [],
+  });
+
+  assert.equal(model.selectedLocalGlobalMetaId, 'gm-first');
+});
+
+test('buildConversationsPageViewModel honors an explicit selection over the default Bot', () => {
+  const model = buildConversationsPageViewModel({
+    localBots: [
+      { name: 'First Bot', slug: 'first-bot', globalMetaId: 'gm-first' },
+      { name: 'Default Bot', slug: 'default-bot', globalMetaId: 'gm-default', isActive: true },
+    ],
+    selectedLocalGlobalMetaId: 'gm-first',
+    conversations: [],
+    messages: [],
+  });
+
+  assert.equal(model.selectedLocalGlobalMetaId, 'gm-first');
+});
