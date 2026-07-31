@@ -14,7 +14,7 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
 
 ## Progress log
 
-- **2026-07-30 — P0 done**: per-turn skill routing block in the chat prompt
+- **2026-07-30 — P0 done** (commit `05400a42`): per-turn skill routing block in the chat prompt
   (name/description/location, gating rules, skills may act — port of the
   IDBots routing prompt); blanket read-only/no-side-effect prompt rules
   removed; chat turns run without `skillIsolation: 'strict'` in a per-profile
@@ -28,6 +28,45 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
   `tests/chat/privateChatAllowedSkills.test.mjs`,
   `tests/chat/privateChatAutoReply.test.mjs`,
   `tests/cli/autoReplyProfileDispatcher.test.mjs`, `tests/cli/runtime.test.mjs`.
+- **2026-07-30 — P1-A done** (commit `21fd50c5`, buyer side): inbound
+  `[ORDER_END]` fails the caller session fast with the provider's real reason
+  and wakes the reply waiter immediately; paid-but-unsent simplemsg orders
+  seed a buyer refund request on all post-payment failure exits; daemon boot
+  re-arms caller reply waits for persisted `requesting_remote` sessions with
+  remaining-budget computation (exhausted waits time out + refund on boot).
+- **2026-07-30 — P1-B done** (commit `1907e440`, seller side):
+  `rating_pending` closes on the buyer's `[ORDER_END rated]` and via a
+  15-minute rating-timeout sweep (existing refund sync loop) that sends
+  `ORDER_END rating_timeout`; My-Services stats count it as delivered work;
+  `providerRunner.execute` and post-delivery finalization are guarded so
+  orders always reach a terminal state; execution timeout is now 5 min
+  default / 20 min video with an IDBots-style partial-artifact timeout
+  fallback; payment verification is tri-state `verified | mismatch | error`
+  so chain outages no longer burn paid orders or poison retry dedupe.
+- **2026-07-30 — P1-C done** (commit `1f00b821`, security):
+  `/api/services/execute` now verifies payment on-chain (same tri-state) and
+  dedupes repeated executions by payment/orderReference; optional bearer
+  auth via `OAC_EXECUTE_API_TOKEN` on the provider daemon, resolved
+  caller-side from the directory-seeds registry (`executeToken`, never
+  exposed through the local API/UI); cross-host demo service made free.
+- **2026-07-30 — P2-A done** (chat pipeline): reply-runner and commit-path
+  throws are logged through the persistent send-failure log
+  (`reply_runner_failed` / `reply_commit_failed`), as are rate-limit drops
+  (`rate_limited`). Reply turns are now serialized per conversation with a
+  unified "moved-past" check (a newer inbound or an existing answer) applied
+  both as a pre-LLM skip and as the commit-time staleness guard — a burst of
+  back-to-back messages now produces exactly one reply with full context, no
+  lost turnCount increments, and no LLM calls paid for discarded replies
+  (IDBots `hasNewerPrivateChatMessage` semantics); recovery retries refuse to
+  queue behind a live turn. Inbound `{"content","extensions"}` wire wrappers
+  are unwrapped at record time (plus legacy-record unwrap at prompt-fetch
+  time) so raw JSON no longer leaks into prompts. The buyer reply waiter now
+  fails fast with a `transport_error` outcome when every MetaSO socket
+  endpoint fails to connect; the continuation records it without a timeout
+  mark or refund and leaves the wait re-armable. `POST
+  /api/conversations/guidance` is now accept-and-poll: the guided LLM turn
+  runs in the background and the UI resolves via its existing message
+  polling, so the HTTP request no longer blocks for minutes.
 
 ---
 

@@ -5568,6 +5568,40 @@ test('boot recovery re-arms a fresh caller wait with the remaining budget and do
   assert.equal(waiterCalls.length, 1, 'the in-memory continuation must not be armed twice');
 });
 
+test('buyer-side transport error keeps the order waiting without timeout or refund', async (t) => {
+  const orderTxid = 'e'.repeat(64);
+  const paymentTxid = 'f'.repeat(64);
+  const waiterCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        waiterCalls.push(input);
+        return { state: 'transport_error', error: 'MetaSO socket connect error' };
+      },
+    },
+  });
+  const seeded = await seedBuyerWaitingTrace(harness, { orderTxid, paymentTxid, createdAt: Date.now() });
+
+  const first = await harness.handlers.resumePendingCallerReplyContinuations();
+  assert.equal(first.armed, 1);
+  await waitForCondition(() => waiterCalls.length > 0);
+  await delay(50);
+
+  // A dead MetaSO connection is not a provider failure: no timeout mark, no
+  // refund request, and the session stays in its waiting state so a later
+  // recovery pass can re-arm the wait.
+  const sessionState = await seeded.sessionStateStore.readState();
+  const session = sessionState.sessions.find((entry) => entry.sessionId === seeded.sessionId);
+  assert.equal(session.state, 'requesting_remote');
+  assert.equal(
+    harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'),
+    false,
+  );
+
+  const second = await harness.handlers.resumePendingCallerReplyContinuations();
+  assert.equal(second.armed, 1, 'the wait must be re-armable after a transport error');
+});
+
 test('boot recovery skips terminal sessions and orders with a recorded refund', async (t) => {
   const waiterCalls = [];
   const completedHarness = await createServiceCallHarness(t, {

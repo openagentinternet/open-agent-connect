@@ -6347,24 +6347,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
     }
   }
 
-  async function readLatestA2AConversationMessage(inputForMessage: {
-    homeDir: string;
-    localGlobalMetaId: string;
-    peerGlobalMetaId: string;
-  }): Promise<A2AConversationMessage | null> {
-    try {
-      const result = await readPeerConversationMessages({
-        homeDir: inputForMessage.homeDir,
-        localGlobalMetaId: inputForMessage.localGlobalMetaId,
-        peerGlobalMetaId: inputForMessage.peerGlobalMetaId,
-        limit: 1,
-      });
-      return result.messages[0] ?? null;
-    } catch {
-      return null;
-    }
-  }
-
   async function runConversationGuidanceTurn(inputForTurn: {
     local: string;
     peer: string;
@@ -6465,8 +6447,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
           logWarning: (scope, message) => console.warn(scope, message),
         });
       })();
-    const previousMessages = await profilePrivateChatStateStore.getRecentMessages(conversation.conversationId, 1);
-    const previousPrivateChatMessage = previousMessages.at(-1) ?? null;
     const orchestrator = createPrivateChatAutoReplyOrchestrator({
       stateStore: profilePrivateChatStateStore,
       strategyStore: createChatStrategyStore(profileHomeDir),
@@ -6482,50 +6462,34 @@ export function createDefaultMetabotDaemonHandlers(input: {
       a2aConversationPersister,
     }, profileAutoReplyConfig);
 
-    await orchestrator.handleLocalGuidedTurn(peerGlobalMetaId, {
-      guidanceToConsume: pendingGuidance.claim,
-    });
-
-    const latestConversation = await profilePrivateChatStateStore.getConversationByPeer(peerGlobalMetaId);
-    const guidanceConsumed = Boolean(
-      latestConversation
-      && latestConversation.pendingGuidanceText === null
-      && latestConversation.pendingGuidanceCreatedAt === null
-    );
-    if (!guidanceConsumed) {
-      return commandFailed(
-        'conversation_guidance_failed',
-        'Failed to generate or send the guided outbound turn.',
-      );
-    }
-    const latestPrivateChatMessages = await profilePrivateChatStateStore.getRecentMessages(
-      latestConversation?.conversationId ?? conversation.conversationId,
-      1,
-    );
-    const latestPrivateChatMessage = latestPrivateChatMessages.at(-1) ?? null;
-
-    const latestA2AMessage = await readLatestA2AConversationMessage({
-      homeDir: profileHomeDir,
-      localGlobalMetaId: state.identity.globalMetaId,
-      peerGlobalMetaId,
-    });
+    // Accept-and-poll: a guided turn can take minutes (LLM + possible skill
+    // execution), so it must not be awaited inside this HTTP request. The UI
+    // already polls the conversation and resolves once the new outbound
+    // message appears; failures are logged through the send-failure log.
+    void (async () => {
+      try {
+        await orchestrator.handleLocalGuidedTurn(peerGlobalMetaId, {
+          guidanceToConsume: pendingGuidance.claim,
+        });
+      } catch (error) {
+        console.warn(
+          '[conversations guidance] guided turn failed:',
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    })();
 
     return commandSuccess({
+      accepted: true,
       localGlobalMetaId: state.identity.globalMetaId,
       peerGlobalMetaId,
-      conversationId: latestConversation?.conversationId ?? conversation.conversationId,
-      state: latestConversation?.state ?? conversation.state,
-      guidanceApplied: Boolean(
-        latestPrivateChatMessage
-        && latestPrivateChatMessage.direction === 'outbound'
-        && latestPrivateChatMessage.messageId !== previousPrivateChatMessage?.messageId
-      ),
-      guidanceConsumed: true,
-      messageId: latestPrivateChatMessage?.messageId ?? null,
-      pinId: latestPrivateChatMessage?.messagePinId ?? null,
-      txids: latestA2AMessage?.messageId === latestPrivateChatMessage?.messageId
-        ? (Array.isArray(latestA2AMessage?.txids) ? latestA2AMessage.txids : [])
-        : [],
+      conversationId: conversation.conversationId,
+      state: conversation.state,
+      guidanceApplied: false,
+      guidanceAccepted: true,
+      messageId: null,
+      pinId: null,
+      txids: [],
     });
   }
 
@@ -11172,6 +11136,30 @@ export function createDefaultMetabotDaemonHandlers(input: {
             orderEndPinId: reply.orderEndPinId,
             observedAt: reply.observedAt,
           });
+          return;
+        }
+        if (reply.state === 'transport_error') {
+          // Our own socket never reached MetaSO; the provider may be healthy
+          // and may even have delivered. Do NOT mark a timeout or seed a
+          // refund: leave the session in its waiting state so the boot
+          // recovery (resumePendingCallerReplyContinuations) can re-arm the
+          // wait, and record the transport failure for observability.
+          console.warn(`[services call] reply wait for trace ${input.trace.traceId} ended with a transport error: ${reply.error}`);
+          await appendA2ATranscriptItems(sessionStateStore, [
+            {
+              id: `${input.trace.traceId}-transport-error-${Date.now()}`,
+              sessionId: input.sessionId,
+              taskRunId: normalizeText(input.trace.a2a?.taskRunId) || input.sessionId,
+              timestamp: Date.now(),
+              type: 'transport_error',
+              sender: 'caller',
+              content: `Reply wait ended with a transport error: ${reply.error}`,
+              metadata: {
+                transportError: true,
+                orderTxid: normalizeText(input.trace.order?.orderTxid) || null,
+              },
+            },
+          ]).catch(() => undefined);
           return;
         }
         if (reply.state !== 'completed') {

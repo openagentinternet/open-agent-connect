@@ -58,6 +58,19 @@ async function waitForConversationEvent(iterator, expectedType, timeoutMs, timeo
   }
 }
 
+// Polls until the check returns a truthy value (returned to the caller) or
+// the deadline passes (returns null). Used to await background guided turns
+// now that the guidance endpoint is accept-and-poll.
+async function waitForCondition(check, { timeoutMs = 3000, intervalMs = 5 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const value = await check();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return null;
+}
+
 function readOnlySigner() {
   return {
     getIdentity: async () => ({}),
@@ -649,15 +662,25 @@ test('default conversation guidance reopens a closed conversation, sends one gui
     guidance: 'Reopen the thread and ask for the delivery date.',
   });
 
+  // Accept-and-poll: the HTTP call returns immediately with an accepted
+  // envelope; the guided turn itself completes in the background.
+  assert.equal(guided.ok, true);
+  assert.equal(guided.data.accepted, true);
+  assert.equal(guided.data.guidanceAccepted, true);
+  assert.equal(guided.data.guidanceApplied, false);
+  assert.equal(guided.data.messageId, null);
+
   const event = await nextEvent;
   await iterator.return?.();
+  const settled = await waitForCondition(async () => {
+    const current = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+    return current?.lastDirection === 'outbound' && current?.pendingGuidanceText === null
+      ? current
+      : null;
+  });
+  assert.ok(settled, 'the background guided turn should complete and clear the pending guidance');
 
   assert.equal(initial.value.type, 'conversation-update');
-  assert.equal(guided.ok, true);
-  assert.equal(guided.data.guidanceApplied, true);
-  assert.equal(guided.data.guidanceConsumed, true);
-  assert.equal(guided.data.pinId, 'chat-live-pin-1');
-  assert.deepEqual(guided.data.txids, ['chat-live-tx-1']);
   assert.equal(writeCalls.length, 1);
   assert.equal(event.value.type, 'conversation-message');
   assert.equal(event.value.localGlobalMetaId, LOCAL_GLOBAL_META_ID);
@@ -713,13 +736,19 @@ test('default conversation guidance keeps pending guidance when reply generation
     guidance: 'Ask for the missing txid.',
   });
 
-  assert.equal(guided.ok, false);
-  assert.equal(guided.code, 'conversation_guidance_failed');
-  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
-  assert.equal(conversation?.pendingGuidanceText, 'Ask for the missing txid.');
-  assert.ok(typeof conversation?.pendingGuidanceCreatedAt === 'number');
-  assert.equal(conversation?.pendingGuidanceLeaseId ?? null, null);
-  assert.equal(conversation?.pendingGuidanceLeaseExpiresAt ?? null, null);
+  // The endpoint accepts the turn; the runner failure plays out in the
+  // background, where the orchestrator releases the guidance claim so the
+  // pending guidance stays available for a later retry.
+  assert.equal(guided.ok, true);
+  assert.equal(guided.data.accepted, true);
+  const released = await waitForCondition(async () => {
+    const current = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+    return current?.pendingGuidanceText && !current?.pendingGuidanceLeaseId ? current : null;
+  });
+  assert.ok(released, 'the failed background turn should release the guidance lease');
+  assert.equal(released?.pendingGuidanceText, 'Ask for the missing txid.');
+  assert.ok(typeof released?.pendingGuidanceCreatedAt === 'number');
+  assert.equal(released?.pendingGuidanceLeaseExpiresAt ?? null, null);
 });
 
 test('default conversation guidance keeps pending guidance when send fails', async (t) => {
@@ -757,13 +786,16 @@ test('default conversation guidance keeps pending guidance when send fails', asy
     guidance: 'Bring the topic back to the payment reference.',
   });
 
-  assert.equal(guided.ok, false);
-  assert.equal(guided.code, 'conversation_guidance_failed');
-  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
-  assert.equal(conversation?.pendingGuidanceText, 'Bring the topic back to the payment reference.');
-  assert.ok(typeof conversation?.pendingGuidanceCreatedAt === 'number');
-  assert.equal(conversation?.pendingGuidanceLeaseId ?? null, null);
-  assert.equal(conversation?.pendingGuidanceLeaseExpiresAt ?? null, null);
+  assert.equal(guided.ok, true);
+  assert.equal(guided.data.accepted, true);
+  const released = await waitForCondition(async () => {
+    const current = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+    return current?.pendingGuidanceText && !current?.pendingGuidanceLeaseId ? current : null;
+  });
+  assert.ok(released, 'the failed background turn should release the guidance lease');
+  assert.equal(released?.pendingGuidanceText, 'Bring the topic back to the payment reference.');
+  assert.ok(typeof released?.pendingGuidanceCreatedAt === 'number');
+  assert.equal(released?.pendingGuidanceLeaseExpiresAt ?? null, null);
 });
 
 test('default conversation guidance keeps pending guidance when host LLM fallback is disabled', async (t) => {
@@ -847,12 +879,16 @@ test('default conversation guidance keeps pending guidance when host LLM fallbac
     guidance: 'Ask for the delivery date.',
   });
 
-  assert.equal(guided.ok, false);
-  assert.equal(guided.code, 'conversation_guidance_failed');
+  assert.equal(guided.ok, true);
+  assert.equal(guided.data.accepted, true);
+  const released = await waitForCondition(async () => {
+    const current = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+    return current?.pendingGuidanceText && !current?.pendingGuidanceLeaseId ? current : null;
+  });
+  assert.ok(released, 'the failed background turn should release the guidance lease');
   assert.equal(writeCalls.length, 0);
-  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
-  assert.equal(conversation?.pendingGuidanceText, 'Ask for the delivery date.');
-  assert.ok(typeof conversation?.pendingGuidanceCreatedAt === 'number');
+  assert.equal(released?.pendingGuidanceText, 'Ask for the delivery date.');
+  assert.ok(typeof released?.pendingGuidanceCreatedAt === 'number');
 });
 
 test('default conversation guidance rejects peers without an existing conversation', async (t) => {
@@ -906,11 +942,16 @@ test('default conversation guidance holds the pending guidance lease until its p
     pendingGuidanceLeaseExpiresAt: null,
   });
 
-  const guidedPromise = handlers.conversations.guidance({
+  const guided = await handlers.conversations.guidance({
     local: LOCAL_GLOBAL_META_ID,
     peer: PEER_GLOBAL_META_ID,
     guidance: 'Ask for the delivery date right now.',
   });
+
+  // Accept-and-poll: the request returns immediately while the gated runner
+  // keeps the background turn (and its guidance lease) open.
+  assert.equal(guided.ok, true);
+  assert.equal(guided.data.accepted, true);
 
   let leasedConversation = null;
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -928,15 +969,17 @@ test('default conversation guidance holds the pending guidance lease until its p
   assert.equal(competingClaim, null);
 
   releaseRunner();
-  const guided = await guidedPromise;
+  const settled = await waitForCondition(async () => {
+    const current = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+    return current?.pendingGuidanceText === null && current?.lastDirection === 'outbound'
+      ? current
+      : null;
+  });
+  assert.ok(settled, 'the background guided turn should complete after the runner is released');
 
-  assert.equal(guided.ok, true);
-  assert.equal(guided.data.guidanceApplied, true);
   assert.equal(writeCalls.length, 1);
-  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
-  assert.equal(conversation?.pendingGuidanceText, null);
-  assert.equal(conversation?.pendingGuidanceCreatedAt, null);
-  assert.equal(conversation?.pendingGuidanceLeaseId, null);
+  assert.equal(settled?.pendingGuidanceCreatedAt, null);
+  assert.equal(settled?.pendingGuidanceLeaseId, null);
 });
 
 test('default conversation guidance replaces older pending guidance before a later successful send', async (t) => {
@@ -979,8 +1022,12 @@ test('default conversation guidance replaces older pending guidance before a lat
     peer: PEER_GLOBAL_META_ID,
     guidance: 'older guidance',
   });
-  assert.equal(firstAttempt.ok, false);
-  const pendingAfterFailure = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+  assert.equal(firstAttempt.ok, true);
+  assert.equal(firstAttempt.data.accepted, true);
+  const pendingAfterFailure = await waitForCondition(async () => {
+    const current = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+    return current?.pendingGuidanceText && !current?.pendingGuidanceLeaseId ? current : null;
+  });
   assert.equal(pendingAfterFailure?.pendingGuidanceText, 'older guidance');
 
   shouldFail = false;
@@ -991,15 +1038,28 @@ test('default conversation guidance replaces older pending guidance before a lat
   });
 
   assert.equal(secondAttempt.ok, true);
-  const messages = await handlers.conversations.messages({
-    local: LOCAL_GLOBAL_META_ID,
-    peer: PEER_GLOBAL_META_ID,
-    limit: 50,
+  assert.equal(secondAttempt.data.accepted, true);
+  const delivered = await waitForCondition(async () => {
+    const result = await handlers.conversations.messages({
+      local: LOCAL_GLOBAL_META_ID,
+      peer: PEER_GLOBAL_META_ID,
+      limit: 50,
+    });
+    // The A2A conversation store reports directions as incoming/outgoing.
+    return (result.data?.messages ?? []).find((message) => (
+      (message.direction === 'outgoing' || message.direction === 'outbound')
+      && message.content === 'guided:newer guidance'
+    )) ?? null;
   });
-  assert.equal(messages.ok, true);
-  assert.equal(messages.data.messages.at(-1)?.content, 'guided:newer guidance');
+  assert.ok(delivered, 'the newer guided turn should be delivered');
 
-  const conversation = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
-  assert.equal(conversation?.pendingGuidanceText, null);
-  assert.equal(conversation?.pendingGuidanceCreatedAt, null);
+  // The A2A message becomes visible slightly before the guidance clear lands;
+  // wait for the commit to finish instead of reading mid-commit.
+  const cleared = await waitForCondition(async () => {
+    const current = await privateChatStateStore.getConversationByPeer(PEER_GLOBAL_META_ID);
+    return current?.pendingGuidanceText === null && current?.pendingGuidanceCreatedAt === null
+      ? current
+      : null;
+  });
+  assert.ok(cleared, 'pending guidance should be cleared after the guided send');
 });

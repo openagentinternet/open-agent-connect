@@ -54,6 +54,13 @@ export type AwaitMetaWebServiceReplyResult =
       observedAt: number | null;
       rawMessage: Record<string, unknown> | null;
     }
+  // Every socket endpoint failed to connect (MetaSO down or local network
+  // down). Distinct from a provider-side failure: the provider may be
+  // perfectly healthy, so callers must not treat it as a delivery failure.
+  | {
+      state: 'transport_error';
+      error: string;
+    }
   | {
       state: 'timeout';
     };
@@ -305,6 +312,14 @@ export function createSocketIoMetaWebReplyWaiter(options: {
           finish({ state: 'timeout' });
         }, timeoutMs);
 
+        if (endpoints.length === 0) {
+          finish({ state: 'transport_error', error: 'No MetaSO socket endpoints resolved.' });
+          return;
+        }
+
+        let connectedCount = 0;
+        let transportErrorCount = 0;
+
         for (const endpoint of endpoints) {
           const socket = io(endpoint.url, {
             path: endpoint.path,
@@ -316,6 +331,20 @@ export function createSocketIoMetaWebReplyWaiter(options: {
             transports: ['websocket'],
           });
           sockets.push(socket);
+
+          socket.on('connect', () => {
+            connectedCount += 1;
+          });
+          socket.on('connect_error', (error: unknown) => {
+            if (settled) return;
+            transportErrorCount += 1;
+            // Fail fast only when EVERY endpoint failed to connect — one
+            // healthy endpoint is enough to keep waiting for the provider.
+            if (transportErrorCount >= endpoints.length && connectedCount === 0) {
+              const message = error instanceof Error ? error.message : String(error ?? 'connect error');
+              finish({ state: 'transport_error', error: message || 'MetaSO socket connect error.' });
+            }
+          });
 
           const handleSocketData = (data: unknown) => {
             if (settled) return;

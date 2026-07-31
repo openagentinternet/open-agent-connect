@@ -490,3 +490,74 @@ test('order end scope must match the expected order txid when both are known', (
     expectedOrderTxid: null,
   }), true);
 });
+
+
+test('metaweb reply waiter settles fast with transport_error when every endpoint fails to connect', async () => {
+  const callerPair = createIdentityPair();
+  const providerPair = createIdentityPair();
+  const socketMock = installSocketIoMock();
+  try {
+    const { createSocketIoMetaWebReplyWaiter } = require('../../dist/core/a2a/metawebReplyWaiter.js');
+    const waiter = createSocketIoMetaWebReplyWaiter();
+    const startedAt = Date.now();
+    const replyPromise = waiter.awaitServiceReply({
+      callerGlobalMetaId: CALLER_GLOBAL_META_ID,
+      callerPrivateKeyHex: callerPair.privateKeyHex,
+      providerGlobalMetaId: PROVIDER_GLOBAL_META_ID,
+      providerChatPublicKey: providerPair.publicKeyHex,
+      servicePinId: SERVICE_PIN_ID,
+      paymentTxid: PAYMENT_TXID,
+      orderTxid: ORDER_TXID,
+      timeoutMs: 60_000,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(socketMock.sockets.length > 0, 'expected reply waiter to open socket listeners');
+    socketMock.sockets[0].emitEvent('connect_error', new Error('connection refused'));
+
+    const result = await replyPromise;
+    assert.equal(result.state, 'transport_error');
+    assert.match(result.error, /connection refused/);
+    assert.ok(
+      Date.now() - startedAt < 5000,
+      'a dead MetaSO connection must fail fast, not after the full wait timeout',
+    );
+  } finally {
+    socketMock.restore();
+  }
+});
+
+test('metaweb reply waiter keeps waiting when one endpoint connects and another fails', async () => {
+  const callerPair = createIdentityPair();
+  const providerPair = createIdentityPair();
+  const socketMock = installSocketIoMock();
+  try {
+    const { createSocketIoMetaWebReplyWaiter } = require('../../dist/core/a2a/metawebReplyWaiter.js');
+    const waiter = createSocketIoMetaWebReplyWaiter({
+      resolveSocketEndpoints: async () => [
+        { url: 'http://127.0.0.1:1', path: '/socket.io' },
+        { url: 'http://127.0.0.1:2', path: '/socket.io' },
+      ],
+    });
+    const replyPromise = waiter.awaitServiceReply({
+      callerGlobalMetaId: CALLER_GLOBAL_META_ID,
+      callerPrivateKeyHex: callerPair.privateKeyHex,
+      providerGlobalMetaId: PROVIDER_GLOBAL_META_ID,
+      providerChatPublicKey: providerPair.publicKeyHex,
+      servicePinId: SERVICE_PIN_ID,
+      paymentTxid: PAYMENT_TXID,
+      orderTxid: ORDER_TXID,
+      timeoutMs: 25,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(socketMock.sockets.length, 2);
+    socketMock.sockets[0].emitEvent('connect_error', new Error('connection refused'));
+    socketMock.sockets[1].emitEvent('connect');
+
+    const result = await replyPromise;
+    assert.equal(result.state, 'timeout', 'one healthy endpoint must keep the wait alive');
+  } finally {
+    socketMock.restore();
+  }
+});

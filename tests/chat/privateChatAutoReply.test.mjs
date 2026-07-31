@@ -94,6 +94,9 @@ async function createAutoReplyHarness(options = {}) {
   const sendFailureEvents = [];
   const stateStore = createPrivateChatStateStore(paths);
   const strategyStore = createChatStrategyStore(paths);
+  if (typeof options.mutateStateStore === 'function') {
+    options.mutateStateStore(stateStore);
+  }
   const hasResolvePeerChatPublicKeyOverride = Object.prototype.hasOwnProperty.call(
     options,
     'resolvePeerChatPublicKey',
@@ -2491,4 +2494,187 @@ test('orchestrator does not resend the wait notice when history already has one 
   const notices = messages.filter((message) => message.extensions?.chatSkillWaitNotice === true);
   assert.equal(notices.length, 1, 'the seeded notice must not be duplicated');
   assert.equal(harness.writes.length, 1, 'only the final reply is written');
+});
+
+
+test('orchestrator logs reply runner failures through the send-failure log', async () => {
+  const harness = await createAutoReplyHarness({
+    replyRunner: async () => {
+      throw new Error('runner exploded');
+    },
+  });
+
+  await harness.handleInbound();
+
+  assert.equal(harness.writes.length, 0);
+  const events = harness.sendFailureEvents.filter((event) => event.kind === 'reply_runner_failed');
+  assert.equal(events.length, 1);
+  assert.match(events[0].error, /runner exploded/);
+});
+
+test('orchestrator logs commit-path failures through the send-failure log', async () => {
+  const harness = await createAutoReplyHarness({
+    mutateStateStore: (store) => {
+      const original = store.appendMessages.bind(store);
+      store.appendMessages = async (messages) => {
+        if (messages.some((message) => message.direction === 'outbound')) {
+          throw new Error('store exploded');
+        }
+        return original(messages);
+      };
+    },
+  });
+
+  await harness.handleInbound();
+
+  const events = harness.sendFailureEvents.filter((event) => event.kind === 'reply_commit_failed');
+  assert.equal(events.length, 1);
+  assert.match(events[0].error, /store exploded/);
+});
+
+test('orchestrator logs rate-limited replies through the send-failure log', async () => {
+  const harness = await createAutoReplyHarness({});
+
+  for (let index = 0; index < 11; index += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await harness.handleInbound({
+      messagePinId: `incoming-pin-rl-${index}`,
+      content: `hello ${index}`,
+    });
+  }
+
+  assert.equal(harness.writes.length, 10);
+  const events = harness.sendFailureEvents.filter((event) => event.kind === 'rate_limited');
+  assert.equal(events.length, 1);
+});
+
+test('orchestrator serializes back-to-back turns: a stale reply is dropped pre-send and the newest inbound is answered', async () => {
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const runnerPrompts = [];
+  let firstCall = true;
+  const harness = await createAutoReplyHarness({
+    replyRunner: async (input) => {
+      const inboundText = input.inboundMessage?.content ?? '';
+      runnerPrompts.push(inboundText);
+      if (firstCall) {
+        firstCall = false;
+        await firstGate;
+      }
+      return { state: 'reply', content: `reply to ${inboundText}` };
+    },
+  });
+
+  const first = harness.handleInbound({ messagePinId: 'pin-burst-1', content: 'first question' });
+  for (let attempt = 0; attempt < 500 && runnerPrompts.length === 0; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  assert.equal(runnerPrompts.length, 1);
+
+  // The second inbound lands while the first turn is still inside the LLM.
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const second = harness.handleInbound({ messagePinId: 'pin-burst-2', content: 'second question' });
+  // Make sure the second inbound is durably stored before the first turn's
+  // commit-guard evaluates, otherwise this test races the append.
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const stored = await harness.stateStore.getRecentMessages(conversationId, 20);
+    if (stored.some((message) => message.messageId === 'pin-burst-2')) {
+      break;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  releaseFirst();
+  await Promise.all([first, second]);
+
+  // Turn 1 paid for its LLM call but its reply is stale by then (a newer
+  // inbound exists), so it is never sent; turn 2 answers with both messages
+  // in context. Exactly one message reaches the chain.
+  assert.equal(runnerPrompts.length, 2);
+  assert.equal(harness.writes.length, 1);
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation?.turnCount, 2, 'both inbound turns are counted exactly once');
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const outbound = messages.filter((message) => message.direction === 'outbound');
+  assert.equal(outbound.length, 1);
+  assert.equal(outbound[0].content, 'reply to second question');
+});
+
+test('orchestrator skips a stale backfilled inbound without paying for an LLM turn', async () => {
+  const runnerContents = [];
+  const harness = await createAutoReplyHarness({
+    replyRunner: async (input) => {
+      runnerContents.push(input.inboundMessage?.content ?? '');
+      return { state: 'reply', content: `reply to ${input.inboundMessage?.content ?? ''}` };
+    },
+  });
+
+  await harness.handleInbound({
+    messagePinId: 'pin-backfill-new',
+    content: 'newer question',
+    timestamp: 1_770_000_001_000,
+  });
+  assert.equal(runnerContents.length, 1);
+  assert.equal(harness.writes.length, 1);
+
+  // A late backfill delivers an OLDER message after the newer one was already
+  // answered: the conversation has moved past it, so its turn is skipped
+  // before any LLM call.
+  await harness.handleInbound({
+    messagePinId: 'pin-backfill-old',
+    content: 'older question',
+    timestamp: 1_770_000_000_500,
+  });
+
+  assert.equal(runnerContents.length, 1);
+  assert.equal(harness.writes.length, 1);
+});
+
+test('orchestrator stores inbound extension-wrapped content unwrapped and renders it as plain text', async () => {
+  const wrapped = JSON.stringify({
+    content: 'hello with extensions',
+    extensions: { foo: 'bar' },
+  });
+  const harness = await createAutoReplyHarness({});
+
+  await harness.handleInbound({ content: wrapped });
+
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  const inbound = messages.find((message) => message.direction === 'inbound');
+  assert.equal(inbound?.content, 'hello with extensions');
+  assert.deepEqual(inbound?.extensions, { foo: 'bar' });
+  const prompt = harness.runnerInputs[0].recentMessages
+    .map((message) => message.content)
+    .join('\n');
+  assert.match(prompt, /hello with extensions/);
+  assert.doesNotMatch(prompt, /\{"content"/);
+});
+
+test('orchestrator renders legacy wrapper-stored inbound records as plain text in the prompt', async () => {
+  const harness = await createAutoReplyHarness({});
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  // Seed a legacy record whose stored content still carries the wire wrapper.
+  await harness.stateStore.appendMessages([{
+    conversationId,
+    messageId: 'legacy-wrapped-1',
+    direction: 'inbound',
+    senderGlobalMetaId: harness.peerGlobalMetaId,
+    content: JSON.stringify({ content: 'legacy plain text', extensions: { legacy: true } }),
+    messagePinId: 'legacy-wrapped-1',
+    extensions: { legacy: true },
+    timestamp: 1_770_000_000_000 - 1000,
+  }]);
+
+  await harness.handleInbound({ messagePinId: 'pin-fresh-1', content: 'fresh question' });
+
+  const prompt = harness.runnerInputs[0].recentMessages
+    .map((message) => message.content)
+    .join('\n');
+  assert.match(prompt, /legacy plain text/);
+  assert.doesNotMatch(prompt, /\{"content"/);
 });

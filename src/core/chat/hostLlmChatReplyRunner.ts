@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { createDefaultChatReplyRunner } from './defaultChatReplyRunner';
+import { unwrapPrivateChatContent } from './privateChatAutoReply';
 import type { LlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import type { LlmExecutionEvent, LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
 import {
@@ -323,7 +324,13 @@ function buildChatPrompt(
   let previousTimestamp: number | null = null;
   let previousClosedSession = false;
   for (const msg of recentMessages) {
-    const rawContent = normalizeText(msg.content);
+    // Legacy inbound records may still carry the {"content","extensions"} wire
+    // wrapper; unwrap so the model sees plain text (new records are stored
+    // unwrapped already).
+    const messageText = msg.direction === 'inbound'
+      ? unwrapPrivateChatContent(msg.content).content
+      : msg.content;
+    const rawContent = normalizeText(messageText);
     const closesSession = hasFinalByeLine(rawContent);
     const timestamp = typeof msg.timestamp === 'number' && Number.isFinite(msg.timestamp)
       ? msg.timestamp
