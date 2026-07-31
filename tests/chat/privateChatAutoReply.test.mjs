@@ -154,6 +154,7 @@ async function createAutoReplyHarness(options = {}) {
       ? (event) => sendFailureEvents.push(event)
       : options.logSendFailure ?? undefined,
     chatSkillWaitNotice: options.chatSkillWaitNotice,
+    hasActiveOrderWithPeer: options.hasActiveOrderWithPeer,
     replyRunner: async (input) => {
       runnerInputs.push(input);
       if (options.replyRunner) {
@@ -1022,6 +1023,91 @@ test('auto-reply retries a stored inbound turn after the original send fails', a
   assert.equal(harness.writes.length, 1);
   assert.equal(runnerCalls, 2);
   assert.equal(await harness.orchestrator.retryPendingInboundMessage(harness.peerGlobalMetaId), false);
+});
+
+test('auto-reply is suppressed while an order with the peer is active', async () => {
+  const harness = await createAutoReplyHarness({
+    hasActiveOrderWithPeer: async () => true,
+  });
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-during-order' });
+
+  // The message is recorded but no reply turn runs: no LLM call, no send.
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  const messages = await harness.stateStore.getRecentMessages(conversationId, 10);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].direction, 'inbound');
+  const conversation = await harness.stateStore.getConversationByPeer(harness.peerGlobalMetaId);
+  assert.equal(conversation.lastDirection, 'inbound');
+  // Like the order-protocol path, a suppressed message does not count turns.
+  assert.equal(conversation.turnCount, 0);
+});
+
+test('auto-reply resumes after the order with the peer reaches a terminal state', async () => {
+  let orderActive = true;
+  const harness = await createAutoReplyHarness({
+    hasActiveOrderWithPeer: async () => orderActive,
+  });
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-mid-order' });
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+
+  orderActive = false;
+  await harness.handleInbound({ messagePinId: 'incoming-pin-after-order' });
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.writes.length, 1);
+});
+
+test('auto-reply recovery does not answer a suppressed message while the order is still active', async () => {
+  let orderActive = true;
+  const harness = await createAutoReplyHarness({
+    hasActiveOrderWithPeer: async () => orderActive,
+  });
+
+  await harness.handleInbound({ messagePinId: 'incoming-pin-recovery-mid-order' });
+  assert.equal(harness.writes.length, 0);
+
+  assert.equal(await harness.orchestrator.retryPendingInboundMessage(harness.peerGlobalMetaId), false);
+  assert.equal(harness.runnerInputs.length, 0);
+  assert.equal(harness.writes.length, 0);
+
+  // Once the order terminalizes, the pending message becomes answerable again.
+  orderActive = false;
+  assert.equal(await harness.orchestrator.retryPendingInboundMessage(harness.peerGlobalMetaId), true);
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.writes.length, 1);
+});
+
+test('auto-reply guided turns are not suppressed by an active order', async () => {
+  const now = 1_770_000_000_000;
+  const harness = await createAutoReplyHarness({
+    now,
+    hasActiveOrderWithPeer: async () => true,
+  });
+  const conversationId = `pc-${harness.localGlobalMetaId}-${harness.peerGlobalMetaId}`;
+  await harness.stateStore.upsertConversation({
+    conversationId,
+    peerGlobalMetaId: harness.peerGlobalMetaId,
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: now - 10_000,
+    updatedAt: now - 1_000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  });
+  await harness.stateStore.setPendingGuidance(conversationId, 'Give a status update on the order.', now - 500);
+
+  await harness.handleLocalGuidedTurn();
+
+  assert.equal(harness.runnerInputs.length, 1);
+  assert.equal(harness.writes.length, 1);
 });
 
 test('auto-reply does not start a recovery reply while the live inbound reply is still running', async () => {

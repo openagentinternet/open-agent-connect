@@ -65,6 +65,12 @@ export interface PrivateChatAutoReplyDependencies {
   replyRunner: ChatReplyRunner;
   a2aConversationPersister?: A2AConversationMessagePersister;
   logSendFailure?: (event: PrivateChatSendFailureEvent) => void;
+  // IDBots hasActiveOrderForPrivateChatSuppression parity: while an order with
+  // the peer is being negotiated/executed, inbound free-chat messages are
+  // still recorded but get no auto-reply (and no turn counting), so the LLM
+  // cannot chime in between order-protocol messages. Operator guided turns
+  // are never suppressed. Absent = never suppress.
+  hasActiveOrderWithPeer?: (peerGlobalMetaId: string) => Promise<boolean>;
   // Generates the persona-voiced "please wait" notice sent to the peer once
   // per inbound message when an allowed chat skill actually starts executing
   // (IDBots-style interim reply). Null/absent disables the notice.
@@ -847,6 +853,10 @@ export function createPrivateChatAutoReplyOrchestrator(
       const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
       const normalizedPeerGlobalMetaId = normalizeText(peerGlobalMetaId);
       if (!selfGlobalMetaId || !normalizedPeerGlobalMetaId) return false;
+      // Active-order suppression gates the recovery path too: a message that
+      // arrived mid-order must not get a late free-chat reply while the order
+      // is still open.
+      if (await deps.hasActiveOrderWithPeer?.(normalizedPeerGlobalMetaId)) return false;
 
       const conversation = await deps.stateStore.getConversationByPeer(normalizedPeerGlobalMetaId);
       if (!conversation || conversation.state !== 'active' || conversation.lastDirection !== 'inbound') {
@@ -1073,6 +1083,18 @@ export function createPrivateChatAutoReplyOrchestrator(
       // Inbound messages are always persisted above so they stay visible and
       // recoverable; only the automated reply is gated by the enabled flag.
       if (!config.enabled) return;
+
+      // ---- Active-order suppression: record-only, no turn counting, no reply ----
+
+      // While an order with this peer is open, free-chat auto-replies stay
+      // silent (IDBots hasActiveOrderForPrivateChatSuppression parity). The
+      // message is already persisted; like the order-protocol path above it
+      // does not count turns. Suppression lifts automatically once the order
+      // reaches a terminal state.
+      if (await deps.hasActiveOrderWithPeer?.(peerGlobalMetaId)) {
+        await deps.stateStore.upsertConversation(conversation);
+        return;
+      }
 
       // ---- Private-chat path: turn counting, cooldown, reply runner ----
 

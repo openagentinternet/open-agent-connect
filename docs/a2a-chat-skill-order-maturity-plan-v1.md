@@ -122,6 +122,21 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
   Explicit media-failure outputs skip the doomed continuation, matching
   IDBots. The HTTP execute path keeps its single upload attempt and no
   notices (no buyer chat channel there).
+- **2026-08-01 — P3-C/P3-E done** (chat suppression + progress UI, IDBots
+  `hasActiveOrderForPrivateChatSuppression` parity): while an order with a
+  peer is active (seller order in `received`/`acknowledged`/`in_progress`/
+  `rating_pending`/`refund_pending`, a caller session still waiting on the
+  provider, or a buyer order whose refund has not settled), inbound free-chat
+  messages are recorded but get no auto-reply and no turn counting — same
+  record-only treatment as order-protocol traffic — and the recovery path is
+  gated too; guided operator turns are never suppressed. Seller progress
+  notices (long-task/heartbeat/upload-retry) are now recorded in the A2A
+  conversation store like the ack (fire-and-forget so the heartbeat cadence
+  is unchanged), and inbound `[ORDER_STATUS]` is recorded on the buyer side,
+  so both trace pages show order progress. /ui/conversations strips the
+  `[ORDER_STATUS:<txid>]` wire prefix and collapses each consecutive
+  heartbeat run into its latest notice so progress no longer floods the
+  thread (no new UI copy; the full record stays on the trace page).
 
 ---
 

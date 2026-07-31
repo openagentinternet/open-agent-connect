@@ -166,6 +166,7 @@ import {
   applyServiceRefundRequestsToState,
   mergeServiceRefundSyncState,
 } from '../core/orders/serviceRefundSync';
+import { createHasActiveOrderWithPeer } from '../core/orders/orderChatSuppression';
 import { createProviderPresenceStateStore } from '../core/provider/providerPresenceState';
 import { createRatingDetailStateStore } from '../core/ratings/ratingDetailState';
 import {
@@ -6413,6 +6414,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const profilePrivateChatStateStore = profileHomeDir === path.resolve(input.homeDir)
       ? privateChatStateStore
       : createPrivateChatStateStore(profileHomeDir);
+    const profileSessionStateStore = profileHomeDir === path.resolve(input.homeDir)
+      ? sessionStateStore
+      : createSessionStateStore(profileHomeDir);
     const profileSigner = profileHomeDir === path.resolve(input.homeDir)
       ? signer
       : createSignerForProfileHome(profileHomeDir);
@@ -6510,6 +6514,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
       resolvePeerChatPublicKey,
       replyRunner: guidanceReplyRunner,
       a2aConversationPersister,
+      // Guided turns themselves are never suppressed, but keep the dependency
+      // wired like the other orchestrators for any inbound path.
+      hasActiveOrderWithPeer: createHasActiveOrderWithPeer({
+        runtimeStateStore: profileRuntimeStateStore,
+        sessionStateStore: profileSessionStateStore,
+      }),
     }, profileAutoReplyConfig);
 
     // Accept-and-poll: a guided turn can take minutes (LLM + possible skill
@@ -7472,11 +7482,49 @@ export function createDefaultMetabotDaemonHandlers(input: {
       return;
     }
     try {
-      await sendProviderOrderPrivateMessage({
+      const wireContent = buildOrderStatusMessage(inputNotice.orderTxid, content);
+      const sent = await sendProviderOrderPrivateMessage({
         toGlobalMetaId: inputNotice.toGlobalMetaId,
         peerChatPublicKey: inputNotice.peerChatPublicKey,
-        content: buildOrderStatusMessage(inputNotice.orderTxid, content),
+        content: wireContent,
       });
+      // Record the notice like the acknowledgement is recorded, so seller
+      // progress (long-task/heartbeat/upload-retry) stays visible in the
+      // conversation store and on the trace page. Fire-and-forget: the
+      // best-effort record must not slow the heartbeat cadence.
+      void (async () => {
+        const state = await runtimeStateStore.readState().catch(() => null);
+        if (!state?.identity) {
+          return;
+        }
+        await persistA2AConversationMessageBestEffort({
+          paths: runtimeStateStore.paths,
+          local: {
+            profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+            globalMetaId: state.identity.globalMetaId,
+            name: state.identity.name,
+            chatPublicKey: state.identity.chatPublicKey,
+          },
+          peer: {
+            globalMetaId: inputNotice.toGlobalMetaId,
+            chatPublicKey: inputNotice.peerChatPublicKey,
+          },
+          message: {
+            direction: 'outgoing',
+            content: wireContent,
+            pinId: sent.pinId,
+            txid: sent.txids[0] ?? sent.pinId,
+            txids: sent.txids,
+            chain: 'mvc',
+            orderTxid: inputNotice.orderTxid,
+            timestamp: Date.now(),
+          },
+          orderSession: {
+            role: 'provider',
+            orderTxid: inputNotice.orderTxid,
+          },
+        }, a2aConversationPersister);
+      })().catch(() => undefined);
     } catch {
       // Best-effort progress notice; the final delivery or failure notice still follows.
     }
@@ -11215,6 +11263,50 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
 
     if (orderStatus) {
+      // Record the provider status (ack/progress heartbeat) like the delivery
+      // is recorded, so the buyer-side conversation view and trace page show
+      // order progress instead of a silent gap between ORDER and DELIVERY.
+      if (runtimeState.identity) {
+        await persistA2AConversationMessageBestEffort({
+          paths: runtimeStateStore.paths,
+          local: {
+            profileSlug: path.basename(runtimeStateStore.paths.profileRoot),
+            globalMetaId: runtimeState.identity.globalMetaId,
+            name: runtimeState.identity.name,
+            chatPublicKey: runtimeState.identity.chatPublicKey,
+          },
+          peer: {
+            globalMetaId: inputMessage.fromGlobalMetaId,
+            name: normalizeText(trace.a2a?.providerName) || normalizeText(trace.session.peerName) || null,
+          },
+          message: {
+            direction: 'incoming',
+            content,
+            pinId: normalizeText(inputMessage.messagePinId) || null,
+            txid: null,
+            txids: [],
+            chain: 'mvc',
+            orderTxid: orderStatus.orderTxid ?? null,
+            paymentTxid: normalizeText(trace.order?.paymentTxid) || null,
+            serviceOrderPinId: normalizeText(orderStatus.orderPinId)
+              || normalizeText(trace.order?.serviceOrderPinId)
+              || null,
+            timestamp: Number.isFinite(inputMessage.timestamp)
+              ? Math.trunc(Number(inputMessage.timestamp))
+              : Date.now(),
+          },
+          orderSession: {
+            role: 'caller',
+            orderTxid: orderStatus.orderTxid ?? null,
+            paymentTxid: normalizeText(trace.order?.paymentTxid) || null,
+            serviceOrderPinId: normalizeText(orderStatus.orderPinId)
+              || normalizeText(trace.order?.serviceOrderPinId)
+              || null,
+            servicePinId: normalizeText(trace.order?.serviceId) || null,
+            serviceName: normalizeText(trace.order?.serviceName) || null,
+          },
+        }, a2aConversationPersister);
+      }
       return commandSuccess({
         handled: true,
         rated: false,

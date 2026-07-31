@@ -20,6 +20,8 @@ const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateS
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createA2AConversationStore } = require('../../dist/core/a2a/conversationStore.js');
+const { buildA2APeerSessionId } = require('../../dist/core/a2a/conversationPersistence.js');
+const { getUnifiedA2ATraceSessionForProfile } = require('../../dist/core/a2a/traceProjection.js');
 const { buildDelegationOrderPayload } = require('../../dist/core/orders/delegationOrderMessage.js');
 const { createRatingDetailStateStore } = require('../../dist/core/ratings/ratingDetailState.js');
 const {
@@ -4043,6 +4045,47 @@ test('inbound provider ORDER sends progress heartbeats while execution is in fli
   assert.equal(harness.writes.length, settledWriteCount);
 });
 
+test('inbound provider ORDER records progress notices in the A2A conversation store like the ack', async (t) => {
+  const orderTxid = '1e'.repeat(32);
+  const paymentTxid = '1f'.repeat(32);
+  const harness = await createInboundProviderOrderHarness(t, {
+    llmDelayMs: 120,
+    providerOrderProgressNoticeIntervalMs: 30,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+  assert.equal(result.ok, true);
+
+  const conversationStore = createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: { globalMetaId: 'idq1provider' },
+    peer: { globalMetaId: harness.buyerGlobalMetaId },
+  });
+  // The notice records are fire-and-forget so they never slow the heartbeat
+  // cadence; poll until the heartbeat record lands.
+  let statusMessages = [];
+  await waitForCondition(async () => {
+    const conversation = await conversationStore.readConversation();
+    statusMessages = conversation.messages.filter((entry) => entry.protocolTag === 'ORDER_STATUS');
+    return statusMessages.some((entry) => entry.content.includes('still processing after about'));
+  }, 2000, 25);
+  // The ack plus at least one heartbeat progress notice, all recorded as
+  // outbound order-protocol records on the seller side.
+  assert.ok(statusMessages.length >= 2, `expected ack + heartbeat records, got ${statusMessages.length}`);
+  assert.ok(statusMessages.every((entry) => entry.direction === 'outgoing'));
+  assert.ok(statusMessages.every((entry) => entry.kind === 'order_protocol'));
+  assert.ok(statusMessages.every((entry) => entry.orderTxid === orderTxid));
+  assert.ok(statusMessages.some((entry) => entry.content.includes('still processing after about')));
+});
+
 test('inbound provider ORDER stops progress heartbeats after a failed execution', async (t) => {
   const orderTxid = '1a'.repeat(32);
   const paymentTxid = '1b'.repeat(32);
@@ -6388,6 +6431,69 @@ test('inbound ORDER_STATUS disarms the first-response deadline and the delivery 
   const payload = JSON.parse(refundWrites[0].payload);
   assert.equal(payload.paymentTxid, paymentTxid);
   assert.equal(payload.failureReason, 'delivery_timeout');
+});
+
+test('inbound ORDER_STATUS is recorded in the A2A conversation store and the trace transcript', async (t) => {
+  const orderTxid = '9'.repeat(64);
+  const paymentTxid = 'a'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return new Promise(() => {});
+      },
+    },
+  });
+  const createdAt = Date.now() - 60_000;
+  await seedBuyerWaitingTrace(harness, {
+    orderTxid,
+    paymentTxid,
+    createdAt,
+    firstResponseDeadlineAt: createdAt + 5 * 60_000,
+    deliveryDeadlineAt: createdAt + 15 * 60_000,
+  });
+
+  const progressText = 'The "Weather Oracle" task is still processing after about 2 minutes.';
+  const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[ORDER_STATUS:${orderTxid}] ${progressText}`,
+    messagePinId: `${orderTxid}i7`,
+    timestamp: createdAt + 120_000,
+  });
+  assert.equal(handled.ok, true, JSON.stringify(handled));
+  assert.equal(handled.data.orderStatus, true);
+
+  const conversationStore = createA2AConversationStore({
+    homeDir: harness.homeDir,
+    local: { globalMetaId: harness.identity.globalMetaId },
+    peer: { globalMetaId: 'idq1provider' },
+  });
+  const conversation = await conversationStore.readConversation();
+  const statusMessage = conversation.messages.find((entry) => entry.protocolTag === 'ORDER_STATUS');
+  assert.ok(statusMessage, 'expected the inbound ORDER_STATUS to be recorded');
+  assert.equal(statusMessage.direction, 'incoming');
+  assert.equal(statusMessage.kind, 'order_protocol');
+  assert.equal(statusMessage.orderTxid, orderTxid);
+  assert.equal(statusMessage.content, `[ORDER_STATUS:${orderTxid}] ${progressText}`);
+  const orderSession = conversation.sessions.find((entry) => entry.type === 'service_order');
+  assert.ok(orderSession, 'expected an order session for the status notice');
+  assert.equal(orderSession.role, 'caller');
+  assert.equal(orderSession.state, 'remote_executing');
+
+  // The trace page reads the same store: the progress notice shows up as an
+  // order_status transcript item with the wire tag stripped from its content.
+  const detail = await getUnifiedA2ATraceSessionForProfile({
+    profile: {
+      name: 'Caller Bot',
+      homeDir: harness.homeDir,
+      globalMetaId: harness.identity.globalMetaId,
+    },
+    sessionId: buildA2APeerSessionId(harness.identity.globalMetaId, 'idq1provider'),
+  });
+  assert.ok(detail);
+  const progressItem = detail.transcriptItems.find((entry) => entry.type === 'order_status');
+  assert.ok(progressItem, 'expected the progress notice in the trace transcript');
+  assert.equal(progressItem.content, progressText);
+  assert.equal(progressItem.sender, 'provider');
 });
 
 test('provider progress heartbeats do not extend the fixed delivery deadline (IDBots parity)', async (t) => {

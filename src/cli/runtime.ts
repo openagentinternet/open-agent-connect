@@ -104,7 +104,9 @@ import {
   type A2ASimplemsgPresenceWatchdog,
 } from '../core/a2a/simplemsgPresenceWatchdog';
 import { classifySimplemsgContent } from '../core/a2a/simplemsgClassifier';
+import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import { SERVICE_ORDER_DEADLINE_SWEEP_INTERVAL_MS } from '../core/orders/orderLifecycle';
+import { createHasActiveOrderWithPeer } from '../core/orders/orderChatSuppression';
 import {
   createPrivateChatAutoReplyOrchestrator,
   type PrivateChatAutoReplyDependencies,
@@ -2048,6 +2050,10 @@ export function createPrivateChatAutoReplyProfileDispatcher(
       resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
       replyRunner,
       logSendFailure: createPrivateChatSendFailureFileLogger(profilePaths),
+      hasActiveOrderWithPeer: createHasActiveOrderWithPeer({
+        runtimeStateStore: profileRuntimeStore,
+        sessionStateStore: createSessionStateStore(profilePaths),
+      }),
       chatSkillWaitNotice: createChatSkillWaitNoticeGenerator({
         runtimeResolver: profileRuntimeResolver,
         llmExecutor: input.llmExecutor,
@@ -3896,6 +3902,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       llmExecutor,
       env: process.env,
       logWarning: (scope, message) => console.warn(scope, message),
+    }),
+    hasActiveOrderWithPeer: createHasActiveOrderWithPeer({
+      runtimeStateStore: runtimeStore,
+      sessionStateStore: createSessionStateStore(paths),
     }),
     chatSkillWaitNotice: createChatSkillWaitNoticeGenerator({
       runtimeResolver: llmResolver,
