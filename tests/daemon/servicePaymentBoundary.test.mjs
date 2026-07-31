@@ -853,6 +853,9 @@ async function seedBuyerWaitingTrace(harness, overrides = {}) {
       providerSkill: overrides.providerSkill ?? 'metabot-weather-oracle',
       providerSkills: overrides.providerSkills ?? ['metabot-weather-oracle'],
       status: overrides.orderStatus ?? null,
+      firstResponseDeadlineAt: overrides.firstResponseDeadlineAt ?? null,
+      deliveryDeadlineAt: overrides.deliveryDeadlineAt ?? null,
+      firstResponseReceivedAt: overrides.firstResponseReceivedAt ?? null,
       refundRequestPinId: overrides.refundRequestPinId ?? null,
       failureReason: overrides.failureReason ?? null,
     },
@@ -5652,7 +5655,10 @@ test('boot recovery times out an exhausted caller wait and seeds the refund with
   assert.ok(refundWrite, 'expected boot recovery to publish a refund request for the expired wait');
   const payload = JSON.parse(refundWrite.payload);
   assert.equal(payload.paymentTxid, paymentTxid);
-  assert.equal(payload.failureReason, 'delivery_timeout');
+  // Legacy orders without stored deadline fields derive deadlines from their
+  // creation time; with nothing received, the first-response deadline is the
+  // one that was breached first.
+  assert.equal(payload.failureReason, 'first_response_timeout');
 });
 
 test('boot recovery re-arms a fresh caller wait with the remaining budget and does not double-arm', async (t) => {
@@ -5679,8 +5685,8 @@ test('boot recovery re-arms a fresh caller wait with the remaining budget and do
   assert.equal(waiterCalls[0].orderTxid, orderTxid);
   assert.ok(waiterCalls[0].timeoutMs > 0, 'expected a positive remaining wait budget');
   assert.ok(
-    waiterCalls[0].timeoutMs <= 30 * 60 * 1000,
-    'expected the re-armed budget to be capped at the standard background wait',
+    waiterCalls[0].timeoutMs <= 15 * 60 * 1000,
+    'expected the re-armed budget to be capped at the order delivery deadline',
   );
 
   const second = await harness.handlers.resumePendingCallerReplyContinuations();
@@ -5784,6 +5790,385 @@ test('boot recovery skips terminal sessions and orders with a recorded refund', 
     refundedHarness.writes.some((entry) => entry.path === '/protocols/service-refund-request'),
     false,
   );
+});
+
+test('services call stamps fixed order deadlines and arms the waiter to the delivery deadline', async (t) => {
+  const waiterCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        waiterCalls.push(input);
+        return new Promise(() => {});
+      },
+    },
+  });
+
+  const before = Date.now();
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+  const after = Date.now();
+
+  assert.equal(called.state, 'waiting');
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === called.data.traceId);
+  assert.ok(trace, 'expected the buyer trace for the call');
+  assert.ok(
+    trace.order.firstResponseDeadlineAt >= before + 5 * 60_000 - 1_000
+      && trace.order.firstResponseDeadlineAt <= after + 5 * 60_000 + 1_000,
+    `expected a ~5 minute first-response deadline, got ${trace.order.firstResponseDeadlineAt}`,
+  );
+  assert.ok(
+    trace.order.deliveryDeadlineAt >= before + 15 * 60_000 - 1_000
+      && trace.order.deliveryDeadlineAt <= after + 15 * 60_000 + 1_000,
+    `expected a ~15 minute delivery deadline, got ${trace.order.deliveryDeadlineAt}`,
+  );
+  assert.equal(trace.order.firstResponseReceivedAt, null);
+  assert.equal(waiterCalls.length, 1);
+  assert.ok(
+    waiterCalls[0].timeoutMs > 14 * 60_000,
+    'a fresh order keeps nearly the full delivery window',
+  );
+  assert.ok(
+    waiterCalls[0].timeoutMs <= 15 * 60_000,
+    'the waiter budget is capped at the delivery deadline',
+  );
+});
+
+test('buyer deadline sweep fails orders past the first-response deadline and seeds exactly one refund', async (t) => {
+  const orderTxid = '1'.repeat(64);
+  const paymentTxid = '2'.repeat(64);
+  const waiterCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        waiterCalls.push(input);
+        return new Promise(() => {});
+      },
+    },
+  });
+  // First-response deadline (creation + 5 min) just passed; nothing received.
+  const createdAt = Date.now() - 6 * 60_000;
+  const seeded = await seedBuyerWaitingTrace(harness, {
+    orderTxid,
+    paymentTxid,
+    createdAt,
+    firstResponseDeadlineAt: createdAt + 5 * 60_000,
+    deliveryDeadlineAt: createdAt + 15 * 60_000,
+  });
+
+  const report = await harness.handlers.sweepBuyerOrderDeadlines();
+
+  assert.equal(report.scanned, 1);
+  assert.equal(report.timedOut, 1);
+  assert.equal(waiterCalls.length, 0, 'the sweep finalizes without arming a waiter');
+
+  const sessionState = await seeded.sessionStateStore.readState();
+  const session = sessionState.sessions.find((entry) => entry.sessionId === seeded.sessionId);
+  assert.equal(session.state, 'timeout');
+
+  const refundWrites = harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request');
+  assert.equal(refundWrites.length, 1, 'expected exactly one refund request');
+  const payload = JSON.parse(refundWrites[0].payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'first_response_timeout');
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === seeded.traceId);
+  assert.equal(trace.order.status, 'refund_pending');
+  assert.equal(trace.order.failureReason, 'first_response_timeout');
+  // Deadline fields survive the trace rebuild performed by finalization.
+  assert.equal(trace.order.firstResponseDeadlineAt, createdAt + 5 * 60_000);
+  assert.equal(trace.order.deliveryDeadlineAt, createdAt + 15 * 60_000);
+
+  const second = await harness.handlers.sweepBuyerOrderDeadlines();
+  assert.equal(second.timedOut, 0);
+  assert.equal(
+    harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request').length,
+    1,
+    'a terminal order must not be timed out or refunded twice',
+  );
+});
+
+test('inbound ORDER_STATUS disarms the first-response deadline and the delivery deadline still bites', async (t) => {
+  const orderTxid = '3'.repeat(64);
+  const paymentTxid = '4'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return new Promise(() => {});
+      },
+    },
+  });
+  const createdAt = Date.now() - 60_000;
+  const seeded = await seedBuyerWaitingTrace(harness, {
+    orderTxid,
+    paymentTxid,
+    createdAt,
+    firstResponseDeadlineAt: createdAt + 5 * 60_000,
+    deliveryDeadlineAt: createdAt + 15 * 60_000,
+  });
+
+  const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[ORDER_STATUS:${orderTxid}] Still working on it.`,
+    messagePinId: `${orderTxid}i7`,
+    timestamp: Date.now(),
+  });
+  assert.equal(handled.ok, true, JSON.stringify(handled));
+  assert.equal(handled.data.handled, true);
+  assert.equal(handled.data.orderStatus, true);
+
+  const stamped = await harness.runtimeStateStore.readState();
+  const stampedTrace = stamped.traces.find((entry) => entry.traceId === seeded.traceId);
+  assert.ok(stampedTrace.order.firstResponseReceivedAt, 'expected the ORDER_STATUS to stamp the first response');
+
+  // Past the first-response deadline: no failure, because a first response arrived.
+  const afterFirstResponseDeadline = await harness.handlers.sweepBuyerOrderDeadlines(createdAt + 6 * 60_000);
+  assert.equal(afterFirstResponseDeadline.timedOut, 0);
+  assert.equal(
+    harness.writes.some((entry) => entry.path === '/protocols/service-refund-request'),
+    false,
+  );
+
+  // Past the delivery deadline with no delivery: delivery_timeout + refund.
+  const afterDeliveryDeadline = await harness.handlers.sweepBuyerOrderDeadlines(createdAt + 16 * 60_000);
+  assert.equal(afterDeliveryDeadline.timedOut, 1);
+  const refundWrites = harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request');
+  assert.equal(refundWrites.length, 1);
+  const payload = JSON.parse(refundWrites[0].payload);
+  assert.equal(payload.paymentTxid, paymentTxid);
+  assert.equal(payload.failureReason, 'delivery_timeout');
+});
+
+test('provider progress heartbeats do not extend the fixed delivery deadline (IDBots parity)', async (t) => {
+  const orderTxid = '5'.repeat(64);
+  const paymentTxid = '6'.repeat(64);
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return new Promise(() => {});
+      },
+    },
+  });
+  const createdAt = Date.now() - 14 * 60_000;
+  await seedBuyerWaitingTrace(harness, {
+    orderTxid,
+    paymentTxid,
+    createdAt,
+    firstResponseDeadlineAt: createdAt + 5 * 60_000,
+    deliveryDeadlineAt: createdAt + 15 * 60_000,
+  });
+
+  // Heartbeats at minutes 1, 7 and 14 keep the buyer informed...
+  for (const offsetMinutes of [1, 7, 14]) {
+    const handled = await harness.handlers.services.handleInboundOrderProtocolMessage({
+      fromGlobalMetaId: 'idq1provider',
+      content: `[ORDER_STATUS:${orderTxid}] heartbeat ${offsetMinutes}`,
+      messagePinId: `${orderTxid}i${offsetMinutes}`,
+      timestamp: createdAt + offsetMinutes * 60_000,
+    });
+    assert.equal(handled.ok, true, JSON.stringify(handled));
+  }
+
+  // ...but the delivery deadline stays fixed at creation + 15 minutes: the
+  // order is still alive just before it and fails right after it, despite the
+  // heartbeat at minute 14.
+  const beforeDeadline = await harness.handlers.sweepBuyerOrderDeadlines(createdAt + 14 * 60_000 + 30_000);
+  assert.equal(beforeDeadline.timedOut, 0, 'order inside the delivery window must stay alive');
+  const pastDeadline = await harness.handlers.sweepBuyerOrderDeadlines(createdAt + 15 * 60_000 + 1_000);
+  assert.equal(pastDeadline.timedOut, 1, 'the fixed delivery deadline bites despite recent heartbeats');
+  const refundWrites = harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request');
+  assert.equal(refundWrites.length, 1);
+  assert.equal(JSON.parse(refundWrites[0].payload).failureReason, 'delivery_timeout');
+});
+
+test('deadline sweep leaves delivered orders untouched and late protocol messages after a failure are no-ops', async (t) => {
+  const completedHarness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return new Promise(() => {});
+      },
+    },
+  });
+  const completedCreatedAt = Date.now() - 20 * 60_000;
+  await seedBuyerWaitingTrace(completedHarness, {
+    traceId: 'trace-buyer-sweep-completed',
+    sessionId: 'session-buyer-sweep-completed-1',
+    taskRunId: 'run-buyer-sweep-completed-1',
+    orderTxid: '7'.repeat(64),
+    paymentTxid: 'a'.repeat(64),
+    createdAt: completedCreatedAt,
+    sessionState: 'completed',
+    taskRunState: 'completed',
+    publicStatus: 'completed',
+    latestEvent: 'provider_completed',
+    firstResponseDeadlineAt: completedCreatedAt + 5 * 60_000,
+    deliveryDeadlineAt: completedCreatedAt + 15 * 60_000,
+  });
+
+  const deliveredSweep = await completedHarness.handlers.sweepBuyerOrderDeadlines();
+  assert.equal(deliveredSweep.timedOut, 0, 'a delivered order must never be timed out by the sweep');
+  assert.equal(
+    completedHarness.writes.some((entry) => entry.path === '/protocols/service-refund-request'),
+    false,
+  );
+
+  const failedHarness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply() {
+        return new Promise(() => {});
+      },
+    },
+  });
+  const failedCreatedAt = Date.now() - 20 * 60_000;
+  const failedSeed = await seedBuyerWaitingTrace(failedHarness, {
+    orderTxid: '8'.repeat(64),
+    paymentTxid: 'b'.repeat(64),
+    createdAt: failedCreatedAt,
+    firstResponseDeadlineAt: failedCreatedAt + 5 * 60_000,
+    deliveryDeadlineAt: failedCreatedAt + 15 * 60_000,
+  });
+  const failureSweep = await failedHarness.handlers.sweepBuyerOrderDeadlines();
+  assert.equal(failureSweep.timedOut, 1);
+
+  // Late provider messages for the failed order do not mutate it or refund again.
+  const lateStatus = await failedHarness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[ORDER_STATUS:${'8'.repeat(64)}] late heartbeat`,
+    messagePinId: `${'8'.repeat(64)}i9`,
+    timestamp: Date.now(),
+  });
+  assert.equal(lateStatus.ok, true);
+  const lateDelivery = await failedHarness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: 'idq1provider',
+    content: `[DELIVERY:${'8'.repeat(64)}] ${JSON.stringify({ result: 'late result', paymentTxid: 'b'.repeat(64) })}`,
+    messagePinId: `${'8'.repeat(64)}i10`,
+    timestamp: Date.now(),
+  });
+  assert.equal(lateDelivery.ok, true);
+
+  const sessionState = await failedSeed.sessionStateStore.readState();
+  const session = sessionState.sessions.find((entry) => entry.sessionId === failedSeed.sessionId);
+  assert.equal(session.state, 'timeout', 'late protocol messages must not resurrect a timed-out order');
+  const state = await failedHarness.runtimeStateStore.readState();
+  const failedTrace = state.traces.find((entry) => entry.traceId === failedSeed.traceId);
+  assert.equal(failedTrace.order.firstResponseReceivedAt, null, 'settled orders keep their first-response state immutable');
+  assert.equal(
+    failedHarness.writes.filter((entry) => entry.path === '/protocols/service-refund-request').length,
+    1,
+    'late protocol messages must not seed another refund request',
+  );
+});
+
+test('boot recovery settles orders past their first-response deadline and re-arms inside the delivery window', async (t) => {
+  const overdueWaiterCalls = [];
+  const overdueHarness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        overdueWaiterCalls.push(input);
+        return { state: 'timeout' };
+      },
+    },
+  });
+  const overdueCreatedAt = Date.now() - 6 * 60_000;
+  await seedBuyerWaitingTrace(overdueHarness, {
+    orderTxid: '9'.repeat(64),
+    paymentTxid: 'a'.repeat(64),
+    createdAt: overdueCreatedAt,
+    firstResponseDeadlineAt: overdueCreatedAt + 5 * 60_000,
+    deliveryDeadlineAt: overdueCreatedAt + 15 * 60_000,
+  });
+
+  const overdueReport = await overdueHarness.handlers.resumePendingCallerReplyContinuations();
+  assert.equal(overdueReport.timedOut, 1);
+  assert.equal(overdueReport.armed, 0);
+  assert.equal(overdueWaiterCalls.length, 0, 'an order past its binding deadline must not be re-armed');
+  const overdueRefund = overdueHarness.writes.find((entry) => entry.path === '/protocols/service-refund-request');
+  assert.ok(overdueRefund, 'expected the overdue order to settle into the refund path');
+  assert.equal(JSON.parse(overdueRefund.payload).failureReason, 'first_response_timeout');
+
+  const freshWaiterCalls = [];
+  const freshHarness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        freshWaiterCalls.push(input);
+        return new Promise(() => {});
+      },
+    },
+  });
+  const freshCreatedAt = Date.now();
+  await seedBuyerWaitingTrace(freshHarness, {
+    orderTxid: 'b'.repeat(64),
+    paymentTxid: 'c'.repeat(64),
+    createdAt: freshCreatedAt,
+    firstResponseDeadlineAt: freshCreatedAt + 5 * 60_000,
+    deliveryDeadlineAt: freshCreatedAt + 15 * 60_000,
+  });
+
+  const freshReport = await freshHarness.handlers.resumePendingCallerReplyContinuations();
+  assert.equal(freshReport.armed, 1);
+  assert.equal(freshWaiterCalls.length, 1);
+  assert.ok(
+    freshWaiterCalls[0].timeoutMs > 14 * 60_000,
+    'an order inside its delivery window keeps nearly the full budget',
+  );
+  assert.ok(
+    freshWaiterCalls[0].timeoutMs <= 15 * 60_000,
+    'the re-armed budget is capped at the delivery deadline',
+  );
+});
+
+test('waiter timeout and deadline sweep racing settle the order exactly once', async (t) => {
+  const orderTxid = 'd'.repeat(64);
+  const paymentTxid = 'e'.repeat(64);
+  const waiterCalls = [];
+  const harness = await createServiceCallHarness(t, {
+    callerReplyWaiter: {
+      async awaitServiceReply(input) {
+        waiterCalls.push(input);
+        await delay(300);
+        return { state: 'timeout' };
+      },
+    },
+  });
+  const createdAt = Date.now() - 4 * 60_000;
+  const seeded = await seedBuyerWaitingTrace(harness, {
+    orderTxid,
+    paymentTxid,
+    createdAt,
+    // The first-response deadline is about to pass; the delivery deadline is
+    // still minutes away, so both the waiter and the sweep can fire.
+    firstResponseDeadlineAt: Date.now() + 200,
+    deliveryDeadlineAt: createdAt + 15 * 60_000,
+  });
+
+  const resumePromise = harness.handlers.resumePendingCallerReplyContinuations();
+  await waitForCondition(() => waiterCalls.length > 0);
+  await harness.handlers.sweepBuyerOrderDeadlines(Date.now() + 500);
+  await resumePromise;
+  await delay(400);
+
+  const sessionState = await seeded.sessionStateStore.readState();
+  const session = sessionState.sessions.find((entry) => entry.sessionId === seeded.sessionId);
+  assert.equal(session.state, 'timeout');
+  assert.equal(
+    harness.writes.filter((entry) => entry.path === '/protocols/service-refund-request').length,
+    1,
+    'exactly one refund request regardless of which path won the race',
+  );
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.traceId === seeded.traceId);
+  assert.equal(trace.order.failureReason, 'first_response_timeout');
 });
 
 test('inbound buyer ORDER_END rated closes a rating_pending seller order as completed', async (t) => {

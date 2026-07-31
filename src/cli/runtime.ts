@@ -104,6 +104,7 @@ import {
   type A2ASimplemsgPresenceWatchdog,
 } from '../core/a2a/simplemsgPresenceWatchdog';
 import { classifySimplemsgContent } from '../core/a2a/simplemsgClassifier';
+import { SERVICE_ORDER_DEADLINE_SWEEP_INTERVAL_MS } from '../core/orders/orderLifecycle';
 import {
   createPrivateChatAutoReplyOrchestrator,
   type PrivateChatAutoReplyDependencies,
@@ -3805,6 +3806,16 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     },
     logWarning: (message) => console.warn(message),
   });
+  // Buyer-side order deadline enforcement (IDBots 60s scanTimedOutOrders
+  // parity): the socket waiter settles deliveries fast, but only this cheap
+  // local sweep fails orders that breach the first-response deadline. The
+  // refund sync loop above also runs the same sweep inline.
+  const buyerOrderDeadlineSweepInterval = setInterval(() => {
+    void Promise.resolve(handlers.sweepBuyerOrderDeadlines?.()).catch((error) => {
+      console.warn('[buyer order deadline sweep]', error instanceof Error ? error.message : String(error));
+    });
+  }, SERVICE_ORDER_DEADLINE_SWEEP_INTERVAL_MS);
+  buyerOrderDeadlineSweepInterval.unref?.();
 
   // ---- LLM runtime discovery and resolver ----
   const llmRuntimeStore = createLlmRuntimeStore(paths);

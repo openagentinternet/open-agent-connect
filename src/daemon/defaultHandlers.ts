@@ -135,10 +135,14 @@ import {
 } from '../core/orders/sellerOrderState';
 import {
   DEFAULT_REFUND_REQUEST_RETRY_DELAY_MS,
+  SERVICE_ORDER_DELIVERY_TIMEOUT_MS,
   SERVICE_ORDER_FREE_REFUND_SKIPPED_REASON,
   SERVICE_ORDER_RATING_TIMEOUT_MS,
   SERVICE_ORDER_SELF_REFUND_SKIPPED_REASON,
+  computeServiceOrderDeadlines,
+  getServiceOrderDeadlineTimeout,
   isSelfDirectedPair,
+  resolveServiceOrderDeadlines,
 } from '../core/orders/orderLifecycle';
 import {
   processSellerRefundSettlement,
@@ -365,7 +369,6 @@ import {
   type ProviderOrderProtocolTextGenerator,
 } from '../core/a2a/orderProtocolTextGenerator';
 
-const DEFAULT_CALLER_BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 const DEFAULT_TRACE_WATCH_WAIT_MS = 75_000;
 const TRACE_WATCH_POLL_INTERVAL_MS = 500;
 const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
@@ -4824,6 +4827,12 @@ export interface A2ACallerReplyResumeReport {
   failed: number;
 }
 
+export interface BuyerOrderDeadlineSweepReport {
+  scanned: number;
+  timedOut: number;
+  skipped: number;
+}
+
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
   systemHomeDir?: string;
@@ -4880,6 +4889,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
   resumePendingCallerReplyContinuations: (inputResume?: {
     localProfileSlug?: string | null;
   }) => Promise<A2ACallerReplyResumeReport>;
+  // Internal helper (not an HTTP route). Fails open buyer orders whose
+  // first-response or delivery deadline passed and seeds their refund request;
+  // driven by the CLI runtime on its own interval and inline by syncRefunds.
+  sweepBuyerOrderDeadlines: (nowMs?: number) => Promise<BuyerOrderDeadlineSweepReport>;
 } {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
@@ -5431,6 +5444,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
   // Keep daemon-side follow-up consumers alive after foreground timeout so late deliveries still land in trace state.
   const pendingCallerReplyContinuations = new Map<string, Promise<void>>();
   const pendingProviderOrderExecutions = new Map<string, Promise<MetabotCommandResult<Record<string, unknown>>>>();
+  // In-process guard so the socket waiter and the deadline sweep can never
+  // finalize the same buyer order twice when they race; persisted refund
+  // markers provide the cross-process idempotency.
+  const callerTimeoutFinalizations = new Set<string>();
 
   async function readLocalProviderSocketPresence(inputPresence: {
     runtimeStateStore: ReturnType<typeof createRuntimeStateStore>;
@@ -8547,6 +8564,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
       await runSellerRatingTimeoutSweep(nowMs).catch((error) => {
         console.warn(`[seller rating sweep] ${error instanceof Error ? error.message : String(error)}`);
       });
+      // Fail buyer orders whose first-response or delivery deadline passed;
+      // same best-effort isolation as the seller sweep above.
+      await runBuyerOrderDeadlineSweep(nowMs).catch((error) => {
+        console.warn(`[buyer order deadline sweep] ${error instanceof Error ? error.message : String(error)}`);
+      });
       const lifecycle = await runBuyerRefundRequestLifecycleForDueTraces(nowMs);
       const stateAfterLifecycle = await runtimeStateStore.readState();
       const reader = createServiceRefundChainReader({
@@ -10800,6 +10822,78 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return { scanned: staleOrders.length, completed, notified };
   }
 
+  // Buyer-side deadline sweep (IDBots scanTimedOutOrders parity): open buyer
+  // orders past their first-response or delivery deadline are failed with the
+  // matching reason and an automatic refund request. The socket waiter is the
+  // fast path for delivery; this sweep is the backstop that enforces both
+  // deadlines. Terminal sessions and orders that already carry a refund
+  // request are skipped, and the finalizer re-checks terminal state, so a
+  // race with the waiter still settles the order exactly once.
+  async function runBuyerOrderDeadlineSweep(nowMs = Date.now()): Promise<BuyerOrderDeadlineSweepReport> {
+    const state = await runtimeStateStore.readState();
+    if (!state.identity) {
+      return { scanned: 0, timedOut: 0, skipped: 0 };
+    }
+    const sessionState = await sessionStateStore.readState();
+    const waitingSessions = sessionState.sessions
+      .filter((entry) => entry.role === 'caller' && entry.state === 'requesting_remote')
+      .sort((left, right) => left.updatedAt - right.updatedAt);
+    const handledTraceIds = new Set<string>();
+    let scanned = 0;
+    let timedOut = 0;
+    let skipped = 0;
+
+    for (const session of waitingSessions) {
+      if (handledTraceIds.has(session.traceId)) {
+        skipped += 1;
+        continue;
+      }
+      handledTraceIds.add(session.traceId);
+      const trace = state.traces.find((entry) => entry.traceId === session.traceId) ?? null;
+      const order = (trace?.order ?? null) as Record<string, unknown> | null;
+      const orderStatus = normalizeText(order?.status);
+      const orderSettled = orderStatus === 'failed'
+        || orderStatus === 'refund_pending'
+        || orderStatus === 'refunded'
+        || Boolean(normalizeText(order?.refundRequestPinId));
+      const deliveryRecorded = normalizeText(trace?.a2a?.publicStatus) === 'completed'
+        || normalizeText(trace?.a2a?.taskRunState) === 'completed';
+      if (!trace || normalizeText(order?.role) !== 'buyer' || orderSettled || deliveryRecorded) {
+        skipped += 1;
+        continue;
+      }
+      scanned += 1;
+      const deadlines = resolveServiceOrderDeadlines({
+        firstResponseDeadlineAt: order?.firstResponseDeadlineAt,
+        deliveryDeadlineAt: order?.deliveryDeadlineAt,
+        createdAt: trace.createdAt,
+      });
+      const transition = getServiceOrderDeadlineTimeout({
+        ...deadlines,
+        firstResponseReceivedAt: order?.firstResponseReceivedAt,
+      }, nowMs);
+      if (!transition) {
+        continue;
+      }
+      try {
+        const finalized = await applyCallerReplyTimeout({
+          trace,
+          sessionId: session.sessionId,
+          failureReason: transition,
+        });
+        if (finalized) {
+          timedOut += 1;
+        } else {
+          skipped += 1;
+        }
+      } catch (error) {
+        skipped += 1;
+        console.warn(`[buyer order deadline sweep] failed to time out ${session.traceId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { scanned, timedOut, skipped };
+  }
+
   async function handleInboundOrderProtocolMessage(inputMessage: {
     fromGlobalMetaId: string;
     content: string;
@@ -10870,7 +10964,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const delivery = parseDeliveryMessage(content);
     const needsRating = parseNeedsRatingMessage(content);
     const orderEnd = parseOrderEndMessage(content);
-    if (!delivery && !needsRating && !orderEnd) {
+    const orderStatus = delivery || needsRating || orderEnd
+      ? null
+      : parseOrderStatusMessage(content);
+    if (!delivery && !needsRating && !orderEnd && !orderStatus) {
       return commandSuccess({ handled: false, rated: false });
     }
 
@@ -10878,10 +10975,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const trace = findBuyerTraceForInboundOrderProtocol({
       traces: runtimeState.traces,
       providerGlobalMetaId: inputMessage.fromGlobalMetaId,
-      orderTxid: delivery?.orderTxid ?? needsRating?.orderTxid ?? orderEnd?.orderTxid ?? null,
+      orderTxid: delivery?.orderTxid ?? needsRating?.orderTxid ?? orderEnd?.orderTxid ?? orderStatus?.orderTxid ?? null,
       serviceOrderPinId: normalizeText(delivery?.serviceOrderPinId)
         || normalizeText(needsRating?.orderPinId)
-        || normalizeText(orderEnd?.orderPinId),
+        || normalizeText(orderEnd?.orderPinId)
+        || normalizeText(orderStatus?.orderPinId),
       paymentTxid: delivery?.paymentTxid ?? null,
     });
     if (!trace) {
@@ -10903,6 +11001,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       }
       return commandSuccess({ handled: false, rated: false });
+    }
+
+    // Any provider protocol message for the order counts as its first response
+    // (IDBots markFirstResponseReceived parity). It only disarms the
+    // first-response deadline; the delivery deadline stays fixed from creation.
+    await markBuyerOrderFirstResponseReceived({
+      trace,
+      receivedAt: Number.isFinite(inputMessage.timestamp) ? Number(inputMessage.timestamp) : null,
+    });
+
+    if (orderStatus) {
+      return commandSuccess({
+        handled: true,
+        rated: false,
+        traceId: trace.traceId,
+        orderStatus: true,
+      });
     }
 
     if (orderEnd && !delivery && !needsRating) {
@@ -10972,10 +11087,90 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
+  // IDBots markFirstResponseReceived parity: the first provider protocol
+  // message for a buyer order is stamped once (COALESCE semantics) and disarms
+  // the first-response deadline; the delivery deadline stays fixed from order
+  // creation and is never extended by provider progress messages.
+  async function markBuyerOrderFirstResponseReceived(inputMark: {
+    trace: SessionTraceRecord;
+    receivedAt?: number | null;
+  }): Promise<void> {
+    const receivedAt = Number.isFinite(inputMark.receivedAt)
+      ? Math.trunc(Number(inputMark.receivedAt))
+      : Date.now();
+    await runtimeStateStore.updateState((current) => {
+      const index = current.traces.findIndex((entry) => entry.traceId === inputMark.trace.traceId);
+      if (index < 0) {
+        return current;
+      }
+      const trace = current.traces[index];
+      const order = (trace.order ?? null) as Record<string, unknown> | null;
+      if (!order || normalizeText(order.role) !== 'buyer') {
+        return current;
+      }
+      // IDBots parity: settled orders are immutable for first-response purposes.
+      const orderStatus = normalizeText(order.status);
+      if (
+        orderStatus === 'failed'
+        || orderStatus === 'refund_pending'
+        || orderStatus === 'refunded'
+        || normalizeText(order.refundRequestPinId)
+      ) {
+        return current;
+      }
+      if (normalizeTimestamp(order.firstResponseReceivedAt)) {
+        return current;
+      }
+      const traces = current.traces.slice();
+      traces[index] = {
+        ...trace,
+        order: {
+          ...order,
+          firstResponseReceivedAt: receivedAt,
+        } as SessionTraceRecord['order'],
+      };
+      return { ...current, traces };
+    }).catch(() => undefined);
+  }
+
+  // The timeout reason mirrors IDBots getTimedOutOrderTransition: nothing
+  // received before the first-response deadline is a first_response_timeout;
+  // a first response without delivery past the delivery deadline is a
+  // delivery_timeout. An explicit reason (from the deadline sweep) wins.
+  function resolveCallerReplyTimeoutReason(trace: SessionTraceRecord, nowMs = Date.now()): string {
+    const order = (trace.order ?? {}) as Record<string, unknown>;
+    const deadlines = resolveServiceOrderDeadlines({
+      firstResponseDeadlineAt: order.firstResponseDeadlineAt,
+      deliveryDeadlineAt: order.deliveryDeadlineAt,
+      createdAt: trace.createdAt,
+    });
+    return getServiceOrderDeadlineTimeout({
+      ...deadlines,
+      firstResponseReceivedAt: order.firstResponseReceivedAt,
+    }, nowMs) ?? 'delivery_timeout';
+  }
+
   async function applyCallerReplyTimeout(inputTimeout: {
     trace: SessionTraceRecord;
     sessionId: string;
-  }): Promise<void> {
+    failureReason?: string;
+  }): Promise<boolean> {
+    if (callerTimeoutFinalizations.has(inputTimeout.trace.traceId)) {
+      return false;
+    }
+    callerTimeoutFinalizations.add(inputTimeout.trace.traceId);
+    try {
+      return await applyCallerReplyTimeoutGuarded(inputTimeout);
+    } finally {
+      callerTimeoutFinalizations.delete(inputTimeout.trace.traceId);
+    }
+  }
+
+  async function applyCallerReplyTimeoutGuarded(inputTimeout: {
+    trace: SessionTraceRecord;
+    sessionId: string;
+    failureReason?: string;
+  }): Promise<boolean> {
     const current = await loadCallerContinuationState({
       traceId: inputTimeout.trace.traceId,
       sessionId: inputTimeout.sessionId,
@@ -10983,9 +11178,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
       sessionStateStore,
       fallbackTrace: inputTimeout.trace,
     });
-    if (!current || current.session.state === 'completed' || current.taskRun.state === 'completed') {
-      return;
+    if (!current) {
+      return false;
     }
+    const sessionTerminal = current.session.state === 'completed'
+      || current.session.state === 'remote_failed'
+      || current.session.state === 'timeout'
+      || current.taskRun.state === 'completed'
+      || current.taskRun.state === 'failed'
+      || current.taskRun.state === 'timeout';
+    if (sessionTerminal) {
+      // The order already reached a terminal state (delivery applied or an
+      // earlier failure/timeout seeded its refund); a late waiter timeout or
+      // deadline sweep pass for it is a no-op.
+      return false;
+    }
+    const failureReason = normalizeText(inputTimeout.failureReason)
+      || resolveCallerReplyTimeoutReason(current.trace);
     const timedOut = sessionEngine.markForegroundTimeout({
       session: current.session,
       taskRun: current.taskRun,
@@ -11019,13 +11228,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
     await ensureBuyerRefundRequestForTrace({
       trace: rebuilt.trace,
-      failureReason: 'delivery_timeout',
+      failureReason,
       failedAt: Date.now(),
       evidencePinIds: uniqueNonEmpty([
         normalizeText(rebuilt.trace.order?.orderPinId),
         normalizeText(rebuilt.trace.order?.orderTxid),
       ]),
     });
+    return true;
   }
 
   async function applyCallerOrderEndFailure(inputFailure: {
@@ -11139,9 +11349,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (pendingCallerReplyContinuations.has(input.trace.traceId)) {
       return;
     }
+    // Defensive fallback only; callers pass the per-order budget left until
+    // the delivery deadline.
     const waitTimeoutMs = Number.isFinite(input.waiterInput.timeoutMs)
       ? Math.max(250, Math.floor(Number(input.waiterInput.timeoutMs)))
-      : DEFAULT_CALLER_BACKGROUND_WAIT_MS;
+      : SERVICE_ORDER_DELIVERY_TIMEOUT_MS;
 
     const continuation = (async () => {
       try {
@@ -11380,19 +11592,32 @@ export function createDefaultMetabotDaemonHandlers(input: {
           continue;
         }
 
-        // Re-arm only the budget left over from before the restart: an order
-        // that already waited 25 minutes gets at most ~5 more, and an order
-        // past the full budget goes straight to the timeout + refund path.
-        const waitStartedAt = normalizeTimestamp(session.createdAt)
-          ?? normalizeTimestamp(session.updatedAt)
-          ?? Date.now();
-        const remainingMs = DEFAULT_CALLER_BACKGROUND_WAIT_MS - (Date.now() - waitStartedAt);
+        // Deadline-aware re-arm (IDBots parity): the binding deadline is the
+        // first-response deadline while no provider message arrived and the
+        // delivery deadline afterwards. An order already past its binding
+        // deadline goes straight to the timeout + refund path instead of
+        // being re-armed. The waiter itself always gets the budget left until
+        // the delivery deadline — it is the delivery fast path while the
+        // periodic sweep keeps enforcing the first-response deadline.
+        const orderDeadlines = resolveServiceOrderDeadlines({
+          firstResponseDeadlineAt: order?.firstResponseDeadlineAt,
+          deliveryDeadlineAt: order?.deliveryDeadlineAt,
+          createdAt: trace.createdAt,
+        });
+        const bindingDeadlineAt = normalizeTimestamp(order?.firstResponseReceivedAt)
+          ? orderDeadlines.deliveryDeadlineAt
+          : orderDeadlines.firstResponseDeadlineAt;
+        const remainingMs = bindingDeadlineAt - Date.now();
         if (remainingMs <= 0) {
-          await applyCallerReplyTimeout({
+          const finalized = await applyCallerReplyTimeout({
             trace,
             sessionId: session.sessionId,
           });
-          report.timedOut += 1;
+          if (finalized) {
+            report.timedOut += 1;
+          } else {
+            report.skipped += 1;
+          }
           continue;
         }
 
@@ -11416,7 +11641,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             orderTxid: normalizeOrderProtocolReference(order?.orderTxid)
               || normalizeOrderProtocolReference(order?.orderPinId)
               || null,
-            timeoutMs: remainingMs,
+            timeoutMs: Math.max(250, orderDeadlines.deliveryDeadlineAt - Date.now()),
           },
         });
         report.armed += 1;
@@ -13622,6 +13847,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         let providerReplyText: string | null = null;
         let deliveryPinId: string | null = null;
         let orderPayloadForTrace = '';
+        let orderDeadlines: ReturnType<typeof computeServiceOrderDeadlines> | null = null;
         const persistCallerTraceSnapshot = async (failure?: {
           code?: string | null;
           message?: string | null;
@@ -13629,6 +13855,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
           if (!orderPayment) {
             throw new Error('Service order payment metadata was not created.');
           }
+          // Order deadlines are fixed once at creation (IDBots parity): the
+          // first snapshot anchors them and later snapshots reuse the same
+          // values instead of sliding the window.
+          const deadlines = (orderDeadlines ??= computeServiceOrderDeadlines(Date.now()));
           const publicStatus = await persistSessionMutation(sessionStateStore, started);
           const callerChainContent = normalizeText(orderPayloadForTrace);
           await appendA2ATranscriptItems(sessionStateStore, [
@@ -13717,6 +13947,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
               providerSkills: normalizeProviderSkillList(service.providerSkills),
               outputType: normalizeText(service.outputType),
               requestText: request.userTask,
+              firstResponseDeadlineAt: deadlines.firstResponseDeadlineAt,
+              deliveryDeadlineAt: deadlines.deliveryDeadlineAt,
             },
             a2a: {
               sessionId: started.session.sessionId,
@@ -14063,6 +14295,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         if (!request.providerDaemonBaseUrl) {
           const privateChatIdentity = await signer.getPrivateChatIdentity();
           const peerChatPublicKey = await resolveServicePeerChatPublicKey();
+          // The socket waiter is the fast path for delivery; it stays armed
+          // until the order's delivery deadline while the periodic deadline
+          // sweep enforces the earlier first-response deadline.
+          const deliveryDeadlineAt = trace.order?.deliveryDeadlineAt
+            ?? computeServiceOrderDeadlines(Date.now()).deliveryDeadlineAt;
 
           // Schedule background continuation immediately (was previously only on timeout)
           scheduleCallerReplyContinuation({
@@ -14076,7 +14313,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               servicePinId: plan.service.servicePinId,
               paymentTxid,
               orderTxid: normalizeOrderProtocolReference(orderTxid) || normalizeOrderProtocolReference(orderPinId) || null,
-              timeoutMs: DEFAULT_CALLER_BACKGROUND_WAIT_MS,
+              timeoutMs: Math.max(250, deliveryDeadlineAt - Date.now()),
             },
           });
 
@@ -16861,11 +17098,18 @@ export function createDefaultMetabotDaemonHandlers(input: {
       localProfileSlug?: string | null;
     }) => Promise<A2ACallerReplyResumeReport>;
   }).resumePendingCallerReplyContinuations = resumePendingCallerReplyContinuations;
+  // Attach the buyer-side order deadline sweep so the CLI runtime can drive it
+  // on its own fast interval; the refund sync loop also runs it inline. Not an
+  // HTTP route; ignored by the router.
+  (handlers as MetabotDaemonHttpHandlers & {
+    sweepBuyerOrderDeadlines: (nowMs?: number) => Promise<BuyerOrderDeadlineSweepReport>;
+  }).sweepBuyerOrderDeadlines = runBuyerOrderDeadlineSweep;
   daemonHandlers = handlers;
   return handlers as MetabotDaemonHttpHandlers & {
     resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
     resumePendingCallerReplyContinuations: (inputResume?: {
       localProfileSlug?: string | null;
     }) => Promise<A2ACallerReplyResumeReport>;
+    sweepBuyerOrderDeadlines: (nowMs?: number) => Promise<BuyerOrderDeadlineSweepReport>;
   };
 }

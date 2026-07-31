@@ -95,6 +95,18 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
   configured skills that no longer resolve; `injectSkills` now refreshes
   stale skill copies via an mtime+size tree fingerprint with an atomic-ish
   directory swap instead of reusing any existing destination.
+- **2026-07-30 — P3-A done** (IDBots deadline parity): buyer orders now carry
+  per-stage deadlines computed at creation — first response ≤ 5 min, delivery
+  ≤ 15 min, both FIXED at creation (verified against IDBots
+  `computeOrderDeadlines`/`getTimedOutOrderTransition`: progress messages do
+  not extend the delivery deadline; the first provider message flips the
+  binding deadline from first-response to delivery). A 60-second buyer
+  deadline sweep (next to the seller rating sweep) fails overdue orders with
+  `first_response_timeout` / `delivery_timeout` and seeds the refund request;
+  the socket waiter remains the fast path, terminal/refund-marked orders are
+  skipped, and an in-process finalization guard makes waiter-vs-sweep races
+  settle exactly once. The flat 30-min buyer wait is replaced by
+  deadline-derived remaining budgets, including in boot recovery.
 
 ---
 
