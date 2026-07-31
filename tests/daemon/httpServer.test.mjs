@@ -2462,7 +2462,7 @@ test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async
   assert.match(html, /data-live-indicator aria-label="Online" title="Online"><\/span>/);
   assert.match(html, /data-i18n-key="bot\.publicIdentity">基础<\/button>/);
   assert.match(html, /data-i18n-key="bot\.behavior">人格<\/button>/);
-  assert.match(html, /data-i18n-key="bot\.chatSkills">聊天技能<\/button>/);
+  assert.match(html, /data-i18n-key="bot\.chatSkills">聊天设置<\/button>/);
   assert.match(html, /data-i18n-key="bot\.advanced">高级<\/button>/);
   assert.match(html, /data-i18n-key="bot\.openPublicBotPage">打开公开 Bot Page<\/button>/);
   assert.match(html, /data-i18n-key="bot\.viewConversations">查看对话<\/button>/);

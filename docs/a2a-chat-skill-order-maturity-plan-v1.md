@@ -49,7 +49,7 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
   auth via `OAC_EXECUTE_API_TOKEN` on the provider daemon, resolved
   caller-side from the directory-seeds registry (`executeToken`, never
   exposed through the local API/UI); cross-host demo service made free.
-- **2026-07-30 — P2-A done** (chat pipeline): reply-runner and commit-path
+- **2026-07-30 — P2-A done** (commit `2f0e3a8c`, chat pipeline): reply-runner and commit-path
   throws are logged through the persistent send-failure log
   (`reply_runner_failed` / `reply_commit_failed`), as are rate-limit drops
   (`rate_limited`). Reply turns are now serialized per conversation with a
@@ -67,6 +67,13 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
   /api/conversations/guidance` is now accept-and-poll: the guided LLM turn
   runs in the background and the UI resolves via its existing message
   polling, so the HTTP request no longer blocks for minutes.
+- **2026-07-30 — P2-B done** (/ui/bot polish): English label uses an ASCII
+  colon (`Private Chat Allowed Skills:`); the `chatSkills` tab is relabeled
+  `Chat Settings` / `聊天设置` since it hosts both Auto-Reply and chat-skill
+  controls; skill options refetch on every tab entry (retrying sticky errors
+  and picking up newly installed skills without a page reload); dead
+  `renderPlaceholderTab`/`behaviorPlaceholder`/`chatSkillsPlaceholder` code
+  and the dead `renderInfoTab` fallback in the skill controls removed.
 
 ---
 
