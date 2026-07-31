@@ -37,6 +37,17 @@ export interface ResolveProviderDeliveryArtifactsInput {
   verifyAvailability?: VerifyAvailability;
   largeUploader?: LargeUploader;
   mvcSponsorClient?: MvcSponsorClient;
+  /**
+   * Total on-chain upload attempts for a locally resolved artifact (IDBots
+   * uploadVerifiedDeliveryArtifact parity). Defaults to 1 (single attempt).
+   * Only actual upload/verification failures are retried; deterministic local
+   * validation errors never are.
+   */
+  maxUploadAttempts?: number;
+  /** Best-effort hook fired once before the first upload attempt. */
+  onUploadStart?: () => void | Promise<void>;
+  /** Best-effort hook fired before each re-upload attempt after a failure. */
+  onUploadRetry?: (input: { attempt: number; error: unknown }) => void | Promise<void>;
 }
 
 export interface ResolveProviderDeliveryArtifactsResult {
@@ -1205,6 +1216,60 @@ async function uploadResolvedLocalArtifact(input: {
   return artifact;
 }
 
+const DEFAULT_PROVIDER_ARTIFACT_UPLOAD_MAX_ATTEMPTS = 1;
+
+// Only chain upload/verification failures are worth a re-upload; deterministic
+// local validation errors (missing file, too large, secret-like, invalid
+// upload result) would fail again identically.
+function isRetryableProviderArtifactUploadError(error: unknown): boolean {
+  const code = error instanceof ProviderDeliveryArtifactError ? error.code : undefined;
+  return code === 'provider_artifact_upload_failed' || code === 'provider_artifact_unavailable';
+}
+
+async function callUploadNoticeHook(hook: (() => void | Promise<void>) | undefined): Promise<void> {
+  if (!hook) {
+    return;
+  }
+  try {
+    await hook();
+  } catch {
+    // Upload notice hooks are best-effort and must never break the upload.
+  }
+}
+
+async function uploadResolvedLocalArtifactWithRetry(input: {
+  file: ResolvedProviderFile;
+  expectedFamily: ProviderExpectedArtifactFamily;
+  signer: Signer;
+  network?: string | null;
+  uploadLargeFile?: typeof uploadLargeFileToChain;
+  verifyAvailability?: VerifyAvailability;
+  largeUploader?: LargeUploader;
+  mvcSponsorClient?: MvcSponsorClient;
+  maxUploadAttempts?: number;
+  onUploadStart?: () => void | Promise<void>;
+  onUploadRetry?: (input: { attempt: number; error: unknown }) => void | Promise<void>;
+}): Promise<A2ADeliveryArtifact> {
+  const maxAttempts = Math.max(
+    1,
+    Math.trunc(Number(input.maxUploadAttempts) || DEFAULT_PROVIDER_ARTIFACT_UPLOAD_MAX_ATTEMPTS),
+  );
+  await callUploadNoticeHook(input.onUploadStart);
+  let lastError: unknown = new Error('Provider artifact upload failed.');
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await uploadResolvedLocalArtifact(input);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isRetryableProviderArtifactUploadError(error)) {
+        throw error;
+      }
+      await callUploadNoticeHook(() => input.onUploadRetry?.({ attempt, error }));
+    }
+  }
+  throw lastError;
+}
+
 export async function resolveProviderDeliveryArtifacts(
   input: ResolveProviderDeliveryArtifactsInput,
 ): Promise<ResolveProviderDeliveryArtifactsResult> {
@@ -1239,7 +1304,7 @@ export async function resolveProviderDeliveryArtifacts(
     workspaceRootCwd: input.workspaceRootCwd,
     expectedFamily,
   });
-  const artifact = await uploadResolvedLocalArtifact({
+  const artifact = await uploadResolvedLocalArtifactWithRetry({
     file: localFile,
     expectedFamily,
     signer: input.signer,
@@ -1248,6 +1313,9 @@ export async function resolveProviderDeliveryArtifacts(
     verifyAvailability: input.verifyAvailability,
     largeUploader: input.largeUploader,
     mvcSponsorClient: input.mvcSponsorClient,
+    maxUploadAttempts: input.maxUploadAttempts,
+    onUploadStart: input.onUploadStart,
+    onUploadRetry: input.onUploadRetry,
   });
   const publicResponseText = stripLocalCandidateLines(responseText, localFile.lineIndexes);
   const workspaceScrubbedResponseText = await scrubExecutionWorkspacePathMentions(

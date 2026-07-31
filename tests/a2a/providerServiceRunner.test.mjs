@@ -1637,3 +1637,74 @@ test('createProviderServiceRunner does not partial-deliver an ambiguous workspac
   assert.equal(result.code, 'provider_execution_timeout');
   await cleanupProfileHome(homeDir);
 });
+
+test('createProviderServiceRunner executeContinuation reruns in the same workspace with a MUST-generate prompt', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Created the image.\nartifactPath: forecast.png',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+  const order = baseOrder({
+    outputType: 'image',
+    metadata: { orderTxid: 'order-txid-123' },
+  });
+
+  const initial = await runner.execute(order);
+  assert.equal(initial.state, 'completed');
+  const continuation = await runner.executeContinuation(order, initial);
+
+  assert.equal(continuation.state, 'completed');
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].prompt, /not complete yet because no image file exists for delivery/);
+  assert.match(calls[1].prompt, /Order txid: order-txid-123\./);
+  assert.match(calls[1].prompt, /Original buyer request: Forecast tomorrow/);
+  assert.match(calls[1].prompt, /MUST generate a real image file/);
+  assert.equal(calls[1].systemPrompt, calls[0].systemPrompt);
+  assert.deepEqual(calls[1].skills, ['weather.oracle']);
+  // The continuation reuses the initial attempt workspace instead of creating
+  // a new one (macOS /var symlink requires the realpath comparison).
+  assert.equal(await fs.realpath(calls[0].cwd), calls[1].cwd);
+  assert.equal(continuation.metadata.missingArtifactContinuation, true);
+  assert.equal(continuation.metadata.attemptWorkspaceCwd, calls[1].cwd);
+  assert.equal(continuation.runtimeId, initial.runtimeId);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner executeContinuation requires the previous selection and workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Done.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const continuation = await runner.executeContinuation(baseOrder({ outputType: 'image' }), {
+    state: 'failed',
+    code: 'provider_execution_failed',
+    message: 'no workspace metadata here',
+  });
+
+  assert.equal(continuation.state, 'failed');
+  assert.equal(continuation.code, 'provider_artifact_continuation_unavailable');
+  assert.equal(calls.length, 0);
+  await cleanupProfileHome(homeDir);
+});

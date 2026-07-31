@@ -256,9 +256,10 @@ import { createPrivateChatStateStore } from '../core/chat/privateChatStateStore'
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { createA2ASessionEngine, type A2ASessionEngineEvent } from '../core/a2a/sessionEngine';
 import { resolvePublicStatus, type PublicStatus } from '../core/a2a/publicStatus';
-import type { ProviderServiceRunnerResult } from '../core/a2a/provider/serviceRunnerContracts';
+import type { ProviderServiceRunnerCompletedResult, ProviderServiceRunnerResult } from '../core/a2a/provider/serviceRunnerContracts';
 import { createServiceRunnerFailedResult } from '../core/a2a/provider/serviceRunnerContracts';
 import {
+  classifyProviderOutputType,
   isTextLikeProviderOutputType,
   resolveProviderDeliveryArtifacts,
 } from '../core/a2a/provider/providerDeliveryArtifacts';
@@ -375,6 +376,16 @@ const PROVIDER_RATING_SYNC_STALE_MS = 30_000;
 const DEFAULT_NETWORK_BOT_LIST_LIMIT = 20;
 const MAX_NETWORK_BOT_LIST_LIMIT = 100;
 const DEFAULT_RATING_FOLLOWUP_RETRY_DELAYS_MS = [1_500, 5_000, 10_000];
+// IDBots VIDEO_ORDER_STATUS_INTERVAL_MS parity: seller progress heartbeats.
+const PROVIDER_ORDER_PROGRESS_NOTICE_INTERVAL_MS = 120_000;
+// IDBots uploadVerifiedDeliveryArtifact maxAttempts=2 parity.
+const PROVIDER_ARTIFACT_UPLOAD_MAX_ATTEMPTS = 2;
+// IDBots MAX_MISSING_ARTIFACT_CONTINUATION_ATTEMPTS parity.
+const MAX_MISSING_ARTIFACT_CONTINUATION_ATTEMPTS = 1;
+// IDBots EXPLICIT_MEDIA_FAILURE_RE parity: when the provider runtime already
+// stated it cannot produce the media result, a forced continuation run would
+// only burn the buyer's fixed delivery deadline, so it is skipped.
+const EXPLICIT_PROVIDER_MEDIA_FAILURE_RE = /(无法|不能|未能|缺少|失败|报错|错误|被拒绝|not able|unable|cannot|can't|failed|failure|missing|error|denied|rejected)/i;
 const KNOWN_LARGE_FILE_UPLOAD_ERROR_CODES = new Set([
   'large_file_upload_unavailable',
   'large_file_upload_too_large',
@@ -587,7 +598,7 @@ async function withScopedRuntimeLock<T>(
   throw new Error(`Timed out acquiring runtime lock: ${lockPath}`);
 }
 
-type ProviderOrderProtocolReplyStage = 'acknowledgement' | 'rating_request';
+type ProviderOrderProtocolReplyStage = 'acknowledgement' | 'rating_request' | 'long_task_notice';
 
 interface ProviderOrderProtocolReplyTextInput {
   replyRunner: ChatReplyRunner | null;
@@ -663,7 +674,9 @@ function buildProviderOrderProtocolInstruction(input: ProviderOrderProtocolReply
   const paymentRef = normalizeText(input.paymentTxid) || normalizeText(input.orderReference) || 'not recorded';
   const stagePurpose = input.stage === 'acknowledgement'
     ? 'Reply as the provider bot after receiving a buyer order. Say in first person that you received it, started working, it may take a little time, and ask the buyer to wait patiently.'
-    : 'Reply as the provider bot after delivery. Say the service is complete, mention the task only briefly, politely ask for a 1-5 rating, and say the feedback is important to you.';
+    : input.stage === 'long_task_notice'
+      ? 'Reply as the provider bot right after acknowledging a buyer order for a long-running task such as video generation. Say in first person that this task may take longer than a typical task to generate and upload, and that you will keep processing it and share progress until the final delivery.'
+      : 'Reply as the provider bot after delivery. Say the service is complete, mention the task only briefly, politely ask for a 1-5 rating, and say the feedback is important to you.';
   const lines = [
     `Stage: ${input.stage}`,
     `Purpose: ${stagePurpose}`,
@@ -691,7 +704,9 @@ function buildProviderOrderProtocolInstruction(input: ProviderOrderProtocolReply
   }
   lines.push(input.stage === 'acknowledgement'
     ? 'Return only the acknowledgement body, under 180 characters.'
-    : 'Return only the rating-request body, under 220 characters.');
+    : input.stage === 'long_task_notice'
+      ? 'Return only the long-task notice body, under 200 characters.'
+      : 'Return only the rating-request body, under 220 characters.');
   return lines.join('\n');
 }
 
@@ -712,6 +727,13 @@ function buildProviderOrderProtocolFallbackText(
       return `我收到你的“${taskLabel}”订单了，会马上开始处理，可能需要一点时间，请耐心等待。`;
     }
     return `I've received your "${taskLabel}" order and started working on it. It may take a little time; thanks for waiting.`;
+  }
+
+  if (input.stage === 'long_task_notice') {
+    if (useChinese) {
+      return `这个“${taskLabel}”任务的生成和上传可能要比一般任务花更长时间，我会持续处理并同步进度，直到最终交付。`;
+    }
+    return `This "${taskLabel}" task may take longer than a typical task to generate and upload. I will keep processing it and share progress until the final delivery.`;
   }
 
   if (useChinese) {
@@ -744,7 +766,7 @@ async function generateProviderOrderProtocolReplyText(
         taskContext: input.taskContext,
         responseText: input.responseText,
       }), {
-        maxChars: input.stage === 'acknowledgement' ? 360 : 440,
+        maxChars: input.stage === 'rating_request' ? 440 : 360,
       });
       if (generated && !isUnsuitableProviderOrderProtocolReply(generated)) {
         return generated;
@@ -784,7 +806,7 @@ async function generateProviderOrderProtocolReplyText(
       topic: 'a2a_skill_service_order',
       strategyId: `provider-order-${input.stage}`,
       state: 'active',
-      turnCount: input.stage === 'acknowledgement' ? 2 : 3,
+      turnCount: input.stage === 'rating_request' ? 3 : 2,
       lastDirection: 'inbound',
       createdAt: now,
       updatedAt: now,
@@ -823,7 +845,9 @@ async function generateProviderOrderProtocolReplyText(
       maxIdleMs: 0,
       exitCriteria: input.stage === 'acknowledgement'
         ? 'Acknowledge the order without ending the conversation.'
-        : 'Ask for a buyer rating after delivery without ending the conversation.',
+        : input.stage === 'long_task_notice'
+          ? 'Tell the buyer the long task is still in progress without ending the conversation.'
+          : 'Ask for a buyer rating after delivery without ending the conversation.',
     },
     inboundMessage,
   };
@@ -4871,6 +4895,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
   autoReplyConfig?: PrivateChatAutoReplyConfig;
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
   providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
+  // Test hook for the seller progress heartbeat cadence; defaults to
+  // PROVIDER_ORDER_PROGRESS_NOTICE_INTERVAL_MS (120s, IDBots parity).
+  providerOrderProgressNoticeIntervalMs?: number;
   testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
   discoverLlmRuntimes?: typeof discoverLlmRuntimes;
   conversationGuidanceReplyRunner?: ChatReplyRunner;
@@ -5107,6 +5134,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
   const callerOrderTextGenerator = input.callerOrderTextGenerator ?? null;
   const providerOrderReplyRunner = input.providerOrderReplyRunner ?? null;
   const providerOrderTextGenerator = input.providerOrderTextGenerator ?? null;
+  const configuredProgressNoticeIntervalMs = Number(input.providerOrderProgressNoticeIntervalMs);
+  const providerOrderProgressNoticeIntervalMs = Number.isFinite(configuredProgressNoticeIntervalMs) && configuredProgressNoticeIntervalMs > 0
+    ? Math.trunc(configuredProgressNoticeIntervalMs)
+    : PROVIDER_ORDER_PROGRESS_NOTICE_INTERVAL_MS;
   const getDaemonRecord = input.getDaemonRecord;
   const metaAppManClient = createMetaAppManOwnerClient({
     fetchFn: input.metaAppManFetch ?? fetch,
@@ -7427,6 +7458,71 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  // Seller progress notices (IDBots privateChatOrderCowork parity): every
+  // notice is a best-effort [ORDER_STATUS:<txid>] simplemsg to the buyer and
+  // a send failure must never change the order state.
+  async function sendProviderOrderStatusNoticeBestEffort(inputNotice: {
+    toGlobalMetaId: string;
+    peerChatPublicKey: string;
+    orderTxid: string;
+    content: string;
+  }): Promise<void> {
+    const content = normalizeText(inputNotice.content);
+    if (!content) {
+      return;
+    }
+    try {
+      await sendProviderOrderPrivateMessage({
+        toGlobalMetaId: inputNotice.toGlobalMetaId,
+        peerChatPublicKey: inputNotice.peerChatPublicKey,
+        content: buildOrderStatusMessage(inputNotice.orderTxid, content),
+      });
+    } catch {
+      // Best-effort progress notice; the final delivery or failure notice still follows.
+    }
+  }
+
+  // IDBots startVideoLongTaskStatusUpdates parity: while a provider execution
+  // is in flight, tell the buyer every intervalMs that the task is still
+  // processing. The returned stop function must run on every exit path;
+  // notice send failures are swallowed and never affect execution.
+  function startProviderOrderProgressHeartbeat(inputHeartbeat: {
+    toGlobalMetaId: string;
+    peerChatPublicKey: string;
+    orderTxid: string;
+    taskLabel: string;
+    intervalMs: number;
+  }): () => void {
+    const intervalMs = Math.max(1, Math.trunc(inputHeartbeat.intervalMs));
+    const taskLabel = compactInlineText(inputHeartbeat.taskLabel, 48) || 'service';
+    let heartbeatCount = 0;
+    let stopped = false;
+    let sendInFlight = false;
+    const intervalId = setInterval(() => {
+      if (stopped || sendInFlight) {
+        return;
+      }
+      sendInFlight = true;
+      heartbeatCount += 1;
+      const elapsedMinutes = Math.max(1, Math.round((heartbeatCount * intervalMs) / 60_000));
+      void sendProviderOrderStatusNoticeBestEffort({
+        toGlobalMetaId: inputHeartbeat.toGlobalMetaId,
+        peerChatPublicKey: inputHeartbeat.peerChatPublicKey,
+        orderTxid: inputHeartbeat.orderTxid,
+        content: `The "${taskLabel}" task is still processing after about ${elapsedMinutes} minutes. I will keep processing it and complete delivery as soon as possible.`,
+      }).catch(() => undefined).finally(() => {
+        sendInFlight = false;
+      });
+    }, intervalMs);
+    if (typeof intervalId.unref === 'function') {
+      intervalId.unref();
+    }
+    return () => {
+      stopped = true;
+      clearInterval(intervalId);
+    };
+  }
+
   function buildProviderRuntimeDiagnostics(
     providerSkill: string,
     runnerResult?: ProviderServiceRunnerResult | null,
@@ -9695,6 +9791,38 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
     }, a2aConversationPersister);
 
+    // IDBots startVideoLongTaskStatusUpdates parity: video orders are long
+    // tasks, so right after the acknowledgement tell the buyer that generation
+    // and upload will take longer than a typical task. Best-effort only.
+    if (classifyProviderOutputType(service.outputType) === 'video') {
+      try {
+        const longTaskNoticeText = await generateProviderOrderProtocolReplyText({
+          replyRunner: providerOrderReplyRunner,
+          textGenerator: providerOrderTextGenerator,
+          paths: runtimeStateStore.paths,
+          providerIdentity: state.identity,
+          buyerGlobalMetaId: inputMessage.fromGlobalMetaId,
+          service,
+          orderTxid,
+          paymentTxid: paymentTxid || null,
+          orderReference: orderReference || null,
+          paymentAmount: amountLine.amount || service.price,
+          paymentCurrency: amountLine.currency || service.currency,
+          userTask,
+          taskContext: '',
+          stage: 'long_task_notice',
+        });
+        await sendProviderOrderStatusNoticeBestEffort({
+          toGlobalMetaId: inputMessage.fromGlobalMetaId,
+          peerChatPublicKey,
+          orderTxid,
+          content: longTaskNoticeText,
+        });
+      } catch {
+        // The long-task notice is best-effort and never changes order state.
+      }
+    }
+
     const acknowledgedAt = Date.now();
     await upsertProviderSellerOrderRecord({
       state,
@@ -9769,7 +9897,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     // A synchronous/startup throw from the runner (corrupt binding store, fs
     // failure) must still drive the order to a terminal failed state with an
     // ORDER_END notice instead of stranding it in_progress.
-    const runnerResult = await providerRunner.execute({
+    const providerOrderExecutionInput = {
       servicePinId: service.currentPinId,
       providerSkill: service.providerSkill,
       providerSkills: service.providerSkills,
@@ -9791,11 +9919,33 @@ export function createDefaultMetabotDaemonHandlers(input: {
           paymentCurrency: amountLine.currency || service.currency,
         },
       },
-    }).catch((error) => createServiceRunnerFailedResult(
-      readErrorCode(error, 'provider_execution_failed'),
-      readErrorMessage(error, 'provider_execution_failed', 'Provider execution failed before a runner result was produced.'),
-    ));
-    const providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
+    };
+    // IDBots videoStatusInterval parity: while an execution run is in flight
+    // (including its internal fallback-retry attempts), send the buyer a
+    // best-effort progress heartbeat. The timer always stops with the run.
+    const runProviderExecutionWithProgressHeartbeat = async (
+      executeRun: () => Promise<ProviderServiceRunnerResult>,
+    ): Promise<ProviderServiceRunnerResult> => {
+      const stopHeartbeat = startProviderOrderProgressHeartbeat({
+        toGlobalMetaId: inputMessage.fromGlobalMetaId,
+        peerChatPublicKey,
+        orderTxid,
+        taskLabel: userTask,
+        intervalMs: providerOrderProgressNoticeIntervalMs,
+      });
+      try {
+        return await executeRun();
+      } finally {
+        stopHeartbeat();
+      }
+    };
+    const runnerResult = await runProviderExecutionWithProgressHeartbeat(() => providerRunner
+      .execute(providerOrderExecutionInput)
+      .catch((error) => createServiceRunnerFailedResult(
+        readErrorCode(error, 'provider_execution_failed'),
+        readErrorMessage(error, 'provider_execution_failed', 'Provider execution failed before a runner result was produced.'),
+      )));
+    let providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, runnerResult);
 
     const deferCompletedPersistence = runnerResult.state === 'completed'
       && !isTextLikeProviderOutputType(service.outputType);
@@ -9938,14 +10088,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
     const baseResponseText = normalizeText(runnerResult.responseText);
     let responseText = baseResponseText;
     let deliveryArtifacts: A2ADeliveryArtifact[] = [];
+    // The runner result that feeds delivery-artifact resolution; replaced by
+    // the forced continuation result when one runs and completes.
+    let deliveryRunnerResult: ProviderServiceRunnerCompletedResult = runnerResult;
     if (!isTextLikeProviderOutputType(service.outputType)) {
-      try {
+      const resolveOrderDeliveryArtifacts = async (deliveryResult: ProviderServiceRunnerCompletedResult) => {
         const artifactNetwork = await resolveFileUploadNetworkForHome(null, runtimeStateStore.paths.profileRoot);
-        const resolvedDelivery = await resolveProviderDeliveryArtifacts({
-          responseText: baseResponseText,
+        return resolveProviderDeliveryArtifacts({
+          responseText: normalizeText(deliveryResult.responseText),
           outputType: service.outputType,
-          executionCwd: normalizeText(runnerResult.metadata?.sessionCwd) || null,
-          workspaceRootCwd: normalizeText(runnerResult.metadata?.attemptWorkspaceCwd) || null,
+          executionCwd: normalizeText(deliveryResult.metadata?.sessionCwd) || null,
+          workspaceRootCwd: normalizeText(deliveryResult.metadata?.attemptWorkspaceCwd) || null,
           network: artifactNetwork,
           signer,
           uploadLargeFile: providerArtifactUploadLargeFile,
@@ -9954,10 +10107,60 @@ export function createDefaultMetabotDaemonHandlers(input: {
             runtimeStateStore.paths.profileRoot,
             artifactNetwork,
           ),
+          maxUploadAttempts: PROVIDER_ARTIFACT_UPLOAD_MAX_ATTEMPTS,
+          onUploadStart: () => sendProviderOrderStatusNoticeBestEffort({
+            toGlobalMetaId: inputMessage.fromGlobalMetaId,
+            peerChatPublicKey,
+            orderTxid,
+            content: 'Skill execution is complete and the digital artifact is ready. It is now being uploaded on-chain for delivery; please wait.',
+          }),
+          onUploadRetry: () => sendProviderOrderStatusNoticeBestEffort({
+            toGlobalMetaId: inputMessage.fromGlobalMetaId,
+            peerChatPublicKey,
+            orderTxid,
+            content: 'The first on-chain artifact upload attempt failed, so the digital artifact is being uploaded one more time.',
+          }),
         });
+      };
+      let resolvedDelivery: Awaited<ReturnType<typeof resolveProviderDeliveryArtifacts>> | null = null;
+      let deliveryPreparationError: unknown = null;
+      let missingArtifactContinuationAttempts = 0;
+      try {
+        resolvedDelivery = await resolveOrderDeliveryArtifacts(deliveryRunnerResult);
+      } catch (initialError) {
+        deliveryPreparationError = initialError;
+        // Missing-artifact forced continuation (IDBots
+        // MAX_MISSING_ARTIFACT_CONTINUATION_ATTEMPTS = 1 parity): a completed
+        // non-text run that left no deliverable artifact gets exactly one
+        // forced continuation run in the same workspace with a MUST-generate
+        // prompt before the order may fail with the non-deliverable code.
+        if (readErrorCode(initialError, 'provider_artifact_delivery_failed') === 'provider_artifact_missing'
+          && missingArtifactContinuationAttempts < MAX_MISSING_ARTIFACT_CONTINUATION_ATTEMPTS
+          && !EXPLICIT_PROVIDER_MEDIA_FAILURE_RE.test(baseResponseText)) {
+          missingArtifactContinuationAttempts += 1;
+          const continuationResult = await runProviderExecutionWithProgressHeartbeat(() => providerRunner
+            .executeContinuation(providerOrderExecutionInput, deliveryRunnerResult)
+            .catch((error) => createServiceRunnerFailedResult(
+              readErrorCode(error, 'provider_execution_failed'),
+              readErrorMessage(error, 'provider_execution_failed', 'Provider continuation execution failed before a runner result was produced.'),
+            )));
+          if (continuationResult.state === 'completed') {
+            deliveryRunnerResult = continuationResult;
+            providerRuntimeDiagnostics = buildProviderRuntimeDiagnostics(service.providerSkill, continuationResult);
+            try {
+              resolvedDelivery = await resolveOrderDeliveryArtifacts(deliveryRunnerResult);
+              deliveryPreparationError = null;
+            } catch (continuationResolutionError) {
+              deliveryPreparationError = continuationResolutionError;
+            }
+          }
+        }
+      }
+      if (resolvedDelivery) {
         responseText = normalizeText(resolvedDelivery.responseText);
         deliveryArtifacts = resolvedDelivery.artifacts;
-      } catch (error) {
+      } else {
+        const error = deliveryPreparationError;
         const failureCode = readErrorCode(error, 'provider_artifact_delivery_failed');
         const failureText = readErrorMessage(
           error,
@@ -10218,7 +10421,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       applied = sessionEngine.applyProviderRunnerResult({
         session: received.session,
         taskRun: received.taskRun,
-        result: runnerResult,
+        result: deliveryRunnerResult,
       });
       appliedStatus = await persistSessionMutation(sessionStateStore, applied);
     }

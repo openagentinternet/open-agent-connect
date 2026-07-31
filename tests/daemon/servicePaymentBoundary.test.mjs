@@ -543,6 +543,7 @@ async function createInboundProviderOrderHarness(t, options = {}) {
       async streamEvents() { return (async function* () {})(); },
     },
     providerRuntimeCanStart: async () => true,
+    providerOrderProgressNoticeIntervalMs: options.providerOrderProgressNoticeIntervalMs,
     a2aConversationPersister: options.a2aConversationPersister,
     providerOrderReplyRunner: options.providerOrderReplyRunner,
     providerOrderTextGenerator: options.providerOrderTextGenerator,
@@ -3701,13 +3702,20 @@ test('inbound provider ORDER upload failure marks seller order failed without de
   assert.equal(result.ok, false);
   assert.equal(result.code, 'provider_artifact_upload_failed');
   assert.deepEqual(result.data.feeAssist, feeAssist);
-  assert.equal(uploadCalls.length, 1);
+  // One re-upload attempt is made before the order fails (IDBots
+  // uploadVerifiedDeliveryArtifact maxAttempts=2 parity).
+  assert.equal(uploadCalls.length, 2);
   const contents = harness.writes
     .filter((entry) => entry.path === '/protocols/simplemsg')
     .map((entry) => harness.decryptProviderWrite(entry));
   assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
   assert.equal(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
   assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
+  assert.equal(
+    contents.filter((entry) => entry.includes('being uploaded one more time')).length,
+    1,
+    'expected one best-effort re-upload notice before the terminal failure',
+  );
 
   const state = await harness.runtimeStateStore.readState();
   const trace = state.traces.find((entry) => entry.order?.orderTxid === orderTxid);
@@ -3900,6 +3908,438 @@ test('inbound provider ORDER fallback protocol copy stays concise and service-or
   assert.match(ratingRequest, /评价|评分|rate|rating/i);
   assert.match(ratingRequest, /1-5|1 到 5|1 至 5|one to five/i);
   assert.doesNotMatch(ratingRequest, /Result summary|https:\/\/|微博热搜 TOP 50|\| 排名 \|/);
+});
+
+test('inbound provider ORDER video output sends a long-task notice right after the acknowledgement', async (t) => {
+  const orderTxid = '0a'.repeat(32);
+  const paymentTxid = '0b'.repeat(32);
+  const protocolReplyCalls = [];
+  const stageTexts = {
+    acknowledgement: 'Weather Oracle here: your video order is in and I started the render.',
+    long_task_notice: 'This video task may take longer than a typical task to generate and upload.',
+    rating_request: 'The video is delivered; please rate it from 1 to 5 when you have a moment.',
+  };
+  const uploadCalls = [];
+  const output = createAttemptOutputController('weather-video.mp4');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'video' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Created the requested video deliverable.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+    providerOrderReplyRunner: async (input) => {
+      protocolReplyCalls.push(input);
+      const stage = protocolReplyCalls.length === 1
+        ? 'acknowledgement'
+        : protocolReplyCalls.length === 2
+          ? 'long_task_notice'
+          : 'rating_request';
+      return { state: 'reply', content: stageTexts[stage] };
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(protocolReplyCalls.length, 3);
+  assert.match(protocolReplyCalls[0].inboundMessage.content, /Stage: acknowledgement/);
+  assert.match(protocolReplyCalls[1].inboundMessage.content, /Stage: long_task_notice/);
+  assert.match(protocolReplyCalls[2].inboundMessage.content, /Stage: rating_request/);
+
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  const statusMessages = contents.filter((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`));
+  // ack, then the long-task notice, then the pre-upload notice.
+  assert.equal(statusMessages.length, 3);
+  assert.equal(statusMessages[0], `[ORDER_STATUS:${orderTxid}] ${stageTexts.acknowledgement}`);
+  assert.equal(statusMessages[1], `[ORDER_STATUS:${orderTxid}] ${stageTexts.long_task_notice}`);
+  assert.ok(statusMessages[2].includes('being uploaded on-chain for delivery'));
+  const deliveryIndex = contents.findIndex((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  assert.ok(deliveryIndex > contents.indexOf(statusMessages[1]), 'long-task notice must precede delivery');
+});
+
+test('inbound provider ORDER non-video output does not send a long-task notice', async (t) => {
+  const orderTxid = '0c'.repeat(32);
+  const paymentTxid = '0d'.repeat(32);
+  const protocolReplyCalls = [];
+  const uploadCalls = [];
+  const output = createAttemptOutputController('weather-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Created the requested image deliverable.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+    providerOrderReplyRunner: async (input) => {
+      protocolReplyCalls.push(input);
+      return { state: 'reply', content: `stage reply ${protocolReplyCalls.length}` };
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(protocolReplyCalls.length, 2);
+  assert.match(protocolReplyCalls[0].inboundMessage.content, /Stage: acknowledgement/);
+  assert.match(protocolReplyCalls[1].inboundMessage.content, /Stage: rating_request/);
+  const statusMessages = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry))
+    .filter((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`));
+  // ack + pre-upload notice, but no long-task notice for non-video output.
+  assert.equal(statusMessages.length, 2);
+  assert.equal(statusMessages.some((entry) => entry.includes('longer than a typical task')), false);
+});
+
+test('inbound provider ORDER sends progress heartbeats while execution is in flight and stops them after delivery', async (t) => {
+  const orderTxid = '0e'.repeat(32);
+  const paymentTxid = '0f'.repeat(32);
+  const harness = await createInboundProviderOrderHarness(t, {
+    llmDelayMs: 120,
+    providerOrderProgressNoticeIntervalMs: 30,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  const contents = () => harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  const heartbeats = contents().filter((entry) => (
+    entry.startsWith(`[ORDER_STATUS:${orderTxid}]`) && entry.includes('still processing after about')
+  ));
+  assert.ok(heartbeats.length >= 2, `expected at least 2 heartbeat notices, got ${heartbeats.length}`);
+  assert.match(heartbeats[0], /still processing after about \d+ minutes/);
+  assert.ok(contents().some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)));
+
+  // The heartbeat timer must be stopped once the run is over.
+  const settledWriteCount = harness.writes.length;
+  await delay(120);
+  assert.equal(harness.writes.length, settledWriteCount);
+});
+
+test('inbound provider ORDER stops progress heartbeats after a failed execution', async (t) => {
+  const orderTxid = '1a'.repeat(32);
+  const paymentTxid = '1b'.repeat(32);
+  const harness = await createInboundProviderOrderHarness(t, {
+    llmDelayMs: 80,
+    llmExecuteError: new Error('simulated provider runtime outage'),
+    providerOrderProgressNoticeIntervalMs: 30,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_execution_failed');
+  const heartbeats = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry))
+    .filter((entry) => entry.includes('still processing after about'));
+  assert.ok(heartbeats.length >= 1, 'expected heartbeat notices during the gated execution');
+
+  const settledWriteCount = harness.writes.length;
+  await delay(120);
+  assert.equal(harness.writes.length, settledWriteCount);
+});
+
+test('inbound provider ORDER heartbeat send failures never break the order', async (t) => {
+  const orderTxid = '1c'.repeat(32);
+  const paymentTxid = '1d'.repeat(32);
+  const heartbeatAttempts = [];
+  let harness = null;
+  const failingWritePinHook = async (input) => {
+    if (input.path !== '/protocols/simplemsg' || !harness) {
+      return;
+    }
+    const text = harness.decryptProviderWrite(input);
+    if (text.includes('still processing')) {
+      heartbeatAttempts.push(text);
+      throw new Error('simulated heartbeat send failure');
+    }
+  };
+  harness = await createInboundProviderOrderHarness(t, {
+    llmDelayMs: 80,
+    providerOrderProgressNoticeIntervalMs: 30,
+    writePinHook: failingWritePinHook,
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(heartbeatAttempts.length >= 1, 'expected at least one heartbeat send attempt');
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.ok(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)));
+  assert.ok(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)));
+});
+
+test('inbound provider ORDER sends an upload notice before uploading the artifact on-chain', async (t) => {
+  const orderTxid = '1e'.repeat(32);
+  const paymentTxid = '1f'.repeat(32);
+  const uploadCalls = [];
+  const output = createAttemptOutputController('upload-notice-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Created the requested image deliverable.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadCalls.length, 1);
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  const uploadNotices = contents.filter((entry) => (
+    entry.startsWith(`[ORDER_STATUS:${orderTxid}]`) && entry.includes('being uploaded on-chain for delivery')
+  ));
+  assert.equal(uploadNotices.length, 1);
+  assert.equal(contents.some((entry) => entry.includes('being uploaded one more time')), false);
+  const ackIndex = contents.findIndex((entry) => entry.startsWith(`[ORDER_STATUS:${orderTxid}]`));
+  const uploadNoticeIndex = contents.indexOf(uploadNotices[0]);
+  const deliveryIndex = contents.findIndex((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  assert.ok(ackIndex >= 0 && uploadNoticeIndex > ackIndex && deliveryIndex > uploadNoticeIndex);
+});
+
+test('inbound provider ORDER re-uploads once and sends a retry notice when the first upload fails', async (t) => {
+  const orderTxid = '2a'.repeat(32);
+  const paymentTxid = '2b'.repeat(32);
+  const uploadCalls = [];
+  const successUpload = createProviderArtifactUploadMock(uploadCalls);
+  const output = createAttemptOutputController('retry-upload-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Created the requested image deliverable.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: async (input) => {
+      if (uploadCalls.length === 0) {
+        uploadCalls.push(input);
+        const error = new Error('simulated transient upload failure');
+        error.code = 'provider_artifact_upload_failed';
+        throw error;
+      }
+      return successUpload(input);
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(uploadCalls.length, 2);
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.filter((entry) => entry.includes('being uploaded on-chain for delivery')).length, 1);
+  assert.equal(contents.filter((entry) => entry.includes('being uploaded one more time')).length, 1);
+  assert.ok(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)));
+});
+
+test('inbound provider ORDER runs exactly one forced continuation when the media artifact is missing and then delivers', async (t) => {
+  const orderTxid = '2c'.repeat(32);
+  const paymentTxid = '2d'.repeat(32);
+  const uploadCalls = [];
+  const output = createAttemptOutputController('continuation-image.png');
+  let firstRunRealCwd = '';
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: async (request, { llmCalls }) => {
+      if (llmCalls.length === 1) {
+        // Captured during execution because the run workspace is cleaned up
+        // once the order reaches a terminal state.
+        firstRunRealCwd = await realpath(request.cwd);
+      }
+      if (llmCalls.length === 2) {
+        await output.write(request);
+      }
+    },
+    llmOutput: ({ llmCalls }) => (llmCalls.length >= 2
+      ? output.outputText('Created the requested image deliverable.')
+      : 'I am starting the image generation now, please hold on.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.llmCalls.length, 2);
+  assert.match(harness.llmCalls[1].prompt, /not complete yet because no image file exists for delivery/);
+  assert.match(harness.llmCalls[1].prompt, /MUST generate a real image file/);
+  assert.match(harness.llmCalls[1].prompt, /Original buyer request: Tell me tomorrow weather/);
+  assert.ok(harness.llmCalls[1].prompt.includes(`Order txid: ${orderTxid}.`));
+  // The continuation runs in the same attempt workspace as the initial run.
+  assert.ok(firstRunRealCwd);
+  assert.equal(firstRunRealCwd, harness.llmCalls[1].cwd);
+  assert.equal(uploadCalls.length, 1);
+  const deliveryMessage = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry))
+    .find((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`));
+  assert.ok(deliveryMessage);
+  const delivery = parseDeliveryMessage(deliveryMessage);
+  assert.equal(delivery.artifacts[0].kind, 'image');
+});
+
+test('inbound provider ORDER fails with provider_artifact_missing when the forced continuation still produces no artifact', async (t) => {
+  const orderTxid = '2e'.repeat(32);
+  const paymentTxid = '2f'.repeat(32);
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: 'Still working on the image.',
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_artifact_missing');
+  // Exactly one forced continuation run, no loops.
+  assert.equal(harness.llmCalls.length, 2);
+  assert.match(harness.llmCalls[1].prompt, /MUST generate a real image file/);
+  const contents = harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry));
+  assert.equal(contents.some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[NeedsRating:${orderTxid}]`)), false);
+  assert.equal(contents.some((entry) => entry.startsWith(`[ORDER_END:${orderTxid} failed]`)), true);
+
+  const state = await harness.runtimeStateStore.readState();
+  const trace = state.traces.find((entry) => entry.order?.orderTxid === orderTxid);
+  assert.ok(trace, 'expected failed provider artifact trace');
+  const sellerOrder = state.sellerOrders.find((entry) => entry.orderTxid === orderTxid);
+  assert.ok(sellerOrder);
+  assert.equal(sellerOrder.state, 'failed');
+  assert.equal(sellerOrder.endReason, 'provider_artifact_missing');
+
+  const sessionState = await createSessionStateStore(harness.homeDir).readState();
+  const failureItem = sessionState.transcriptItems.find((item) => item.id === `${trace.traceId}-provider-artifact-failure`);
+  assert.ok(failureItem);
+  assert.equal(failureItem.metadata.refundRequired, true);
+});
+
+test('inbound provider ORDER text output never triggers the missing-artifact continuation', async (t) => {
+  const orderTxid = '3a'.repeat(32);
+  const paymentTxid = '3b'.repeat(32);
+  const harness = await createInboundProviderOrderHarness(t, {
+    llmOutput: 'Tomorrow weather: bright with light wind.',
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.llmCalls.length, 1);
+  assert.ok(harness.writes
+    .filter((entry) => entry.path === '/protocols/simplemsg')
+    .map((entry) => harness.decryptProviderWrite(entry))
+    .some((entry) => entry.startsWith(`[DELIVERY:${orderTxid}]`)));
+});
+
+test('inbound provider ORDER skips the forced continuation when the provider already reported the media failure', async (t) => {
+  const orderTxid = '3c'.repeat(32);
+  const paymentTxid = '3d'.repeat(32);
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmOutput: 'I cannot generate the image because the generation backend failed.',
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content: harness.makeOrderContent({ paymentTxid }),
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_artifact_missing');
+  assert.equal(harness.llmCalls.length, 1);
 });
 
 test('/api services.execute persists seller lifecycle state and provider runtime diagnostics', async (t) => {

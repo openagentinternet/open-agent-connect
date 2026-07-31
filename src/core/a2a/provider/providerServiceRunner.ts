@@ -256,6 +256,23 @@ function buildPaidOrderUserPrompt(input: ProviderServiceOrderInput): string {
   return lines.join('\n');
 }
 
+// IDBots buildMissingArtifactContinuationPrompt parity: after a completed run
+// left no deliverable artifact, the provider gets one forced continuation run
+// that must produce the expected file in the same workspace.
+function buildMissingArtifactContinuationPrompt(order: ProviderServiceOrderInput): string {
+  const outputType = classifyProviderOutputType(order.outputType);
+  const orderTxid = normalizeText(order.metadata?.orderTxid);
+  return [
+    `The paid service order is not complete yet because no ${outputType} file exists for delivery.`,
+    orderTxid ? `Order txid: ${orderTxid}.` : '',
+    `Original buyer request: ${normalizeText(order.userTask) || 'No buyer request was recorded.'}`,
+    `Continue executing the required skill now. You MUST generate a real ${outputType} file in the current workspace before giving the final answer.`,
+    'Do not answer with only progress, intent, acknowledgement, or "started generating".',
+    'Use the service skill/tool/command now. After the file exists, the final answer must include the local file path.',
+    `If you truly cannot generate a valid ${outputType} file, state the concrete failure reason instead of claiming success.`,
+  ].filter(Boolean).join('\n');
+}
+
 type ProviderServiceRunnerResultWithRuntime = ProviderServiceRunnerResult & {
   runtimeId?: string;
   sessionId?: string;
@@ -1028,6 +1045,146 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
         sessionId,
         selection,
       };
+    },
+
+    /**
+     * IDBots MAX_MISSING_ARTIFACT_CONTINUATION_ATTEMPTS parity: one forced
+     * continuation run after a completed non-text execution left no
+     * deliverable artifact. The continuation reuses the previous run's
+     * selection and attempt workspace (no new workspace, no fallback retry)
+     * and prompts the runtime that it MUST generate the expected file.
+     */
+    async executeContinuation(
+      order: ProviderServiceOrderInput,
+      previousResult: ProviderServiceRunnerResult,
+    ): Promise<ProviderServiceRunnerResultWithRuntime> {
+      const normalizedProviderSkillNames = normalizeProviderSkillNames(order);
+      if (normalizedProviderSkillNames.invalidSkill) {
+        return createServiceRunnerFailedResult('invalid_provider_skill', `Provider skill name is unsafe: ${normalizedProviderSkillNames.invalidSkill}`);
+      }
+      const providerSkills = normalizedProviderSkillNames.skills;
+      if (providerSkills.length === 0) {
+        return createServiceRunnerFailedResult('invalid_provider_skill', 'Provider skill name is required.');
+      }
+      const providerSkill = providerSkills[0];
+
+      const previousRecord = previousResult as ProviderServiceRunnerResult & {
+        selection?: ProviderServiceRunnerSelection | null;
+      };
+      const selection = previousRecord.selection
+        ?? (previousRecord.metadata?.selection as ProviderServiceRunnerSelection | null | undefined)
+        ?? null;
+      const previousWorkspaceCwd = normalizeText(previousRecord.metadata?.attemptWorkspaceCwd);
+      if (!selection || !previousWorkspaceCwd) {
+        return createServiceRunnerFailedResult(
+          'provider_artifact_continuation_unavailable',
+          'Provider continuation requires the previous run selection and attempt workspace.',
+        );
+      }
+      const runtime = selection.runtime;
+      let attemptWorkspaceCwd: string;
+      try {
+        attemptWorkspaceCwd = await fs.realpath(previousWorkspaceCwd);
+      } catch {
+        return createRuntimeFailedResult(
+          'provider_artifact_continuation_unavailable',
+          'Provider continuation attempt workspace is no longer readable.',
+          {
+            runtime,
+            providerSkill,
+            providerSkills,
+            selection,
+          },
+        );
+      }
+
+      const systemPrompt = buildPaidOrderSystemPrompt({
+        serviceName: order.serviceName ?? '',
+        displayName: order.displayName ?? '',
+        providerSkill,
+        providerSkills,
+        outputType: order.outputType ?? 'text',
+        userTask: order.userTask,
+        taskContext: order.taskContext,
+        executionReminder: order.executionReminder,
+      });
+      const selectedSkills = selection.skills.length > 0 ? selection.skills : [selection.skill];
+      const skillSourcePaths = Object.fromEntries(
+        selectedSkills.map((skill) => [skill.skillName, skill.absolutePath]),
+      );
+
+      let sessionId: string;
+      let session: LlmSessionRecord | null;
+      try {
+        sessionId = await input.llmExecutor.execute({
+          runtimeId: runtime.id,
+          runtime,
+          prompt: buildMissingArtifactContinuationPrompt(order),
+          systemPrompt,
+          cwd: attemptWorkspaceCwd,
+          skills: providerSkills,
+          skillSourcePaths,
+          metaBotSlug: input.metaBotSlug,
+          timeout: sessionTimeoutMs,
+        });
+        session = await waitForSession(input.llmExecutor, sessionId, sessionTimeoutMs, pollIntervalMs);
+      } catch (error) {
+        return createRuntimeFailedResult(
+          'provider_execution_failed',
+          error instanceof Error ? error.message : String(error),
+          {
+            runtime,
+            providerSkill,
+            providerSkills,
+            selection,
+            attemptWorkspaceCwd,
+          },
+        );
+      }
+
+      const run: ProviderRuntimeRun = {
+        runtime,
+        selection,
+        sessionId,
+        session,
+        executionCwd: attemptWorkspaceCwd,
+        attemptWorkspaceCwd,
+      };
+      const failure = buildSessionFailure(run, providerSkill, providerSkills);
+      if (failure) {
+        return failure.result;
+      }
+      const responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', providerSkill);
+      if (!responseText) {
+        return createRuntimeFailedResult(
+          'provider_execution_empty',
+          'The provider runtime returned an empty result.',
+          {
+            runtime,
+            providerSkill,
+            providerSkills,
+            sessionId,
+            selection,
+            attemptWorkspaceCwd,
+          },
+        );
+      }
+      return withRuntimeMetadata({
+        state: 'completed',
+        responseText,
+        metadata: {
+          outputType: normalizeText(order.outputType) || 'text',
+          sessionCwd: await resolveCompletedSessionCwd(session?.cwd, attemptWorkspaceCwd),
+          attemptWorkspaceCwd,
+          missingArtifactContinuation: true,
+        },
+      }, {
+        runtime,
+        providerSkill,
+        providerSkills,
+        sessionId,
+        selection,
+      });
     },
   };
 }

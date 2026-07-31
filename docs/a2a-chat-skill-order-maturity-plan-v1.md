@@ -95,7 +95,7 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
   configured skills that no longer resolve; `injectSkills` now refreshes
   stale skill copies via an mtime+size tree fingerprint with an atomic-ish
   directory swap instead of reusing any existing destination.
-- **2026-07-30 — P3-A done** (IDBots deadline parity): buyer orders now carry
+- **2026-07-30 — P3-A done** (commit `98730f3a`, IDBots deadline parity): buyer orders now carry
   per-stage deadlines computed at creation — first response ≤ 5 min, delivery
   ≤ 15 min, both FIXED at creation (verified against IDBots
   `computeOrderDeadlines`/`getTimedOutOrderTransition`: progress messages do
@@ -107,6 +107,21 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
   skipped, and an in-process finalization guard makes waiter-vs-sweep races
   settle exactly once. The flat 30-min buyer wait is replaced by
   deadline-derived remaining budgets, including in boot recovery.
+- **2026-07-30 — P3-B/P3-D done** (seller progress + artifact retry, IDBots
+  `privateChatOrderCowork` parity): video orders get an initial long-task
+  `[ORDER_STATUS]` notice (persona LLM stage + template fallback, video-only
+  exactly like IDBots); a 120 s heartbeat posts "...still processing after
+  about N minutes..." notices while the execution is in flight (all output
+  types, covering runner-internal retries, always stopped before upload,
+  sends best-effort); artifact upload now posts an uploading notice and a
+  retry notice, with the upload attempt itself gaining a second try on
+  transport failures (it previously had none). Media orders that complete
+  without a deliverable artifact get exactly one forced continuation run in
+  the same workspace with a MUST-generate prompt (plus the original buyer
+  request); still missing → the existing non-deliverable failure path.
+  Explicit media-failure outputs skip the doomed continuation, matching
+  IDBots. The HTTP execute path keeps its single upload attempt and no
+  notices (no buyer chat channel there).
 
 ---
 
