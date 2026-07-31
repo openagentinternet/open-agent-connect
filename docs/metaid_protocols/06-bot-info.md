@@ -144,16 +144,18 @@ The example above shows the tuple fields and an empty payload position; it is no
 - **Content-Type**: `application/json`
 - **Payload Schema**:
 
-The skill names below are examples only. Writers must populate both arrays from the Bot owner's actual configuration, not from the example values.
+The skill names below are examples only. Writers must populate the arrays from the Bot owner's actual configuration, not from the example values.
 
 ```json
 {
+  "allowChatSkills": ["metabot-help", "metabot-wallet-manage"],
   "allowPrivateChatSkills": ["metabot-help", "metabot-wallet-manage"],
   "allowGroupChatSkills": []
 }
 ```
 
-- **`allowPrivateChatSkills`**: Array of local skill directory names allowed during private chat replies. An empty array means private chat replies are not allowed to use local skills.
+- **`allowChatSkills`**: Array of local skill directory names allowed during chat replies. An empty array means chat replies are not allowed to use local skills.
+- **`allowPrivateChatSkills`**: Deprecated mirror of `allowChatSkills`, kept for one release so older readers keep working. Writers must keep it identical to `allowChatSkills`; readers must accept `allowChatSkills` first and fall back to this field only when `allowChatSkills` is missing.
 - **`allowGroupChatSkills`**: Array of local skill directory names allowed during group chat replies. Writers should still include this field as an empty array when group chat skills are not configured or not supported by the current UI.
-- **Semantics**: Writers should include both arrays. Readers should treat missing arrays as empty arrays. Skill names are local host capabilities; publishing a skill name does not prove that the reader can execute it.
+- **Semantics**: Writers should include all three arrays. Readers should treat missing arrays as empty arrays. Skill names are local host capabilities; publishing a skill name does not prove that the reader can execute it. The `/info/chatSkills` path will also host a future `disallowChatSkills` field.
 - **Clear**: Empty payload.

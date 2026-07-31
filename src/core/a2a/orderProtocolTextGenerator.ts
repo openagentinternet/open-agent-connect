@@ -6,6 +6,7 @@ import { createLlmBindingStore } from '../llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import { createLlmRuntimeStore } from '../llm/llmRuntimeStore';
 import { runLlmPromptWithRuntimeFallback } from '../llm/llmRuntimeExecution';
+import { createOrderMetadataLineRegex } from '../orders/orderMessage';
 import type { PublishedServiceRecord } from '../services/publishService';
 import type { MetabotPaths } from '../state/paths';
 
@@ -130,10 +131,15 @@ function stripGeneratedProtocolText(value: unknown): string {
   return lines.join('\n').trim();
 }
 
+// Generated protocol text is rejected when it quotes protocol metadata lines;
+// a bare label prefix (no separator) is enough to reject.
+const PROTOCOL_METADATA_LINE_RE = createOrderMetadataLineRegex({
+  optionalSeparator: true,
+  extraLabels: ['payment(?:\\s+amount)?'],
+});
+
 function hasProtocolMetadataLine(value: string): boolean {
-  return value.split(/\r?\n/u).some((line) => (
-    /^\s*(?:支付金额|payment(?: amount)?|txid|order id|commit txid|payment chain|settlement kind|service id|skill name|output type)\s*[:：]?/iu.test(line)
-  ));
+  return value.split(/\r?\n/u).some((line) => PROTOCOL_METADATA_LINE_RE.test(line));
 }
 
 function isGenericPrivateChatReply(value: string): boolean {

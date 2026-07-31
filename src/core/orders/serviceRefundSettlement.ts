@@ -179,7 +179,7 @@ function findSellerOrder(state: RuntimeState, orderId: string): SellerOrderRecor
 }
 
 function blockedSellerOrderState(entry: SellerOrderRecord): SellerOrderRecord['state'] {
-  if (entry.state === 'refunded' || entry.state === 'ended') {
+  if (entry.state === 'refunded') {
     return entry.state;
   }
   if (entry.state === 'refund_pending' || normalizeText(entry.refundRequestPinId)) {
@@ -340,7 +340,7 @@ function buildRefundFinalizePayload(input: {
 }
 
 function transitionToRefundPendingIfNeeded(order: SellerOrderRecord, updatedAt: number): SellerOrderRecord {
-  if (order.state === 'refund_pending' || order.state === 'refunded' || order.state === 'ended') {
+  if (order.state === 'refund_pending' || order.state === 'refunded') {
     return order;
   }
   return transitionSellerOrderRecord(order, {
@@ -412,7 +412,7 @@ function recordRefundTransfer(input: {
         return entry;
       }
       return transitionSellerOrderRecord(entry, {
-        state: entry.state === 'refunded' || entry.state === 'ended' ? entry.state : 'refund_pending',
+        state: entry.state === 'refunded' ? entry.state : 'refund_pending',
         refundTxid: input.refundTxid,
         updatedAt: input.recordedAt,
       });

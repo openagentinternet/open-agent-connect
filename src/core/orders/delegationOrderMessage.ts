@@ -1,4 +1,4 @@
-import { buildOrderPayload, normalizeOrderRawRequest } from './orderMessage';
+import { buildOrderPayload, createOrderMetadataLineRegex, normalizeOrderRawRequest } from './orderMessage';
 
 export interface BuildDelegationOrderPayloadInput {
   rawRequest?: string | null;
@@ -20,7 +20,28 @@ export interface BuildDelegationOrderPayloadInput {
 }
 
 const ORDER_PREFIX_RE = /^\s*\[ORDER\]\s*/i;
-const STRUCTURED_ORDER_METADATA_LINE_RE = /^\s*(?:(?:支付金额)(?:\s+[0-9]+(?:\.[0-9]+)?\s+[A-Za-z0-9._-]+|\s*[:：=])|(?:payment(?: amount)?|payment\s+chain|settlement\s+kind|commit\s+txid|txid|transaction id|mrc20\s+ticker|mrc20\s+id|output\s+type|order(?:\s+id|\s+ref(?:erence)?)?|service(?:\s+pin)?\s+id|service(?:\s+id)?|serviceid|skill(?:\s+name)?|provider\s*skill|service\s+skill|服务(?:\s*pin)?\s*id|服务(?:编号|标识|ID)|订单(?:编号|标识|ID)|技能(?:名称?)?|服务技能|服务名称)\s*[:：=])/i;
+// Generated task text may quote metadata lines with `=` separators and a
+// broader set of chatty label variants beyond the canonical order metadata.
+const STRUCTURED_ORDER_METADATA_LINE_RE = createOrderMetadataLineRegex({
+  allowEqualsSeparator: true,
+  extraLabels: [
+    'payment(?:\\s+amount)?',
+    'transaction\\s+id',
+    'order(?:\\s+ref(?:erence)?)?',
+    'service(?:\\s+pin)?\\s+id',
+    'service(?:\\s+id)?',
+    'serviceid',
+    'skill(?:\\s+name)?',
+    'provider\\s*skill',
+    'service\\s+skill',
+    '服务(?:\\s*pin)?\\s*id',
+    '服务(?:编号|标识|ID)',
+    '订单(?:编号|标识|ID)',
+    '技能(?:名称?)?',
+    '服务技能',
+    '服务名称',
+  ],
+});
 const TRANSPORT_CHATTER_FRAGMENT_PATTERNS = [
   /^Selected cached online service:[^\n]*/gi,
   /(?:^|[，,。；;])\s*已确认同意使用远程MetaBot服务[^，,。；;\n]*/gi,

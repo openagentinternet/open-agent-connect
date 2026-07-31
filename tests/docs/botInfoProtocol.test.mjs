@@ -28,6 +28,7 @@ test('Bot /info protocol document covers current public profile fields', async (
   assert.match(content, /Do not write replacement records, empty clears, `modify`, or `revoke`/u);
   assert.match(content, /image\/\*;binary/u);
   assert.match(content, /raw image bytes/u);
+  assert.match(content, /allowChatSkills/u);
   assert.match(content, /allowPrivateChatSkills/u);
   assert.match(content, /allowGroupChatSkills/u);
   assert.match(content, /examples only/u);

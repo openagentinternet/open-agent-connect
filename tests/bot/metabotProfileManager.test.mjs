@@ -684,6 +684,7 @@ test('syncMetabotInfoToChain writes persona fields to one JSON path', async () =
     goal: 'Goal',
   });
   assert.deepEqual(JSON.parse(calls[2].payload), {
+    allowChatSkills: ['metabot-help', 'metabot-wallet-manage'],
     allowPrivateChatSkills: ['metabot-help', 'metabot-wallet-manage'],
     allowGroupChatSkills: [],
   });

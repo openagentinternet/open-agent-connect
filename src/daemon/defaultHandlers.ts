@@ -9862,7 +9862,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           serviceName: normalizeText(service.displayName) || normalizeText(service.serviceName),
           outputType: service.outputType,
           endedAt: Date.now(),
-          endReason: runnerResult.state === 'failed' ? runnerResult.code : 'clarification_needed',
+          endReason: runnerResult.state === 'failed' ? runnerResult.code : 'clarification_not_supported',
           failureReason: failureText,
         },
       }, a2aConversationPersister);
@@ -9886,12 +9886,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
         latestEvent: applied.event,
         userTask,
         failureText,
-        failureCode: runnerResult.state === 'failed' ? runnerResult.code : 'clarification_needed',
+        failureCode: runnerResult.state === 'failed' ? runnerResult.code : 'clarification_not_supported',
         providerRuntime: providerRuntimeDiagnostics,
       });
       return runnerResult.state === 'failed'
         ? commandFailed(runnerResult.code, runnerResult.message)
-        : commandManualActionRequired('clarification_needed', runnerResult.question);
+        : commandFailed('clarification_not_supported', failureText);
     }
 
     const baseResponseText = normalizeText(runnerResult.responseText);
@@ -13836,23 +13836,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
             );
           }
 
-          try {
-            sendPrivateChat({
-              fromIdentity: {
-                globalMetaId: privateChatIdentity.globalMetaId,
-                privateKeyHex: privateChatIdentity.privateKeyHex,
-              },
-              toGlobalMetaId: plan.service.providerGlobalMetaId,
-              peerChatPublicKey,
-              content: '[ORDER] preflight',
-            });
-          } catch (error) {
-            return commandFailed(
-              'remote_order_build_failed',
-              error instanceof Error ? error.message : String(error)
-            );
-          }
-
           const paymentResult = await createOrderPayment();
           if (!paymentResult.ok) {
             return paymentResult.failure;
@@ -14449,16 +14432,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
           if (!applied || !appliedStatus) {
             throw new Error('Provider runner result was not persisted before handling incomplete state.');
           }
+          // A needs_clarification outcome has no answer channel, so it is
+          // finalized as a terminal failure exactly like a runner failure.
+          const failureCode = runnerResult.state === 'failed'
+            ? runnerResult.code
+            : 'clarification_not_supported';
           const failureText = runnerResult.state === 'failed'
             ? runnerResult.message
-            : runnerResult.question;
+            : normalizeText(runnerResult.question)
+              || 'Provider runner requested clarification, which is not supported.';
           await appendA2ATranscriptItems(sessionStateStore, [
             {
               id: `${traceId}-provider-runner-${runnerResult.state}`,
               sessionId: received.session.sessionId,
               taskRunId: applied.taskRun.runId,
               timestamp: applied.session.updatedAt,
-              type: runnerResult.state === 'failed' ? 'failure' : 'clarification',
+              type: 'failure',
               sender: 'system',
               content: failureText,
               metadata: {
@@ -14553,7 +14542,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             state,
             service,
             buyerGlobalMetaId: execution.buyer.globalMetaId,
-            lifecycleState: runnerResult.state === 'failed' ? 'failed' : 'in_progress',
+            lifecycleState: 'failed',
             traceId,
             orderMessageId,
             orderTxid: '',
@@ -14572,13 +14561,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
             publicStatus: appliedStatus.status,
             latestEvent: applied.event,
             providerRuntime: providerRuntimeDiagnostics,
-            failureReason: runnerResult.state === 'failed' ? failureText : null,
-            endReason: runnerResult.state === 'failed' ? runnerResult.code : null,
+            failureReason: failureText,
+            endReason: failureCode,
             receivedAt: received.session.createdAt,
             startedAt: directStartedAt,
-            endedAt: runnerResult.state === 'failed'
-              ? applied.taskRun.completedAt ?? applied.session.updatedAt
-              : null,
+            endedAt: applied.taskRun.completedAt ?? applied.session.updatedAt,
             updatedAt: applied.session.updatedAt,
           });
           await runtimeStateStore.updateState((current) => ({
@@ -14593,14 +14580,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
           }));
 
-          if (runnerResult.state === 'failed') {
-            return commandFailed(runnerResult.code, runnerResult.message);
-          }
-          return commandManualActionRequired(
-            'clarification_needed',
-            runnerResult.question,
-            buildConversationHref(execution.providerGlobalMetaId, execution.buyer?.globalMetaId),
-          );
+          return commandFailed(failureCode, failureText);
         }
         const baseResponseText = normalizeText(runnerResult.responseText);
         let responseText = baseResponseText;

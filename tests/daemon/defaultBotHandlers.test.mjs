@@ -1663,6 +1663,7 @@ test('default bot createProfile writes explicitly empty allowChatSkills to chain
   assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/persona', '/info/chatSkills']);
   assert.equal(writeCalls[3].contentType, 'application/json');
   assert.deepEqual(JSON.parse(writeCalls[3].payload), {
+    allowChatSkills: [],
     allowPrivateChatSkills: [],
     allowGroupChatSkills: [],
   });
@@ -2917,6 +2918,7 @@ test('default bot updateProfile validates allowChatSkills and writes chain chatS
         const beforeLocalSave = await getMetabotProfile(systemHomeDir, profile.slug);
         assert.deepEqual(beforeLocalSave.allowChatSkills, []);
         assert.deepEqual(JSON.parse(input.payload), {
+          allowChatSkills: ['metabot-help'],
           allowPrivateChatSkills: ['metabot-help'],
           allowGroupChatSkills: [],
         });

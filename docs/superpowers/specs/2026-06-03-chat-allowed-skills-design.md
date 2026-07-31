@@ -66,20 +66,21 @@ Rules:
 - Unsafe skill names are rejected before persistence.
 - Unknown skill names are rejected when saving through the UI/API if the selected Bot has a resolvable primary runtime catalog.
 
-### Bio Payload
+### On-chain Payload
 
-`/info/bio` should include:
+Implemented: the allow-list is published on the `/info/chatSkills` pin (this section originally proposed embedding it in `/info/bio`; the `/info/chatSkills` path was chosen instead and will also host a future `disallowChatSkills` field):
 
 ```json
 {
-  "role": "...",
-  "soul": "...",
-  "goal": "...",
-  "primaryProvider": "...",
-  "fallbackProvider": "...",
-  "allowChatSkills": ["skill-one", "skill-two"]
+  "allowChatSkills": ["skill-one", "skill-two"],
+  "allowPrivateChatSkills": ["skill-one", "skill-two"],
+  "allowGroupChatSkills": []
 }
 ```
+
+- `allowChatSkills` is the canonical field.
+- `allowPrivateChatSkills` is a deprecated mirror of `allowChatSkills`, published for one release so older readers keep working. Readers accept `allowChatSkills` first and fall back to `allowPrivateChatSkills` only when it is missing.
+- `allowGroupChatSkills` is reserved for group chat and is currently always published as `[]`.
 
 When the list is empty, the writer may include `allowChatSkills: []` for explicitness. The runtime must treat missing, null, and empty values as no configured chat skills.
 
