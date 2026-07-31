@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -46,6 +47,20 @@ async function writeExecutableScript(dir, name, source) {
   await fs.writeFile(scriptPath, source, 'utf8');
   await fs.chmod(scriptPath, 0o755);
   return scriptPath;
+}
+
+async function reserveThenCloseLoopbackPort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  await new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+  return address.port;
 }
 
 async function collectEvents(iterable) {
@@ -1528,6 +1543,45 @@ test('LlmExecutor launches a Node-shebang provider with a compatible Node from P
 
   assert.equal(factoryEnv.PATH.split(path.delimiter)[0], compatibleBinDir);
   assert.equal(requestEnv.PATH.split(path.delimiter)[0], compatibleBinDir);
+});
+
+test('LlmExecutor keeps refused daemon loopback proxies out of the final Cursor child env', async () => {
+  const base = await createTempDir('metabot-llm-cursor-refused-proxy-');
+  const refusedPort = await reserveThenCloseLoopbackPort();
+  const refusedProxy = `http://127.0.0.1:${refusedPort}`;
+  const binaryPath = await writeExecutableScript(base, 'cursor-agent', `#!/bin/sh
+if [ -n "$HTTP_PROXY$HTTPS_PROXY$ALL_PROXY$http_proxy$https_proxy$all_proxy" ]; then
+  echo "Error: [unavailable] connect ECONNREFUSED 127.0.0.1:${refusedPort}" >&2
+  exit 1
+fi
+echo '{"type":"result","result":"Cursor ready"}'
+`);
+  const executor = new LlmExecutor({
+    sessionsRoot: path.join(base, 'sessions'),
+    transcriptsRoot: path.join(base, 'transcripts'),
+    skillsRoot: path.join(base, 'skills'),
+    env: {
+      HTTP_PROXY: refusedProxy,
+      HTTPS_PROXY: refusedProxy,
+      ALL_PROXY: refusedProxy,
+      http_proxy: refusedProxy,
+      https_proxy: refusedProxy,
+      all_proxy: refusedProxy,
+    },
+    backends: { cursor: (_binaryPath, env) => createCursorBackend(binaryPath, env) },
+  });
+
+  const sessionId = await executor.execute({
+    runtimeId: 'runtime-cursor',
+    runtime: { ...runtime, id: 'runtime-cursor', provider: 'cursor', binaryPath },
+    prompt: 'Reply exactly OK.',
+  });
+  await collectEvents(executor.streamEvents(sessionId));
+
+  const session = await executor.getSession(sessionId);
+  assert.equal(session.status, 'completed');
+  assert.equal(session.result.status, 'completed');
+  assert.equal(session.result.output, 'Cursor ready');
 });
 
 test('LlmExecutor cancel preserves completed session history', async () => {
