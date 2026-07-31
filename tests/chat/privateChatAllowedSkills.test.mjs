@@ -119,3 +119,65 @@ test('private chat allowed skills resolver returns empty scope for profiles with
   assert.deepEqual(result.skippedSkills, []);
   assert.equal(result.warning, null);
 });
+
+test('private chat allowed skills resolver persists the last resolution outcome', async (t) => {
+  const context = await createProfileContext(t, 'Resolution Record Bot');
+  await updateMetabotProfile(context.systemHomeDir, context.profile.slug, {
+    allowChatSkills: ['metabot-weather', 'metabot-missing'],
+  });
+  await writeSkill(path.join(context.systemHomeDir, '.codex', 'skills'), 'metabot-weather');
+
+  const resolver = createPrivateChatAllowedSkillsResolver({
+    paths: context.paths,
+    metaBotSlug: context.profile.slug,
+    runtimeStore: context.runtimeStore,
+    bindingStore: context.bindingStore,
+    env: {},
+  });
+
+  await resolver();
+
+  const record = JSON.parse(await fs.readFile(context.paths.chatSkillResolutionPath, 'utf8'));
+  assert.deepEqual(record.resolved, ['metabot-weather']);
+  assert.deepEqual(record.skipped, ['metabot-missing']);
+  assert.match(record.warning, /metabot-missing/);
+  assert.ok(record.checkedAt);
+
+  // A follow-up resolve with a cleared policy overwrites the stale record.
+  await updateMetabotProfile(context.systemHomeDir, context.profile.slug, {
+    allowChatSkills: [],
+  });
+  await resolver();
+  const cleared = JSON.parse(await fs.readFile(context.paths.chatSkillResolutionPath, 'utf8'));
+  assert.deepEqual(cleared.resolved, []);
+  assert.deepEqual(cleared.skipped, []);
+  assert.equal(cleared.warning, null);
+});
+
+test('private chat allowed skills resolver keeps working when the resolution record write fails', async (t) => {
+  const context = await createProfileContext(t, 'Resolution Write Fails Bot');
+  await updateMetabotProfile(context.systemHomeDir, context.profile.slug, {
+    allowChatSkills: ['metabot-weather', 'metabot-missing'],
+  });
+  await writeSkill(path.join(context.systemHomeDir, '.codex', 'skills'), 'metabot-weather');
+  // Point the record path inside a regular file so the write always fails.
+  const blockerPath = path.join(context.systemHomeDir, 'resolution-blocker');
+  await fs.writeFile(blockerPath, 'not a directory', 'utf8');
+  const paths = {
+    ...context.paths,
+    chatSkillResolutionPath: path.join(blockerPath, 'chat-skill-resolution.json'),
+  };
+
+  const resolver = createPrivateChatAllowedSkillsResolver({
+    paths,
+    metaBotSlug: context.profile.slug,
+    runtimeStore: context.runtimeStore,
+    bindingStore: context.bindingStore,
+    env: {},
+  });
+
+  const result = await resolver();
+
+  assert.deepEqual(result.skills, ['metabot-weather']);
+  assert.deepEqual(result.skippedSkills, ['metabot-missing']);
+});

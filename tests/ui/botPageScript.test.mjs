@@ -3260,6 +3260,117 @@ test('bot page saveChatSkills sends normalized allowChatSkills only after select
   assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['orders.create', 'weather.lookup']);
 });
 
+test('bot page saveChatSkills warns without blocking when the chain sync fails', async () => {
+  const status = field();
+  const chatSkillsPanel = panelElement('data-chat-skills-profile-slug', 'alice-bot', {
+    '[data-save-status]': status,
+    '[data-act="save-chat-skills"]': field(),
+  });
+  let successModalCount = 0;
+  const context = createBotScriptContext({
+    elements: {
+      '[data-chat-skills-profile-slug]': chatSkillsPanel,
+    },
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          profile: {
+            slug: 'alice-bot',
+            name: 'Alice',
+            allowChatSkills: ['orders.create'],
+          },
+          chainWrites: [],
+          chainSync: { ok: false, error: 'chain is offline' },
+        },
+      }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    allowChatSkills: [],
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.state.chatAllowedSkillsBySlug['alice-bot'] = ['orders.create'];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderChatSkillsTab = () => {};
+  context.showChainSuccessModal = () => { successModalCount += 1; };
+
+  await context.saveChatSkills();
+
+  assert.equal(status.textContent, 'Saved locally; chain sync failed: chain is offline');
+  assert.equal(status.className, 'save-status warning');
+  assert.equal(successModalCount, 0);
+  assert.deepEqual(Array.from(context.state.chatAllowedSkillsBySlug['alice-bot']), ['orders.create']);
+});
+
+test('bot page chat skills tab warns about configured skills that no longer resolve', async () => {
+  const root = { innerHTML: '' };
+  const activeChatSkillsPanel = {
+    getAttribute: (name) => (name === 'data-chat-skills-profile-slug' ? 'alice-bot' : null),
+  };
+  const context = createBotScriptContext({
+    elements: {
+      '[data-chat-skills-content]': root,
+      '[data-chat-skills-profile-slug]': activeChatSkillsPanel,
+    },
+    fetch: (url) => {
+      if (url === '/api/chat/auto-reply/status?from=alice-bot') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, data: { enabled: true, defaultStrategyId: null } }),
+        });
+      }
+      assert.equal(url, '/api/services/skills?from=alice-bot&allowFallbackRuntime=true');
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          data: {
+            skills: [
+              { skillName: 'weather.lookup', title: 'Weather Lookup', description: 'Check current weather.' },
+            ],
+            chatSkillResolution: {
+              resolved: ['weather.lookup'],
+              skipped: ['gone.skill', 'old.skill'],
+              warning: 'Skipping unavailable chat skills: gone.skill, old.skill',
+              checkedAt: '2026-05-06T00:00:00.000Z',
+            },
+          },
+        }),
+      });
+    },
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice-bot';
+  context.state.profiles = [{
+    slug: 'alice-bot',
+    name: 'Alice',
+    allowChatSkills: ['weather.lookup', 'gone.skill', 'old.skill'],
+  }];
+  context.state.selectedTab = 'chatSkills';
+  context.renderChatSkillsTab();
+
+  await context.loadChatSkillOptions('alice-bot');
+
+  assert.match(root.innerHTML, /2 configured skills unavailable: gone\.skill, old\.skill/);
+});
+
+test('bot page chat skill warning copy exists in both dictionaries', () => {
+  const keys = ['bot.chatSkillsSavedChainFailed', 'bot.chatSkillsUnavailable'];
+  for (const key of keys) {
+    assert.equal(typeof DICTIONARIES.en[key], 'string', key);
+    assert.equal(typeof DICTIONARIES['zh-CN'][key], 'string', key);
+  }
+});
+
 test('bot page saveInfo omits allowChatSkills when selected chips are unchanged', async () => {
   const fields = {
     '[data-save-status]': field(),

@@ -74,6 +74,27 @@ Evidence base: full code review of `src/core/chat`, `src/core/services`,
   and picking up newly installed skills without a page reload); dead
   `renderPlaceholderTab`/`behaviorPlaceholder`/`chatSkillsPlaceholder` code
   and the dead `renderInfoTab` fallback in the skill controls removed.
+- **2026-07-30 — P2-C done** (commit `31e7792f`, dead code/drift/naming):
+  deleted the never-called `createPrivateChatListener`, dead delegation-prefix
+  helpers, the dead clarification machinery (a `needs_clarification` runner
+  outcome now terminal-fails the order as `clarification_not_supported` on
+  both order paths), the discarded `[ORDER] preflight` send, and the
+  unreachable seller state `ended`; the `METABOT_PRIVATE_CHAT_REPLY_GENERATION`
+  env marker turned out to be a live double-send guard and was kept; the three
+  diverging ORDER-metadata regexes are one shared
+  `createOrderMetadataLineRegex`; `/info/chatSkills` now publishes
+  `allowChatSkills` with a one-release deprecated `allowPrivateChatSkills`
+  mirror (naming decision 4).
+- **2026-07-30 — P2-D done** (ops): provider run workspaces are removed at
+  order terminal states plus a 24h-TTL janitor (delivery artifacts live on
+  chain, nothing local references the workspace); the allowChatSkills save is
+  now local-first with the on-chain publish best-effort and a `chainSync`
+  status in the response (UI shows a non-blocking warning on chain failure);
+  the last chat-skill resolution outcome is persisted per bot and exposed
+  through the skills endpoint so the Chat Settings tab can warn about
+  configured skills that no longer resolve; `injectSkills` now refreshes
+  stale skill copies via an mtime+size tree fingerprint with an atomic-ish
+  directory swap instead of reusing any existing destination.
 
 ---
 

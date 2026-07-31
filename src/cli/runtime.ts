@@ -126,6 +126,10 @@ import {
 import { createPrivateChatAllowedSkillsResolver } from '../core/chat/privateChatAllowedSkills';
 import { createChatSkillWaitNoticeGenerator } from '../core/chat/chatSkillWaitNotice';
 import { createLlmOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
+import {
+  PROVIDER_RUN_WORKSPACE_SWEEP_INTERVAL_MS,
+  sweepProviderRunWorkspaces,
+} from '../core/a2a/provider/providerWorkspaceCleanup';
 import type {
   ChatReplyRunner,
   PrivateChatAutoReplyConfig,
@@ -3780,6 +3784,18 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     });
   }, DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS);
   onlineServiceCacheInterval.unref?.();
+  // Reclaim abandoned provider run workspaces (crashed daemons never reach
+  // the terminal cleanup); terminal orders remove their own workspace.
+  const sweepProviderWorkspaces = () => sweepProviderRunWorkspaces({
+    projectRoot: paths.profileRoot,
+  }).catch((error) => {
+    console.warn('[provider workspace sweep]', error instanceof Error ? error.message : String(error));
+  });
+  void sweepProviderWorkspaces();
+  const providerWorkspaceSweepInterval = setInterval(() => {
+    void sweepProviderWorkspaces();
+  }, PROVIDER_RUN_WORKSPACE_SWEEP_INTERVAL_MS);
+  providerWorkspaceSweepInterval.unref?.();
   const serviceRefundSyncLoop = createServiceRefundSyncLoop({
     syncRefunds: async () => {
       const result = await handlers.services?.syncRefunds?.({});
@@ -4199,6 +4215,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     simplemsgListener.stop();
     chatAutoReplyBackfill.stop();
     clearInterval(onlineServiceCacheInterval);
+    clearInterval(providerWorkspaceSweepInterval);
     serviceRefundSyncLoop.stop();
     let shutdownFailure: unknown = null;
     try {

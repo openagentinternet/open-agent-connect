@@ -286,6 +286,7 @@ function withRuntimeMetadata<T extends ProviderServiceRunnerResult>(
     providerSkills?: string[] | null;
     sessionId?: string | null;
     selection?: ProviderServiceRunnerSelection | null;
+    attemptWorkspaceCwd?: string | null;
   },
 ): T & {
   runtimeId: string;
@@ -294,6 +295,7 @@ function withRuntimeMetadata<T extends ProviderServiceRunnerResult>(
 } {
   const selection = input.selection ?? null;
   const sessionId = normalizeText(input.sessionId);
+  const attemptWorkspaceCwd = normalizeText(input.attemptWorkspaceCwd);
   const enriched = {
     ...result,
     metadata: {
@@ -307,6 +309,9 @@ function withRuntimeMetadata<T extends ProviderServiceRunnerResult>(
         : [input.providerSkill],
       fallbackSelected: selection?.fallbackSelected ?? null,
       selection,
+      // Kept on every post-workspace result (including failures) so the
+      // daemon can remove the run workspace once the order is terminal.
+      ...(attemptWorkspaceCwd ? { attemptWorkspaceCwd } : {}),
     },
     runtimeId: input.runtime.id,
     ...(sessionId ? { sessionId } : {}),
@@ -328,6 +333,7 @@ function createRuntimeFailedResult(
     providerSkills?: string[] | null;
     sessionId?: string | null;
     selection?: ProviderServiceRunnerSelection | null;
+    attemptWorkspaceCwd?: string | null;
   },
 ): ProviderServiceRunnerResultWithRuntime {
   return withRuntimeMetadata(createServiceRunnerFailedResult(code, message), input);
@@ -362,6 +368,7 @@ function buildSessionFailure(
           providerSkills,
           sessionId,
           selection,
+          attemptWorkspaceCwd: run.attemptWorkspaceCwd,
         },
       ),
       retryable: isRetryableProviderRuntimeFailure(code),
@@ -379,6 +386,7 @@ function buildSessionFailure(
           providerSkills,
           sessionId,
           selection,
+          attemptWorkspaceCwd: run.attemptWorkspaceCwd,
         },
       ),
       retryable: true,
@@ -400,6 +408,7 @@ function buildSessionFailure(
           providerSkills,
           sessionId,
           selection,
+          attemptWorkspaceCwd: run.attemptWorkspaceCwd,
         },
       ),
       retryable: isRetryableProviderRuntimeFailure(code),
@@ -997,6 +1006,7 @@ export function createProviderServiceRunner(input: ProviderServiceRunnerDependen
             providerSkills,
             sessionId,
             selection,
+            attemptWorkspaceCwd: run.attemptWorkspaceCwd,
           },
         );
       }

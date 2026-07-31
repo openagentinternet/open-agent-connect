@@ -107,6 +107,7 @@ import {
 } from '../core/services/skillServiceProtocol';
 import {
   normalizeAllowChatSkills,
+  readChatSkillResolution,
   validateAllowChatSkills,
 } from '../core/services/chatSkillPolicy';
 import {
@@ -118,6 +119,7 @@ import {
   createProviderServiceRunner,
   resolveProviderOrderExecutionTimeoutMs,
 } from '../core/a2a/provider/providerServiceRunner';
+import { removeProviderRunWorkspace } from '../core/a2a/provider/providerWorkspaceCleanup';
 import { buildProviderConsoleSnapshot, type ProviderConsoleTraceRecord } from '../core/provider/providerConsole';
 import {
   buildProviderSellerOrderInspection,
@@ -7436,6 +7438,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  // Best-effort removal of a provider order's run workspace once the order is
+  // terminal. Delivery artifacts live on chain (metafile:// URIs) and trace
+  // exports point at the exports root, so nothing local references the
+  // workspace after finalization; a cleanup failure must never break the
+  // order, and runs without workspace metadata simply have nothing to remove.
+  async function cleanupProviderRunWorkspace(
+    runnerResult: ProviderServiceRunnerResult | null | undefined,
+  ): Promise<void> {
+    const attemptWorkspaceCwd = normalizeText(readObject(runnerResult?.metadata)?.attemptWorkspaceCwd);
+    if (!attemptWorkspaceCwd) {
+      return;
+    }
+    await removeProviderRunWorkspace(runtimeStateStore.paths.profileRoot, attemptWorkspaceCwd)
+      .catch(() => undefined);
+  }
+
   function buildProviderSellerOrderRecord(inputOrder: {
     state: RuntimeState;
     service: RuntimeState['services'][number];
@@ -9889,6 +9907,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         failureCode: runnerResult.state === 'failed' ? runnerResult.code : 'clarification_not_supported',
         providerRuntime: providerRuntimeDiagnostics,
       });
+      await cleanupProviderRunWorkspace(runnerResult);
       return runnerResult.state === 'failed'
         ? commandFailed(runnerResult.code, runnerResult.message)
         : commandFailed('clarification_not_supported', failureText);
@@ -10045,6 +10064,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           feeAssist,
           providerRuntime: providerRuntimeDiagnostics,
         });
+        await cleanupProviderRunWorkspace(runnerResult);
         return commandFailed(failureCode, failureText, data ? { data } : undefined);
       }
     }
@@ -10168,6 +10188,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
         failureCode: 'provider_delivery_failed',
         providerRuntime: providerRuntimeDiagnostics,
       });
+      await cleanupProviderRunWorkspace(runnerResult);
       return commandFailed('provider_delivery_failed', failureText);
     }
 
@@ -10504,6 +10525,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       ]).catch(() => undefined);
     }
 
+    await cleanupProviderRunWorkspace(runnerResult);
     return commandSuccess({
       handled: true,
       delivered: true,
@@ -13154,6 +13176,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed(result.code, result.message);
         }
 
+        // Last chat-turn skill resolution outcome for this bot (null until
+        // the first private chat resolve records one); lets the Chat
+        // Settings tab warn about configured skills that no longer resolve.
+        const chatSkillResolution = await readChatSkillResolution(
+          profileRuntimeStateStore.paths.chatSkillResolutionPath,
+        ).catch(() => null);
+
         return commandSuccess({
           metaBotSlug,
           identity: {
@@ -13174,6 +13203,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           platform: result.platform,
           skills: result.skills,
           rootDiagnostics: result.rootDiagnostics,
+          chatSkillResolution,
         });
       },
       publish: async (rawInput) => {
@@ -14580,6 +14610,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
           }));
 
+          await cleanupProviderRunWorkspace(runnerResult);
           return commandFailed(failureCode, failureText);
         }
         const baseResponseText = normalizeText(runnerResult.responseText);
@@ -14763,6 +14794,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
               ],
               sellerOrders: upsertSellerOrderRecord(current.sellerOrders, failedOrder),
             }));
+            await cleanupProviderRunWorkspace(runnerResult);
             return commandFailed(failureCode, failureText, data ? { data } : undefined);
           }
         }
@@ -14986,6 +15018,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ]).catch(() => undefined);
         }
 
+        await cleanupProviderRunWorkspace(runnerResult);
         return commandSuccess({
           traceId: trace.traceId,
           externalConversationId: trace.session.externalConversationId,
@@ -16385,6 +16418,50 @@ export function createDefaultMetabotDaemonHandlers(input: {
           chainProfile,
           calculateMetabotUpdateInfoFields(current, update),
         );
+
+        // The chat-skill allow-list is a local runtime policy first: after
+        // the validation above, the local save always succeeds and the
+        // on-chain /info/chatSkills mirror becomes best-effort, so a chain
+        // outage (or a not-yet-chained bot) never blocks the Chat Settings
+        // save. Mixed updates that also touch other fields keep the
+        // chain-first ordering below; only the dedicated allowChatSkills
+        // save path takes this branch.
+        const submittedInfoFields = calculateMetabotSubmittedInfoFields(update);
+        const chatSkillsOnlyUpdate = submittedInfoFields.length > 0
+          && submittedInfoFields.every((field) => field === 'allowChatSkills');
+        if (chatSkillsOnlyUpdate) {
+          try {
+            const profile = await updateMetabotProfile(normalizedSystemHomeDir, slug, update);
+            let chatSkillChainWrites: ChainWriteResult[] = [];
+            let chainSync: { ok: boolean; error?: string } = { ok: true };
+            if (updateInfoTargets.length > 0 && current.globalMetaId) {
+              try {
+                const profileSigner = createSignerForProfileHome(current.homeDir);
+                chatSkillChainWrites = await syncMetabotInfoToChain(profileSigner, profile, updateInfoTargets, {
+                  deferPublishStateWrite: true,
+                });
+                await recordMetabotInfoPublishResults(profile, updateInfoTargets, chatSkillChainWrites);
+              } catch (error) {
+                chainSync = {
+                  ok: false,
+                  error: error instanceof Error ? error.message : String(error),
+                };
+              }
+            }
+            return commandSuccess({
+              profile,
+              chainWrites: chatSkillChainWrites,
+              chainSync,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (/not found/i.test(message)) {
+              return commandFailed('profile_not_found', message);
+            }
+            return commandFailed('metabot_profile_update_failed', message);
+          }
+        }
+
         let chainWrites: ChainWriteResult[] = [];
         if ((changedFields.length > 0 || updateInfoTargets.length > 0) && !current.globalMetaId) {
           return commandFailed(
@@ -16414,6 +16491,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandSuccess({
             profile,
             chainWrites,
+            // This path only reaches success when the chain publish succeeded
+            // (or nothing needed publishing), hence the constant ok flag.
+            chainSync: { ok: true },
             ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
           });
         } catch (error) {

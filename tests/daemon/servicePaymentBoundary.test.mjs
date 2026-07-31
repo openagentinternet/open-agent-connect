@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createECDH } from 'node:crypto';
-import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -4092,6 +4092,127 @@ test('/api services.execute image output does not complete session while artifac
   assert.equal(uploadWindowError, null, uploadWindowError?.message);
   assert.equal(uploadCalls.length, 1);
   await assertProviderSessionCompleted(harness.homeDir, traceId);
+});
+
+async function assertProviderRunWorkspaceRemoved(homeDir, attemptCwd) {
+  assert.ok(
+    String(attemptCwd || '').includes(path.join('.runtime', 'a2a-provider-runs')),
+    `expected an a2a-provider-runs attempt workspace, got: ${attemptCwd}`,
+  );
+  await assert.rejects(() => access(attemptCwd), /ENOENT/);
+  const remaining = await readdir(path.join(homeDir, '.runtime', 'a2a-provider-runs')).catch(() => []);
+  assert.deepEqual(remaining, []);
+}
+
+test('inbound provider ORDER removes the run workspace after terminal delivery', async (t) => {
+  const orderTxid = '9'.repeat(64);
+  const paymentTxid = 'a'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+  const content = harness.makeOrderContent({ paymentTxid });
+
+  const result = await harness.handlers.services.handleInboundOrderProtocolMessage({
+    fromGlobalMetaId: harness.buyerGlobalMetaId,
+    content,
+    messagePinId: `${orderTxid}i0`,
+    timestamp: 1_775_000_001_000,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.delivered, true);
+  assert.equal(harness.llmCalls.length, 1);
+  await assertProviderRunWorkspaceRemoved(harness.homeDir, harness.llmCalls[0].cwd);
+});
+
+test('/api services.execute removes the run workspace after artifact delivery upload', async (t) => {
+  const paymentTxid = '7'.repeat(64);
+  const uploadCalls = [];
+  const output = createAttemptOutputController('direct-delivered-image.png');
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { outputType: 'image' },
+    llmExecuteHook: (request) => output.write(request),
+    llmOutput: () => output.outputText('Direct image complete.'),
+    llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+    providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-workspace-cleanup',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Create a weather image',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  // The artifact was uploaded to a chain metafile:// URI during delivery, so
+  // the local workspace copy is unreferenced and gets removed.
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(harness.llmCalls.length, 1);
+  await assertProviderRunWorkspaceRemoved(harness.homeDir, harness.llmCalls[0].cwd);
+});
+
+test('/api services.execute removes the run workspace after a terminal runner failure', async (t) => {
+  const paymentTxid = '8'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    llmSession: (sessionId) => ({
+      sessionId,
+      status: 'failed',
+      error: 'runtime refused direct execution',
+    }),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-failed-workspace-cleanup',
+    externalConversationId: 'direct:buyer:provider',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'provider_execution_failed');
+  assert.equal(harness.llmCalls.length, 1);
+  await assertProviderRunWorkspaceRemoved(harness.homeDir, harness.llmCalls[0].cwd);
 });
 
 test('/api services.execute upload failure marks direct seller order and trace failed', async (t) => {

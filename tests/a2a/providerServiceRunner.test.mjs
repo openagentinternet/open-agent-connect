@@ -506,6 +506,40 @@ test('createProviderServiceRunner executes non-text orders in a dedicated runtim
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner reports the attempt workspace on terminal failures so the daemon can clean it up', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'failed',
+      output: '',
+      error: 'runtime failed',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'provider_execution_failed');
+  assert.equal(calls.length, 1);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[0].cwd));
+  assert.equal(isInsideRuntimeArea(homeDir, result.metadata.attemptWorkspaceCwd), true);
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner rejects session cwd symlinks that escape the dedicated workspace', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({
