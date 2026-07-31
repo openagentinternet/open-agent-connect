@@ -1031,6 +1031,64 @@ test('runtime discovery lets slow WorkBuddy version probes complete before readi
   });
 });
 
+test('WorkBuddy readiness timeout preserves stderr diagnostics from the CLI', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-workbuddy-readiness-error-');
+    const workbuddyPath = path.join(tempRoot, 'workbuddy-cli');
+    await writeFile(workbuddyPath, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "2.115.0"
+  exit 0
+fi
+echo "Unhandled rejection Error: listen EADDRINUSE: address already in use 127.0.0.1:64403" >&2
+while :; do :; done
+`, 'utf8');
+    await chmod(workbuddyPath, 0o755);
+
+    const result = await discoverLlmRuntimes({
+      env: { ...process.env, OAC_WORKBUDDY_PATH: workbuddyPath },
+      providers: ['workbuddy'],
+      readinessTimeoutMs: 50,
+      now: () => '2026-07-31T00:00:00.000Z',
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].health, 'detected');
+    assert.match(result.runtimes[0].healthReason, /Readiness probe timed out after 50ms\./);
+    assert.match(result.runtimes[0].healthReason, /EADDRINUSE/);
+    assert.match(result.runtimes[0].healthReason, /127\.0\.0\.1:64403/);
+    assert.doesNotMatch(result.runtimes[0].healthReason, /Unhandled rejection/);
+  });
+});
+
+test('non-WorkBuddy readiness timeouts keep generic diagnostics', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-codex-readiness-error-');
+    const codexPath = path.join(tempRoot, 'codex-cli');
+    await writeFile(codexPath, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "codex-cli 1.0.0"
+  exit 0
+fi
+echo "sensitive provider stderr: EADDRINUSE 127.0.0.1:64403" >&2
+while :; do :; done
+`, 'utf8');
+    await chmod(codexPath, 0o755);
+
+    const result = await discoverLlmRuntimes({
+      env: { ...process.env, OAC_CODEX_PATH: codexPath },
+      providers: ['codex'],
+      readinessTimeoutMs: 50,
+      now: () => '2026-07-31T00:00:00.000Z',
+    });
+
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].health, 'detected');
+    assert.equal(result.runtimes[0].healthReason, 'Readiness probe timed out after 50ms.');
+  });
+});
+
 async function writeFakeLoginShell(tempRoot, resolvedLines = []) {
   const shellDir = path.join(tempRoot, 'fake-shell');
   await mkdir(shellDir, { recursive: true });

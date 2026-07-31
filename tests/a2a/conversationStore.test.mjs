@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtempTempRootSync } from '../helpers/tempRoots.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -268,4 +268,34 @@ test('conversation store reclaims a stale lock whose recorded pid is still alive
   const state = await store.readConversation();
   assert.equal(state.messages.length, 1);
   assert.equal(state.messages[0].messageId, 'msg-1');
+});
+
+test('conversation store releases its lock when an update fails', async () => {
+  const store = createStore(createProfileHome('metabot-a2a-failed-update-lock-'));
+
+  await assert.rejects(
+    store.updateConversation(async () => {
+      throw new Error('simulated update failure');
+    }),
+    /simulated update failure/,
+  );
+
+  assert.equal(existsSync(store.lockPath), false);
+  await store.appendMessages([createMessage(1)]);
+  assert.equal((await store.readConversation()).messages.length, 1);
+});
+
+test('conversation store reads a manual disk repair before its next update', async () => {
+  const store = createStore(createProfileHome('metabot-a2a-disk-repair-'));
+  await store.appendMessages([createMessage(1)]);
+
+  const repaired = JSON.parse(readFileSync(store.conversationPath, 'utf8'));
+  repaired.messages[0].content = 'manually repaired content';
+  writeFileSync(store.conversationPath, `${JSON.stringify(repaired, null, 2)}\n`, 'utf8');
+
+  await store.appendMessages([createMessage(2)]);
+
+  const state = await store.readConversation();
+  assert.equal(state.messages[0].content, 'manually repaired content');
+  assert.equal(state.messages[1].messageId, 'msg-2');
 });

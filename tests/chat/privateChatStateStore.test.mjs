@@ -509,3 +509,60 @@ test('private chat state store reclaims a stale lock whose recorded pid is still
   const state = await store.readState();
   assert.equal(state.version, 1);
 });
+
+test('private chat state store releases its lock when an update fails', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+  const lockPath = `${store.paths.privateChatStatePath}.lock`;
+
+  await assert.rejects(
+    store.updateState(async () => {
+      throw new Error('simulated update failure');
+    }),
+    /simulated update failure/,
+  );
+
+  await assert.rejects(fs.access(lockPath));
+  await store.updateState((state) => state);
+  assert.equal((await store.readState()).version, 1);
+});
+
+test('private chat state store reads a manual disk repair before its next update', async () => {
+  const { profileRoot } = await createTempProfileHome();
+  const store = createPrivateChatStateStore(resolveMetabotPaths(profileRoot));
+  const conversation = {
+    conversationId: 'pc-self-peer',
+    peerGlobalMetaId: 'peer-gm-1',
+    peerName: null,
+    topic: null,
+    strategyId: null,
+    state: 'active',
+    turnCount: 1,
+    lastDirection: 'inbound',
+    createdAt: 1000,
+    updatedAt: 1000,
+    pendingGuidanceText: null,
+    pendingGuidanceCreatedAt: null,
+  };
+  await store.upsertConversation(conversation);
+
+  const statePath = store.paths.privateChatStatePath;
+  const repaired = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  repaired.conversations[0].turnCount = 7;
+  await fs.writeFile(statePath, `${JSON.stringify(repaired, null, 2)}\n`, 'utf8');
+
+  await store.appendMessages([{
+    conversationId: conversation.conversationId,
+    messageId: 'msg-after-repair',
+    direction: 'inbound',
+    senderGlobalMetaId: conversation.peerGlobalMetaId,
+    content: 'new message',
+    messagePinId: null,
+    extensions: null,
+    timestamp: 2000,
+  }]);
+
+  const afterUpdate = await store.readState();
+  assert.equal(afterUpdate.conversations[0].turnCount, 7);
+  assert.equal(afterUpdate.messages[0].messageId, 'msg-after-repair');
+});
