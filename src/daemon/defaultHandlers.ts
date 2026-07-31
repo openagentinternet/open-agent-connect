@@ -2556,7 +2556,7 @@ async function fetchRemoteAvailableServices(
   }
 }
 
-async function readDirectorySeeds(directorySeedsPath: string): Promise<Array<{ baseUrl: string; label: string | null }>> {
+async function readDirectorySeeds(directorySeedsPath: string): Promise<Array<{ baseUrl: string; label: string | null; executeToken: string | null }>> {
   let payload: unknown;
   try {
     payload = JSON.parse(await fs.readFile(directorySeedsPath, 'utf8')) as unknown;
@@ -2585,6 +2585,7 @@ async function readDirectorySeeds(directorySeedsPath: string): Promise<Array<{ b
     normalizedProviders.push({
       baseUrl,
       label: normalizeText(entry?.label) || null,
+      executeToken: normalizeText(entry?.executeToken) || null,
     });
   }
   return normalizedProviders;
@@ -2592,19 +2593,26 @@ async function readDirectorySeeds(directorySeedsPath: string): Promise<Array<{ b
 
 async function writeDirectorySeeds(
   directorySeedsPath: string,
-  providers: Array<{ baseUrl: string; label: string | null }>
+  providers: Array<{ baseUrl: string; label: string | null; executeToken: string | null }>
 ): Promise<void> {
   await fs.mkdir(path.dirname(directorySeedsPath), { recursive: true });
   await fs.writeFile(
     directorySeedsPath,
-    `${JSON.stringify({ providers }, null, 2)}\n`,
+    `${JSON.stringify({
+      providers: providers.map((entry) => ({
+        baseUrl: entry.baseUrl,
+        label: entry.label,
+        // Keep seed files clean: the shared secret is only written when set.
+        ...(entry.executeToken ? { executeToken: entry.executeToken } : {}),
+      })),
+    }, null, 2)}\n`,
     'utf8'
   );
 }
 
 function sortDirectorySeeds(
-  providers: Array<{ baseUrl: string; label: string | null }>
-): Array<{ baseUrl: string; label: string | null }> {
+  providers: Array<{ baseUrl: string; label: string | null; executeToken: string | null }>
+): Array<{ baseUrl: string; label: string | null; executeToken: string | null }> {
   return [...providers].sort((left, right) => left.baseUrl.localeCompare(right.baseUrl));
 }
 
@@ -2760,16 +2768,19 @@ async function executeRemoteServiceCall(input: {
   providerGlobalMetaId: string;
   buyer: RuntimeIdentityRecord;
   payment: A2AOrderPaymentResult;
+  executeToken?: string | null;
   request: {
     userTask: string;
     taskContext: string;
   };
 }): Promise<MetabotCommandResult<Record<string, unknown>>> {
   try {
+    const executeToken = normalizeText(input.executeToken);
     const response = await fetch(`${input.providerDaemonBaseUrl}/api/services/execute`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
+        ...(executeToken ? { authorization: `Bearer ${executeToken}` } : {}),
       },
       body: JSON.stringify({
         traceId: input.traceId,
@@ -12632,7 +12643,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
       },
       listSources: async () => {
-        const sources = sortDirectorySeeds(await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath));
+        const sources = sortDirectorySeeds(await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath))
+          // Never expose the execute shared secret through the local API/UI.
+          .map((entry) => ({ baseUrl: entry.baseUrl, label: entry.label }));
         return commandSuccess({ sources });
       },
       addSource: async ({ baseUrl, label }) => {
@@ -12652,12 +12665,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
 
         const normalizedLabel = normalizeText(label) || null;
+        const normalizedBaseUrlEntry = parsed.toString().replace(/\/$/, '');
         const currentSources = await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath);
+        // Re-adding a source updates baseUrl/label but must not silently drop
+        // a previously configured execute token.
+        const existingSource = currentSources.find((entry) => entry.baseUrl === normalizedBaseUrlEntry);
         const nextSources = sortDirectorySeeds([
-          ...currentSources.filter((entry) => entry.baseUrl !== parsed.toString().replace(/\/$/, '')),
+          ...currentSources.filter((entry) => entry.baseUrl !== normalizedBaseUrlEntry),
           {
-            baseUrl: parsed.toString().replace(/\/$/, ''),
+            baseUrl: normalizedBaseUrlEntry,
             label: normalizedLabel,
+            executeToken: existingSource?.executeToken ?? null,
           },
         ]);
         await writeDirectorySeeds(runtimeStateStore.paths.directorySeedsPath, nextSources);
@@ -13771,6 +13789,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const preparedOrderPayment = serviceOrderResult.payment;
           applyOrderPayment(preparedOrderPayment);
 
+          // The execute endpoint may require a shared-secret bearer token;
+          // resolve it from the directory seeds registry for this provider.
+          const normalizedProviderBaseUrl = request.providerDaemonBaseUrl.replace(/\/$/, '');
+          const executeToken = (await readDirectorySeeds(runtimeStateStore.paths.directorySeedsPath))
+            .find((entry) => entry.baseUrl.replace(/\/$/, '') === normalizedProviderBaseUrl)
+            ?.executeToken ?? null;
+
           const execution = await executeRemoteServiceCall({
             providerDaemonBaseUrl: request.providerDaemonBaseUrl,
             traceId: plan.traceId,
@@ -13779,6 +13804,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             providerGlobalMetaId: plan.service.providerGlobalMetaId,
             buyer: state.identity,
             payment: preparedOrderPayment,
+            executeToken,
             request: {
               userTask: request.userTask,
               taskContext: request.taskContext,
@@ -14202,6 +14228,87 @@ export function createDefaultMetabotDaemonHandlers(input: {
         ));
         if (!service) {
           return commandFailed('service_not_found', `Published service was not found: ${execution.servicePinId}`);
+        }
+
+        // Mirror the simplemsg inbound ORDER idempotency: a repeated execution
+        // for the same payment or order reference must not run the provider
+        // twice. The seller order record uses the same dedupe keys.
+        const existingOrderSession = await findExistingProviderOrderSession({
+          state,
+          buyerGlobalMetaId: execution.buyer.globalMetaId,
+          paymentTxid: execution.payment.paymentTxid,
+          orderReference: execution.payment.orderReference,
+        });
+        if (existingOrderSession) {
+          return commandSuccess({
+            handled: true,
+            duplicate: true,
+            state: existingOrderSession.state,
+            paymentTxid: normalizeText(existingOrderSession.paymentTxid) || execution.payment.paymentTxid || null,
+            orderReference: execution.payment.orderReference,
+            servicePinId: service.currentPinId,
+          });
+        }
+
+        // The caller-supplied payment object is not trusted: verify it on
+        // chain against the service terms and the provider receive address,
+        // exactly like the simplemsg inbound ORDER path. Nothing is persisted
+        // for rejected executions; the synchronous response carries the
+        // outcome, so a chain outage stays retryable.
+        const serviceAmount = normalizePaymentAmountForCompare(service.price);
+        const orderAmount = normalizePaymentAmountForCompare(execution.payment.paymentAmount);
+        const serviceCurrency = normalizePublishedServiceCurrency(service.currency);
+        const orderCurrency = normalizePublishedServiceCurrency(execution.payment.paymentCurrency);
+        const serviceIsFree = Number(serviceAmount || '0') === 0;
+        const paymentTxid = execution.payment.paymentTxid;
+        const paymentChain = normalizeText(execution.payment.paymentChain).toLowerCase();
+        if (serviceIsFree) {
+          if (paymentTxid) {
+            return commandFailed('order_payment_unverified', 'Free service execution must not include a payment txid.');
+          }
+        } else if (!paymentTxid) {
+          return commandFailed('order_payment_unverified', 'Paid service execution must include a payment txid.');
+        } else if (!paymentChain) {
+          return commandFailed('order_payment_unverified', 'Paid service execution must include payment chain metadata.');
+        } else if (!orderAmount || orderAmount !== serviceAmount || !orderCurrency || orderCurrency !== serviceCurrency) {
+          return commandFailed('order_payment_unverified', 'Service execution payment terms do not match the local service.');
+        }
+
+        const paymentVerification = await verifyServiceOrderPayment({
+          adapters,
+          paymentTxid: paymentTxid || null,
+          paymentChain: paymentChain || null,
+          settlementKind: serviceIsFree ? 'free' : 'native',
+          paymentAddress: service.paymentAddress,
+          amount: serviceAmount,
+          currency: serviceCurrency,
+        }).catch((error): { verified: false; outcome: 'error' } => {
+          // Unexpected verifier failures must not burn a paid order either;
+          // treat them as transient like chain transport outages.
+          console.warn(`[provider execute] payment verification threw for ${execution.traceId || paymentTxid}: ${error instanceof Error ? error.message : String(error)}`);
+          return { verified: false, outcome: 'error' };
+        });
+        if (!paymentVerification.verified && paymentVerification.outcome === 'error') {
+          // Chain transport/indexer outage: do NOT execute and do NOT record a
+          // terminal state. The buyer retry must be able to reprocess this
+          // execution once the chain API recovers.
+          console.warn(`[provider execute] payment verification unavailable for ${execution.traceId || paymentTxid}: chain lookup failed; keeping the execution retryable.`);
+          return commandFailed(
+            'order_payment_verification_unavailable',
+            'Service execution payment could not be verified because the chain API is unavailable; the execution was not started and can be retried.',
+            {
+              data: {
+                handled: true,
+                transient: true,
+                retryable: true,
+                paymentTxid: paymentTxid || null,
+                orderReference: execution.payment.orderReference,
+              },
+            },
+          );
+        }
+        if (!paymentVerification.verified) {
+          return commandFailed('order_payment_unverified', 'Service execution payment could not be verified on chain.');
         }
 
         const traceId = execution.traceId || `trace-${sanitizeServiceSegment(service.serviceName)}-${Date.now().toString(36)}`;

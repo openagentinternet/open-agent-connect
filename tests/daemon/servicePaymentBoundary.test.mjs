@@ -2802,6 +2802,138 @@ test('buyer-side provider daemon execution failure creates a refund request afte
   assert.match(trace.order.refundRequestPinId, /^\/protocols\/service-refund-request-pin-/);
 });
 
+function stubProviderDaemonFetch(executeRequests) {
+  return async (url, options = {}) => {
+    const href = String(url);
+    if (href.includes('/api/network/services')) {
+      return new Response(JSON.stringify({
+        ok: true,
+        data: {
+          services: [{
+            servicePinId: 'chain-service-pin-1',
+            sourceServicePinId: 'chain-service-pin-1',
+            currentPinId: 'chain-service-pin-1',
+            providerGlobalMetaId: 'idq1provider',
+            providerSkill: 'metabot-weather-oracle',
+            serviceName: 'weather-oracle',
+            displayName: 'Weather Oracle',
+            price: '0.00001',
+            currency: 'SPACE',
+            outputType: 'text',
+            endpoint: 'simplemsg',
+            paymentAddress: MVC_PAYMENT_ADDRESS,
+            online: true,
+            providerDaemonBaseUrl: 'http://127.0.0.1:27272',
+          }],
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    executeRequests.push({
+      headers: options.headers ?? {},
+      body: JSON.parse(String(options.body || '{}')),
+    });
+    return new Response(JSON.stringify({
+      ok: true,
+      state: 'success',
+      data: {
+        traceId: 'trace-remote-execute',
+        responseText: 'Tomorrow weather: bright with light wind.',
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+}
+
+async function createProviderDaemonCallHarness(t, paymentTxid) {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const harness = await createServiceCallHarness(t, {
+    servicePaymentExecutor: {
+      async execute(input) {
+        return {
+          paymentTxid,
+          paymentChain: input.paymentChain,
+          paymentAmount: input.amount,
+          paymentCurrency: input.currency,
+          settlementKind: input.settlementKind,
+          network: input.paymentChain,
+        };
+      },
+    },
+  });
+  const executeRequests = [];
+  globalThis.fetch = stubProviderDaemonFetch(executeRequests);
+  return { harness, executeRequests };
+}
+
+test('buyer-side provider daemon execution sends the execute token from directory seeds', async (t) => {
+  const paymentTxid = '9'.repeat(64);
+  const { harness, executeRequests } = await createProviderDaemonCallHarness(t, paymentTxid);
+  const seedsPath = harness.runtimeStateStore.paths.directorySeedsPath;
+  await mkdir(path.dirname(seedsPath), { recursive: true });
+  await writeFile(seedsPath, JSON.stringify({
+    providers: [
+      { baseUrl: 'http://127.0.0.1:27272', label: 'provider', executeToken: 'test-execute-token' },
+    ],
+  }), 'utf8');
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      providerDaemonBaseUrl: 'http://127.0.0.1:27272',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, true, JSON.stringify(called));
+  assert.equal(executeRequests.length, 1);
+  assert.equal(executeRequests[0].headers.authorization, 'Bearer test-execute-token');
+  assert.equal(executeRequests[0].body.payment.paymentTxid, paymentTxid);
+});
+
+test('buyer-side provider daemon execution omits the authorization header without a seed execute token', async (t) => {
+  const paymentTxid = 'a'.repeat(64);
+  const { harness, executeRequests } = await createProviderDaemonCallHarness(t, paymentTxid);
+  const seedsPath = harness.runtimeStateStore.paths.directorySeedsPath;
+  await mkdir(path.dirname(seedsPath), { recursive: true });
+  await writeFile(seedsPath, JSON.stringify({
+    providers: [
+      { baseUrl: 'http://127.0.0.1:27272', label: 'provider' },
+    ],
+  }), 'utf8');
+
+  const called = await harness.handlers.services.call({
+    request: {
+      servicePinId: 'chain-service-pin-1',
+      providerGlobalMetaId: 'idq1provider',
+      providerDaemonBaseUrl: 'http://127.0.0.1:27272',
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'User is in Shanghai',
+      spendCap: {
+        amount: '0.00002',
+        currency: 'SPACE',
+      },
+    },
+  });
+
+  assert.equal(called.ok, true, JSON.stringify(called));
+  assert.equal(executeRequests.length, 1);
+  assert.equal(executeRequests[0].headers.authorization, undefined);
+});
+
 test('buyer-side BTC refund request is scheduled instead of publishing an MVC refund address fallback', async (t) => {
   const paymentTxid = '7'.repeat(64);
   const harness = await createServiceCallHarness(t, {
@@ -3775,6 +3907,9 @@ test('/api services.execute persists seller lifecycle state and provider runtime
       providerSkills,
       executionReminder,
     },
+    rawTxs: {
+      ['9'.repeat(64)]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
   });
   const paymentTxid = '9'.repeat(64);
   const serviceOrderPinId = 'skill-service-order-direct-pin-1';
@@ -3846,6 +3981,9 @@ test('/api services.execute resolves non-text provider artifacts into direct tra
     llmExecuteHook: (request) => output.write(request),
     llmOutput: () => output.outputText('Direct image complete.'),
     llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
     providerArtifactUploadLargeFile: createProviderArtifactUploadMock(uploadCalls),
   });
 
@@ -3914,6 +4052,9 @@ test('/api services.execute image output does not complete session while artifac
     llmExecuteHook: (request) => output.write(request),
     llmOutput: () => output.outputText('Direct pending-window image complete.'),
     llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
     providerArtifactUploadLargeFile: async (input) => {
       try {
         await assertProviderSessionNotCompleted(harness.homeDir, traceId);
@@ -3971,6 +4112,9 @@ test('/api services.execute upload failure marks direct seller order and trace f
     llmExecuteHook: (request) => output.write(request),
     llmOutput: () => output.outputText('Direct image complete.'),
     llmSessionCwd: () => output.sessionCwd(),
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
     providerArtifactUploadLargeFile: async (input) => {
       uploadCalls.push(input);
       const error = new Error(`simulated direct artifact upload failure at ${output.filePath}`);
@@ -4088,6 +4232,9 @@ test('/api services.execute persists failed seller lifecycle state with provider
       status: 'failed',
       error: 'runtime refused direct execution',
     }),
+    rawTxs: {
+      ['8'.repeat(64)]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
   });
   const paymentTxid = '8'.repeat(64);
 
@@ -5717,7 +5864,11 @@ test('inbound provider ORDER reaches terminal failed state when the runner throw
 
 test('/api services.execute returns a structured failure when the runner throws before producing a result', async (t) => {
   const paymentTxid = '8'.repeat(64);
-  const harness = await createInboundProviderOrderHarness(t);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
   const bindingsPath = resolveMetabotPaths(harness.homeDir).llmBindingsPath;
   await rm(bindingsPath, { force: true });
   await mkdir(bindingsPath, { recursive: true });
@@ -5753,6 +5904,274 @@ test('/api services.execute returns a structured failure when the runner throws 
   const sellerOrder = state.sellerOrders.find((entry) => entry.paymentTxid === paymentTxid);
   assert.ok(sellerOrder, 'expected terminal seller order for a direct execute runner throw');
   assert.equal(sellerOrder.state, 'failed');
+});
+
+test('/api services.execute verifies the payment on chain before executing', async (t) => {
+  const paymentTxid = 'b'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-verify-ok',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(harness.fetchRawTxCalls, [paymentTxid]);
+  assert.equal(harness.llmCalls.length, 1);
+});
+
+test('/api services.execute rejects a mismatched payment without executing or persisting', async (t) => {
+  const paymentTxid = 'c'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      // Pays a different address than the service payment address.
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_OTHER_ADDRESS, 1000),
+    },
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-verify-mismatch',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'order_payment_unverified');
+  assert.equal(harness.llmCalls.length, 0);
+
+  const state = await harness.runtimeStateStore.readState();
+  assert.equal(state.sellerOrders.length, 0);
+  assert.equal(state.traces.length, 0);
+});
+
+test('/api services.execute keeps a paid execution retryable when the chain API is unavailable', async (t) => {
+  const paymentTxid = 'd'.repeat(64);
+  const rawTx = buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000);
+  let chainDown = true;
+  const harness = await createInboundProviderOrderHarness(t, {
+    adapters: new Map([
+      ['mvc', {
+        network: 'mvc',
+        explorerBaseUrl: 'https://www.mvcscan.com',
+        feeRateUnit: 'sat/byte',
+        minTransferSatoshis: 600,
+        async deriveAddress() { return 'mvc-provider-address'; },
+        async fetchUtxos() {
+          if (chainDown) {
+            throw new Error('chain API unavailable');
+          }
+          return [];
+        },
+        async fetchBalance() {
+          return {
+            chain: 'mvc',
+            address: 'mvc-provider-address',
+            totalSatoshis: 0,
+            confirmedSatoshis: 0,
+            unconfirmedSatoshis: 0,
+            utxoCount: 0,
+          };
+        },
+        async fetchFeeRate() { return 1; },
+        async fetchRawTx() {
+          if (chainDown) {
+            throw new Error('chain API unavailable');
+          }
+          return rawTx;
+        },
+        async broadcastTx() { throw new Error('not used'); },
+        async buildTransfer() { throw new Error('not used'); },
+        async buildInscription() { throw new Error('not used'); },
+      }],
+    ]),
+  });
+  const executeRequest = {
+    traceId: 'trace-provider-direct-verify-outage',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  };
+
+  const outage = await harness.handlers.services.execute(executeRequest);
+
+  assert.equal(outage.ok, false);
+  assert.equal(outage.code, 'order_payment_verification_unavailable');
+  assert.equal(outage.data.transient, true);
+  assert.equal(outage.data.retryable, true);
+  assert.equal(harness.llmCalls.length, 0);
+  const stateAfterOutage = await harness.runtimeStateStore.readState();
+  assert.equal(stateAfterOutage.sellerOrders.length, 0);
+  assert.equal(stateAfterOutage.traces.length, 0);
+
+  chainDown = false;
+  const retry = await harness.handlers.services.execute(executeRequest);
+
+  assert.equal(retry.ok, true);
+  assert.equal(retry.data.duplicate, undefined);
+  assert.equal(harness.llmCalls.length, 1);
+});
+
+test('/api services.execute requires a payment txid for a paid service', async (t) => {
+  const harness = await createInboundProviderOrderHarness(t);
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-unpaid',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'order_payment_unverified');
+  assert.match(result.message, /payment txid/);
+  assert.equal(harness.llmCalls.length, 0);
+
+  const state = await harness.runtimeStateStore.readState();
+  assert.equal(state.sellerOrders.length, 0);
+  assert.equal(state.traces.length, 0);
+});
+
+test('/api services.execute runs a free service without payment', async (t) => {
+  const harness = await createInboundProviderOrderHarness(t, {
+    service: { price: '0' },
+  });
+
+  const result = await harness.handlers.services.execute({
+    traceId: 'trace-provider-direct-free',
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(harness.llmCalls.length, 1);
+
+  const state = await harness.runtimeStateStore.readState();
+  const sellerOrder = state.sellerOrders.find((entry) => entry.traceId === 'trace-provider-direct-free');
+  assert.ok(sellerOrder, 'expected free direct execution seller order');
+  assert.equal(sellerOrder.state, 'completed');
+});
+
+test('/api services.execute dedupes a repeated execution for the same payment', async (t) => {
+  const paymentTxid = 'e'.repeat(64);
+  const harness = await createInboundProviderOrderHarness(t, {
+    rawTxs: {
+      [paymentTxid]: buildMvcPaymentRawTx(MVC_PAYMENT_ADDRESS, 1000),
+    },
+  });
+  const executeRequest = {
+    servicePinId: harness.service.currentPinId,
+    providerGlobalMetaId: harness.identity.globalMetaId,
+    buyer: {
+      host: 'codex',
+      globalMetaId: harness.buyerGlobalMetaId,
+      name: 'Buyer Bot',
+    },
+    request: {
+      userTask: 'Tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+    payment: {
+      paymentTxid,
+      paymentChain: 'mvc',
+      paymentAmount: harness.service.price,
+      paymentCurrency: harness.service.currency,
+      settlementKind: 'native',
+      orderReference: 'skill-service-order-dedupe-pin-1',
+      serviceOrderPinId: 'skill-service-order-dedupe-pin-1',
+    },
+  };
+
+  const first = await harness.handlers.services.execute({
+    ...executeRequest,
+    traceId: 'trace-provider-direct-dedupe-first',
+  });
+  assert.equal(first.ok, true);
+  assert.equal(harness.llmCalls.length, 1);
+
+  const second = await harness.handlers.services.execute({
+    ...executeRequest,
+    traceId: 'trace-provider-direct-dedupe-second',
+  });
+  assert.equal(second.ok, true);
+  assert.equal(second.data.duplicate, true);
+  assert.equal(second.data.state, 'completed');
+  assert.equal(second.data.paymentTxid, paymentTxid);
+  assert.equal(harness.llmCalls.length, 1);
 });
 
 test('inbound provider ORDER still reaches rating_pending when trace artifact export fails after delivery', async (t) => {
