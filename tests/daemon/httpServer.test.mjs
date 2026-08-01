@@ -2462,7 +2462,7 @@ test('GET /ui/bot supports zh-CN local UI chrome without changing routes', async
   assert.match(html, /data-live-indicator aria-label="Online" title="Online"><\/span>/);
   assert.match(html, /data-i18n-key="bot\.publicIdentity">基础<\/button>/);
   assert.match(html, /data-i18n-key="bot\.behavior">人格<\/button>/);
-  assert.match(html, /data-i18n-key="bot\.chatSkills">聊天技能<\/button>/);
+  assert.match(html, /data-i18n-key="bot\.chatSkills">聊天设置<\/button>/);
   assert.match(html, /data-i18n-key="bot\.advanced">高级<\/button>/);
   assert.match(html, /data-i18n-key="bot\.openPublicBotPage">打开公开 Bot Page<\/button>/);
   assert.match(html, /data-i18n-key="bot\.viewConversations">查看对话<\/button>/);
@@ -2747,6 +2747,61 @@ test('POST /api/services/execute forwards remote execution payloads to services.
       transcriptMarkdownPath: '/tmp/provider-transcript.md',
     },
   });
+});
+
+test('POST /api/services/execute enforces OAC_EXECUTE_API_TOKEN when configured', async (t) => {
+  const previousToken = process.env.OAC_EXECUTE_API_TOKEN;
+  process.env.OAC_EXECUTE_API_TOKEN = 'route-test-secret';
+  t.after(() => {
+    if (previousToken === undefined) {
+      delete process.env.OAC_EXECUTE_API_TOKEN;
+    } else {
+      process.env.OAC_EXECUTE_API_TOKEN = previousToken;
+    }
+  });
+  const server = await startServer();
+  t.after(async () => server.close());
+
+  const request = {
+    traceId: 'trace-token-gate',
+    servicePinId: 'service-weather',
+    providerGlobalMetaId: 'gm-weather-seller',
+    buyer: {
+      host: 'codex',
+      globalMetaId: 'gm-caller',
+      name: 'Caller Bot',
+    },
+    request: {
+      userTask: 'tell me tomorrow weather',
+      taskContext: 'Shanghai tomorrow',
+    },
+  };
+  const postExecute = (headers = {}) => fetch(`${server.baseUrl}/api/services/execute`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...headers,
+    },
+    body: JSON.stringify(request),
+  });
+
+  const missing = await postExecute();
+  const missingPayload = await missing.json();
+  assert.equal(missing.status, 200);
+  assert.equal(missingPayload.ok, false);
+  assert.equal(missingPayload.code, 'execute_api_unauthorized');
+
+  const wrong = await postExecute({ authorization: 'Bearer wrong-secret' });
+  const wrongPayload = await wrong.json();
+  assert.equal(wrongPayload.ok, false);
+  assert.equal(wrongPayload.code, 'execute_api_unauthorized');
+  assert.equal(server.calls.serviceExecutions.length, 0);
+
+  const authed = await postExecute({ authorization: 'Bearer route-test-secret' });
+  const authedPayload = await authed.json();
+  assert.equal(authedPayload.ok, true);
+  assert.equal(server.calls.serviceExecutions.length, 1);
+  assert.deepEqual(server.calls.serviceExecutions[0], request);
 });
 
 test('POST /api/services/publish forwards the JSON payload to services.publish', async (t) => {

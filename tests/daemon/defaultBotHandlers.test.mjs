@@ -1663,6 +1663,7 @@ test('default bot createProfile writes explicitly empty allowChatSkills to chain
   assert.deepEqual(writeCalls.map((call) => call.path), ['/info/name', '/info/chatpubkey', '/info/persona', '/info/chatSkills']);
   assert.equal(writeCalls[3].contentType, 'application/json');
   assert.deepEqual(JSON.parse(writeCalls[3].payload), {
+    allowChatSkills: [],
     allowPrivateChatSkills: [],
     allowGroupChatSkills: [],
   });
@@ -2867,7 +2868,7 @@ test('default bot updateProfile backfills missing LLM info when saving only bio'
   });
 });
 
-test('default bot updateProfile validates allowChatSkills and writes chain chatSkills before local state', async (t) => {
+test('default bot updateProfile saves allowChatSkills locally before the best-effort chain mirror', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -2914,9 +2915,12 @@ test('default bot updateProfile validates allowChatSkills and writes chain chatS
     signer: makeSigner(async (input) => {
       writeCalls.push(input);
       if (input.path === '/info/chatSkills') {
-        const beforeLocalSave = await getMetabotProfile(systemHomeDir, profile.slug);
-        assert.deepEqual(beforeLocalSave.allowChatSkills, []);
+        // Local-first: the local policy save has already landed when the
+        // best-effort chain mirror runs.
+        const afterLocalSave = await getMetabotProfile(systemHomeDir, profile.slug);
+        assert.deepEqual(afterLocalSave.allowChatSkills, ['metabot-help']);
         assert.deepEqual(JSON.parse(input.payload), {
+          allowChatSkills: ['metabot-help'],
           allowPrivateChatSkills: ['metabot-help'],
           allowGroupChatSkills: [],
         });
@@ -2944,6 +2948,132 @@ test('default bot updateProfile validates allowChatSkills and writes chain chatS
 
   assert.equal(result.ok, true);
   assert.deepEqual(writeCalls.map((call) => call.path), ['/info/chatSkills']);
+  assert.deepEqual(result.data.profile.allowChatSkills, ['metabot-help']);
+  assert.deepEqual(result.data.chainSync, { ok: true });
+  assert.deepEqual(result.data.chainWrites.flatMap((write) => write.txids), ['chat-skill-save-tx-1']);
+  assert.deepEqual(updated.allowChatSkills, ['metabot-help']);
+});
+
+test('default bot updateProfile saves allowChatSkills locally when the chain sync fails', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Chat Skill Offline Bot',
+    role: 'Original role.',
+  });
+  await upsertIdentityProfile({
+    systemHomeDir,
+    name: profile.name,
+    homeDir: profile.homeDir,
+    globalMetaId: 'gm-chat-skill-offline-bot',
+    mvcAddress: 'addr-chat-skill-offline-bot',
+  });
+  await createLlmRuntimeStore(profile.homeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'healthy'),
+    ],
+  });
+  await createLlmBindingStore(profile.homeDir).write({
+    version: 1,
+    bindings: [
+      {
+        id: 'binding-chat-skill-offline-primary',
+        metaBotSlug: profile.slug,
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+    ],
+  });
+  await writeProfileSkill(profile.homeDir, 'metabot-help');
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      writeCalls.push(input);
+      throw new Error('chain is offline');
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    allowChatSkills: ['metabot-help'],
+  });
+  const updated = await getMetabotProfile(systemHomeDir, profile.slug);
+  const policy = JSON.parse(await readFile(resolveMetabotPaths(profile.homeDir).chatSkillPolicyPath, 'utf8'));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writeCalls.map((call) => call.path), ['/info/chatSkills']);
+  assert.equal(result.data.chainSync.ok, false);
+  assert.match(result.data.chainSync.error, /chain is offline/);
+  assert.deepEqual(result.data.chainWrites, []);
+  assert.deepEqual(result.data.profile.allowChatSkills, ['metabot-help']);
+  assert.deepEqual(updated.allowChatSkills, ['metabot-help']);
+  assert.deepEqual(policy.allowChatSkills, ['metabot-help']);
+});
+
+test('default bot updateProfile saves allowChatSkills locally for profiles without a chained identity', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const profile = await createMetabotProfile(systemHomeDir, {
+    name: 'Chat Skill Local Bot',
+    role: 'Original role.',
+  });
+  await createLlmRuntimeStore(profile.homeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'healthy'),
+    ],
+  });
+  await createLlmBindingStore(profile.homeDir).write({
+    version: 1,
+    bindings: [
+      {
+        id: 'binding-chat-skill-local-primary',
+        metaBotSlug: profile.slug,
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+    ],
+  });
+  await writeProfileSkill(profile.homeDir, 'metabot-help');
+  const signerCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir: profile.homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    signer: makeSigner(async (input) => {
+      signerCalls.push(input);
+      throw new Error('unchained profile should not sync chat skills');
+    }),
+  });
+
+  const result = await handlers.bot.updateProfile({
+    slug: profile.slug,
+    allowChatSkills: ['metabot-help'],
+  });
+  const updated = await getMetabotProfile(systemHomeDir, profile.slug);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(signerCalls, []);
+  assert.deepEqual(result.data.chainSync, { ok: true });
+  assert.deepEqual(result.data.chainWrites, []);
   assert.deepEqual(result.data.profile.allowChatSkills, ['metabot-help']);
   assert.deepEqual(updated.allowChatSkills, ['metabot-help']);
 });
@@ -3821,6 +3951,63 @@ test('default services listPublishSkills lists fallback runtime skills when expl
   assert.equal(result.ok, true);
   assert.equal(result.data.runtime.id, 'runtime-claude');
   assert.deepEqual(result.data.skills.map((skill) => skill.skillName), ['metabot-claude-only']);
+});
+
+test('default services listPublishSkills exposes the last chat skill resolution outcome', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-services-', 'chat-resolution-bot');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  await writeRuntimeIdentity(homeDir, 'Chat Resolution Bot');
+  await createLlmRuntimeStore(homeDir).write({
+    version: 1,
+    runtimes: [
+      runtime('codex', 'runtime-codex', 'healthy'),
+    ],
+  });
+  await createLlmBindingStore(homeDir).write({
+    version: 1,
+    bindings: [
+      {
+        id: 'binding-chat-resolution-primary',
+        metaBotSlug: 'chat-resolution-bot',
+        llmRuntimeId: 'runtime-codex',
+        role: 'primary',
+        priority: 0,
+        enabled: true,
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      },
+    ],
+  });
+  await writeProjectSkill(homeDir, '.codex', 'metabot-help');
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+  });
+
+  // No chat turn has recorded a resolution yet: the endpoint stays clean.
+  const withoutRecord = await handlers.services.listPublishSkills();
+  assert.equal(withoutRecord.ok, true);
+  assert.equal(withoutRecord.data.chatSkillResolution, null);
+
+  const paths = resolveMetabotPaths(homeDir);
+  await mkdir(path.dirname(paths.chatSkillResolutionPath), { recursive: true });
+  await writeFile(paths.chatSkillResolutionPath, JSON.stringify({
+    resolved: ['metabot-help'],
+    skipped: ['metabot-missing'],
+    warning: 'Skipping unavailable chat skills: metabot-missing',
+    checkedAt: '2026-05-06T00:00:00.000Z',
+  }), 'utf8');
+
+  const withRecord = await handlers.services.listPublishSkills();
+  assert.equal(withRecord.ok, true);
+  assert.deepEqual(withRecord.data.chatSkillResolution.resolved, ['metabot-help']);
+  assert.deepEqual(withRecord.data.chatSkillResolution.skipped, ['metabot-missing']);
+  assert.match(withRecord.data.chatSkillResolution.warning, /metabot-missing/);
+  assert.equal(withRecord.data.chatSkillResolution.checkedAt, '2026-05-06T00:00:00.000Z');
 });
 
 test('default bot stats and sessions aggregate executor history by MetaBot slug', async (t) => {

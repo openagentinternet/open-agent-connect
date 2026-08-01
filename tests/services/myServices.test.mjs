@@ -517,3 +517,65 @@ test('validateMyServiceMutation rejects revoked or missing-creator services', ()
     },
   );
 });
+
+test('rating_pending orders surface as delivered work in My-Services listing and aggregates', () => {
+  const profiles = [
+    {
+      slug: 'seller',
+      name: 'Seller Bot',
+      homeDir: '/tmp/seller',
+      identity: {
+        metabotId: 7,
+        name: 'Seller Bot',
+        globalMetaId: 'idq1seller',
+        mvcAddress: '1seller',
+        addresses: { mvc: '1seller' },
+      },
+      services: [createService()],
+      sellerOrders: [
+        createOrder({
+          id: 'seller-order-completed',
+          paymentTxid: 'payment-completed',
+          paymentAmount: '0.00005',
+        }),
+        createOrder({
+          id: 'seller-order-rating-pending',
+          state: 'rating_pending',
+          paymentTxid: 'payment-rating-pending',
+          paymentAmount: '0.00007',
+          deliveredAt: 1_775_000_030_000,
+          ratingRequestedAt: 1_775_000_031_000,
+          updatedAt: 1_775_000_031_000,
+        }),
+        createOrder({
+          id: 'seller-order-open',
+          state: 'in_progress',
+          paymentTxid: 'payment-open',
+          paymentAmount: '9',
+        }),
+      ],
+      ratingDetails: [],
+    },
+  ];
+
+  const summaryPage = buildMyServiceSummaries({ profiles, page: 1, pageSize: 10 });
+  assert.equal(summaryPage.total, 1);
+  // Delivered but un-rated work counts as success; the still-open order does not.
+  assert.equal(summaryPage.items[0].successCount, 2);
+  assert.equal(summaryPage.items[0].refundCount, 0);
+  assert.equal(summaryPage.items[0].grossRevenue, '0.00012');
+  assert.equal(summaryPage.items[0].netIncome, '0.00012');
+
+  const detailPage = buildMyServiceOrderDetails({
+    serviceId: 'service-create-pin',
+    profiles,
+    page: 1,
+    pageSize: 10,
+  });
+  assert.equal(detailPage.total, 2);
+  assert.equal(detailPage.items[0].id, 'seller-order-rating-pending');
+  assert.equal(detailPage.items[0].status, 'rating_pending');
+  assert.equal(detailPage.items[0].paymentTxid, 'payment-rating-pending');
+  assert.equal(detailPage.items[1].id, 'seller-order-completed');
+  assert.equal(detailPage.items[1].status, 'completed');
+});

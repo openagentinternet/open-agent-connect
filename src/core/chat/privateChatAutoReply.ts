@@ -1,5 +1,6 @@
 import { sendPrivateChat } from './privateChat';
 import { loadChatPersona } from './chatPersonaLoader';
+import type { ChatSkillWaitNoticeGenerator } from './chatSkillWaitNotice';
 import {
   persistA2AConversationMessageBestEffort,
   type A2AConversationMessagePersister,
@@ -29,6 +30,22 @@ const CLOSE_CONVERSATION_SIGNAL = 'Bye';
 const CLOSE_CONVERSATION_FINAL_LINE_PATTERN = /^(?:bye|goodbye)[.!。！]?$/iu;
 const MAX_REPLIES_PER_MINUTE = 10;
 const MAX_REPLIES_PER_HOUR = 100;
+// Outbound-message extension markers for the chat-skill wait notice: they let
+// retries dedupe against conversation history and let the staleness guard
+// skip notices when checking whether a newer peer message has arrived.
+const CHAT_SKILL_WAIT_NOTICE_EXTENSION = 'chatSkillWaitNotice';
+const CHAT_SKILL_WAIT_NOTICE_FOR_EXTENSION = 'chatSkillWaitNoticeForMessageId';
+
+function hasSentChatSkillWaitNotice(
+  messages: PrivateChatMessage[],
+  forMessageId: string,
+): boolean {
+  return messages.some((message) => (
+    message.direction === 'outbound'
+    && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] === true
+    && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_FOR_EXTENSION] === forMessageId
+  ));
+}
 
 // Order-protocol records (ORDER/ORDER_STATUS/DELIVERY/NeedsRating/ORDER_END)
 // are service traffic, not conversation. Keep them out of the LLM chat
@@ -48,6 +65,16 @@ export interface PrivateChatAutoReplyDependencies {
   replyRunner: ChatReplyRunner;
   a2aConversationPersister?: A2AConversationMessagePersister;
   logSendFailure?: (event: PrivateChatSendFailureEvent) => void;
+  // IDBots hasActiveOrderForPrivateChatSuppression parity: while an order with
+  // the peer is being negotiated/executed, inbound free-chat messages are
+  // still recorded but get no auto-reply (and no turn counting), so the LLM
+  // cannot chime in between order-protocol messages. Operator guided turns
+  // are never suppressed. Absent = never suppress.
+  hasActiveOrderWithPeer?: (peerGlobalMetaId: string) => Promise<boolean>;
+  // Generates the persona-voiced "please wait" notice sent to the peer once
+  // per inbound message when an allowed chat skill actually starts executing
+  // (IDBots-style interim reply). Null/absent disables the notice.
+  chatSkillWaitNotice?: ChatSkillWaitNoticeGenerator | null;
   now?: () => number;
 }
 
@@ -103,16 +130,45 @@ function buildMessageId(timestamp: number): string {
   return `msg-${timestamp}-${random}`;
 }
 
-function parseExtensions(content: string): Record<string, unknown> | null {
+// The simplemsg wire format wraps extension-carrying messages as
+// {"content": "...", "extensions": {...}}. Inbound records must store the
+// unwrapped text (like outbound records do), otherwise raw JSON leaks into
+// the LLM prompt history. Exported so prompt builders can also unwrap
+// legacy records that were stored with the wrapper still on.
+export function unwrapPrivateChatContent(raw: string): {
+  content: string;
+  extensions: Record<string, unknown> | null;
+} {
   try {
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed.extensions as Record<string, unknown> | null ?? null;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      parsed
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && typeof parsed.content === 'string'
+      && Object.hasOwn(parsed, 'extensions')
+    ) {
+      return {
+        content: parsed.content,
+        extensions: (parsed.extensions as Record<string, unknown> | null) ?? null,
+      };
     }
   } catch {
-    // Not JSON, no extensions.
+    // Not a wrapper payload.
   }
-  return null;
+  return { content: raw, extensions: null };
+}
+
+// Prompt-context helper: unwrap legacy inbound records whose stored content
+// still carries the {"content","extensions"} wire wrapper, so every consumer
+// downstream (history rendering, notice dedupe, moved-past checks) sees plain
+// text. New records are already stored unwrapped; this is idempotent.
+function unwrapLegacyInboundContents(messages: PrivateChatMessage[]): PrivateChatMessage[] {
+  return messages.map((message) => (
+    message.direction === 'inbound'
+      ? { ...message, content: unwrapPrivateChatContent(message.content).content }
+      : message
+  ));
 }
 
 async function pendingGuidanceClaimStillMatchesState(
@@ -207,9 +263,15 @@ async function latestConversationMessageMatches(input: {
   conversationId: string;
   expectedMessageId: string;
 }): Promise<boolean> {
-  const latestMessages = await input.stateStore.getRecentMessages(input.conversationId, 1);
-  const latestMessage = latestMessages.at(-1) ?? null;
-  return Boolean(latestMessage && latestMessage.messageId === input.expectedMessageId);
+  // Scan a small tail instead of only the very last record: our own interim
+  // chat-skill wait notices are appended to the store while the turn is still
+  // being composed, and must not count as "a newer message arrived".
+  const latestMessages = await input.stateStore.getRecentMessages(input.conversationId, 5);
+  const latestSignificantMessage = [...latestMessages].reverse().find((message) => !(
+    message.direction === 'outbound'
+    && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] === true
+  ));
+  return Boolean(latestSignificantMessage && latestSignificantMessage.messageId === input.expectedMessageId);
 }
 
 function checkRateLimit(rateLimiter: RateLimiterState, now: number): boolean {
@@ -221,6 +283,30 @@ function checkRateLimit(rateLimiter: RateLimiterState, now: number): boolean {
   const repliesLastHour = rateLimiter.replyTimestamps.length;
 
   return repliesLastMinute < MAX_REPLIES_PER_MINUTE && repliesLastHour < MAX_REPLIES_PER_HOUR;
+}
+
+// True when the conversation has moved past the given message: either a
+// newer inbound arrived (only the latest message of a burst should be
+// answered, IDBots-style) or a non-notice outbound already answered it. Used
+// both to skip queued reply turns BEFORE paying for an LLM call and as the
+// commit-time staleness guard before sending.
+async function conversationMovedPastMessage(input: {
+  stateStore: PrivateChatStateStore;
+  conversationId: string;
+  messageId: string;
+}): Promise<boolean> {
+  const recentMessages = await input.stateStore.getRecentMessages(input.conversationId, 20);
+  const triggerIndex = recentMessages.findIndex((message) => message.messageId === input.messageId);
+  if (triggerIndex < 0) {
+    return false;
+  }
+  return recentMessages.slice(triggerIndex + 1).some((message) => (
+    message.direction === 'inbound'
+    || (
+      message.direction === 'outbound'
+      && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_EXTENSION] !== true
+    )
+  ));
 }
 
 // Per-bot config values win over strategy values; the defaults are the last
@@ -244,6 +330,28 @@ export function createPrivateChatAutoReplyOrchestrator(
   const rateLimiter: RateLimiterState = { replyTimestamps: [] };
   const activeInboundReplies = new Set<string>();
   const getNow = deps.now ?? (() => Date.now());
+
+  // Reply turns are serialized per conversation: back-to-back inbound messages
+  // must not spawn concurrent LLM turns (lost turnCount increments, replies
+  // discarded only after the LLM call was paid for). Different conversations
+  // still run concurrently. The chain never wedges on a rejected promise and
+  // entries are removed once drained.
+  const conversationTurnChains = new Map<string, Promise<unknown>>();
+  async function runSerializedConversationTurn<T>(
+    conversationId: string,
+    turn: () => Promise<T>,
+  ): Promise<T> {
+    const previous = conversationTurnChains.get(conversationId) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(turn);
+    conversationTurnChains.set(conversationId, current);
+    try {
+      return await current;
+    } finally {
+      if (conversationTurnChains.get(conversationId) === current) {
+        conversationTurnChains.delete(conversationId);
+      }
+    }
+  }
 
   async function sendReplyMessage(
     selfGlobalMetaId: string,
@@ -325,6 +433,71 @@ export function createPrivateChatAutoReplyOrchestrator(
     }
   }
 
+  // Sends the interim "please wait" notice for a chat-skill execution and
+  // records it like a normal outbound message, so conversation history (and
+  // later retry dedupe) reflects what the peer actually saw.
+  async function sendChatSkillWaitNotice(input: {
+    selfGlobalMetaId: string;
+    peerGlobalMetaId: string;
+    conversation: PrivateChatConversation;
+    inboundMessage: PrivateChatMessage;
+    persona: Awaited<ReturnType<typeof loadChatPersona>>;
+  }): Promise<void> {
+    if (!deps.chatSkillWaitNotice) return;
+    try {
+      const text = normalizeText(await deps.chatSkillWaitNotice({
+        conversation: input.conversation,
+        inboundMessage: input.inboundMessage,
+        persona: input.persona,
+      }));
+      if (!text) return;
+      const extensions: Record<string, unknown> = {
+        [CHAT_SKILL_WAIT_NOTICE_EXTENSION]: true,
+        [CHAT_SKILL_WAIT_NOTICE_FOR_EXTENSION]: input.inboundMessage.messageId,
+      };
+      const sent = await sendReplyMessage(
+        input.selfGlobalMetaId,
+        input.peerGlobalMetaId,
+        text,
+        extensions,
+      );
+      if (!sent) return;
+      const timestamp = getNow();
+      const outboundRecord: PrivateChatMessage = {
+        conversationId: input.conversation.conversationId,
+        messageId: sent.pinId || buildMessageId(timestamp),
+        direction: 'outbound',
+        senderGlobalMetaId: input.selfGlobalMetaId,
+        content: text,
+        messagePinId: sent.pinId,
+        extensions,
+        timestamp,
+      };
+      await deps.stateStore.appendMessages([outboundRecord]).catch(() => undefined);
+      await persistA2AConversationMessageBestEffort({
+        paths: deps.paths,
+        local: {
+          globalMetaId: input.selfGlobalMetaId,
+        },
+        peer: {
+          globalMetaId: input.peerGlobalMetaId,
+        },
+        message: {
+          messageId: outboundRecord.messageId,
+          direction: 'outgoing',
+          content: outboundRecord.content,
+          pinId: outboundRecord.messagePinId,
+          txid: sent.txids[0] ?? null,
+          txids: sent.txids,
+          chain: sent.network ?? 'mvc',
+          timestamp: outboundRecord.timestamp,
+        },
+      }, deps.a2aConversationPersister);
+    } catch {
+      // The wait notice is strictly best-effort; skill execution continues.
+    }
+  }
+
   async function prepareOutboundTurn(input: {
     conversation: PrivateChatConversation;
     recentMessages: PrivateChatMessage[];
@@ -333,6 +506,7 @@ export function createPrivateChatAutoReplyOrchestrator(
     inboundMessage: PrivateChatMessage | null;
     operatorGuidanceText?: string | null;
     conversationCloseAllowed?: boolean;
+    onSkillExecutionStart?: () => void;
   }): Promise<PreparedOutboundTurn | null> {
     const conversationCloseAllowed = input.conversationCloseAllowed !== false;
     let runnerResult;
@@ -345,8 +519,16 @@ export function createPrivateChatAutoReplyOrchestrator(
         inboundMessage: input.inboundMessage,
         operatorGuidanceText: input.operatorGuidanceText ?? null,
         conversationCloseAllowed,
+        onSkillExecutionStart: input.onSkillExecutionStart,
       });
-    } catch {
+    } catch (error) {
+      // Never let a throwing runner crash the daemon loop, but never leave the
+      // peer's silence unexplained either.
+      deps.logSendFailure?.({
+        kind: 'reply_runner_failed',
+        peerGlobalMetaId: input.conversation.peerGlobalMetaId,
+        error: describePrivateChatSendFailureError(error),
+      });
       return null;
     }
 
@@ -418,11 +600,11 @@ export function createPrivateChatAutoReplyOrchestrator(
       }
       if (
         input.triggerMessageId
-        && !(await latestConversationMessageMatches({
+        && await conversationMovedPastMessage({
           stateStore: deps.stateStore,
           conversationId: input.conversation.conversationId,
-          expectedMessageId: input.triggerMessageId,
-        }))
+          messageId: input.triggerMessageId,
+        })
       ) {
         if (input.guidanceToConsume) {
           await deps.stateStore.releasePendingGuidanceClaimIfMatches(
@@ -507,7 +689,12 @@ export function createPrivateChatAutoReplyOrchestrator(
       }
 
       return updatedConversation;
-    } catch {
+    } catch (error) {
+      deps.logSendFailure?.({
+        kind: 'reply_commit_failed',
+        peerGlobalMetaId: input.peerGlobalMetaId,
+        error: describePrivateChatSendFailureError(error),
+      });
       if (input.guidanceToConsume) {
         if (outboundReply) {
           await deps.stateStore.clearPendingGuidanceIfMatches(
@@ -536,7 +723,28 @@ export function createPrivateChatAutoReplyOrchestrator(
   }): Promise<boolean> {
     const replyKey = `${input.conversation.conversationId}:${input.inboundMessage.messageId}`;
     if (activeInboundReplies.has(replyKey)) return false;
-    if (!checkRateLimit(rateLimiter, getNow())) return false;
+    if (!checkRateLimit(rateLimiter, getNow())) {
+      // A dropped reply is peer-visible silence; make it diagnosable. The
+      // backfill may retry this message later.
+      deps.logSendFailure?.({
+        kind: 'rate_limited',
+        peerGlobalMetaId: input.peerGlobalMetaId,
+        error: `reply rate limit exceeded (max ${MAX_REPLIES_PER_MINUTE}/min, ${MAX_REPLIES_PER_HOUR}/h)`,
+      });
+      return false;
+    }
+
+    // This turn may have waited in the per-conversation queue while the
+    // conversation moved on (a newer inbound arrived, or an earlier turn
+    // already answered this message). Skip it BEFORE paying for an LLM call;
+    // the commit-time guard applies the same moved-past check before sending.
+    if (await conversationMovedPastMessage({
+      stateStore: deps.stateStore,
+      conversationId: input.conversation.conversationId,
+      messageId: input.inboundMessage.messageId,
+    })) {
+      return false;
+    }
 
     activeInboundReplies.add(replyKey);
     try {
@@ -569,10 +777,34 @@ export function createPrivateChatAutoReplyOrchestrator(
       }
 
       const persona = await loadChatPersona(deps.paths);
-      const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(
-        input.conversation.conversationId,
-        DEFAULT_RECENT_MESSAGES_LIMIT,
+      const recentMessages = unwrapLegacyInboundContents(filterChatPromptMessages(
+        await deps.stateStore.getRecentMessages(
+          input.conversation.conversationId,
+          DEFAULT_RECENT_MESSAGES_LIMIT,
+        ),
       ));
+      // Interim "please wait" notice (IDBots-style): fired by the reply runner
+      // when an allowed chat skill actually starts executing. Sent at most once
+      // per inbound message, deduped against history so a later retry of the
+      // same message does not re-notify the peer.
+      const waitNoticeState: { sent: boolean; promise: Promise<void> | null } = {
+        sent: false,
+        promise: null,
+      };
+      const onSkillExecutionStart = deps.chatSkillWaitNotice
+        ? () => {
+          if (waitNoticeState.sent) return;
+          waitNoticeState.sent = true;
+          if (hasSentChatSkillWaitNotice(recentMessages, input.inboundMessage.messageId)) return;
+          waitNoticeState.promise = sendChatSkillWaitNotice({
+            selfGlobalMetaId: input.selfGlobalMetaId,
+            peerGlobalMetaId: input.peerGlobalMetaId,
+            conversation: input.conversation,
+            inboundMessage: input.inboundMessage,
+            persona,
+          });
+        }
+        : undefined;
       const preparedTurn = await prepareOutboundTurn({
         conversation: input.conversation,
         recentMessages,
@@ -580,6 +812,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         strategy: input.strategy,
         inboundMessage: input.inboundMessage,
         operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
+        onSkillExecutionStart,
       });
       if (!preparedTurn) {
         if (guidanceToConsume) {
@@ -590,6 +823,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         }
         return false;
       }
+
+      // Keep wire order for the peer: the wait notice (if one went out during
+      // the LLM turn) must settle before the final reply is sent.
+      await waitNoticeState.promise;
 
       const committedConversation = await commitOutboundTurn({
         selfGlobalMetaId: input.selfGlobalMetaId,
@@ -616,9 +853,18 @@ export function createPrivateChatAutoReplyOrchestrator(
       const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
       const normalizedPeerGlobalMetaId = normalizeText(peerGlobalMetaId);
       if (!selfGlobalMetaId || !normalizedPeerGlobalMetaId) return false;
+      // Active-order suppression gates the recovery path too: a message that
+      // arrived mid-order must not get a late free-chat reply while the order
+      // is still open.
+      if (await deps.hasActiveOrderWithPeer?.(normalizedPeerGlobalMetaId)) return false;
 
       const conversation = await deps.stateStore.getConversationByPeer(normalizedPeerGlobalMetaId);
       if (!conversation || conversation.state !== 'active' || conversation.lastDirection !== 'inbound') {
+        return false;
+      }
+      // A live or queued reply turn for this conversation already covers the
+      // pending message; recovery must not line up behind it.
+      if (conversationTurnChains.has(conversation.conversationId)) {
         return false;
       }
       const [latestMessage] = await deps.stateStore.getRecentMessages(conversation.conversationId, 1);
@@ -636,13 +882,13 @@ export function createPrivateChatAutoReplyOrchestrator(
           : null,
         config,
       );
-      return replyToInboundMessage({
+      return runSerializedConversationTurn(conversation.conversationId, () => replyToInboundMessage({
         selfGlobalMetaId,
         peerGlobalMetaId: normalizedPeerGlobalMetaId,
         conversation,
         inboundMessage: latestMessage,
         strategy,
-      });
+      }));
     },
     async retryOutboundMessage(peerGlobalMetaId, message) {
       if (message.direction !== 'outbound') return false;
@@ -774,16 +1020,20 @@ export function createPrivateChatAutoReplyOrchestrator(
         };
       }
 
-      const simplemsgClassification = classifySimplemsgContent(message.content);
+      // Unwrap the {"content","extensions"} wire envelope up front so
+      // classification, the Bye check, the stored record, and the LLM prompt
+      // all see plain text instead of raw JSON.
+      const inboundWireContent = unwrapPrivateChatContent(message.content);
+      const simplemsgClassification = classifySimplemsgContent(inboundWireContent.content);
 
       const inboundMessageRecord: PrivateChatMessage = {
         conversationId: conversation.conversationId,
         messageId: message.messagePinId || buildMessageId(now),
         direction: 'inbound',
         senderGlobalMetaId: peerGlobalMetaId,
-        content: message.content,
+        content: inboundWireContent.content,
         messagePinId: message.messagePinId,
-        extensions: parseExtensions(message.content),
+        extensions: inboundWireContent.extensions,
         timestamp: inboundTimestamp,
       };
 
@@ -834,28 +1084,51 @@ export function createPrivateChatAutoReplyOrchestrator(
       // recoverable; only the automated reply is gated by the enabled flag.
       if (!config.enabled) return;
 
-      // ---- Private-chat path: turn counting, cooldown, reply runner ----
+      // ---- Active-order suppression: record-only, no turn counting, no reply ----
 
-      conversation = {
-        ...conversation,
-        turnCount: conversation.turnCount + 1,
-      };
-      await deps.stateStore.upsertConversation(conversation);
-
-      // Check for the natural-language closing signal from peer.
-      if (hasFinalByeLine(message.content)) {
-        conversation = { ...conversation, state: 'closed', updatedAt: now };
+      // While an order with this peer is open, free-chat auto-replies stay
+      // silent (IDBots hasActiveOrderForPrivateChatSuppression parity). The
+      // message is already persisted; like the order-protocol path above it
+      // does not count turns. Suppression lifts automatically once the order
+      // reaches a terminal state.
+      if (await deps.hasActiveOrderWithPeer?.(peerGlobalMetaId)) {
         await deps.stateStore.upsertConversation(conversation);
         return;
       }
 
-      if (conversation.state !== 'active') return;
-      await replyToInboundMessage({
-        selfGlobalMetaId,
-        peerGlobalMetaId,
-        conversation,
-        strategy,
-        inboundMessage: inboundMessageRecord,
+      // ---- Private-chat path: turn counting, cooldown, reply runner ----
+
+      await runSerializedConversationTurn(conversation.conversationId, async () => {
+        // Re-read inside the per-conversation mutex so back-to-back inbound
+        // messages cannot lose turnCount increments to a read-modify-write
+        // race, then re-apply the reopen/idle-reset decisions made above.
+        const storedConversation = await deps.stateStore.getConversationByPeer(peerGlobalMetaId)
+          ?? conversation;
+        const turnCountWasReset = conversation.turnCount === 0 && storedConversation.turnCount > 0;
+        conversation = {
+          ...storedConversation,
+          state: conversation.state,
+          lastDirection: 'inbound',
+          updatedAt: now,
+          turnCount: (turnCountWasReset ? 0 : storedConversation.turnCount) + 1,
+        };
+        await deps.stateStore.upsertConversation(conversation);
+
+        // Check for the natural-language closing signal from peer.
+        if (hasFinalByeLine(inboundWireContent.content)) {
+          conversation = { ...conversation, state: 'closed', updatedAt: now };
+          await deps.stateStore.upsertConversation(conversation);
+          return;
+        }
+
+        if (conversation.state !== 'active') return;
+        await replyToInboundMessage({
+          selfGlobalMetaId,
+          peerGlobalMetaId,
+          conversation,
+          strategy,
+          inboundMessage: inboundMessageRecord,
+        });
       });
     },
     async handleLocalGuidedTurn(peerGlobalMetaId, options = {}) {
@@ -892,9 +1165,11 @@ export function createPrivateChatAutoReplyOrchestrator(
           turnCount: conversation.turnCount + 1,
         };
       const persona = await loadChatPersona(deps.paths);
-      const recentMessages = filterChatPromptMessages(await deps.stateStore.getRecentMessages(
-        conversation.conversationId,
-        DEFAULT_RECENT_MESSAGES_LIMIT,
+      const recentMessages = unwrapLegacyInboundContents(filterChatPromptMessages(
+        await deps.stateStore.getRecentMessages(
+          conversation.conversationId,
+          DEFAULT_RECENT_MESSAGES_LIMIT,
+        ),
       ));
       const preparedTurn = await prepareOutboundTurn({
         conversation: runnerConversation,

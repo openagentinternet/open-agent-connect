@@ -506,6 +506,40 @@ test('createProviderServiceRunner executes non-text orders in a dedicated runtim
   await cleanupProfileHome(homeDir);
 });
 
+test('createProviderServiceRunner reports the attempt workspace on terminal failures so the daemon can clean it up', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  await runtimeStore.write({
+    version: 1,
+    runtimes: [
+      runtime({ id: 'runtime-primary', provider: 'codex', health: 'healthy' }),
+    ],
+  });
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'failed',
+      output: '',
+      error: 'runtime failed',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'provider_execution_failed');
+  assert.equal(calls.length, 1);
+  assert.equal(result.metadata.attemptWorkspaceCwd, await fs.realpath(calls[0].cwd));
+  assert.equal(isInsideRuntimeArea(homeDir, result.metadata.attemptWorkspaceCwd), true);
+  await cleanupProfileHome(homeDir);
+});
+
 test('createProviderServiceRunner rejects session cwd symlinks that escape the dedicated workspace', async () => {
   const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
   await runtimeStore.write({
@@ -1433,5 +1467,244 @@ test('createProviderServiceRunner falls back before session creation when primar
   assert.equal(calls.length, 1);
   assert.equal(calls[0].runtimeId, 'runtime-fallback');
   assert.equal(result.metadata.fallbackSelected, true);
+  await cleanupProfileHome(homeDir);
+});
+
+test('resolveProviderOrderExecutionTimeoutMs gives video 20 minutes and other output types 5 minutes', async () => {
+  const {
+    resolveProviderOrderExecutionTimeoutMs,
+    DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS,
+    VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS,
+  } = require('../../dist/core/a2a/provider/providerServiceRunner.js');
+
+  assert.equal(DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS, 5 * 60_000);
+  assert.equal(VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS, 20 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video' }), 20 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video/mp4' }), 20 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'text' }), 5 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'image' }), 5 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'audio' }), 5 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: null }), 5 * 60_000);
+});
+
+test('resolveProviderOrderExecutionTimeoutMs honors a service timeout override with clamps', async () => {
+  const {
+    resolveProviderOrderExecutionTimeoutMs,
+  } = require('../../dist/core/a2a/provider/providerServiceRunner.js');
+
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video', executionTimeoutMs: 10 * 60_000 }), 10 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'text', executionTimeoutMs: 5_000 }), 30_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'text', executionTimeoutMs: 60 * 60_000 }), 30 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video', executionTimeoutMs: 0 }), 20 * 60_000);
+  assert.equal(resolveProviderOrderExecutionTimeoutMs({ outputType: 'video', executionTimeoutMs: Number.NaN }), 20 * 60_000);
+});
+
+test('createProviderServiceRunner passes the 5 minute default session timeout to the executor', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'It will rain tomorrow.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder());
+
+  assert.equal(result.state, 'completed');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].timeout, 5 * 60_000);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner delivers an existing workspace artifact as a partial result on execution timeout', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        await fs.writeFile(path.join(request.cwd, 'forecast.png'), 'png bytes', 'utf8');
+        return 'session-timeout-partial';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'timeout',
+          error: 'provider execution timed out',
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'completed');
+  assert.match(result.responseText, /timed out/i);
+  assert.match(result.responseText, /may be incomplete/i);
+  assert.match(result.responseText, /artifactPath: forecast\.png/);
+  assert.equal(result.metadata.executionTimedOut, true);
+  assert.equal(typeof result.metadata.attemptWorkspaceCwd, 'string');
+  // The partial delivery takes precedence over the fallback-runtime retry.
+  assert.equal(calls.length, 1);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner keeps the failure path when a timeout produced no artifact', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        calls.push(request);
+        return `session-${calls.length}`;
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'timeout',
+          error: 'provider execution timed out',
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'provider_execution_timeout');
+  // The selected runtime was already the fallback, so no further retry happens.
+  assert.equal(calls.length, 1);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner does not partial-deliver an ambiguous workspace on timeout', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: {
+      async execute(request) {
+        await fs.writeFile(path.join(request.cwd, 'first.png'), 'png bytes', 'utf8');
+        await fs.writeFile(path.join(request.cwd, 'second.png'), 'png bytes', 'utf8');
+        return 'session-timeout-ambiguous';
+      },
+      async getSession(sessionId) {
+        return {
+          sessionId,
+          status: 'timeout',
+          error: 'provider execution timed out',
+        };
+      },
+      async cancel() {},
+      async listSessions() { return []; },
+      async streamEvents() { return (async function* () {})(); },
+    },
+    canStartRuntime: () => true,
+  });
+
+  const result = await runner.execute(baseOrder({ outputType: 'image' }));
+
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'provider_execution_timeout');
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner executeContinuation reruns in the same workspace with a MUST-generate prompt', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Created the image.\nartifactPath: forecast.png',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+  const order = baseOrder({
+    outputType: 'image',
+    metadata: { orderTxid: 'order-txid-123' },
+  });
+
+  const initial = await runner.execute(order);
+  assert.equal(initial.state, 'completed');
+  const continuation = await runner.executeContinuation(order, initial);
+
+  assert.equal(continuation.state, 'completed');
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].prompt, /not complete yet because no image file exists for delivery/);
+  assert.match(calls[1].prompt, /Order txid: order-txid-123\./);
+  assert.match(calls[1].prompt, /Original buyer request: Forecast tomorrow/);
+  assert.match(calls[1].prompt, /MUST generate a real image file/);
+  assert.equal(calls[1].systemPrompt, calls[0].systemPrompt);
+  assert.deepEqual(calls[1].skills, ['weather.oracle']);
+  // The continuation reuses the initial attempt workspace instead of creating
+  // a new one (macOS /var symlink requires the realpath comparison).
+  assert.equal(await fs.realpath(calls[0].cwd), calls[1].cwd);
+  assert.equal(continuation.metadata.missingArtifactContinuation, true);
+  assert.equal(continuation.metadata.attemptWorkspaceCwd, calls[1].cwd);
+  assert.equal(continuation.runtimeId, initial.runtimeId);
+  await cleanupProfileHome(homeDir);
+});
+
+test('createProviderServiceRunner executeContinuation requires the previous selection and workspace', async () => {
+  const { homeDir, systemHomeDir, runtimeStore, bindingStore } = await createRunnerDeps();
+  const calls = [];
+  const runner = createProviderServiceRunner({
+    metaBotSlug: 'alice',
+    systemHomeDir,
+    projectRoot: homeDir,
+    runtimeStore,
+    bindingStore,
+    llmExecutor: llmExecutorForTerminalResult({
+      status: 'completed',
+      output: 'Done.',
+      durationMs: 10,
+    }, calls),
+    canStartRuntime: () => true,
+  });
+
+  const continuation = await runner.executeContinuation(baseOrder({ outputType: 'image' }), {
+    state: 'failed',
+    code: 'provider_execution_failed',
+    message: 'no workspace metadata here',
+  });
+
+  assert.equal(continuation.state, 'failed');
+  assert.equal(continuation.code, 'provider_artifact_continuation_unavailable');
+  assert.equal(calls.length, 0);
   await cleanupProfileHome(homeDir);
 });

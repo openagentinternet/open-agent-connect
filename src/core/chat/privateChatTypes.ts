@@ -78,6 +78,11 @@ export interface ChatReplyRunnerInput {
   // farewell output and the orchestrator strips any close marker the model
   // still emits. Used for session-opening guided turns.
   conversationCloseAllowed?: boolean;
+  // Fired at most once per turn when the reply runtime starts using a tool,
+  // i.e. an allowed chat skill actually began executing. Fire-and-forget: the
+  // orchestrator uses it to send the peer a short wait notice before a long
+  // skill execution; it must never break the reply path.
+  onSkillExecutionStart?: () => void;
 }
 
 export interface ChatReplyRunnerResult {

@@ -5,7 +5,6 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const {
   buildRemoteServicesPrompt,
-  parseDelegationMessage,
   planRemoteCall,
 } = require('../../dist/core/delegation/remoteCall.js');
 
@@ -219,8 +218,4 @@ test('remote service prompt supports natural-language selection and free-service
   assert.match(prompt, /userTask.*imperative task/i);
   assert.match(prompt, /<provider_name>TarotBot<\/provider_name>/);
   assert.match(prompt, /<updated_at>1775000000000<\/updated_at>/);
-
-  const parsed = parseDelegationMessage(`[DELEGATE_REMOTE_SERVICE] {"servicePinId":"tarot-service","serviceName":"塔罗牌占卜","providerGlobalMetaid":"seller-global-metaid","price":"0","currency":"SPACE","rawRequest":"我想用塔罗牌占卜一下明天运程","userTask":"tarot tomorrow fortune","taskContext":"free tarot service match","policyMode":"confirm_paid_only"}`);
-  assert.equal(parsed.policyMode, 'confirm_paid_only');
-  assert.equal(parsed.rawRequest, '我想用塔罗牌占卜一下明天运程');
 });

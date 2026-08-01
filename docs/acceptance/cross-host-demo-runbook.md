@@ -2,6 +2,26 @@
 
 Release is blocked until both manual lines below are completed on real hosts.
 
+## Execute Endpoint Hardening
+
+The provider daemon verifies the buyer's payment on chain before running any
+paid service ordered over `POST /api/services/execute` (free services run
+without payment, as before). A payment mismatch is rejected with
+`order_payment_unverified`; a chain/indexer outage is rejected with the
+transient, retryable `order_payment_verification_unavailable`.
+
+The execute endpoint also accepts an optional shared-secret gate:
+
+- Provider side: set `OAC_EXECUTE_API_TOKEN` in the daemon environment before
+  `metabot daemon start`. Every `/api/services/execute` call must then carry
+  `authorization: Bearer <token>`. Without the variable the endpoint stays
+  open (previous behavior) and the daemon logs a one-time warning.
+- Caller side: add `executeToken` to the provider's entry in
+  `.runtime/state/directory-seeds.json` (next to `baseUrl` and `label`). The
+  buyer daemon sends it automatically when it orders through that provider
+  daemon. `network sources add` preserves an existing `executeToken` when a
+  source is re-added.
+
 ## Manual Line 1: Codex -> Claude Code
 
 Prove all of the following in one session:

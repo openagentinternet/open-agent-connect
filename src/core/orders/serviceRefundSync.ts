@@ -381,7 +381,7 @@ function patchSellerRequestOrder(
     || order.refundRequestedAt !== patch.refundRequestedAt
   );
 
-  if (order.state === 'refunded' || order.state === 'ended') {
+  if (order.state === 'refunded') {
     return {
       order: createSellerOrderRecord({
         ...order,
@@ -627,16 +627,6 @@ function patchSellerFinalizeOrder(
       changed: !alreadyApplied,
     };
   }
-  if (order.state === 'ended') {
-    return {
-      order: transitionSellerOrderRecord(order, {
-        ...patch,
-        state: 'refunded',
-        updatedAt: nowMs,
-      }),
-      changed: true,
-    };
-  }
   const pending = order.state === 'refund_pending'
     ? order
     : transitionSellerOrderRecord(order, {
@@ -675,7 +665,7 @@ function blockSellerFinalizeOrder(
   reason: string,
   nowMs: number,
 ): SellerOrderRecord {
-  if (order.state === 'refunded' || order.state === 'ended') {
+  if (order.state === 'refunded') {
     return createSellerOrderRecord({
       ...order,
       refundBlockingReason: reason,

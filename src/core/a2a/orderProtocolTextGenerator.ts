@@ -6,10 +6,11 @@ import { createLlmBindingStore } from '../llm/llmBindingStore';
 import { createLlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import { createLlmRuntimeStore } from '../llm/llmRuntimeStore';
 import { runLlmPromptWithRuntimeFallback } from '../llm/llmRuntimeExecution';
+import { createOrderMetadataLineRegex } from '../orders/orderMessage';
 import type { PublishedServiceRecord } from '../services/publishService';
 import type { MetabotPaths } from '../state/paths';
 
-export type ProviderOrderProtocolTextStage = 'acknowledgement' | 'rating_request';
+export type ProviderOrderProtocolTextStage = 'acknowledgement' | 'rating_request' | 'long_task_notice';
 
 export interface CallerOrderProtocolTextGeneratorInput {
   paths: MetabotPaths;
@@ -130,10 +131,15 @@ function stripGeneratedProtocolText(value: unknown): string {
   return lines.join('\n').trim();
 }
 
+// Generated protocol text is rejected when it quotes protocol metadata lines;
+// a bare label prefix (no separator) is enough to reject.
+const PROTOCOL_METADATA_LINE_RE = createOrderMetadataLineRegex({
+  optionalSeparator: true,
+  extraLabels: ['payment(?:\\s+amount)?'],
+});
+
 function hasProtocolMetadataLine(value: string): boolean {
-  return value.split(/\r?\n/u).some((line) => (
-    /^\s*(?:支付金额|payment(?: amount)?|txid|order id|commit txid|payment chain|settlement kind|service id|skill name|output type)\s*[:：]?/iu.test(line)
-  ));
+  return value.split(/\r?\n/u).some((line) => PROTOCOL_METADATA_LINE_RE.test(line));
 }
 
 function isGenericPrivateChatReply(value: string): boolean {
@@ -208,7 +214,9 @@ function buildProviderOrderPrompt(input: ProviderOrderProtocolTextGeneratorInput
     || 'Skill Service';
   const stagePurpose = input.stage === 'acknowledgement'
     ? 'Say that you received the order, have started processing it, it may take a little time, and ask the buyer to wait patiently.'
-    : 'Say that the service has been completed, mention the task only briefly, politely ask for a 1-5 rating, and say the feedback matters to you.';
+    : input.stage === 'long_task_notice'
+      ? 'Say that this task may take longer than a typical task to generate and upload, and that you will keep processing it and share progress until the final delivery.'
+      : 'Say that the service has been completed, mention the task only briefly, politely ask for a 1-5 rating, and say the feedback matters to you.';
   const lines = [
     `Stage: provider_${input.stage}`,
     'You are the provider MetaBot. Write the body of the provider message to the buyer.',
@@ -233,7 +241,9 @@ function buildProviderOrderPrompt(input: ProviderOrderProtocolTextGeneratorInput
   }
   lines.push(input.stage === 'acknowledgement'
     ? 'Return only the acknowledgement body, under 180 characters.'
-    : 'Return only the rating request body, under 220 characters.');
+    : input.stage === 'long_task_notice'
+      ? 'Return only the long-task notice body, under 200 characters.'
+      : 'Return only the rating request body, under 220 characters.');
   return lines.join('\n\n');
 }
 
@@ -320,7 +330,7 @@ export function createLlmOrderProtocolTextGenerator(options: {
         paths: input.paths,
         persona: input.persona,
         prompt: buildProviderOrderPrompt(input),
-        maxChars: input.stage === 'acknowledgement' ? 360 : 440,
+        maxChars: input.stage === 'rating_request' ? 440 : 360,
       });
     },
     generateBuyerRatingText(input: BuyerRatingProtocolTextGeneratorInput) {

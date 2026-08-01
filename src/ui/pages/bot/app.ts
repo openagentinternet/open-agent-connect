@@ -29,7 +29,7 @@ var AUTO_REPLY_COOLDOWN_MS_OPTIONS=[60000,300000,600000,1800000,3600000];
 var DEFAULT_AUTO_REPLY_MAX_TURNS=5;
 var DEFAULT_AUTO_REPLY_COOLDOWN_MS=300000;
 var PERSONA_PRESET_CATALOG=${inlineScriptJson(PERSONA_PRESET_CATALOG)};
-var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},autoReplyMaxTurnsBySlug:{},autoReplyCooldownMsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryStopWhenHealthy:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
+var state={profiles:[],runtimes:[],sessions:[],stats:{botCount:0,healthyRuntimes:0,totalExecutions:0,successRate:0},profileConfigs:{},chatSkillOptionsBySlug:{},chatSkillOptionsStatusBySlug:{},chatSkillOptionsErrorBySlug:{},chatSkillResolutionBySlug:{},chatAllowedSkillsBySlug:{},autoReplyBySlug:{},autoReplyStatusBySlug:{},autoReplyMaxTurnsBySlug:{},autoReplyCooldownMsBySlug:{},selectedSlug:'',selectedTab:'publicIdentity',originalProfile:null,_pendingAvatar:undefined,_pendingHomepage:undefined,_homepageSource:'',_homepageUploadWorking:false,_homepageUploadToken:0,_homepageMetaAppsBySlug:{},_homepageMetaAppsStatusBySlug:{},_homepageMetaAppsErrorBySlug:{},_homepageMetaAppPickerOpen:false,_createdBotPageUrl:'',_toastTimer:null,_modalClose:null,_modalRequestSeq:0,_sensitiveModalToken:null,_deleteCountdownTimer:null,_deleteCountdown:5,_deleteWorking:false,_runtimeModalOpen:false,_runtimeTestById:{},_runtimesLoaded:false,runtimeDiscoveryStatus:null,_runtimeDiscoveryPolling:false,_runtimeDiscoveryPollTimer:null,_runtimeDiscoveryStopTimer:null,_runtimeDiscoveryObservedRunning:false,_runtimeDiscoveryStopWhenHealthy:false,_runtimeDiscoveryAutoTriggered:false,_walletPanel:null,_walletTransfer:null,_managementRouteRequest:null,_personaPresetModalOpen:false,_personaPresetCategory:'all',_personaPresetQuery:'',_personaPresetSelectedId:'gentle-listener',_personaPresetPendingId:'',_personaPresetApplied:false};
 var LEGACY_DEFAULT_ROLE='You are a helpful AI assistant.';
 var LEGACY_DEFAULT_SOUL='You are friendly and professional.';
 var LEGACY_DEFAULT_GOAL='Your goal is to help users accomplish their tasks effectively.';
@@ -684,6 +684,8 @@ function loadChatSkillOptions(slug){
     });
     state.chatSkillOptionsBySlug[slug]=rows;
     state.chatSkillOptionsStatusBySlug[slug]='loaded';
+    var resolution=data&&data.chatSkillResolution;
+    state.chatSkillResolutionBySlug[slug]=resolution&&Array.isArray(resolution.skipped)?resolution:null;
     rerenderChatSkillsTabForLoad(slug);
     return rows;
   }).catch(function(error){
@@ -801,7 +803,12 @@ function chatAllowedSkillsMarkup(profile){
     return '<option value="'+esc(skill.skillName)+'">'+esc(label)+'</option>';
   }).join('');
   var note=status==='loading'?'<div class="save-status saving">'+esc(uiText('bot.loadingChatSkills','Loading chat skills...'))+'</div>':(status==='error'?'<div class="save-status error">'+esc(error||uiText('bot.chatSkillsLoadFailed','Failed to load chat skills.'))+'</div>':'');
-  return '<div class="field field-full chat-skills-field"><label>'+esc(uiText('bot.chatAllowedSkills','Private Chat Allowed Skills：'))+'</label>'+
+  var resolution=state.chatSkillResolutionBySlug[slug];
+  var skipped=resolution&&Array.isArray(resolution.skipped)?resolution.skipped:[];
+  if(skipped.length){
+    note+='<div class="save-status warning">'+esc(uiText('bot.chatSkillsUnavailable','{count} configured skills unavailable: {names}',{count:skipped.length,names:skipped.join(', ')}))+'</div>';
+  }
+  return '<div class="field field-full chat-skills-field"><label>'+esc(uiText('bot.chatAllowedSkills','Private Chat Allowed Skills:'))+'</label>'+
     '<div class="chat-skill-chips">'+chips+'</div>'+
     '<div class="chat-skill-picker"><select data-field="chatSkillSelect"'+(status==='loading'?' disabled':'')+'>'+optionHtml+'</select><button type="button" class="btn btn-primary btn-sm" data-act="add-chat-skill"'+(status==='loading'?' disabled':'')+'>'+esc(uiText('bot.add','Add'))+'</button></div>'+
     note+
@@ -815,7 +822,7 @@ function wireChatSkillControls(){
       var select=q('[data-field="chatSkillSelect"]');var skill=String(select&&select.value||'').trim();
       if(!skill)return;
       state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(selectedChatSkills(profile).concat([skill]));
-      if(state.selectedTab==='chatSkills')renderChatSkillsTab();else renderInfoTab();
+      renderChatSkillsTab();
     });
   });
   qq('[data-act="remove-chat-skill"]').forEach(function(el){
@@ -824,7 +831,7 @@ function wireChatSkillControls(){
       var profile=selectedProfile();if(!profile)return;
       var skill=this.getAttribute('data-skill')||'';
       state.chatAllowedSkillsBySlug[profile.slug]=normalizeChatSkillList(selectedChatSkills(profile).filter(function(item){return item!==skill}));
-      if(state.selectedTab==='chatSkills')renderChatSkillsTab();else renderInfoTab();
+      renderChatSkillsTab();
     });
   });
 }
@@ -1901,7 +1908,13 @@ function saveChatSkills(){
     renderMetabotList();
     renderDetailHeader(updated);
     renderChatSkillsTab();
-    panel=chatSkillsPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');if(status){status.textContent=uiText('bot.onChainUpdateConfirmed','On-chain update confirmed.');status.className='save-status success'}
+    panel=chatSkillsPanelForProfile(updated);status=queryWithin(panel,'[data-save-status]');
+    var chainSync=r.data&&r.data.chainSync;
+    if(chainSync&&chainSync.ok===false){
+      if(status){status.textContent=uiText('bot.chatSkillsSavedChainFailed','Saved locally; chain sync failed: {error}',{error:chainSync.error||'unknown error'});status.className='save-status warning'}
+      return;
+    }
+    if(status){status.textContent=uiText('bot.onChainUpdateConfirmed','On-chain update confirmed.');status.className='save-status success'}
     showChainSuccessModal({
       title:uiText('bot.profileUpdatedOnChain','Profile Updated On-Chain'),
       message:uiText('bot.profileChangesWrittenOnChain','Profile changes were written on-chain before local data was saved.'),
@@ -2016,14 +2029,6 @@ function toggleExecDetail(btn){
   if(open){row.removeAttribute('hidden');btn.setAttribute('aria-expanded','true')}else{row.setAttribute('hidden','');btn.setAttribute('aria-expanded','false')}
 }
 
-function renderPlaceholderTab(tab){
-  var selector=tab==='behavior'?'[data-behavior-content]':tab==='chatSkills'?'[data-chat-skills-content]':'';
-  var root=selector?q(selector):null;
-  if(!root)return;
-  var copy=tab==='behavior'?uiText('bot.behaviorPlaceholder','Behavior controls will be available here.'):uiText('bot.chatSkillsPlaceholder','Chat skill controls will be available here.');
-  root.innerHTML='<div class="session-empty"><p>'+esc(copy)+'</p></div>';
-}
-
 function switchTab(tab,silent){
   var allowed={publicIdentity:1,behavior:1,chatSkills:1,advanced:1};
   state.selectedTab=allowed[tab]?tab:'publicIdentity';
@@ -2032,8 +2037,14 @@ function switchTab(tab,silent){
   if(state.selectedTab==='advanced')renderAdvancedTab();
   else if(state.selectedTab==='publicIdentity')renderPublicIdentityTab();
   else if(state.selectedTab==='behavior')renderBehaviorTab();
-  else if(state.selectedTab==='chatSkills')renderChatSkillsTab();
-  else renderPlaceholderTab(state.selectedTab);
+  else if(state.selectedTab==='chatSkills'){
+    renderChatSkillsTab();
+    // Refresh the skill options on every tab entry: skills installed later or
+    // a runtime switch must show up without a full page reload, and a previous
+    // load error must be retried instead of sticking.
+    var chatProfile=selectedProfile();
+    if(chatProfile)loadChatSkillOptions(chatProfile.slug);
+  }
 }
 
 function loadStats(){renderStats();return Promise.resolve()}

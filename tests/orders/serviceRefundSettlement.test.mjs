@@ -372,20 +372,6 @@ test('processSellerRefundSettlement persists refund transfer state before finali
   assert.equal(persistedStates[0].sellerOrders.every((entry) => entry.refundFinalizePinId === null), true);
 });
 
-test('processSellerRefundSettlement records transfer state across ended mirror orders', async () => {
-  const state = createState();
-  state.sellerOrders[1] = createSellerOrderRecord({
-    ...state.sellerOrders[1],
-    state: 'ended',
-  });
-
-  const { result } = await settle({ state });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.nextState.sellerOrders.every((entry) => entry.state === 'refunded'), true);
-  assert.equal(result.nextState.sellerOrders.every((entry) => entry.refundTxid === 'refund-transfer-txid-1'), true);
-});
-
 test('processSellerRefundSettlement does not finalize if transfer state persistence fails', async () => {
   const { result, transferCalls, finalizeWrites } = await settle({
     persistSettlementState: async () => {

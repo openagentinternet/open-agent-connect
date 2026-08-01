@@ -46,7 +46,6 @@ test('seller order state list includes every Phase 5 lifecycle state', () => {
     'failed',
     'refund_pending',
     'refunded',
-    'ended',
   ]);
 });
 
@@ -79,7 +78,7 @@ test('createSellerOrderRecord stores required provider, service, order, payment,
 test('transitionSellerOrderRecord allows forward seller lifecycle transitions and rejects impossible backwards transitions', () => {
   let record = createSellerOrderRecord(createBaseInput());
 
-  for (const state of ['acknowledged', 'in_progress', 'completed', 'rating_pending', 'refund_pending', 'refunded', 'ended']) {
+  for (const state of ['acknowledged', 'in_progress', 'completed', 'rating_pending', 'refund_pending', 'refunded']) {
     record = transitionSellerOrderRecord(record, {
       state,
       updatedAt: record.updatedAt + 1,

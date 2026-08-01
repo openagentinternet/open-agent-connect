@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import type { LlmBindingStore } from '../llm/llmBindingStore';
 import type { LlmRuntimeStore } from '../llm/llmRuntimeStore';
 import type { LlmRuntime } from '../llm/llmTypes';
@@ -239,4 +241,49 @@ export async function resolveAllowChatSkillsForRuntime(
       ? { warning: `Skipping unavailable chat skills: ${resolved.skippedSkills.join(', ')}` }
       : {}),
   });
+}
+
+// Last chat-skill resolution outcome for one bot, persisted on every private
+// chat resolve so the operator can see configured skills that silently
+// stopped resolving (uninstalled skill, changed primary runtime). Read-only
+// for consumers; written best-effort by the chat turn resolver.
+export interface ChatSkillResolutionRecord {
+  resolved: string[];
+  skipped: string[];
+  warning: string | null;
+  checkedAt: string;
+}
+
+function normalizeSkillNameList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter((entry) => entry.length > 0);
+}
+
+export async function writeChatSkillResolution(
+  filePath: string,
+  record: ChatSkillResolutionRecord,
+): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+}
+
+export async function readChatSkillResolution(filePath: string): Promise<ChatSkillResolutionRecord | null> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as Partial<ChatSkillResolutionRecord> | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    return {
+      resolved: normalizeSkillNameList(parsed.resolved),
+      skipped: normalizeSkillNameList(parsed.skipped),
+      warning: typeof parsed.warning === 'string' && parsed.warning.trim() ? parsed.warning.trim() : null,
+      checkedAt: typeof parsed.checkedAt === 'string' ? parsed.checkedAt : '',
+    };
+  } catch {
+    return null;
+  }
 }

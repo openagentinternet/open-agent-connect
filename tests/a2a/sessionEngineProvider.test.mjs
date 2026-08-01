@@ -69,7 +69,7 @@ test('provider runner completion produces a terminal completion', () => {
   });
 });
 
-test('one clarification round is accepted, and a second request is guarded', () => {
+test('a needs_clarification runner outcome is finalized as a terminal failure', () => {
   const engine = createEngine();
   const received = engine.receiveProviderTask({
     traceId: 'trace-weather-order-123456789',
@@ -80,7 +80,7 @@ test('one clarification round is accepted, and a second request is guarded', () 
     taskContext: '',
   });
 
-  const firstClarification = engine.applyProviderRunnerResult({
+  const failed = engine.applyProviderRunnerResult({
     session: received.session,
     taskRun: received.taskRun,
     result: {
@@ -89,45 +89,15 @@ test('one clarification round is accepted, and a second request is guarded', () 
     },
   });
 
-  assert.equal(firstClarification.accepted, true);
-  assert.equal(firstClarification.session.state, 'manual_action_required');
-  assert.equal(firstClarification.taskRun.state, 'needs_clarification');
-  assert.equal(firstClarification.taskRun.clarificationRounds.length, 1);
-  assert.equal(firstClarification.taskRun.clarificationRounds[0].status, 'pending');
-  assert.equal(firstClarification.event, 'clarification_needed');
-  assert.equal(resolvePublicStatus({ event: firstClarification.event }).status, 'manual_action_required');
-  assert.deepEqual(firstClarification.runnerResult, {
+  assert.equal(failed.session.state, 'remote_failed');
+  assert.equal(failed.taskRun.state, 'failed');
+  assert.equal(failed.taskRun.failureCode, 'clarification_not_supported');
+  assert.equal(failed.taskRun.failureReason, 'Which city should I use?');
+  assert.ok(failed.taskRun.completedAt);
+  assert.equal(failed.event, 'provider_failed');
+  assert.equal(resolvePublicStatus({ event: failed.event }).status, 'remote_failed');
+  assert.deepEqual(failed.runnerResult, {
     state: 'needs_clarification',
     question: 'Which city should I use?',
-  });
-
-  const resumed = engine.answerClarification({
-    session: firstClarification.session,
-    taskRun: firstClarification.taskRun,
-    answer: 'Shanghai',
-  });
-
-  assert.equal(resumed.accepted, true);
-  assert.equal(resumed.taskRun.state, 'running');
-  assert.equal(resumed.taskRun.clarificationRounds[0].status, 'answered');
-  assert.equal(resumed.taskRun.clarificationRounds[0].answer, 'Shanghai');
-
-  const secondClarification = engine.applyProviderRunnerResult({
-    session: resumed.session,
-    taskRun: resumed.taskRun,
-    result: {
-      state: 'needs_clarification',
-      question: 'And what time of day?',
-    },
-  });
-
-  assert.equal(secondClarification.accepted, false);
-  assert.equal(secondClarification.session.state, 'manual_action_required');
-  assert.equal(secondClarification.taskRun.clarificationRounds.length, 1);
-  assert.equal(secondClarification.guardCode, 'clarification_round_limit_exceeded');
-  assert.equal(resolvePublicStatus({ event: secondClarification.event }).status, 'manual_action_required');
-  assert.deepEqual(secondClarification.runnerResult, {
-    state: 'needs_clarification',
-    question: 'And what time of day?',
   });
 });

@@ -182,3 +182,150 @@ test('executeServiceOrderPayment rejects unsupported settlement before order sen
     /service_payment_unsupported_settlement/,
   );
 });
+
+test('verifyServiceOrderPayment reports verified outcome for a matching MVC payment output', async () => {
+  const {
+    verifyServiceOrderPayment,
+  } = require('../../dist/core/payments/servicePaymentVerification.js');
+  const { TxComposer, mvc } = require('meta-contract');
+
+  const txComposer = new TxComposer();
+  txComposer.appendP2PKHOutput({
+    address: new mvc.Address('1BoatSLRHtKNngkdXEeobR76b53LETtpyT', mvc.Networks.livenet),
+    satoshis: 1000,
+  });
+  const adapters = new Map([
+    ['mvc', {
+      async fetchRawTx() { return txComposer.getRawHex(); },
+      async fetchUtxos() { return []; },
+    }],
+  ]);
+
+  const result = await verifyServiceOrderPayment({
+    adapters,
+    paymentTxid: 'b'.repeat(64),
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    paymentAddress: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+    amount: '0.00001',
+    currency: 'SPACE',
+  });
+
+  assert.equal(result.verified, true);
+  assert.equal(result.outcome, 'verified');
+  assert.equal(result.failureKind, null);
+});
+
+test('verifyServiceOrderPayment reports mismatch outcome when the raw tx pays a different address', async () => {
+  const {
+    verifyServiceOrderPayment,
+  } = require('../../dist/core/payments/servicePaymentVerification.js');
+  const { TxComposer, mvc } = require('meta-contract');
+
+  const txComposer = new TxComposer();
+  txComposer.appendP2PKHOutput({
+    address: new mvc.Address('1dice8EMZmqKvrGE4Qc9bUFf9PX3xaYDp', mvc.Networks.livenet),
+    satoshis: 1000,
+  });
+  const adapters = new Map([
+    ['mvc', {
+      async fetchRawTx() { return txComposer.getRawHex(); },
+      async fetchUtxos() { return []; },
+    }],
+  ]);
+
+  const result = await verifyServiceOrderPayment({
+    adapters,
+    paymentTxid: 'b'.repeat(64),
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    paymentAddress: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+    amount: '0.00001',
+    currency: 'SPACE',
+  });
+
+  assert.equal(result.verified, false);
+  assert.equal(result.outcome, 'mismatch');
+  assert.equal(result.failureKind, 'output_mismatch');
+});
+
+test('verifyServiceOrderPayment reports mismatch outcome when an answered UTXO fallback finds no payment', async () => {
+  const {
+    verifyServiceOrderPayment,
+  } = require('../../dist/core/payments/servicePaymentVerification.js');
+
+  const adapters = new Map([
+    ['mvc', {
+      async fetchRawTx() { throw new Error('indexer 404'); },
+      async fetchUtxos() { return []; },
+    }],
+  ]);
+
+  const result = await verifyServiceOrderPayment({
+    adapters,
+    paymentTxid: 'b'.repeat(64),
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    paymentAddress: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+    amount: '0.00001',
+    currency: 'SPACE',
+  });
+
+  assert.equal(result.verified, false);
+  assert.equal(result.outcome, 'mismatch');
+  assert.equal(result.failureKind, 'payment_not_found');
+});
+
+test('verifyServiceOrderPayment reports a transient error outcome when every MVC chain lookup fails', async () => {
+  const {
+    verifyServiceOrderPayment,
+  } = require('../../dist/core/payments/servicePaymentVerification.js');
+
+  const adapters = new Map([
+    ['mvc', {
+      async fetchRawTx() { throw new Error('connection refused'); },
+      async fetchUtxos() { throw new Error('connection refused'); },
+    }],
+  ]);
+
+  const result = await verifyServiceOrderPayment({
+    adapters,
+    paymentTxid: 'b'.repeat(64),
+    paymentChain: 'mvc',
+    settlementKind: 'native',
+    paymentAddress: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+    amount: '0.00001',
+    currency: 'SPACE',
+  });
+
+  assert.equal(result.verified, false);
+  assert.equal(result.outcome, 'error');
+  assert.equal(result.failureKind, 'chain_unavailable');
+});
+
+test('verifyServiceOrderPayment maps a BTC raw-tx transport failure to a transient error outcome instead of throwing', async () => {
+  const {
+    verifyServiceOrderPayment,
+  } = require('../../dist/core/payments/servicePaymentVerification.js');
+
+  const adapters = new Map([
+    ['btc', {
+      async fetchRawTx() { throw new Error('mempool space unreachable'); },
+      async fetchUtxos() { throw new Error('mempool space unreachable'); },
+    }],
+  ]);
+
+  const result = await verifyServiceOrderPayment({
+    adapters,
+    paymentTxid: 'b'.repeat(64),
+    paymentChain: 'btc',
+    settlementKind: 'native',
+    paymentAddress: 'bc1qexampleaddress0000000000000000000000000',
+    amount: '0.00001',
+    currency: 'BTC',
+  });
+
+  assert.equal(result.verified, false);
+  assert.equal(result.outcome, 'error');
+  assert.equal(result.failureKind, 'chain_unavailable');
+});

@@ -18,10 +18,27 @@ export type ServiceOrderPaymentVerificationFailureKind =
   | 'input_invalid'
   | 'adapter_missing'
   | 'payment_not_found'
-  | 'output_mismatch';
+  | 'output_mismatch'
+  | 'chain_unavailable';
+
+/**
+ * Tri-state verification outcome:
+ * - `verified`: a matching payment output was found on chain.
+ * - `mismatch`: at least one chain lookup answered and the payment is absent
+ *   or pays the wrong address/amount. Deterministic — callers may fail the
+ *   order terminally.
+ * - `error`: every available chain lookup failed to answer (transport or
+ *   indexer outage). Transient — callers must not treat it as proof of
+ *   non-payment; the order should stay reprocessable.
+ */
+export type ServiceOrderPaymentVerificationOutcome =
+  | 'verified'
+  | 'mismatch'
+  | 'error';
 
 export interface VerifiedServiceOrderPayment {
   verified: boolean;
+  outcome: ServiceOrderPaymentVerificationOutcome;
   paymentTxid: string | null;
   paymentChain: VerifiableServicePaymentChain | null;
   settlementKind: 'native' | 'free';
@@ -142,6 +159,7 @@ export async function verifyServiceOrderPayment(
     const verified = !paymentTxid && amountSatoshis === 0;
     return {
       verified,
+      outcome: verified ? 'verified' : 'mismatch',
       paymentTxid: null,
       paymentChain: null,
       settlementKind,
@@ -157,6 +175,7 @@ export async function verifyServiceOrderPayment(
   if (!paymentTxid || !paymentChain || !paymentAddress || amountSatoshis <= 0) {
     return {
       verified: false,
+      outcome: 'mismatch',
       paymentTxid,
       paymentChain: paymentChain || null,
       settlementKind,
@@ -173,6 +192,7 @@ export async function verifyServiceOrderPayment(
   if (!adapter) {
     return {
       verified: false,
+      outcome: 'mismatch',
       paymentTxid,
       paymentChain,
       settlementKind,
@@ -197,21 +217,35 @@ export async function verifyServiceOrderPayment(
     }
   } catch (error) {
     if (paymentChain !== 'mvc') {
-      throw error;
-    }
-    matchedOutputIndex = await findMvcPaymentUtxoFallback({
-      adapter,
-      paymentTxid,
-      paymentAddress,
-      amountSatoshis,
-    }).catch(() => null);
-    if (matchedOutputIndex === null) {
-      failureKind = 'payment_not_found';
+      // The only lookup available for this chain failed to answer; this is a
+      // transient transport/indexer failure, not evidence of a missing payment.
+      failureKind = 'chain_unavailable';
+    } else {
+      let utxoLookupFailed = false;
+      matchedOutputIndex = await findMvcPaymentUtxoFallback({
+        adapter,
+        paymentTxid,
+        paymentAddress,
+        amountSatoshis,
+      }).catch(() => {
+        utxoLookupFailed = true;
+        return null;
+      });
+      if (matchedOutputIndex === null) {
+        // The raw-tx lookup already failed, so an empty or failed UTXO fallback
+        // only proves non-payment when the fallback itself answered.
+        failureKind = utxoLookupFailed ? 'chain_unavailable' : 'payment_not_found';
+      }
     }
   }
 
   return {
     verified: matchedOutputIndex !== null,
+    outcome: matchedOutputIndex !== null
+      ? 'verified'
+      : failureKind === 'chain_unavailable'
+        ? 'error'
+        : 'mismatch',
     paymentTxid,
     paymentChain,
     settlementKind,

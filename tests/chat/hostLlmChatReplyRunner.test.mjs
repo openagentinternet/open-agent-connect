@@ -255,16 +255,17 @@ test('buildChatPrompt makes OAC the only private-chat delivery owner', () => {
   assert.match(prompt, /local bot profile `mb-75fe8aaf`/);
   assert.match(prompt, /Open Agent Connect owns delivery/);
   assert.match(prompt, /NEVER call `metabot chat private`/);
-  assert.match(prompt, /Do not perform chain writes/);
+  assert.doesNotMatch(prompt, /Do not perform chain writes/);
 });
 
-test('buildChatPrompt omits private chat skill read-only hints when no skills are allowed', () => {
+test('buildChatPrompt omits private chat skill routing rules when no skills are allowed', () => {
   const prompt = buildChatPrompt(makeInput(), emptyPrivateChatAllowedSkillScope(), {
     metaBotSlug: 'mb-75fe8aaf',
   });
   assert.doesNotMatch(prompt, /Use allowed private-chat skills only for read-only context/);
+  assert.doesNotMatch(prompt, /<available_skills>/);
   assert.match(prompt, /Persona Immersion \(critical\)/);
-  assert.match(prompt, /Never say you are reading skills, checking context, or preparing to send a reply/);
+  assert.match(prompt, /Do not narrate plans or internal steps/);
   assert.match(prompt, /No private chat skills are available for this turn/);
 });
 
@@ -364,16 +365,31 @@ test('parseRunnerOutput strips Cursor private-chat path and send narration', () 
   assert.equal(result.content, 'Good to see you too.');
 });
 
-test('buildChatPrompt includes persona immersion rules when skills are allowed', () => {
+test('buildChatPrompt includes per-turn skill routing rules when skills are allowed', () => {
   const prompt = buildChatPrompt(makeInput(), {
     skills: ['andrej-karpathy-perspective'],
     skillSourcePaths: { 'andrej-karpathy-perspective': '/tmp/karpathy' },
+    skillDetails: [
+      {
+        name: 'andrej-karpathy-perspective',
+        description: 'Answer questions the way Andrej Karpathy would.',
+        location: '/tmp/karpathy/SKILL.md',
+      },
+    ],
     skippedSkills: [],
     warning: null,
   });
   assert.match(prompt, /Persona Immersion \(critical\)/);
-  assert.match(prompt, /Never tell the user you are reading/);
+  assert.match(prompt, /## Available Private Chat Skills \(evaluate every turn\)/);
+  assert.match(prompt, /scan the skill descriptions below and decide/);
+  assert.match(prompt, /If exactly one skill clearly applies, use it/);
+  assert.match(prompt, /<available_skills>/);
+  assert.match(prompt, /- name: andrej-karpathy-perspective/);
+  assert.match(prompt, /description: Answer questions the way Andrej Karpathy would\./);
+  assert.match(prompt, /location: \/tmp\/karpathy\/SKILL\.md/);
+  assert.match(prompt, /the host sends a brief wait notice to the peer automatically/);
   assert.match(prompt, /Do NOT open with a plan sentence/);
+  assert.doesNotMatch(prompt, /read-only context/);
 });
 
 test('buildChatPrompt strips local execution narration from outbound history before reuse', () => {
@@ -525,6 +541,13 @@ test('host LLM chat runner injects only resolved allowed chat skills', async () 
     allowedChatSkillsResolver: async () => ({
       skills: ['metabot-weather'],
       skillSourcePaths: { 'metabot-weather': '/tmp/metabot-weather' },
+      skillDetails: [
+        {
+          name: 'metabot-weather',
+          description: 'Look up current weather for a place.',
+          location: '/tmp/metabot-weather/SKILL.md',
+        },
+      ],
       skippedSkills: [],
       warning: null,
     }),
@@ -539,9 +562,12 @@ test('host LLM chat runner injects only resolved allowed chat skills', async () 
   assert.equal(executorCalls.length, 1);
   assert.deepEqual(executorCalls[0].skills, ['metabot-weather']);
   assert.deepEqual(executorCalls[0].skillSourcePaths, { 'metabot-weather': '/tmp/metabot-weather' });
-  assert.equal(executorCalls[0].skillIsolation, 'strict');
-  assert.match(executorCalls[0].prompt, /only skills available for this private chat turn/);
-  assert.match(executorCalls[0].prompt, /metabot-weather/);
+  // Chat turns run with the host's normal environment so allowed skills can
+  // fully execute (IDBots-style); the allow-list is scoped in the prompt.
+  assert.equal(Object.hasOwn(executorCalls[0], 'skillIsolation'), false);
+  assert.match(executorCalls[0].prompt, /<available_skills>/);
+  assert.match(executorCalls[0].prompt, /name: metabot-weather/);
+  assert.match(executorCalls[0].prompt, /description: Look up current weather for a place\./);
 });
 
 test('host LLM chat runner does not inject skills when resolver returns none', async () => {
@@ -584,6 +610,7 @@ test('host LLM chat runner does not inject skills when resolver returns none', a
     allowedChatSkillsResolver: async () => ({
       skills: [],
       skillSourcePaths: {},
+      skillDetails: [],
       skippedSkills: ['metabot-missing'],
       warning: 'Configured chat skills are not currently available: metabot-missing',
     }),
@@ -598,7 +625,7 @@ test('host LLM chat runner does not inject skills when resolver returns none', a
   assert.equal(executorCalls.length, 1);
   assert.equal(Object.hasOwn(executorCalls[0], 'skills'), false);
   assert.equal(Object.hasOwn(executorCalls[0], 'skillSourcePaths'), false);
-  assert.equal(executorCalls[0].skillIsolation, 'strict');
+  assert.equal(Object.hasOwn(executorCalls[0], 'skillIsolation'), false);
   assert.doesNotMatch(executorCalls[0].prompt, /metabot-missing/);
 });
 
@@ -780,6 +807,7 @@ test('host LLM chat runner does not globally mark a strict scoped runtime unavai
     allowedChatSkillsResolver: async () => ({
       skills: [],
       skillSourcePaths: {},
+      skillDetails: [],
       skippedSkills: [],
       warning: null,
     }),
@@ -1028,6 +1056,7 @@ test('host LLM chat runner does not mark the first poll-deadline but marks the s
     allowedChatSkillsResolver: async () => ({
       skills: [],
       skillSourcePaths: {},
+      skillDetails: [],
       skippedSkills: [],
       warning: null,
     }),
@@ -1456,4 +1485,210 @@ test('buildChatPrompt still marks the boundary when the closing outbound message
 test('buildChatPrompt exit mechanism binds goodbye to the current session', () => {
   const prompt = buildChatPrompt(makeInput());
   assert.match(prompt, /explicitly says goodbye or signals the end in the CURRENT session/);
+});
+
+test('host LLM chat runner fires onSkillExecutionStart once when the session emits tool_use', async () => {
+  const runtime = makeHealthyRuntime('llm-runtime-tools');
+  let pollCount = 0;
+  const llmExecutor = {
+    async execute() {
+      return 'llm-session-tools';
+    },
+    async getSession(sessionId) {
+      pollCount += 1;
+      if (pollCount < 3) {
+        return { sessionId, status: 'running' };
+      }
+      return {
+        sessionId,
+        status: 'completed',
+        result: { status: 'completed', output: 'Skill result reply.', durationMs: 12 },
+      };
+    },
+    async *streamEvents() {
+      yield { type: 'tool_use', tool: 'Bash', callId: 'call-1' };
+      yield { type: 'tool_use', tool: 'Read', callId: 'call-2' };
+      yield { type: 'result', result: { status: 'completed', output: 'Skill result reply.', durationMs: 12 } };
+    },
+  };
+  let skillStartCount = 0;
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    allowedChatSkillsResolver: async () => ({
+      skills: ['metabot-weather'],
+      skillSourcePaths: { 'metabot-weather': '/tmp/metabot-weather' },
+      skillDetails: [{ name: 'metabot-weather', description: null, location: null }],
+      skippedSkills: [],
+      warning: null,
+    }),
+  });
+
+  const result = await runner(makeInput({
+    onSkillExecutionStart: () => {
+      skillStartCount += 1;
+    },
+  }));
+
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'Skill result reply.');
+  assert.equal(skillStartCount, 1, 'multiple tool_use events fire the notice only once per turn');
+});
+
+test('host LLM chat runner fires onSkillExecutionStart only once across runtime attempts', async () => {
+  const primaryRuntime = makeHealthyRuntime('llm-runtime-primary');
+  const fallbackRuntime = makeHealthyRuntime('llm-runtime-fallback');
+  const pollCounts = new Map();
+  const llmExecutor = {
+    async execute(request) {
+      return request.runtimeId === 'llm-runtime-primary'
+        ? 'llm-session-primary'
+        : 'llm-session-fallback';
+    },
+    async getSession(sessionId) {
+      const count = (pollCounts.get(sessionId) ?? 0) + 1;
+      pollCounts.set(sessionId, count);
+      if (count < 3) {
+        return { sessionId, status: 'running' };
+      }
+      if (sessionId === 'llm-session-primary') {
+        return {
+          sessionId,
+          status: 'failed',
+          result: { status: 'failed', output: '', error: 'primary crashed', durationMs: 9 },
+        };
+      }
+      return {
+        sessionId,
+        status: 'completed',
+        result: { status: 'completed', output: 'Fallback reply.', durationMs: 11 },
+      };
+    },
+    async *streamEvents(sessionId) {
+      yield { type: 'tool_use', tool: 'Bash', callId: `call-${sessionId}` };
+      yield { type: 'result', result: { status: 'failed', output: '', error: 'done', durationMs: 1 } };
+    },
+  };
+  let skillStartCount = 0;
+  const resolver = {
+    async resolveRuntime(input) {
+      const excluded = new Set(input?.excludeRuntimeIds ?? []);
+      const runtime = [primaryRuntime, fallbackRuntime].find((candidate) => !excluded.has(candidate.id)) ?? null;
+      return { runtime, bindingId: 'binding-1' };
+    },
+    async selectMetaBot() {
+      return null;
+    },
+    async markBindingUsed() {},
+    async markRuntimeUnavailable() {},
+  };
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: resolver,
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    allowedChatSkillsResolver: async () => ({
+      skills: ['metabot-weather'],
+      skillSourcePaths: { 'metabot-weather': '/tmp/metabot-weather' },
+      skillDetails: [{ name: 'metabot-weather', description: null, location: null }],
+      skippedSkills: [],
+      warning: null,
+    }),
+  });
+
+  const result = await runner(makeInput({
+    onSkillExecutionStart: () => {
+      skillStartCount += 1;
+    },
+  }));
+
+  assert.equal(result.state, 'reply');
+  assert.equal(skillStartCount, 1, 'a second attempt starting tools must not re-notify the peer');
+});
+
+test('host LLM chat runner does not fire onSkillExecutionStart without tool_use or without allowed skills', async () => {
+  const runtime = makeHealthyRuntime('llm-runtime-plain');
+  const llmExecutor = {
+    async execute() {
+      return 'llm-session-plain';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'completed',
+        result: { status: 'completed', output: 'Plain reply.', durationMs: 8 },
+      };
+    },
+    async *streamEvents() {
+      yield { type: 'text', content: 'Plain reply.' };
+      yield { type: 'result', result: { status: 'completed', output: 'Plain reply.', durationMs: 8 } };
+    },
+  };
+  let skillStartCount = 0;
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    allowedChatSkillsResolver: async () => ({
+      skills: ['metabot-weather'],
+      skillSourcePaths: { 'metabot-weather': '/tmp/metabot-weather' },
+      skillDetails: [{ name: 'metabot-weather', description: null, location: null }],
+      skippedSkills: [],
+      warning: null,
+    }),
+  });
+
+  const result = await runner(makeInput({
+    onSkillExecutionStart: () => {
+      skillStartCount += 1;
+    },
+  }));
+
+  assert.equal(result.state, 'reply');
+  await new Promise((resolve) => { setTimeout(resolve, 10); });
+  assert.equal(skillStartCount, 0);
+});
+
+test('host LLM chat runner runs the turn in chatWorkspaceDir when provided', async (t) => {
+  const { promises: fs } = await import('node:fs');
+  const path = await import('node:path');
+  const { mkdtempTempRoot } = await import('../helpers/tempRoots.mjs');
+  const tempRoot = await mkdtempTempRoot('oac-chat-runner-workspace-');
+  t.after(async () => {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
+  const chatWorkspaceDir = path.join(tempRoot, 'chat-work');
+  const runtime = makeHealthyRuntime('llm-runtime-workspace');
+  const executorCalls = [];
+  const llmExecutor = {
+    async execute(request) {
+      executorCalls.push(request);
+      return 'llm-session-workspace';
+    },
+    async getSession(sessionId) {
+      return {
+        sessionId,
+        status: 'completed',
+        result: { status: 'completed', output: 'Workspace reply.', durationMs: 7 },
+      };
+    },
+  };
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor,
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    chatWorkspaceDir,
+  });
+
+  const result = await runner(makeInput());
+
+  assert.equal(result.state, 'reply');
+  assert.equal(executorCalls.length, 1);
+  assert.equal(executorCalls[0].cwd, chatWorkspaceDir);
+  assert.equal(Object.hasOwn(executorCalls[0], 'skillIsolation'), false);
+  await fs.access(chatWorkspaceDir);
 });

@@ -202,7 +202,9 @@ async function publishWeatherOracle(homeDir) {
     description: 'Returns tomorrow weather from the local MetaBot runtime.',
     providerSkill: 'metabot-weather-oracle',
     providerSkills: ['metabot-weather-oracle'],
-    price: '0.00001',
+    // Free service: the provider execute endpoint verifies paid orders on
+    // chain before executing, and this demo has no funded chain wallet.
+    price: '0',
     currency: 'SPACE',
     outputType: 'text',
     skillDocument: '# Weather Oracle',

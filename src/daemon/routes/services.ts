@@ -1,5 +1,26 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { commandFailed } from '../../core/contracts/commandResult';
 import type { RouteHandler } from './types';
+
+let warnedMissingExecuteApiToken = false;
+
+function readExecuteApiToken(): string {
+  return (process.env.OAC_EXECUTE_API_TOKEN ?? '').trim();
+}
+
+function readBearerCredential(value: string | string[] | undefined): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const match = String(raw ?? '').trim().match(/^bearer\s+(.+)$/i);
+  return match?.[1]?.trim() ?? '';
+}
+
+function executeApiTokenMatches(provided: string, expected: string): boolean {
+  // Hash both sides first so the comparison is timing-safe regardless of the
+  // configured token length (timingSafeEqual requires equal-length buffers).
+  const providedHash = createHash('sha256').update(provided).digest();
+  const expectedHash = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(providedHash, expectedHash);
+}
 
 function readPositiveInteger(value: string | null, fallback: number): number {
   const parsed = Number(value);
@@ -218,6 +239,26 @@ export const handleServicesRoutes: RouteHandler = async (context) => {
     if (req.method !== 'POST') {
       context.sendMethodNotAllowed(['POST']);
       return true;
+    }
+
+    // Optional shared-secret gate for daemon-to-daemon execution. When the
+    // provider daemon sets OAC_EXECUTE_API_TOKEN, callers must present it as
+    // a bearer credential; without it the endpoint stays open for backwards
+    // compatibility. The failure is returned as a command envelope (daemon
+    // convention) so remote callers surface the distinct code.
+    const executeApiToken = readExecuteApiToken();
+    if (executeApiToken) {
+      const credential = readBearerCredential(req.headers.authorization);
+      if (!credential || !executeApiTokenMatches(credential, executeApiToken)) {
+        context.sendJson(200, commandFailed(
+          'execute_api_unauthorized',
+          'POST /api/services/execute requires a valid bearer token.'
+        ));
+        return true;
+      }
+    } else if (!warnedMissingExecuteApiToken) {
+      warnedMissingExecuteApiToken = true;
+      console.warn('[services execute] OAC_EXECUTE_API_TOKEN is not set; the execute endpoint accepts unauthenticated remote execution requests.');
     }
 
     const input = await context.readJsonBody();

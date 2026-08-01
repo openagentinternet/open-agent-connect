@@ -35,6 +35,9 @@ export interface SessionTraceOrderInput {
   outputType?: string | null;
   requestText?: string | null;
   status?: string | null;
+  firstResponseDeadlineAt?: number | null;
+  deliveryDeadlineAt?: number | null;
+  firstResponseReceivedAt?: number | null;
   failedAt?: number | null;
   failureReason?: string | null;
   refundRequestPinId?: string | null;
@@ -149,6 +152,9 @@ export interface SessionTraceRecord {
     outputType: string | null;
     requestText: string | null;
     status: string | null;
+    firstResponseDeadlineAt: number | null;
+    deliveryDeadlineAt: number | null;
+    firstResponseReceivedAt: number | null;
     failedAt: number | null;
     failureReason: string | null;
     refundRequestPinId: string | null;
@@ -209,6 +215,13 @@ function normalizeOptionalNumber(value: unknown): number | null {
   }
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
+}
+
+// Timestamp variant that also accepts plain numbers (normalizeOptionalNumber
+// only accepts numeric strings); used for the order deadline fields.
+function normalizeOptionalTimestamp(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.trunc(numeric) : null;
 }
 
 function sanitizePathSegment(value: string, fallback: string): string {
@@ -359,6 +372,9 @@ export function buildSessionTrace(input: BuildSessionTraceInput): SessionTraceRe
           outputType: normalizeText(input.order.outputType) || null,
           requestText: normalizeText(input.order.requestText) || null,
           status: normalizeText(input.order.status) || null,
+          firstResponseDeadlineAt: normalizeOptionalTimestamp(input.order.firstResponseDeadlineAt),
+          deliveryDeadlineAt: normalizeOptionalTimestamp(input.order.deliveryDeadlineAt),
+          firstResponseReceivedAt: normalizeOptionalTimestamp(input.order.firstResponseReceivedAt),
           failedAt: normalizeOptionalNumber(input.order.failedAt),
           failureReason: normalizeText(input.order.failureReason) || null,
           refundRequestPinId: normalizeText(input.order.refundRequestPinId) || null,

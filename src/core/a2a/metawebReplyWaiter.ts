@@ -3,6 +3,7 @@ import { receivePrivateChat } from '../chat/privateChat';
 import {
   normalizeOrderProtocolTxid,
   parseNeedsRatingMessage as parseA2ANeedsRatingMessage,
+  parseOrderEndMessage as parseA2AOrderEndMessage,
 } from './protocol/orderProtocol';
 import {
   cleanServiceResultText,
@@ -44,6 +45,21 @@ export type AwaitMetaWebServiceReplyResult =
       ratingRequestPinId?: string | null;
       ratingRequestObservedAt?: number | null;
       ratingRawMessage?: Record<string, unknown> | null;
+    }
+  | {
+      state: 'failed';
+      failureCode: string;
+      failureReason: string;
+      orderEndPinId: string | null;
+      observedAt: number | null;
+      rawMessage: Record<string, unknown> | null;
+    }
+  // Every socket endpoint failed to connect (MetaSO down or local network
+  // down). Distinct from a provider-side failure: the provider may be
+  // perfectly healthy, so callers must not treat it as a delivery failure.
+  | {
+      state: 'transport_error';
+      error: string;
     }
   | {
       state: 'timeout';
@@ -137,6 +153,24 @@ export function shouldAcceptServiceRatingRequestForReplyWaiter(input: {
 
   const pendingDeliveryOrderTxid = normalizeOrderProtocolReference(input.pendingDeliveryOrderTxid);
   return Boolean(pendingDeliveryOrderTxid && ratingOrderTxid === pendingDeliveryOrderTxid);
+}
+
+export function shouldAcceptServiceOrderEndForReplyWaiter(input: {
+  orderEndOrderTxid?: unknown;
+  expectedOrderTxid?: unknown;
+}): boolean {
+  const orderEndOrderTxid = normalizeOrderProtocolReference(input.orderEndOrderTxid);
+  if (!orderEndOrderTxid) {
+    // Legacy [ORDER_END <reason>] messages carry no txid; the peer filter has
+    // already scoped this wait to a single provider, so accept the terminal reply.
+    return true;
+  }
+
+  const expectedOrderTxid = normalizeOrderProtocolReference(input.expectedOrderTxid);
+  if (!expectedOrderTxid) {
+    return true;
+  }
+  return orderEndOrderTxid === expectedOrderTxid;
 }
 
 function normalizeObject(value: unknown): Record<string, unknown> | null {
@@ -278,6 +312,14 @@ export function createSocketIoMetaWebReplyWaiter(options: {
           finish({ state: 'timeout' });
         }, timeoutMs);
 
+        if (endpoints.length === 0) {
+          finish({ state: 'transport_error', error: 'No MetaSO socket endpoints resolved.' });
+          return;
+        }
+
+        let connectedCount = 0;
+        let transportErrorCount = 0;
+
         for (const endpoint of endpoints) {
           const socket = io(endpoint.url, {
             path: endpoint.path,
@@ -289,6 +331,20 @@ export function createSocketIoMetaWebReplyWaiter(options: {
             transports: ['websocket'],
           });
           sockets.push(socket);
+
+          socket.on('connect', () => {
+            connectedCount += 1;
+          });
+          socket.on('connect_error', (error: unknown) => {
+            if (settled) return;
+            transportErrorCount += 1;
+            // Fail fast only when EVERY endpoint failed to connect — one
+            // healthy endpoint is enough to keep waiting for the provider.
+            if (transportErrorCount >= endpoints.length && connectedCount === 0) {
+              const message = error instanceof Error ? error.message : String(error ?? 'connect error');
+              finish({ state: 'transport_error', error: message || 'MetaSO socket connect error.' });
+            }
+          });
 
           const handleSocketData = (data: unknown) => {
             if (settled) return;
@@ -321,6 +377,29 @@ export function createSocketIoMetaWebReplyWaiter(options: {
                   ? message.timestamp
                   : null,
                 ratingRawMessage: normalizeObject(message),
+              });
+              return;
+            }
+
+            const orderEnd = parseA2AOrderEndMessage(plaintext);
+            if (orderEnd) {
+              if (!shouldAcceptServiceOrderEndForReplyWaiter({
+                orderEndOrderTxid: orderEnd.orderTxid,
+                expectedOrderTxid: input.orderTxid,
+              })) {
+                return;
+              }
+              const failureCode = normalizeText(orderEnd.reason) || 'provider_order_ended';
+              finish({
+                state: 'failed',
+                failureCode,
+                failureReason: normalizeText(orderEnd.content)
+                  || `Provider ended the order (${failureCode}).`,
+                orderEndPinId: pinIdFromMessage(message),
+                observedAt: typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)
+                  ? message.timestamp
+                  : null,
+                rawMessage: normalizeObject(message),
               });
               return;
             }

@@ -560,6 +560,61 @@ test('skill injector copies requested skills into provider-native skill roots', 
   assert.match(copiedScript, /export/);
 });
 
+test('skill injector refreshes stale copies and skips unchanged skills', async () => {
+  const base = await createTempDir();
+  const skillsRoot = path.join(base, 'skills');
+  const srcDir = path.join(skillsRoot, 'metabot-refreshable');
+  const cwd = path.join(base, 'work');
+  await fs.mkdir(path.join(srcDir, 'scripts'), { recursive: true });
+  await fs.writeFile(path.join(srcDir, 'SKILL.md'), '# Refreshable v1\n', 'utf8');
+  await fs.writeFile(path.join(srcDir, 'scripts', 'run.mjs'), 'export const v = 1;\n', 'utf8');
+
+  const input = {
+    skills: ['metabot-refreshable'],
+    skillsRoot,
+    provider: 'claude-code',
+    cwd,
+  };
+  const dstDir = path.join(cwd, '.claude', 'skills', 'metabot-refreshable');
+  const originalCp = fs.cp;
+  let cpCalls = 0;
+  fs.cp = async (...args) => {
+    cpCalls += 1;
+    return originalCp(...args);
+  };
+  try {
+    const first = await injectSkills(input);
+    assert.deepEqual(first.injected, ['metabot-refreshable']);
+    assert.equal(cpCalls, 1);
+
+    // Unchanged source: the fingerprint matches and no copy happens at all.
+    const second = await injectSkills(input);
+    assert.deepEqual(second.injected, ['metabot-refreshable']);
+    assert.equal(cpCalls, 1);
+
+    // A SKILL.md change refreshes the injected copy.
+    await fs.writeFile(path.join(srcDir, 'SKILL.md'), '# Refreshable v2 with more words\n', 'utf8');
+    const third = await injectSkills(input);
+    assert.deepEqual(third.injected, ['metabot-refreshable']);
+    assert.equal(cpCalls, 2);
+    assert.match(await fs.readFile(path.join(dstDir, 'SKILL.md'), 'utf8'), /v2 with more words/);
+
+    // A script-only change (SKILL.md untouched) also refreshes the copy.
+    await fs.writeFile(path.join(srcDir, 'scripts', 'run.mjs'), 'export const v = 22;\n', 'utf8');
+    const fourth = await injectSkills(input);
+    assert.deepEqual(fourth.injected, ['metabot-refreshable']);
+    assert.equal(cpCalls, 3);
+    assert.match(await fs.readFile(path.join(dstDir, 'scripts', 'run.mjs'), 'utf8'), /v = 22/);
+  } finally {
+    fs.cp = originalCp;
+  }
+
+  // The atomic swap never leaves temp dirs or a partial tree behind.
+  const skillRootEntries = await fs.readdir(path.join(cwd, '.claude', 'skills'));
+  assert.deepEqual(skillRootEntries, ['metabot-refreshable']);
+  assert.match(await fs.readFile(path.join(dstDir, 'SKILL.md'), 'utf8'), /v2 with more words/);
+});
+
 test('skill injector copies explicit selected skill sources outside the default root', async () => {
   const base = await createTempDir();
   const skillsRoot = path.join(base, 'default-skills');

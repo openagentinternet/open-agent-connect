@@ -15,7 +15,13 @@ import type { MetabotPaths } from '../state/paths';
 export type PrivateChatSendFailureKind =
   | 'identity_unavailable'
   | 'peer_chat_key_unavailable'
-  | 'pin_write_failed';
+  | 'pin_write_failed'
+  // The reply runner threw before producing content, the commit path threw
+  // after it, or a reply was dropped by the rate limiter — all three used to
+  // be silent, which made unexplained peer-visible silence undiagnosable.
+  | 'reply_runner_failed'
+  | 'reply_commit_failed'
+  | 'rate_limited';
 
 export interface PrivateChatSendFailureEvent {
   kind: PrivateChatSendFailureKind;

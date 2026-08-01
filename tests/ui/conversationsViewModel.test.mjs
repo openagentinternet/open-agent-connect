@@ -446,6 +446,164 @@ test('buildConversationsPageViewModelRuntimeSource formats timestamps with local
   assert.equal(context.result.messages[0].timestampLabel, '2026-07-06 08:19');
 });
 
+test('buildConversationsPageViewModel collapses order progress heartbeats into the latest update', () => {
+  const orderTxid = 'd'.repeat(64);
+  const model = buildConversationsPageViewModel({
+    selectedPeerGlobalMetaId: 'gm-bob',
+    messages: [
+      {
+        messageId: 'msg-1',
+        direction: 'incoming',
+        kind: 'private_chat',
+        sender: { globalMetaId: 'gm-bob', name: 'Bob Bot' },
+        content: 'how is it going?',
+        contentType: 'text/plain',
+        timestamp: FIXTURE_TIMESTAMP,
+      },
+      {
+        messageId: 'msg-2',
+        direction: 'incoming',
+        kind: 'order_protocol',
+        protocolTag: 'ORDER_STATUS',
+        orderTxid,
+        sender: { globalMetaId: 'gm-bob', name: 'Bob Bot' },
+        content: `[ORDER_STATUS:${orderTxid}] I received the order and started processing.`,
+        contentType: 'text/plain',
+        timestamp: FIXTURE_TIMESTAMP + 1000,
+      },
+      {
+        messageId: 'msg-3',
+        direction: 'incoming',
+        kind: 'order_protocol',
+        protocolTag: 'ORDER_STATUS',
+        orderTxid,
+        sender: { globalMetaId: 'gm-bob', name: 'Bob Bot' },
+        content: `[ORDER_STATUS:${orderTxid}] The task is still processing after about 2 minutes.`,
+        contentType: 'text/plain',
+        timestamp: FIXTURE_TIMESTAMP + 2000,
+      },
+      {
+        messageId: 'msg-4',
+        direction: 'incoming',
+        kind: 'order_protocol',
+        protocolTag: 'ORDER_STATUS',
+        orderTxid,
+        sender: { globalMetaId: 'gm-bob', name: 'Bob Bot' },
+        content: `[ORDER_STATUS:${orderTxid}] The task is still processing after about 4 minutes.`,
+        contentType: 'text/plain',
+        timestamp: FIXTURE_TIMESTAMP + 3000,
+      },
+      {
+        messageId: 'msg-5',
+        direction: 'incoming',
+        kind: 'private_chat',
+        sender: { globalMetaId: 'gm-bob', name: 'Bob Bot' },
+        content: 'any update?',
+        contentType: 'text/plain',
+        timestamp: FIXTURE_TIMESTAMP + 4000,
+      },
+    ],
+  });
+
+  // The heartbeat run collapses into its latest notice instead of flooding
+  // the thread, and the wire tag is stripped from the displayed content.
+  assert.deepEqual(model.messages.map((message) => message.messageId), ['msg-1', 'msg-4', 'msg-5']);
+  assert.equal(model.messages[1].content, 'The task is still processing after about 4 minutes.');
+  assert.equal(model.messages[1].kindLabel, 'Service');
+});
+
+test('buildConversationsPageViewModel keeps separate orders and other protocol records apart', () => {
+  const orderA = 'e'.repeat(64);
+  const orderB = 'f'.repeat(64);
+  const model = buildConversationsPageViewModel({
+    selectedPeerGlobalMetaId: 'gm-bob',
+    messages: [
+      {
+        messageId: 'msg-1',
+        direction: 'incoming',
+        kind: 'order_protocol',
+        protocolTag: 'ORDER_STATUS',
+        orderTxid: orderA,
+        content: `[ORDER_STATUS:${orderA}] accepted A`,
+        timestamp: FIXTURE_TIMESTAMP + 1000,
+      },
+      {
+        messageId: 'msg-2',
+        direction: 'incoming',
+        kind: 'order_protocol',
+        protocolTag: 'ORDER_STATUS',
+        orderTxid: orderB,
+        content: `[ORDER_STATUS:${orderB}] accepted B`,
+        timestamp: FIXTURE_TIMESTAMP + 2000,
+      },
+      {
+        messageId: 'msg-3',
+        direction: 'incoming',
+        kind: 'order_protocol',
+        protocolTag: 'ORDER_STATUS',
+        orderTxid: orderA,
+        content: `[ORDER_STATUS:${orderA}] A still processing`,
+        timestamp: FIXTURE_TIMESTAMP + 3000,
+      },
+      {
+        messageId: 'msg-4',
+        direction: 'incoming',
+        kind: 'order_protocol',
+        protocolTag: 'DELIVERY',
+        orderTxid: orderA,
+        content: `[DELIVERY:${orderA}] {"result":"done"}`,
+        timestamp: FIXTURE_TIMESTAMP + 4000,
+      },
+    ],
+  });
+
+  // Different orders do not merge, non-consecutive repeats stay, and DELIVERY
+  // payloads are neither stripped nor collapsed.
+  assert.deepEqual(model.messages.map((message) => message.messageId), ['msg-1', 'msg-2', 'msg-3', 'msg-4']);
+  assert.equal(model.messages[0].content, 'accepted A');
+  assert.equal(model.messages[1].content, 'accepted B');
+  assert.equal(model.messages[2].content, 'A still processing');
+  assert.equal(model.messages[3].content, `[DELIVERY:${orderA}] {"result":"done"}`);
+});
+
+test('buildConversationsPageViewModelRuntimeSource collapses heartbeats in browser-like context', () => {
+  const orderTxid = 'd'.repeat(64);
+  const context = {
+    input: {
+      selectedPeerGlobalMetaId: 'gm-bob',
+      messages: [
+        {
+          messageId: 'msg-1',
+          direction: 'incoming',
+          kind: 'order_protocol',
+          protocolTag: 'ORDER_STATUS',
+          orderTxid,
+          content: `[ORDER_STATUS:${orderTxid}] accepted`,
+          timestamp: 1776836184000,
+        },
+        {
+          messageId: 'msg-2',
+          direction: 'incoming',
+          kind: 'order_protocol',
+          protocolTag: 'ORDER_STATUS',
+          orderTxid,
+          content: `[ORDER_STATUS:${orderTxid}] still processing`,
+          timestamp: 1776836185000,
+        },
+      ],
+    },
+    result: null,
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${buildConversationsPageViewModelRuntimeSource()}\nresult = buildConversationsPageViewModel(input);`,
+    context,
+  );
+
+  assert.equal(context.result.messages.length, 1);
+  assert.equal(context.result.messages[0].content, 'still processing');
+});
+
 test('buildConversationsPageViewModel defaults to the system default Bot (isActive) rather than the first listed Bot', () => {
   const model = buildConversationsPageViewModel({
     localBots: [

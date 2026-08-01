@@ -1005,10 +1005,14 @@ export function buildMetabotInfoPublishTargets(
       }
     }
     if (changed.has('allowChatSkills')) {
+      const allowChatSkills = normalizeAllowChatSkills(profile.allowChatSkills);
       targets.push(jsonInfoTarget({
         path: '/info/chatSkills',
         payload: {
-          allowPrivateChatSkills: normalizeAllowChatSkills(profile.allowChatSkills),
+          allowChatSkills,
+          // Deprecated mirror of allowChatSkills, kept for one release so
+          // older readers that only understand the legacy field keep working.
+          allowPrivateChatSkills: allowChatSkills,
           allowGroupChatSkills: [],
         },
       }));

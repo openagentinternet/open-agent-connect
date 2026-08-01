@@ -66,20 +66,21 @@ Rules:
 - Unsafe skill names are rejected before persistence.
 - Unknown skill names are rejected when saving through the UI/API if the selected Bot has a resolvable primary runtime catalog.
 
-### Bio Payload
+### On-chain Payload
 
-`/info/bio` should include:
+Implemented: the allow-list is published on the `/info/chatSkills` pin (this section originally proposed embedding it in `/info/bio`; the `/info/chatSkills` path was chosen instead and will also host a future `disallowChatSkills` field):
 
 ```json
 {
-  "role": "...",
-  "soul": "...",
-  "goal": "...",
-  "primaryProvider": "...",
-  "fallbackProvider": "...",
-  "allowChatSkills": ["skill-one", "skill-two"]
+  "allowChatSkills": ["skill-one", "skill-two"],
+  "allowPrivateChatSkills": ["skill-one", "skill-two"],
+  "allowGroupChatSkills": []
 }
 ```
+
+- `allowChatSkills` is the canonical field.
+- `allowPrivateChatSkills` is a deprecated mirror of `allowChatSkills`, published for one release so older readers keep working. Readers accept `allowChatSkills` first and fall back to `allowPrivateChatSkills` only when it is missing.
+- `allowGroupChatSkills` is reserved for group chat and is currently always published as `[]`.
 
 When the list is empty, the writer may include `allowChatSkills: []` for explicitness. The runtime must treat missing, null, and empty values as no configured chat skills.
 
@@ -194,6 +195,17 @@ For each local Bot handling a private chat message:
 This keeps runtime behavior safe when skills are uninstalled, renamed, or when the primary runtime changes after the profile was saved.
 
 ### Executor-Level Enforcement
+
+> **Superseded 2026-07-30** (branch `fix-a2a-skill-execution`, plan:
+> `docs/a2a-chat-skill-order-maturity-plan-v1.md`): chat turns no longer run
+> under `skillIsolation: 'strict'`. To match the IDBots reference behavior,
+> allowed chat skills execute with the host's normal environment so they can
+> perform their documented actions (including on-chain writes, uploads, and
+> messaging). The allow-list is now scoped **at prompt level**: the routing
+> block lists only the allowed skills (name, description, SKILL.md location)
+> and instructs the model to use only those. Chat turns run in a per-profile
+> workspace (`<profile>/.runtime/private-chat-work/`). The executor's
+> strict-isolation machinery remains available for other callers.
 
 Private chat skill enablement must be enforced through:
 
