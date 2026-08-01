@@ -61,6 +61,21 @@ Test rules:
 - Full `npm test` (or `test:fast` + `test:integration`) is required for shared runtime behavior, wallet or chain writes, persistence format changes, release artifacts, package or build plumbing, broad skillpack output, before releases, or when the user explicitly asks for it.
 - For narrow docs, prompts, SKILLs, scripts, or UI copy changes, scoped checks plus `git diff --check` are usually enough.
 
+## Merge And Closeout
+
+A merge is a git operation that takes seconds; it only balloons when verification is mis-scoped. The full suite (`npm test`) is slow (tens of minutes) and contains a few flaky build-heavy integration tests that can fail under concurrency. Do **not** treat the merge step as a trigger to re-run the full suite. Keep closeout fast:
+
+- **Baseline the workspace up front.** After `git worktree add`, run `npm install && npm run build` before writing any code. A worktree with no `node_modules` produces spurious failures (missing deps) later that cost a full round-trip to diagnose.
+- **Verify on the merge result with the same scoped set, not the full suite.** Run the scoped commands already used during development (see Verification Policy) on `main` after the `--no-ff` merge. The merge step's job is to confirm the branch still builds/tests clean when combined with `main`, not to re-certify the whole repo.
+- **Check for overlap before merging.** When `main` advanced while the branch was in flight, confirm the two change sets do not touch the same files:
+  ```bash
+  fork=$(git merge-base main HEAD)
+  comm -12 <(git diff --name-only "$fork"..main | sort) <(git diff --name-only "$fork"..HEAD | sort)
+  ```
+  Empty output means a clean merge is expected; non-empty files are the only real conflict candidates.
+- **Never re-run the full suite to diagnose one failure.** If a test fails in a suite run, isolate it: run that single file on the branch and on plain `main`. A failure that reproduces on plain `main` (or passes in isolation) is pre-existing flakiness or an environment gap, not a regression to block the merge.
+- **Do not poll long-running tasks.** Background commands notify on completion. Do not chain `sleep` calls to wait for them; do other work or stop and let the completion event drive the next step.
+
 ## Definition Of Done
 
 A change round is not done until all of these are true:

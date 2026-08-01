@@ -1063,3 +1063,101 @@ test('default conversation guidance replaces older pending guidance before a lat
   });
   assert.ok(cleared, 'pending guidance should be cleared after the guided send');
 });
+
+// --- peer chat public key error classification (network vs. missing) -----
+
+// Overwrites the cached A2A conversation peer chatPublicKey, mirroring how an
+// inbound (already verified) peer key is stored locally.
+async function seedCachedPeerChatPublicKey(homeDir, peerChatPublicKey) {
+  const local = actor(LOCAL_GLOBAL_META_ID, 'Eric');
+  const peer = { ...actor(PEER_GLOBAL_META_ID, 'Remote Bot'), chatPublicKey: peerChatPublicKey };
+  await createA2AConversationStore({ homeDir, local, peer }).writeConversation({
+    version: 1,
+    local,
+    peer,
+    messages: [message(1, { direction: 'incoming', content: 'remote hello', sender: peer, recipient: local })],
+    sessions: [],
+    indexes: { messageIds: ['handler-msg-1'], orderTxidToSessionId: {}, paymentTxidToSessionId: {} },
+    updatedAt: BASE_TIME + 1,
+  });
+}
+
+test('chat.private reuses a cached peer chat public key when the chain lookup endpoints are unreachable', async (t) => {
+  const localPair = createIdentityPair();
+  const peerPair = createIdentityPair();
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: chatSigner(localPair, []),
+    // Injected resolver is what background paths use. Simulate the real chain
+    // endpoints being down so the foreground handler's own lookup also reports
+    // unreachable — unless the local cache is hit first.
+    fetchPeerChatPublicKey: async () => null,
+  });
+  await seedCachedPeerChatPublicKey(homeDir, peerPair.publicKeyHex);
+  const originalFetch = global.fetch;
+  global.fetch = async () => { throw new Error('ECONNRESET'); };
+  try {
+    const result = await handlers.chat.private({
+      from: LOCAL_GLOBAL_META_ID,
+      to: PEER_GLOBAL_META_ID,
+      content: 'cached ping',
+    });
+    // The chain endpoints are down, so success here proves the locally cached
+    // peer chat public key was reused instead of failing as unreachable.
+    assert.equal(result.ok, true);
+    assert.equal(result.data.to, PEER_GLOBAL_META_ID);
+    assert.equal(result.data.path, '/protocols/simplemsg');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('chat.private reports peer_chat_public_key_lookup_unreachable with upstream errors when nothing is reachable', async (t) => {
+  const localPair = createIdentityPair();
+  // Empty conversation so no cached peer key exists.
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: chatSigner(localPair, []),
+    fetchPeerChatPublicKey: async () => null,
+  });
+  await seedCachedPeerChatPublicKey(homeDir, null);
+  const originalFetch = global.fetch;
+  global.fetch = async () => { throw new Error('TLS handshake failed'); };
+  try {
+    const result = await handlers.chat.private({
+      from: LOCAL_GLOBAL_META_ID,
+      to: PEER_GLOBAL_META_ID,
+      content: 'unreachable ping',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'peer_chat_public_key_lookup_unreachable');
+    assert.match(result.message, /Could not reach the chat public key lookup service/);
+    assert.ok(Array.isArray(result.data?.errors), 'preserves upstream errors');
+    assert.ok(result.data.errors.some((e) => e.includes('TLS handshake failed')));
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('chat.private reports peer_chat_public_key_missing when endpoints are reachable but carry no key', async (t) => {
+  const localPair = createIdentityPair();
+  const { homeDir, handlers } = await createFixture(t, {
+    signer: chatSigner(localPair, []),
+    fetchPeerChatPublicKey: async () => null,
+  });
+  await seedCachedPeerChatPublicKey(homeDir, null);
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true, status: 200, statusText: 'OK',
+    json: async () => ({ data: { name: 'Remote Bot' } }),
+  });
+  try {
+    const result = await handlers.chat.private({
+      from: LOCAL_GLOBAL_META_ID,
+      to: PEER_GLOBAL_META_ID,
+      content: 'absent ping',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'peer_chat_public_key_missing');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

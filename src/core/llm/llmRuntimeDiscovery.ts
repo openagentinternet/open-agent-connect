@@ -58,6 +58,7 @@ export type RuntimeReadinessProbe = (input: {
 const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
 const DEFAULT_VERSION_PROBE_TIMEOUT_MS = 5_000;
 const DEFAULT_READINESS_SEMANTIC_INACTIVITY_TIMEOUT_MS = 15_000;
+const WORKBUDDY_READINESS_ABORT_SETTLE_GRACE_MS = 1_000;
 const DEFAULT_PROVIDER_DISCOVERY_CONCURRENCY = 8;
 const DEFAULT_RECENT_HEALTHY_READINESS_SKIP_MS = 30 * 60 * 1000;
 const READINESS_PROMPT = 'Reply exactly OK.';
@@ -446,6 +447,24 @@ function readinessSucceeded(result: RuntimeReadinessProbeResult): boolean {
   return result.ok && typeof result.output === 'string' && result.output.trim().length > 0;
 }
 
+function readinessTimeoutMessage(
+  provider: LlmProvider,
+  timeoutMs: number,
+  backendMessage?: string,
+): string {
+  const timeoutMessage = `Readiness probe timed out after ${timeoutMs}ms.`;
+  if (provider !== 'workbuddy' || !backendMessage) return timeoutMessage;
+
+  const addressInUse = backendMessage.match(
+    /\bEADDRINUSE\b[^\r\n]*?\b((?:127\.0\.0\.1|localhost):(\d{1,5}))\b/i,
+  );
+  if (!addressInUse) return timeoutMessage;
+
+  const port = Number(addressInUse[2]);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return timeoutMessage;
+  return `${timeoutMessage} WorkBuddy CLI reported that ${addressInUse[1]} is already in use (EADDRINUSE).`;
+}
+
 function probeHintsForProvider(provider: LlmProvider) {
   if (!isRuntimePlatformId(provider)) return undefined;
   return getRuntimePlatformDefinition(provider).runtime.probeHints;
@@ -486,10 +505,24 @@ async function defaultRuntimeReadinessProbe(input: {
 
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
+  let fallbackTimer: NodeJS.Timeout | undefined;
+  let timedOut = false;
   const timeout = new Promise<RuntimeReadinessProbeResult>((resolve) => {
     timer = setTimeout(() => {
+      timedOut = true;
       controller.abort();
-      resolve({ ok: false, message: `Readiness probe timed out after ${input.timeoutMs}ms.` });
+      if (input.runtime.provider !== 'workbuddy') {
+        resolve({ ok: false, message: readinessTimeoutMessage(input.runtime.provider, input.timeoutMs) });
+        return;
+      }
+      // Give the backend time to terminate its child and attach bounded stderr
+      // diagnostics before falling back to the generic timeout message.
+      fallbackTimer = setTimeout(() => {
+        resolve({
+          ok: false,
+          message: readinessTimeoutMessage(input.runtime.provider, input.timeoutMs),
+        });
+      }, WORKBUDDY_READINESS_ABORT_SETTLE_GRACE_MS);
     }, input.timeoutMs);
   });
 
@@ -515,7 +548,14 @@ async function defaultRuntimeReadinessProbe(input: {
   }, controller.signal).then((result) => {
     const output = result.output || outputParts.join('');
     if (result.status !== 'completed') {
-      return { ok: false, output, message: result.error || `Readiness probe ended with status ${result.status}.` };
+      const backendMessage = result.error || `Readiness probe ended with status ${result.status}.`;
+      return {
+        ok: false,
+        output,
+        message: timedOut
+          ? readinessTimeoutMessage(input.runtime.provider, input.timeoutMs, backendMessage)
+          : backendMessage,
+      };
     }
     if (!output.trim()) {
       return { ok: false, output, message: 'Readiness probe completed without returning output.' };
@@ -530,6 +570,7 @@ async function defaultRuntimeReadinessProbe(input: {
     return await Promise.race([probe, timeout]);
   } finally {
     if (timer) clearTimeout(timer);
+    if (fallbackTimer) clearTimeout(fallbackTimer);
   }
 }
 

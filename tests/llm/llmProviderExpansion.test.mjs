@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import test from 'node:test';
@@ -47,6 +48,20 @@ async function withDefaultExecutablePathsDisabled(callback) {
       platform.runtime.defaultExecutablePaths = defaultExecutablePaths;
     }
   }
+}
+
+async function reserveThenCloseLoopbackPort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  await new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+  return address.port;
 }
 
 test('supported provider metadata includes all managed host providers and custom guard compatibility', () => {
@@ -573,6 +588,96 @@ test('Node-shebang providers use a compatible Node later in PATH', async () => {
   assert.equal(resolution.env.PATH.split(path.delimiter)[0], compatibleBinDir);
 });
 
+test('provider process env neutralizes refused numeric loopback proxies and preserves other proxies', async () => {
+  const refusedPort = await reserveThenCloseLoopbackPort();
+  const refusedProxy = `http://127.0.0.1:${refusedPort}`;
+  const remoteProxy = 'http://proxy.example.test:8080';
+  const ambiguousLocalhostProxy = `http://localhost:${refusedPort}`;
+
+  const resolution = await resolveProviderProcessEnv('cursor', '/bin/sh', {
+    HTTP_PROXY: refusedProxy,
+    HTTPS_PROXY: refusedProxy,
+    http_proxy: refusedProxy,
+    https_proxy: refusedProxy,
+    ALL_PROXY: remoteProxy,
+    all_proxy: ambiguousLocalhostProxy,
+  });
+
+  assert.equal(resolution.error, undefined);
+  assert.equal(resolution.env.HTTP_PROXY, '');
+  assert.equal(resolution.env.HTTPS_PROXY, '');
+  assert.equal(resolution.env.http_proxy, '');
+  assert.equal(resolution.env.https_proxy, '');
+  assert.equal(resolution.env.ALL_PROXY, remoteProxy);
+  assert.equal(resolution.env.all_proxy, ambiguousLocalhostProxy);
+});
+
+test('provider process env preserves a reachable numeric loopback proxy', async (t) => {
+  const server = createServer();
+  t.after(() => {
+    if (server.listening) server.close();
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const reachableProxy = `http://127.0.0.1:${address.port}`;
+
+  const resolution = await resolveProviderProcessEnv('cursor', '/bin/sh', {
+    HTTP_PROXY: reachableProxy,
+    HTTPS_PROXY: reachableProxy,
+  });
+
+  assert.equal(resolution.error, undefined);
+  assert.equal(resolution.env.HTTP_PROXY, reachableProxy);
+  assert.equal(resolution.env.HTTPS_PROXY, reachableProxy);
+});
+
+test('Cursor readiness succeeds when the daemon inherited a refused loopback proxy', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-cursor-refused-proxy-');
+    const cursorPath = path.join(tempRoot, 'cursor-agent');
+    const refusedPort = await reserveThenCloseLoopbackPort();
+    const refusedProxy = `http://127.0.0.1:${refusedPort}`;
+    await writeFile(cursorPath, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "cursor-agent 2026.07.23"
+  exit 0
+fi
+if [ -n "$HTTP_PROXY$HTTPS_PROXY$ALL_PROXY$http_proxy$https_proxy$all_proxy" ]; then
+  echo "Error: [unavailable] connect ECONNREFUSED 127.0.0.1:${refusedPort}" >&2
+  exit 1
+fi
+echo '{"type":"result","result":"OK"}'
+`, 'utf8');
+    await chmod(cursorPath, 0o755);
+
+    const result = await discoverLlmRuntimes({
+      env: {
+        PATH: tempRoot,
+        OAC_CURSOR_PATH: cursorPath,
+        HTTP_PROXY: refusedProxy,
+        HTTPS_PROXY: refusedProxy,
+        ALL_PROXY: refusedProxy,
+        http_proxy: refusedProxy,
+        https_proxy: refusedProxy,
+        all_proxy: refusedProxy,
+      },
+      providers: ['cursor'],
+      readinessTimeoutMs: 1_000,
+      now: () => '2026-07-31T00:00:00.000Z',
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].provider, 'cursor');
+    assert.equal(result.runtimes[0].health, 'healthy');
+    assert.equal(result.runtimes[0].healthReason, undefined);
+  });
+});
+
 test('runtime discovery reports a clear error when a Node-shebang provider has no compatible Node', async () => {
   await withDefaultExecutablePathsDisabled(async () => {
     const tempRoot = await mkdtempTempRoot('oac-provider-node-runtime-missing-');
@@ -1028,6 +1133,64 @@ test('runtime discovery lets slow WorkBuddy version probes complete before readi
     assert.equal(result.runtimes[0].version, '2.103.3');
     assert.equal(result.runtimes[0].health, 'healthy');
     assert.equal(readinessCalled, true);
+  });
+});
+
+test('WorkBuddy readiness timeout preserves stderr diagnostics from the CLI', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-workbuddy-readiness-error-');
+    const workbuddyPath = path.join(tempRoot, 'workbuddy-cli');
+    await writeFile(workbuddyPath, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "2.115.0"
+  exit 0
+fi
+echo "Unhandled rejection Error: listen EADDRINUSE: address already in use 127.0.0.1:64403" >&2
+while :; do :; done
+`, 'utf8');
+    await chmod(workbuddyPath, 0o755);
+
+    const result = await discoverLlmRuntimes({
+      env: { ...process.env, OAC_WORKBUDDY_PATH: workbuddyPath },
+      providers: ['workbuddy'],
+      readinessTimeoutMs: 50,
+      now: () => '2026-07-31T00:00:00.000Z',
+    });
+
+    assert.equal(result.errors.length, 0);
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].health, 'detected');
+    assert.match(result.runtimes[0].healthReason, /Readiness probe timed out after 50ms\./);
+    assert.match(result.runtimes[0].healthReason, /EADDRINUSE/);
+    assert.match(result.runtimes[0].healthReason, /127\.0\.0\.1:64403/);
+    assert.doesNotMatch(result.runtimes[0].healthReason, /Unhandled rejection/);
+  });
+});
+
+test('non-WorkBuddy readiness timeouts keep generic diagnostics', async () => {
+  await withDefaultExecutablePathsDisabled(async () => {
+    const tempRoot = await mkdtempTempRoot('oac-provider-codex-readiness-error-');
+    const codexPath = path.join(tempRoot, 'codex-cli');
+    await writeFile(codexPath, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "codex-cli 1.0.0"
+  exit 0
+fi
+echo "sensitive provider stderr: EADDRINUSE 127.0.0.1:64403" >&2
+while :; do :; done
+`, 'utf8');
+    await chmod(codexPath, 0o755);
+
+    const result = await discoverLlmRuntimes({
+      env: { ...process.env, OAC_CODEX_PATH: codexPath },
+      providers: ['codex'],
+      readinessTimeoutMs: 50,
+      now: () => '2026-07-31T00:00:00.000Z',
+    });
+
+    assert.equal(result.runtimes.length, 1);
+    assert.equal(result.runtimes[0].health, 'detected');
+    assert.equal(result.runtimes[0].healthReason, 'Readiness probe timed out after 50ms.');
   });
 });
 

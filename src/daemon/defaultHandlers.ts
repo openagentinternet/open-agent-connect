@@ -3960,12 +3960,31 @@ async function buildTraceInspectorPayload(input: {
   };
 }
 
-export async function fetchPeerChatPublicKey(
+export type PeerChatPublicKeyOutcome =
+  | { status: 'found'; chatPublicKey: string }
+  // The lookup reached at least one endpoint and it answered without a usable
+  // chatpubkey. The peer genuinely has no published key.
+  | { status: 'absent' }
+  // No endpoint could be reached or returned a usable response. This is a
+  // network/gateway problem, not missing data. The real upstream errors are
+  // preserved so callers can surface them instead of misreporting "no key".
+  | { status: 'unreachable'; errors: string[] };
+
+function readChatPubKeyFromPayload(payload: unknown): string {
+  const record = readObject(payload) ?? {};
+  const data = readObject(record.data) ?? {};
+  return normalizeText(data.chatpubkey ?? record.chatpubkey);
+}
+
+// Structured lookup that classifies the outcome and preserves upstream errors.
+// `fetchPeerChatPublicKey` (below) is a thin wrapper that keeps the historical
+// `string | null` contract for the many background callers that rely on it.
+export async function lookupPeerChatPublicKey(
   globalMetaId: string,
   options: { chainApiBaseUrl?: string } = {},
-): Promise<string | null> {
+): Promise<PeerChatPublicKeyOutcome> {
   const normalized = normalizeText(globalMetaId);
-  if (!normalized) return null;
+  if (!normalized) return { status: 'absent' };
 
   const urls = [
     ...(normalizeText(options.chainApiBaseUrl)
@@ -3973,26 +3992,44 @@ export async function fetchPeerChatPublicKey(
       : []),
     `https://file.metaid.io/metafile-indexer/api/v1/info/globalmetaid/${encodeURIComponent(normalized)}`,
     `https://manapi.metaid.io/api/info/metaid/${encodeURIComponent(normalized)}`,
+    `https://so.metaid.io/api/info/globalmetaid/${encodeURIComponent(normalized)}`,
   ];
+
+  const errors: string[] = [];
+  // A 2xx response means we actually reached the gateway; if none of the
+  // reached endpoints carried a key, the key is genuinely absent rather than
+  // merely unreachable.
+  let reachedAnyEndpoint = false;
 
   for (const url of urls) {
     try {
       const response = await fetch(url);
-      if (!response.ok) continue;
-      const payload = await response.json() as {
-        data?: { chatpubkey?: unknown };
-        chatpubkey?: unknown;
-      };
-      const chatPublicKey = normalizeText(payload?.data?.chatpubkey ?? payload?.chatpubkey);
-      if (chatPublicKey) {
-        return chatPublicKey;
+      if (!response.ok) {
+        errors.push(`${response.status} ${response.statusText}`.trim() || `HTTP ${response.status}`);
+        continue;
       }
-    } catch {
-      // ignore and fall through
+      reachedAnyEndpoint = true;
+      const chatPublicKey = readChatPubKeyFromPayload(await response.json());
+      if (chatPublicKey) {
+        return { status: 'found', chatPublicKey };
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
     }
   }
 
-  return null;
+  if (reachedAnyEndpoint) {
+    return { status: 'absent' };
+  }
+  return { status: 'unreachable', errors };
+}
+
+export async function fetchPeerChatPublicKey(
+  globalMetaId: string,
+  options: { chainApiBaseUrl?: string } = {},
+): Promise<string | null> {
+  const outcome = await lookupPeerChatPublicKey(globalMetaId, options);
+  return outcome.status === 'found' ? outcome.chatPublicKey : null;
 }
 
 async function listRuntimeDirectoryServices(input: {
@@ -15654,7 +15691,32 @@ export function createDefaultMetabotDaemonHandlers(input: {
           ? normalizeText(state.identity.chatPublicKey) || privateChatIdentity.chatPublicKey
           : '';
         if (!peerChatPublicKey) {
-          peerChatPublicKey = await resolvePeerChatPublicKey(request.peer) ?? '';
+          // Reuse the peer chat public key already cached in the local A2A
+          // conversation history before hitting the chain endpoints.
+          const cachedConversation = await createA2AConversationStore({
+            paths: actor.runtimeStateStore.paths,
+            local: {
+              globalMetaId: state.identity.globalMetaId,
+              name: state.identity.name,
+              chatPublicKey: state.identity.chatPublicKey,
+            },
+            peer: { globalMetaId: request.peer },
+          }).readConversation().catch(() => null);
+          peerChatPublicKey = normalizeText(cachedConversation?.peer?.chatPublicKey) || '';
+        }
+        if (!peerChatPublicKey) {
+          const outcome = await lookupPeerChatPublicKey(request.peer, {
+            chainApiBaseUrl: input.chainApiBaseUrl,
+          });
+          if (outcome.status === 'found') {
+            peerChatPublicKey = outcome.chatPublicKey;
+          } else if (outcome.status === 'unreachable') {
+            return commandFailed(
+              'peer_chat_public_key_lookup_unreachable',
+              'Could not reach the chat public key lookup service to resolve the target. This is usually a temporary network or gateway issue; please retry shortly.',
+              { data: { target: request.peer, errors: outcome.errors } },
+            );
+          }
         }
         if (!peerChatPublicKey) {
           return commandFailed(
@@ -15712,7 +15774,33 @@ export function createDefaultMetabotDaemonHandlers(input: {
           peerChatPublicKey = state.identity.chatPublicKey;
         }
         if (!peerChatPublicKey) {
-          peerChatPublicKey = await resolvePeerChatPublicKey(request.to) ?? '';
+          // Prefer a peer chat public key already verified and cached in the
+          // local A2A conversation history. This lets a send succeed even when
+          // the chain public-key endpoints are temporarily unreachable.
+          const cachedConversation = await createA2AConversationStore({
+            paths: actor.runtimeStateStore.paths,
+            local: {
+              globalMetaId: state.identity.globalMetaId,
+              name: state.identity.name,
+              chatPublicKey: state.identity.chatPublicKey,
+            },
+            peer: { globalMetaId: request.to },
+          }).readConversation().catch(() => null);
+          peerChatPublicKey = normalizeText(cachedConversation?.peer?.chatPublicKey) || '';
+        }
+        if (!peerChatPublicKey) {
+          const outcome = await lookupPeerChatPublicKey(request.to, {
+            chainApiBaseUrl: input.chainApiBaseUrl,
+          });
+          if (outcome.status === 'found') {
+            peerChatPublicKey = outcome.chatPublicKey;
+          } else if (outcome.status === 'unreachable') {
+            return commandFailed(
+              'peer_chat_public_key_lookup_unreachable',
+              'Could not reach the chat public key lookup service to resolve the target. This is usually a temporary network or gateway issue; please retry shortly.',
+              { data: { target: request.to, errors: outcome.errors } },
+            );
+          }
         }
         if (!peerChatPublicKey) {
           return commandFailed(

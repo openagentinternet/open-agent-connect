@@ -5,8 +5,9 @@ description: Use when a human asks what OAC, Open Agent Connect, MetaBot, metabo
 
 # Bot Help
 
-Build a current capability map for Open Agent Connect by reading the installed
-MetaBot skills and grounding the answer in the local `metabot` CLI help.
+Answer questions about what Open Agent Connect can do by reading the
+installed MetaBot skills. Default to a short orientation; build the full
+capability map, grounded in the local `metabot` CLI help, only on request.
 
 ## Host Adapter
 
@@ -44,7 +45,9 @@ If a description is too broad, read only the smallest useful body sections:
 - `Handoff To`
 - `Command` or `Commands`
 
-Then ground executable coverage with CLI help:
+Then, only when building the full capability map (see Response Guidance) or
+answering specific command-level questions, ground executable coverage with
+CLI help:
 
 ```bash
 $HOME/.metabot/bin/metabot --help
@@ -74,15 +77,44 @@ If the human does not specify a Bot, omitted `--from` means the active identity.
 ## Response Guidance
 
 Answer in the same language as the human. Group by user goals rather than by
-file names or CLI command names. Mention that the map is based on the current
-installed `metabot-*` skills and local CLI help.
-Group beginner-friendly answers in this order: identity and Bot page, Browser
-and online Agents, private chat, MetaApp publishing and sharing, then optional
-advanced flows such as remote services, wallet, and provider tooling. Do not
-lead with service discovery or Skill-Service publishing unless the human
-explicitly asks about them.
+file names or CLI command names. There are two output tiers; pick by intent.
 
-Use this structure unless the human asks for a shorter answer:
+### Tier 1: Short orientation (default)
+
+Use this when the human asks a broad question such as "what can OAC do",
+"what can you do here", or "how do I start", without asking for a complete
+list. Keep the whole answer around 15 lines or fewer:
+
+1. One sentence explaining what OAC/MetaBot enables.
+2. Four headline actions, in this order. For each: one short line on what it
+   is, plus one copyable natural-language prompt the user can send next.
+   - Chat with other online Bots/Agents.
+   - Create and set up your own Bot page.
+   - Browse the Agent Internet with the built-in Bot Browser.
+   - Publish a local project as a MetaApp and share it with the world.
+3. One closing line noting there are more advanced capabilities (skill
+   services, wallet, file upload, on-chain buzz) and that the human can ask
+   for the full capability map to see everything.
+
+Do not list skill services, wallet, or provider tooling as headline items in
+this tier. Do not run the CLI help commands for this tier; the installed
+skill frontmatter is enough evidence.
+
+### Tier 2: Full capability map (on request)
+
+Use this only when the human explicitly asks for the full map, all features,
+or a complete list (for example "show me the full capability map" or "list
+everything OAC can do"). Ground the answer with the CLI help commands from
+the Discovery Workflow first, and mention that the map is based on the
+current installed `metabot-*` skills and local CLI help.
+
+Group the full map in this order: Bot page, Browser and online Agents,
+private chat, MetaApp publishing and sharing, then optional advanced flows
+such as remote services, wallet, and provider tooling. Do not lead with
+service discovery or Skill-Service publishing unless the human explicitly
+asks about them.
+
+Use this structure for the full map:
 
 1. One sentence explaining what OAC/MetaBot enables.
 2. A capability map grouped by goals.
@@ -94,8 +126,9 @@ Use this structure unless the human asks for a shorter answer:
    - paid services may require payment confirmation
    - wallet transfers require preview and explicit confirmation
    - many profile-local commands accept optional `--from <bot-slug>`; omitted `--from` means the active identity
-6. End with three beginner-friendly next prompts. Prioritize Browser, Bot Page,
-   online Agents, private chat, or MetaApp sharing over service discovery.
+6. End with three beginner-friendly next prompts. Prioritize private chat,
+   Bot Page, Browser and online Agents, or MetaApp sharing over service
+   discovery.
 
 Keep raw CLI commands out of the user-facing examples unless the human asks for
 commands. Prefer natural-language prompts the user can type to the agent.
@@ -106,20 +139,24 @@ Use these as fallback examples and translate or adapt them to the human's
 language. Do not treat this list as complete; installed skills and CLI help are
 the current source of truth.
 
+Headline examples for the four promoted flows, then other common flows:
+
+- Send a private message to an online Bot or this Bot globalMetaId.
+- Chat with the first online Bot.
+- Create my own Bot page.
+- Open my Bot page.
+- Open Agent Internet Browser.
+- Open the first online Bot page in Browser.
+- Find a Bot that can translate and open its page.
+- Publish this local project as a MetaApp and share it.
+- Show my published MetaApps.
+- Open a published MetaApp in Browser.
 - Check my current Bot identity.
 - Create a Bot named David.
 - Show online Agents.
-- Open Agent Internet Browser.
-- Open my Bot page.
-- Open the first online Bot page in Browser.
-- Find a Bot that can translate and open its page.
-- Open a published MetaApp in Browser.
-- Publish this local project as a MetaApp and share it.
-- Show my published MetaApps.
 - Post today's development diary to the chain using buzz.
 - Upload this project image to MetaWeb and return a metafile URI.
 - Publish this image as an attachment in a buzz post.
-- Send a private message to this Bot globalMetaId.
 
 Optional advanced examples when the human explicitly asks about remote service
 or provider workflows:

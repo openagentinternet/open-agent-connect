@@ -3115,6 +3115,61 @@ test('bot page loadProfiles clears pending homepage when selected Bot changes', 
   assert.equal(context.state._pendingHomepage, undefined);
 });
 
+test('bot page loadProfiles seeds the selected Bot from the system default (isActive) rather than the first listed Bot', async () => {
+  const context = createBotScriptContext({
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          profiles: [
+            { slug: 'first-bot', name: 'First', isActive: false },
+            { slug: 'default-bot', name: 'Default', isActive: true },
+            { slug: 'other-bot', name: 'Other', isActive: false },
+          ],
+        },
+      }),
+    }),
+  });
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.setDetailVisible = () => {};
+  context.renderCurrentTab = () => {};
+  context.renderStats = () => {};
+
+  await context.loadProfiles();
+
+  assert.equal(context.state.selectedSlug, 'default-bot');
+});
+
+test('bot page loadProfiles falls back to the first Bot when no Bot is marked isActive', async () => {
+  const context = createBotScriptContext({
+    fetch: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          profiles: [
+            { slug: 'first-bot', name: 'First', isActive: false },
+            { slug: 'other-bot', name: 'Other', isActive: false },
+          ],
+        },
+      }),
+    }),
+  });
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.setDetailVisible = () => {};
+  context.renderCurrentTab = () => {};
+  context.renderStats = () => {};
+
+  await context.loadProfiles();
+
+  assert.equal(context.state.selectedSlug, 'first-bot');
+});
+
 test('bot page public identity reset reverts profile draft and clears pending avatar', () => {
   const root = { innerHTML: '' };
   const context = createBotScriptContext({
