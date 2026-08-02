@@ -35,8 +35,8 @@ const DEFAULT_CONFIG = {
   },
   autoReply: {
     enabled: true,
-    maxTurns: 5,
-    cooldownMs: 300000,
+    maxTurns: 10,
+    cooldownMs: 60000,
   },
   browser: DEFAULT_BROWSER_CONFIG,
 };
@@ -176,8 +176,8 @@ test('read ignores retired askMaster and evolution_network config fields', async
       },
       autoReply: {
         enabled: true,
-        maxTurns: 5,
-        cooldownMs: 300000,
+        maxTurns: 10,
+        cooldownMs: 60000,
       },
       browser: DEFAULT_BROWSER_CONFIG,
     });
@@ -237,8 +237,8 @@ test('set drops retired askMaster and evolution_network fields from persisted co
       },
       autoReply: {
         enabled: true,
-        maxTurns: 5,
-        cooldownMs: 300000,
+        maxTurns: 10,
+        cooldownMs: 60000,
       },
       browser: DEFAULT_BROWSER_CONFIG,
     });
@@ -271,7 +271,7 @@ test('set persists the auto-reply enabled flag and round-trips it through disk',
     await store.set(disabled);
 
     const persisted = JSON.parse(await fs.readFile(store.paths.configPath, 'utf8'));
-    assert.deepEqual(persisted.autoReply, { enabled: false, maxTurns: 5, cooldownMs: 300000 });
+    assert.deepEqual(persisted.autoReply, { enabled: false, maxTurns: 10, cooldownMs: 60000 });
 
     const reloaded = await store.read();
     assert.equal(reloaded.autoReply.enabled, false);
@@ -295,8 +295,8 @@ test('read keeps valid persisted autoReply params and falls back to defaults for
         autoReply: { enabled: true, maxTurns: invalid, cooldownMs: invalid },
       }, null, 2)}\n`, 'utf8');
       const reloaded = await store.read();
-      assert.equal(reloaded.autoReply.maxTurns, 5, `maxTurns falls back for ${JSON.stringify(invalid)}`);
-      assert.equal(reloaded.autoReply.cooldownMs, 300000, `cooldownMs falls back for ${JSON.stringify(invalid)}`);
+      assert.equal(reloaded.autoReply.maxTurns, 10, `maxTurns falls back for ${JSON.stringify(invalid)}`);
+      assert.equal(reloaded.autoReply.cooldownMs, 60000, `cooldownMs falls back for ${JSON.stringify(invalid)}`);
     }
   });
 });

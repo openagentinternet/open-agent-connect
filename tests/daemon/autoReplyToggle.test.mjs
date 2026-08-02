@@ -44,7 +44,7 @@ test('setAutoReply persists the enabled flag to the profile config.json', async 
   assert.equal(disabled.data.enabled, false);
 
   const persisted = JSON.parse(await readFile(createConfigStore(homeDir).paths.configPath, 'utf8'));
-  assert.deepEqual(persisted.autoReply, { enabled: false, maxTurns: 5, cooldownMs: 300000 });
+  assert.deepEqual(persisted.autoReply, { enabled: false, maxTurns: 10, cooldownMs: 60000 });
 });
 
 test('setAutoReply toggling back to enabled updates the persisted config', async (t) => {
@@ -54,7 +54,7 @@ test('setAutoReply toggling back to enabled updates the persisted config', async
   await handlers.chat.setAutoReply({ enabled: true });
 
   const persisted = JSON.parse(await readFile(createConfigStore(homeDir).paths.configPath, 'utf8'));
-  assert.deepEqual(persisted.autoReply, { enabled: true, maxTurns: 5, cooldownMs: 300000 });
+  assert.deepEqual(persisted.autoReply, { enabled: true, maxTurns: 10, cooldownMs: 60000 });
 });
 
 test('autoReplyStatus defaults to enabled when the config has not been touched', async (t) => {
@@ -63,8 +63,8 @@ test('autoReplyStatus defaults to enabled when the config has not been touched',
   const status = await handlers.chat.autoReplyStatus({});
   assert.equal(status.ok, true);
   assert.equal(status.data.enabled, true);
-  assert.equal(status.data.maxTurns, 5);
-  assert.equal(status.data.cooldownMs, 300000);
+  assert.equal(status.data.maxTurns, 10);
+  assert.equal(status.data.cooldownMs, 60000);
 });
 
 test('setAutoReply persists maxTurns and cooldownMs to the profile config.json', async (t) => {
@@ -77,11 +77,11 @@ test('setAutoReply persists maxTurns and cooldownMs to the profile config.json',
   const status = await handlers.chat.autoReplyStatus({});
   assert.equal(status.ok, true);
   assert.equal(status.data.maxTurns, 10);
-  assert.equal(status.data.cooldownMs, 300000);
+  assert.equal(status.data.cooldownMs, 60000);
   assert.equal(status.data.enabled, true);
 
   let persisted = JSON.parse(await readFile(createConfigStore(homeDir).paths.configPath, 'utf8'));
-  assert.deepEqual(persisted.autoReply, { enabled: true, maxTurns: 10, cooldownMs: 300000 });
+  assert.deepEqual(persisted.autoReply, { enabled: true, maxTurns: 10, cooldownMs: 60000 });
 
   const updatedCooldown = await handlers.chat.setAutoReply({ cooldownMs: 600000 });
   assert.equal(updatedCooldown.ok, true);
@@ -108,8 +108,8 @@ test('setAutoReply rejects values outside the allowed option sets', async (t) =>
 
   const status = await handlers.chat.autoReplyStatus({});
   assert.equal(status.ok, true);
-  assert.equal(status.data.maxTurns, 5);
-  assert.equal(status.data.cooldownMs, 300000);
+  assert.equal(status.data.maxTurns, 10);
+  assert.equal(status.data.cooldownMs, 60000);
   // Rejected updates never touch the persisted config.
   await assert.rejects(
     readFile(createConfigStore(homeDir).paths.configPath, 'utf8'),

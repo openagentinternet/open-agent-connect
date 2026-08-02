@@ -1797,6 +1797,7 @@ test('bot page renders Auto-Reply param selects with the server-provided values'
   assert.match(root.innerHTML, /<option value="5">5<\/option>/);
   assert.match(root.innerHTML, /<option value="10" selected>10<\/option>/);
   assert.match(root.innerHTML, /<option value="30">30<\/option>/);
+  assert.match(root.innerHTML, /<option value="50">50<\/option>/);
   assert.match(root.innerHTML, /data-auto-reply-cooldown/);
   assert.match(root.innerHTML, /<option value="60000">1 min<\/option>/);
   assert.match(root.innerHTML, /<option value="600000" selected>10 min<\/option>/);
