@@ -1475,13 +1475,14 @@ test('version probe escalates and settles when an executable ignores SIGTERM', a
   ].join('\n'), 'utf8');
   await chmod(wedgedPath, 0o755);
 
+  const probeTimeoutMs = 2_000;
   const startedAt = Date.now();
-  const probe = await probeExecutableVersion(wedgedPath, ['--version'], 500, { PATH: binDir, PID_PATH: pidPath });
+  const probe = await probeExecutableVersion(wedgedPath, ['--version'], probeTimeoutMs, { PATH: binDir, PID_PATH: pidPath });
   const elapsedMs = Date.now() - startedAt;
 
   assert.equal(probe.ok, false);
-  assert.equal(probe.message, 'Version probe timed out after 500ms.');
-  assert.ok(elapsedMs >= 500, `probe must not settle before the timeout, took ${elapsedMs}ms`);
+  assert.equal(probe.message, `Version probe timed out after ${probeTimeoutMs}ms.`);
+  assert.ok(elapsedMs >= probeTimeoutMs, `probe must not settle before the timeout, took ${elapsedMs}ms`);
   assert.ok(elapsedMs < 15_000, `probe must settle shortly after the kill grace window, took ${elapsedMs}ms`);
 
   const childPid = Number(await readFile(pidPath, 'utf8'));

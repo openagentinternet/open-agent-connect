@@ -1871,14 +1871,19 @@ function createDefaultCliDependencies(context) {
     // AgentBrowserTabs.openTab performs the actual open. No tab id is returned —
     // tab ids are client-only and never reach the daemon.
     async function openBrowserTab(input) {
+        const baseUrl = await readReachableDaemonBaseUrl(context);
         const resolve = await probeMetaAppResolve(input.uri);
         const response = await requestJson(context, 'POST', '/api/browser/tabs/open', { uri: input.uri });
         if (!response.ok) {
             return (0, commandResult_1.commandFailed)(response.code ?? 'browser_tab_open_failed', response.message ?? 'Browser tab open failed.');
         }
         const data = response.data ?? {};
+        const resultUri = typeof data.uri === 'string' ? data.uri : input.uri;
         return (0, commandResult_1.commandSuccess)({
-            uri: typeof data.uri === 'string' ? data.uri : input.uri,
+            uri: resultUri,
+            // Same clickable path-form link as `browser open`/`browser link`, so the
+            // agent never has to hand-build a Browser URL (preview-metaapp included).
+            ...(baseUrl ? { localUiUrl: `${baseUrl}${resolveLocalBrowserPath(resultUri)}` } : {}),
             pagesReached: typeof data.pagesReached === 'number' ? data.pagesReached : 0,
             ...(data.note ? { note: data.note } : {}),
             ...(resolve ? { resolve } : {}),

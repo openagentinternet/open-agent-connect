@@ -9,9 +9,13 @@ const {
   receivePrivateChat,
 } = require('../../dist/core/chat/privateChat.js');
 
-function createIdentityPair() {
+function createIdentityPair(privateKeyHex) {
   const ecdh = createECDH('prime256v1');
-  ecdh.generateKeys();
+  if (privateKeyHex) {
+    ecdh.setPrivateKey(Buffer.from(privateKeyHex, 'hex'));
+  } else {
+    ecdh.generateKeys();
+  }
   return {
     privateKeyHex: ecdh.getPrivateKey('hex'),
     publicKeyHex: ecdh.getPublicKey('hex', 'uncompressed'),
@@ -112,5 +116,34 @@ test('receivePrivateChat rejects requests without a local private key', () => {
       },
     }),
     /local private key/i
+  );
+});
+
+test('receivePrivateChat rejects decrypted control characters from unauthenticated ciphertext', () => {
+  const alice = createIdentityPair('1'.padStart(64, '0'));
+  const bob = createIdentityPair('2'.padStart(64, '0'));
+  const outbound = sendPrivateChat({
+    fromIdentity: {
+      globalMetaId: 'alice-global-metaid',
+      privateKeyHex: alice.privateKeyHex,
+    },
+    toGlobalMetaId: 'bob-global-metaid',
+    peerChatPublicKey: bob.publicKeyHex,
+    content: '\u0006M\u0016b',
+  });
+
+  assert.throws(
+    () => receivePrivateChat({
+      localIdentity: {
+        globalMetaId: 'bob-global-metaid',
+        privateKeyHex: bob.privateKeyHex,
+      },
+      peerChatPublicKey: alice.publicKeyHex,
+      payload: {
+        fromGlobalMetaId: 'alice-global-metaid',
+        content: outbound.encryptedContent,
+      },
+    }),
+    /failed to decrypt private chat payload/i,
   );
 });

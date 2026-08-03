@@ -14,9 +14,13 @@ const {
   fetchPrivateChatPeerGlobalMetaIds,
 } = require('../../dist/core/chat/privateConversation.js');
 
-function createIdentityPair() {
+function createIdentityPair(privateKeyHex) {
   const ecdh = createECDH('prime256v1');
-  ecdh.generateKeys();
+  if (privateKeyHex) {
+    ecdh.setPrivateKey(Buffer.from(privateKeyHex, 'hex'));
+  } else {
+    ecdh.generateKeys();
+  }
   return {
     privateKeyHex: ecdh.getPrivateKey('hex'),
     publicKeyHex: ecdh.getPublicKey('hex', 'uncompressed'),
@@ -262,9 +266,9 @@ test('buildPrivateConversationResponse fetches private history and returns decry
 });
 
 test('buildPrivateConversationResponse keeps decrypt failures visible without returning ciphertext', async () => {
-  const alice = createIdentityPair();
-  const bob = createIdentityPair();
-  const wrongPeer = createIdentityPair();
+  const alice = createIdentityPair('1'.padStart(64, '0'));
+  const bob = createIdentityPair('2'.padStart(64, '0'));
+  const wrongPeer = createIdentityPair('3'.padStart(64, '0'));
 
   const bobOutbound = sendPrivateChat({
     fromIdentity: {

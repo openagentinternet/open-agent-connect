@@ -151,7 +151,9 @@ function tryDecryptWithSecret(cipherText, secret) {
     if (!cipherText || !secret)
         return null;
     const plain = ecdhDecrypt(cipherText, secret);
-    if (!plain || plain === cipherText)
+    if (!plain
+        || plain === cipherText
+        || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(plain))
         return null;
     return plain;
 }
