@@ -409,6 +409,52 @@ Include local assets needed by the page. Avoid absolute local filesystem paths. 
 
 All packaged CSS, JS, image, font, document, JSON, and Markdown asset references must stay relative to the package entry or the referencing file. Do not publish a MetaApp that depends on site-root paths such as `/assets/...`, because Browser resolves those against the host origin instead of the packaged ZIP.
 
+## Local Preview
+
+Preview a not-yet-published project before any chain write. Preview serves files live from the workspace, so reloads pick up edits without republishing.
+
+```bash
+$HOME/.metabot/bin/metabot metaapp preview --project-dir <path>
+```
+
+The preview command returns `localPreviewUrl` (a `/api/metaapp/preview-assets/<previewId>/<entry>` asset URL) and `previewId`. **Do not hand `localPreviewUrl` or any `file:///...` path to the human, and never build a Browser URL from a local filesystem path.** Those open a raw asset outside the Agent Browser shell, break Agent Internet links, and `file://` URIs do not resolve at all.
+
+The correct way to address a live local preview is the **preview-metaapp URI**, whose canonical form is:
+
+```text
+preview-metaapp://localhost<absolutePath>
+```
+
+`<absolutePath>` is the absolute path to the project directory or the entry file. The host is always the literal `localhost`; there is no userinfo, and the path must be absolute. Examples:
+
+```text
+preview-metaapp://localhost/Users/name/projects/my-app
+preview-metaapp://localhost/Users/name/projects/my-app/dist/index.html
+```
+
+Open a preview exactly the same way as a published MetaApp — through the MetaBot Browser open commands — and prefer the in-app Browser:
+
+```bash
+# Push into every already-open Browser page (preferred when one is running):
+$HOME/.metabot/bin/metabot browser tab open --uri preview-metaapp://localhost/Users/name/projects/my-app
+
+# Open (or focus) the Browser page itself when none is running:
+$HOME/.metabot/bin/metabot browser open --uri preview-metaapp://localhost/Users/name/projects/my-app
+
+# Resolve a clickable local http Browser URL for the chat surface:
+$HOME/.metabot/bin/metabot browser link --uri preview-metaapp://localhost/Users/name/projects/my-app
+```
+
+Always also present the `localUiUrl` returned by `browser open`/`browser tab open`/`browser link` as a full absolute-URL markdown link (for example `[Open preview](http://127.0.0.1:10001/browser/preview-metaapp/localhost/Users/name/projects/my-app)`), and open it in the host in-app Browser per the `## Host Adapter
+
+Generated for OpenClaw.
+
+- Default skill root: `${OPENCLAW_HOME:-$HOME/.openclaw}/skills`
+- Host pack id: `openclaw`
+- Primary CLI path: `$HOME/.metabot/bin/metabot`` rule. Never use `file://`, never invent a `localhost` http URL by hand, and never build a Browser URL from a local filesystem path.
+
+Preview is local-dev only (daemon bound to `127.0.0.1`); `METABOT_BROWSER_DISABLE_PREVIEW_METAAPP=1` disables the whole scheme. A preview is a development aid, not a published MetaApp: it has no `pinId` and cannot be shared, `metaapp://`-linked, or set as a Bot homepage until it is published through the Publish Wizard.
+
 ## APP.md App Documentation
 
 Every MetaApp should carry an `APP.md` at the package root, next to `index.html`. It is natural-language documentation written for LLM readers, the SKILL.md-body analogue for MetaApps: the pin JSON (`title`, `intro`, `tags`) is the index and routing surface, while `APP.md` holds the understanding layer that does not fit there. Agents read it first when they explain, fork, or remix an app.
@@ -442,7 +488,7 @@ Do not use `publish-project` as the default guided path. Keep it only as a fast 
 1. Classify the source artifact.
 
    - ZIP source: inspect enough to verify the declared `indexFile` exists.
-   - Project directory: preview to discover the artifact directory and default entry.
+   - Project directory: preview to discover the artifact directory and default entry (see Local Preview for the preview-metaapp URI form and open rules).
 
 ```bash
 $HOME/.metabot/bin/metabot metaapp preview --project-dir <path>
@@ -577,7 +623,7 @@ Add `--manifest-file <path>` when publishable fields live outside `.metaapp.json
 
 ## Direct CLI Shortcuts
 
-Preview a project:
+Preview a project (see Local Preview for the preview-metaapp URI form and open rules):
 
 ```bash
 $HOME/.metabot/bin/metabot metaapp preview --project-dir <path>
@@ -622,6 +668,9 @@ $HOME/.metabot/bin/metabot metaapp comment --pin-id <pinid> --comment <text> --f
 
 ## Validation Checklist
 
+- A local preview is opened through `browser tab open`/`browser open` with a `preview-metaapp://localhost<absolutePath>` URI, never through a `file:///` path, a hand-built `localhost` http URL, or a raw `localPreviewUrl` handed to the human.
+- The preview-metaapp URI uses the literal host `localhost` and an absolute path to the project directory or entry file.
+- The preview `localUiUrl` from `browser open`/`browser link` is presented as a clickable absolute-URL markdown link and opened in the in-app Browser.
 - Project has a browser-runnable `index.html` or known build output.
 - Bot homepage projects include `data.json`.
 - Bot homepage fetches use `version=v3`, validate `code === 0`, and validate `schemaVersion === "botHomepage.v3"`.

@@ -774,6 +774,9 @@ function resolveLocalUiPath(page: string): string {
 const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile', 'pin']);
 const BROWSER_PIN_ID_PATTERN = /^[0-9a-f]{64}i0$/iu;
 const BROWSER_DOMAIN_ALIAS_PATTERN = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
+// preview-metaapp://localhost<path-to-dir-or-entry> carries an absolute path, so
+// unlike the host-only deep links above it needs its own RESTful Browser path.
+const PREVIEW_METAAPP_URI_PATTERN = /^preview-metaapp:\/\/([^/?#]+)(\/.*)?$/iu;
 
 function resolveLocalBrowserPath(uri: string): string {
   const trimmedUri = uri.trim();
@@ -784,6 +787,17 @@ function resolveLocalBrowserPath(uri: string): string {
   const resourceId = match?.[2];
   if (scheme && resourceId && BROWSER_DEEP_LINK_SCHEMES.has(scheme)) {
     return `/browser/${scheme}/${encodeURIComponent(resourceId)}`;
+  }
+  // Render preview-metaapp://localhost<path> as a path-style Browser URL so it
+  // survives chat surfaces that mangle the ?uri=<encoded> query form. The host
+  // and each absolute-path segment are encoded independently.
+  const previewMatch = trimmedUri === uri ? PREVIEW_METAAPP_URI_PATTERN.exec(uri) : null;
+  if (previewMatch) {
+    const host = previewMatch[1];
+    const rawPath = previewMatch[2] || '';
+    const segments = rawPath.split('/').filter(Boolean).map((segment) => encodeURIComponent(segment));
+    const pathSuffix = segments.length ? '/' + segments.join('/') : '';
+    return `/browser/preview-metaapp/${encodeURIComponent(host)}${pathSuffix}`;
   }
   if (!match && trimmedUri === uri && BROWSER_PIN_ID_PATTERN.test(uri)) {
     return `/browser/pin/${encodeURIComponent(uri)}`;
@@ -2454,6 +2468,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
   async function openBrowserTab(input: {
     uri: string;
   }): Promise<MetabotCommandResult<unknown>> {
+    const baseUrl = await readReachableDaemonBaseUrl(context);
     const resolve = await probeMetaAppResolve(input.uri);
     const response = await requestJson<{
       ok?: boolean;
@@ -2468,8 +2483,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       );
     }
     const data = response.data ?? {};
+    const resultUri = typeof data.uri === 'string' ? data.uri : input.uri;
     return commandSuccess({
-      uri: typeof data.uri === 'string' ? data.uri : input.uri,
+      uri: resultUri,
+      // Same clickable path-form link as `browser open`/`browser link`, so the
+      // agent never has to hand-build a Browser URL (preview-metaapp included).
+      ...(baseUrl ? { localUiUrl: `${baseUrl}${resolveLocalBrowserPath(resultUri)}` } : {}),
       pagesReached: typeof data.pagesReached === 'number' ? data.pagesReached : 0,
       ...(data.note ? { note: data.note } : {}),
       ...(resolve ? { resolve } : {}),

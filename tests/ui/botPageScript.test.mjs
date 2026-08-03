@@ -2352,6 +2352,56 @@ test('bot page savePublicIdentity sends only changed public identity fields', as
   assert.equal(successModal.title, 'Profile Updated On-Chain');
 });
 
+test('bot page savePublicIdentity keeps the default (isActive) flag and setup status after a save', async () => {
+  const fields = {
+    '[data-save-status]': field(),
+    '[data-act="save-public-identity"]': field(),
+    '[data-field="name"]': field('Alice'),
+    '[data-field="bio"]': field('Updated public bio.'),
+  };
+  const context = createBotScriptContext({
+    elements: fields,
+    fetch: () => Promise.resolve({
+      ok: true,
+      // The PUT response omits isActive/setup, exactly like the daemon does.
+      json: () => Promise.resolve({
+        ok: true,
+        data: {
+          profile: {
+            slug: 'alice',
+            name: 'Alice',
+            bio: 'Updated public bio.',
+            avatarDataUrl: '',
+          },
+          chainWrites: [],
+        },
+      }),
+    }),
+  });
+
+  vm.runInNewContext(buildBotPageDefinition().script, context);
+  context.state.selectedSlug = 'alice';
+  // isActive/setup come from the list endpoint; they must survive the save.
+  context.state.profiles = [{
+    slug: 'alice',
+    name: 'Alice',
+    bio: 'Original public bio.',
+    isActive: true,
+    setup: { state: 'ready' },
+  }];
+  context.state.originalProfile = context.state.profiles[0];
+  context.renderMetabotList = () => {};
+  context.renderDetailHeader = () => {};
+  context.renderPublicIdentityTab = () => {};
+  context.showChainSuccessModal = () => {};
+
+  await context.savePublicIdentity();
+
+  assert.equal(context.state.profiles[0].bio, 'Updated public bio.');
+  assert.equal(context.state.profiles[0].isActive, true);
+  assert.deepEqual(context.state.profiles[0].setup, { state: 'ready' });
+});
+
 test('bot page savePublicIdentity ignores stale UI updates after selection changes', async () => {
   const response = deferred();
   const fields = {
