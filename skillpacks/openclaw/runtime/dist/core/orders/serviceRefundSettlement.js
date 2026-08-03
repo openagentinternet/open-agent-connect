@@ -86,7 +86,7 @@ function findSellerOrder(state, orderId) {
     return state.sellerOrders.find((entry) => normalizeText(entry.id) === normalizedOrderId) ?? null;
 }
 function blockedSellerOrderState(entry) {
-    if (entry.state === 'refunded' || entry.state === 'ended') {
+    if (entry.state === 'refunded') {
         return entry.state;
     }
     if (entry.state === 'refund_pending' || normalizeText(entry.refundRequestPinId)) {
@@ -213,7 +213,7 @@ function buildRefundFinalizePayload(input) {
     };
 }
 function transitionToRefundPendingIfNeeded(order, updatedAt) {
-    if (order.state === 'refund_pending' || order.state === 'refunded' || order.state === 'ended') {
+    if (order.state === 'refund_pending' || order.state === 'refunded') {
         return order;
     }
     return (0, sellerOrderState_1.transitionSellerOrderRecord)(order, {
@@ -271,7 +271,7 @@ function recordRefundTransfer(input) {
                 return entry;
             }
             return (0, sellerOrderState_1.transitionSellerOrderRecord)(entry, {
-                state: entry.state === 'refunded' || entry.state === 'ended' ? entry.state : 'refund_pending',
+                state: entry.state === 'refunded' ? entry.state : 'refund_pending',
                 refundTxid: input.refundTxid,
                 updatedAt: input.recordedAt,
             });

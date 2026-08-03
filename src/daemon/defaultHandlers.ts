@@ -4911,6 +4911,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
   fetchPrivateChatHistory?: FetchPrivateHistory;
   callerReplyWaiter?: MetaWebServiceReplyWaiter;
   servicePaymentExecutor?: ServicePaymentExecutor;
+  serviceOrderPaymentVerifier?: typeof verifyServiceOrderPayment;
   ratingFollowupRetryDelaysMs?: number[];
   a2aConversationPersister?: A2AConversationMessagePersister;
   buyerRatingReplyRunner?: ChatReplyRunner;
@@ -5139,6 +5140,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     secretStore,
     adapters: adapters ?? new Map(),
   });
+  const serviceOrderPaymentVerifier = input.serviceOrderPaymentVerifier ?? verifyServiceOrderPayment;
   async function executeSellerRefundTransfer(inputRefund: RefundTransferInput) {
     const chain = normalizeText(inputRefund.paymentChain).toLowerCase();
     const adapter = adapters.get(chain as Parameters<typeof adapters.get>[0]);
@@ -8725,7 +8727,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     const refundAddress = normalizeText(refundRequestPayload.refundAddress)
       || normalizeText(refundRequestPayload.refundToAddress);
-    const verification = await verifyServiceOrderPayment({
+    const verification = await serviceOrderPaymentVerifier({
       adapters,
       paymentTxid: refundTxid,
       paymentChain: normalizeText(refundRequestPayload.paymentChain),
@@ -9499,7 +9501,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
     const traceId = `trace-provider-${sanitizeServiceSegment(orderTxid.slice(0, 16))}`;
 
-    const paymentVerification = await verifyServiceOrderPayment({
+    const paymentVerification = await serviceOrderPaymentVerifier({
       adapters,
       paymentTxid: paymentTxid || null,
       paymentChain: paymentChain || null,
@@ -14844,7 +14846,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('order_payment_unverified', 'Service execution payment terms do not match the local service.');
         }
 
-        const paymentVerification = await verifyServiceOrderPayment({
+        const paymentVerification = await serviceOrderPaymentVerifier({
           adapters,
           paymentTxid: paymentTxid || null,
           paymentChain: paymentChain || null,

@@ -1,8 +1,15 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeAllowChatSkills = normalizeAllowChatSkills;
 exports.validateAllowChatSkills = validateAllowChatSkills;
 exports.resolveAllowChatSkillsForRuntime = resolveAllowChatSkillsForRuntime;
+exports.writeChatSkillResolution = writeChatSkillResolution;
+exports.readChatSkillResolution = readChatSkillResolution;
+const node_fs_1 = require("node:fs");
+const node_path_1 = __importDefault(require("node:path"));
 const platformSkillCatalog_1 = require("./platformSkillCatalog");
 function normalizeText(value) {
     return value.trim();
@@ -164,4 +171,33 @@ async function resolveAllowChatSkillsForRuntime(input) {
             ? { warning: `Skipping unavailable chat skills: ${resolved.skippedSkills.join(', ')}` }
             : {}),
     });
+}
+function normalizeSkillNameList(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value
+        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+        .filter((entry) => entry.length > 0);
+}
+async function writeChatSkillResolution(filePath, record) {
+    await node_fs_1.promises.mkdir(node_path_1.default.dirname(filePath), { recursive: true });
+    await node_fs_1.promises.writeFile(filePath, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+}
+async function readChatSkillResolution(filePath) {
+    try {
+        const parsed = JSON.parse(await node_fs_1.promises.readFile(filePath, 'utf8'));
+        if (!parsed || typeof parsed !== 'object') {
+            return null;
+        }
+        return {
+            resolved: normalizeSkillNameList(parsed.resolved),
+            skipped: normalizeSkillNameList(parsed.skipped),
+            warning: typeof parsed.warning === 'string' && parsed.warning.trim() ? parsed.warning.trim() : null,
+            checkedAt: typeof parsed.checkedAt === 'string' ? parsed.checkedAt : '',
+        };
+    }
+    catch {
+        return null;
+    }
 }

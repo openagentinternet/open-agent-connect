@@ -32,6 +32,9 @@ export interface SessionTraceOrderInput {
     outputType?: string | null;
     requestText?: string | null;
     status?: string | null;
+    firstResponseDeadlineAt?: number | null;
+    deliveryDeadlineAt?: number | null;
+    firstResponseReceivedAt?: number | null;
     failedAt?: number | null;
     failureReason?: string | null;
     refundRequestPinId?: string | null;
@@ -139,6 +142,9 @@ export interface SessionTraceRecord {
         outputType: string | null;
         requestText: string | null;
         status: string | null;
+        firstResponseDeadlineAt: number | null;
+        deliveryDeadlineAt: number | null;
+        firstResponseReceivedAt: number | null;
         failedAt: number | null;
         failureReason: string | null;
         refundRequestPinId: string | null;

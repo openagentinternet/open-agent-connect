@@ -1,4 +1,4 @@
-export declare const SELLER_ORDER_STATES: readonly ["received", "acknowledged", "in_progress", "completed", "rating_pending", "failed", "refund_pending", "refunded", "ended"];
+export declare const SELLER_ORDER_STATES: readonly ["received", "acknowledged", "in_progress", "completed", "rating_pending", "failed", "refund_pending", "refunded"];
 export type SellerOrderState = typeof SELLER_ORDER_STATES[number];
 export interface SellerOrderRecord {
     id: string;

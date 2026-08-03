@@ -38,3 +38,11 @@ export type ChatSkillPolicyValidationResult = ChatSkillPolicySuccess | ChatSkill
 export declare function normalizeAllowChatSkills(value: unknown): string[];
 export declare function validateAllowChatSkills(input: ChatSkillPolicyInput): Promise<ChatSkillPolicyValidationResult>;
 export declare function resolveAllowChatSkillsForRuntime(input: ChatSkillPolicyInput): Promise<ChatSkillPolicySuccess>;
+export interface ChatSkillResolutionRecord {
+    resolved: string[];
+    skipped: string[];
+    warning: string | null;
+    checkedAt: string;
+}
+export declare function writeChatSkillResolution(filePath: string, record: ChatSkillResolutionRecord): Promise<void>;
+export declare function readChatSkillResolution(filePath: string): Promise<ChatSkillResolutionRecord | null>;

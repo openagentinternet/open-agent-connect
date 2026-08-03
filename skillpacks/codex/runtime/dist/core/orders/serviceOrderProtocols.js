@@ -5,9 +5,22 @@ exports.cleanServiceResultText = cleanServiceResultText;
 exports.parseDeliveryMessage = parseDeliveryMessage;
 exports.parseNeedsRatingMessage = parseNeedsRatingMessage;
 const orderProtocol_1 = require("../a2a/protocol/orderProtocol");
+const orderMessage_1 = require("./orderMessage");
 const MARKDOWN_HEADING_RE = /^#{1,6}\s+/;
 const EXCLUDED_RESULT_SECTION_RE = /(服务订单确认|订单确认|order confirmation|payment confirmation|payment details|交易信息|付款信息|支付信息)/i;
-const RESULT_METADATA_LINE_RE = /^\s*(?:[-*]\s*)?(?:\*\*)?\s*(?:(?:支付金额)(?:\s+[0-9]+(?:\.[0-9]+)?\s+[A-Za-z0-9._-]+|\s*[:：])|(?:交易ID|交易Id|txid|commit txid|payment chain|settlement kind|mrc20 ticker|mrc20 id|output type|service id|服务ID|技能名称|skill name|payment(?: amount)?|transaction id|service name)\s*[:：])/i;
+// Result text may quote metadata lines with markdown bullets/bold and uses a
+// few extra chatty labels beyond the canonical order metadata set.
+const RESULT_METADATA_LINE_RE = (0, orderMessage_1.createOrderMetadataLineRegex)({
+    allowMarkdownPrefix: true,
+    extraLabels: [
+        '交易ID',
+        '服务ID',
+        '技能名称',
+        'service\\s+name',
+        'payment(?:\\s+amount)?',
+        'transaction\\s+id',
+    ],
+});
 const INTRO_CHATTER_RE = /(你好|您好|我是|数字主分身|收到你的服务订单|成功处理了你的服务订单|已经成功处理|链上远端服务)/i;
 const CLOSING_CHATTER_RE = /(?:服务已完成|感谢.*使用|如有其他需求|欢迎随时联系|欢迎再次使用|希望.*体验|欢迎.*评价|欢迎.*反馈|期待.*再次)/i;
 function buildDeliveryMessage(payload) {

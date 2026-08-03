@@ -1,9 +1,15 @@
 import type { LlmBindingStore } from '../llm/llmBindingStore';
 import type { LlmRuntimeStore } from '../llm/llmRuntimeStore';
 import type { MetabotPaths } from '../state/paths';
+export interface PrivateChatAllowedSkillDetail {
+    name: string;
+    description: string | null;
+    location: string | null;
+}
 export interface PrivateChatAllowedSkillScope {
     skills: string[];
     skillSourcePaths: Record<string, string>;
+    skillDetails: PrivateChatAllowedSkillDetail[];
     skippedSkills: string[];
     warning: string | null;
 }

@@ -1,16 +1,5 @@
 import { type SpendCap } from './spendPolicy';
 import type { DelegationPolicyDecision } from '../a2a/sessionTypes';
-export interface DelegationRequest {
-    servicePinId: string;
-    serviceName: string;
-    providerGlobalMetaid: string;
-    price: string;
-    currency: string;
-    userTask: string;
-    taskContext: string;
-    rawRequest: string;
-    policyMode?: string;
-}
 export interface RemoteServiceDescriptor {
     servicePinId?: string | null;
     pinId?: string | null;
@@ -64,15 +53,11 @@ export type RemoteCallPlanResult = {
     traceId?: string;
     confirmation?: DelegationPolicyDecision;
 };
-export declare function containsDelegationControlPrefix(content: string): boolean;
-export declare function getDelegationDisplayText(content: string): string;
-export declare function isExplicitMetaAppUserRequest(userText: string, appId?: string): boolean;
 export declare function normalizeDelegationPaymentTerms(rawPrice: unknown, rawCurrency: unknown): {
     price: string;
     currency: string;
 };
 export declare function isDelegationPriceNumeric(value: string): boolean;
-export declare function parseDelegationMessage(content: string): DelegationRequest | null;
 export declare function buildRemoteServicesPrompt(availableServices: RemoteServiceDescriptor[]): string | null;
 export declare function planRemoteCall(input: {
     request: RemoteCallRequest;

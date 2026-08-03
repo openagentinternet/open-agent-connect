@@ -50,6 +50,77 @@ async function findReadableSkillSource(input, skillName) {
     }
     throw new Error(errors[0] ?? `Skill source not found: ${skillName}`);
 }
+// Cheap change detection for one skill directory: a sorted listing of
+// "relativePath:mtime:size" entries for every file in the tree. Copies are
+// made with preserveTimestamps, so an unchanged source fingerprints
+// identically to its injected copy and each turn only pays a stat pass.
+// mtimes are compared at whole-millisecond precision because fs.cp restores
+// timestamps through Date values, which round sub-millisecond fractions to
+// the nearest millisecond; rounding both sides keeps an unchanged copy
+// fingerprint-identical to its source.
+// Content hashing would also catch mtime-preserving external edits, but it
+// costs a full read of every file on every chat turn, which is not worth it
+// for docs-plus-scripts skill trees.
+async function fingerprintSkillTree(rootDir) {
+    const parts = [];
+    const walk = async (relativeDir) => {
+        const entries = await node_fs_1.promises.readdir(node_path_1.default.join(rootDir, relativeDir), { withFileTypes: true });
+        for (const entry of entries) {
+            const relativePath = relativeDir ? node_path_1.default.join(relativeDir, entry.name) : entry.name;
+            if (entry.isDirectory()) {
+                await walk(relativePath);
+                continue;
+            }
+            const stat = await node_fs_1.promises.stat(node_path_1.default.join(rootDir, relativePath)).catch(() => null);
+            if (stat?.isFile()) {
+                parts.push(`${relativePath}:${Math.round(stat.mtimeMs)}:${stat.size}`);
+            }
+        }
+    };
+    try {
+        await walk('');
+    }
+    catch {
+        return null;
+    }
+    return parts.sort().join('\n');
+}
+// Swap a skill directory without ever exposing a half-copied tree under its
+// real name: copy into a dot-prefixed sibling, move any previous copy aside,
+// put the new one in place, then drop the old copy. A crash can leave
+// dot-prefixed temp dirs behind (skill discovery ignores them), but never a
+// partially written skill.
+async function replaceSkillDir(srcDir, dstDir) {
+    const parentDir = node_path_1.default.dirname(dstDir);
+    const stamp = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const incomingDir = node_path_1.default.join(parentDir, `.${node_path_1.default.basename(dstDir)}.incoming-${stamp}`);
+    const replacedDir = node_path_1.default.join(parentDir, `.${node_path_1.default.basename(dstDir)}.replaced-${stamp}`);
+    await node_fs_1.promises.cp(srcDir, incomingDir, { recursive: true, preserveTimestamps: true });
+    let movedAside = false;
+    try {
+        await node_fs_1.promises.rename(dstDir, replacedDir);
+        movedAside = true;
+    }
+    catch (error) {
+        if (error.code !== 'ENOENT') {
+            await node_fs_1.promises.rm(incomingDir, { recursive: true, force: true }).catch(() => undefined);
+            throw error;
+        }
+    }
+    try {
+        await node_fs_1.promises.rename(incomingDir, dstDir);
+    }
+    catch (error) {
+        if (movedAside) {
+            await node_fs_1.promises.rename(replacedDir, dstDir).catch(() => undefined);
+        }
+        await node_fs_1.promises.rm(incomingDir, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
+    }
+    if (movedAside) {
+        await node_fs_1.promises.rm(replacedDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+}
 async function injectSkills(input) {
     const skillRoot = resolveProviderSkillRoot(input.provider, input.cwd, {
         systemHomeDir: input.systemHomeDir,
@@ -67,15 +138,19 @@ async function injectSkills(input) {
                 injected.push(skillName);
                 continue;
             }
-            try {
-                await node_fs_1.promises.access(dstDir);
+            // Refresh-on-change: an existing destination is reused only while its
+            // fingerprint still matches the source, so skill updates reach the
+            // persistent chat workspace and cached strict-isolation scopes instead
+            // of serving a stale copy forever.
+            const [srcFingerprint, dstFingerprint] = await Promise.all([
+                fingerprintSkillTree(srcDir),
+                fingerprintSkillTree(dstDir),
+            ]);
+            if (srcFingerprint !== null && srcFingerprint === dstFingerprint) {
                 injected.push(skillName);
                 continue;
             }
-            catch {
-                // Destination does not exist yet.
-            }
-            await node_fs_1.promises.cp(srcDir, dstDir, { recursive: true });
+            await replaceSkillDir(srcDir, dstDir);
             injected.push(skillName);
         }
         catch (error) {

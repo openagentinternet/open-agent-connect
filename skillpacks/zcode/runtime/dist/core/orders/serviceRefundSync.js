@@ -256,7 +256,7 @@ function patchSellerRequestOrder(order, request, nowMs) {
         || normalizeText(order.refundBlockingReason) !== normalizeText(patch.refundBlockingReason)
         || normalizeText(order.latestEvent) !== normalizeText(patch.latestEvent)
         || order.refundRequestedAt !== patch.refundRequestedAt);
-    if (order.state === 'refunded' || order.state === 'ended') {
+    if (order.state === 'refunded') {
         return {
             order: (0, sellerOrderState_1.createSellerOrderRecord)({
                 ...order,
@@ -458,16 +458,6 @@ function patchSellerFinalizeOrder(order, finalize, nowMs) {
             changed: !alreadyApplied,
         };
     }
-    if (order.state === 'ended') {
-        return {
-            order: (0, sellerOrderState_1.transitionSellerOrderRecord)(order, {
-                ...patch,
-                state: 'refunded',
-                updatedAt: nowMs,
-            }),
-            changed: true,
-        };
-    }
     const pending = order.state === 'refund_pending'
         ? order
         : (0, sellerOrderState_1.transitionSellerOrderRecord)(order, {
@@ -497,7 +487,7 @@ function blockBuyerFinalizeTrace(trace, reason, nowMs) {
     };
 }
 function blockSellerFinalizeOrder(order, reason, nowMs) {
-    if (order.state === 'refunded' || order.state === 'ended') {
+    if (order.state === 'refunded') {
         return (0, sellerOrderState_1.createSellerOrderRecord)({
             ...order,
             refundBlockingReason: reason,

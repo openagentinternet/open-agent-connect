@@ -4,10 +4,10 @@ exports.DEFAULT_WRITE_NETWORKS = exports.DEFAULT_AUTO_REPLY_COOLDOWN_MS = export
 exports.isDefaultWriteNetwork = isDefaultWriteNetwork;
 exports.createDefaultConfig = createDefaultConfig;
 const agent_browser_core_1 = require("@openagentinternet/agent-browser-core");
-exports.AUTO_REPLY_MAX_TURNS_OPTIONS = [5, 10, 15, 20, 25, 30];
+exports.AUTO_REPLY_MAX_TURNS_OPTIONS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
 exports.AUTO_REPLY_COOLDOWN_MS_OPTIONS = [60_000, 300_000, 600_000, 1_800_000, 3_600_000];
-exports.DEFAULT_AUTO_REPLY_MAX_TURNS = 5;
-exports.DEFAULT_AUTO_REPLY_COOLDOWN_MS = 300_000;
+exports.DEFAULT_AUTO_REPLY_MAX_TURNS = 10;
+exports.DEFAULT_AUTO_REPLY_COOLDOWN_MS = 60_000;
 exports.DEFAULT_WRITE_NETWORKS = ['mvc', 'btc', 'doge', 'opcat'];
 const DEFAULT_BLOCK_EXPLORER_BASE_URL = 'https://www.mvcscan.com/tx';
 function isDefaultWriteNetwork(value) {

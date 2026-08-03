@@ -3,12 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.MAX_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = exports.MIN_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = exports.VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = exports.DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = void 0;
 exports.buildProviderServiceOrderPrompt = buildProviderServiceOrderPrompt;
+exports.resolveProviderOrderExecutionTimeoutMs = resolveProviderOrderExecutionTimeoutMs;
 exports.createProviderServiceRunner = createProviderServiceRunner;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const platformSkillCatalog_1 = require("../../services/platformSkillCatalog");
 const serviceRunnerContracts_1 = require("./serviceRunnerContracts");
+const providerDeliveryArtifacts_1 = require("./providerDeliveryArtifacts");
 const platformRegistry_1 = require("../../platform/platformRegistry");
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -176,9 +179,26 @@ function buildPaidOrderUserPrompt(input) {
     }
     return lines.join('\n');
 }
+// IDBots buildMissingArtifactContinuationPrompt parity: after a completed run
+// left no deliverable artifact, the provider gets one forced continuation run
+// that must produce the expected file in the same workspace.
+function buildMissingArtifactContinuationPrompt(order) {
+    const outputType = (0, providerDeliveryArtifacts_1.classifyProviderOutputType)(order.outputType);
+    const orderTxid = normalizeText(order.metadata?.orderTxid);
+    return [
+        `The paid service order is not complete yet because no ${outputType} file exists for delivery.`,
+        orderTxid ? `Order txid: ${orderTxid}.` : '',
+        `Original buyer request: ${normalizeText(order.userTask) || 'No buyer request was recorded.'}`,
+        `Continue executing the required skill now. You MUST generate a real ${outputType} file in the current workspace before giving the final answer.`,
+        'Do not answer with only progress, intent, acknowledgement, or "started generating".',
+        'Use the service skill/tool/command now. After the file exists, the final answer must include the local file path.',
+        `If you truly cannot generate a valid ${outputType} file, state the concrete failure reason instead of claiming success.`,
+    ].filter(Boolean).join('\n');
+}
 function withRuntimeMetadata(result, input) {
     const selection = input.selection ?? null;
     const sessionId = normalizeText(input.sessionId);
+    const attemptWorkspaceCwd = normalizeText(input.attemptWorkspaceCwd);
     const enriched = {
         ...result,
         metadata: {
@@ -192,6 +212,9 @@ function withRuntimeMetadata(result, input) {
                 : [input.providerSkill],
             fallbackSelected: selection?.fallbackSelected ?? null,
             selection,
+            // Kept on every post-workspace result (including failures) so the
+            // daemon can remove the run workspace once the order is terminal.
+            ...(attemptWorkspaceCwd ? { attemptWorkspaceCwd } : {}),
         },
         runtimeId: input.runtime.id,
         ...(sessionId ? { sessionId } : {}),
@@ -223,6 +246,7 @@ function buildSessionFailure(run, providerSkill, providerSkills) {
                 providerSkills,
                 sessionId,
                 selection,
+                attemptWorkspaceCwd: run.attemptWorkspaceCwd,
             }),
             retryable: isRetryableProviderRuntimeFailure(code),
         };
@@ -236,6 +260,7 @@ function buildSessionFailure(run, providerSkill, providerSkills) {
                 providerSkills,
                 sessionId,
                 selection,
+                attemptWorkspaceCwd: run.attemptWorkspaceCwd,
             }),
             retryable: true,
         };
@@ -253,6 +278,7 @@ function buildSessionFailure(run, providerSkill, providerSkills) {
                 providerSkills,
                 sessionId,
                 selection,
+                attemptWorkspaceCwd: run.attemptWorkspaceCwd,
             }),
             retryable: isRetryableProviderRuntimeFailure(code),
         };
@@ -511,8 +537,28 @@ function buildProviderServiceOrderPrompt(input) {
         executionReminder: input.executionReminder,
     });
 }
+exports.DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = 5 * 60_000;
+exports.VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = 20 * 60_000;
+exports.MIN_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = 30_000;
+exports.MAX_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS = 30 * 60_000;
+/**
+ * Execution timeout for one provider service order. The published service
+ * schema carries no timeout field and none is added; a service record that
+ * nevertheless has a positive `executionTimeoutMs` is honored as an override,
+ * clamped to [30s, 30min]. Otherwise video output gets 20 minutes and every
+ * other output type gets 5 minutes (mirrors the IDBots reference behavior).
+ */
+function resolveProviderOrderExecutionTimeoutMs(service) {
+    const override = Number(service.executionTimeoutMs);
+    if (Number.isFinite(override) && override > 0) {
+        return Math.min(exports.MAX_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS, Math.max(exports.MIN_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS, Math.trunc(override)));
+    }
+    return (0, providerDeliveryArtifacts_1.classifyProviderOutputType)(service.outputType) === 'video'
+        ? exports.VIDEO_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS
+        : exports.DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS;
+}
 function createProviderServiceRunner(input) {
-    const sessionTimeoutMs = input.sessionTimeoutMs ?? 120_000;
+    const sessionTimeoutMs = input.sessionTimeoutMs ?? exports.DEFAULT_PROVIDER_ORDER_EXECUTION_TIMEOUT_MS;
     const pollIntervalMs = input.pollIntervalMs ?? 500;
     return {
         async execute(order) {
@@ -594,6 +640,43 @@ function createProviderServiceRunner(input) {
                 providerSkills,
                 selection: failedSelection,
             });
+            // IDBots resolveTimeoutFallback parity: when the runtime session times
+            // out but a deliverable artifact already exists in the attempt
+            // workspace, deliver that artifact as a partial success with an explicit
+            // timeout note instead of failing the order.
+            const tryResolveTimeoutPartialResult = async (timedOutRun) => {
+                const artifactPath = await (0, providerDeliveryArtifacts_1.findProviderWorkspaceArtifactCandidate)({
+                    workspaceCwd: timedOutRun.attemptWorkspaceCwd,
+                    outputType: order.outputType,
+                });
+                if (!artifactPath) {
+                    return null;
+                }
+                const relativeArtifactPath = node_path_1.default.relative(timedOutRun.executionCwd, artifactPath);
+                if (!relativeArtifactPath || relativeArtifactPath.startsWith('..') || node_path_1.default.isAbsolute(relativeArtifactPath)) {
+                    return null;
+                }
+                return withRuntimeMetadata({
+                    state: 'completed',
+                    responseText: [
+                        'Execution timed out before the provider finished.',
+                        'The attached artifact was produced before the timeout and the result may be incomplete.',
+                        `artifactPath: ${relativeArtifactPath.split(node_path_1.default.sep).join('/')}`,
+                    ].join('\n'),
+                    metadata: {
+                        outputType: normalizeText(order.outputType) || 'text',
+                        sessionCwd: timedOutRun.executionCwd,
+                        attemptWorkspaceCwd: timedOutRun.attemptWorkspaceCwd,
+                        executionTimedOut: true,
+                    },
+                }, {
+                    runtime: timedOutRun.runtime,
+                    providerSkill,
+                    providerSkills,
+                    sessionId: timedOutRun.sessionId,
+                    selection: timedOutRun.selection,
+                });
+            };
             let run;
             try {
                 run = await executeWithSelection(selection);
@@ -611,6 +694,12 @@ function createProviderServiceRunner(input) {
                 }
             }
             let failure = buildSessionFailure(run, providerSkill, providerSkills);
+            if (failure?.result.state === 'failed' && failure.result.code === 'provider_execution_timeout') {
+                const partialResult = await tryResolveTimeoutPartialResult(run);
+                if (partialResult) {
+                    return partialResult;
+                }
+            }
             if (failure?.retryable) {
                 const fallbackSelection = await resolveFallbackSelection(run.runtime, run.selection);
                 if (fallbackSelection) {
@@ -618,6 +707,12 @@ function createProviderServiceRunner(input) {
                         const fallbackRun = await executeWithSelection(fallbackSelection);
                         const fallbackFailure = buildSessionFailure(fallbackRun, providerSkill, providerSkills);
                         if (fallbackFailure) {
+                            if (fallbackFailure.result.state === 'failed' && fallbackFailure.result.code === 'provider_execution_timeout') {
+                                const partialResult = await tryResolveTimeoutPartialResult(fallbackRun);
+                                if (partialResult) {
+                                    return partialResult;
+                                }
+                            }
                             return fallbackFailure.result;
                         }
                         run = fallbackRun;
@@ -664,6 +759,7 @@ function createProviderServiceRunner(input) {
                     providerSkills,
                     sessionId,
                     selection,
+                    attemptWorkspaceCwd: run.attemptWorkspaceCwd,
                 });
             }
             return {
@@ -684,6 +780,121 @@ function createProviderServiceRunner(input) {
                 sessionId,
                 selection,
             };
+        },
+        /**
+         * IDBots MAX_MISSING_ARTIFACT_CONTINUATION_ATTEMPTS parity: one forced
+         * continuation run after a completed non-text execution left no
+         * deliverable artifact. The continuation reuses the previous run's
+         * selection and attempt workspace (no new workspace, no fallback retry)
+         * and prompts the runtime that it MUST generate the expected file.
+         */
+        async executeContinuation(order, previousResult) {
+            const normalizedProviderSkillNames = normalizeProviderSkillNames(order);
+            if (normalizedProviderSkillNames.invalidSkill) {
+                return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('invalid_provider_skill', `Provider skill name is unsafe: ${normalizedProviderSkillNames.invalidSkill}`);
+            }
+            const providerSkills = normalizedProviderSkillNames.skills;
+            if (providerSkills.length === 0) {
+                return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('invalid_provider_skill', 'Provider skill name is required.');
+            }
+            const providerSkill = providerSkills[0];
+            const previousRecord = previousResult;
+            const selection = previousRecord.selection
+                ?? previousRecord.metadata?.selection
+                ?? null;
+            const previousWorkspaceCwd = normalizeText(previousRecord.metadata?.attemptWorkspaceCwd);
+            if (!selection || !previousWorkspaceCwd) {
+                return (0, serviceRunnerContracts_1.createServiceRunnerFailedResult)('provider_artifact_continuation_unavailable', 'Provider continuation requires the previous run selection and attempt workspace.');
+            }
+            const runtime = selection.runtime;
+            let attemptWorkspaceCwd;
+            try {
+                attemptWorkspaceCwd = await node_fs_1.promises.realpath(previousWorkspaceCwd);
+            }
+            catch {
+                return createRuntimeFailedResult('provider_artifact_continuation_unavailable', 'Provider continuation attempt workspace is no longer readable.', {
+                    runtime,
+                    providerSkill,
+                    providerSkills,
+                    selection,
+                });
+            }
+            const systemPrompt = buildPaidOrderSystemPrompt({
+                serviceName: order.serviceName ?? '',
+                displayName: order.displayName ?? '',
+                providerSkill,
+                providerSkills,
+                outputType: order.outputType ?? 'text',
+                userTask: order.userTask,
+                taskContext: order.taskContext,
+                executionReminder: order.executionReminder,
+            });
+            const selectedSkills = selection.skills.length > 0 ? selection.skills : [selection.skill];
+            const skillSourcePaths = Object.fromEntries(selectedSkills.map((skill) => [skill.skillName, skill.absolutePath]));
+            let sessionId;
+            let session;
+            try {
+                sessionId = await input.llmExecutor.execute({
+                    runtimeId: runtime.id,
+                    runtime,
+                    prompt: buildMissingArtifactContinuationPrompt(order),
+                    systemPrompt,
+                    cwd: attemptWorkspaceCwd,
+                    skills: providerSkills,
+                    skillSourcePaths,
+                    metaBotSlug: input.metaBotSlug,
+                    timeout: sessionTimeoutMs,
+                });
+                session = await waitForSession(input.llmExecutor, sessionId, sessionTimeoutMs, pollIntervalMs);
+            }
+            catch (error) {
+                return createRuntimeFailedResult('provider_execution_failed', error instanceof Error ? error.message : String(error), {
+                    runtime,
+                    providerSkill,
+                    providerSkills,
+                    selection,
+                    attemptWorkspaceCwd,
+                });
+            }
+            const run = {
+                runtime,
+                selection,
+                sessionId,
+                session,
+                executionCwd: attemptWorkspaceCwd,
+                attemptWorkspaceCwd,
+            };
+            const failure = buildSessionFailure(run, providerSkill, providerSkills);
+            if (failure) {
+                return failure.result;
+            }
+            const responseText = sanitizeProviderDeliverableText(session?.result?.output ?? '', providerSkill);
+            if (!responseText) {
+                return createRuntimeFailedResult('provider_execution_empty', 'The provider runtime returned an empty result.', {
+                    runtime,
+                    providerSkill,
+                    providerSkills,
+                    sessionId,
+                    selection,
+                    attemptWorkspaceCwd,
+                });
+            }
+            return withRuntimeMetadata({
+                state: 'completed',
+                responseText,
+                metadata: {
+                    outputType: normalizeText(order.outputType) || 'text',
+                    sessionCwd: await resolveCompletedSessionCwd(session?.cwd, attemptWorkspaceCwd),
+                    attemptWorkspaceCwd,
+                    missingArtifactContinuation: true,
+                },
+            }, {
+                runtime,
+                providerSkill,
+                providerSkills,
+                sessionId,
+                selection,
+            });
         },
     };
 }

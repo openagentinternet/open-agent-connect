@@ -25,12 +25,7 @@ export interface ApplyProviderRunnerResultInput {
     taskRun: A2ATaskRunRecord;
     result: ProviderServiceRunnerResult;
 }
-export interface AnswerClarificationInput {
-    session: A2ASessionRecord;
-    taskRun: A2ATaskRunRecord;
-    answer: string;
-}
-export type A2ASessionEngineEvent = 'request_sent' | 'provider_received' | 'provider_executing' | 'provider_completed' | 'timeout' | 'provider_failed' | 'clarification_needed';
+export type A2ASessionEngineEvent = 'request_sent' | 'provider_received' | 'provider_executing' | 'provider_completed' | 'timeout' | 'provider_failed';
 export interface SessionEngineMutation {
     session: A2ASessionRecord;
     taskRun: A2ATaskRunRecord;
@@ -39,10 +34,6 @@ export interface SessionEngineMutation {
 }
 export interface CallerSessionStarted extends SessionEngineMutation {
     linkage: A2ASessionLinkage;
-}
-export interface ClarificationMutation extends SessionEngineMutation {
-    accepted: boolean;
-    guardCode: string | null;
 }
 export interface A2ASessionEngineOptions {
     now?: () => number;
@@ -61,7 +52,6 @@ export interface A2ASessionEngine {
         taskRun: A2ATaskRunRecord;
     }): SessionEngineMutation;
     receiveProviderTask(input: ReceiveProviderTaskInput): SessionEngineMutation;
-    applyProviderRunnerResult(input: ApplyProviderRunnerResultInput): ClarificationMutation | SessionEngineMutation;
-    answerClarification(input: AnswerClarificationInput): ClarificationMutation;
+    applyProviderRunnerResult(input: ApplyProviderRunnerResultInput): SessionEngineMutation;
 }
 export declare function createA2ASessionEngine(options?: A2ASessionEngineOptions): A2ASessionEngine;

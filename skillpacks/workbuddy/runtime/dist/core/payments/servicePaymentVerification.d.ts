@@ -9,9 +9,21 @@ export interface VerifyServiceOrderPaymentInput {
     amount: string;
     currency: string;
 }
-export type ServiceOrderPaymentVerificationFailureKind = 'input_invalid' | 'adapter_missing' | 'payment_not_found' | 'output_mismatch';
+export type ServiceOrderPaymentVerificationFailureKind = 'input_invalid' | 'adapter_missing' | 'payment_not_found' | 'output_mismatch' | 'chain_unavailable';
+/**
+ * Tri-state verification outcome:
+ * - `verified`: a matching payment output was found on chain.
+ * - `mismatch`: at least one chain lookup answered and the payment is absent
+ *   or pays the wrong address/amount. Deterministic — callers may fail the
+ *   order terminally.
+ * - `error`: every available chain lookup failed to answer (transport or
+ *   indexer outage). Transient — callers must not treat it as proof of
+ *   non-payment; the order should stay reprocessable.
+ */
+export type ServiceOrderPaymentVerificationOutcome = 'verified' | 'mismatch' | 'error';
 export interface VerifiedServiceOrderPayment {
     verified: boolean;
+    outcome: ServiceOrderPaymentVerificationOutcome;
     paymentTxid: string | null;
     paymentChain: VerifiableServicePaymentChain | null;
     settlementKind: 'native' | 'free';

@@ -12,6 +12,7 @@ exports.buildDaemonConfigHash = buildDaemonConfigHash;
 exports.probeDaemonStatus = probeDaemonStatus;
 exports.createPrivateChatReplyRunnerForProfile = createPrivateChatReplyRunnerForProfile;
 exports.replayUnhandledA2AOrderMessagesForProfiles = replayUnhandledA2AOrderMessagesForProfiles;
+exports.resumePendingA2ACallerReplyWaitsForProfiles = resumePendingA2ACallerReplyWaitsForProfiles;
 exports.createPrivateChatAutoReplyProfileDispatcher = createPrivateChatAutoReplyProfileDispatcher;
 exports.resolvePeerChatPublicKeyFromLocalProfiles = resolvePeerChatPublicKeyFromLocalProfiles;
 exports.createPeerChatPublicKeyResolver = createPeerChatPublicKeyResolver;
@@ -59,6 +60,9 @@ const defaultHandlers_1 = require("../daemon/defaultHandlers");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const simplemsgPresenceWatchdog_1 = require("../core/a2a/simplemsgPresenceWatchdog");
 const simplemsgClassifier_1 = require("../core/a2a/simplemsgClassifier");
+const sessionStateStore_1 = require("../core/a2a/sessionStateStore");
+const orderLifecycle_1 = require("../core/orders/orderLifecycle");
+const orderChatSuppression_1 = require("../core/orders/orderChatSuppression");
 const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
 const privateChatSendFailureLog_1 = require("../core/chat/privateChatSendFailureLog");
 const privateChatAutoReplyBackfill_1 = require("../core/chat/privateChatAutoReplyBackfill");
@@ -68,7 +72,9 @@ const privateChatPeerDiscovery_1 = require("../core/chat/privateChatPeerDiscover
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
 const privateChatAllowedSkills_1 = require("../core/chat/privateChatAllowedSkills");
+const chatSkillWaitNotice_1 = require("../core/chat/chatSkillWaitNotice");
 const orderProtocolTextGenerator_1 = require("../core/a2a/orderProtocolTextGenerator");
+const providerWorkspaceCleanup_1 = require("../core/a2a/provider/providerWorkspaceCleanup");
 const servicePayment_1 = require("../core/payments/servicePayment");
 const llmRuntimeStore_1 = require("../core/llm/llmRuntimeStore");
 const llmBindingStore_1 = require("../core/llm/llmBindingStore");
@@ -1188,6 +1194,7 @@ function createPrivateChatReplyRunnerForProfile(input) {
         runtimeResolver: input.runtimeResolver,
         llmExecutor: input.llmExecutor,
         metaBotSlug: input.metaBotSlug,
+        chatWorkspaceDir: node_path_1.default.join(input.paths.profileRoot, '.runtime', 'private-chat-work'),
         requestAvailabilityRecovery: () => {
             activeLlmAvailabilityRecovery?.requestSoon(input.paths.profileRoot);
         },
@@ -1427,6 +1434,50 @@ async function replayUnhandledA2AOrderMessagesForProfiles(input) {
     }
     return result;
 }
+// Buyer-side counterpart of replayUnhandledA2AOrderMessagesForProfiles: caller
+// reply waits live in daemon memory, so a restart would otherwise strand paid
+// orders in 'requesting_remote' with no timeout and no refund. Re-arm them (or
+// settle already-expired waits straight into the timeout + refund path).
+async function resumePendingA2ACallerReplyWaitsForProfiles(input) {
+    const result = {
+        profiles: 0,
+        scanned: 0,
+        armed: 0,
+        timedOut: 0,
+        skipped: 0,
+        failed: 0,
+    };
+    const resume = input.resumeCallerReplyWait;
+    if (!resume) {
+        return result;
+    }
+    const listProfilesForResume = input.listProfiles ?? identityProfiles_1.listIdentityProfiles;
+    const profiles = await listProfilesForResume(input.systemHomeDir).catch((error) => {
+        input.logWarning?.('[A2A caller reply resume profiles]', error);
+        return [];
+    });
+    const activeHomeDir = normalizeReplayText(input.activeHomeDir);
+    for (const profile of profiles) {
+        result.profiles += 1;
+        const profileHomeDir = normalizeReplayText(profile.homeDir);
+        const localProfileSlug = activeHomeDir && profileHomeDir && node_path_1.default.resolve(profileHomeDir) === node_path_1.default.resolve(activeHomeDir)
+            ? null
+            : profile.slug;
+        try {
+            const report = await resume({ localProfileSlug });
+            result.scanned += Number(report?.scanned) || 0;
+            result.armed += Number(report?.armed) || 0;
+            result.timedOut += Number(report?.timedOut) || 0;
+            result.skipped += Number(report?.skipped) || 0;
+            result.failed += Number(report?.failed) || 0;
+        }
+        catch (error) {
+            result.failed += 1;
+            input.logWarning?.('[A2A caller reply resume]', error);
+        }
+    }
+    return result;
+}
 function createPrivateChatAutoReplyProfileDispatcher(input) {
     const orchestrators = new Map();
     const createOrchestrator = input.createOrchestrator ?? privateChatAutoReply_1.createPrivateChatAutoReplyOrchestrator;
@@ -1504,6 +1555,15 @@ function createPrivateChatAutoReplyProfileDispatcher(input) {
             resolvePeerChatPublicKey: input.resolvePeerChatPublicKey,
             replyRunner,
             logSendFailure: (0, privateChatSendFailureLog_1.createPrivateChatSendFailureFileLogger)(profilePaths),
+            hasActiveOrderWithPeer: (0, orderChatSuppression_1.createHasActiveOrderWithPeer)({
+                runtimeStateStore: profileRuntimeStore,
+                sessionStateStore: (0, sessionStateStore_1.createSessionStateStore)(profilePaths),
+            }),
+            chatSkillWaitNotice: (0, chatSkillWaitNotice_1.createChatSkillWaitNoticeGenerator)({
+                runtimeResolver: profileRuntimeResolver,
+                llmExecutor: input.llmExecutor,
+                metaBotSlug,
+            }),
         }, profileAutoReplyConfig);
         orchestrators.set(cacheKey, orchestrator);
         return orchestrator;
@@ -2836,6 +2896,25 @@ async function serveCliDaemonProcess(context) {
         callerOrderTextGenerator: orderProtocolTextGenerator.generateCallerOrderText,
         providerOrderTextGenerator: orderProtocolTextGenerator.generateProviderOrderText,
         servicePaymentExecutor,
+        serviceOrderPaymentVerifier: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+            ? async (verificationInput) => ({
+                verified: true,
+                outcome: 'verified',
+                paymentTxid: verificationInput.paymentTxid ?? null,
+                paymentChain: verificationInput.paymentChain === 'btc'
+                    ? 'btc'
+                    : verificationInput.paymentChain === 'mvc'
+                        ? 'mvc'
+                        : null,
+                settlementKind: verificationInput.settlementKind === 'free' ? 'free' : 'native',
+                paymentAddress: verificationInput.paymentAddress ?? null,
+                amount: verificationInput.amount,
+                currency: verificationInput.currency,
+                amountSatoshis: Math.round(Number(verificationInput.amount) * 100_000_000),
+                matchedOutputIndex: verificationInput.paymentTxid ? 0 : null,
+                failureKind: null,
+            })
+            : undefined,
         requestMvcGasSubsidy,
         createSignerForHome: (profileHomeDir) => {
             const profileBaseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
@@ -2905,6 +2984,18 @@ async function serveCliDaemonProcess(context) {
         });
     }, onlineServiceCache_1.DEFAULT_ONLINE_SERVICE_CACHE_SYNC_INTERVAL_MS);
     onlineServiceCacheInterval.unref?.();
+    // Reclaim abandoned provider run workspaces (crashed daemons never reach
+    // the terminal cleanup); terminal orders remove their own workspace.
+    const sweepProviderWorkspaces = () => (0, providerWorkspaceCleanup_1.sweepProviderRunWorkspaces)({
+        projectRoot: paths.profileRoot,
+    }).catch((error) => {
+        console.warn('[provider workspace sweep]', error instanceof Error ? error.message : String(error));
+    });
+    void sweepProviderWorkspaces();
+    const providerWorkspaceSweepInterval = setInterval(() => {
+        void sweepProviderWorkspaces();
+    }, providerWorkspaceCleanup_1.PROVIDER_RUN_WORKSPACE_SWEEP_INTERVAL_MS);
+    providerWorkspaceSweepInterval.unref?.();
     const serviceRefundSyncLoop = createServiceRefundSyncLoop({
         syncRefunds: async () => {
             const result = await handlers.services?.syncRefunds?.({});
@@ -2914,6 +3005,16 @@ async function serveCliDaemonProcess(context) {
         },
         logWarning: (message) => console.warn(message),
     });
+    // Buyer-side order deadline enforcement (IDBots 60s scanTimedOutOrders
+    // parity): the socket waiter settles deliveries fast, but only this cheap
+    // local sweep fails orders that breach the first-response deadline. The
+    // refund sync loop above also runs the same sweep inline.
+    const buyerOrderDeadlineSweepInterval = setInterval(() => {
+        void Promise.resolve(handlers.sweepBuyerOrderDeadlines?.()).catch((error) => {
+            console.warn('[buyer order deadline sweep]', error instanceof Error ? error.message : String(error));
+        });
+    }, orderLifecycle_1.SERVICE_ORDER_DEADLINE_SWEEP_INTERVAL_MS);
+    buyerOrderDeadlineSweepInterval.unref?.();
     // ---- LLM runtime discovery and resolver ----
     const llmRuntimeStore = (0, llmRuntimeStore_1.createLlmRuntimeStore)(paths);
     const llmBindingStore = (0, llmBindingStore_1.createLlmBindingStore)(paths);
@@ -2991,6 +3092,15 @@ async function serveCliDaemonProcess(context) {
             llmExecutor,
             env: process.env,
             logWarning: (scope, message) => console.warn(scope, message),
+        }),
+        hasActiveOrderWithPeer: (0, orderChatSuppression_1.createHasActiveOrderWithPeer)({
+            runtimeStateStore: runtimeStore,
+            sessionStateStore: (0, sessionStateStore_1.createSessionStateStore)(paths),
+        }),
+        chatSkillWaitNotice: (0, chatSkillWaitNotice_1.createChatSkillWaitNoticeGenerator)({
+            runtimeResolver: llmResolver,
+            llmExecutor,
+            metaBotSlug,
         }),
     }, sharedAutoReplyConfig);
     const profileAutoReplyDispatcher = createPrivateChatAutoReplyProfileDispatcher({
@@ -3256,6 +3366,20 @@ async function serveCliDaemonProcess(context) {
             console.warn('[A2A order replay]', error instanceof Error ? error.message : String(error));
         });
     }
+    // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
+    // them (with their remaining budget) or settle expired waits into the
+    // timeout + refund path. Runs even when the simplemsg listener is disabled —
+    // the refund safety net must not depend on inbound listener config.
+    void resumePendingA2ACallerReplyWaitsForProfiles({
+        systemHomeDir: paths.systemHomeDir,
+        activeHomeDir: homeDir,
+        resumeCallerReplyWait: (input) => handlers.resumePendingCallerReplyContinuations(input),
+        logWarning: (scope, error) => {
+            console.warn(scope, error instanceof Error ? error.message : String(error));
+        },
+    }).catch((error) => {
+        console.warn('[A2A caller reply resume]', error instanceof Error ? error.message : String(error));
+    });
     if (pendingA2ASimplemsgRefreshAfterIdentityRegistration) {
         pendingA2ASimplemsgRefreshAfterIdentityRegistration = false;
         await refreshA2ASimplemsgListenerAfterIdentityRegistration();
@@ -3269,6 +3393,7 @@ async function serveCliDaemonProcess(context) {
         simplemsgListener.stop();
         chatAutoReplyBackfill.stop();
         clearInterval(onlineServiceCacheInterval);
+        clearInterval(providerWorkspaceSweepInterval);
         serviceRefundSyncLoop.stop();
         let shutdownFailure = null;
         try {

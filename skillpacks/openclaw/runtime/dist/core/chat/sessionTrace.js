@@ -24,6 +24,12 @@ function normalizeOptionalNumber(value) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
 }
+// Timestamp variant that also accepts plain numbers (normalizeOptionalNumber
+// only accepts numeric strings); used for the order deadline fields.
+function normalizeOptionalTimestamp(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? Math.trunc(numeric) : null;
+}
 function sanitizePathSegment(value, fallback) {
     const normalized = normalizeText(value).replace(/[^a-zA-Z0-9._-]+/g, '-');
     return normalized || fallback;
@@ -152,6 +158,9 @@ function buildSessionTrace(input) {
                 outputType: normalizeText(input.order.outputType) || null,
                 requestText: normalizeText(input.order.requestText) || null,
                 status: normalizeText(input.order.status) || null,
+                firstResponseDeadlineAt: normalizeOptionalTimestamp(input.order.firstResponseDeadlineAt),
+                deliveryDeadlineAt: normalizeOptionalTimestamp(input.order.deliveryDeadlineAt),
+                firstResponseReceivedAt: normalizeOptionalTimestamp(input.order.firstResponseReceivedAt),
                 failedAt: normalizeOptionalNumber(input.order.failedAt),
                 failureReason: normalizeText(input.order.failureReason) || null,
                 refundRequestPinId: normalizeText(input.order.refundRequestPinId) || null,

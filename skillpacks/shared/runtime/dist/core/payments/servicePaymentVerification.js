@@ -123,6 +123,7 @@ async function verifyServiceOrderPayment(input) {
         const verified = !paymentTxid && amountSatoshis === 0;
         return {
             verified,
+            outcome: verified ? 'verified' : 'mismatch',
             paymentTxid: null,
             paymentChain: null,
             settlementKind,
@@ -137,6 +138,7 @@ async function verifyServiceOrderPayment(input) {
     if (!paymentTxid || !paymentChain || !paymentAddress || amountSatoshis <= 0) {
         return {
             verified: false,
+            outcome: 'mismatch',
             paymentTxid,
             paymentChain: paymentChain || null,
             settlementKind,
@@ -152,6 +154,7 @@ async function verifyServiceOrderPayment(input) {
     if (!adapter) {
         return {
             verified: false,
+            outcome: 'mismatch',
             paymentTxid,
             paymentChain,
             settlementKind,
@@ -176,20 +179,35 @@ async function verifyServiceOrderPayment(input) {
     }
     catch (error) {
         if (paymentChain !== 'mvc') {
-            throw error;
+            // The only lookup available for this chain failed to answer; this is a
+            // transient transport/indexer failure, not evidence of a missing payment.
+            failureKind = 'chain_unavailable';
         }
-        matchedOutputIndex = await findMvcPaymentUtxoFallback({
-            adapter,
-            paymentTxid,
-            paymentAddress,
-            amountSatoshis,
-        }).catch(() => null);
-        if (matchedOutputIndex === null) {
-            failureKind = 'payment_not_found';
+        else {
+            let utxoLookupFailed = false;
+            matchedOutputIndex = await findMvcPaymentUtxoFallback({
+                adapter,
+                paymentTxid,
+                paymentAddress,
+                amountSatoshis,
+            }).catch(() => {
+                utxoLookupFailed = true;
+                return null;
+            });
+            if (matchedOutputIndex === null) {
+                // The raw-tx lookup already failed, so an empty or failed UTXO fallback
+                // only proves non-payment when the fallback itself answered.
+                failureKind = utxoLookupFailed ? 'chain_unavailable' : 'payment_not_found';
+            }
         }
     }
     return {
         verified: matchedOutputIndex !== null,
+        outcome: matchedOutputIndex !== null
+            ? 'verified'
+            : failureKind === 'chain_unavailable'
+                ? 'error'
+                : 'mismatch',
         paymentTxid,
         paymentChain,
         settlementKind,

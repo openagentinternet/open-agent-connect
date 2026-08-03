@@ -15,9 +15,6 @@ function buildMutation(session, taskRun, event, runnerResult = null) {
         runnerResult,
     };
 }
-function cloneClarificationRounds(rounds) {
-    return rounds.map((round) => ({ ...round }));
-}
 function createA2ASessionEngine(options = {}) {
     let fallbackIdSequence = 0;
     const now = options.now ?? (() => Date.now());
@@ -113,52 +110,6 @@ function createA2ASessionEngine(options = {}) {
         };
         return buildMutation(session, taskRun, 'provider_received');
     };
-    const answerClarification = (input) => {
-        const timestamp = now();
-        const clarificationRounds = cloneClarificationRounds(input.taskRun.clarificationRounds);
-        const pendingRound = clarificationRounds.find((round) => round.status === 'pending') || null;
-        if (!pendingRound) {
-            const session = {
-                ...input.session,
-                state: 'manual_action_required',
-                updatedAt: timestamp,
-            };
-            const taskRun = {
-                ...input.taskRun,
-                updatedAt: timestamp,
-                failureCode: 'clarification_not_pending',
-                failureReason: 'No pending clarification round was available to answer.',
-                clarificationRounds,
-            };
-            return {
-                ...buildMutation(session, taskRun, 'clarification_needed'),
-                accepted: false,
-                guardCode: 'clarification_not_pending',
-            };
-        }
-        pendingRound.answeredAt = timestamp;
-        pendingRound.answer = normalizeText(input.answer);
-        pendingRound.status = 'answered';
-        const session = {
-            ...input.session,
-            state: 'remote_received',
-            updatedAt: timestamp,
-            latestTaskRunState: 'running',
-        };
-        const taskRun = {
-            ...input.taskRun,
-            state: 'running',
-            updatedAt: timestamp,
-            failureCode: null,
-            failureReason: null,
-            clarificationRounds,
-        };
-        return {
-            ...buildMutation(session, taskRun, 'provider_received'),
-            accepted: true,
-            guardCode: null,
-        };
-    };
     const applyProviderRunnerResult = (input) => {
         const timestamp = now();
         if (input.result.state === 'completed') {
@@ -195,54 +146,24 @@ function createA2ASessionEngine(options = {}) {
             };
             return buildMutation(session, taskRun, 'provider_failed', input.result);
         }
-        const clarificationRounds = cloneClarificationRounds(input.taskRun.clarificationRounds);
-        if (clarificationRounds.length >= 1) {
-            const session = {
-                ...input.session,
-                state: 'manual_action_required',
-                updatedAt: timestamp,
-            };
-            const taskRun = {
-                ...input.taskRun,
-                updatedAt: timestamp,
-                failureCode: 'clarification_round_limit_exceeded',
-                failureReason: 'The provider runner requested more than one clarification round.',
-                clarificationRounds,
-            };
-            return {
-                ...buildMutation(session, taskRun, 'clarification_needed', input.result),
-                accepted: false,
-                guardCode: 'clarification_round_limit_exceeded',
-            };
-        }
-        const clarificationRound = {
-            round: 1,
-            askedAt: timestamp,
-            answeredAt: null,
-            question: normalizeText(input.result.question),
-            answer: null,
-            status: 'pending',
-        };
-        clarificationRounds.push(clarificationRound);
+        // A needs_clarification outcome has no answer channel: finalize it as a
+        // terminal failure instead of leaving the task run stuck.
         const session = {
             ...input.session,
-            state: 'manual_action_required',
+            state: 'remote_failed',
             updatedAt: timestamp,
-            latestTaskRunState: 'needs_clarification',
+            latestTaskRunState: 'failed',
         };
         const taskRun = {
             ...input.taskRun,
-            state: 'needs_clarification',
+            state: 'failed',
             updatedAt: timestamp,
-            failureCode: null,
-            failureReason: null,
-            clarificationRounds,
+            completedAt: timestamp,
+            failureCode: 'clarification_not_supported',
+            failureReason: normalizeText(input.result.question)
+                || 'Provider runner requested clarification, which is not supported.',
         };
-        return {
-            ...buildMutation(session, taskRun, 'clarification_needed', input.result),
-            accepted: true,
-            guardCode: null,
-        };
+        return buildMutation(session, taskRun, 'provider_failed', input.result);
     };
     return {
         buildSessionLinkage,
@@ -250,6 +171,5 @@ function createA2ASessionEngine(options = {}) {
         markForegroundTimeout,
         receiveProviderTask,
         applyProviderRunnerResult,
-        answerClarification,
     };
 }

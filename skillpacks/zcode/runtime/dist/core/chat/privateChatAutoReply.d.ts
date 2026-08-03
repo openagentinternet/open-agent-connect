@@ -1,3 +1,4 @@
+import type { ChatSkillWaitNoticeGenerator } from './chatSkillWaitNotice';
 import { type A2AConversationMessagePersister } from '../a2a/conversationPersistence';
 import { type PrivateChatSendFailureEvent } from './privateChatSendFailureLog';
 import type { PrivateChatPendingGuidanceClaim, PrivateChatStateStore } from './privateChatStateStore';
@@ -15,6 +16,8 @@ export interface PrivateChatAutoReplyDependencies {
     replyRunner: ChatReplyRunner;
     a2aConversationPersister?: A2AConversationMessagePersister;
     logSendFailure?: (event: PrivateChatSendFailureEvent) => void;
+    hasActiveOrderWithPeer?: (peerGlobalMetaId: string) => Promise<boolean>;
+    chatSkillWaitNotice?: ChatSkillWaitNoticeGenerator | null;
     now?: () => number;
 }
 export interface PrivateChatAutoReplyOrchestrator {
@@ -25,4 +28,8 @@ export interface PrivateChatAutoReplyOrchestrator {
         guidanceToConsume?: PrivateChatPendingGuidanceClaim | null;
     }): Promise<void>;
 }
+export declare function unwrapPrivateChatContent(raw: string): {
+    content: string;
+    extensions: Record<string, unknown> | null;
+};
 export declare function createPrivateChatAutoReplyOrchestrator(deps: PrivateChatAutoReplyDependencies, config: PrivateChatAutoReplyConfig): PrivateChatAutoReplyOrchestrator;

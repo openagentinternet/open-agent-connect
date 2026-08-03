@@ -123,6 +123,45 @@ function normalizeKindLabel(value) {
     }
     return 'Chat';
 }
+// Order progress notices (the ack, the long-task notice, the 2-minute
+// heartbeats, upload/retry notices) all share the ORDER_STATUS wire tag. The
+// tag prefix is wire framing, not prose, so it is stripped for display.
+function orderStatusTagPrefixRe() {
+    return /^\[ORDER_STATUS(?::([0-9a-fA-F]{64}))?\]\s*/;
+}
+function readOrderStatusProgressKey(record) {
+    const protocolTag = normalizeText(record.protocolTag).toUpperCase();
+    const content = normalizeText(record.content) || normalizeText(record.text) || normalizeText(record.body);
+    const match = content.match(orderStatusTagPrefixRe());
+    if (protocolTag !== 'ORDER_STATUS' && !match) {
+        return '';
+    }
+    return normalizeTxid(record.orderTxid) || normalizeTxid(match?.[1]) || 'order-status';
+}
+function stripOrderStatusTagPrefix(record, content) {
+    if (!readOrderStatusProgressKey(record)) {
+        return content;
+    }
+    return content.replace(orderStatusTagPrefixRe(), '').trim() || content;
+}
+// A heartbeat stream fires every couple of minutes while an order executes;
+// rendering every notice as its own bubble would flood the thread. Collapse
+// each consecutive run of ORDER_STATUS records for the same order into its
+// latest one so the thread shows the current progress state (the full record
+// stays in the store and on the trace page).
+function collapseOrderProgressMessages(rows) {
+    const collapsed = [];
+    for (const row of rows) {
+        const key = readOrderStatusProgressKey(readObject(row));
+        const previousIndex = collapsed.length - 1;
+        if (key && previousIndex >= 0 && readOrderStatusProgressKey(readObject(collapsed[previousIndex])) === key) {
+            collapsed[previousIndex] = row;
+            continue;
+        }
+        collapsed.push(row);
+    }
+    return collapsed;
+}
 function normalizeKindLabels(value) {
     const raw = readArray(value);
     const labels = raw.length > 0 ? raw.map(normalizeKindLabel) : ['Chat'];
@@ -222,6 +261,7 @@ function buildMessage(row) {
     const sender = readObject(record.sender);
     const contentType = normalizeText(record.contentType) || 'text/plain';
     const txid = resolveMessageTxid(record);
+    const rawContent = normalizeText(record.content) || normalizeText(record.text) || normalizeText(record.body);
     return {
         messageId: normalizeText(record.messageId)
             || normalizeText(record.id)
@@ -230,7 +270,7 @@ function buildMessage(row) {
         direction,
         directionLabel: direction === 'outgoing' || direction === 'outbound' ? 'Bot' : 'Peer',
         kindLabel: normalizeKindLabel(record.kind || record.protocolTag),
-        content: normalizeText(record.content) || normalizeText(record.text) || normalizeText(record.body),
+        content: stripOrderStatusTagPrefix(record, rawContent),
         contentType,
         isMarkdown: isMarkdownContentType(contentType),
         senderLabel: normalizeText(sender.name)
@@ -246,7 +286,13 @@ function buildMessage(row) {
 function buildConversationsPageViewModel(input = {}) {
     const selectedLocalInput = normalizeText(input.selectedLocalGlobalMetaId);
     const localBotRows = extractLocalBots(input);
+    // When no Bot is explicitly selected, prefer the system-configured default
+    // Bot (isActive) before falling back to the first listed Bot.
+    const defaultLocalBot = selectedLocalInput
+        ? null
+        : localBotRows.find((row) => readObject(row).isActive === true) ?? null;
     const selectedLocalGlobalMetaId = selectedLocalInput
+        || normalizeText(readObject(defaultLocalBot).globalMetaId)
         || normalizeText(readObject(localBotRows[0]).globalMetaId);
     const localBots = localBotRows
         .map((row) => buildLocalBotOption(row, selectedLocalGlobalMetaId))
@@ -279,14 +325,14 @@ function buildConversationsPageViewModel(input = {}) {
             || (selectedConversationId && summary.conversationId === selectedConversationId)),
     }));
     const selectedConversation = conversations.find((summary) => summary.isSelected) || null;
-    const messages = extractMessages(input)
+    const sortedMessageRows = extractMessages(input)
         .sort((left, right) => {
         const leftRecord = readObject(left);
         const rightRecord = readObject(right);
         return normalizeTimestampMs(leftRecord.timestamp || leftRecord.createdAt)
             - normalizeTimestampMs(rightRecord.timestamp || rightRecord.createdAt);
-    })
-        .map(buildMessage);
+    });
+    const messages = collapseOrderProgressMessages(sortedMessageRows).map(buildMessage);
     return {
         localBots,
         selectedLocalGlobalMetaId,
@@ -326,6 +372,10 @@ function buildConversationsPageViewModelRuntimeSource() {
         extractMessages,
         normalizeKindLabel,
         normalizeKindLabels,
+        orderStatusTagPrefixRe,
+        readOrderStatusProgressKey,
+        stripOrderStatusTagPrefix,
+        collapseOrderProgressMessages,
         buildLocalBotOption,
         buildConversationId,
         buildSyntheticConversationSummary,

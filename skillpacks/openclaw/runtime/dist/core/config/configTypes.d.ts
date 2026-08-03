@@ -9,8 +9,8 @@ export interface AutoReplyConfig {
 }
 export declare const AUTO_REPLY_MAX_TURNS_OPTIONS: readonly number[];
 export declare const AUTO_REPLY_COOLDOWN_MS_OPTIONS: readonly number[];
-export declare const DEFAULT_AUTO_REPLY_MAX_TURNS = 5;
-export declare const DEFAULT_AUTO_REPLY_COOLDOWN_MS = 300000;
+export declare const DEFAULT_AUTO_REPLY_MAX_TURNS = 10;
+export declare const DEFAULT_AUTO_REPLY_COOLDOWN_MS = 60000;
 export type DefaultWriteNetwork = 'mvc' | 'btc' | 'doge' | 'opcat';
 export declare const DEFAULT_WRITE_NETWORKS: DefaultWriteNetwork[];
 export interface ChainConfig {

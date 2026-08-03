@@ -68,6 +68,7 @@ export interface ChatReplyRunnerInput {
     inboundMessage?: PrivateChatMessage | null;
     operatorGuidanceText?: string | null;
     conversationCloseAllowed?: boolean;
+    onSkillExecutionStart?: () => void;
 }
 export interface ChatReplyRunnerResult {
     state: 'reply' | 'end_conversation' | 'skip';

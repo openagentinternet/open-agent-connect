@@ -16,6 +16,7 @@ import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
 import { type A2AConversationMessagePersister } from '../core/a2a/conversationPersistence';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import { type ServicePaymentExecutor } from '../core/payments/servicePayment';
+import { verifyServiceOrderPayment } from '../core/payments/servicePaymentVerification';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { type BuyerRatingProtocolTextGenerator, type CallerOrderProtocolTextGenerator, type ProviderOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
@@ -23,6 +24,18 @@ export declare function resolveServiceOrderPaymentMetadata(currency: unknown): {
     paymentChain?: 'mvc' | 'btc';
     settlementKind?: 'native';
 };
+export type PeerChatPublicKeyOutcome = {
+    status: 'found';
+    chatPublicKey: string;
+} | {
+    status: 'absent';
+} | {
+    status: 'unreachable';
+    errors: string[];
+};
+export declare function lookupPeerChatPublicKey(globalMetaId: string, options?: {
+    chainApiBaseUrl?: string;
+}): Promise<PeerChatPublicKeyOutcome>;
 export declare function fetchPeerChatPublicKey(globalMetaId: string, options?: {
     chainApiBaseUrl?: string;
 }): Promise<string | null>;
@@ -35,6 +48,18 @@ export declare function rebuildTraceArtifactsFromSessionState(input: {
     artifacts: Awaited<ReturnType<typeof exportSessionArtifacts>>;
 }>;
 export declare function llmDiscoverySweepRunningForHomeDir(homeDir: string): boolean;
+export interface A2ACallerReplyResumeReport {
+    scanned: number;
+    armed: number;
+    timedOut: number;
+    skipped: number;
+    failed: number;
+}
+export interface BuyerOrderDeadlineSweepReport {
+    scanned: number;
+    timedOut: number;
+    skipped: number;
+}
 export declare function createDefaultMetabotDaemonHandlers(input: {
     homeDir: string;
     systemHomeDir?: string;
@@ -51,6 +76,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     fetchPrivateChatHistory?: FetchPrivateHistory;
     callerReplyWaiter?: MetaWebServiceReplyWaiter;
     servicePaymentExecutor?: ServicePaymentExecutor;
+    serviceOrderPaymentVerifier?: typeof verifyServiceOrderPayment;
     ratingFollowupRetryDelaysMs?: number[];
     a2aConversationPersister?: A2AConversationMessagePersister;
     buyerRatingReplyRunner?: ChatReplyRunner;
@@ -71,6 +97,7 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     autoReplyConfig?: PrivateChatAutoReplyConfig;
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
     providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
+    providerOrderProgressNoticeIntervalMs?: number;
     testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
     discoverLlmRuntimes?: typeof discoverLlmRuntimes;
     conversationGuidanceReplyRunner?: ChatReplyRunner;
@@ -79,4 +106,8 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     env?: NodeJS.ProcessEnv;
 }): MetabotDaemonHttpHandlers & {
     resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
+    resumePendingCallerReplyContinuations: (inputResume?: {
+        localProfileSlug?: string | null;
+    }) => Promise<A2ACallerReplyResumeReport>;
+    sweepBuyerOrderDeadlines: (nowMs?: number) => Promise<BuyerOrderDeadlineSweepReport>;
 };

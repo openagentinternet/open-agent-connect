@@ -35,7 +35,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.defaultBotSaveFailed': "Failed to update the default Bot.";
         readonly 'bot.publicIdentity': "Basic";
         readonly 'bot.behavior': "Persona";
-        readonly 'bot.chatSkills': "Chat Skills";
+        readonly 'bot.chatSkills': "Chat Settings";
         readonly 'bot.services': "Services";
         readonly 'bot.advanced': "Advanced";
         readonly 'bot.botName': "Bot Name";
@@ -103,6 +103,8 @@ export declare const DICTIONARIES: {
         readonly 'bot.personaPresetKeepEditing': "Keep current fields";
         readonly 'bot.personaPresetReplace': "Replace fields";
         readonly 'bot.saveChatSkills': "Save Chat Skills";
+        readonly 'bot.chatSkillsSavedChainFailed': "Saved locally; chain sync failed: {error}";
+        readonly 'bot.chatSkillsUnavailable': "{count} configured skills unavailable: {names}";
         readonly 'bot.autoReplyToggle': "Auto-Reply";
         readonly 'bot.autoReplyHint': "When on, this Bot replies to incoming private messages using its local LLM. Turn off to stay online without auto-replying.";
         readonly 'bot.autoReplyOn': "On";
@@ -117,8 +119,6 @@ export declare const DICTIONARIES: {
         readonly 'bot.autoReplyCooldownHint': "After a chat ends, new messages arriving within the cooldown are recorded but not replied to.";
         readonly 'bot.autoReplyCooldownMinutes': "min";
         readonly 'bot.reset': "Reset";
-        readonly 'bot.behaviorPlaceholder': "Behavior controls will be available here.";
-        readonly 'bot.chatSkillsPlaceholder': "Chat skill controls will be available here.";
         readonly 'bot.servicesPlaceholder': "Service publishing entries will be available here.";
         readonly 'bot.role': "Role";
         readonly 'bot.soul': "Soul";
@@ -133,7 +133,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.llmNotReadyLabel': "LLM NOT READY";
         readonly 'bot.llmNotReadyTitle': "Bound LLM runtimes are not ready yet. Open LLM runtimes to test or refresh.";
         readonly 'bot.chatSkillsNote': "Choose which skills can be used for private conversation replies.";
-        readonly 'bot.chatAllowedSkills': "Private Chat Allowed Skills：";
+        readonly 'bot.chatAllowedSkills': "Private Chat Allowed Skills:";
         readonly 'bot.noChatSkillsAllowed': "No chat skills allowed yet.";
         readonly 'bot.selectSkill': "Select a skill";
         readonly 'bot.add': "Add";
@@ -647,7 +647,7 @@ export declare const DICTIONARIES: {
         readonly 'bot.defaultBotSaveFailed': "设置默认 Bot 失败。";
         readonly 'bot.publicIdentity': "基础";
         readonly 'bot.behavior': "人格";
-        readonly 'bot.chatSkills': "聊天技能";
+        readonly 'bot.chatSkills': "聊天设置";
         readonly 'bot.services': "服务";
         readonly 'bot.advanced': "高级";
         readonly 'bot.botName': "Bot 名称";
@@ -715,6 +715,8 @@ export declare const DICTIONARIES: {
         readonly 'bot.personaPresetKeepEditing': "保留当前内容";
         readonly 'bot.personaPresetReplace': "替换字段";
         readonly 'bot.saveChatSkills': "保存聊天技能";
+        readonly 'bot.chatSkillsSavedChainFailed': "已保存到本地；链上同步失败:{error}";
+        readonly 'bot.chatSkillsUnavailable': "{count} 个已配置的技能不可用:{names}";
         readonly 'bot.autoReplyToggle': "自动回复";
         readonly 'bot.autoReplyHint': "开启后，此 Bot 会使用本地 LLM 自动回复收到的私信。关闭后 Bot 仍保持在线，但不会自动回复。";
         readonly 'bot.autoReplyOn': "开";
@@ -729,8 +731,6 @@ export declare const DICTIONARIES: {
         readonly 'bot.autoReplyCooldownHint': "对话结束后，冷却期内收到的新消息只记录、不回复。";
         readonly 'bot.autoReplyCooldownMinutes': "分钟";
         readonly 'bot.reset': "重置";
-        readonly 'bot.behaviorPlaceholder': "行为设置将在这里显示。";
-        readonly 'bot.chatSkillsPlaceholder': "聊天技能设置将在这里显示。";
         readonly 'bot.servicesPlaceholder': "服务发布入口将在这里显示。";
         readonly 'bot.role': "角色";
         readonly 'bot.soul': "灵魂";

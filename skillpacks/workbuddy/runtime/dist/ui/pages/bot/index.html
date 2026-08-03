@@ -671,6 +671,9 @@
       .save-status.saving {
         color: var(--amber);
       }
+      .save-status.warning {
+        color: var(--amber);
+      }
       .provider-field {
         position: relative;
       }
@@ -2277,7 +2280,7 @@
           <div class="tab-bar" data-tab-bar hidden>
             <button class="tab-btn active" data-tab="publicIdentity" data-i18n-key="bot.publicIdentity">Public Identity</button>
             <button class="tab-btn" data-tab="behavior" data-i18n-key="bot.behavior">Behavior</button>
-            <button class="tab-btn" data-tab="chatSkills" data-i18n-key="bot.chatSkills">Chat Skills</button>
+            <button class="tab-btn" data-tab="chatSkills" data-i18n-key="bot.chatSkills">Chat Settings</button>
             <button class="tab-btn" data-tab="advanced" data-i18n-key="bot.advanced">Advanced</button>
           </div>
           <div class="tab-content" data-tab-content hidden>
@@ -2285,14 +2288,10 @@
               <div data-info-content></div>
             </div>
             <div class="tab-panel" data-tab-panel="behavior">
-              <div data-behavior-content>
-                <div class="session-empty"><p data-i18n-key="bot.behaviorPlaceholder">Behavior controls will be available here.</p></div>
-              </div>
+              <div data-behavior-content></div>
             </div>
             <div class="tab-panel" data-tab-panel="chatSkills">
-              <div data-chat-skills-content>
-                <div class="session-empty"><p data-i18n-key="bot.chatSkillsPlaceholder">Chat skill controls will be available here.</p></div>
-              </div>
+              <div data-chat-skills-content></div>
             </div>
             <div class="tab-panel" data-tab-panel="advanced">
               <div class="advanced-card">

@@ -2,7 +2,7 @@ import type { ChatPersona } from '../chat/privateChatTypes';
 import type { LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
 import type { PublishedServiceRecord } from '../services/publishService';
 import type { MetabotPaths } from '../state/paths';
-export type ProviderOrderProtocolTextStage = 'acknowledgement' | 'rating_request';
+export type ProviderOrderProtocolTextStage = 'acknowledgement' | 'rating_request' | 'long_task_notice';
 export interface CallerOrderProtocolTextGeneratorInput {
     paths: MetabotPaths;
     persona: ChatPersona;

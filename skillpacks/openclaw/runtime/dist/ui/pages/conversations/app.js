@@ -793,8 +793,11 @@ function buildConversationsPageDefinition(i18n = (0, i18n_1.createI18nContext)()
   const loadProfiles = async () => {
     const payload = await fetchJson('/api/bot/profiles');
     state.localBots = Array.isArray(payload.profiles) ? payload.profiles.filter((profile) => profile && profile.globalMetaId) : [];
-    if (!state.selectedLocalGlobalMetaId && state.localBots[0]) {
-      state.selectedLocalGlobalMetaId = state.localBots[0].globalMetaId;
+    if (!state.selectedLocalGlobalMetaId && state.localBots.length) {
+      // Prefer the system-configured default Bot (isActive) over the first
+      // listed Bot when no Bot has been explicitly selected yet.
+      const defaultBot = state.localBots.find((bot) => bot && bot.isActive === true);
+      state.selectedLocalGlobalMetaId = (defaultBot && defaultBot.globalMetaId) || state.localBots[0].globalMetaId;
     }
   };
   const readBeforeCursor = (messages) => {

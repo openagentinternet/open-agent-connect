@@ -3719,6 +3719,25 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     callerOrderTextGenerator: orderProtocolTextGenerator.generateCallerOrderText,
     providerOrderTextGenerator: orderProtocolTextGenerator.generateProviderOrderText,
     servicePaymentExecutor,
+    serviceOrderPaymentVerifier: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
+      ? async (verificationInput) => ({
+        verified: true,
+        outcome: 'verified',
+        paymentTxid: verificationInput.paymentTxid ?? null,
+        paymentChain: verificationInput.paymentChain === 'btc'
+          ? 'btc'
+          : verificationInput.paymentChain === 'mvc'
+            ? 'mvc'
+            : null,
+        settlementKind: verificationInput.settlementKind === 'free' ? 'free' : 'native',
+        paymentAddress: verificationInput.paymentAddress ?? null,
+        amount: verificationInput.amount,
+        currency: verificationInput.currency,
+        amountSatoshis: Math.round(Number(verificationInput.amount) * 100_000_000),
+        matchedOutputIndex: verificationInput.paymentTxid ? 0 : null,
+        failureKind: null,
+      })
+      : undefined,
     requestMvcGasSubsidy,
     createSignerForHome: (profileHomeDir) => {
       const profileBaseSigner = createLocalMnemonicSigner({

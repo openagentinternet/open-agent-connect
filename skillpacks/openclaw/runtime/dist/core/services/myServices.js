@@ -13,7 +13,13 @@ const publishService_1 = require("./publishService");
 const skillServiceProtocol_1 = require("./skillServiceProtocol");
 const DECIMAL_SCALE = 8n;
 const DECIMAL_MULTIPLIER = 10n ** DECIMAL_SCALE;
-const CLOSED_ORDER_STATES = new Set(['completed', 'refunded']);
+// rating_pending orders are delivered work that is only waiting on the buyer's
+// rating, so they surface alongside closed orders in the My-Services list and
+// count toward success/net-income aggregates (a rating, when it arrives, is
+// still matched to the order; the refund side stays limited to 'refunded').
+const CLOSED_ORDER_STATES = new Set(['completed', 'rating_pending', 'refunded']);
+// States that count as successfully delivered (paid) work in the aggregates.
+const SUCCESS_ORDER_STATES = new Set(['completed', 'rating_pending']);
 function toSafeString(value) {
     if (typeof value === 'string')
         return value.trim();
@@ -205,7 +211,7 @@ function buildMyServiceSummaries(input) {
             for (const order of closedOrders) {
                 const amountUnits = parseDecimalToUnits(order.paymentAmount);
                 grossRevenueUnits += amountUnits;
-                if (order.state === 'completed') {
+                if (SUCCESS_ORDER_STATES.has(toSafeString(order.state))) {
                     successCount += 1;
                     netIncomeUnits += amountUnits;
                 }

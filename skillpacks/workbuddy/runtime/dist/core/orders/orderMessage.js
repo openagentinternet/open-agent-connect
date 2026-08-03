@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ORDER_RAW_REQUEST_CLOSE_TAG = exports.ORDER_RAW_REQUEST_OPEN_TAG = exports.ORDER_PREFIX = void 0;
+exports.createOrderMetadataLineRegex = createOrderMetadataLineRegex;
 exports.normalizeOrderRawRequest = normalizeOrderRawRequest;
 exports.extractOrderRawRequest = extractOrderRawRequest;
 exports.buildOrderRawRequestBlock = buildOrderRawRequestBlock;
@@ -11,6 +12,35 @@ exports.ORDER_RAW_REQUEST_OPEN_TAG = '<raw_request>';
 exports.ORDER_RAW_REQUEST_CLOSE_TAG = '</raw_request>';
 const ORDER_PREFIX_RE = /^\s*\[ORDER\]\s*/i;
 const RAW_REQUEST_BLOCK_RE = /<raw_request>\s*\n?([\s\S]*?)\n?\s*<\/raw_request>/i;
+// Canonical metadata line labels emitted by buildOrderPayload below. Every
+// emitted line is `<label><separator><value>` except 支付金额, which carries
+// `支付金额 <amount> <currency>` without a separator. Multi-word labels are
+// matched with flexible inner whitespace.
+const ORDER_METADATA_LABELS = [
+    'order\\s+id',
+    'txid',
+    'commit\\s+txid',
+    'payment\\s+chain',
+    'settlement\\s+kind',
+    'mrc20\\s+ticker',
+    'mrc20\\s+id',
+    'service\\s+id',
+    'skill\\s+name',
+    'output\\s+type',
+];
+/**
+ * Single grammar for the protocol metadata lines buildOrderPayload emits,
+ * shared by the result-text cleaner, the order-text sanitizer, and the
+ * generated-text rejector. Consumer-specific matching modes are expressed
+ * through options instead of diverging regex copies.
+ */
+function createOrderMetadataLineRegex(options = {}) {
+    const separator = options.allowEqualsSeparator ? '[:：=]' : '[:：]';
+    const optionalSeparator = options.optionalSeparator ? '?' : '';
+    const markdownPrefix = options.allowMarkdownPrefix ? '(?:[-*]\\s*)?(?:\\*\\*)?\\s*' : '';
+    const labels = [...ORDER_METADATA_LABELS, ...(options.extraLabels ?? [])].join('|');
+    return new RegExp(`^\\s*${markdownPrefix}(?:(?:支付金额)(?:\\s+[0-9]+(?:\\.[0-9]+)?\\s+[A-Za-z0-9._-]+|\\s*${separator}${optionalSeparator})|(?:${labels})\\s*${separator}${optionalSeparator})`, 'iu');
+}
 function normalizeMultilineText(value) {
     return typeof value === 'string'
         ? value.replace(/\r\n?/g, '\n').trim()

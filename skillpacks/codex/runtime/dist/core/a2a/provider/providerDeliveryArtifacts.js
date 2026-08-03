@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProviderDeliveryArtifactError = void 0;
 exports.classifyProviderOutputType = classifyProviderOutputType;
 exports.isTextLikeProviderOutputType = isTextLikeProviderOutputType;
+exports.findProviderWorkspaceArtifactCandidate = findProviderWorkspaceArtifactCandidate;
 exports.resolveProviderDeliveryArtifacts = resolveProviderDeliveryArtifacts;
 const node_fs_1 = require("node:fs");
 const node_os_1 = __importDefault(require("node:os"));
@@ -518,6 +519,55 @@ async function scanWorkspaceForCandidates(executionCwd, expectedFamily) {
     }
     return candidates;
 }
+/**
+ * Tolerant variant of scanWorkspaceForCandidates for the provider execution
+ * timeout fallback: it never throws, silently skips secret-like files and
+ * hidden directories, and only returns a path when exactly one workspace file
+ * matches the expected artifact family. Text-like output types have no
+ * deliverable file artifact and always return null.
+ */
+async function findProviderWorkspaceArtifactCandidate(input) {
+    const expectedFamily = classifyProviderOutputType(input.outputType);
+    if (expectedFamily === 'text') {
+        return null;
+    }
+    const workspaceCwd = normalizeText(input.workspaceCwd);
+    if (!workspaceCwd) {
+        return null;
+    }
+    const candidates = [];
+    const ignoredDirectories = new Set(['.git', 'node_modules', 'dist']);
+    async function visit(directory, inHiddenDirectory = false) {
+        let entries;
+        try {
+            entries = await node_fs_1.promises.readdir(directory, { withFileTypes: true });
+        }
+        catch {
+            return;
+        }
+        for (const entry of entries) {
+            if (entry.isDirectory()) {
+                if (ignoredDirectories.has(entry.name)) {
+                    continue;
+                }
+                await visit(node_path_1.default.join(directory, entry.name), inHiddenDirectory || entry.name.startsWith('.'));
+                continue;
+            }
+            if (!entry.isFile() || inHiddenDirectory) {
+                continue;
+            }
+            const filePath = node_path_1.default.join(directory, entry.name);
+            if (isSecretLikeFileName(node_path_1.default.relative(workspaceCwd, filePath))) {
+                continue;
+            }
+            if (shouldScanFile(filePath, expectedFamily)) {
+                candidates.push(filePath);
+            }
+        }
+    }
+    await visit(workspaceCwd);
+    return candidates.length === 1 ? candidates[0] : null;
+}
 async function resolveLocalArtifact(input) {
     const normalizedExecutionCwd = normalizeText(input.executionCwd);
     const explicitWorkspaceRootCwd = normalizeText(input.workspaceRootCwd);
@@ -851,6 +901,43 @@ async function uploadResolvedLocalArtifact(input) {
     validateArtifactFamily(artifact, input.expectedFamily);
     return artifact;
 }
+const DEFAULT_PROVIDER_ARTIFACT_UPLOAD_MAX_ATTEMPTS = 1;
+// Only chain upload/verification failures are worth a re-upload; deterministic
+// local validation errors (missing file, too large, secret-like, invalid
+// upload result) would fail again identically.
+function isRetryableProviderArtifactUploadError(error) {
+    const code = error instanceof ProviderDeliveryArtifactError ? error.code : undefined;
+    return code === 'provider_artifact_upload_failed' || code === 'provider_artifact_unavailable';
+}
+async function callUploadNoticeHook(hook) {
+    if (!hook) {
+        return;
+    }
+    try {
+        await hook();
+    }
+    catch {
+        // Upload notice hooks are best-effort and must never break the upload.
+    }
+}
+async function uploadResolvedLocalArtifactWithRetry(input) {
+    const maxAttempts = Math.max(1, Math.trunc(Number(input.maxUploadAttempts) || DEFAULT_PROVIDER_ARTIFACT_UPLOAD_MAX_ATTEMPTS));
+    await callUploadNoticeHook(input.onUploadStart);
+    let lastError = new Error('Provider artifact upload failed.');
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            return await uploadResolvedLocalArtifact(input);
+        }
+        catch (error) {
+            lastError = error;
+            if (attempt >= maxAttempts || !isRetryableProviderArtifactUploadError(error)) {
+                throw error;
+            }
+            await callUploadNoticeHook(() => input.onUploadRetry?.({ attempt, error }));
+        }
+    }
+    throw lastError;
+}
 async function resolveProviderDeliveryArtifacts(input) {
     const responseText = typeof input.responseText === 'string' ? input.responseText : '';
     const expectedFamily = classifyProviderOutputType(input.outputType);
@@ -877,7 +964,7 @@ async function resolveProviderDeliveryArtifacts(input) {
         workspaceRootCwd: input.workspaceRootCwd,
         expectedFamily,
     });
-    const artifact = await uploadResolvedLocalArtifact({
+    const artifact = await uploadResolvedLocalArtifactWithRetry({
         file: localFile,
         expectedFamily,
         signer: input.signer,
@@ -886,6 +973,9 @@ async function resolveProviderDeliveryArtifacts(input) {
         verifyAvailability: input.verifyAvailability,
         largeUploader: input.largeUploader,
         mvcSponsorClient: input.mvcSponsorClient,
+        maxUploadAttempts: input.maxUploadAttempts,
+        onUploadStart: input.onUploadStart,
+        onUploadRetry: input.onUploadRetry,
     });
     const publicResponseText = stripLocalCandidateLines(responseText, localFile.lineIndexes);
     const workspaceScrubbedResponseText = await scrubExecutionWorkspacePathMentions(publicResponseText, input.executionCwd);

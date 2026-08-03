@@ -23,6 +23,16 @@ export type AwaitMetaWebServiceReplyResult = {
     ratingRequestObservedAt?: number | null;
     ratingRawMessage?: Record<string, unknown> | null;
 } | {
+    state: 'failed';
+    failureCode: string;
+    failureReason: string;
+    orderEndPinId: string | null;
+    observedAt: number | null;
+    rawMessage: Record<string, unknown> | null;
+} | {
+    state: 'transport_error';
+    error: string;
+} | {
     state: 'timeout';
 };
 export interface MetaWebServiceReplyWaiter {
@@ -45,6 +55,10 @@ export declare function shouldAcceptServiceRatingRequestForReplyWaiter(input: {
     ratingOrderTxid?: unknown;
     expectedOrderTxid?: unknown;
     pendingDeliveryOrderTxid?: unknown;
+}): boolean;
+export declare function shouldAcceptServiceOrderEndForReplyWaiter(input: {
+    orderEndOrderTxid?: unknown;
+    expectedOrderTxid?: unknown;
 }): boolean;
 export declare function createSocketIoMetaWebReplyWaiter(options?: {
     resolveSocketEndpoints?: () => Promise<MetasoSocketEndpoint[]> | MetasoSocketEndpoint[];

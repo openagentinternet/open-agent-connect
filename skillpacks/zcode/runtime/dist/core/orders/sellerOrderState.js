@@ -14,18 +14,16 @@ exports.SELLER_ORDER_STATES = [
     'failed',
     'refund_pending',
     'refunded',
-    'ended',
 ];
 const ALLOWED_TRANSITIONS = {
-    received: ['received', 'acknowledged', 'in_progress', 'failed', 'refund_pending', 'ended'],
-    acknowledged: ['acknowledged', 'in_progress', 'failed', 'refund_pending', 'ended'],
-    in_progress: ['in_progress', 'completed', 'rating_pending', 'failed', 'refund_pending', 'ended'],
-    completed: ['completed', 'rating_pending', 'refund_pending', 'ended'],
-    rating_pending: ['rating_pending', 'completed', 'refund_pending', 'ended'],
-    failed: ['failed', 'refund_pending', 'ended'],
-    refund_pending: ['refund_pending', 'refunded', 'ended'],
-    refunded: ['refunded', 'ended'],
-    ended: ['ended', 'refunded'],
+    received: ['received', 'acknowledged', 'in_progress', 'failed', 'refund_pending'],
+    acknowledged: ['acknowledged', 'in_progress', 'failed', 'refund_pending'],
+    in_progress: ['in_progress', 'completed', 'rating_pending', 'failed', 'refund_pending'],
+    completed: ['completed', 'rating_pending', 'refund_pending'],
+    rating_pending: ['rating_pending', 'completed', 'refund_pending'],
+    failed: ['failed', 'refund_pending'],
+    refund_pending: ['refund_pending', 'refunded'],
+    refunded: ['refunded'],
 };
 function normalizeText(value) {
     if (typeof value === 'string')

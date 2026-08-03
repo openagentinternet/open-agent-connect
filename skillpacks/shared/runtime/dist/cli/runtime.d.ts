@@ -2,6 +2,7 @@ import { type MetabotCommandResult } from '../core/contracts/commandResult';
 import { type IdentityProfileRecord } from '../core/identity/identityProfiles';
 import { type MetabotPaths } from '../core/state/paths';
 import type { Signer } from '../core/signing/signer';
+import { type A2ACallerReplyResumeReport } from '../daemon/defaultHandlers';
 import { type A2ASimplemsgListenerManager, type A2ASimplemsgListenerStartReport } from '../core/a2a/simplemsgListener';
 import { type A2ASimplemsgPresenceWatchdog } from '../core/a2a/simplemsgPresenceWatchdog';
 import { type PrivateChatAutoReplyDependencies, type PrivateChatAutoReplyOrchestrator } from '../core/chat/privateChatAutoReply';
@@ -104,6 +105,24 @@ export interface A2AUnhandledOrderReplayOptions {
     logWarning?: (scope: string, error: unknown) => void;
 }
 export declare function replayUnhandledA2AOrderMessagesForProfiles(input: A2AUnhandledOrderReplayOptions): Promise<A2AUnhandledOrderReplayResult>;
+export interface A2ACallerReplyResumeResult {
+    profiles: number;
+    scanned: number;
+    armed: number;
+    timedOut: number;
+    skipped: number;
+    failed: number;
+}
+export interface A2ACallerReplyResumeOptions {
+    systemHomeDir: string;
+    activeHomeDir?: string | null;
+    resumeCallerReplyWait?: (input: {
+        localProfileSlug?: string | null;
+    }) => Promise<A2ACallerReplyResumeReport | null | undefined> | A2ACallerReplyResumeReport | null | undefined;
+    listProfiles?: (systemHomeDir: string) => Promise<IdentityProfileRecord[]>;
+    logWarning?: (scope: string, error: unknown) => void;
+}
+export declare function resumePendingA2ACallerReplyWaitsForProfiles(input: A2ACallerReplyResumeOptions): Promise<A2ACallerReplyResumeResult>;
 export declare function createPrivateChatAutoReplyProfileDispatcher(input: PrivateChatAutoReplyProfileDispatcherOptions): PrivateChatAutoReplyProfileDispatcher;
 export declare function resolvePeerChatPublicKeyFromLocalProfiles(systemHomeDir: string, globalMetaId: string): Promise<string | null>;
 export declare function createPeerChatPublicKeyResolver(input: {

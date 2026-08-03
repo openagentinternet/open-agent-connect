@@ -1,24 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.containsDelegationControlPrefix = containsDelegationControlPrefix;
-exports.getDelegationDisplayText = getDelegationDisplayText;
-exports.isExplicitMetaAppUserRequest = isExplicitMetaAppUserRequest;
 exports.normalizeDelegationPaymentTerms = normalizeDelegationPaymentTerms;
 exports.isDelegationPriceNumeric = isDelegationPriceNumeric;
-exports.parseDelegationMessage = parseDelegationMessage;
 exports.buildRemoteServicesPrompt = buildRemoteServicesPrompt;
 exports.planRemoteCall = planRemoteCall;
 const node_crypto_1 = require("node:crypto");
 const spendPolicy_1 = require("./spendPolicy");
 const delegationPolicy_1 = require("../a2a/delegationPolicy");
 const skillServiceProtocol_1 = require("../services/skillServiceProtocol");
-const DELEGATE_REMOTE_SERVICE_PREFIX = '[DELEGATE_REMOTE_SERVICE]';
 const NUMERIC_DELEGATION_PRICE_RE = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
 const DECORATED_DELEGATION_PRICE_RE = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))(?:\s+([A-Za-z]+))$/;
-const DELEGATION_PARTIAL_PREFIX_MIN_CHARS = 1;
-const METAAPP_GENERIC_CONFIRMATION_RE = /^(?:好|好的|好呀|好哒|行|可以|确定|确认|继续|开始吧|请开始|没问题|嗯|嗯嗯|ok|okay|yes|yep|sure)[!！。.\s]*$/i;
-const METAAPP_EXPLICIT_INTENT_RE = /\b(?:open|launch|start|use|run)\b|(?:打开|开启|启动|运行|使用|进入)/i;
-const METAAPP_CONTEXT_WORD_RE = /\b(?:metaapp|app|application)\b|(?:应用|应用页|本地应用|本地app|本地 App|MetaApp)/i;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -44,52 +35,6 @@ function buildRemoteCallTraceId(input) {
     const nonce = (0, node_crypto_1.randomUUID)().replace(/-/g, '').slice(0, 8);
     return `trace-${provider}-${service}-${timestamp}-${nonce}`;
 }
-function findTrailingDelegationPrefixFragmentStart(content) {
-    if (typeof content !== 'string' || content.length === 0) {
-        return -1;
-    }
-    const maxFragmentLength = Math.min(DELEGATE_REMOTE_SERVICE_PREFIX.length - 1, content.length);
-    for (let length = maxFragmentLength; length >= DELEGATION_PARTIAL_PREFIX_MIN_CHARS; length -= 1) {
-        if (DELEGATE_REMOTE_SERVICE_PREFIX.startsWith(content.slice(-length))) {
-            return content.length - length;
-        }
-    }
-    return -1;
-}
-function containsDelegationControlPrefix(content) {
-    return typeof content === 'string' && content.includes(DELEGATE_REMOTE_SERVICE_PREFIX);
-}
-function getDelegationDisplayText(content) {
-    if (typeof content !== 'string' || !content) {
-        return '';
-    }
-    const fullPrefixIndex = content.indexOf(DELEGATE_REMOTE_SERVICE_PREFIX);
-    if (fullPrefixIndex >= 0) {
-        return content.slice(0, fullPrefixIndex).trimEnd();
-    }
-    const partialPrefixStart = findTrailingDelegationPrefixFragmentStart(content);
-    if (partialPrefixStart >= 0) {
-        return content.slice(0, partialPrefixStart).trimEnd();
-    }
-    return content;
-}
-function isExplicitMetaAppUserRequest(userText, appId) {
-    const normalizedText = normalizeText(userText).toLowerCase();
-    if (!normalizedText) {
-        return false;
-    }
-    if (METAAPP_GENERIC_CONFIRMATION_RE.test(normalizedText)) {
-        return false;
-    }
-    const normalizedAppId = normalizeText(appId).toLowerCase();
-    const mentionsAppId = normalizedAppId.length > 0 && normalizedText.includes(normalizedAppId);
-    const hasIntentVerb = METAAPP_EXPLICIT_INTENT_RE.test(userText);
-    const hasMetaAppContext = METAAPP_CONTEXT_WORD_RE.test(userText);
-    if (mentionsAppId && (hasIntentVerb || hasMetaAppContext)) {
-        return true;
-    }
-    return hasIntentVerb && hasMetaAppContext;
-}
 function normalizeDelegationPaymentTerms(rawPrice, rawCurrency) {
     let price = normalizeText(rawPrice);
     let currency = normalizeText(rawCurrency);
@@ -104,45 +49,6 @@ function normalizeDelegationPaymentTerms(rawPrice, rawCurrency) {
 }
 function isDelegationPriceNumeric(value) {
     return NUMERIC_DELEGATION_PRICE_RE.test(normalizeText(value));
-}
-function parseDelegationMessage(content) {
-    const idx = content.indexOf(DELEGATE_REMOTE_SERVICE_PREFIX);
-    if (idx === -1)
-        return null;
-    const afterPrefix = content.slice(idx + DELEGATE_REMOTE_SERVICE_PREFIX.length);
-    const firstBrace = afterPrefix.indexOf('{');
-    const lastBrace = afterPrefix.lastIndexOf('}');
-    if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace)
-        return null;
-    const jsonStr = afterPrefix.slice(firstBrace, lastBrace + 1);
-    let parsed;
-    try {
-        parsed = JSON.parse(jsonStr);
-    }
-    catch {
-        return null;
-    }
-    if (!parsed || typeof parsed !== 'object') {
-        return null;
-    }
-    const obj = parsed;
-    if (typeof obj.servicePinId !== 'string' || !obj.servicePinId
-        || typeof obj.serviceName !== 'string' || !obj.serviceName
-        || typeof obj.providerGlobalMetaid !== 'string' || !obj.providerGlobalMetaid) {
-        return null;
-    }
-    const normalizedTerms = normalizeDelegationPaymentTerms(obj.price, obj.currency);
-    return {
-        servicePinId: obj.servicePinId,
-        serviceName: obj.serviceName,
-        providerGlobalMetaid: obj.providerGlobalMetaid,
-        price: normalizedTerms.price,
-        currency: normalizedTerms.currency,
-        userTask: typeof obj.userTask === 'string' ? obj.userTask : '',
-        taskContext: typeof obj.taskContext === 'string' ? obj.taskContext : '',
-        rawRequest: typeof obj.rawRequest === 'string' ? obj.rawRequest : '',
-        policyMode: typeof obj.policyMode === 'string' ? obj.policyMode : undefined,
-    };
 }
 function buildRemoteServicesPrompt(availableServices) {
     if (!availableServices || availableServices.length === 0)

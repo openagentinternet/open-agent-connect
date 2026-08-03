@@ -9,7 +9,7 @@ import type { MetabotPaths } from '../state/paths';
  * Never log message payloads, plaintext content, or private key material
  * here; only the failure stage, the peer, and a bounded error message.
  */
-export type PrivateChatSendFailureKind = 'identity_unavailable' | 'peer_chat_key_unavailable' | 'pin_write_failed';
+export type PrivateChatSendFailureKind = 'identity_unavailable' | 'peer_chat_key_unavailable' | 'pin_write_failed' | 'reply_runner_failed' | 'reply_commit_failed' | 'rate_limited';
 export interface PrivateChatSendFailureEvent {
     kind: PrivateChatSendFailureKind;
     peerGlobalMetaId: string;
