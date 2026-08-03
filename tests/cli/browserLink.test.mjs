@@ -102,6 +102,40 @@ test('runCli default `metabot browser link` handler normalizes map URIs through 
   assert.equal(url.searchParams.get('uri'), 'map://sunnyfung.eth/root');
 });
 
+test('runCli default `metabot browser link` handler renders preview-metaapp:// as a RESTful Browser path', async () => {
+  const systemHome = await mkdtempTempRoot('oac-cli-browser-link-preview-metaapp-');
+
+  const { exitCode, envelope } = await runBrowserCli([
+    'browser',
+    'link',
+    '--uri', 'preview-metaapp://localhost/Users/name/projects/my-app/dist/index.html',
+  ], {
+    env: { HOME: systemHome, METABOT_DAEMON_BASE_URL: 'http://127.0.0.1:10001' },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(envelope.ok, true);
+  assert.deepEqual(envelope.data, {
+    uri: 'preview-metaapp://localhost/Users/name/projects/my-app/dist/index.html',
+    localUiUrl: 'http://127.0.0.1:10001/browser/preview-metaapp/localhost/Users/name/projects/my-app/dist/index.html',
+  });
+});
+
+test('runCli default `metabot browser link` handler renders preview-metaapp://localhost<dir> without trailing slashes', async () => {
+  const systemHome = await mkdtempTempRoot('oac-cli-browser-link-preview-metaapp-dir-');
+
+  const { exitCode, envelope } = await runBrowserCli([
+    'browser',
+    'link',
+    '--uri', 'preview-metaapp://localhost/Users/name/projects/my-app',
+  ], {
+    env: { HOME: systemHome, METABOT_DAEMON_BASE_URL: 'http://127.0.0.1:10001' },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(envelope.data.localUiUrl, 'http://127.0.0.1:10001/browser/preview-metaapp/localhost/Users/name/projects/my-app');
+});
+
 test('runCli default `metabot browser link` handler returns the bare URI when no daemon is reachable', async () => {
   const systemHome = await mkdtempTempRoot('oac-cli-browser-link-down-');
 

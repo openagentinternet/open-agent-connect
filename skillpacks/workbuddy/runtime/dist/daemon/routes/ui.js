@@ -142,6 +142,9 @@ async function renderBuiltInPage(page, languagePreference) {
 function isBrowserPagePath(pathname) {
     return pathname === '/browser'
         || /^\/browser\/(?:metaid|metaapp|metafile|pin)\/[^/?#]+$/u.test(pathname)
+        // preview-metaapp deep links carry an absolute path (host + path segments),
+        // so allow slashes after the host, mirroring the /browser/map branch.
+        || /^\/browser\/preview-metaapp\/[^/?#]+(?:\/[^?#]*)?$/u.test(pathname)
         || /^\/browser\/map\/[^?#]+$/u.test(pathname);
 }
 function getBrowserLanguagePreference(req) {

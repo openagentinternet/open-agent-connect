@@ -102,6 +102,15 @@ function setSelectedBotDefault(toggle){
 }
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
 function selectedProfile(){return state.profiles.find(function(p){return p.slug===state.selectedSlug})||null}
+function mergeProfileUpdate(prev,updated){
+  if(!prev)return updated;
+  // isActive and setup are derived by the list endpoint and are absent
+  // from the PUT response. Carry them over so the default badge / toggle
+  // and the setup alert keep their state until the next full reload.
+  if(prev.isActive!==undefined&&updated.isActive===undefined)updated.isActive=prev.isActive;
+  if(prev.setup!==undefined&&updated.setup===undefined)updated.setup=prev.setup;
+  return updated;
+}
 function publicPersonaValues(profile){
   var role=String(profile&&profile.role||'').trim();
   var soul=String(profile&&profile.soul||'').trim();
@@ -1789,7 +1798,7 @@ function saveInfo(){
   return api('/api/bot/profiles/'+encodeURIComponent(state.selectedSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
     state.chatAllowedSkillsBySlug[updated.slug]=normalizeChatSkillList(updated.allowChatSkills!==undefined?updated.allowChatSkills:(payload.allowChatSkills!==undefined?payload.allowChatSkills:profile.allowChatSkills));
-    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
+    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?mergeProfileUpdate(p,updated):p});
     state.originalProfile=updated;
     state._pendingAvatar=undefined;
     renderMetabotList();
@@ -1833,7 +1842,7 @@ function savePublicIdentity(){
   if(btn)btn.disabled=true;
   return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
-    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
+    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?mergeProfileUpdate(p,updated):p});
     if(state.selectedSlug!==profileSlug)return;
     state.originalProfile=updated;
     state._pendingAvatar=undefined;
@@ -1869,7 +1878,7 @@ function saveBehavior(){
   if(btn)btn.disabled=true;
   return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
-    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
+    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?mergeProfileUpdate(p,updated):p});
     if(state.selectedSlug!==profileSlug)return;
     state.originalProfile=updated;
     state._personaPresetApplied=false;
@@ -1902,7 +1911,7 @@ function saveChatSkills(){
   return api('/api/bot/profiles/'+encodeURIComponent(profileSlug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){
     var updated=r.data.profile;
     state.chatAllowedSkillsBySlug[updated.slug]=normalizeChatSkillList(updated.allowChatSkills!==undefined?updated.allowChatSkills:payload.allowChatSkills);
-    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?updated:p});
+    state.profiles=state.profiles.map(function(p){return p.slug===updated.slug?mergeProfileUpdate(p,updated):p});
     if(state.selectedSlug!==profileSlug)return;
     state.originalProfile=updated;
     renderMetabotList();

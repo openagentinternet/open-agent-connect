@@ -94,6 +94,25 @@ test('serves Browser shell for /browser/map/simplemsg/conversation MAP routes', 
   assert.match(html, /data-browser-uri-input/);
 });
 
+test('serves Browser shell for /browser/preview-metaapp RESTful deep links', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(async () => server.close());
+
+  // Directory-shaped and entry-file-shaped paths must both serve the shell, so
+  // the CLI's path-form preview URL reaches the Browser SPA instead of 404.
+  const dirResponse = await fetch(`${baseUrl}/browser/preview-metaapp/localhost/Users/name/projects/my-app`);
+  const fileResponse = await fetch(`${baseUrl}/browser/preview-metaapp/localhost/Users/name/projects/my-app/dist/index.html`);
+  const dirHtml = await dirResponse.text();
+  const fileHtml = await fileResponse.text();
+
+  assert.equal(dirResponse.status, 200);
+  assert.equal(fileResponse.status, 200);
+  assert.match(dirHtml, /Agent Internet Browser/);
+  assert.match(dirHtml, /data-browser-uri-input/);
+  assert.match(fileHtml, /Agent Internet Browser/);
+  assert.match(fileHtml, /data-browser-uri-input/);
+});
+
 test('Browser default shell hides drawer and inspector by default and avoids rejected labels', async (t) => {
   const { server, baseUrl } = await startServer();
   t.after(async () => server.close());
