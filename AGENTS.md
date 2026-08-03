@@ -19,8 +19,9 @@
 - Do not guess. Read the relevant code, spec, or test first. If a boundary is still unclear, stop and ask.
 - Keep changes surgical. No unrelated refactors, formatting churn, or drive-by fixes.
 - Every changed line must trace back to the current task.
-- All documentation, SKILL documents, and code comments must be in English.
-- Route local UI copy through i18n and keep English plus Simplified Chinese coverage in sync.
+- All documentation, SKILL documents, code comments, and development logs (e.g. `eric` journal/buzz posts) must be in English, unless the user explicitly requests another language.
+- English is the default UI language. Route all user-facing UI copy through i18n and keep English plus Simplified Chinese coverage in sync.
+- When replying to the user or conversing with them, use the user's language.
 - Do not introduce new code or docs that depend on the legacy `.metabot/hot` layout.
 - MetaBot storage changes must follow `docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`.
 - When merging completed work back to `main`, use `git merge --no-ff`.
