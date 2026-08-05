@@ -12257,6 +12257,70 @@ export function createDefaultMetabotDaemonHandlers(input: {
         );
       }
     },
+    llmComplete: async ({ actorId, messages, options, purpose }) => {
+      const actor = await resolveActorWriteContext(actorId);
+      if ('failure' in actor) throw new Error('Local LLM actor is unavailable.');
+      const profileHomeDir = path.resolve(actor.homeDir);
+      const profilePaths = resolveMetabotPaths(profileHomeDir);
+      const profileRuntimeStore = profileHomeDir === path.resolve(input.homeDir)
+        ? runtimeStateStore
+        : createRuntimeStateStore(profileHomeDir);
+      const profileLlmRuntimeStore = profileHomeDir === path.resolve(input.homeDir)
+        ? llmRuntimeStore
+        : createLlmRuntimeStore(profileHomeDir);
+      const profileLlmBindingStore = profileHomeDir === path.resolve(input.homeDir)
+        ? llmBindingStore
+        : createLlmBindingStore(profileHomeDir);
+      const profile = await resolveMetabotProfileBySelector(path.basename(profilePaths.profileRoot));
+      const metaBotSlug = profile?.slug || path.basename(profilePaths.profileRoot);
+      if (!input.llmExecutor) throw new Error('Local LLM is unavailable.');
+      const runtimeResolver = createLlmRuntimeResolver({
+        runtimeStore: profileLlmRuntimeStore,
+        bindingStore: profileLlmBindingStore,
+        getPreferredRuntimeId: async () => {
+          try {
+            const raw = await fs.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+            const data = JSON.parse(raw) as { runtimeId?: unknown };
+            return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+          } catch {
+            return null;
+          }
+        },
+      });
+      const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+      if (!resolved.runtime) throw new Error('Local LLM is unavailable.');
+      const prompt = messages.map((message) => `${message.role}: ${message.content}`).join('\n');
+      const execution = await runLlmPromptWithRuntimeFallback({
+        runtimeResolver,
+        llmExecutor: input.llmExecutor,
+        metaBotSlug,
+        prompt,
+        timeoutMs: Math.min(
+          typeof options?.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+            ? options.timeoutMs : 120_000,
+          180_000,
+        ),
+        pollIntervalMs: 250,
+        cwd: profilePaths.llmExecutorRoot,
+      });
+      if (execution.status !== 'completed' || !execution.output.trim()) {
+        const error = new Error(execution.error || 'Local LLM is unavailable.');
+        if (execution.error?.toLowerCase().includes('timed out')) (error as { code?: string }).code = 'llm_timeout';
+        throw error;
+      }
+      return {
+        text: execution.output.trim(),
+        model: resolved.runtime.displayName,
+        finishReason: 'stop',
+      };
+    },
+    audit: async (event) => {
+      const actor = event.actorId ? await resolveActorWriteContext(event.actorId) : { failure: true } as const;
+      const auditHomeDir = 'failure' in actor ? input.homeDir : actor.homeDir;
+      const auditPath = path.join(resolveMetabotPaths(auditHomeDir).runtimeRoot, 'browser-bridge-audit.jsonl');
+      await fs.mkdir(path.dirname(auditPath), { recursive: true });
+      await fs.appendFile(auditPath, `${JSON.stringify({ ...event, at: new Date().toISOString() })}\n`, 'utf8');
+    },
     fetch: globalThis.fetch,
     env: process.env,
     onInfrastructureSettingsUpdated: input.onBrowserInfrastructureChanged,
@@ -12491,6 +12555,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           actorId: browserActorId(request),
           resourceUri: request.resourceUri,
           kind: request.kind,
+          ...(request.sessionId ? { sessionId: request.sessionId } : {}),
         };
         if (request.payload) {
           Object.assign(actionRequest, { payload: request.payload });
@@ -12510,6 +12575,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
           actorId: browserActorId(request),
           resourceUri: normalizeText((request as { resourceUri?: unknown }).resourceUri),
           kind: 'metafile-upload' as BrowserTrustedActionInput['kind'],
+          ...(normalizeText((request as { sessionId?: unknown }).sessionId) ? { sessionId: normalizeText((request as { sessionId?: unknown }).sessionId) } : {}),
           payload,
         });
       },

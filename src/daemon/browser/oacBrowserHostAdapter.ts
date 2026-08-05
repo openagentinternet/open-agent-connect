@@ -25,6 +25,9 @@ import type {
   BrowserSettingsUpdateInput,
   BrowserTrustedActionInput,
   BrowserTrustedActionResult,
+  BrowserLlmCompleteMessage,
+  BrowserLlmCompleteResult,
+  BrowserPermissionGrant,
 } from '@openagentinternet/agent-browser-host-contract';
 import {
   applyBrowserSettingsUpdate,
@@ -73,6 +76,18 @@ type OacMetaIdPinWriteOperation = 'create' | 'modify' | 'revoke';
 type OacMetaIdPinWritePayloadEncoding = 'utf-8' | 'base64';
 
 const DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
+const LLM_COMPLETE_DEFAULT_TIMEOUT_MS = 120_000;
+const LLM_COMPLETE_MAX_TIMEOUT_MS = 180_000;
+const LLM_COMPLETE_RATE_LIMIT_PER_MINUTE = 6;
+const GRANTED_WRITE_RATE_LIMIT_PER_MINUTE = 12;
+const GRANTED_WRITE_MAX_PAYLOAD_BYTES = 16 * 1024;
+const PERMISSION_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
+const PROTOCOL_GRANT_WHITELIST = new Set([
+  '/protocols/simplegroupcreate',
+  '/protocols/simplegroupjoin',
+  '/protocols/simplegroupchat',
+]);
+const PROTOCOL_GRANT_PATH_PATTERN = /^\/protocols\/[A-Za-z0-9_-]+$/u;
 const PIN_ID_PATTERN = /^[0-9a-f]{64}i\d+$/iu;
 
 export interface OacBrowserMetaAppBridgeActor {
@@ -162,6 +177,21 @@ export interface CreateOacBrowserHostAdapterInput {
   serviceCall?: OacBrowserActionHandler;
   writeMetaIdPin?: OacBrowserMetaIdPinWriteHandler;
   uploadMetaFile?: OacBrowserMetaFileUploadHandler;
+  llmComplete?: (input: {
+    actorId?: string;
+    resourceUri: string;
+    messages: BrowserLlmCompleteMessage[];
+    options?: Record<string, unknown>;
+    purpose?: string;
+  }) => Promise<BrowserLlmCompleteResult>;
+  audit?: (event: {
+    type: 'permission_granted' | 'permission_revoked' | 'granted_write';
+    actorId: string;
+    resourceUri: string;
+    sessionId: string;
+    paths?: string[];
+    path?: string;
+  }) => Promise<void> | void;
   fetch?: typeof fetch;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
@@ -184,6 +214,24 @@ interface PendingPinWriteConfirmation {
   resourceUri: string;
   requestHash: string;
   expiresAt: number;
+}
+
+interface PendingPermissionConfirmation {
+  tokenHash: string;
+  actorId: string;
+  resourceUri: string;
+  sessionId: string;
+  grants: BrowserPermissionGrant[];
+  reason?: string;
+  expiresAt: number;
+}
+
+interface SessionPermissionGrant {
+  actorId: string;
+  resourceUri: string;
+  sessionId: string;
+  operation: 'create';
+  path: string;
 }
 
 function normalizeText(value: unknown): string {
@@ -982,6 +1030,11 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     ? Math.floor(Number(input.confirmationTtlMs))
     : DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS;
   const pendingPinWriteConfirmations = new Map<string, PendingPinWriteConfirmation>();
+  const pendingPermissionConfirmations = new Map<string, PendingPermissionConfirmation>();
+  const sessionPermissionGrants = new Map<string, SessionPermissionGrant[]>();
+  const llmTimestamps = new Map<string, number[]>();
+  const llmInFlight = new Set<string>();
+  const grantedWriteTimestamps = new Map<string, number[]>();
   const infrastructureConfigStore = createInfrastructureConfigStore(input.systemHomeDir);
 
   async function resolveActor(
@@ -1150,7 +1203,32 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       return actor.failure;
     }
 
-    const confirmedByHost = consumeMetaIdPinWriteConfirmation({
+    const sessionId = normalizeText(actionInput.sessionId);
+    const requestedOperation = validation.request.operation;
+    const grantKey = `${sessionId}\u0000${actionInput.resourceUri}\u0000${actor.actorId}\u0000${requestedOperation}\u0000${validation.request.path}`;
+    const hasGrant = requestedOperation === 'create' && Boolean(sessionId) && (sessionPermissionGrants.get(sessionId) ?? []).some((grant) =>
+      `${grant.sessionId}\u0000${grant.resourceUri}\u0000${grant.actorId}\u0000${grant.operation}\u0000${grant.path}` === grantKey,
+    );
+    if (hasGrant) {
+      const resourceKey = normalizeText(actionInput.resourceUri);
+      const activeWrites = (grantedWriteTimestamps.get(resourceKey) ?? []).filter((stamp) => nowMs() - stamp < 60_000);
+      if (activeWrites.length >= GRANTED_WRITE_RATE_LIMIT_PER_MINUTE) {
+        return browserFailure('rate_limited', 'Too many granted writes in the last minute.');
+      }
+      if (validation.payloadSize > GRANTED_WRITE_MAX_PAYLOAD_BYTES) {
+        return invalidBridgeParams('Granted write payload exceeds the 16KB limit.');
+      }
+      activeWrites.push(nowMs());
+      grantedWriteTimestamps.set(resourceKey, activeWrites);
+      void Promise.resolve(input.audit?.({
+        type: 'granted_write',
+        actorId: actor.actorId,
+        resourceUri: actionInput.resourceUri,
+        sessionId,
+        path: validation.request.path,
+      })).catch(() => {});
+    }
+    const confirmedByHost = hasGrant || consumeMetaIdPinWriteConfirmation({
       actionInput,
       actor: actor.actor,
       actorId: actor.actorId,
@@ -1199,6 +1277,139 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
       kind: 'metaid-pin-write' as BrowserTrustedActionInput['kind'],
       handled: true,
       data: data as BrowserTrustedActionResult['data'],
+    });
+  }
+
+  function sessionIdForAction(actionInput: BrowserTrustedActionInput): string {
+    return normalizeText(actionInput.sessionId);
+  }
+
+  function isPermissionGrant(value: unknown): value is BrowserPermissionGrant {
+    return browserRecord(value).method === 'metaid.pin.write'
+      && browserRecord(value).operation === 'create'
+      && typeof browserRecord(value).path === 'string'
+      && PROTOCOL_GRANT_PATH_PATTERN.test(String(browserRecord(value).path));
+  }
+
+  async function runLlmCompleteAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    const payload = readActionPayload(actionInput);
+    const messages = payload.messages;
+    if (!Array.isArray(messages) || messages.length === 0 || messages.some((message) => {
+      const record = browserRecord(message);
+      return !['system', 'user', 'assistant'].includes(String(record.role)) || typeof record.content !== 'string';
+    })) {
+      return invalidBridgeParams('browser.llm.complete requires non-empty text messages.');
+    }
+    const messageBytes = messages.reduce((total, message) => total + Buffer.byteLength(String(browserRecord(message).content), 'utf8'), 0);
+    if (messageBytes > 64 * 1024) return invalidBridgeParams('browser.llm.complete messages exceed the 64KB limit.');
+    if (hasOwn(payload, 'model') || hasOwn(payload, 'endpoint') || hasOwn(payload, 'provider') || hasOwn(payload, 'stream') || hasOwn(payload, 'tools') || hasOwn(payload, 'modalities')) {
+      return invalidBridgeParams('The host selects the local LLM model and configuration.');
+    }
+    const resourceKey = normalizeText(actionInput.resourceUri);
+    const active = (llmTimestamps.get(resourceKey) ?? []).filter((stamp) => nowMs() - stamp < 60_000);
+    if (active.length >= LLM_COMPLETE_RATE_LIMIT_PER_MINUTE || llmInFlight.has(resourceKey)) {
+      return browserFailure('rate_limited', 'Local LLM rate limit reached; try again later.');
+    }
+    if (!input.llmComplete) return browserFailure('llm_unavailable', 'No local LLM is configured for this host.');
+    const options = browserRecord(payload.options);
+    for (const key of Object.keys(options)) {
+      if (!['temperature', 'maxOutputTokens', 'timeoutMs'].includes(key)) {
+        return invalidBridgeParams('Only temperature, maxOutputTokens, and timeoutMs are supported.');
+      }
+    }
+    if (hasOwn(options, 'temperature') && (typeof options.temperature !== 'number' || !Number.isFinite(options.temperature) || options.temperature < 0 || options.temperature > 2)) {
+      return invalidBridgeParams('temperature must be a number between 0 and 2.');
+    }
+    if (hasOwn(options, 'maxOutputTokens') && (typeof options.maxOutputTokens !== 'number' || !Number.isInteger(options.maxOutputTokens) || options.maxOutputTokens <= 0)) {
+      return invalidBridgeParams('maxOutputTokens must be a positive integer.');
+    }
+    if (hasOwn(options, 'timeoutMs') && (typeof options.timeoutMs !== 'number' || !Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)) {
+      return invalidBridgeParams('timeoutMs must be a positive number.');
+    }
+    const requestedTimeout = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs : LLM_COMPLETE_DEFAULT_TIMEOUT_MS;
+    const timeoutMs = Math.min(requestedTimeout, LLM_COMPLETE_MAX_TIMEOUT_MS);
+    llmInFlight.add(resourceKey);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        input.llmComplete({
+          actorId: actorSelector(actionInput) || undefined,
+          resourceUri: actionInput.resourceUri,
+          messages: messages as BrowserLlmCompleteMessage[],
+          ...(Object.keys(options).length ? { options } : {}),
+          ...(normalizeText(payload.purpose) ? { purpose: normalizeText(payload.purpose) } : {}),
+        }),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(Object.assign(new Error('Local LLM completion timed out.'), { code: 'llm_timeout' })), timeoutMs);
+        }),
+      ]);
+      active.push(nowMs());
+      llmTimestamps.set(resourceKey, active);
+      const data: BrowserLlmCompleteResult = { text: normalizeText(result.text) };
+      if (normalizeText(result.model)) data.model = normalizeText(result.model);
+      if (result.finishReason) data.finishReason = result.finishReason;
+      return browserSuccess({ kind: 'llm-complete', handled: true, data: { ...data } });
+    } catch (error) {
+      const code = error instanceof Error && normalizeText((error as { code?: unknown }).code);
+      if (code === 'consent_denied' || code === 'invalid_params' || code === 'rate_limited' || code === 'llm_timeout' || code === 'llm_unavailable') {
+        return browserFailure(code, code === 'llm_timeout' ? 'Local LLM completion timed out.' : 'Local LLM completion failed.');
+      }
+      return browserFailure('llm_unavailable', 'Local LLM completion failed.');
+    } finally {
+      if (timer) clearTimeout(timer);
+      llmInFlight.delete(resourceKey);
+    }
+  }
+
+  async function runPermissionsRequestAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    const payload = readActionPayload(actionInput);
+    const sessionId = sessionIdForAction(actionInput);
+    const resourceUri = normalizeText(actionInput.resourceUri);
+    if (!sessionId || !resourceUri) return browserFailure('consent_denied', 'A page session and resource are required.');
+    if (payload.revoke === true) {
+      sessionPermissionGrants.delete(sessionId);
+      const actorId = actorSelector(actionInput) || '';
+      void Promise.resolve(input.audit?.({ type: 'permission_revoked', actorId, resourceUri, sessionId })).catch(() => {});
+      return browserSuccess({ kind: 'permissions-request', handled: true, data: { revoked: true } });
+    }
+    const actor = await resolveMetaAppBridgeActor(actionInput);
+    if ('failure' in actor) return actor.failure;
+    const actorId = actor.actorId;
+    const rawGrants = Array.isArray(payload.grants) ? payload.grants : [];
+    const grants = rawGrants.filter(isPermissionGrant);
+    if (!rawGrants.length || grants.length !== rawGrants.length) return invalidBridgeParams('Only create metaid.pin.write grants on exact protocol paths are supported.');
+    for (const grant of grants) {
+      if (!PROTOCOL_GRANT_WHITELIST.has(grant.path)) return browserFailure('consent_denied', `Protocol path is not allowed: ${grant.path}`);
+    }
+    const hostConfirmation = browserRecord(payload.hostConfirmation);
+    if (payload.confirmed === true && normalizeText(hostConfirmation.id) && normalizeText(hostConfirmation.token)) {
+      const id = normalizeText(hostConfirmation.id);
+      const pending = pendingPermissionConfirmations.get(id);
+      const requestedReason = normalizeText(payload.reason);
+      const grantsMatch = pending?.grants.length === grants.length
+        && pending.grants.every((grant, index) => grant.method === grants[index].method && grant.operation === grants[index].operation && grant.path === grants[index].path);
+      if (!pending || pending.expiresAt <= nowMs() || pending.sessionId !== sessionId || pending.resourceUri !== resourceUri || pending.actorId !== actorId || pending.reason !== (requestedReason || undefined) || !grantsMatch || !safeHashEqual(pending.tokenHash, sha256Text(normalizeText(hostConfirmation.token)))) {
+        return browserFailure('consent_denied', 'The permission confirmation is invalid or expired.');
+      }
+      pendingPermissionConfirmations.delete(id);
+      sessionPermissionGrants.set(sessionId, pending.grants.map((grant) => ({ ...grant, sessionId, resourceUri, actorId })));
+      void Promise.resolve(input.audit?.({ type: 'permission_granted', actorId, resourceUri, sessionId, paths: pending.grants.map((grant) => grant.path) })).catch(() => {});
+      return browserSuccess({ kind: 'permissions-request', handled: true, data: { granted: pending.grants, expiresAt: pending.expiresAt } });
+    }
+    const id = `permission-${randomUUID()}`;
+    const token = randomBytes(32).toString('base64url');
+    const reason = normalizeText(payload.reason);
+    pendingPermissionConfirmations.set(id, { tokenHash: sha256Text(token), actorId, resourceUri, sessionId, grants, ...(reason ? { reason } : {}), expiresAt: nowMs() + PERMISSION_CONFIRMATION_TTL_MS });
+    return browserManualActionRequired('manual_action_required', 'Confirm protocol write permissions for this MetaApp.', {
+      data: {
+        confirmation: { actor: actor.actor, grants, ...(reason ? { reason } : {}) },
+        confirmRequest: { resourceUri, kind: 'permissions-request', payload: { grants, ...(reason ? { reason } : {}), confirmed: true, hostConfirmation: { id, token } } },
+      },
     });
   }
 
@@ -1500,6 +1711,14 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
 
     if ((actionInput.kind as string) === 'metaid-pin-write') {
       return runMetaIdPinWriteAction(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'llm-complete') {
+      return runLlmCompleteAction(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'permissions-request') {
+      return runPermissionsRequestAction(actionInput);
     }
 
     const actor = await resolveActor(actionInput);

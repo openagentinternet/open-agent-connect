@@ -120,6 +120,8 @@ async function createAdapter(input) {
     serviceCall: input.serviceCall,
     writeMetaIdPin: input.writeMetaIdPin,
     uploadMetaFile: input.uploadMetaFile,
+    llmComplete: input.llmComplete,
+    audit: input.audit,
     nameAliasProviders: input.nameAliasProviders,
     ensNameAliasProviderFactory: input.ensNameAliasProviderFactory,
     onInfrastructureSettingsUpdated: input.onInfrastructureSettingsUpdated,
@@ -1751,6 +1753,177 @@ test('OAC browser host adapter previews metaid-pin-write through manual confirma
     ['id', 'token'],
   );
   assert.equal(result.data.confirmRequest.payload.hostConfirmation.id, result.data.confirmation.confirmationId);
+});
+
+test('OAC Browser Host Bridge v1.1 completes local LLM requests with host-owned policy', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-bridge-llm');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'LLM Bridge Bot', homeDir: profileHome, globalMetaId: LOCAL_GLOBAL_META_ID, mvcAddress: '18LlmBridge',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    llmComplete: async (request) => {
+      calls.push(request);
+      return { text: 'move e2e4', model: 'Local Display Model', finishReason: 'stop' };
+    },
+  });
+  const result = await adapter.runTrustedAction({
+    actorId: active.slug, resourceUri: 'metaapp://chess', kind: 'llm-complete',
+    payload: { messages: [{ role: 'user', content: 'choose a legal move' }], purpose: 'llmchess-move' },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.data, { text: 'move e2e4', model: 'Local Display Model', finishReason: 'stop' });
+  assert.equal(calls[0].actorId, active.slug);
+  assert.equal(calls[0].resourceUri, 'metaapp://chess');
+
+  for (let index = 1; index < 6; index += 1) {
+    const repeated = await adapter.runTrustedAction({
+      actorId: active.slug, resourceUri: 'metaapp://chess', kind: 'llm-complete',
+      payload: { messages: [{ role: 'user', content: `move ${index}` }] },
+    });
+    assert.equal(repeated.ok, true);
+  }
+  const rateLimited = await adapter.runTrustedAction({
+    actorId: active.slug, resourceUri: 'metaapp://chess', kind: 'llm-complete',
+    payload: { messages: [{ role: 'user', content: 'move 7' }] },
+  });
+  assert.equal(rateLimited.code, 'rate_limited');
+
+  const timeoutAdapter = await createAdapter({
+    homeDir: active.homeDir, systemHomeDir,
+    llmComplete: async () => new Promise(() => {}),
+  });
+  const timedOut = await timeoutAdapter.runTrustedAction({
+    actorId: active.slug, resourceUri: 'metaapp://timeout', kind: 'llm-complete',
+    payload: { messages: [{ role: 'user', content: 'timeout' }], options: { timeoutMs: 1 } },
+  });
+  assert.equal(timedOut.code, 'llm_timeout');
+
+  const unavailable = await createAdapter({ homeDir: active.homeDir, systemHomeDir });
+  const unavailableResult = await unavailable.runTrustedAction({
+    actorId: active.slug, resourceUri: 'metaapp://chess', kind: 'llm-complete',
+    payload: { messages: [{ role: 'user', content: 'hello' }] },
+  });
+  assert.equal(unavailableResult.code, 'llm_unavailable');
+
+  const deniedAdapter = await createAdapter({
+    homeDir: active.homeDir, systemHomeDir,
+    llmComplete: async () => { throw Object.assign(new Error('denied'), { code: 'consent_denied' }); },
+  });
+  const denied = await deniedAdapter.runTrustedAction({
+    actorId: active.slug, resourceUri: 'metaapp://chess', kind: 'llm-complete',
+    payload: { messages: [{ role: 'user', content: 'hello' }] },
+  });
+  assert.equal(denied.code, 'consent_denied');
+});
+
+test('OAC Browser Host Bridge v1.1 grants exact protocol writes once per page session', async (t) => {
+  const profileHome = await createProfileHome('oac-browser-bridge-permissions');
+  t.after(async () => cleanupProfileHome(profileHome));
+  const systemHomeDir = deriveSystemHome(profileHome);
+  const calls = [];
+  const audit = [];
+  const active = await createMetabotProfileFromIdentity(systemHomeDir, {
+    name: 'Permission Bridge Bot', homeDir: profileHome, globalMetaId: LOCAL_GLOBAL_META_ID, mvcAddress: '18PermissionBridge',
+  });
+  const adapter = await createAdapter({
+    homeDir: active.homeDir,
+    systemHomeDir,
+    audit: (event) => audit.push(event),
+    writeMetaIdPin: async (request) => {
+      calls.push(request);
+      return { ok: true, state: 'success', data: { pinId: 'granted-pin', txid: 'granted-tx' } };
+    },
+  });
+  const base = {
+    actorId: active.slug,
+    resourceUri: 'metaapp://chess',
+    sessionId: 'page-1',
+  };
+  const phase1 = await adapter.runTrustedAction({
+    ...base,
+    kind: 'permissions-request',
+    payload: {
+      grants: [{ method: 'metaid.pin.write', operation: 'create', path: '/protocols/simplegroupchat' }],
+      reason: 'Write moves automatically',
+    },
+  });
+  assert.equal(phase1.state, 'manual_action_required');
+  assert.equal(phase1.code, 'manual_action_required');
+  assert.equal(phase1.data.confirmation.actor.globalMetaId, LOCAL_GLOBAL_META_ID);
+  assert.equal(typeof phase1.data.confirmRequest.payload.hostConfirmation.token, 'string');
+
+  const approved = await adapter.runTrustedAction({
+    ...base,
+    kind: phase1.data.confirmRequest.kind,
+    payload: phase1.data.confirmRequest.payload,
+  });
+  assert.equal(approved.ok, true);
+  assert.equal(approved.data.data.granted[0].path, '/protocols/simplegroupchat');
+
+  const write = await adapter.runTrustedAction({
+    ...base,
+    kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create', path: '/protocols/simplegroupchat', encryption: '0', version: '1.0.0',
+      contentType: 'application/json', payload: { encoding: 'utf8', value: '{"move":"e2e4"}' },
+    },
+  });
+  assert.equal(write.ok, true);
+  assert.equal(write.data.data.pinId, 'granted-pin');
+  assert.equal(calls.length, 1);
+
+  for (let index = 1; index < 12; index += 1) {
+    const repeated = await adapter.runTrustedAction({
+      ...base, kind: 'metaid-pin-write',
+      payload: {
+        operation: 'create', path: '/protocols/simplegroupchat', encryption: '0', version: '1.0.0',
+        contentType: 'application/json', payload: { encoding: 'utf8', value: `{"move":"e${index}"}` },
+      },
+    });
+    assert.equal(repeated.ok, true);
+  }
+  const writeRateLimited = await adapter.runTrustedAction({
+    ...base, kind: 'metaid-pin-write',
+    payload: {
+      operation: 'create', path: '/protocols/simplegroupchat', encryption: '0', version: '1.0.0',
+      contentType: 'application/json', payload: { encoding: 'utf8', value: '{"move":"overflow"}' },
+    },
+  });
+  assert.equal(writeRateLimited.code, 'rate_limited');
+
+  const modify = await adapter.runTrustedAction({
+    ...base, kind: 'metaid-pin-write',
+    payload: { operation: 'modify', path: '@8544d8a15126296abe36a0bad740a4f293580575b5b00d345029bf99b74c78eci0', encryption: '0', version: '1.0.0', contentType: 'application/json', payload: { encoding: 'utf8', value: '{}' } },
+  });
+  assert.equal(modify.state, 'manual_action_required');
+
+  const offList = await adapter.runTrustedAction({
+    ...base, kind: 'permissions-request',
+    payload: { grants: [{ method: 'metaid.pin.write', operation: 'create', path: '/protocols/simplebuzz' }] },
+  });
+  assert.equal(offList.code, 'consent_denied');
+
+  const refreshed = await adapter.runTrustedAction({
+    ...base, sessionId: 'page-2', kind: 'metaid-pin-write',
+    payload: { operation: 'create', path: '/protocols/simplegroupchat', encryption: '0', version: '1.0.0', contentType: 'application/json', payload: { encoding: 'utf8', value: '{}' } },
+  });
+  assert.equal(refreshed.state, 'manual_action_required');
+
+  const revoked = await adapter.runTrustedAction({ ...base, kind: 'permissions-request', payload: { revoke: true } });
+  assert.deepEqual(revoked.data.data, { revoked: true });
+  const afterRevoke = await adapter.runTrustedAction({
+    ...base, kind: 'metaid-pin-write',
+    payload: { operation: 'create', path: '/protocols/simplegroupchat', encryption: '0', version: '1.0.0', contentType: 'application/json', payload: { encoding: 'utf8', value: '{}' } },
+  });
+  assert.equal(afterRevoke.state, 'manual_action_required');
+  assert.equal(audit.filter((event) => event.type === 'permission_granted').length, 1);
+  assert.equal(audit.filter((event) => event.type === 'granted_write').length, 12);
+  assert.equal(audit.filter((event) => event.type === 'permission_revoked').length, 1);
 });
 
 test('OAC browser host adapter rejects invalid metaid-pin-write payloads before signer access', async (t) => {
