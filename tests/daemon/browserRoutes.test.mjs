@@ -218,6 +218,17 @@ test('POST /api/browser/actions forwards trusted action payload and actorId', as
   }]);
 });
 
+test('POST /api/browser/actions preserves the Browser page sessionId', async (t) => {
+  const { server, calls, baseUrl } = await startServer();
+  t.after(async () => server.close());
+  const response = await fetch(`${baseUrl}/api/browser/actions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ actorId: 'alice', resourceUri: 'metaapp://bridge', sessionId: 'page-123', kind: 'permissions-request', payload: { revoke: true } }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(calls.actions.at(-1).sessionId, 'page-123');
+});
+
 test('POST /api/browser/actions forwards owner trusted action payload and actorId', async (t) => {
   const { server, calls, baseUrl } = await startServer();
   t.after(async () => server.close());

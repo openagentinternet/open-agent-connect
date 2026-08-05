@@ -223,6 +223,7 @@ export async function handleBrowserApiRoutes(context: BrowserHttpRouteContext): 
         ...actorRouteInput(url, input),
         resourceUri,
         kind: kind as BrowserTrustedActionKind,
+        ...(normalizeText(input.sessionId) ? { sessionId: normalizeText(input.sessionId) } : {}),
         ...(payload ? { payload } : {}),
       })
       : browserFailure('not_implemented', 'Browser action handler is not configured.');
