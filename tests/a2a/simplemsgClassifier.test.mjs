@@ -78,3 +78,36 @@ test('simplemsg classifier treats unknown bracketed text as private chat', () =>
     kind: 'private_chat',
   });
 });
+
+test('simplemsg classifier recognizes contract protocol tags', () => {
+  assert.deepEqual(classifySimplemsgContent('[CONTRACT_PROPOSE:contract-test-1] {"contract":{}}'), {
+    kind: 'contract_protocol',
+    tag: 'CONTRACT_PROPOSE',
+    contractId: 'contract-test-1',
+  });
+  assert.deepEqual(classifySimplemsgContent('[CONTRACT_ACCEPT:contract-test-1] accepted'), {
+    kind: 'contract_protocol',
+    tag: 'CONTRACT_ACCEPT',
+    contractId: 'contract-test-1',
+  });
+  assert.deepEqual(classifySimplemsgContent('[CONTRACT_BYE] goodbye'), {
+    kind: 'contract_protocol',
+    tag: 'CONTRACT_BYE',
+    contractId: null,
+  });
+  assert.deepEqual(classifySimplemsgContent('[contract_confirm:contract-test-1] ok'), {
+    kind: 'contract_protocol',
+    tag: 'CONTRACT_CONFIRM',
+    contractId: 'contract-test-1',
+  });
+});
+
+test('simplemsg classifier keeps order protocol precedence over contract namespace', () => {
+  assert.deepEqual(classifySimplemsgContent(`[DELIVERY:${ORDER_TXID}] {"result":"ok"}`), {
+    kind: 'order_protocol',
+    tag: 'DELIVERY',
+    orderTxid: ORDER_TXID,
+    orderPinId: null,
+    reason: null,
+  });
+});

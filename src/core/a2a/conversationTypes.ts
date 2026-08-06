@@ -1,13 +1,21 @@
 import type { A2ADeliveryArtifact } from './deliveryArtifacts';
 
 export type A2AConversationDirection = 'incoming' | 'outgoing';
-export type A2AConversationMessageKind = 'private_chat' | 'order_protocol';
+export type A2AConversationMessageKind = 'private_chat' | 'order_protocol' | 'contract_protocol';
 export type A2AConversationProtocolTag =
   | 'ORDER'
   | 'ORDER_STATUS'
   | 'DELIVERY'
   | 'NeedsRating'
   | 'ORDER_END'
+  | 'CONTRACT_PROPOSE'
+  | 'CONTRACT_CONFIRM'
+  | 'CONTRACT_OBJECTION'
+  | 'CONTRACT_INSUFFICIENT'
+  | 'CONTRACT_DELIVERY'
+  | 'CONTRACT_ACCEPT'
+  | 'CONTRACT_REOPEN'
+  | 'CONTRACT_BYE'
   | string;
 
 export interface A2AConversationActor {
@@ -80,9 +88,21 @@ export interface A2AOrderConversationSession {
   failureReason?: string | null;
 }
 
+export interface A2AContractConversationSession {
+  sessionId: string;
+  type: 'contract';
+  state: string;
+  contractId?: string | null;
+  specRef?: string | null;
+  createdAt: number;
+  updatedAt: number;
+  latestMessageId?: string | null;
+}
+
 export type A2AConversationSession =
   | A2APeerConversationSession
-  | A2AOrderConversationSession;
+  | A2AOrderConversationSession
+  | A2AContractConversationSession;
 
 export interface A2AConversationIndexes {
   messageIds: string[];

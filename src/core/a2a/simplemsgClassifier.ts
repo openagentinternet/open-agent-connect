@@ -1,9 +1,17 @@
+import {
+  normalizeContractProtocolId,
+  normalizeContractProtocolTag,
+  type A2AContractProtocolTag,
+} from './protocol/contractProtocol';
+
 export type SimplemsgOrderProtocolTag =
   | 'ORDER'
   | 'ORDER_STATUS'
   | 'DELIVERY'
   | 'NeedsRating'
   | 'ORDER_END';
+
+export type SimplemsgContractProtocolTag = A2AContractProtocolTag;
 
 export type SimplemsgClassification =
   | { kind: 'private_chat' }
@@ -13,11 +21,17 @@ export type SimplemsgClassification =
       orderTxid: string | null;
       orderPinId: string | null;
       reason: string | null;
+    }
+  | {
+      kind: 'contract_protocol';
+      tag: SimplemsgContractProtocolTag;
+      contractId: string | null;
     };
 
 const ORDER_TXID_RE = /^[0-9a-f]{64}$/i;
 const TAG_RE = /^\[([A-Za-z_]+)(?::([0-9a-fA-F]{64})(?:\s+([A-Za-z0-9_-]+))?)?\]/;
 const LEGACY_ORDER_END_RE = /^\[(ORDER_END)(?:\s+([A-Za-z0-9_-]+))?\]/i;
+const CONTRACT_TAG_RE = /^\[(CONTRACT_[A-Za-z]+)(?::([A-Za-z0-9][A-Za-z0-9._-]{5,63}))?\]/i;
 const ORDER_PIN_LINE_RE = /^\s*order\s+pin\s+id\s*[:：=]\s*([A-Za-z0-9][A-Za-z0-9._:-]{5,127})\s*$/im;
 
 function normalizeText(value: unknown): string {
@@ -54,16 +68,15 @@ export function classifySimplemsgContent(content: unknown): SimplemsgClassificat
   const match = text.match(TAG_RE);
   if (match) {
     const tag = normalizeProtocolTag(match[1]);
-    if (!tag) {
-      return { kind: 'private_chat' };
+    if (tag) {
+      return {
+        kind: 'order_protocol',
+        tag,
+        orderTxid: normalizeOrderTxid(match[2]),
+        orderPinId: extractOrderPinId(text),
+        reason: tag === 'ORDER_END' ? normalizeText(match[3]) || null : null,
+      };
     }
-    return {
-      kind: 'order_protocol',
-      tag,
-      orderTxid: normalizeOrderTxid(match[2]),
-      orderPinId: extractOrderPinId(text),
-      reason: tag === 'ORDER_END' ? normalizeText(match[3]) || null : null,
-    };
   }
 
   const legacyOrderEndMatch = text.match(LEGACY_ORDER_END_RE);
@@ -75,6 +88,18 @@ export function classifySimplemsgContent(content: unknown): SimplemsgClassificat
       orderPinId: extractOrderPinId(text),
       reason: normalizeText(legacyOrderEndMatch[2]) || null,
     };
+  }
+
+  const contractMatch = text.match(CONTRACT_TAG_RE);
+  if (contractMatch) {
+    const tag = normalizeContractProtocolTag(contractMatch[1]);
+    if (tag) {
+      return {
+        kind: 'contract_protocol',
+        tag,
+        contractId: normalizeContractProtocolId(contractMatch[2]) || null,
+      };
+    }
   }
 
   return { kind: 'private_chat' };

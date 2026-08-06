@@ -286,7 +286,8 @@ function resolveCallerProvider(input: {
 }
 
 function isCallerVisibleSession(session: A2AConversationSession): boolean {
-  return session.type === 'peer' || normalizeRole(session.role) === 'caller';
+  return session.type === 'peer'
+    || (session.type === 'service_order' && normalizeRole(session.role) === 'caller');
 }
 
 function isCallerServiceOrderSession(session: A2AConversationSession): session is A2AOrderConversationSession {
@@ -431,7 +432,10 @@ function messageBelongsToSession(
   if (session.type === 'peer') {
     return true;
   }
-  return messageBelongsToServiceOrder(message, session);
+  if (session.type === 'service_order') {
+    return messageBelongsToServiceOrder(message, session);
+  }
+  return false;
 }
 
 function stripOrderProtocolFallback(content: string): string {

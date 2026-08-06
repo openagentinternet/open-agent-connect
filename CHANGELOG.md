@@ -55,6 +55,16 @@ tags for releases.
   http links, and understanding an app is explicitly source-first through the
   local artifact cache (never screenshots or page snapshots).
   `metabot-browser-open` remains for one release as a deprecated stub.
+- Added the A2A collaboration contract foundation: a `contract_protocol`
+  message kind and `CONTRACT_*` protocol tags recognized by the simplemsg
+  classifier, an `A2AContractConversationSession` conversation-session shape,
+  and a pure contract state machine (`contractEngine`) whose explicit events
+  (`propose`/`confirm`/`objection`/`insufficient`/`decide`/`accept`/`reopen`/
+  `reject`/`bye`) reject illegal transitions between `draft`, `proposed`,
+  `open`, `decided`, `locked`, `rejected` and `closed`. Contract messages can
+  be encoded and parsed via `protocol/contractProtocol` (propose carries the
+  full contract record as a JSON payload) and persist with their protocol tag.
+  Transport/routing wiring is intentionally left for a follow-up PR.
 
 ### Security
 

@@ -294,7 +294,9 @@ export async function persistA2AConversationMessage(
     orderSessionId,
     direction: input.message.direction,
     kind: classification.kind,
-    protocolTag: classification.kind === 'order_protocol' ? classification.tag : null,
+    protocolTag: classification.kind === 'order_protocol' || classification.kind === 'contract_protocol'
+      ? classification.tag
+      : null,
     orderTxid,
     serviceOrderPinId,
     orderPinId: serviceOrderPinId,
