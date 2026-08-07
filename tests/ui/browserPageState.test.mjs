@@ -661,7 +661,9 @@ test('Browser using identity selector switches identity without reloading curren
   await context.selectUsingIdentity('reviewer');
   await Promise.resolve();
 
-  assert.equal(context.state.runtime.defaultActor.id, 'reviewer');
+  // ABC 0.5.1 keeps runtime.defaultActor as the stable host default; the
+  // per-tab selection is written to state.actorId only.
+  assert.equal(context.state.runtime.defaultActor.id, 'worker');
   assert.equal(context.state.actorId, 'reviewer');
   assert.match(elements['[data-browser-using-selector]'].innerHTML, /Using: Reviewer Bot/);
   assert.equal(elements['[data-browser-modal-root]'].hidden, true);
@@ -680,7 +682,7 @@ test('Browser menu is data-driven and opens cache management settings', async ()
   const mainMenu = context.browserMenuSections.find((section) => section.id === 'main');
   assert.deepEqual(
     Array.from(mainMenu?.items ?? [], (item) => item.id),
-    ['settings', 'name-resolution', 'templates', 'cache'],
+    ['settings', 'name-resolution', 'templates', 'cache', 'force-reload'],
   );
 
   elements['[data-browser-menu-trigger]'].click();
@@ -690,6 +692,7 @@ test('Browser menu is data-driven and opens cache management settings', async ()
   assert.match(elements['[data-browser-menu]'].innerHTML, /Name Resolution/);
   assert.match(elements['[data-browser-menu]'].innerHTML, /Bot Page Templates/);
   assert.match(elements['[data-browser-menu]'].innerHTML, /Cache Management/);
+  assert.match(elements['[data-browser-menu]'].innerHTML, /Force Reload/);
 
   await context.handleBrowserMenuAction('cache');
 
