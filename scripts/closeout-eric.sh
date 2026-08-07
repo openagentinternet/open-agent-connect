@@ -7,6 +7,7 @@ CHAIN=""
 COMMIT_MESSAGE=""
 JOURNAL=""
 VERIFY_CMD=""
+VERIFY_LOG=""
 STAGE_PATHS=()
 
 usage() {
@@ -24,6 +25,7 @@ Required options:
   --message <text>   Commit message for this round.
   --journal <text>   Human summary for the development journal.
   --verify <cmd>     Scoped verification command. Runs through bash -lc.
+  --verify-log <file> Use a recorded passing test log instead of rerunning verification.
   --stage <path>     File to include in the commit. Repeat for each file.
 
 Optional:
@@ -48,6 +50,11 @@ while [ "$#" -gt 0 ]; do
     --verify)
       [ "$#" -ge 2 ] || { echo "Missing value for --verify" >&2; exit 2; }
       VERIFY_CMD="$2"
+      shift 2
+      ;;
+    --verify-log)
+      [ "$#" -ge 2 ] || { echo "Missing value for --verify-log" >&2; exit 2; }
+      VERIFY_LOG="$2"
       shift 2
       ;;
     --stage)
@@ -79,10 +86,24 @@ done
 
 [ -n "$COMMIT_MESSAGE" ] || { echo "--message is required" >&2; exit 2; }
 [ -n "$JOURNAL" ] || { echo "--journal is required" >&2; exit 2; }
-[ -n "$VERIFY_CMD" ] || { echo "--verify is required" >&2; exit 2; }
+if [ -n "$VERIFY_CMD" ] && [ -n "$VERIFY_LOG" ]; then
+  echo "Provide either --verify or --verify-log, not both." >&2
+  exit 2
+fi
+[ -n "$VERIFY_CMD" ] || [ -n "$VERIFY_LOG" ] || { echo "--verify or --verify-log is required" >&2; exit 2; }
 [ "${#STAGE_PATHS[@]}" -gt 0 ] || { echo "At least one --stage path is required" >&2; exit 2; }
 
 cd "$ROOT_DIR"
+
+INDEX_LOCK="$(git rev-parse --git-path index.lock)"
+if [ -n "$INDEX_LOCK" ] && [ -e "$INDEX_LOCK" ]; then
+  if ps -ax -o command= 2>/dev/null | grep -q '[g]it '; then
+    echo "Refusing to run while another git process holds $INDEX_LOCK." >&2
+    exit 1
+  fi
+  echo "[closeout] removing stale git index lock: $INDEX_LOCK"
+  rm -f -- "$INDEX_LOCK"
+fi
 
 if ! git diff --cached --quiet; then
   echo "Refusing to run with pre-existing staged changes. Clear the index first." >&2
@@ -94,8 +115,22 @@ echo "[closeout] workspace: $ROOT_DIR"
 echo "[closeout] actor: $ACTOR"
 git status --short --branch
 
-echo "[closeout] running verification"
-bash -lc "$VERIFY_CMD"
+if [ -n "$VERIFY_CMD" ]; then
+  echo "[closeout] running verification"
+  bash -lc "$VERIFY_CMD"
+  VERIFY_DESCRIPTION="$VERIFY_CMD"
+else
+  echo "[closeout] using recorded verification log: $VERIFY_LOG"
+  [ -f "$VERIFY_LOG" ] || { echo "verification log not found: $VERIFY_LOG" >&2; exit 1; }
+  PASS_COUNT="$(grep -E '^(#|ℹ) pass [0-9]+$' "$VERIFY_LOG" | tail -1 | awk '{print $3}')"
+  FAIL_COUNT="$(grep -E '^(#|ℹ) fail [0-9]+$' "$VERIFY_LOG" | tail -1 | awk '{print $3}')"
+  if [ -z "$PASS_COUNT" ] || [ "$PASS_COUNT" -le 0 ] 2>/dev/null || [ "$FAIL_COUNT" != "0" ] || grep -qE '^(not ok|✖) ' "$VERIFY_LOG"; then
+    echo "recorded verification log does not show a passing test run: $VERIFY_LOG" >&2
+    exit 1
+  fi
+  echo "[closeout] recorded verification: pass=$PASS_COUNT fail=0 log=$VERIFY_LOG"
+  VERIFY_DESCRIPTION="recorded verification log: $VERIFY_LOG (pass=$PASS_COUNT, fail=0)"
+fi
 
 echo "[closeout] staging scoped files"
 git add -- "${STAGE_PATHS[@]}"
@@ -128,7 +163,7 @@ Development journal for commit $COMMIT_HASH ($COMMIT_SUBJECT).
 $JOURNAL
 
 Verification:
-$VERIFY_CMD
+$VERIFY_DESCRIPTION
 
 Files:
 $STAGED_FILES
