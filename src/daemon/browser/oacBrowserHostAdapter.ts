@@ -69,11 +69,59 @@ import {
 } from '../../core/metaapp/artifactCache';
 import { resolveMetaAppArtifact } from '../../core/metaapp/artifactDownload';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
+import {
+  DEFAULT_AGENT_GAME_PROTOCOL_PATHS,
+  type AppSessionError,
+  type AppSessionPublic,
+  type AppSessionStartParams,
+} from '../../core/appSession/types';
 
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
 type OacBrowserActionHandler = (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 type OacMetaIdPinWriteOperation = 'create' | 'modify' | 'revoke';
 type OacMetaIdPinWritePayloadEncoding = 'utf-8' | 'base64';
+
+/** The daemon-owned app session runtime surface the bridge may call. */
+export interface OacAppSessionHost {
+  validateStart(input: AppSessionStartParams & {
+    resourceUri: string;
+    actorId: string;
+    actorGlobalMetaId: string;
+  }): Promise<{ ok: true; adapterHash: string } | { ok: false; error: AppSessionError }>;
+  start(input: AppSessionStartParams & {
+    resourceUri: string;
+    actorId: string;
+    actorGlobalMetaId: string;
+  }): Promise<AppSessionPublic>;
+  list(input: {
+    resourceUri: string;
+    actorId: string;
+    actorGlobalMetaId: string;
+    appId?: string;
+    status?: string;
+    groupId?: string;
+  }): Promise<AppSessionPublic[]>;
+  status(sessionId: string, actor: {
+    resourceUri: string;
+    actorId: string;
+    actorGlobalMetaId: string;
+  }): Promise<AppSessionPublic>;
+  pause(sessionId: string, actor: {
+    resourceUri: string;
+    actorId: string;
+    actorGlobalMetaId: string;
+  }): Promise<AppSessionPublic>;
+  resume(sessionId: string, actor: {
+    resourceUri: string;
+    actorId: string;
+    actorGlobalMetaId: string;
+  }): Promise<AppSessionPublic>;
+  stop(sessionId: string, actor: {
+    resourceUri: string;
+    actorId: string;
+    actorGlobalMetaId: string;
+  }, options?: { releaseSeat?: boolean }): Promise<AppSessionPublic>;
+}
 
 const DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 const LLM_COMPLETE_DEFAULT_TIMEOUT_MS = 120_000;
@@ -177,6 +225,7 @@ export interface CreateOacBrowserHostAdapterInput {
   serviceCall?: OacBrowserActionHandler;
   writeMetaIdPin?: OacBrowserMetaIdPinWriteHandler;
   uploadMetaFile?: OacBrowserMetaFileUploadHandler;
+  appSession?: OacAppSessionHost;
   llmComplete?: (input: {
     actorId?: string;
     resourceUri: string;
@@ -185,12 +234,13 @@ export interface CreateOacBrowserHostAdapterInput {
     purpose?: string;
   }) => Promise<BrowserLlmCompleteResult>;
   audit?: (event: {
-    type: 'permission_granted' | 'permission_revoked' | 'granted_write';
+    type: string;
     actorId: string;
     resourceUri: string;
-    sessionId: string;
+    sessionId?: string;
     paths?: string[];
     path?: string;
+    [key: string]: unknown;
   }) => Promise<void> | void;
   fetch?: typeof fetch;
   env?: NodeJS.ProcessEnv;
@@ -232,6 +282,18 @@ interface SessionPermissionGrant {
   sessionId: string;
   operation: 'create';
   path: string;
+}
+
+interface PendingAppSessionStart {
+  id: string;
+  tokenHash: string;
+  actorId: string;
+  actorGlobalMetaId: string;
+  resourceUri: string;
+  params: AppSessionStartParams;
+  requestHash: string;
+  adapterHash: string;
+  expiresAt: number;
 }
 
 function normalizeText(value: unknown): string {
@@ -505,6 +567,22 @@ function normalizeOptionalBridgeField(value: unknown, fieldName: string):
     return { failure: invalidBridgeParams(`metaid.pin.write ${fieldName} must be a single-line string.`) };
   }
   return { value: text };
+}
+
+function sameAppSessionStartParams(left: AppSessionStartParams, right: AppSessionStartParams): boolean {
+  const leftBudget = left.budget ?? {};
+  const rightBudget = right.budget ?? {};
+  return left.appId === right.appId
+    && left.sessionType === right.sessionType
+    && left.groupId === right.groupId
+    && left.gameId === right.gameId
+    && left.manifestUri === right.manifestUri
+    && left.rulesHash === right.rulesHash
+    && left.seat === right.seat
+    && left.agentId === right.agentId
+    && (left.ttlMs ?? 86_400_000) === (right.ttlMs ?? 86_400_000)
+    && (leftBudget.llmCalls ?? 500) === (rightBudget.llmCalls ?? 500)
+    && (leftBudget.writes ?? 500) === (rightBudget.writes ?? 500);
 }
 
 function payloadByteSize(input: { payload: string; encoding: OacMetaIdPinWritePayloadEncoding }): number {
@@ -1031,6 +1109,7 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     : DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS;
   const pendingPinWriteConfirmations = new Map<string, PendingPinWriteConfirmation>();
   const pendingPermissionConfirmations = new Map<string, PendingPermissionConfirmation>();
+  const pendingAppSessionStarts = new Map<string, PendingAppSessionStart>();
   const sessionPermissionGrants = new Map<string, SessionPermissionGrant[]>();
   const llmTimestamps = new Map<string, number[]>();
   const llmInFlight = new Set<string>();
@@ -1698,6 +1777,362 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
     });
   }
 
+  function mapAppSessionRuntimeError(error: unknown): BrowserCommandResult<BrowserTrustedActionResult> {
+    const code = normalizeText((error as { code?: unknown })?.code) || 'internal_error';
+    const message = normalizeText((error as { message?: unknown })?.message) || 'OAC App Session runtime failed.';
+    return browserFailure(code as Parameters<typeof browserFailure>[0], message);
+  }
+
+  function appSessionActorBinding(actionInput: BrowserTrustedActionInput, actor: { actor: OacBrowserMetaAppBridgeActor; actorId: string }): {
+    resourceUri: string;
+    actorId: string;
+    actorGlobalMetaId: string;
+  } {
+    return {
+      resourceUri: normalizeText(actionInput.resourceUri),
+      actorId: actor.actorId,
+      actorGlobalMetaId: actor.actor.globalMetaId,
+    };
+  }
+
+  function validateAppSessionStartPayload(payload: Record<string, unknown>):
+    | { ok: true; params: AppSessionStartParams }
+    | { ok: false; failure: BrowserCommandResult<BrowserTrustedActionResult> } {
+    const requiredFields: Array<[string, unknown]> = [
+      ['appId', payload.appId],
+      ['sessionType', payload.sessionType],
+      ['groupId', payload.groupId],
+      ['gameId', payload.gameId],
+      ['manifestUri', payload.manifestUri],
+      ['rulesHash', payload.rulesHash],
+      ['seat', payload.seat],
+      ['agentId', payload.agentId],
+    ];
+    const params: Record<string, unknown> = {};
+    for (const [fieldName, rawValue] of requiredFields) {
+      const value = normalizeText(rawValue);
+      if (!value) {
+        return { ok: false, failure: invalidBridgeParams(`browser.app.session.start ${fieldName} is required.`) };
+      }
+      params[fieldName] = value;
+    }
+    if (normalizeText(payload.sessionType) !== 'agent-game') {
+      return { ok: false, failure: invalidBridgeParams('browser.app.session.start sessionType must be "agent-game".') };
+    }
+    if (payload.ttlMs !== undefined
+      && (!Number.isInteger(payload.ttlMs) || Number(payload.ttlMs) <= 0)) {
+      return { ok: false, failure: invalidBridgeParams('browser.app.session.start ttlMs must be a positive integer.') };
+    }
+    const budget = browserRecord(payload.budget);
+    for (const key of Object.keys(budget)) {
+      if (key !== 'llmCalls' && key !== 'writes') {
+        return { ok: false, failure: invalidBridgeParams('browser.app.session.start budget only supports llmCalls and writes.') };
+      }
+      const value = budget[key];
+      if (value !== undefined && (!Number.isInteger(value) || Number(value) <= 0)) {
+        return { ok: false, failure: invalidBridgeParams(`browser.app.session.start budget.${key} must be a positive integer.`) };
+      }
+    }
+    const paramsResult: AppSessionStartParams = params as unknown as AppSessionStartParams;
+    if (payload.ttlMs !== undefined) {
+      paramsResult.ttlMs = Number(payload.ttlMs);
+    }
+    if (Object.keys(budget).length) {
+      paramsResult.budget = {
+        ...(Number.isInteger(budget.llmCalls) ? { llmCalls: Number(budget.llmCalls) } : {}),
+        ...(Number.isInteger(budget.writes) ? { writes: Number(budget.writes) } : {}),
+      };
+    }
+    return { ok: true, params: paramsResult };
+  }
+
+  async function runAppSessionStartAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    if (!input.appSession) {
+      return browserFailure('unsupported_method', 'OAC App Session runtime is not configured.');
+    }
+    const payload = readActionPayload(actionInput);
+    const validation = validateAppSessionStartPayload(payload);
+    if (!validation.ok) {
+      return validation.failure;
+    }
+    const actor = await resolveMetaAppBridgeActor(actionInput);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+    if (validation.params.agentId !== actor.actor.globalMetaId) {
+      return invalidBridgeParams('browser.app.session.start agentId must match the current actor globalMetaId.');
+    }
+    const resourceUri = normalizeText(actionInput.resourceUri);
+    if (!resourceUri) {
+      return invalidBridgeParams('browser.app.session.start requires a resourceUri.');
+    }
+    const binding = appSessionActorBinding(actionInput, actor);
+
+    const hostConfirmation = browserRecord(payload.hostConfirmation);
+    if (payload.confirmed === true && normalizeText(hostConfirmation.id)) {
+      const id = normalizeText(hostConfirmation.id);
+      const token = normalizeText(hostConfirmation.token);
+      const pending = pendingAppSessionStarts.get(id);
+      const paramsMatch = pending
+        && sameAppSessionStartParams(pending.params, validation.params);
+      if (!pending
+        || pending.expiresAt <= nowMs()
+        || pending.actorId !== actor.actorId
+        || pending.actorGlobalMetaId !== actor.actor.globalMetaId
+        || pending.resourceUri !== resourceUri
+        || !paramsMatch
+        || !safeHashEqual(pending.tokenHash, sha256Text(token))) {
+        return browserFailure('consent_denied', 'The app session confirmation is invalid or expired.');
+      }
+      pendingAppSessionStarts.delete(id);
+      try {
+        const session = await input.appSession.start({
+          ...validation.params,
+          ...binding,
+        });
+        void Promise.resolve(input.audit?.({
+          type: 'app_session_consent_confirmed',
+          actorId: actor.actorId,
+          resourceUri,
+          sessionId: session.sessionId,
+          groupId: session.groupId,
+          gameId: session.gameId,
+        })).catch(() => undefined);
+        return browserSuccess({
+          kind: 'app-session-start' as BrowserTrustedActionInput['kind'],
+          handled: true,
+          data: { session },
+        });
+      } catch (error) {
+        return mapAppSessionRuntimeError(error);
+      }
+    }
+
+    // First phase: docs/09 validation steps 1-7, then the task authorization card.
+    const preflight = await input.appSession.validateStart({
+      ...validation.params,
+      ...binding,
+    });
+    if (!preflight.ok) {
+      return mapAppSessionRuntimeError(preflight.error);
+    }
+    const issuedAt = nowMs();
+    for (const [id, pending] of pendingAppSessionStarts.entries()) {
+      if (pending.expiresAt <= issuedAt) {
+        pendingAppSessionStarts.delete(id);
+      }
+    }
+    const id = `app-session-${randomUUID()}`;
+    const token = randomBytes(32).toString('base64url');
+    const requestHash = sha256Text(JSON.stringify({
+      actorId: actor.actorId,
+      actorGlobalMetaId: actor.actor.globalMetaId,
+      resourceUri,
+      params: validation.params,
+    }));
+    pendingAppSessionStarts.set(id, {
+      id,
+      tokenHash: sha256Text(token),
+      actorId: actor.actorId,
+      actorGlobalMetaId: actor.actor.globalMetaId,
+      resourceUri,
+      params: validation.params,
+      requestHash,
+      adapterHash: preflight.adapterHash,
+      expiresAt: issuedAt + confirmationTtlMs,
+    });
+    void Promise.resolve(input.audit?.({
+      type: 'app_session_consent_requested',
+      actorId: actor.actorId,
+      resourceUri,
+      groupId: validation.params.groupId,
+      gameId: validation.params.gameId,
+      seat: validation.params.seat,
+      requestHash,
+    })).catch(() => undefined);
+    return browserManualActionRequired(
+      'manual_action_required',
+      'Confirm this agent-game session before OAC starts it.',
+      {
+        data: {
+          confirmation: {
+            actor: actor.actor,
+            appId: validation.params.appId,
+            sessionType: validation.params.sessionType,
+            groupId: validation.params.groupId,
+            gameId: validation.params.gameId,
+            manifestUri: validation.params.manifestUri,
+            rulesHash: validation.params.rulesHash,
+            adapterHash: preflight.adapterHash,
+            seat: validation.params.seat,
+            agentId: validation.params.agentId,
+            protocolPaths: [...DEFAULT_AGENT_GAME_PROTOCOL_PATHS],
+            ttlMs: validation.params.ttlMs ?? 86_400_000,
+            budget: {
+              llmCalls: validation.params.budget?.llmCalls ?? 500,
+              writes: validation.params.budget?.writes ?? 500,
+            },
+          },
+          confirmRequest: {
+            resourceUri,
+            kind: 'app-session-start',
+            payload: {
+              ...validation.params,
+              confirmed: true,
+              hostConfirmation: { id, token },
+            },
+          },
+        },
+      },
+    );
+  }
+
+  async function runAppSessionListAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    if (!input.appSession) {
+      return browserFailure('unsupported_method', 'OAC App Session runtime is not configured.');
+    }
+    const actor = await resolveMetaAppBridgeActor(actionInput);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+    const binding = appSessionActorBinding(actionInput, actor);
+    if (!binding.resourceUri) {
+      return invalidBridgeParams('browser.app.session.list requires a resourceUri.');
+    }
+    const payload = readActionPayload(actionInput);
+    try {
+      const sessions = await input.appSession.list({
+        ...binding,
+        ...(normalizeText(payload.appId) ? { appId: normalizeText(payload.appId) } : {}),
+        ...(normalizeText(payload.status) ? { status: normalizeText(payload.status) } : {}),
+        ...(normalizeText(payload.groupId) ? { groupId: normalizeText(payload.groupId) } : {}),
+      });
+      return browserSuccess({
+        kind: 'app-session-list' as BrowserTrustedActionInput['kind'],
+        handled: true,
+        data: { sessions },
+      });
+    } catch (error) {
+      return mapAppSessionRuntimeError(error);
+    }
+  }
+
+  async function runAppSessionStatusAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    if (!input.appSession) {
+      return browserFailure('unsupported_method', 'OAC App Session runtime is not configured.');
+    }
+    const actor = await resolveMetaAppBridgeActor(actionInput);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+    const payload = readActionPayload(actionInput);
+    const sessionId = normalizeText(payload.sessionId);
+    if (!sessionId) {
+      return invalidBridgeParams('browser.app.session.status sessionId is required.');
+    }
+    try {
+      const session = await input.appSession.status(sessionId, appSessionActorBinding(actionInput, actor));
+      return browserSuccess({
+        kind: 'app-session-status' as BrowserTrustedActionInput['kind'],
+        handled: true,
+        data: { session },
+      });
+    } catch (error) {
+      return mapAppSessionRuntimeError(error);
+    }
+  }
+
+  async function runAppSessionPauseAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    if (!input.appSession) {
+      return browserFailure('unsupported_method', 'OAC App Session runtime is not configured.');
+    }
+    const actor = await resolveMetaAppBridgeActor(actionInput);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+    const payload = readActionPayload(actionInput);
+    const sessionId = normalizeText(payload.sessionId);
+    if (!sessionId) {
+      return invalidBridgeParams('browser.app.session.pause sessionId is required.');
+    }
+    try {
+      const session = await input.appSession.pause(sessionId, appSessionActorBinding(actionInput, actor));
+      return browserSuccess({
+        kind: 'app-session-pause' as BrowserTrustedActionInput['kind'],
+        handled: true,
+        data: { session },
+      });
+    } catch (error) {
+      return mapAppSessionRuntimeError(error);
+    }
+  }
+
+  async function runAppSessionResumeAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    if (!input.appSession) {
+      return browserFailure('unsupported_method', 'OAC App Session runtime is not configured.');
+    }
+    const actor = await resolveMetaAppBridgeActor(actionInput);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+    const payload = readActionPayload(actionInput);
+    const sessionId = normalizeText(payload.sessionId);
+    if (!sessionId) {
+      return invalidBridgeParams('browser.app.session.resume sessionId is required.');
+    }
+    try {
+      const session = await input.appSession.resume(sessionId, appSessionActorBinding(actionInput, actor));
+      return browserSuccess({
+        kind: 'app-session-resume' as BrowserTrustedActionInput['kind'],
+        handled: true,
+        data: { session },
+      });
+    } catch (error) {
+      return mapAppSessionRuntimeError(error);
+    }
+  }
+
+  async function runAppSessionStopAction(
+    actionInput: BrowserTrustedActionInput & { from?: string },
+  ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
+    if (!input.appSession) {
+      return browserFailure('unsupported_method', 'OAC App Session runtime is not configured.');
+    }
+    const actor = await resolveMetaAppBridgeActor(actionInput);
+    if ('failure' in actor) {
+      return actor.failure;
+    }
+    const payload = readActionPayload(actionInput);
+    const sessionId = normalizeText(payload.sessionId);
+    if (!sessionId) {
+      return invalidBridgeParams('browser.app.session.stop sessionId is required.');
+    }
+    try {
+      const session = await input.appSession.stop(
+        sessionId,
+        appSessionActorBinding(actionInput, actor),
+        { releaseSeat: payload.releaseSeat === true },
+      );
+      return browserSuccess({
+        kind: 'app-session-stop' as BrowserTrustedActionInput['kind'],
+        handled: true,
+        data: { session },
+      });
+    } catch (error) {
+      return mapAppSessionRuntimeError(error);
+    }
+  }
+
   async function runTrustedAction(
     actionInput: BrowserTrustedActionInput & { from?: string },
   ): Promise<BrowserCommandResult<BrowserTrustedActionResult>> {
@@ -1719,6 +2154,30 @@ export function createOacBrowserHostAdapter(input: CreateOacBrowserHostAdapterIn
 
     if ((actionInput.kind as string) === 'permissions-request') {
       return runPermissionsRequestAction(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'app-session-start') {
+      return runAppSessionStartAction(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'app-session-list') {
+      return runAppSessionListAction(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'app-session-status') {
+      return runAppSessionStatusAction(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'app-session-pause') {
+      return runAppSessionPauseAction(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'app-session-resume') {
+      return runAppSessionResumeAction(actionInput);
+    }
+
+    if ((actionInput.kind as string) === 'app-session-stop') {
+      return runAppSessionStopAction(actionInput);
     }
 
     const actor = await resolveActor(actionInput);

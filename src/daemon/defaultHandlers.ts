@@ -332,6 +332,12 @@ import { resolveMetasoInfrastructureEndpoints } from '../core/network/metasoInfr
 import { createMvcSponsorV2Client } from '../core/subsidy/mvcSponsorV2Client';
 import type { BrowserContextResult } from '@openagentinternet/agent-browser-core';
 import { createOacBrowserHostAdapter } from './browser/oacBrowserHostAdapter';
+import { createAgentGameRuntime } from '../core/appSession/runtime';
+import { createAppSessionStore } from '../core/appSession/store';
+import { createGamePackageLoader } from '../core/appSession/gamePackage';
+import { createGroupChatListenerManager } from '../core/appSession/groupChatListener';
+import { fetchGroupMessages as fetchGroupMessagesFromApi } from '../core/appSession/groupChat';
+import type { AppSessionRuntimeStartReport } from '../core/appSession/types';
 import {
   AUTO_REPLY_COOLDOWN_MS_OPTIONS,
   AUTO_REPLY_MAX_TURNS_OPTIONS,
@@ -4959,6 +4965,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
   // first-response or delivery deadline passed and seeds their refund request;
   // driven by the CLI runtime on its own interval and inline by syncRefunds.
   sweepBuyerOrderDeadlines: (nowMs?: number) => Promise<BuyerOrderDeadlineSweepReport>;
+  // Internal helper (not an HTTP route). Restores app sessions, re-validates
+  // grants, catches up history, acquires leases, and starts the group chat
+  // listener; called by the CLI runtime on daemon start.
+  startAppSessionRuntime: () => Promise<AppSessionRuntimeStartReport>;
+  // Internal helper (not an HTTP route). Stops the group chat listener,
+  // releases leases and disposes adapters; called on daemon shutdown.
+  stopAppSessionRuntime: () => Promise<void>;
 } {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
@@ -12166,6 +12179,161 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  async function runProfileLlmCompletion(inputLlm: {
+    actorId?: string;
+    messages: Array<{ role: string; content: string }>;
+    options?: Record<string, unknown>;
+    purpose?: string;
+  }): Promise<{ text: string; model?: string; finishReason: 'stop' | 'length' | 'error' }> {
+    const actor = await resolveActorWriteContext(inputLlm.actorId);
+    if ('failure' in actor) throw new Error('Local LLM actor is unavailable.');
+    const profileHomeDir = path.resolve(actor.homeDir);
+    const profilePaths = resolveMetabotPaths(profileHomeDir);
+    const profileRuntimeStore = profileHomeDir === path.resolve(input.homeDir)
+      ? runtimeStateStore
+      : createRuntimeStateStore(profileHomeDir);
+    const profileLlmRuntimeStore = profileHomeDir === path.resolve(input.homeDir)
+      ? llmRuntimeStore
+      : createLlmRuntimeStore(profileHomeDir);
+    const profileLlmBindingStore = profileHomeDir === path.resolve(input.homeDir)
+      ? llmBindingStore
+      : createLlmBindingStore(profileHomeDir);
+    const profile = await resolveMetabotProfileBySelector(path.basename(profilePaths.profileRoot));
+    const metaBotSlug = profile?.slug || path.basename(profilePaths.profileRoot);
+    if (!input.llmExecutor) throw new Error('Local LLM is unavailable.');
+    const runtimeResolver = createLlmRuntimeResolver({
+      runtimeStore: profileLlmRuntimeStore,
+      bindingStore: profileLlmBindingStore,
+      getPreferredRuntimeId: async () => {
+        try {
+          const raw = await fs.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+          const data = JSON.parse(raw) as { runtimeId?: unknown };
+          return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+        } catch {
+          return null;
+        }
+      },
+    });
+    const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+    if (!resolved.runtime) throw new Error('Local LLM is unavailable.');
+    const prompt = inputLlm.messages.map((message) => `${message.role}: ${message.content}`).join('\n');
+    const execution = await runLlmPromptWithRuntimeFallback({
+      runtimeResolver,
+      llmExecutor: input.llmExecutor,
+      metaBotSlug,
+      prompt,
+      timeoutMs: Math.min(
+        typeof inputLlm.options?.timeoutMs === 'number'
+          && Number.isFinite(inputLlm.options.timeoutMs)
+          && Number(inputLlm.options.timeoutMs) > 0
+          ? Number(inputLlm.options.timeoutMs) : 120_000,
+        180_000,
+      ),
+      pollIntervalMs: 250,
+      cwd: profilePaths.llmExecutorRoot,
+    });
+    if (execution.status !== 'completed' || !execution.output.trim()) {
+      const error = new Error(execution.error || 'Local LLM is unavailable.');
+      if (execution.error?.toLowerCase().includes('timed out')) (error as { code?: string }).code = 'llm_timeout';
+      throw error;
+    }
+    return {
+      text: execution.output.trim(),
+      model: resolved.runtime.displayName,
+      finishReason: 'stop',
+    };
+  }
+
+  async function writeBrowserBridgeAudit(event: Record<string, unknown>): Promise<void> {
+    const actor = typeof event.actorId === 'string' && event.actorId
+      ? await resolveActorWriteContext(event.actorId)
+      : ({ failure: true } as const);
+    const auditHomeDir = 'failure' in actor ? input.homeDir : actor.homeDir;
+    const auditPath = path.join(resolveMetabotPaths(auditHomeDir).runtimeRoot, 'browser-bridge-audit.jsonl');
+    await fs.mkdir(path.dirname(auditPath), { recursive: true });
+    await fs.appendFile(auditPath, `${JSON.stringify({ ...event, at: new Date().toISOString() })}\n`, 'utf8');
+  }
+
+  const appSessionStore = createAppSessionStore(resolveMetabotPaths(input.homeDir).runtimeRoot);
+  const appSessionRuntime = createAgentGameRuntime({
+    store: appSessionStore,
+    fetchGroupMessages: async ({ groupId, startIndex, size }) => {
+      const chatApiBaseUrl = await resolveChatApiBaseUrl();
+      return fetchGroupMessagesFromApi({
+        chatApiBaseUrl,
+        groupId,
+        startIndex,
+        size,
+        fetchImpl: globalThis.fetch,
+      });
+    },
+    loadGamePackage: createGamePackageLoader({
+      fetchImpl: globalThis.fetch,
+      cacheRoot: path.join(resolveMetabotPaths(input.homeDir).runtimeRoot, 'app-session-packages'),
+    }).load,
+    llmComplete: async ({ actorId, messages }) => {
+      try {
+        return await runProfileLlmCompletion({
+          actorId,
+          messages: messages as Array<{ role: string; content: string }>,
+          purpose: 'agent-game',
+        });
+      } catch (error) {
+        const code = (error as { code?: unknown }).code;
+        if (code === 'llm_timeout' || code === 'rate_limited' || code === 'llm_unavailable') {
+          throw error;
+        }
+        const wrapped = new Error(error instanceof Error ? error.message : 'Local LLM is unavailable.');
+        (wrapped as { code?: string }).code = 'llm_unavailable';
+        throw wrapped;
+      }
+    },
+    writeGroupChat: async ({ actorId, groupId, payload }) => {
+      try {
+        const actor = await resolveActorWriteContext(actorId);
+        if ('failure' in actor) {
+          return { ok: false as const, code: 'actor_required', message: 'A selected MetaID Actor Bot is required.' };
+        }
+        const network = await resolveWriteNetworkForHome(undefined, actor.homeDir);
+        const result = await actor.signer.writePin({
+          operation: 'create',
+          path: '/protocols/simplegroupchat',
+          encryption: '0',
+          version: '1.0.0',
+          contentType: 'application/json;utf-8',
+          payload: JSON.stringify(payload),
+          encoding: 'utf-8',
+          network,
+        });
+        return { ok: true as const, pinId: result.pinId };
+      } catch (error) {
+        return {
+          ok: false as const,
+          code: 'write_failed',
+          message: safeBrowserBridgeErrorMessage(error, 'Group chat write failed.'),
+        };
+      }
+    },
+    audit: (event) => writeBrowserBridgeAudit(event),
+  });
+
+  const appSessionGroupChatListener = createGroupChatListenerManager({
+    systemHomeDir: normalizedSystemHomeDir,
+    listProfiles: async () => {
+      const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => [] as IdentityProfileRecord[]);
+      return profiles;
+    },
+    resolveSocketEndpoints: async () => [(await resolveInfrastructure()).socket],
+    onGroupMessage: (_profile, message) => {
+      if (normalizeText(message.groupId)) {
+        appSessionRuntime.notifyGroupActivity(normalizeText(message.groupId));
+      }
+    },
+    onError: (error) => {
+      console.warn('[app-session group listener]', error.message);
+    },
+  });
+
   const browserHostAdapterInput: Parameters<typeof createOacBrowserHostAdapter>[0] = {
     homeDir: input.homeDir,
     systemHomeDir: normalizedSystemHomeDir,
@@ -12257,70 +12425,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
         );
       }
     },
-    llmComplete: async ({ actorId, messages, options, purpose }) => {
-      const actor = await resolveActorWriteContext(actorId);
-      if ('failure' in actor) throw new Error('Local LLM actor is unavailable.');
-      const profileHomeDir = path.resolve(actor.homeDir);
-      const profilePaths = resolveMetabotPaths(profileHomeDir);
-      const profileRuntimeStore = profileHomeDir === path.resolve(input.homeDir)
-        ? runtimeStateStore
-        : createRuntimeStateStore(profileHomeDir);
-      const profileLlmRuntimeStore = profileHomeDir === path.resolve(input.homeDir)
-        ? llmRuntimeStore
-        : createLlmRuntimeStore(profileHomeDir);
-      const profileLlmBindingStore = profileHomeDir === path.resolve(input.homeDir)
-        ? llmBindingStore
-        : createLlmBindingStore(profileHomeDir);
-      const profile = await resolveMetabotProfileBySelector(path.basename(profilePaths.profileRoot));
-      const metaBotSlug = profile?.slug || path.basename(profilePaths.profileRoot);
-      if (!input.llmExecutor) throw new Error('Local LLM is unavailable.');
-      const runtimeResolver = createLlmRuntimeResolver({
-        runtimeStore: profileLlmRuntimeStore,
-        bindingStore: profileLlmBindingStore,
-        getPreferredRuntimeId: async () => {
-          try {
-            const raw = await fs.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
-            const data = JSON.parse(raw) as { runtimeId?: unknown };
-            return typeof data.runtimeId === 'string' ? data.runtimeId : null;
-          } catch {
-            return null;
-          }
-        },
-      });
-      const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
-      if (!resolved.runtime) throw new Error('Local LLM is unavailable.');
-      const prompt = messages.map((message) => `${message.role}: ${message.content}`).join('\n');
-      const execution = await runLlmPromptWithRuntimeFallback({
-        runtimeResolver,
-        llmExecutor: input.llmExecutor,
-        metaBotSlug,
-        prompt,
-        timeoutMs: Math.min(
-          typeof options?.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-            ? options.timeoutMs : 120_000,
-          180_000,
-        ),
-        pollIntervalMs: 250,
-        cwd: profilePaths.llmExecutorRoot,
-      });
-      if (execution.status !== 'completed' || !execution.output.trim()) {
-        const error = new Error(execution.error || 'Local LLM is unavailable.');
-        if (execution.error?.toLowerCase().includes('timed out')) (error as { code?: string }).code = 'llm_timeout';
-        throw error;
-      }
-      return {
-        text: execution.output.trim(),
-        model: resolved.runtime.displayName,
-        finishReason: 'stop',
-      };
-    },
-    audit: async (event) => {
-      const actor = event.actorId ? await resolveActorWriteContext(event.actorId) : { failure: true } as const;
-      const auditHomeDir = 'failure' in actor ? input.homeDir : actor.homeDir;
-      const auditPath = path.join(resolveMetabotPaths(auditHomeDir).runtimeRoot, 'browser-bridge-audit.jsonl');
-      await fs.mkdir(path.dirname(auditPath), { recursive: true });
-      await fs.appendFile(auditPath, `${JSON.stringify({ ...event, at: new Date().toISOString() })}\n`, 'utf8');
-    },
+    appSession: appSessionRuntime,
+    llmComplete: (inputLlm) => runProfileLlmCompletion({
+      actorId: inputLlm.actorId,
+      messages: inputLlm.messages,
+      options: inputLlm.options,
+      purpose: inputLlm.purpose,
+    }),
+    audit: (event) => writeBrowserBridgeAudit(event),
     fetch: globalThis.fetch,
     env: process.env,
     onInfrastructureSettingsUpdated: input.onBrowserInfrastructureChanged,
@@ -17555,6 +17667,26 @@ export function createDefaultMetabotDaemonHandlers(input: {
   (handlers as MetabotDaemonHttpHandlers & {
     sweepBuyerOrderDeadlines: (nowMs?: number) => Promise<BuyerOrderDeadlineSweepReport>;
   }).sweepBuyerOrderDeadlines = runBuyerOrderDeadlineSweep;
+  // Attach the resident App/Game Runtime lifecycle so the CLI runtime can
+  // restore sessions and start the group chat listener on daemon start, and
+  // release leases/adapters on daemon shutdown. Not an HTTP route.
+  (handlers as MetabotDaemonHttpHandlers & {
+    startAppSessionRuntime: () => Promise<AppSessionRuntimeStartReport>;
+    stopAppSessionRuntime: () => Promise<void>;
+  }).startAppSessionRuntime = async () => {
+    const report = await appSessionRuntime.startRuntime();
+    if (!appSessionGroupChatListener.isRunning()) {
+      await appSessionGroupChatListener.start();
+    }
+    return report;
+  };
+  (handlers as MetabotDaemonHttpHandlers & {
+    startAppSessionRuntime: () => Promise<AppSessionRuntimeStartReport>;
+    stopAppSessionRuntime: () => Promise<void>;
+  }).stopAppSessionRuntime = async () => {
+    appSessionGroupChatListener.stop();
+    await appSessionRuntime.dispose();
+  };
   daemonHandlers = handlers;
   return handlers as MetabotDaemonHttpHandlers & {
     resolveAutoReplyConfigForHome: (homeDir: string) => Promise<PrivateChatAutoReplyConfig>;
@@ -17562,5 +17694,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
       localProfileSlug?: string | null;
     }) => Promise<A2ACallerReplyResumeReport>;
     sweepBuyerOrderDeadlines: (nowMs?: number) => Promise<BuyerOrderDeadlineSweepReport>;
+    startAppSessionRuntime: () => Promise<AppSessionRuntimeStartReport>;
+    stopAppSessionRuntime: () => Promise<void>;
   };
 }
