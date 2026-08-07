@@ -154,6 +154,7 @@ async function handleBrowserApiRoutes(context) {
                 ...actorRouteInput(url, input),
                 resourceUri,
                 kind: kind,
+                ...(normalizeText(input.sessionId) ? { sessionId: normalizeText(input.sessionId) } : {}),
                 ...(payload ? { payload } : {}),
             })
             : (0, agent_browser_host_contract_1.browserFailure)('not_implemented', 'Browser action handler is not configured.');

@@ -18,6 +18,7 @@ import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '..
 import { type ServicePaymentExecutor } from '../core/payments/servicePayment';
 import { verifyServiceOrderPayment } from '../core/payments/servicePaymentVerification';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
+import type { AppSessionRuntimeStartReport } from '../core/appSession/types';
 import { type MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import { type BuyerRatingProtocolTextGenerator, type CallerOrderProtocolTextGenerator, type ProviderOrderProtocolTextGenerator } from '../core/a2a/orderProtocolTextGenerator';
 export declare function resolveServiceOrderPaymentMetadata(currency: unknown): {
@@ -110,4 +111,6 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
         localProfileSlug?: string | null;
     }) => Promise<A2ACallerReplyResumeReport>;
     sweepBuyerOrderDeadlines: (nowMs?: number) => Promise<BuyerOrderDeadlineSweepReport>;
+    startAppSessionRuntime: () => Promise<AppSessionRuntimeStartReport>;
+    stopAppSessionRuntime: () => Promise<void>;
 };

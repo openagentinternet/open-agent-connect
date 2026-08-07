@@ -1,11 +1,61 @@
-import type { BrowserHostAdapter } from '@openagentinternet/agent-browser-host-contract';
+import type { BrowserHostAdapter, BrowserLlmCompleteMessage, BrowserLlmCompleteResult } from '@openagentinternet/agent-browser-host-contract';
 import { type BrowserNameAliasProvider } from '@openagentinternet/agent-browser-core';
 import { type MetabotCommandResult } from '../../core/contracts/commandResult';
 import type { createMetaAppPreviewSessionRegistry } from '../../core/metaapp/previewSessions';
+import { type AppSessionError, type AppSessionPublic, type AppSessionStartParams } from '../../core/appSession/types';
 type MetaAppPreviewSessions = ReturnType<typeof createMetaAppPreviewSessionRegistry>;
 type OacBrowserActionHandler = (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 type OacMetaIdPinWriteOperation = 'create' | 'modify' | 'revoke';
 type OacMetaIdPinWritePayloadEncoding = 'utf-8' | 'base64';
+/** The daemon-owned app session runtime surface the bridge may call. */
+export interface OacAppSessionHost {
+    validateStart(input: AppSessionStartParams & {
+        resourceUri: string;
+        actorId: string;
+        actorGlobalMetaId: string;
+    }): Promise<{
+        ok: true;
+        adapterHash: string;
+    } | {
+        ok: false;
+        error: AppSessionError;
+    }>;
+    start(input: AppSessionStartParams & {
+        resourceUri: string;
+        actorId: string;
+        actorGlobalMetaId: string;
+    }): Promise<AppSessionPublic>;
+    list(input: {
+        resourceUri: string;
+        actorId: string;
+        actorGlobalMetaId: string;
+        appId?: string;
+        status?: string;
+        groupId?: string;
+    }): Promise<AppSessionPublic[]>;
+    status(sessionId: string, actor: {
+        resourceUri: string;
+        actorId: string;
+        actorGlobalMetaId: string;
+    }): Promise<AppSessionPublic>;
+    pause(sessionId: string, actor: {
+        resourceUri: string;
+        actorId: string;
+        actorGlobalMetaId: string;
+    }): Promise<AppSessionPublic>;
+    resume(sessionId: string, actor: {
+        resourceUri: string;
+        actorId: string;
+        actorGlobalMetaId: string;
+    }): Promise<AppSessionPublic>;
+    stop(sessionId: string, actor: {
+        resourceUri: string;
+        actorId: string;
+        actorGlobalMetaId: string;
+    }, options?: {
+        releaseSeat?: boolean;
+    }): Promise<AppSessionPublic>;
+}
 export interface OacBrowserMetaAppBridgeActor {
     uri: string;
     globalMetaId: string;
@@ -84,6 +134,23 @@ export interface CreateOacBrowserHostAdapterInput {
     serviceCall?: OacBrowserActionHandler;
     writeMetaIdPin?: OacBrowserMetaIdPinWriteHandler;
     uploadMetaFile?: OacBrowserMetaFileUploadHandler;
+    appSession?: OacAppSessionHost;
+    llmComplete?: (input: {
+        actorId?: string;
+        resourceUri: string;
+        messages: BrowserLlmCompleteMessage[];
+        options?: Record<string, unknown>;
+        purpose?: string;
+    }) => Promise<BrowserLlmCompleteResult>;
+    audit?: (event: {
+        type: string;
+        actorId: string;
+        resourceUri: string;
+        sessionId?: string;
+        paths?: string[];
+        path?: string;
+        [key: string]: unknown;
+    }) => Promise<void> | void;
     fetch?: typeof fetch;
     env?: NodeJS.ProcessEnv;
     now?: () => number;

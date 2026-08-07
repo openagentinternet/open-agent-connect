@@ -3385,6 +3385,21 @@ async function serveCliDaemonProcess(context) {
             console.warn('[A2A order replay]', error instanceof Error ? error.message : String(error));
         });
     }
+    // Resident App/Game Runtime (browser.app.session.*): restore persisted
+    // sessions, re-validate grants, catch up history, acquire leases, and start
+    // the group chat socket listener. Independent of the private chat listener
+    // config; sessions must survive MetaApp page close and daemon restarts.
+    try {
+        const appSessionReport = await handlers.startAppSessionRuntime?.();
+        if (appSessionReport) {
+            console.log(`[app-session runtime] restored ${appSessionReport.restored} sessions: `
+                + `${appSessionReport.running} running, ${appSessionReport.paused} paused, `
+                + `${appSessionReport.stopped} stopped, ${appSessionReport.conflicts} lease conflicts`);
+        }
+    }
+    catch (error) {
+        console.warn('[app-session runtime] start failed:', error instanceof Error ? error.message : String(error));
+    }
     // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
     // them (with their remaining budget) or settle expired waits into the
     // timeout + refund path. Runs even when the simplemsg listener is disabled —
@@ -3411,6 +3426,12 @@ async function serveCliDaemonProcess(context) {
         simplemsgPresenceWatchdog.stop();
         simplemsgListener.stop();
         chatAutoReplyBackfill.stop();
+        try {
+            await handlers.stopAppSessionRuntime?.();
+        }
+        catch (error) {
+            console.warn('[app-session runtime] shutdown failed:', error instanceof Error ? error.message : String(error));
+        }
         clearInterval(onlineServiceCacheInterval);
         clearInterval(providerWorkspaceSweepInterval);
         serviceRefundSyncLoop.stop();

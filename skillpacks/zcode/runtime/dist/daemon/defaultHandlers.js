@@ -93,6 +93,7 @@ const traceProjection_1 = require("../core/a2a/traceProjection");
 const conversationUrl_1 = require("../core/a2a/conversationUrl");
 const localIdentityBootstrap_1 = require("../core/bootstrap/localIdentityBootstrap");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
+const llmRuntimeExecution_1 = require("../core/llm/llmRuntimeExecution");
 const delegationOrderMessage_1 = require("../core/orders/delegationOrderMessage");
 const orderMessage_1 = require("../core/orders/orderMessage");
 const servicePayment_1 = require("../core/payments/servicePayment");
@@ -108,6 +109,11 @@ const infrastructureConfigStore_1 = require("../core/config/infrastructureConfig
 const metasoInfrastructure_1 = require("../core/network/metasoInfrastructure");
 const mvcSponsorV2Client_1 = require("../core/subsidy/mvcSponsorV2Client");
 const oacBrowserHostAdapter_1 = require("./browser/oacBrowserHostAdapter");
+const runtime_1 = require("../core/appSession/runtime");
+const store_1 = require("../core/appSession/store");
+const gamePackage_1 = require("../core/appSession/gamePackage");
+const groupChatListener_1 = require("../core/appSession/groupChatListener");
+const groupChat_1 = require("../core/appSession/groupChat");
 const configTypes_1 = require("../core/config/configTypes");
 const metawebReplyWaiter_1 = require("../core/a2a/metawebReplyWaiter");
 const deliveryArtifacts_1 = require("../core/a2a/deliveryArtifacts");
@@ -10118,6 +10124,156 @@ function createDefaultMetabotDaemonHandlers(input) {
             name: normalizeText(profile.name) || profile.slug,
         };
     }
+    async function runProfileLlmCompletion(inputLlm) {
+        const actor = await resolveActorWriteContext(inputLlm.actorId);
+        if ('failure' in actor)
+            throw new Error('Local LLM actor is unavailable.');
+        const profileHomeDir = node_path_1.default.resolve(actor.homeDir);
+        const profilePaths = (0, paths_1.resolveMetabotPaths)(profileHomeDir);
+        const profileRuntimeStore = profileHomeDir === node_path_1.default.resolve(input.homeDir)
+            ? runtimeStateStore
+            : (0, runtimeStateStore_1.createRuntimeStateStore)(profileHomeDir);
+        const profileLlmRuntimeStore = profileHomeDir === node_path_1.default.resolve(input.homeDir)
+            ? llmRuntimeStore
+            : (0, llmRuntimeStore_1.createLlmRuntimeStore)(profileHomeDir);
+        const profileLlmBindingStore = profileHomeDir === node_path_1.default.resolve(input.homeDir)
+            ? llmBindingStore
+            : (0, llmBindingStore_1.createLlmBindingStore)(profileHomeDir);
+        const profile = await resolveMetabotProfileBySelector(node_path_1.default.basename(profilePaths.profileRoot));
+        const metaBotSlug = profile?.slug || node_path_1.default.basename(profilePaths.profileRoot);
+        if (!input.llmExecutor)
+            throw new Error('Local LLM is unavailable.');
+        const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+            runtimeStore: profileLlmRuntimeStore,
+            bindingStore: profileLlmBindingStore,
+            getPreferredRuntimeId: async () => {
+                try {
+                    const raw = await node_fs_1.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                    const data = JSON.parse(raw);
+                    return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+                }
+                catch {
+                    return null;
+                }
+            },
+        });
+        const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug });
+        if (!resolved.runtime)
+            throw new Error('Local LLM is unavailable.');
+        const prompt = inputLlm.messages.map((message) => `${message.role}: ${message.content}`).join('\n');
+        const execution = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+            runtimeResolver,
+            llmExecutor: input.llmExecutor,
+            metaBotSlug,
+            prompt,
+            timeoutMs: Math.min(typeof inputLlm.options?.timeoutMs === 'number'
+                && Number.isFinite(inputLlm.options.timeoutMs)
+                && Number(inputLlm.options.timeoutMs) > 0
+                ? Number(inputLlm.options.timeoutMs) : 120_000, 180_000),
+            pollIntervalMs: 250,
+            cwd: profilePaths.llmExecutorRoot,
+        });
+        if (execution.status !== 'completed' || !execution.output.trim()) {
+            const error = new Error(execution.error || 'Local LLM is unavailable.');
+            if (execution.error?.toLowerCase().includes('timed out'))
+                error.code = 'llm_timeout';
+            throw error;
+        }
+        return {
+            text: execution.output.trim(),
+            model: resolved.runtime.displayName,
+            finishReason: 'stop',
+        };
+    }
+    async function writeBrowserBridgeAudit(event) {
+        const actor = typeof event.actorId === 'string' && event.actorId
+            ? await resolveActorWriteContext(event.actorId)
+            : { failure: true };
+        const auditHomeDir = 'failure' in actor ? input.homeDir : actor.homeDir;
+        const auditPath = node_path_1.default.join((0, paths_1.resolveMetabotPaths)(auditHomeDir).runtimeRoot, 'browser-bridge-audit.jsonl');
+        await node_fs_1.promises.mkdir(node_path_1.default.dirname(auditPath), { recursive: true });
+        await node_fs_1.promises.appendFile(auditPath, `${JSON.stringify({ ...event, at: new Date().toISOString() })}\n`, 'utf8');
+    }
+    const appSessionStore = (0, store_1.createAppSessionStore)((0, paths_1.resolveMetabotPaths)(input.homeDir).runtimeRoot);
+    const appSessionRuntime = (0, runtime_1.createAgentGameRuntime)({
+        store: appSessionStore,
+        fetchGroupMessages: async ({ groupId, startIndex, size }) => {
+            const chatApiBaseUrl = await resolveChatApiBaseUrl();
+            return (0, groupChat_1.fetchGroupMessages)({
+                chatApiBaseUrl,
+                groupId,
+                startIndex,
+                size,
+                fetchImpl: globalThis.fetch,
+            });
+        },
+        loadGamePackage: (0, gamePackage_1.createGamePackageLoader)({
+            fetchImpl: globalThis.fetch,
+            cacheRoot: node_path_1.default.join((0, paths_1.resolveMetabotPaths)(input.homeDir).runtimeRoot, 'app-session-packages'),
+        }).load,
+        llmComplete: async ({ actorId, messages }) => {
+            try {
+                return await runProfileLlmCompletion({
+                    actorId,
+                    messages: messages,
+                    purpose: 'agent-game',
+                });
+            }
+            catch (error) {
+                const code = error.code;
+                if (code === 'llm_timeout' || code === 'rate_limited' || code === 'llm_unavailable') {
+                    throw error;
+                }
+                const wrapped = new Error(error instanceof Error ? error.message : 'Local LLM is unavailable.');
+                wrapped.code = 'llm_unavailable';
+                throw wrapped;
+            }
+        },
+        writeGroupChat: async ({ actorId, groupId, payload }) => {
+            try {
+                const actor = await resolveActorWriteContext(actorId);
+                if ('failure' in actor) {
+                    return { ok: false, code: 'actor_required', message: 'A selected MetaID Actor Bot is required.' };
+                }
+                const network = await resolveWriteNetworkForHome(undefined, actor.homeDir);
+                const result = await actor.signer.writePin({
+                    operation: 'create',
+                    path: '/protocols/simplegroupchat',
+                    encryption: '0',
+                    version: '1.0.0',
+                    contentType: 'application/json;utf-8',
+                    payload: JSON.stringify(payload),
+                    encoding: 'utf-8',
+                    network,
+                });
+                return { ok: true, pinId: result.pinId };
+            }
+            catch (error) {
+                return {
+                    ok: false,
+                    code: 'write_failed',
+                    message: safeBrowserBridgeErrorMessage(error, 'Group chat write failed.'),
+                };
+            }
+        },
+        audit: (event) => writeBrowserBridgeAudit(event),
+    });
+    const appSessionGroupChatListener = (0, groupChatListener_1.createGroupChatListenerManager)({
+        systemHomeDir: normalizedSystemHomeDir,
+        listProfiles: async () => {
+            const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []);
+            return profiles;
+        },
+        resolveSocketEndpoints: async () => [(await resolveInfrastructure()).socket],
+        onGroupMessage: (_profile, message) => {
+            if (normalizeText(message.groupId)) {
+                appSessionRuntime.notifyGroupActivity(normalizeText(message.groupId));
+            }
+        },
+        onError: (error) => {
+            console.warn('[app-session group listener]', error.message);
+        },
+    });
     const browserHostAdapterInput = {
         homeDir: input.homeDir,
         systemHomeDir: normalizedSystemHomeDir,
@@ -10192,6 +10348,14 @@ function createDefaultMetabotDaemonHandlers(input) {
                 return (0, commandResult_1.commandFailed)('upload_failed', safeBrowserBridgeErrorMessage(error, 'MetaFile upload failed.'));
             }
         },
+        appSession: appSessionRuntime,
+        llmComplete: (inputLlm) => runProfileLlmCompletion({
+            actorId: inputLlm.actorId,
+            messages: inputLlm.messages,
+            options: inputLlm.options,
+            purpose: inputLlm.purpose,
+        }),
+        audit: (event) => writeBrowserBridgeAudit(event),
         fetch: globalThis.fetch,
         env: process.env,
         onInfrastructureSettingsUpdated: input.onBrowserInfrastructureChanged,
@@ -10393,6 +10557,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     actorId: browserActorId(request),
                     resourceUri: request.resourceUri,
                     kind: request.kind,
+                    ...(request.sessionId ? { sessionId: request.sessionId } : {}),
                 };
                 if (request.payload) {
                     Object.assign(actionRequest, { payload: request.payload });
@@ -10412,6 +10577,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     actorId: browserActorId(request),
                     resourceUri: normalizeText(request.resourceUri),
                     kind: 'metafile-upload',
+                    ...(normalizeText(request.sessionId) ? { sessionId: normalizeText(request.sessionId) } : {}),
                     payload,
                 });
             },
@@ -15003,6 +15169,20 @@ function createDefaultMetabotDaemonHandlers(input) {
     // on its own fast interval; the refund sync loop also runs it inline. Not an
     // HTTP route; ignored by the router.
     handlers.sweepBuyerOrderDeadlines = runBuyerOrderDeadlineSweep;
+    // Attach the resident App/Game Runtime lifecycle so the CLI runtime can
+    // restore sessions and start the group chat listener on daemon start, and
+    // release leases/adapters on daemon shutdown. Not an HTTP route.
+    handlers.startAppSessionRuntime = async () => {
+        const report = await appSessionRuntime.startRuntime();
+        if (!appSessionGroupChatListener.isRunning()) {
+            await appSessionGroupChatListener.start();
+        }
+        return report;
+    };
+    handlers.stopAppSessionRuntime = async () => {
+        appSessionGroupChatListener.stop();
+        await appSessionRuntime.dispose();
+    };
     daemonHandlers = handlers;
     return handlers;
 }

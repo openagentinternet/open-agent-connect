@@ -17,7 +17,20 @@ const infrastructureConfigStore_1 = require("../../core/config/infrastructureCon
 const llmTypes_1 = require("../../core/llm/llmTypes");
 const artifactCache_1 = require("../../core/metaapp/artifactCache");
 const artifactDownload_1 = require("../../core/metaapp/artifactDownload");
+const types_1 = require("../../core/appSession/types");
 const DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
+const LLM_COMPLETE_DEFAULT_TIMEOUT_MS = 120_000;
+const LLM_COMPLETE_MAX_TIMEOUT_MS = 180_000;
+const LLM_COMPLETE_RATE_LIMIT_PER_MINUTE = 6;
+const GRANTED_WRITE_RATE_LIMIT_PER_MINUTE = 12;
+const GRANTED_WRITE_MAX_PAYLOAD_BYTES = 16 * 1024;
+const PERMISSION_CONFIRMATION_TTL_MS = 5 * 60 * 1000;
+const PROTOCOL_GRANT_WHITELIST = new Set([
+    '/protocols/simplegroupcreate',
+    '/protocols/simplegroupjoin',
+    '/protocols/simplegroupchat',
+]);
+const PROTOCOL_GRANT_PATH_PATTERN = /^\/protocols\/[A-Za-z0-9_-]+$/u;
 const PIN_ID_PATTERN = /^[0-9a-f]{64}i\d+$/iu;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -251,6 +264,21 @@ function normalizeOptionalBridgeField(value, fieldName) {
         return { failure: invalidBridgeParams(`metaid.pin.write ${fieldName} must be a single-line string.`) };
     }
     return { value: text };
+}
+function sameAppSessionStartParams(left, right) {
+    const leftBudget = left.budget ?? {};
+    const rightBudget = right.budget ?? {};
+    return left.appId === right.appId
+        && left.sessionType === right.sessionType
+        && left.groupId === right.groupId
+        && left.gameId === right.gameId
+        && left.manifestUri === right.manifestUri
+        && left.rulesHash === right.rulesHash
+        && left.seat === right.seat
+        && left.agentId === right.agentId
+        && (left.ttlMs ?? 86_400_000) === (right.ttlMs ?? 86_400_000)
+        && (leftBudget.llmCalls ?? 500) === (rightBudget.llmCalls ?? 500)
+        && (leftBudget.writes ?? 500) === (rightBudget.writes ?? 500);
 }
 function payloadByteSize(input) {
     return input.encoding === 'base64'
@@ -706,6 +734,12 @@ function createOacBrowserHostAdapter(input) {
         ? Math.floor(Number(input.confirmationTtlMs))
         : DEFAULT_PIN_WRITE_CONFIRMATION_TTL_MS;
     const pendingPinWriteConfirmations = new Map();
+    const pendingPermissionConfirmations = new Map();
+    const pendingAppSessionStarts = new Map();
+    const sessionPermissionGrants = new Map();
+    const llmTimestamps = new Map();
+    const llmInFlight = new Set();
+    const grantedWriteTimestamps = new Map();
     const infrastructureConfigStore = (0, infrastructureConfigStore_1.createInfrastructureConfigStore)(input.systemHomeDir);
     async function resolveActor(actorInput) {
         return input.resolveActorWriteContext(actorSelector(actorInput));
@@ -831,7 +865,30 @@ function createOacBrowserHostAdapter(input) {
         if ('failure' in actor) {
             return actor.failure;
         }
-        const confirmedByHost = consumeMetaIdPinWriteConfirmation({
+        const sessionId = normalizeText(actionInput.sessionId);
+        const requestedOperation = validation.request.operation;
+        const grantKey = `${sessionId}\u0000${actionInput.resourceUri}\u0000${actor.actorId}\u0000${requestedOperation}\u0000${validation.request.path}`;
+        const hasGrant = requestedOperation === 'create' && Boolean(sessionId) && (sessionPermissionGrants.get(sessionId) ?? []).some((grant) => `${grant.sessionId}\u0000${grant.resourceUri}\u0000${grant.actorId}\u0000${grant.operation}\u0000${grant.path}` === grantKey);
+        if (hasGrant) {
+            const resourceKey = normalizeText(actionInput.resourceUri);
+            const activeWrites = (grantedWriteTimestamps.get(resourceKey) ?? []).filter((stamp) => nowMs() - stamp < 60_000);
+            if (activeWrites.length >= GRANTED_WRITE_RATE_LIMIT_PER_MINUTE) {
+                return (0, agent_browser_host_contract_1.browserFailure)('rate_limited', 'Too many granted writes in the last minute.');
+            }
+            if (validation.payloadSize > GRANTED_WRITE_MAX_PAYLOAD_BYTES) {
+                return invalidBridgeParams('Granted write payload exceeds the 16KB limit.');
+            }
+            activeWrites.push(nowMs());
+            grantedWriteTimestamps.set(resourceKey, activeWrites);
+            void Promise.resolve(input.audit?.({
+                type: 'granted_write',
+                actorId: actor.actorId,
+                resourceUri: actionInput.resourceUri,
+                sessionId,
+                path: validation.request.path,
+            })).catch(() => { });
+        }
+        const confirmedByHost = hasGrant || consumeMetaIdPinWriteConfirmation({
             actionInput,
             actor: actor.actor,
             actorId: actor.actorId,
@@ -876,6 +933,142 @@ function createOacBrowserHostAdapter(input) {
             kind: 'metaid-pin-write',
             handled: true,
             data: data,
+        });
+    }
+    function sessionIdForAction(actionInput) {
+        return normalizeText(actionInput.sessionId);
+    }
+    function isPermissionGrant(value) {
+        return browserRecord(value).method === 'metaid.pin.write'
+            && browserRecord(value).operation === 'create'
+            && typeof browserRecord(value).path === 'string'
+            && PROTOCOL_GRANT_PATH_PATTERN.test(String(browserRecord(value).path));
+    }
+    async function runLlmCompleteAction(actionInput) {
+        const payload = readActionPayload(actionInput);
+        const messages = payload.messages;
+        if (!Array.isArray(messages) || messages.length === 0 || messages.some((message) => {
+            const record = browserRecord(message);
+            return !['system', 'user', 'assistant'].includes(String(record.role)) || typeof record.content !== 'string';
+        })) {
+            return invalidBridgeParams('browser.llm.complete requires non-empty text messages.');
+        }
+        const messageBytes = messages.reduce((total, message) => total + Buffer.byteLength(String(browserRecord(message).content), 'utf8'), 0);
+        if (messageBytes > 64 * 1024)
+            return invalidBridgeParams('browser.llm.complete messages exceed the 64KB limit.');
+        if (hasOwn(payload, 'model') || hasOwn(payload, 'endpoint') || hasOwn(payload, 'provider') || hasOwn(payload, 'stream') || hasOwn(payload, 'tools') || hasOwn(payload, 'modalities')) {
+            return invalidBridgeParams('The host selects the local LLM model and configuration.');
+        }
+        const resourceKey = normalizeText(actionInput.resourceUri);
+        const active = (llmTimestamps.get(resourceKey) ?? []).filter((stamp) => nowMs() - stamp < 60_000);
+        if (active.length >= LLM_COMPLETE_RATE_LIMIT_PER_MINUTE || llmInFlight.has(resourceKey)) {
+            return (0, agent_browser_host_contract_1.browserFailure)('rate_limited', 'Local LLM rate limit reached; try again later.');
+        }
+        if (!input.llmComplete)
+            return (0, agent_browser_host_contract_1.browserFailure)('llm_unavailable', 'No local LLM is configured for this host.');
+        const options = browserRecord(payload.options);
+        for (const key of Object.keys(options)) {
+            if (!['temperature', 'maxOutputTokens', 'timeoutMs'].includes(key)) {
+                return invalidBridgeParams('Only temperature, maxOutputTokens, and timeoutMs are supported.');
+            }
+        }
+        if (hasOwn(options, 'temperature') && (typeof options.temperature !== 'number' || !Number.isFinite(options.temperature) || options.temperature < 0 || options.temperature > 2)) {
+            return invalidBridgeParams('temperature must be a number between 0 and 2.');
+        }
+        if (hasOwn(options, 'maxOutputTokens') && (typeof options.maxOutputTokens !== 'number' || !Number.isInteger(options.maxOutputTokens) || options.maxOutputTokens <= 0)) {
+            return invalidBridgeParams('maxOutputTokens must be a positive integer.');
+        }
+        if (hasOwn(options, 'timeoutMs') && (typeof options.timeoutMs !== 'number' || !Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)) {
+            return invalidBridgeParams('timeoutMs must be a positive number.');
+        }
+        const requestedTimeout = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+            ? options.timeoutMs : LLM_COMPLETE_DEFAULT_TIMEOUT_MS;
+        const timeoutMs = Math.min(requestedTimeout, LLM_COMPLETE_MAX_TIMEOUT_MS);
+        llmInFlight.add(resourceKey);
+        let timer;
+        try {
+            const result = await Promise.race([
+                input.llmComplete({
+                    actorId: actorSelector(actionInput) || undefined,
+                    resourceUri: actionInput.resourceUri,
+                    messages: messages,
+                    ...(Object.keys(options).length ? { options } : {}),
+                    ...(normalizeText(payload.purpose) ? { purpose: normalizeText(payload.purpose) } : {}),
+                }),
+                new Promise((_resolve, reject) => {
+                    timer = setTimeout(() => reject(Object.assign(new Error('Local LLM completion timed out.'), { code: 'llm_timeout' })), timeoutMs);
+                }),
+            ]);
+            active.push(nowMs());
+            llmTimestamps.set(resourceKey, active);
+            const data = { text: normalizeText(result.text) };
+            if (normalizeText(result.model))
+                data.model = normalizeText(result.model);
+            if (result.finishReason)
+                data.finishReason = result.finishReason;
+            return (0, agent_browser_host_contract_1.browserSuccess)({ kind: 'llm-complete', handled: true, data: { ...data } });
+        }
+        catch (error) {
+            const code = error instanceof Error && normalizeText(error.code);
+            if (code === 'consent_denied' || code === 'invalid_params' || code === 'rate_limited' || code === 'llm_timeout' || code === 'llm_unavailable') {
+                return (0, agent_browser_host_contract_1.browserFailure)(code, code === 'llm_timeout' ? 'Local LLM completion timed out.' : 'Local LLM completion failed.');
+            }
+            return (0, agent_browser_host_contract_1.browserFailure)('llm_unavailable', 'Local LLM completion failed.');
+        }
+        finally {
+            if (timer)
+                clearTimeout(timer);
+            llmInFlight.delete(resourceKey);
+        }
+    }
+    async function runPermissionsRequestAction(actionInput) {
+        const payload = readActionPayload(actionInput);
+        const sessionId = sessionIdForAction(actionInput);
+        const resourceUri = normalizeText(actionInput.resourceUri);
+        if (!sessionId || !resourceUri)
+            return (0, agent_browser_host_contract_1.browserFailure)('consent_denied', 'A page session and resource are required.');
+        if (payload.revoke === true) {
+            sessionPermissionGrants.delete(sessionId);
+            const actorId = actorSelector(actionInput) || '';
+            void Promise.resolve(input.audit?.({ type: 'permission_revoked', actorId, resourceUri, sessionId })).catch(() => { });
+            return (0, agent_browser_host_contract_1.browserSuccess)({ kind: 'permissions-request', handled: true, data: { revoked: true } });
+        }
+        const actor = await resolveMetaAppBridgeActor(actionInput);
+        if ('failure' in actor)
+            return actor.failure;
+        const actorId = actor.actorId;
+        const rawGrants = Array.isArray(payload.grants) ? payload.grants : [];
+        const grants = rawGrants.filter(isPermissionGrant);
+        if (!rawGrants.length || grants.length !== rawGrants.length)
+            return invalidBridgeParams('Only create metaid.pin.write grants on exact protocol paths are supported.');
+        for (const grant of grants) {
+            if (!PROTOCOL_GRANT_WHITELIST.has(grant.path))
+                return (0, agent_browser_host_contract_1.browserFailure)('consent_denied', `Protocol path is not allowed: ${grant.path}`);
+        }
+        const hostConfirmation = browserRecord(payload.hostConfirmation);
+        if (payload.confirmed === true && normalizeText(hostConfirmation.id) && normalizeText(hostConfirmation.token)) {
+            const id = normalizeText(hostConfirmation.id);
+            const pending = pendingPermissionConfirmations.get(id);
+            const requestedReason = normalizeText(payload.reason);
+            const grantsMatch = pending?.grants.length === grants.length
+                && pending.grants.every((grant, index) => grant.method === grants[index].method && grant.operation === grants[index].operation && grant.path === grants[index].path);
+            if (!pending || pending.expiresAt <= nowMs() || pending.sessionId !== sessionId || pending.resourceUri !== resourceUri || pending.actorId !== actorId || pending.reason !== (requestedReason || undefined) || !grantsMatch || !safeHashEqual(pending.tokenHash, sha256Text(normalizeText(hostConfirmation.token)))) {
+                return (0, agent_browser_host_contract_1.browserFailure)('consent_denied', 'The permission confirmation is invalid or expired.');
+            }
+            pendingPermissionConfirmations.delete(id);
+            sessionPermissionGrants.set(sessionId, pending.grants.map((grant) => ({ ...grant, sessionId, resourceUri, actorId })));
+            void Promise.resolve(input.audit?.({ type: 'permission_granted', actorId, resourceUri, sessionId, paths: pending.grants.map((grant) => grant.path) })).catch(() => { });
+            return (0, agent_browser_host_contract_1.browserSuccess)({ kind: 'permissions-request', handled: true, data: { granted: pending.grants, expiresAt: pending.expiresAt } });
+        }
+        const id = `permission-${(0, node_crypto_1.randomUUID)()}`;
+        const token = (0, node_crypto_1.randomBytes)(32).toString('base64url');
+        const reason = normalizeText(payload.reason);
+        pendingPermissionConfirmations.set(id, { tokenHash: sha256Text(token), actorId, resourceUri, sessionId, grants, ...(reason ? { reason } : {}), expiresAt: nowMs() + PERMISSION_CONFIRMATION_TTL_MS });
+        return (0, agent_browser_host_contract_1.browserManualActionRequired)('manual_action_required', 'Confirm protocol write permissions for this MetaApp.', {
+            data: {
+                confirmation: { actor: actor.actor, grants, ...(reason ? { reason } : {}) },
+                confirmRequest: { resourceUri, kind: 'permissions-request', payload: { grants, ...(reason ? { reason } : {}), confirmed: true, hostConfirmation: { id, token } } },
+            },
         });
     }
     async function runMetaFileUploadAction(actionInput) {
@@ -1149,6 +1342,331 @@ function createOacBrowserHostAdapter(input) {
             },
         });
     }
+    function mapAppSessionRuntimeError(error) {
+        const code = normalizeText(error?.code) || 'internal_error';
+        const message = normalizeText(error?.message) || 'OAC App Session runtime failed.';
+        return (0, agent_browser_host_contract_1.browserFailure)(code, message);
+    }
+    function appSessionActorBinding(actionInput, actor) {
+        return {
+            resourceUri: normalizeText(actionInput.resourceUri),
+            actorId: actor.actorId,
+            actorGlobalMetaId: actor.actor.globalMetaId,
+        };
+    }
+    function validateAppSessionStartPayload(payload) {
+        const requiredFields = [
+            ['appId', payload.appId],
+            ['sessionType', payload.sessionType],
+            ['groupId', payload.groupId],
+            ['gameId', payload.gameId],
+            ['manifestUri', payload.manifestUri],
+            ['rulesHash', payload.rulesHash],
+            ['seat', payload.seat],
+            ['agentId', payload.agentId],
+        ];
+        const params = {};
+        for (const [fieldName, rawValue] of requiredFields) {
+            const value = normalizeText(rawValue);
+            if (!value) {
+                return { ok: false, failure: invalidBridgeParams(`browser.app.session.start ${fieldName} is required.`) };
+            }
+            params[fieldName] = value;
+        }
+        if (normalizeText(payload.sessionType) !== 'agent-game') {
+            return { ok: false, failure: invalidBridgeParams('browser.app.session.start sessionType must be "agent-game".') };
+        }
+        if (payload.ttlMs !== undefined
+            && (!Number.isInteger(payload.ttlMs) || Number(payload.ttlMs) <= 0)) {
+            return { ok: false, failure: invalidBridgeParams('browser.app.session.start ttlMs must be a positive integer.') };
+        }
+        const budget = browserRecord(payload.budget);
+        for (const key of Object.keys(budget)) {
+            if (key !== 'llmCalls' && key !== 'writes') {
+                return { ok: false, failure: invalidBridgeParams('browser.app.session.start budget only supports llmCalls and writes.') };
+            }
+            const value = budget[key];
+            if (value !== undefined && (!Number.isInteger(value) || Number(value) <= 0)) {
+                return { ok: false, failure: invalidBridgeParams(`browser.app.session.start budget.${key} must be a positive integer.`) };
+            }
+        }
+        const paramsResult = params;
+        if (payload.ttlMs !== undefined) {
+            paramsResult.ttlMs = Number(payload.ttlMs);
+        }
+        if (Object.keys(budget).length) {
+            paramsResult.budget = {
+                ...(Number.isInteger(budget.llmCalls) ? { llmCalls: Number(budget.llmCalls) } : {}),
+                ...(Number.isInteger(budget.writes) ? { writes: Number(budget.writes) } : {}),
+            };
+        }
+        return { ok: true, params: paramsResult };
+    }
+    async function runAppSessionStartAction(actionInput) {
+        if (!input.appSession) {
+            return (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC App Session runtime is not configured.');
+        }
+        const payload = readActionPayload(actionInput);
+        const validation = validateAppSessionStartPayload(payload);
+        if (!validation.ok) {
+            return validation.failure;
+        }
+        const actor = await resolveMetaAppBridgeActor(actionInput);
+        if ('failure' in actor) {
+            return actor.failure;
+        }
+        if (validation.params.agentId !== actor.actor.globalMetaId) {
+            return invalidBridgeParams('browser.app.session.start agentId must match the current actor globalMetaId.');
+        }
+        const resourceUri = normalizeText(actionInput.resourceUri);
+        if (!resourceUri) {
+            return invalidBridgeParams('browser.app.session.start requires a resourceUri.');
+        }
+        const binding = appSessionActorBinding(actionInput, actor);
+        const hostConfirmation = browserRecord(payload.hostConfirmation);
+        if (payload.confirmed === true && normalizeText(hostConfirmation.id)) {
+            const id = normalizeText(hostConfirmation.id);
+            const token = normalizeText(hostConfirmation.token);
+            const pending = pendingAppSessionStarts.get(id);
+            const paramsMatch = pending
+                && sameAppSessionStartParams(pending.params, validation.params);
+            if (!pending
+                || pending.expiresAt <= nowMs()
+                || pending.actorId !== actor.actorId
+                || pending.actorGlobalMetaId !== actor.actor.globalMetaId
+                || pending.resourceUri !== resourceUri
+                || !paramsMatch
+                || !safeHashEqual(pending.tokenHash, sha256Text(token))) {
+                return (0, agent_browser_host_contract_1.browserFailure)('consent_denied', 'The app session confirmation is invalid or expired.');
+            }
+            pendingAppSessionStarts.delete(id);
+            try {
+                const session = await input.appSession.start({
+                    ...validation.params,
+                    ...binding,
+                });
+                void Promise.resolve(input.audit?.({
+                    type: 'app_session_consent_confirmed',
+                    actorId: actor.actorId,
+                    resourceUri,
+                    sessionId: session.sessionId,
+                    groupId: session.groupId,
+                    gameId: session.gameId,
+                })).catch(() => undefined);
+                return (0, agent_browser_host_contract_1.browserSuccess)({
+                    kind: 'app-session-start',
+                    handled: true,
+                    data: { session },
+                });
+            }
+            catch (error) {
+                return mapAppSessionRuntimeError(error);
+            }
+        }
+        // First phase: docs/09 validation steps 1-7, then the task authorization card.
+        const preflight = await input.appSession.validateStart({
+            ...validation.params,
+            ...binding,
+        });
+        if (!preflight.ok) {
+            return mapAppSessionRuntimeError(preflight.error);
+        }
+        const issuedAt = nowMs();
+        for (const [id, pending] of pendingAppSessionStarts.entries()) {
+            if (pending.expiresAt <= issuedAt) {
+                pendingAppSessionStarts.delete(id);
+            }
+        }
+        const id = `app-session-${(0, node_crypto_1.randomUUID)()}`;
+        const token = (0, node_crypto_1.randomBytes)(32).toString('base64url');
+        const requestHash = sha256Text(JSON.stringify({
+            actorId: actor.actorId,
+            actorGlobalMetaId: actor.actor.globalMetaId,
+            resourceUri,
+            params: validation.params,
+        }));
+        pendingAppSessionStarts.set(id, {
+            id,
+            tokenHash: sha256Text(token),
+            actorId: actor.actorId,
+            actorGlobalMetaId: actor.actor.globalMetaId,
+            resourceUri,
+            params: validation.params,
+            requestHash,
+            adapterHash: preflight.adapterHash,
+            expiresAt: issuedAt + confirmationTtlMs,
+        });
+        void Promise.resolve(input.audit?.({
+            type: 'app_session_consent_requested',
+            actorId: actor.actorId,
+            resourceUri,
+            groupId: validation.params.groupId,
+            gameId: validation.params.gameId,
+            seat: validation.params.seat,
+            requestHash,
+        })).catch(() => undefined);
+        return (0, agent_browser_host_contract_1.browserManualActionRequired)('manual_action_required', 'Confirm this agent-game session before OAC starts it.', {
+            data: {
+                confirmation: {
+                    actor: actor.actor,
+                    appId: validation.params.appId,
+                    sessionType: validation.params.sessionType,
+                    groupId: validation.params.groupId,
+                    gameId: validation.params.gameId,
+                    manifestUri: validation.params.manifestUri,
+                    rulesHash: validation.params.rulesHash,
+                    adapterHash: preflight.adapterHash,
+                    seat: validation.params.seat,
+                    agentId: validation.params.agentId,
+                    protocolPaths: [...types_1.DEFAULT_AGENT_GAME_PROTOCOL_PATHS],
+                    ttlMs: validation.params.ttlMs ?? 86_400_000,
+                    budget: {
+                        llmCalls: validation.params.budget?.llmCalls ?? 500,
+                        writes: validation.params.budget?.writes ?? 500,
+                    },
+                },
+                confirmRequest: {
+                    resourceUri,
+                    kind: 'app-session-start',
+                    payload: {
+                        ...validation.params,
+                        confirmed: true,
+                        hostConfirmation: { id, token },
+                    },
+                },
+            },
+        });
+    }
+    async function runAppSessionListAction(actionInput) {
+        if (!input.appSession) {
+            return (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC App Session runtime is not configured.');
+        }
+        const actor = await resolveMetaAppBridgeActor(actionInput);
+        if ('failure' in actor) {
+            return actor.failure;
+        }
+        const binding = appSessionActorBinding(actionInput, actor);
+        if (!binding.resourceUri) {
+            return invalidBridgeParams('browser.app.session.list requires a resourceUri.');
+        }
+        const payload = readActionPayload(actionInput);
+        try {
+            const sessions = await input.appSession.list({
+                ...binding,
+                ...(normalizeText(payload.appId) ? { appId: normalizeText(payload.appId) } : {}),
+                ...(normalizeText(payload.status) ? { status: normalizeText(payload.status) } : {}),
+                ...(normalizeText(payload.groupId) ? { groupId: normalizeText(payload.groupId) } : {}),
+            });
+            return (0, agent_browser_host_contract_1.browserSuccess)({
+                kind: 'app-session-list',
+                handled: true,
+                data: { sessions },
+            });
+        }
+        catch (error) {
+            return mapAppSessionRuntimeError(error);
+        }
+    }
+    async function runAppSessionStatusAction(actionInput) {
+        if (!input.appSession) {
+            return (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC App Session runtime is not configured.');
+        }
+        const actor = await resolveMetaAppBridgeActor(actionInput);
+        if ('failure' in actor) {
+            return actor.failure;
+        }
+        const payload = readActionPayload(actionInput);
+        const sessionId = normalizeText(payload.sessionId);
+        if (!sessionId) {
+            return invalidBridgeParams('browser.app.session.status sessionId is required.');
+        }
+        try {
+            const session = await input.appSession.status(sessionId, appSessionActorBinding(actionInput, actor));
+            return (0, agent_browser_host_contract_1.browserSuccess)({
+                kind: 'app-session-status',
+                handled: true,
+                data: { session },
+            });
+        }
+        catch (error) {
+            return mapAppSessionRuntimeError(error);
+        }
+    }
+    async function runAppSessionPauseAction(actionInput) {
+        if (!input.appSession) {
+            return (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC App Session runtime is not configured.');
+        }
+        const actor = await resolveMetaAppBridgeActor(actionInput);
+        if ('failure' in actor) {
+            return actor.failure;
+        }
+        const payload = readActionPayload(actionInput);
+        const sessionId = normalizeText(payload.sessionId);
+        if (!sessionId) {
+            return invalidBridgeParams('browser.app.session.pause sessionId is required.');
+        }
+        try {
+            const session = await input.appSession.pause(sessionId, appSessionActorBinding(actionInput, actor));
+            return (0, agent_browser_host_contract_1.browserSuccess)({
+                kind: 'app-session-pause',
+                handled: true,
+                data: { session },
+            });
+        }
+        catch (error) {
+            return mapAppSessionRuntimeError(error);
+        }
+    }
+    async function runAppSessionResumeAction(actionInput) {
+        if (!input.appSession) {
+            return (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC App Session runtime is not configured.');
+        }
+        const actor = await resolveMetaAppBridgeActor(actionInput);
+        if ('failure' in actor) {
+            return actor.failure;
+        }
+        const payload = readActionPayload(actionInput);
+        const sessionId = normalizeText(payload.sessionId);
+        if (!sessionId) {
+            return invalidBridgeParams('browser.app.session.resume sessionId is required.');
+        }
+        try {
+            const session = await input.appSession.resume(sessionId, appSessionActorBinding(actionInput, actor));
+            return (0, agent_browser_host_contract_1.browserSuccess)({
+                kind: 'app-session-resume',
+                handled: true,
+                data: { session },
+            });
+        }
+        catch (error) {
+            return mapAppSessionRuntimeError(error);
+        }
+    }
+    async function runAppSessionStopAction(actionInput) {
+        if (!input.appSession) {
+            return (0, agent_browser_host_contract_1.browserFailure)('unsupported_method', 'OAC App Session runtime is not configured.');
+        }
+        const actor = await resolveMetaAppBridgeActor(actionInput);
+        if ('failure' in actor) {
+            return actor.failure;
+        }
+        const payload = readActionPayload(actionInput);
+        const sessionId = normalizeText(payload.sessionId);
+        if (!sessionId) {
+            return invalidBridgeParams('browser.app.session.stop sessionId is required.');
+        }
+        try {
+            const session = await input.appSession.stop(sessionId, appSessionActorBinding(actionInput, actor), { releaseSeat: payload.releaseSeat === true });
+            return (0, agent_browser_host_contract_1.browserSuccess)({
+                kind: 'app-session-stop',
+                handled: true,
+                data: { session },
+            });
+        }
+        catch (error) {
+            return mapAppSessionRuntimeError(error);
+        }
+    }
     async function runTrustedAction(actionInput) {
         if (actionInput.kind === 'copy-uri') {
             return copyUriTrustedActionResult(actionInput);
@@ -1158,6 +1676,30 @@ function createOacBrowserHostAdapter(input) {
         }
         if (actionInput.kind === 'metaid-pin-write') {
             return runMetaIdPinWriteAction(actionInput);
+        }
+        if (actionInput.kind === 'llm-complete') {
+            return runLlmCompleteAction(actionInput);
+        }
+        if (actionInput.kind === 'permissions-request') {
+            return runPermissionsRequestAction(actionInput);
+        }
+        if (actionInput.kind === 'app-session-start') {
+            return runAppSessionStartAction(actionInput);
+        }
+        if (actionInput.kind === 'app-session-list') {
+            return runAppSessionListAction(actionInput);
+        }
+        if (actionInput.kind === 'app-session-status') {
+            return runAppSessionStatusAction(actionInput);
+        }
+        if (actionInput.kind === 'app-session-pause') {
+            return runAppSessionPauseAction(actionInput);
+        }
+        if (actionInput.kind === 'app-session-resume') {
+            return runAppSessionResumeAction(actionInput);
+        }
+        if (actionInput.kind === 'app-session-stop') {
+            return runAppSessionStopAction(actionInput);
         }
         const actor = await resolveActor(actionInput);
         if ('failure' in actor)
