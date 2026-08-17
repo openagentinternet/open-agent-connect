@@ -35,6 +35,7 @@ export interface MetabotPaths {
   chatSkillResolutionPath: string;
   profilePublishStatePath: string;
   homepageStatePath: string;
+  dshLlmPath: string;
   bioMdPath: string;
   soulMdPath: string;
   goalMdPath: string;
@@ -144,6 +145,7 @@ function buildMetabotPaths(input: {
   goalMdPath: string;
   roleMdPath: string;
   daemonLockPath: string;
+  dshLlmPath: string;
   llmRoot: string;
   llmRuntimesPath: string;
   llmBindingsPath: string;
@@ -190,6 +192,7 @@ function buildMetabotPaths(input: {
     chatSkillResolutionPath: input.chatSkillResolutionPath,
     profilePublishStatePath: input.profilePublishStatePath,
     homepageStatePath: path.join(input.stateRoot, 'homepage.json'),
+    dshLlmPath: input.dshLlmPath,
     bioMdPath: input.bioMdPath,
     soulMdPath: input.soulMdPath,
     goalMdPath: input.goalMdPath,
@@ -253,6 +256,7 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     chatSkillPolicyPath: path.join(stateRoot, 'chat-skill-policy.json'),
     chatSkillResolutionPath: path.join(stateRoot, 'chat-skill-resolution.json'),
     profilePublishStatePath: path.join(stateRoot, 'profile-publish-state.json'),
+    dshLlmPath: path.join(stateRoot, 'dsh-llm.json'),
     bioMdPath: path.join(profileRoot, 'BIO.md'),
     soulMdPath: path.join(profileRoot, 'SOUL.md'),
     goalMdPath: path.join(profileRoot, 'GOAL.md'),

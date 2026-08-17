@@ -76,6 +76,7 @@ import type {
   MetabotProfileFull,
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
+import { normalizeOptionalDshLlmId } from '../core/bot/dshLlm';
 import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
 import {
   buildPublishedService,
@@ -1039,6 +1040,18 @@ function buildMetabotUpdateInput(input: Record<string, unknown>): UpdateMetabotI
   if (hasOwnField(input, 'homepage')) {
     update.homepage = normalizeMetabotHomepage(input.homepage);
   }
+  if (hasOwnField(input, 'dshLlmProvider')) {
+    update.dshLlmProvider = normalizeOptionalDshLlmId(input.dshLlmProvider);
+  }
+  if (hasOwnField(input, 'dshLlmModel')) {
+    update.dshLlmModel = normalizeOptionalDshLlmId(input.dshLlmModel);
+  }
+  if (hasOwnField(input, 'dshLlmFallbackProvider')) {
+    update.dshLlmFallbackProvider = normalizeOptionalDshLlmId(input.dshLlmFallbackProvider);
+  }
+  if (hasOwnField(input, 'dshLlmFallbackModel')) {
+    update.dshLlmFallbackModel = normalizeOptionalDshLlmId(input.dshLlmFallbackModel);
+  }
   return update;
 }
 
@@ -1079,6 +1092,18 @@ function buildMetabotCreateInput(input: Record<string, unknown>): CreateMetabotI
       throw new Error('allowChatSkills can be configured after MetaBot creation from the Bot detail page.');
     }
     createInput.allowChatSkills = allowChatSkills;
+  }
+  if (hasOwnField(input, 'dshLlmProvider')) {
+    createInput.dshLlmProvider = normalizeOptionalDshLlmId(input.dshLlmProvider);
+  }
+  if (hasOwnField(input, 'dshLlmModel')) {
+    createInput.dshLlmModel = normalizeOptionalDshLlmId(input.dshLlmModel);
+  }
+  if (hasOwnField(input, 'dshLlmFallbackProvider')) {
+    createInput.dshLlmFallbackProvider = normalizeOptionalDshLlmId(input.dshLlmFallbackProvider);
+  }
+  if (hasOwnField(input, 'dshLlmFallbackModel')) {
+    createInput.dshLlmFallbackModel = normalizeOptionalDshLlmId(input.dshLlmFallbackModel);
   }
   return createInput;
 }

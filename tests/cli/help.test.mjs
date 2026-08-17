@@ -315,6 +315,10 @@ test('runCli prints machine-readable help for bot profile/config/runtime leaf co
     avatarDataUrl: 'optional data URL avatar, empty string clears the avatar',
     primaryProvider: 'optional primary LLM provider id or null',
     fallbackProvider: 'optional fallback LLM provider id or null',
+    dshLlmProvider: 'optional DSH LLM provider id or null',
+    dshLlmModel: 'optional DSH LLM model id or null',
+    dshLlmFallbackProvider: 'optional DSH fallback LLM provider id or null',
+    dshLlmFallbackModel: 'optional DSH fallback LLM model id or null',
     allowChatSkills: ['optional allowed private chat skill ids'],
     homepage: {
       uri: 'optional metafile://... or metaapp://... homepage target',
@@ -1136,12 +1140,12 @@ test('runCli prints skills resolve help for `metabot skills resolve --help`', as
   assert.equal(exitCode, 0);
 
   const output = stdout.join('');
-  assert.match(output, /^Usage:\s+metabot skills resolve --skill <skill-name> --format <json\|markdown> \[--host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy>\]/m);
+  assert.match(output, /^Usage:\s+metabot skills resolve --skill <skill-name> --format <json\|markdown> \[--host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy\|dsh>\]/m);
   assert.match(output, /^Required flags:/m);
   assert.match(output, /--skill <skill-name>\s+Base skill id to resolve, such as metabot-network-manage\./m);
   assert.match(output, /--format <json\|markdown>\s+Output shape to render\./m);
   assert.match(output, /^Optional flags:/m);
-  assert.match(output, /--host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy>\s+Optional compatibility override\./m);
+  assert.match(output, /--host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy\|dsh>\s+Optional compatibility override\./m);
   assert.match(output, /^Success shape:/m);
   assert.match(output, /requestedHost/);
   assert.match(output, /resolutionMode/);
@@ -1161,7 +1165,7 @@ test('runCli prints machine-readable skills resolve help for `metabot skills res
   assert.deepEqual(output.commandPath, ['skills', 'resolve']);
   assert.equal(output.command, 'metabot skills resolve');
   assert.equal(output.summary, 'Render one resolved skill contract using the shared-default host or an explicit compatibility host override.');
-  assert.equal(output.usage, 'metabot skills resolve --skill <skill-name> --format <json|markdown> [--host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|codebuddy|zcode|workbuddy>]');
+  assert.equal(output.usage, 'metabot skills resolve --skill <skill-name> --format <json|markdown> [--host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|codebuddy|zcode|workbuddy|dsh>]');
   assert.deepEqual(output.requiredFlags, [
     {
       flag: '--skill',
@@ -1177,7 +1181,7 @@ test('runCli prints machine-readable skills resolve help for `metabot skills res
   assert.deepEqual(output.optionalFlags, [
     {
       flag: '--host',
-      value: '<claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|codebuddy|zcode|workbuddy>',
+      value: '<claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|codebuddy|zcode|workbuddy|dsh>',
       description: 'Optional compatibility override. Omit to render the shared-default contract.',
     },
     {

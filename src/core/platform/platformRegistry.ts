@@ -14,7 +14,8 @@ export type PlatformId =
   | 'kiro'
   | 'codebuddy'
   | 'zcode'
-  | 'workbuddy';
+  | 'workbuddy'
+  | 'dsh';
 
 export type RuntimePlatformId = PlatformId;
 
@@ -448,6 +449,17 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
       backendFactoryExport: 'codeBuddyBackendFactory',
       launchCommand: 'codebuddy -p <prompt> --output-format stream-json --dangerously-skip-permissions',
       multicaReferencePath: 'agent/workbuddy.go',
+    },
+  },
+  {
+    id: 'dsh',
+    displayName: 'DeepSeek Harness',
+    logoPath: '/ui/assets/platforms/dsh.svg',
+    skills: {
+      roots: [
+        { id: 'dsh-home', kind: 'global', homeEnv: 'DSH_HOME', path: '~/.dsh/skills', autoBind: 'when-parent-exists' },
+        { id: 'dsh-project', kind: 'project', path: '.dsh/skills', autoBind: 'manual' },
+      ],
     },
   },
 ];

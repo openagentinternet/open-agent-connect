@@ -70,6 +70,10 @@ test('createMetabotProfile creates a profile workspace with empty editable perso
   assert.equal(created.goal, '');
   assert.equal(created.primaryProvider, null);
   assert.equal(created.fallbackProvider, null);
+  assert.equal(created.dshLlmProvider, null);
+  assert.equal(created.dshLlmModel, null);
+  assert.equal(created.dshLlmFallbackProvider, null);
+  assert.equal(created.dshLlmFallbackModel, null);
   assert.deepEqual(created.allowChatSkills, []);
 
   for (const relativePath of ['ROLE.md', 'SOUL.md', 'GOAL.md', 'llmbindings.json']) {
@@ -83,6 +87,45 @@ test('createMetabotProfile creates a profile workspace with empty editable perso
 
   const profiles = await listMetabotProfiles(systemHomeDir);
   assert.deepEqual(profiles.map((profile) => profile.slug), ['alice-bot']);
+});
+
+test('createMetabotProfile and updateMetabotProfile persist DSH LLM fields locally', async () => {
+  const systemHomeDir = await createSystemHome();
+  const created = await createMetabotProfile(systemHomeDir, {
+    name: 'DSH Bot',
+    dshLlmProvider: 'deepseek',
+    dshLlmModel: 'deepseek-chat',
+    dshLlmFallbackProvider: 'openai',
+    dshLlmFallbackModel: 'gpt-4.1',
+  });
+  const paths = resolveMetabotPaths(created.homeDir);
+
+  assert.equal(created.dshLlmProvider, 'deepseek');
+  assert.equal(created.dshLlmModel, 'deepseek-chat');
+  assert.equal(created.dshLlmFallbackProvider, 'openai');
+  assert.equal(created.dshLlmFallbackModel, 'gpt-4.1');
+  assert.equal(created.primaryProvider, null);
+
+  const persisted = JSON.parse(await readFile(paths.dshLlmPath, 'utf8'));
+  assert.equal(persisted.dshLlmProvider, 'deepseek');
+  assert.equal(persisted.dshLlmModel, 'deepseek-chat');
+
+  const updated = await updateMetabotProfile(systemHomeDir, created.slug, {
+    dshLlmProvider: 'openai',
+    dshLlmModel: 'gpt-4.1',
+    dshLlmFallbackProvider: null,
+    dshLlmFallbackModel: null,
+  });
+  assert.equal(updated.dshLlmProvider, 'openai');
+  assert.equal(updated.dshLlmModel, 'gpt-4.1');
+  assert.equal(updated.dshLlmFallbackProvider, null);
+  assert.equal(updated.dshLlmFallbackModel, null);
+
+  const shown = await getMetabotProfile(systemHomeDir, created.slug);
+  assert.equal(shown.dshLlmProvider, 'openai');
+  assert.equal(shown.dshLlmModel, 'gpt-4.1');
+  assert.equal(shown.dshLlmFallbackProvider, null);
+  assert.equal(shown.dshLlmFallbackModel, null);
 });
 
 test('createMetabotProfileFromIdentity and updateMetabotProfile persist public bio locally', async () => {

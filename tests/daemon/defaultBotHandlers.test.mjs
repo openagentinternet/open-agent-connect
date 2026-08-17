@@ -1387,6 +1387,49 @@ test('default bot createProfile rejects missing or duplicate names', async (t) =
   assert.equal(duplicate.code, 'name_taken');
 });
 
+test('default bot createProfile and updateProfile persist DSH LLM fields without publishing them', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-dsh-llm-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const writeCalls = [];
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    discoverLlmRuntimes: async () => ({ runtimes: [], errors: [] }),
+    ...makeChainedCreateOverrides(writeCalls),
+  });
+
+  const created = await handlers.bot.createProfile({
+    name: 'DSH Settings Bot',
+    host: 'dsh',
+    dshLlmProvider: 'deepseek',
+    dshLlmModel: 'deepseek-chat',
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.data.profile.dshLlmProvider, 'deepseek');
+  assert.equal(created.data.profile.dshLlmModel, 'deepseek-chat');
+  assert.equal(created.data.profile.dshLlmFallbackProvider, null);
+  assert.equal(writeCalls.some((call) => String(call.path || '').includes('dsh')), false);
+
+  const shown = await handlers.bot.getProfile({ slug: created.data.profile.slug });
+  assert.equal(shown.ok, true);
+  assert.equal(shown.data.profile.dshLlmProvider, 'deepseek');
+  assert.equal(shown.data.profile.dshLlmModel, 'deepseek-chat');
+
+  const updated = await handlers.bot.updateProfile({
+    slug: created.data.profile.slug,
+    dshLlmFallbackProvider: 'openai',
+    dshLlmFallbackModel: 'gpt-4.1',
+  });
+  assert.equal(updated.ok, true);
+  assert.equal(updated.data.profile.dshLlmProvider, 'deepseek');
+  assert.equal(updated.data.profile.dshLlmFallbackProvider, 'openai');
+  assert.equal(updated.data.profile.dshLlmFallbackModel, 'gpt-4.1');
+});
+
 test('default bot createProfile bootstraps a chained identity before indexing the local profile', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-', 'active-bot');
   t.after(async () => {

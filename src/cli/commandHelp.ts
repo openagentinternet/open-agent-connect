@@ -274,15 +274,19 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['bot', 'create'],
     summary: 'Create one local MetaBot profile, optionally preferring the current host LLM provider.',
-    usage: 'metabot bot create --name <name> [--host <provider>]',
+    usage: 'metabot bot create --name <name> [--host <provider>] [--dsh-llm-provider <id>] [--dsh-llm-model <id>] [--dsh-llm-fallback-provider <id>] [--dsh-llm-fallback-model <id>]',
     requiredFlags: [
       { flag: '--name', value: '<name>', description: 'Human-facing name for the new local MetaBot profile.' },
     ],
     optionalFlags: [
-      { flag: '--host', value: '<provider>', description: 'Current host provider id. It becomes primary when its healthy local runtime is available; the fallback remains activity-based.' },
+      { flag: '--host', value: '<provider>', description: 'Current host provider id. It becomes primary when its healthy local runtime is available; the fallback remains activity-based. Use dsh to bind skills without selecting an OAC LLM executor.' },
+      { flag: '--dsh-llm-provider', value: '<id>', description: 'DSH LLM provider id stored on the Bot profile. Ignored by OAC host runtimes.' },
+      { flag: '--dsh-llm-model', value: '<id>', description: 'DSH LLM model id stored on the Bot profile. Ignored by OAC host runtimes.' },
+      { flag: '--dsh-llm-fallback-provider', value: '<id>', description: 'Optional DSH fallback LLM provider id.' },
+      { flag: '--dsh-llm-fallback-model', value: '<id>', description: 'Optional DSH fallback LLM model id.' },
       HELP_JSON_FLAG,
     ],
-    examples: ['metabot bot create --name "Alice" --host codex'],
+    examples: ['metabot bot create --name "Alice" --host codex', 'metabot bot create --name "Alice" --host dsh --dsh-llm-provider openai --dsh-llm-model gpt-4.1'],
   },
   {
     commandPath: ['bot', 'update'],
@@ -301,6 +305,10 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       avatarDataUrl: 'optional data URL avatar, empty string clears the avatar',
       primaryProvider: 'optional primary LLM provider id or null',
       fallbackProvider: 'optional fallback LLM provider id or null',
+      dshLlmProvider: 'optional DSH LLM provider id or null',
+      dshLlmModel: 'optional DSH LLM model id or null',
+      dshLlmFallbackProvider: 'optional DSH fallback LLM provider id or null',
+      dshLlmFallbackModel: 'optional DSH fallback LLM model id or null',
       allowChatSkills: ['optional allowed private chat skill ids'],
       homepage: {
         uri: 'optional metafile://... or metaapp://... homepage target',
@@ -2328,7 +2336,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Update Open Agent Connect. Defaults to npm-first package update and registry-driven oac install.',
     usage: 'metabot system update [--host <codex|claude-code|openclaw|zcode|workbuddy>] [--target-version <tag>] [--dry-run]',
     optionalFlags: [
-      { flag: '--host', value: '<codex|claude-code|openclaw|zcode|workbuddy>', description: 'Legacy release-pack update target. Omit for npm-first 14-platform registry update.' },
+      { flag: '--host', value: '<codex|claude-code|openclaw|zcode|workbuddy>', description: 'Legacy release-pack update target. Omit for npm-first 15-platform registry update.' },
       { flag: '--target-version', value: '<tag>', description: 'Optional explicit version. npm mode accepts tags such as latest or v0.2.7.' },
       { flag: '--dry-run', description: 'Print the update plan without downloading, installing, or rebinding.' },
       HELP_JSON_FLAG,

@@ -46,7 +46,18 @@ export async function runBotCommand(args: string[], context: CliRuntimeContext):
     if (!handler) {
       return commandFailed('not_implemented', 'Bot profile create handler is not configured.');
     }
-    return handler({ name, ...(host ? { host } : {}) });
+    const dshLlmProvider = readFlagValue(args, '--dsh-llm-provider');
+    const dshLlmModel = readFlagValue(args, '--dsh-llm-model');
+    const dshLlmFallbackProvider = readFlagValue(args, '--dsh-llm-fallback-provider');
+    const dshLlmFallbackModel = readFlagValue(args, '--dsh-llm-fallback-model');
+    return handler({
+      name,
+      ...(host ? { host } : {}),
+      ...(dshLlmProvider ? { dshLlmProvider } : {}),
+      ...(dshLlmModel ? { dshLlmModel } : {}),
+      ...(dshLlmFallbackProvider ? { dshLlmFallbackProvider } : {}),
+      ...(dshLlmFallbackModel ? { dshLlmFallbackModel } : {}),
+    });
   }
 
   if (subcommand === 'update') {

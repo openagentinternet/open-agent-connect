@@ -83,7 +83,7 @@ test('runOac help shows primary bare install flow and registry platform host lis
   assert.match(result.stdout, /oac install/);
   assert.match(result.stdout, /oac doctor/);
   assert.match(result.stdout, /uninstall\s+Remove OAC shim/);
-  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy>/);
+  assert.match(result.stdout, /oac install --host <claude-code\|codex\|copilot\|opencode\|openclaw\|hermes\|gemini\|pi\|cursor\|kimi\|kiro\|codebuddy\|zcode\|workbuddy\|dsh>/);
 });
 
 test('runOac installs shared skills, metabot shim, and codex host bindings for an explicit host', async (t) => {
@@ -341,6 +341,22 @@ test('runOac install can force-bind WorkBuddy and CodeBuddy-compatible skill roo
   await assertSymlinkPointsTo(
     path.join(systemHome, '.codebuddy', 'skills', 'metabot-help'),
     path.join(systemHome, '.metabot', 'host-skills', 'workbuddy', 'metabot-help'),
+  );
+});
+
+test('runOac install --host dsh force-creates DSH skill-bind roots without an OAC executor', async (t) => {
+  const { systemHome } = await createSystemHome('oac-install-force-dsh-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const result = await runOacCli(systemHome, ['install', '--host', 'dsh']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.host, 'dsh');
+  assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'dsh' && root.rootId === 'dsh-home' && root.status === 'bound'));
+  await assertSymlinkPointsTo(
+    path.join(systemHome, '.dsh', 'skills', 'metabot-help'),
+    path.join(systemHome, '.metabot', 'host-skills', 'dsh', 'metabot-help'),
   );
 });
 

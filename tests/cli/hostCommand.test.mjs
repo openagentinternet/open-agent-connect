@@ -69,6 +69,8 @@ function hostHomeEnvName(host) {
       return 'CLAUDE_HOME';
     case 'openclaw':
       return 'OPENCLAW_HOME';
+    case 'dsh':
+      return 'DSH_HOME';
     case 'gemini':
       return '';
     default:
@@ -84,6 +86,8 @@ function defaultHostHome(systemHome, host) {
       return path.join(systemHome, '.claude');
     case 'openclaw':
       return path.join(systemHome, '.openclaw');
+    case 'dsh':
+      return path.join(systemHome, '.dsh');
     case 'gemini':
       return path.join(systemHome, '.gemini');
     default:
@@ -166,6 +170,24 @@ for (const host of ['codex', 'claude-code', 'openclaw']) {
     );
   });
 }
+
+test('runCli supports `metabot host bind-skills --host dsh` into ~/.dsh/skills', async (t) => {
+  const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-dsh-');
+  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
+
+  const sharedSkillRoot = await createSharedSkill(systemHome, 'metabot-help');
+  const result = await runHostCli(homeDir, ['host', 'bind-skills', '--host', 'dsh']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.data.host, 'dsh');
+  assert.equal(result.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, 'dsh'));
+  assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'dsh' && root.status === 'bound'));
+  await assertSymlinkPointsTo(
+    path.join(expectedHostSkillRoot(systemHome, 'dsh'), 'metabot-help'),
+    sharedSkillRoot,
+  );
+});
 
 test('runCli supports registry-derived `metabot host bind-skills --host gemini`', async (t) => {
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-gemini-');
@@ -384,7 +406,7 @@ test('runCli prints machine-readable help for `metabot host bind-skills --help -
   const output = JSON.parse(stdout.join(''));
   assert.deepEqual(output.commandPath, ['host', 'bind-skills']);
   assert.equal(output.command, 'metabot host bind-skills');
-  assert.equal(output.usage, 'metabot host bind-skills --host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|codebuddy|zcode|workbuddy>');
+  assert.equal(output.usage, 'metabot host bind-skills --host <claude-code|codex|copilot|opencode|openclaw|hermes|gemini|pi|cursor|kimi|kiro|codebuddy|zcode|workbuddy|dsh>');
   assert.ok(output.successFields.includes('hostSkillRoot'));
   assert.ok(output.failureSemantics.includes('Fails with shared_skills_missing when ~/.metabot/skills has no shared metabot-* directories to bind.'));
 });

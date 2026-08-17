@@ -52,6 +52,12 @@ import {
   type ProfilePublishPayloadInput,
 } from './profilePublishState';
 import { normalizePublicMetabotPersona } from './metabotPersona';
+import {
+  mergeDshLlmBinding,
+  readDshLlmBinding,
+  writeDshLlmBinding,
+  type DshLlmBinding,
+} from './dshLlm';
 
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
@@ -68,6 +74,10 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
   fallbackProvider?: LlmProvider | null;
   allowChatSkills: string[];
   homepage?: MetabotHomepage;
+  dshLlmProvider?: string | null;
+  dshLlmModel?: string | null;
+  dshLlmFallbackProvider?: string | null;
+  dshLlmFallbackModel?: string | null;
 }
 
 export interface CreateMetabotInput {
@@ -80,6 +90,10 @@ export interface CreateMetabotInput {
   primaryProvider?: LlmProvider | null;
   fallbackProvider?: LlmProvider | null;
   allowChatSkills?: string[];
+  dshLlmProvider?: string | null;
+  dshLlmModel?: string | null;
+  dshLlmFallbackProvider?: string | null;
+  dshLlmFallbackModel?: string | null;
 }
 
 export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
@@ -101,6 +115,10 @@ export interface UpdateMetabotInfoInput {
   fallbackProvider?: LlmProvider | null;
   allowChatSkills?: string[];
   homepage?: MetabotHomepage | null;
+  dshLlmProvider?: string | null;
+  dshLlmModel?: string | null;
+  dshLlmFallbackProvider?: string | null;
+  dshLlmFallbackModel?: string | null;
 }
 
 export interface SyncMetabotInfoToChainOptions {
@@ -199,6 +217,22 @@ async function writeChatSkillPolicy(filePath: string, allowChatSkills: string[])
     allowChatSkills,
     updatedAt: new Date().toISOString(),
   }, null, 2)}\n`, 'utf8');
+}
+
+function dshLlmPatchFromInput(input: DshLlmBinding): DshLlmBinding {
+  const patch: DshLlmBinding = {};
+  if (input.dshLlmProvider !== undefined) patch.dshLlmProvider = input.dshLlmProvider;
+  if (input.dshLlmModel !== undefined) patch.dshLlmModel = input.dshLlmModel;
+  if (input.dshLlmFallbackProvider !== undefined) patch.dshLlmFallbackProvider = input.dshLlmFallbackProvider;
+  if (input.dshLlmFallbackModel !== undefined) patch.dshLlmFallbackModel = input.dshLlmFallbackModel;
+  return patch;
+}
+
+function hasDshLlmPatch(patch: DshLlmBinding): boolean {
+  return Object.prototype.hasOwnProperty.call(patch, 'dshLlmProvider')
+    || Object.prototype.hasOwnProperty.call(patch, 'dshLlmModel')
+    || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackProvider')
+    || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackModel');
 }
 
 function validateProvider(value: unknown): LlmProvider | null {
@@ -398,7 +432,7 @@ async function readProfileProviderBindings(profile: IdentityProfileRecord): Prom
 
 async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<MetabotProfileFull> {
   const paths = resolveMetabotPaths(profile.homeDir);
-  const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage] = await Promise.all([
+  const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage, dshLlm] = await Promise.all([
     readTextFile(paths.bioMdPath),
     readTextFile(paths.roleMdPath),
     readTextFile(paths.soulMdPath),
@@ -407,6 +441,7 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     readProfileProviderBindings(profile),
     readChatSkillPolicy(paths.chatSkillPolicyPath),
     readMetabotHomepage(paths.homepageStatePath),
+    readDshLlmBinding(paths.dshLlmPath),
   ]);
   const persona = normalizePublicMetabotPersona({ role, soul, goal });
 
@@ -421,6 +456,10 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     fallbackProvider: providerBindings.fallbackProvider,
     allowChatSkills,
     ...(homepage ? { homepage } : {}),
+    dshLlmProvider: dshLlm.dshLlmProvider ?? null,
+    dshLlmModel: dshLlm.dshLlmModel ?? null,
+    dshLlmFallbackProvider: dshLlm.dshLlmFallbackProvider ?? null,
+    dshLlmFallbackModel: dshLlm.dshLlmFallbackModel ?? null,
   };
 }
 
@@ -494,6 +533,10 @@ export async function createMetabotProfile(
   if (avatar) {
     await writeTextFile(resolveAvatarPath(resolvedHome.homeDir), avatar);
   }
+  const dshLlmPatch = dshLlmPatchFromInput(input);
+  if (hasDshLlmPatch(dshLlmPatch)) {
+    await writeDshLlmBinding(paths.dshLlmPath, dshLlmPatch);
+  }
 
   const profile = await upsertIdentityProfile({
     systemHomeDir,
@@ -554,6 +597,10 @@ export function buildMetabotProfileDraftFromIdentity(input: CreateMetabotFromIde
     primaryProvider: input.primaryProvider === undefined ? null : validateProvider(input.primaryProvider),
     fallbackProvider: input.fallbackProvider === undefined ? null : validateProvider(input.fallbackProvider),
     allowChatSkills: input.allowChatSkills === undefined ? [] : normalizeAllowChatSkills(input.allowChatSkills),
+    dshLlmProvider: input.dshLlmProvider === undefined ? null : input.dshLlmProvider,
+    dshLlmModel: input.dshLlmModel === undefined ? null : input.dshLlmModel,
+    dshLlmFallbackProvider: input.dshLlmFallbackProvider === undefined ? null : input.dshLlmFallbackProvider,
+    dshLlmFallbackModel: input.dshLlmFallbackModel === undefined ? null : input.dshLlmFallbackModel,
   };
 }
 
@@ -585,6 +632,10 @@ export async function createMetabotProfileFromIdentity(
   ]);
   if (draft.avatarDataUrl) {
     await writeTextFile(resolveAvatarPath(draft.homeDir), draft.avatarDataUrl);
+  }
+  const dshLlmPatch = dshLlmPatchFromInput(input);
+  if (hasDshLlmPatch(dshLlmPatch)) {
+    await writeDshLlmBinding(paths.dshLlmPath, dshLlmPatch);
   }
 
   const profile = await upsertIdentityProfile({
@@ -869,6 +920,11 @@ export async function updateMetabotProfile(
     } else {
       await writeMetabotHomepage(paths.homepageStatePath, homepage);
     }
+  }
+  const dshLlmPatch = dshLlmPatchFromInput(input);
+  if (hasDshLlmPatch(dshLlmPatch)) {
+    const currentDshLlm = await readDshLlmBinding(paths.dshLlmPath);
+    await writeDshLlmBinding(paths.dshLlmPath, mergeDshLlmBinding(currentDshLlm, dshLlmPatch));
   }
 
   if (writeProviderBindings) {

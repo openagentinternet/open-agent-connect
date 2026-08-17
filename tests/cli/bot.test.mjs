@@ -98,6 +98,69 @@ test('runCli dispatches bot profile mutations with actor selectors', async () =>
   ]);
 });
 
+test('runCli forwards DSH LLM fields on bot create and update', async () => {
+  const tempDir = await mkdtempTempRoot('metabot-cli-bot-dsh-');
+  const payloadFile = path.join(tempDir, 'dsh.json');
+  await writeFile(payloadFile, JSON.stringify({
+    dshLlmProvider: 'openai',
+    dshLlmModel: 'gpt-4.1',
+    dshLlmFallbackProvider: null,
+    dshLlmFallbackModel: null,
+  }), 'utf8');
+
+  const calls = [];
+  const createExitCode = await runCli([
+    'bot', 'create', '--name', 'Alice', '--host', 'dsh',
+    '--dsh-llm-provider', 'deepseek',
+    '--dsh-llm-model', 'deepseek-chat',
+    '--dsh-llm-fallback-provider', 'openai',
+    '--dsh-llm-fallback-model', 'gpt-4.1',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      bot: {
+        createProfile: async (input) => {
+          calls.push(['create', input]);
+          return commandSuccess({ profile: input.name });
+        },
+      },
+    },
+  });
+  const updateExitCode = await runCli(['bot', 'update', '--from', 'alice', '--payload-file', payloadFile], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies: {
+      bot: {
+        updateProfile: async (input) => {
+          calls.push(['update', input]);
+          return commandSuccess({ profile: input.slug });
+        },
+      },
+    },
+  });
+
+  assert.equal(createExitCode, 0);
+  assert.equal(updateExitCode, 0);
+  assert.deepEqual(calls, [
+    ['create', {
+      name: 'Alice',
+      host: 'dsh',
+      dshLlmProvider: 'deepseek',
+      dshLlmModel: 'deepseek-chat',
+      dshLlmFallbackProvider: 'openai',
+      dshLlmFallbackModel: 'gpt-4.1',
+    }],
+    ['update', {
+      slug: 'alice',
+      dshLlmProvider: 'openai',
+      dshLlmModel: 'gpt-4.1',
+      dshLlmFallbackProvider: null,
+      dshLlmFallbackModel: null,
+    }],
+  ]);
+});
+
 test('runCli dispatches bot config, wallet, backup, runtime, and session commands', async () => {
   const tempDir = await mkdtempTempRoot('metabot-cli-bot-config-');
   const configFile = path.join(tempDir, 'config.json');
