@@ -23,7 +23,14 @@ metabot host bind-skills --host dsh
 After bind, DSH should see host-native `metabot-*` entries while the canonical shared content still lives in `~/.metabot/skills/`.
 If the current DSH session does not immediately pick up the new skills, start a fresh session.
 
-The DSH plugin install path (`dsh plugin --profile web add open-agent-connect-dsh`) runs this bind as part of host apply. End-user plugin install is documented when that package ships.
+The DSH plugin package lives in `dsh-plugin/` (npm name `open-agent-connect-dsh`, Cordis name `oac-dsh`). Host apply runs this bind. Developer mount:
+
+```bash
+cd dsh-plugin && npm install && npm run build
+dsh plugin --profile web add "link:$(pwd)"
+```
+
+End-user `dsh plugin add open-agent-connect-dsh` is documented when that package ships.
 
 ## Common Resolve Check
 

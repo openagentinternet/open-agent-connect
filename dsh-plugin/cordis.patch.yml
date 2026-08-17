@@ -1,0 +1,12 @@
+# open-agent-connect-dsh bundle patch
+#
+# Installed through the official DSH CLI:
+#
+#   dsh plugin --profile web add open-agent-connect-dsh
+#
+# The CLI reconciles `dsh.profile.bundles` against installed packages and
+# appends this insert (one host row). The client half is declared through
+# `dsh.client` in package.json, not a second patch row.
+- insert:
+    - id: oac-dsh
+      name: 'open-agent-connect-dsh'

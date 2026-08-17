@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dsh-plugin/node_modules/
+dsh-plugin/lib/
 release/packs/
 .metabot/
 .claude/

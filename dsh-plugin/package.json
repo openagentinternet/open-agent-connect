@@ -1,0 +1,76 @@
+{
+  "name": "open-agent-connect-dsh",
+  "version": "0.3.6",
+  "description": "DSH profile-bundle plugin for Open Agent Connect: four Settings sections, one MetaBot = one agent preset, CLI-backed UI.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openagentinternet/open-agent-connect.git",
+    "directory": "dsh-plugin"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "scripts/install.sh",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rm -rf lib && tsc -p tsconfig.json && tsdown",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent-presets": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "open-agent-connect": ">=0.3.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "open-agent-connect": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.6.0"
+  }
+}
