@@ -125,6 +125,17 @@ export interface CliDependencies {
       from?: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  conversations?: {
+    list?: (input: { local: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    messages?: (input: {
+      local: string;
+      peer: string;
+      limit?: number;
+      before?: number;
+      after?: number;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    guidance?: (input: { local: string; peer: string; guidance: string }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     uploadLarge?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

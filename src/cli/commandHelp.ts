@@ -2255,6 +2255,58 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: ['metabot chat auto-reply config --from alice --enabled true --max-turns 15 --cooldown-ms 300000'],
   },
   {
+    commandPath: ['conversations'],
+    summary: 'A2A conversation commands: peer conversation summaries, messages, and guidance.',
+    usage: 'metabot conversations <subcommand>',
+    subcommands: [
+      { name: 'list', summary: 'List peer conversation summaries for one local MetaBot.' },
+      { name: 'messages', summary: 'Show messages of one peer conversation.' },
+      { name: 'guidance', summary: 'Guide the next local turn of one peer conversation.' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['conversations', 'list'],
+    summary: 'List peer conversation summaries for one local MetaBot.',
+    usage: 'metabot conversations list --local <bot-slug> [--limit <n>]',
+    requiredFlags: [{ flag: '--local', value: '<bot-slug>', description: 'Local MetaBot actor.' }],
+    optionalFlags: [
+      { flag: '--limit', value: '<n>', description: 'Maximum conversation count. Defaults to 50.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['localBot', 'conversations'],
+    examples: ['metabot conversations list --local alice --limit 20'],
+  },
+  {
+    commandPath: ['conversations', 'messages'],
+    summary: 'Show messages of one peer conversation.',
+    usage: 'metabot conversations messages --local <bot-slug> --peer <globalMetaId> [--limit <n>] [--before <ms>] [--after <ms>]',
+    requiredFlags: [
+      { flag: '--local', value: '<bot-slug>', description: 'Local MetaBot actor.' },
+      { flag: '--peer', value: '<globalMetaId>', description: 'Remote peer globalMetaId.' },
+    ],
+    optionalFlags: [
+      { flag: '--limit', value: '<n>', description: 'Maximum message count. Defaults to 50.' },
+      { flag: '--before', value: '<ms>', description: 'Only messages before this timestamp.' },
+      { flag: '--after', value: '<ms>', description: 'Only messages after this timestamp.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['localBot', 'peerBot', 'messages', 'pagination'],
+    examples: ['metabot conversations messages --local alice --peer gm-remote-bob --limit 20'],
+  },
+  {
+    commandPath: ['conversations', 'guidance'],
+    summary: 'Guide the next local turn of one peer conversation.',
+    usage: 'metabot conversations guidance --local <bot-slug> --peer <globalMetaId> --guidance <text>',
+    requiredFlags: [
+      { flag: '--local', value: '<bot-slug>', description: 'Local MetaBot actor.' },
+      { flag: '--peer', value: '<globalMetaId>', description: 'Remote peer globalMetaId.' },
+      { flag: '--guidance', value: '<text>', description: 'Guidance for the next local turn.' },
+    ],
+    successFields: ['messageId'],
+    examples: ['metabot conversations guidance --local alice --peer gm-remote-bob --guidance "Answer in Chinese"'],
+  },
+  {
     commandPath: ['trace'],
     summary: 'Trace commands for following remote delegation progress and inspecting final artifacts.',
     usage: 'metabot trace <subcommand>',
