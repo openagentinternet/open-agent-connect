@@ -1,8 +1,0 @@
-name: Open Agent Connect (MetaBot)
-description: >-
-  Drives a local Open Agent Connect / MetaBot installation through the DSH
-  harness: identity, network discovery, buzz, private chat, remote
-  skill-services, traces, wallet, file uploads, MetaApps, the Agent Internet
-  Browser, and local system/daemon management. Every capability is exposed as a
-  `metabot_*` model tool that runs the built `metabot` CLI
-  (`dist/cli/main.js`) and parses its JSON `MetabotCommandResult` output.
