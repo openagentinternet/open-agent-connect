@@ -144,7 +144,7 @@ async function assertSymlinkPointsTo(entryPath, targetPath) {
   assert.equal(path.resolve(path.dirname(entryPath), resolved), targetPath);
 }
 
-for (const host of ['codex', 'claude-code', 'openclaw']) {
+for (const host of ['codex', 'claude-code', 'openclaw', 'dsh']) {
   test(`runCli supports \`metabot host bind-skills --host ${host}\``, async (t) => {
     const { homeDir, systemHome } = await createProfileHome(`metabot-cli-host-${host}-`);
     t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
@@ -168,26 +168,12 @@ for (const host of ['codex', 'claude-code', 'openclaw']) {
       path.join(expectedHostSkillRoot(systemHome, host), 'metabot-help'),
       sharedSkillRoot,
     );
+    const catalog = await fs.readdir(expectedHostSkillRoot(systemHome, host));
+    assert.ok(catalog.includes('metabot-help'));
+    assert.ok(catalog.includes('metabot-network-directory'));
+    assert.ok(catalog.every((name) => name.startsWith('metabot-')));
   });
 }
-
-test('runCli supports `metabot host bind-skills --host dsh` into ~/.dsh/skills', async (t) => {
-  const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-dsh-');
-  t.after(async () => fs.rm(systemHome, { recursive: true, force: true }));
-
-  const sharedSkillRoot = await createSharedSkill(systemHome, 'metabot-help');
-  const result = await runHostCli(homeDir, ['host', 'bind-skills', '--host', 'dsh']);
-
-  assert.equal(result.exitCode, 0);
-  assert.equal(result.payload.ok, true);
-  assert.equal(result.payload.data.host, 'dsh');
-  assert.equal(result.payload.data.hostSkillRoot, expectedHostSkillRoot(systemHome, 'dsh'));
-  assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'dsh' && root.status === 'bound'));
-  await assertSymlinkPointsTo(
-    path.join(expectedHostSkillRoot(systemHome, 'dsh'), 'metabot-help'),
-    sharedSkillRoot,
-  );
-});
 
 test('runCli supports registry-derived `metabot host bind-skills --host gemini`', async (t) => {
   const { homeDir, systemHome } = await createProfileHome('metabot-cli-host-gemini-');

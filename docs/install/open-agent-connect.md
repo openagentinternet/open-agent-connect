@@ -135,6 +135,11 @@ Supported platforms:
 - `zcode` - ZCode
 - `workbuddy` - WorkBuddy
 
+DeepSeek Harness (`dsh`) is a skill-bind host only. It is not in the runtime
+list above. OAC never discovers or spawns a `dsh` binary. Install the DSH plugin
+with `dsh plugin --profile web add open-agent-connect-dsh`, then follow
+`docs/hosts/dsh.md`.
+
 Runtime discovery requires a real CLI executable. The daemon first checks
 explicit path overrides, then the daemon `PATH`, then the user's login shell
 path, then known app-bundled CLI paths for platforms that ship a local CLI
@@ -199,6 +204,7 @@ Host-native roots used by the built-in binder:
 - `CodeBuddy`: `$HOME/.codebuddy/skills`
 - `ZCode`: `$HOME/.zcode/skills`
 - `WorkBuddy`: `$HOME/.workbuddy/skills` and `$HOME/.codebuddy/skills`
+- `DeepSeek Harness`: `${DSH_HOME:-$HOME/.dsh}/skills` (skill-bind only; not an OAC LLM executor)
 - Shared standard root: `$HOME/.agents/skills`
 
 On Windows, `$HOME` in this guide means the resolved user home. `oac install`
@@ -406,6 +412,7 @@ metabot host bind-skills --host openclaw
 metabot host bind-skills --host gemini
 metabot host bind-skills --host zcode
 metabot host bind-skills --host workbuddy
+metabot host bind-skills --host dsh
 ```
 
 This keeps one canonical shared skill root while exposing the same `metabot-*`

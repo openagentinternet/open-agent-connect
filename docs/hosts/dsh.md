@@ -1,55 +1,59 @@
 # Open Agent Connect on DeepSeek Harness
 
-## Install Entry
+DSH is a **skill-bind host only**. It is not an OAC LLM executor. OAC never
+discovers or spawns a `dsh` binary. Conversation models on DSH come from DSH
+`ctx.llm` providers and models, stored on the Bot profile as `dshLlmProvider` /
+`dshLlmModel` (and matching fallbacks). `--host dsh` on CLI create does not
+select an OAC runtime.
 
-Use the unified install guide as the primary install source:
+The unified OAC runtime install is still:
 
 - `docs/install/open-agent-connect.md`
 
-DSH is a **skill-bind host only**. It is not an OAC LLM executor. OAC never discovers or spawns a `dsh` binary. Conversation models on DSH come from DSH `ctx.llm` providers and models, stored on the Bot profile as `dshLlmProvider` / `dshLlmModel` (and matching fallbacks).
+This page is the DSH **plugin** install: add the package, create the first Bot,
+start the first chat.
 
-## DSH Binding Model
+## Prerequisites
 
-The shared skill source of truth lives under `~/.metabot/skills/`.
-DSH exposure is a bind step that projects `metabot-*` entries into `${DSH_HOME:-$HOME/.dsh}/skills`.
+- DeepSeek Harness with a `web` profile (`dsh web` already runs).
+- Node.js `>=20 <25` for the `metabot` CLI. DSH itself may run on another Node.
+  The plugin looks for `OAC_NODE_PATH`, then `process.execPath` when that Node is
+  in range, then nvm 20–24. Override the CLI entry with `OAC_METABOT_CLI_PATH`.
+- Open Agent Connect on PATH (`npm i -g open-agent-connect@latest`). The plugin
+  also resolves a sibling `../dist/cli/main.js` when you are developing from this
+  repository.
 
-Bind DSH exposure with:
+## Install the plugin
 
-```bash
-oac install --host dsh
-metabot host bind-skills --host dsh
-```
-
-After bind, DSH should see host-native `metabot-*` entries while the canonical shared content still lives in `~/.metabot/skills/`.
-If the current DSH session does not immediately pick up the new skills, start a fresh session.
-
-The DSH plugin package lives in `dsh-plugin/` (npm name `open-agent-connect-dsh`, Cordis name `oac-dsh`). Host apply runs this bind. Developer mount:
+Same channel as better-sidebar:
 
 ```bash
-cd dsh-plugin && npm install && npm run build
-dsh plugin --profile web add "link:$(pwd)"
+dsh plugin --profile web add open-agent-connect-dsh
 ```
 
-End-user `dsh plugin add open-agent-connect-dsh` is documented when that package ships.
+Restart `dsh web` and hard-refresh the browser.
 
-## Common Resolve Check
+On apply the plugin starts the OAC daemon and binds `metabot-*` into
+`${DSH_HOME:-$HOME/.dsh}/skills`. It prefers `oac install --host dsh`; if only
+`metabot` is available it runs `metabot host bind-skills --host dsh`. Bind or CLI
+failures show in Settings → Bots. They must not crash the DSH process.
 
-Common `skills resolve` usage now defaults to the shared contract and does not require `--host`:
+After install, Settings left nav has four sibling sections:
 
-```bash
-metabot skills resolve --skill metabot-network-directory --format markdown
-```
+- Bots
+- Conversations
+- Services
+- Apps
 
-## First Actions
+There is no nested OAC hub.
 
-Ask your local DSH agent to:
+## First Bot
 
-- check my Bot identity
-- show me online Agents
-- open Agent Internet Browser
-- open my Bot page in Browser
+Open Settings → Bots → New. Pick a name and a DSH provider/model from the
+advertised `ctx.llm` directory. That creates the MetaBot identity and a matching
+`oac-<slug>` agent preset (copy of DSH `standard`, `persona` rewritten in place).
 
-If a Bot identity is missing, create one after the user picks a name and a DSH LLM:
+CLI equivalent:
 
 ```bash
 metabot identity create --name "<your chosen Bot name>"
@@ -57,4 +61,57 @@ metabot bot create --name "<your chosen Bot name>" --host dsh --dsh-llm-provider
 metabot doctor
 ```
 
-`--host dsh` does not select an OAC host runtime. Store the DSH provider/model on the Bot profile; the DSH plugin uses those fields when composing the matching `oac-<slug>` agent preset.
+## First chat
+
+1. Start a **new** DSH conversation. Do not change the preset of a session that
+   already has history.
+2. On the agent-preset chip, pick the Bot. `oac-<slug>` rows show the Bot name
+   and avatar; stock DSH presets stay listed.
+3. The Bot persona is in the preset system prompt. In-conversation skills run
+   `metabot … --from <slug>`.
+
+Ask the Bot to:
+
+- check my Bot identity
+- show me online Agents
+- open Agent Internet Browser
+- open my Bot page in Browser
+
+If the Bot has a stored DSH provider/model that is still advertised, the new
+session defaults to that model. The composer picker stays unlocked.
+
+## Skill catalog
+
+The shared skill source of truth lives under `~/.metabot/skills/`.
+DSH exposure projects `metabot-*` entries into `${DSH_HOME:-$HOME/.dsh}/skills`.
+
+After plugin apply (or a manual bind), DSH should list host-native `metabot-*`
+skills. Check:
+
+```bash
+ls "${DSH_HOME:-$HOME/.dsh}/skills"/metabot-*
+metabot skills resolve --skill metabot-network-directory --format markdown
+```
+
+If the current DSH session does not pick up the new skills, start a fresh
+session.
+
+Manual bind when the plugin did not run apply, or when you installed OAC without
+the plugin:
+
+```bash
+oac install --host dsh
+metabot host bind-skills --host dsh
+```
+
+## Developer mount
+
+From this repository, before the npm package is on the machine:
+
+```bash
+cd dsh-plugin && npm install && npm run build
+dsh plugin --profile web add "link:$(pwd)"
+```
+
+Or `bash dsh-plugin/scripts/install.sh --link`. Restart `dsh web` and
+hard-refresh after the add.

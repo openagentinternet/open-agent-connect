@@ -353,11 +353,18 @@ test('runOac install --host dsh force-creates DSH skill-bind roots without an OA
   assert.equal(result.exitCode, 0);
   assert.equal(result.payload.ok, true);
   assert.equal(result.payload.data.host, 'dsh');
-  assert.ok(result.payload.data.boundRoots.some((root) => root.platformId === 'dsh' && root.rootId === 'dsh-home' && root.status === 'bound'));
+  const dshRoot = result.payload.data.boundRoots.find((root) => root.platformId === 'dsh' && root.rootId === 'dsh-home');
+  assert.ok(dshRoot);
+  assert.equal(dshRoot.status, 'bound');
+  assert.ok(dshRoot.boundSkills.includes('metabot-help'));
+  assert.ok(dshRoot.boundSkills.every((name) => name.startsWith('metabot-')));
   await assertSymlinkPointsTo(
     path.join(systemHome, '.dsh', 'skills', 'metabot-help'),
     path.join(systemHome, '.metabot', 'host-skills', 'dsh', 'metabot-help'),
   );
+  const catalog = await fs.readdir(path.join(systemHome, '.dsh', 'skills'));
+  assert.ok(catalog.includes('metabot-help'));
+  assert.ok(catalog.some((name) => name.startsWith('metabot-')));
 });
 
 test('runOac install rejects removed Trae host support', async (t) => {
