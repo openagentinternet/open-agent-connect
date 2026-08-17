@@ -169,10 +169,18 @@ export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
 export { validateCreatePayload } from './bots-input.js'
 export { buildPersonaPrompt, parseBotListData } from './persona.js'
 export {
-  generatePreset,
+  advertisedModelForBot,
+  chipDisplayName,
+  filterSelectablePresets,
   isOacPresetId,
-  presetDir,
+  modelSelectionToApply,
   presetIdForSlug,
+  shouldApplyStagedPreset,
+  slugFromPresetId,
+} from './chip-logic.js'
+export {
+  generatePreset,
+  presetDir,
   reconcilePresets,
   removePreset,
   STANDARD_PRESET_ID,

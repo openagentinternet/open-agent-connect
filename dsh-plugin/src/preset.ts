@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
+import { isOacPresetId, presetIdForSlug } from './chip-logic.js'
 import type { AgentPresetsLike, HostContext } from './context-types.js'
 import { buildPersonaPrompt, parseBotListData, type BotPersonaInput } from './persona.js'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
@@ -17,15 +18,12 @@ export const STANDARD_PRESET_ID = 'standard'
 export const USER_PRESET_DIR = '.agent-presets'
 export const COMPOSITION_FILE = 'agent.cordis.yml'
 export const METADATA_FILE = 'preset.yml'
-export const PRESET_ID_PREFIX = 'oac-'
 
-export function presetIdForSlug(slug: string): string {
-  return `${PRESET_ID_PREFIX}${slug}`
-}
-
-export function isOacPresetId(id: string): boolean {
-  return id.startsWith(PRESET_ID_PREFIX) && id.length > PRESET_ID_PREFIX.length
-}
+export {
+  isOacPresetId,
+  presetIdForSlug,
+  PRESET_ID_PREFIX,
+} from './chip-logic.js'
 
 export function presetDir(ctx: HostContext, presetId: string): string {
   const fromGet = ctx.get?.('dshHomePath')

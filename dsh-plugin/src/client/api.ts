@@ -17,6 +17,7 @@ export type BotRow = {
   soul?: string
   goal?: string
   bio?: string
+  avatarDataUrl?: string
   allowChatSkills?: string[]
   dshLlmProvider?: string | null
   dshLlmModel?: string | null

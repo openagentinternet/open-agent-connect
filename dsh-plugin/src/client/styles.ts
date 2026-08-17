@@ -12,3 +12,16 @@ export const BOTS_CSS = `
 .oac-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .oac-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
 `
+
+export const PRESETS_CSS = `
+.oac-preset-seat { display: inline-flex; align-items: center; gap: 4px; max-width: min(100%, 240px); min-height: 28px; padding: 0 8px; border: none; border-radius: 16px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.oac-preset-seat:not(:disabled):hover, .oac-preset-seat[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-preset-seat:disabled { cursor: default; color: var(--dsw-alias-label-quaternary); }
+.oac-preset-seat-icon { flex: none; color: var(--dsw-alias-label-primary); }
+.oac-preset-seat-chevron { flex: none; color: var(--dsw-alias-label-caption); }
+.oac-preset-seat-item { display: flex; flex-direction: column; gap: 2px; max-width: 280px; }
+.oac-preset-seat-item-name { font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); }
+.oac-preset-seat-item-desc { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-caption); white-space: normal; }
+.oac-preset-seat-item-icon { flex: none; }
+.oac-preset-avatar.oac-preset-seat-icon, .oac-preset-avatar.oac-preset-seat-item-icon { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
+`
