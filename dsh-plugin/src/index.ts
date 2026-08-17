@@ -11,6 +11,7 @@ import type { HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse }
 import { emptyHealth, type HealthPayload } from './health.js'
 import { apiMethod, readJsonBody, writeJson } from './http.js'
 import { reconcilePresets } from './preset.js'
+import { dispatchSection } from './sections.js'
 import { isTrustedApiRequest } from './trust-fence.js'
 
 /** Cordis plugin name (patch id `oac-dsh`). */
@@ -73,6 +74,8 @@ async function dispatchPost(
   if (method === 'llm/directory') {
     return { ok: true, state: 'success', data: await listLlmDirectory(ctx) }
   }
+  const section = await dispatchSection(method, payload)
+  if (section !== undefined) return section
   return { ok: false, state: 'failed', code: 'not-found', message: `unknown oac API method "${method}"` }
 }
 
@@ -178,6 +181,7 @@ export {
   shouldApplyStagedPreset,
   slugFromPresetId,
 } from './chip-logic.js'
+export { dispatchSection } from './sections.js'
 export {
   generatePreset,
   presetDir,

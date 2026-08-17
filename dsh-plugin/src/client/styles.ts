@@ -11,6 +11,12 @@ export const BOTS_CSS = `
 .oac-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .oac-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .oac-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+.oac-split { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 2fr); gap: 12px; }
+.oac-messages { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow: auto; }
+.oac-msg-in, .oac-msg-out { padding: 6px 8px; border-radius: 8px; font-size: 13px; white-space: pre-wrap; }
+.oac-msg-in { background: var(--dsh-border, rgba(127,127,127,.18)); }
+.oac-msg-out { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.28)); align-self: flex-end; }
+.oac-card[data-active='true'] { outline: 1px solid var(--dsw-alias-label-primary, currentColor); }
 `
 
 export const PRESETS_CSS = `

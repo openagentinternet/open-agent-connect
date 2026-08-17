@@ -1,8 +1,7 @@
 /**
- * Browser half of open-agent-connect-dsh: locale dictionaries, the Bots
- * settings section (`oac-bots`), and the new-session preset chip. Does not
- * shadow Settings → Agent presets. Conversations / Services / Apps sections
- * register in a later round.
+ * Browser half of open-agent-connect-dsh: locale dictionaries, four Settings
+ * sections, and the new-session preset chip. Does not shadow Settings →
+ * Agent presets.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -11,16 +10,25 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 import { api } from './api.ts'
+import { AppsPanel } from './AppsPanel.tsx'
 import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
+import { ConversationsPanel } from './ConversationsPanel.tsx'
+import { appEn, APP_NS, appZh, type AppsLocaleKey } from './locale-apps.ts'
+import { convEn, CONV_NS, convZh, type ConversationsLocaleKey } from './locale-conversations.ts'
 import { en, NS, zh, type BotsLocaleKey } from './locale.ts'
+import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.ts'
 import type { SeatApi, SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
+import { ServicesPanel } from './ServicesPanel.tsx'
 import { BOTS_CSS, PRESETS_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     'settings.oac.bots': BotsLocaleKey
+    'settings.oac.conversations': ConversationsLocaleKey
+    'settings.oac.services': ServicesLocaleKey
+    'settings.oac.apps': AppsLocaleKey
   }
 }
 
@@ -34,8 +42,14 @@ export function apply(ctx: ClientContext): void {
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'oac-dsh: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'oac-dsh: bots dictionary')
+  ctx.effect(() => ctx.locale.register(CONV_NS, { zh: convZh, en: convEn }), 'oac-dsh: conversations dictionary')
+  ctx.effect(() => ctx.locale.register(SVC_NS, { zh: svcZh, en: svcEn }), 'oac-dsh: services dictionary')
+  ctx.effect(() => ctx.locale.register(APP_NS, { zh: appZh, en: appEn }), 'oac-dsh: apps dictionary')
   const t = ctx.locale.bind(NS)
+  const tConv = ctx.locale.bind(CONV_NS)
+  const tSvc = ctx.locale.bind(SVC_NS)
+  const tApps = ctx.locale.bind(APP_NS)
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'oac-bots',
@@ -50,6 +64,48 @@ export function apply(ctx: ClientContext): void {
       llmDirectory: () => api.llmDirectory(),
     }),
   }, BotPanel))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'oac-conversations',
+    order: 21,
+    label: () => tConv('nav'),
+    locale: CONV_NS,
+    inject: () => ({
+      bots: () => api.list(),
+      conversations: (from: string) => api.chatConversations(from),
+      messages: (from: string, conversationId: string) => api.chatMessages(from, conversationId),
+      send: (from: string, to: string, content: string) => api.chatPrivate(from, to, content),
+    }),
+  }, ConversationsPanel))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'oac-services',
+    order: 22,
+    label: () => tSvc('nav'),
+    locale: SVC_NS,
+    inject: () => ({
+      bots: () => api.list(),
+      owned: (from: string) => api.servicesOwned(from),
+      orders: (from: string, serviceId: string) => api.servicesOrders(from, serviceId),
+      publish: (from: string, payload: Record<string, unknown>) => api.servicesPublish(from, payload),
+      revoke: (from: string, serviceId: string) => api.servicesRevoke(from, serviceId),
+      call: (from: string, request: Record<string, unknown>, confirm?: boolean) =>
+        api.servicesCall(from, request, confirm),
+    }),
+  }, ServicesPanel))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'oac-apps',
+    order: 23,
+    label: () => tApps('nav'),
+    locale: APP_NS,
+    inject: () => ({
+      bots: () => api.list(),
+      list: (from: string) => api.metaappList(from),
+      publish: (from: string, payload: Record<string, unknown>) => api.metaappPublish(from, payload),
+      remove: (from: string, targetPinId: string) => api.metaappDelete(from, targetPinId),
+    }),
+  }, AppsPanel))
 
   ctx.inject(['slots', 'conversation', 'sessions'], (scope: ClientContext) => {
     const connection = ctx.get('connection') as { api: SeatApi }

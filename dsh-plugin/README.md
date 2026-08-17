@@ -6,7 +6,7 @@ DSH profile-bundle plugin for Open Agent Connect. Installed like better-sidebar:
 dsh plugin --profile web add open-agent-connect-dsh
 ```
 
-After a DSH restart, Settings left nav gains a **Bots** section (`oac-bots`). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible). Conversations, Services, and Apps sections land in later rounds.
+After a DSH restart, Settings left nav gains four sibling sections: **Bots**, **Conversations**, **Services**, and **Apps**. New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
 
 ## Developer mount
 
@@ -29,6 +29,9 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 |---|---|---|
 | GET or POST | `/oac/api/health` | `{ cliPath, daemon, skillBind }` |
 | POST | `/oac/api/who` | `metabot identity who` JSON envelope |
+| POST | `/oac/api/chat/*` | `metabot chat conversations`, `messages`, `private` |
+| POST | `/oac/api/services/*` | `metabot services owned`, `publish`, `call` |
+| POST | `/oac/api/metaapp/*` | `metabot metaapp list`, `publish`, `delete` |
 
 The host process is the only process that talks to `metabot`. The client half does not spawn CLI.
 
