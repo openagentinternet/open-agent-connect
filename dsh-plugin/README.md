@@ -6,7 +6,7 @@ DSH profile-bundle plugin for Open Agent Connect. Installed like better-sidebar:
 dsh plugin --profile web add open-agent-connect-dsh
 ```
 
-After a DSH restart, Settings left nav gains four independent sections (Bots, Conversations, Services, Apps). Round 2 of this package ships the dual-face skeleton, CLI resolution, skill bind on host apply, and a fenced ping route. The four Settings panels land in later rounds.
+After a DSH restart, Settings left nav gains a **Bots** section (`oac-bots`). Conversations, Services, and Apps sections land in later rounds. Round 2 of this package shipped the dual-face skeleton; Round 3 added per-bot `oac-<slug>` presets.
 
 ## Developer mount
 

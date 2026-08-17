@@ -2,14 +2,14 @@
  * Open Agent Connect host plugin for DeepSeek Harness.
  *
  * Dual-face package: this file is the Node half (CLI bridge + fenced HTTP
- * routes). The browser half is `src/client/index.ts`. Round 2 mounts the
- * ping/health surface only; Settings sections land in later rounds.
+ * routes). The browser half is `src/client/index.ts`.
  */
 import { bootstrapHealth } from './bootstrap.js'
+import { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import type { HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { emptyHealth, type HealthPayload } from './health.js'
-import { apiMethod, writeJson } from './http.js'
+import { apiMethod, readJsonBody, writeJson } from './http.js'
 import { reconcilePresets } from './preset.js'
 import { isTrustedApiRequest } from './trust-fence.js'
 
@@ -17,8 +17,7 @@ import { isTrustedApiRequest } from './trust-fence.js'
 export const name = 'oac-dsh'
 
 /**
- * `agentPresets` / `llm` are consumed in later rounds; declaring them now
- * keeps composition stable. `webServer` + `webRuntime` are the trust seam.
+ * `agentPresets` and `llm` are required. `webServer` + `webRuntime` are the trust seam.
  */
 export const inject = ['webServer', 'webRuntime', 'agentPresets', 'llm']
 
@@ -32,6 +31,49 @@ function warn(ctx: HostContext, message: string): void {
 
 async function handleWho(): Promise<MetabotCommandResult> {
   return runMetabot(['identity', 'who'], { timeoutMs: PING_TIMEOUT_MS })
+}
+
+async function dispatchPost(
+  ctx: HostContext,
+  method: string,
+  payload: unknown,
+): Promise<MetabotCommandResult> {
+  if (method === 'who') {
+    return handleWho()
+  }
+  if (method === 'bots/list') {
+    return runMetabot(['bot', 'list'], { timeoutMs: PING_TIMEOUT_MS })
+  }
+  if (method === 'bots/show') {
+    const slug = typeof (payload as { slug?: unknown })?.slug === 'string'
+      ? (payload as { slug: string }).slug.trim()
+      : ''
+    if (!slug) return { ok: false, state: 'failed', code: 'missing_slug', message: 'slug is required' }
+    return runMetabot(['bot', 'show', '--from', slug])
+  }
+  if (method === 'bots/create') {
+    return createBot(ctx, payload)
+  }
+  if (method === 'bots/update') {
+    const body = payload as { slug?: unknown; patch?: unknown }
+    const slug = typeof body?.slug === 'string' ? body.slug.trim() : ''
+    if (!slug) return { ok: false, state: 'failed', code: 'missing_slug', message: 'slug is required' }
+    const patch = body.patch !== null && typeof body.patch === 'object' && !Array.isArray(body.patch)
+      ? body.patch as Record<string, unknown>
+      : {}
+    return updateBot(ctx, slug, patch)
+  }
+  if (method === 'bots/delete') {
+    const slug = typeof (payload as { slug?: unknown })?.slug === 'string'
+      ? (payload as { slug: string }).slug.trim()
+      : ''
+    if (!slug) return { ok: false, state: 'failed', code: 'missing_slug', message: 'slug is required' }
+    return deleteBot(ctx, slug)
+  }
+  if (method === 'llm/directory') {
+    return { ok: true, state: 'success', data: await listLlmDirectory(ctx) }
+  }
+  return { ok: false, state: 'failed', code: 'not-found', message: `unknown oac API method "${method}"` }
 }
 
 function registerApi(ctx: HostContext, getHealth: () => HealthPayload): () => void {
@@ -63,21 +105,20 @@ function registerApi(ctx: HostContext, getHealth: () => HealthPayload): () => vo
         writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
         return
       }
-      if (method === 'who') {
-        try {
-          writeJson(res, 200, await handleWho())
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          writeJson(res, 500, {
-            ok: false,
-            state: 'failed',
-            code: error instanceof CliBridgeError ? 'cli_bridge' : 'internal',
-            message,
-          })
-        }
-        return
+      try {
+        const payload = await readJsonBody(req)
+        const result = await dispatchPost(ctx, method, payload)
+        const status = result.code === 'not-found' ? 404 : 200
+        writeJson(res, status, result)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        writeJson(res, 500, {
+          ok: false,
+          state: 'failed',
+          code: error instanceof CliBridgeError ? 'cli_bridge' : 'internal',
+          message,
+        })
       }
-      writeJson(res, 404, { ok: false, error: { code: 'not-found', message: `unknown oac API method "${method}"` } })
     },
   })
 }
@@ -124,6 +165,8 @@ export { parseMetabotStdout, resolveCli, resolveMetabotCliPath, runMetabot } fro
 export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'
 export { bootstrapHealth } from './bootstrap.js'
+export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
+export { validateCreatePayload } from './bots-input.js'
 export { buildPersonaPrompt, parseBotListData } from './persona.js'
 export {
   generatePreset,

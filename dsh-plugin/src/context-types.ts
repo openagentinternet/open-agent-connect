@@ -46,6 +46,11 @@ export interface AgentPresetsLike {
   list(): Promise<ReadonlyArray<{ id: string }>>
 }
 
+export interface LlmLike {
+  listProviders(): ReadonlyArray<{ id: string; name?: string }>
+  listModels(provider: string): Promise<ReadonlyArray<{ id: string; name?: string }>>
+}
+
 /** Host plugin context: webserver/trust seam plus inject targets for later rounds. */
 export interface HostContext {
   webServer: PluginWebServer
@@ -53,6 +58,7 @@ export interface HostContext {
   logger?: PluginLogger
   effect(fn: () => void | (() => void), label?: string): void
   agentPresets?: AgentPresetsLike
+  llm?: LlmLike
   get?(key: string): unknown
   dshHomePath?: (...segments: string[]) => string
 }
