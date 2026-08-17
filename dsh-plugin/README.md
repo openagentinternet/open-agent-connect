@@ -32,6 +32,8 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 
 The host process is the only process that talks to `metabot`. The client half does not spawn CLI.
 
+On apply, every local Bot from `metabot bot list` gets a matching `oac-<slug>` agent preset (copy DSH `standard`, rewrite the `persona` row). Delete removes that preset. Non-`oac-*` presets are left alone.
+
 ## Layout
 
 - Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`

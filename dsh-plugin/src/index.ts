@@ -10,6 +10,7 @@ import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bri
 import type { HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { emptyHealth, type HealthPayload } from './health.js'
 import { apiMethod, writeJson } from './http.js'
+import { reconcilePresets } from './preset.js'
 import { isTrustedApiRequest } from './trust-fence.js'
 
 /** Cordis plugin name (patch id `oac-dsh`). */
@@ -97,6 +98,23 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       health.error = error instanceof Error ? error.message : String(error)
       warn(ctx, health.error)
     }
+    if (ctx.agentPresets !== undefined && health.cliPath !== null) {
+      try {
+        const reconciled = await reconcilePresets(ctx)
+        health.presets = {
+          ok: true,
+          message: `${reconciled.createdOrUpdated.length} bots, ${reconciled.removed.length} removed`,
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        health.presets = { ok: false, message }
+        health.ok = false
+        health.error = [health.error, `presets: ${message}`].filter(Boolean).join('; ')
+        warn(ctx, health.error)
+      }
+    } else if (ctx.agentPresets === undefined) {
+      health.presets = { ok: false, message: 'agentPresets not available' }
+    }
   }
   ctx.effect(() => registerApi(ctx, () => health), 'oac-dsh: /oac/api routes')
 }
@@ -106,3 +124,13 @@ export { parseMetabotStdout, resolveCli, resolveMetabotCliPath, runMetabot } fro
 export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'
 export { bootstrapHealth } from './bootstrap.js'
+export { buildPersonaPrompt, parseBotListData } from './persona.js'
+export {
+  generatePreset,
+  isOacPresetId,
+  presetDir,
+  presetIdForSlug,
+  reconcilePresets,
+  removePreset,
+  STANDARD_PRESET_ID,
+} from './preset.js'

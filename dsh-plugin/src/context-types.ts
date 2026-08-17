@@ -40,12 +40,21 @@ export interface PluginLogger {
   info?(message: string): void
 }
 
+export interface AgentPresetsLike {
+  copy(from: string, id: string, name?: string): Promise<void>
+  remove(id: string): Promise<void>
+  list(): Promise<ReadonlyArray<{ id: string }>>
+}
+
 /** Host plugin context: webserver/trust seam plus inject targets for later rounds. */
 export interface HostContext {
   webServer: PluginWebServer
   webRuntime: PluginWebRuntime
   logger?: PluginLogger
   effect(fn: () => void | (() => void), label?: string): void
+  agentPresets?: AgentPresetsLike
+  get?(key: string): unknown
+  dshHomePath?: (...segments: string[]) => string
 }
 
 /** Optional apply config (tests skip CLI bootstrap so they cannot start a user daemon). */

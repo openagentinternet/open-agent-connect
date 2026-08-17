@@ -12,6 +12,7 @@ export type HealthPayload = {
   nodeVersion: string | null
   daemon: StepStatus
   skillBind: StepStatus
+  presets: StepStatus
   error?: string
 }
 
@@ -24,6 +25,7 @@ export function emptyHealth(): HealthPayload {
     nodeVersion: null,
     daemon: { ok: false },
     skillBind: { ok: false },
+    presets: { ok: false },
   }
 }
 
