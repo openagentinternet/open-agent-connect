@@ -9,7 +9,7 @@ export const BOTS_CSS = `
 .oac-card-list { display: flex; flex-direction: column; gap: 8px; }
 .oac-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
 .oac-tabs button[data-active="true"] { font-weight: 600; }
-.oac-form { display: flex; flex-direction: column; gap: 10px; }
+.oac-form { display: flex; flex-direction: column; gap: 12px; }
 .oac-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .oac-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .oac-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
@@ -29,10 +29,10 @@ export const BOTS_CSS = `
 .oac-bot-card:hover { border-color: var(--dsw-alias-label-dimmed); }
 .oac-bot-main { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 14px 16px 12px; }
 .oac-bot-avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+.oac-bot-avatar-sm { width: 28px; height: 28px; }
 .oac-bot-avatar-fallback { display: inline-flex; align-items: center; justify-content: center; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); font-size: 14px; font-weight: 600; }
-.oac-bot-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.oac-bot-name { font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oac-bot-id { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-dimmed); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-bot-name { flex: 1; min-width: 0; font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-bot-bio { margin: 0 16px 12px; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .oac-bot-model { margin: 0 16px 12px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-bot-foot { display: flex; justify-content: flex-end; gap: 2px; padding: 6px 10px; border-top: 1px solid var(--dsw-alias-border-l2); }
 .oac-icon-btn { position: relative; appearance: none; border: 0; border-radius: 7px; padding: 6px; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; display: inline-flex; align-items: center; }
@@ -40,6 +40,39 @@ export const BOTS_CSS = `
 .oac-icon-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -1px; }
 .oac-icon-btn::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; background: var(--dsw-alias-label-primary); color: var(--dsw-alias-bg-layer-3); font-size: 11px; line-height: 17px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s; }
 .oac-icon-btn:hover::after, .oac-icon-btn:focus-visible::after { opacity: 1; }
+
+/* Form vocabulary from the DSH settings panels: field label above the
+   control, input/select tokens from the Models section, dialog footer
+   actions from the preset copy dialog. */
+.oac-field { display: flex; flex-direction: column; gap: 6px; }
+.oac-field-label { font-size: 12px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
+.oac-input { box-sizing: border-box; width: 100%; padding: 9px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; font: inherit; font-size: 13px; line-height: 20px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
+.oac-input:focus { outline: none; border-color: var(--dsw-alias-brand-primary); }
+.oac-input::placeholder { color: var(--dsw-alias-label-dimmed); }
+.oac-input:disabled { opacity: 0.6; cursor: default; }
+textarea.oac-input { resize: vertical; min-height: 76px; }
+.oac-input-select { appearance: none; padding-right: 32px; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px; }
+.oac-hint { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.oac-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.oac-info { display: flex; flex-direction: column; gap: 8px; }
+.oac-info-row { display: flex; align-items: baseline; gap: 10px; font-size: 12px; line-height: 18px; }
+.oac-info-label { flex: none; color: var(--dsw-alias-label-tertiary); }
+.oac-info-value { margin: 0; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; user-select: all; }
+.oac-danger-outline { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
+.oac-danger-outline:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-danger); }
+.oac-dialog { width: min(560px, 100%); }
+.oac-dialog-delete { width: min(480px, 100%); }
+.oac-dialog-body { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
+.oac-editor-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+/* Underline tabs from the Plugins settings section: hairline track, 13px
+   labels, a 2px primary underline on the active tab, roving tabindex. */
+.oac-tablist { display: flex; align-items: flex-end; gap: 22px; border-bottom: 1px solid var(--dsw-alias-border-l2); margin-top: 2px; }
+.oac-tab { position: relative; border: 0; padding: 7px 1px 9px; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
+.oac-tab:hover, .oac-tab[data-active='true'] { color: var(--dsw-alias-label-primary); }
+.oac-tab[data-active='true']::after, .oac-tab:focus-visible::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 2px 2px 0 0; background: var(--dsw-alias-label-primary); content: ''; }
+.oac-tab:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; border-radius: 2px; color: var(--dsw-alias-label-primary); }
+.oac-tab-panel { min-width: 0; padding-top: 2px; }
 `
 
 export const PRESETS_CSS = `

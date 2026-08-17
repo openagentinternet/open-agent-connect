@@ -7,6 +7,7 @@ import {
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BotRow, LlmDirectory } from './api.ts'
+import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
 import { CreateBotForm, type CreateBotInput } from './CreateBotForm.tsx'
 import type { BotsLocaleKey } from './locale.ts'
@@ -21,13 +22,9 @@ export interface BotPanelInjected {
   llmDirectory: () => Promise<LlmDirectory>
 }
 
-/** Round avatar: the Bot's own image when it has one, initials otherwise. */
-function BotAvatar({ name, src }: { name: string; src: string | undefined }): ReactNode {
-  if (src !== undefined && src.trim() !== '') {
-    return <img className="oac-bot-avatar" src={src} alt="" />
-  }
-  const initials = name.trim().slice(0, 2).toUpperCase() || 'MB'
-  return <span className="oac-bot-avatar oac-bot-avatar-fallback" aria-hidden="true">{initials}</span>
+/** Newest first, by profile creation time. */
+function sortNewestFirst(rows: BotRow[]): BotRow[] {
+  return [...rows].sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))
 }
 
 export function BotPanel({
@@ -44,12 +41,13 @@ export function BotPanel({
   const [editing, setEditing] = useState<BotRow | null>(null)
   const [directory, setDirectory] = useState<LlmDirectory | null>(null)
   const [busy, setBusy] = useState(false)
+  const [canCreate, setCanCreate] = useState(false)
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
     let current = true
     void list().then(
-      (rows) => { if (current) { setBots(rows); setError(null) } },
+      (rows) => { if (current) { setBots(sortNewestFirst(rows)); setError(null) } },
       (cause: unknown) => { if (current) setError(cause instanceof Error ? cause.message : String(cause)) },
     )
     return () => { current = false }
@@ -123,7 +121,7 @@ export function BotPanel({
             type="button"
             variant="primary"
             icon={<IconPlusOutline16 />}
-            onClick={() => { setCreating(true); setError(null) }}
+            onClick={() => { setCreating(true); setError(null); setCanCreate(false) }}
           >
             {t('createNew')}
           </Button>
@@ -140,11 +138,9 @@ export function BotPanel({
               <li className="oac-bot-card" key={bot.slug}>
                 <div className="oac-bot-main">
                   <BotAvatar name={bot.name} src={bot.avatarDataUrl} />
-                  <div className="oac-bot-info">
-                    <span className="oac-bot-name">{bot.name}</span>
-                    <code className="oac-bot-id">oac-{bot.slug}</code>
-                  </div>
+                  <span className="oac-bot-name">{bot.name}</span>
                 </div>
+                {bot.bio ? <p className="oac-bot-bio">{bot.bio}</p> : null}
                 {bot.dshLlmProvider && bot.dshLlmModel ? (
                   <div className="oac-bot-model">{bot.dshLlmProvider}/{bot.dshLlmModel}</div>
                 ) : null}
@@ -164,13 +160,30 @@ export function BotPanel({
           </ul>
         </>
       ) : null}
-      <Modal open={creating} onClose={() => setCreating(false)} title={t('createTitle')}>
+      <Modal
+        open={creating}
+        onClose={() => setCreating(false)}
+        title={t('createTitle')}
+        description={t('fieldLlmHint')}
+        className="oac-dialog"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setCreating(false)}>
+              {t('cancel')}
+            </Button>
+            <Button type="submit" form="oac-create-bot-form" variant="primary" disabled={!canCreate}>
+              {busy ? t('creating') : t('create')}
+            </Button>
+          </>
+        )}
+      >
         <CreateBotForm
           t={t}
           directory={directory}
           busy={busy}
           error={error}
-          onCancel={() => setCreating(false)}
+          formId="oac-create-bot-form"
+          onValidityChange={setCanCreate}
           onSubmit={onCreate}
         />
       </Modal>

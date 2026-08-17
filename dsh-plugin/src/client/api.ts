@@ -11,6 +11,7 @@ export class OacApiError extends Error {
 export type BotRow = {
   name: string
   slug: string
+  createdAt?: number
   globalMetaId?: string
   mvcAddress?: string
   role?: string
