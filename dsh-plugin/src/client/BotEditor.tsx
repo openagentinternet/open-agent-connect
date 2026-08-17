@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronLeftOutline14, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BotRow, LlmDirectory } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'
 
@@ -72,7 +72,7 @@ export function BotEditor({
   return (
     <div className="oac-panel">
       <div className="oac-row">
-        <Button type="button" onClick={onBack}>{t('back')}</Button>
+        <Button type="button" icon={<IconChevronLeftOutline14 />} onClick={onBack}>{t('back')}</Button>
         <strong>{bot.name}</strong>
       </div>
       {error ? <div className="oac-error">{error}</div> : null}

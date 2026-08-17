@@ -1,5 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  Button,
+  IconEditOutline16,
+  IconPlusOutline16,
+  IconRefreshOutline16,
+  Modal,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BotRow, LlmDirectory } from './api.ts'
 import { BotEditor } from './BotEditor.tsx'
 import { CreateBotForm, type CreateBotInput } from './CreateBotForm.tsx'
@@ -13,6 +19,15 @@ export interface BotPanelInjected {
   update: (slug: string, patch: Record<string, unknown>) => Promise<BotRow>
   remove: (slug: string) => Promise<void>
   llmDirectory: () => Promise<LlmDirectory>
+}
+
+/** Round avatar: the Bot's own image when it has one, initials otherwise. */
+function BotAvatar({ name, src }: { name: string; src: string | undefined }): ReactNode {
+  if (src !== undefined && src.trim() !== '') {
+    return <img className="oac-bot-avatar" src={src} alt="" />
+  }
+  const initials = name.trim().slice(0, 2).toUpperCase() || 'MB'
+  return <span className="oac-bot-avatar oac-bot-avatar-fallback" aria-hidden="true">{initials}</span>
 }
 
 export function BotPanel({
@@ -103,26 +118,50 @@ export function BotPanel({
       <div className="oac-row">
         <h2>{t('title')}</h2>
         <div className="oac-actions">
-          <Button type="button" onClick={reload}>{t('refresh')}</Button>
-          <Button type="button" onClick={() => { setCreating(true); setError(null) }}>{t('createNew')}</Button>
+          <Button type="button" icon={<IconRefreshOutline16 />} onClick={reload}>{t('refresh')}</Button>
+          <Button
+            type="button"
+            variant="primary"
+            icon={<IconPlusOutline16 />}
+            onClick={() => { setCreating(true); setError(null) }}
+          >
+            {t('createNew')}
+          </Button>
         </div>
       </div>
       {error && !creating ? <div className="oac-error">{error}</div> : null}
       {bots === null && !error ? <div className="oac-muted">{t('loading')}</div> : null}
-      {bots && bots.length === 0 ? <div className="oac-muted">{t('empty')}</div> : null}
+      {bots && bots.length === 0 ? <div className="oac-bot-intro">{t('empty')}</div> : null}
       {bots && bots.length > 0 ? (
         <>
-          <div className="oac-muted">{t('count', { count: bots.length }).replace('{count}', String(bots.length))}</div>
-          <div className="oac-card-list">
+          <p className="oac-bot-intro">{t('count', { count: bots.length }).replace('{count}', String(bots.length))}</p>
+          <ul className="oac-bot-grid">
             {bots.map((bot) => (
-              <div className="oac-card" key={bot.slug}>
-                <strong>{bot.name}</strong>
-                <div className="oac-mono">{bot.slug} · oac-{bot.slug}</div>
-                <div className="oac-muted">{bot.dshLlmProvider && bot.dshLlmModel ? `${bot.dshLlmProvider}/${bot.dshLlmModel}` : ''}</div>
-                <Button type="button" onClick={() => { setEditing(bot); setError(null) }}>{t('edit')}</Button>
-              </div>
+              <li className="oac-bot-card" key={bot.slug}>
+                <div className="oac-bot-main">
+                  <BotAvatar name={bot.name} src={bot.avatarDataUrl} />
+                  <div className="oac-bot-info">
+                    <span className="oac-bot-name">{bot.name}</span>
+                    <code className="oac-bot-id">oac-{bot.slug}</code>
+                  </div>
+                </div>
+                {bot.dshLlmProvider && bot.dshLlmModel ? (
+                  <div className="oac-bot-model">{bot.dshLlmProvider}/{bot.dshLlmModel}</div>
+                ) : null}
+                <div className="oac-bot-foot">
+                  <button
+                    type="button"
+                    className="oac-icon-btn"
+                    data-tip={t('edit')}
+                    aria-label={`${t('edit')}: ${bot.name}`}
+                    onClick={() => { setEditing(bot); setError(null) }}
+                  >
+                    <IconEditOutline16 />
+                  </button>
+                </div>
+              </li>
             ))}
-          </div>
+          </ul>
         </>
       ) : null}
       <Modal open={creating} onClose={() => setCreating(false)} title={t('createTitle')}>
