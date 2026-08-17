@@ -6,7 +6,7 @@ import {
   IconRefreshOutline16,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { BotRow, LlmDirectory } from './api.ts'
+import type { BotRow, LlmDirectory, AutoReplyConfig, ChatSkillsPayload } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
 import { CreateBotForm, type CreateBotInput } from './CreateBotForm.tsx'
@@ -20,6 +20,12 @@ export interface BotPanelInjected {
   update: (slug: string, patch: Record<string, unknown>) => Promise<BotRow>
   remove: (slug: string) => Promise<void>
   llmDirectory: () => Promise<LlmDirectory>
+  chatSkills: (from: string) => Promise<ChatSkillsPayload>
+  loadAutoReplyStatus: (from: string) => Promise<AutoReplyConfig>
+  autoReplyConfig: (
+    from: string,
+    patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
+  ) => Promise<AutoReplyConfig>
 }
 
 /** Newest first, by profile creation time. */
@@ -33,6 +39,9 @@ export function BotPanel({
   update,
   remove,
   llmDirectory,
+  chatSkills,
+  loadAutoReplyStatus,
+  autoReplyConfig,
   t,
 }: BotPanelInjected & { t: Translate }): ReactNode {
   const [bots, setBots] = useState<BotRow[] | null>(null)
@@ -82,6 +91,9 @@ export function BotPanel({
         t={t}
         busy={busy}
         error={error}
+        chatSkills={chatSkills}
+        loadAutoReplyStatus={loadAutoReplyStatus}
+        autoReplyConfig={autoReplyConfig}
         onBack={() => { setEditing(null); reload() }}
         onSave={async (patch) => {
           setBusy(true)

@@ -62,6 +62,12 @@ export function apply(ctx: ClientContext): void {
       update: (slug: string, patch: Record<string, unknown>) => api.update(slug, patch),
       remove: (slug: string) => api.remove(slug),
       llmDirectory: () => api.llmDirectory(),
+      chatSkills: (from: string) => api.chatSkills(from),
+      loadAutoReplyStatus: (from: string) => api.autoReplyStatus(from),
+      autoReplyConfig: (
+        from: string,
+        patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
+      ) => api.autoReplyConfig(from, patch),
     }),
   }, BotPanel))
   ctx.slots.inject('settings.section', () => ctx.slots.register({

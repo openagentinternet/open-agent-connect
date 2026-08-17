@@ -6,6 +6,7 @@
  */
 import { bootstrapHealth } from './bootstrap.js'
 import { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
+import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import type { HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { emptyHealth, type HealthPayload } from './health.js'
@@ -73,6 +74,31 @@ async function dispatchPost(
   }
   if (method === 'llm/directory') {
     return { ok: true, state: 'success', data: await listLlmDirectory(ctx) }
+  }
+  if (method === 'chat/skills') {
+    const from = typeof (payload as { from?: unknown })?.from === 'string'
+      ? (payload as { from: string }).from.trim()
+      : ''
+    if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+    return listChatSkills(from)
+  }
+  if (method === 'chat/auto-reply/status') {
+    const from = typeof (payload as { from?: unknown })?.from === 'string'
+      ? (payload as { from: string }).from.trim()
+      : ''
+    if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+    return getAutoReplyStatus(from)
+  }
+  if (method === 'chat/auto-reply/config') {
+    const body = payload as { from?: unknown; enabled?: unknown; maxTurns?: unknown; cooldownMs?: unknown }
+    const from = typeof body.from === 'string' ? body.from.trim() : ''
+    if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+    return setAutoReplyConfig({
+      from,
+      ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+      ...(typeof body.maxTurns === 'number' ? { maxTurns: body.maxTurns } : {}),
+      ...(typeof body.cooldownMs === 'number' ? { cooldownMs: body.cooldownMs } : {}),
+    })
   }
   const section = await dispatchSection(method, payload)
   if (section !== undefined) return section
@@ -169,6 +195,7 @@ export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'
 export { bootstrapHealth } from './bootstrap.js'
 export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
+export { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 export { validateCreatePayload } from './bots-input.js'
 export { buildPersonaPrompt, parseBotListData } from './persona.js'
 export {

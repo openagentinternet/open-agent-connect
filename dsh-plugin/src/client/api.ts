@@ -31,6 +31,30 @@ export type LlmDirectory = {
   modelsByProvider: Record<string, Array<{ id: string; name: string }>>
 }
 
+export type ChatSkillOption = {
+  skillName: string
+  title: string
+  description: string
+}
+
+/** Skill catalog for one Bot plus the last resolution's skipped names. */
+export type ChatSkillsPayload = {
+  skills: ChatSkillOption[]
+  skipped: string[]
+}
+
+export type AutoReplyConfig = {
+  enabled: boolean
+  maxTurns: number
+  cooldownMs: number
+}
+
+/** Same option sets the OAC chat settings tab offers. */
+export const AUTO_REPLY_MAX_TURNS_OPTIONS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50] as const
+export const AUTO_REPLY_COOLDOWN_MS_OPTIONS = [60_000, 300_000, 600_000, 1_800_000, 3_600_000] as const
+export const DEFAULT_AUTO_REPLY_MAX_TURNS = 10
+export const DEFAULT_AUTO_REPLY_COOLDOWN_MS = 60_000
+
 type Envelope = {
   ok?: boolean
   state?: string
@@ -97,6 +121,51 @@ export const api = {
     await post('bots/delete', { slug })
   },
   llmDirectory: async (): Promise<LlmDirectory> => post('llm/directory'),
+  chatSkills: async (from: string): Promise<ChatSkillsPayload> => {
+    const data = await post<{
+      skills?: Array<{ skillName?: unknown; title?: unknown; description?: unknown }>
+      chatSkillResolution?: { skipped?: unknown }
+    }>('chat/skills', { from })
+    const skills = (data.skills ?? [])
+      .map((row) => ({
+        skillName: typeof row.skillName === 'string' ? row.skillName.trim() : '',
+        title: typeof row.title === 'string' ? row.title : '',
+        description: typeof row.description === 'string' ? row.description : '',
+      }))
+      .filter((row) => row.skillName !== '')
+    const skippedRaw = data.chatSkillResolution?.skipped
+    const skipped = Array.isArray(skippedRaw)
+      ? skippedRaw.map((name) => typeof name === 'string' ? name : '').filter(Boolean)
+      : []
+    return { skills, skipped }
+  },
+  autoReplyStatus: async (from: string): Promise<AutoReplyConfig> => {
+    const data = await post<{
+      enabled?: unknown
+      maxTurns?: unknown
+      cooldownMs?: unknown
+    }>('chat/auto-reply/status', { from })
+    return {
+      enabled: data.enabled === true,
+      maxTurns: typeof data.maxTurns === 'number' ? data.maxTurns : DEFAULT_AUTO_REPLY_MAX_TURNS,
+      cooldownMs: typeof data.cooldownMs === 'number' ? data.cooldownMs : DEFAULT_AUTO_REPLY_COOLDOWN_MS,
+    }
+  },
+  autoReplyConfig: async (
+    from: string,
+    patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
+  ): Promise<AutoReplyConfig> => {
+    const data = await post<{
+      enabled?: unknown
+      maxTurns?: unknown
+      cooldownMs?: unknown
+    }>('chat/auto-reply/config', { from, ...patch })
+    return {
+      enabled: data.enabled === true,
+      maxTurns: typeof data.maxTurns === 'number' ? data.maxTurns : DEFAULT_AUTO_REPLY_MAX_TURNS,
+      cooldownMs: typeof data.cooldownMs === 'number' ? data.cooldownMs : DEFAULT_AUTO_REPLY_COOLDOWN_MS,
+    }
+  },
   chatConversations: async (from: string): Promise<unknown> => post('chat/conversations', { from }),
   chatMessages: async (from: string, conversationId: string): Promise<unknown> =>
     post('chat/messages', { from, conversationId }),
