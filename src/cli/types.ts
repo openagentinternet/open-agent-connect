@@ -117,7 +117,13 @@ export interface CliDependencies {
     conversations?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     messages?: (input: { conversationId: string; limit?: number; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     autoReplyStatus?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    setAutoReply?: (input: { enabled: boolean; defaultStrategyId?: string; from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    setAutoReply?: (input: {
+      enabled?: boolean;
+      defaultStrategyId?: string;
+      maxTurns?: number;
+      cooldownMs?: number;
+      from?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

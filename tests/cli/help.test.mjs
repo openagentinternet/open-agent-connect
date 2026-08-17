@@ -1053,6 +1053,10 @@ test('runCli documents actor selection for chat history and auto-reply commands'
       args: ['chat', 'auto-reply', 'disable', '--help'],
       usage: /^Usage:\s+metabot chat auto-reply disable \[--from <bot-slug>\]/m,
     },
+    {
+      args: ['chat', 'auto-reply', 'config', '--help'],
+      usage: /^Usage:\s+metabot chat auto-reply config \[--from <bot-slug>\] \[--enabled <true\|false>\] \[--max-turns <n>\] \[--cooldown-ms <ms>\] \[--strategy <strategy-id>\]/m,
+    },
   ];
 
   for (const entry of cases) {
