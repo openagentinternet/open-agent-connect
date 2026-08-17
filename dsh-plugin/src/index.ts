@@ -7,6 +7,7 @@
 import { bootstrapHealth } from './bootstrap.js'
 import { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
+import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import type { HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { emptyHealth, type HealthPayload } from './health.js'
@@ -99,6 +100,31 @@ async function dispatchPost(
       ...(typeof body.maxTurns === 'number' ? { maxTurns: body.maxTurns } : {}),
       ...(typeof body.cooldownMs === 'number' ? { cooldownMs: body.cooldownMs } : {}),
     })
+  }
+  if (method === 'conversations/list') {
+    const from = typeof (payload as { from?: unknown })?.from === 'string'
+      ? (payload as { from: string }).from.trim()
+      : ''
+    if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+    return listConversations(from)
+  }
+  if (method === 'conversations/messages') {
+    const body = payload as { from?: unknown; peer?: unknown }
+    const from = typeof body.from === 'string' ? body.from.trim() : ''
+    const peer = typeof body.peer === 'string' ? body.peer.trim() : ''
+    if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+    if (!peer) return { ok: false, state: 'failed', code: 'missing_peer', message: 'peer is required' }
+    return getConversationMessages(from, peer)
+  }
+  if (method === 'conversations/guidance') {
+    const body = payload as { from?: unknown; peer?: unknown; guidance?: unknown }
+    const from = typeof body.from === 'string' ? body.from.trim() : ''
+    const peer = typeof body.peer === 'string' ? body.peer.trim() : ''
+    const guidance = typeof body.guidance === 'string' ? body.guidance.trim() : ''
+    if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+    if (!peer) return { ok: false, state: 'failed', code: 'missing_peer', message: 'peer is required' }
+    if (!guidance) return { ok: false, state: 'failed', code: 'missing_guidance', message: 'guidance is required' }
+    return runConversationGuidance(from, peer, guidance)
   }
   const section = await dispatchSection(method, payload)
   if (section !== undefined) return section
@@ -196,6 +222,7 @@ export { isTrustedApiRequest } from './trust-fence.js'
 export { bootstrapHealth } from './bootstrap.js'
 export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
 export { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
+export { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 export { validateCreatePayload } from './bots-input.js'
 export { buildPersonaPrompt, parseBotListData } from './persona.js'
 export {

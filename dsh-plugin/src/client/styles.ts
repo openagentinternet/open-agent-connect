@@ -103,6 +103,71 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-note.success { color: var(--dsw-alias-state-success-primary); }
 .oac-note.warn { color: var(--dsw-alias-state-warn-label); }
 .oac-note.error { color: var(--dsw-alias-state-error-primary); }
+
+/* A2A conversation panel: the sidebar-foot trigger row above Settings and a
+   floating two-column dialog. Geometry and tokens follow the Settings shell
+   (mask + centered 24px panel) and the conversation row/bubble vocabulary. */
+.oac-a2a-trigger { flex: none; display: flex; align-items: center; gap: 8px; width: calc(100% + 8px); height: 34px; margin: 4px -4px 4px; padding: 6px 2px 6px 10px; box-sizing: border-box; border: none; border-radius: 12px; background: transparent; color: var(--dsw-alias-label-primary); font-family: inherit; font-size: 14px; line-height: 22px; cursor: pointer; overflow: hidden; }
+.oac-a2a-trigger:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-a2a-trigger-rail { width: 36px; height: 36px; margin: 8px 0 10px; justify-content: center; gap: 0; padding: 0; border-radius: 50%; }
+.oac-a2a-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.oac-a2a-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }
+.oac-a2a-panel { position: relative; z-index: 1; display: flex; flex-direction: column; width: min(980px, calc(100vw - 48px)); height: min(720px, calc(100vh - 48px)); border-radius: 24px; overflow: hidden; background: var(--dsw-alias-bg-layer-2); box-shadow: var(--dsw-shadow-lv3); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+.oac-a2a-header { flex: none; display: flex; align-items: center; justify-content: space-between; height: 54px; padding: 10px 14px 8px 24px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-a2a-header h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--dsw-alias-label-primary); }
+.oac-a2a-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 28px; background: transparent; cursor: pointer; color: var(--dsw-alias-label-primary); }
+.oac-a2a-close:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-a2a-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 272px minmax(0, 1fr); }
+.oac-a2a-list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-3); }
+.oac-a2a-list-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-a2a-bot-avatar { flex: none; width: 32px; height: 32px; }
+.oac-a2a-list-head .oac-input { flex: 1; min-width: 0; height: 32px; }
+.oac-a2a-list-rows { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.oac-a2a-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 8px; box-sizing: border-box; border: none; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.oac-a2a-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-a2a-row.active { background: var(--dsw-alias-interactive-bg-active); }
+.oac-a2a-row-avatar { flex: none; width: 28px; height: 28px; }
+.oac-a2a-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.oac-a2a-row-name { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-a2a-row-text { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-a2a-row-time { flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-dimmed); }
+.oac-a2a-thread { min-width: 0; display: flex; flex-direction: column; }
+.oac-a2a-thread-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 16px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-a2a-thread-avatar { flex: none; width: 32px; height: 32px; }
+.oac-a2a-thread-peer { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.oac-a2a-thread-peer strong { font-size: 14px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-a2a-thread-peer span { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-a2a-id { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 11px; line-height: 16px; cursor: pointer; }
+.oac-a2a-id:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.oac-a2a-id code { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+.oac-a2a-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.oac-a2a-msg { display: flex; gap: 10px; max-width: min(560px, 86%); }
+.oac-a2a-msg-peer { align-self: flex-start; }
+.oac-a2a-msg-local { align-self: flex-end; flex-direction: row-reverse; }
+.oac-a2a-msg-avatar { flex: none; width: 28px; height: 28px; }
+.oac-a2a-msg-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.oac-a2a-msg-local .oac-a2a-msg-body { align-items: flex-end; }
+.oac-a2a-msg-head { display: flex; align-items: baseline; gap: 10px; }
+.oac-a2a-msg-local .oac-a2a-msg-head { flex-direction: row-reverse; }
+.oac-a2a-msg-name { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
+.oac-a2a-msg-meta { display: inline-flex; align-items: baseline; gap: 8px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-dimmed); }
+.oac-a2a-msg-txid { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
+.oac-a2a-msg-txid-text { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-a2a-copy { padding: 0 2px; border: none; background: none; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 11px; line-height: 16px; cursor: pointer; }
+.oac-a2a-copy:hover { color: var(--dsw-alias-label-primary); }
+.oac-a2a-bubble { min-width: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
+.oac-a2a-bubble-local { background: var(--dsw-specific-bubble); border-radius: 16px 16px 4px 16px; padding: 8px 12px; }
+.oac-a2a-bubble-peer { background: var(--dsw-alias-bg-layer-3); border: 1px solid var(--dsw-alias-border-l2); border-radius: 16px 16px 16px 4px; padding: 8px 12px; }
+.oac-a2a-msg-text { white-space: pre-wrap; }
+.oac-a2a-msg-image { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; object-fit: contain; }
+.oac-a2a-composer { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-a2a-composer-row { display: flex; align-items: center; gap: 8px; }
+.oac-a2a-composer-row .oac-input { flex: 1; min-width: 0; }
+.oac-a2a-guidance { display: flex; flex-direction: column; gap: 8px; }
+.oac-a2a-guidance-toggle { align-self: flex-start; padding: 0; border: none; background: none; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+.oac-a2a-guidance-toggle:hover { color: var(--dsw-alias-label-primary); }
+.oac-a2a-guidance-form { display: flex; flex-direction: column; gap: 8px; }
+.oac-a2a-guidance-actions { display: flex; justify-content: flex-end; gap: 8px; }
 `
 
 export const PRESETS_CSS = `

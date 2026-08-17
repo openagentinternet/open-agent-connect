@@ -25,8 +25,8 @@ test('en and zh dictionaries stay in sync for Conversations, Services, and Apps'
     'convZh',
     'ConversationsLocaleKey',
   )
-  assert.match(conversations, /nav: 'Conversations'/)
-  assert.match(conversations, /nav: '对话'/)
+  assert.match(conversations, /nav: 'A2A Chat'/)
+  assert.match(conversations, /nav: 'A2A 对话'/)
   const services = await assertLocalePair('locale-services.ts', 'svcEn', 'svcZh', 'ServicesLocaleKey')
   assert.match(services, /nav: 'Services'/)
   assert.match(services, /nav: '服务'/)
@@ -38,14 +38,15 @@ test('en and zh dictionaries stay in sync for Conversations, Services, and Apps'
   assert.match(apps, /metaapp delete --confirm/)
 })
 
-test('client registers four sibling settings sections', async () => {
+test('client registers three settings sections and the A2A sidebar footer action', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(text, /id: 'oac-bots'/)
-  assert.match(text, /id: 'oac-conversations'/)
   assert.match(text, /id: 'oac-services'/)
   assert.match(text, /id: 'oac-apps'/)
+  assert.doesNotMatch(text, /id: 'oac-conversations'/)
+  assert.match(text, /name: 'sidebar\.footer\.action'/)
+  assert.match(text, /id: 'oac-a2a'/)
   assert.match(text, /order: 20/)
-  assert.match(text, /order: 21/)
   assert.match(text, /order: 22/)
   assert.match(text, /order: 23/)
   assert.doesNotMatch(text, /id: 'oac'/)

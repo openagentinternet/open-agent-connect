@@ -10,10 +10,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 import { api } from './api.ts'
+import { A2AConversation, type A2AConversationInjected } from './A2AConversation.tsx'
 import { AppsPanel } from './AppsPanel.tsx'
 import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
-import { ConversationsPanel } from './ConversationsPanel.tsx'
 import { appEn, APP_NS, appZh, type AppsLocaleKey } from './locale-apps.ts'
 import { convEn, CONV_NS, convZh, type ConversationsLocaleKey } from './locale-conversations.ts'
 import { en, NS, zh, type BotsLocaleKey } from './locale.ts'
@@ -29,6 +29,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.oac.conversations': ConversationsLocaleKey
     'settings.oac.services': ServicesLocaleKey
     'settings.oac.apps': AppsLocaleKey
+  }
+  interface SlotMap {
+    /** Sidebar-foot action above Settings; owner share is the column state. */
+    'sidebar.footer.action': { kind: 'list'; scope: 'root'; owner: { wide: boolean } }
   }
 }
 
@@ -70,19 +74,20 @@ export function apply(ctx: ClientContext): void {
       ) => api.autoReplyConfig(from, patch),
     }),
   }, BotPanel))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'oac-conversations',
-    order: 21,
-    label: () => tConv('nav'),
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
+    id: 'oac-a2a',
+    order: 0,
     locale: CONV_NS,
-    inject: () => ({
+    inject: (): A2AConversationInjected => ({
       bots: () => api.list(),
-      conversations: (from: string) => api.chatConversations(from),
-      messages: (from: string, conversationId: string) => api.chatMessages(from, conversationId),
+      list: (from: string) => api.conversations(from),
+      thread: (from: string, peer: string) => api.conversationThread(from, peer),
       send: (from: string, to: string, content: string) => api.chatPrivate(from, to, content),
+      guidance: (from: string, peer: string, guidance: string) =>
+        api.conversationGuidance(from, peer, guidance),
     }),
-  }, ConversationsPanel))
+  }, A2AConversation))
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'oac-services',
