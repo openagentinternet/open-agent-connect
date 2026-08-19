@@ -41,6 +41,35 @@ The host process is the only process that talks to `metabot`. The client half do
 
 On apply, every local Bot from `metabot bot list` gets a matching `oac-<slug>` agent preset (copy DSH `standard`, rewrite the `persona` row). Delete removes that preset. Non-`oac-*` presets are left alone.
 
+## Live DSH binding and the parallel-branch loop
+
+The live DSH web (`dsh web`, e.g. `http://127.0.0.1:3080/`) loads this plugin
+from the `web` profile's `link:` dependency. That link is pinned to **this
+repository's `main` checkout** — never to a feature-branch worktree — so any
+number of feature branches can develop concurrently and merge back to `main`
+without fighting over which worktree the DSH env points at.
+
+After merging a feature branch into `main` (`git merge --no-ff <branch>`):
+
+```bash
+# in the OAC main worktree:
+cd dsh-plugin
+npm install      # only when the branch added/modified dependencies
+npm run build    # always: (re)build the served lib/ artifacts
+```
+
+Then reload the DSH env:
+
+- **Client-only changes** (Settings UI, the sidebar, CSS, locales, …) → hard
+  refresh the DSH page (`Cmd+Shift+R`). The web host stat-polls
+  `lib/client.js` and serves the new revision, so no restart is needed.
+- **Host-half changes** (new `/oac/api/*` routes, the browser-event hub, any
+  `src/*.ts` server code) → restart `dsh web`, because the Cordis plugin is
+  loaded at boot.
+
+Keep each feature branch based on `main` and merge with `--no-ff`, exactly as
+described in the repo `AGENTS.md`.
+
 ## Bot Browser
 
 The plugin adds a very wide right-sidebar Bot Browser to the DSH web GUI: the
