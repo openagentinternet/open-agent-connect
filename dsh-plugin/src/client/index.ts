@@ -14,7 +14,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 import { api } from './api.ts'
 import { A2AConversation, type A2AConversationInjected } from './A2AConversation.tsx'
 import { AppsPanel } from './AppsPanel.tsx'
-import { BotBrowserSidebar, type BrowserLocaleFace } from './BotBrowserSidebar.tsx'
+import { BotBrowserBoundary, BotBrowserSidebar, type BrowserLocaleFace } from './BotBrowserSidebar.tsx'
 import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { BotBrowserStore } from './browser-store.ts'
@@ -71,17 +71,38 @@ export function apply(ctx: ClientContext): void {
     host.dataset.plugin = 'open-agent-connect-dsh'
     host.dataset.oacBrowser = ''
     document.body.appendChild(host)
-    const root = createRoot(host)
-    root.render(createElement(BotBrowserSidebar, {
-      store: browserStore,
-      locale: ctx.locale as unknown as BrowserLocaleFace,
-      openHome: () => openBrowser(browserStore, null),
-    }))
-    const stopEvents = startBrowserEventSource(browserStore)
-    return () => {
-      stopEvents()
-      root.unmount()
-      host.remove()
+    const fail = (phase: string, error: unknown): void => {
+      const message = `[oac-dsh] bot browser ${phase}: ${error instanceof Error ? error.message : String(error)}`
+      console.error(message, error)
+      try {
+        const bar = document.createElement('div')
+        bar.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483000;max-width:70vw;'
+          + 'padding:8px 12px;font:12px/1.5 ui-monospace,Menlo,monospace;color:#f2a1a1;'
+          + 'background:#1b1b22;border:1px solid #f2a1a1;border-radius:8px;white-space:pre-wrap'
+        bar.textContent = message
+        document.body.appendChild(bar)
+      } catch {
+        // nothing left to report with
+      }
+    }
+    try {
+      const root = createRoot(host)
+      root.render(createElement(BotBrowserBoundary, null,
+        createElement(BotBrowserSidebar, {
+          store: browserStore,
+          locale: ctx.locale as unknown as BrowserLocaleFace,
+          openHome: () => openBrowser(browserStore, null),
+        }),
+      ))
+      const stopEvents = startBrowserEventSource(browserStore)
+      return () => {
+        stopEvents()
+        root.unmount()
+        host.remove()
+      }
+    } catch (error) {
+      fail('mount', error)
+      return () => { host.remove() }
     }
   }, 'oac-dsh: bot browser sidebar')
   ctx.slots.inject('settings.section', () => ctx.slots.register({

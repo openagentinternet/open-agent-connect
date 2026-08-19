@@ -8,6 +8,7 @@
  * dsh-better-sidebar for the same body-portal + layout-push pattern.
  */
 import {
+  Component,
   useEffect,
   useRef,
   useState,
@@ -25,6 +26,36 @@ export interface BrowserLocaleFace {
   subscribe(fn: () => void): () => void
 }
 
+type BoundaryState = { error: string | null }
+
+/**
+ * Error boundary over the sidebar tree: a render failure must never blank the
+ * app silently — it shows a dismissible diagnostic strip instead and logs the
+ * stack (the same robustness dsh-better-sidebar applies to its own portal).
+ */
+export class BotBrowserBoundary extends Component<{ children: ReactNode }, BoundaryState> {
+  override state: BoundaryState = { error: null }
+
+  static getDerivedStateFromError(error: unknown): BoundaryState {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+
+  override componentDidCatch(error: unknown): void {
+    console.error('[oac-dsh] bot browser render error:', error)
+  }
+
+  override render(): ReactNode {
+    if (this.state.error !== null) {
+      return (
+        <div className="oac-browser-landing" data-error>
+          <p className="oac-browser-error">Bot Browser failed to render: {this.state.error}</p>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 export function BotBrowserSidebar({
   store,
   locale,
@@ -34,8 +65,18 @@ export function BotBrowserSidebar({
   locale: BrowserLocaleFace
   openHome: () => void
 }): ReactNode {
-  const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
-  useSyncExternalStore(locale.subscribe, () => locale.getSnapshot().revision)
+  // Wrap subscribe/getSnapshot in arrows: React's useSyncExternalStore calls
+  // the subscribe reference as a bare function, so an unbound prototype method
+  // (like the DSH LocaleRuntime's `subscribe`, which reads `this.listeners`)
+  // would throw. The wrapper pins `this` to the instance.
+  const state = useSyncExternalStore(
+    (cb) => store.subscribe(cb),
+    () => store.getSnapshot(),
+  )
+  useSyncExternalStore(
+    (cb) => locale.subscribe(cb),
+    () => locale.getSnapshot().revision,
+  )
   const t = (key: BrowserLocaleKey): string => locale.bind(BROWSER_NS)(key)
 
   // Layout push + drag state ride CSS variables on <html> so the write is
