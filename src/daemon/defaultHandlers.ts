@@ -12171,7 +12171,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
     });
   }
 
-  const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry();
+  const metaAppPreviewSessions = createMetaAppPreviewSessionRegistry({
+    resolveMetafileContentBaseUrl: async () => (await infrastructureConfigStore.read()).metafileContentBaseUrl,
+  });
   let daemonHandlers: MetabotDaemonHttpHandlers | null = null;
   function safeBrowserBridgeErrorMessage(error: unknown, fallback: string): string {
     const message = error instanceof Error ? error.message : normalizeText(error);

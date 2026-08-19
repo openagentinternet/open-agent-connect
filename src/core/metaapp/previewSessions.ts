@@ -1,7 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import * as agentBrowserCore from '@openagentinternet/agent-browser-core';
 import type { MetaAppPreviewAsset, MetaAppPreviewSession } from './types';
+
+type PreparePreviewHtml = (input: {
+  body: Buffer;
+  contentType: string;
+  metafileContentBaseUrl: string;
+}) => Buffer | string;
+
+// Optional until @openagentinternet/agent-browser-core >= 0.5.3 is pinned:
+// with an older core the host keeps serving preview HTML unprepared (the
+// pre-0.5.3 behavior) instead of failing every MetaApp open.
+const preparePreviewHtml: PreparePreviewHtml | undefined = (
+  agentBrowserCore as { preparePreviewHtml?: PreparePreviewHtml }
+).preparePreviewHtml;
+
+export function metaAppPreviewHtmlPreparationAvailable(): boolean {
+  return preparePreviewHtml !== undefined;
+}
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
 
@@ -98,6 +116,9 @@ export function inferMetaAppPreviewMimeType(filePath: string): string {
 export function createMetaAppPreviewSessionRegistry(input?: {
   now?: () => number;
   ttlMs?: number;
+  // Serves as the rewrite base for metafile:// subresource references in
+  // served HTML. When omitted, core's default Metafile content base applies.
+  resolveMetafileContentBaseUrl?: () => string | Promise<string>;
 }): {
   create(input: { artifactDir: string; indexFile: string }): MetaAppPreviewSession;
   resolveAsset(input: { previewId: string; assetPath?: string }): Promise<MetaAppPreviewAsset>;
@@ -105,6 +126,7 @@ export function createMetaAppPreviewSessionRegistry(input?: {
 } {
   const now = input?.now ?? Date.now;
   const ttlMs = input?.ttlMs ?? DEFAULT_TTL_MS;
+  const resolveMetafileContentBaseUrl = input?.resolveMetafileContentBaseUrl;
   const sessions = new Map<string, MetaAppPreviewSession>();
 
   return {
@@ -143,11 +165,20 @@ export function createMetaAppPreviewSessionRegistry(input?: {
         throw error;
       }
 
+      const contentType = inferMetaAppPreviewMimeType(filePath);
+      if (preparePreviewHtml && /^text\/html\b/iu.test(contentType)) {
+        const metafileContentBaseUrl = resolveMetafileContentBaseUrl
+          ? await resolveMetafileContentBaseUrl()
+          : '';
+        const prepared = preparePreviewHtml({ body, contentType, metafileContentBaseUrl });
+        body = typeof prepared === 'string' ? Buffer.from(prepared, 'utf8') : prepared;
+      }
+
       return {
         previewId: session.previewId,
         assetPath,
         filePath,
-        contentType: inferMetaAppPreviewMimeType(filePath),
+        contentType,
         body,
       };
     },
