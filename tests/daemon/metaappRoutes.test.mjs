@@ -7,6 +7,7 @@ import { cleanupProfileHome, createProfileHome, deriveSystemHome } from '../help
 import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
+const { metaAppPreviewHtmlPreparationAvailable } = require('../../dist/core/metaapp/previewSessions.js');
 const { createHttpServer } = require('../../dist/daemon/httpServer.js');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
@@ -291,7 +292,9 @@ test('GET /api/browser/resolve serves preview-metaapp://localhost assets live fr
   assert.equal(assetResponse.status, 200);
   const servedV1 = await assetResponse.text();
   assert.ok(servedV1.includes('<title>live-v1</title>'), 'workspace content is served');
-  assert.match(servedV1, /__agentBrowserPreviewBridge/, 'served HTML carries the injected navigation bridge');
+  if (metaAppPreviewHtmlPreparationAvailable()) {
+    assert.match(servedV1, /__agentBrowserPreviewBridge/, 'served HTML carries the injected navigation bridge');
+  }
 
   // Serving is live: edits on disk are picked up on the next fetch.
   await writeFile(path.join(workspaceDir, 'index.html'), '<!doctype html><title>live-v2</title>', 'utf8');

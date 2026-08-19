@@ -1,8 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { preparePreviewHtml } from '@openagentinternet/agent-browser-core';
+import * as agentBrowserCore from '@openagentinternet/agent-browser-core';
 import type { MetaAppPreviewAsset, MetaAppPreviewSession } from './types';
+
+type PreparePreviewHtml = (input: {
+  body: Buffer;
+  contentType: string;
+  metafileContentBaseUrl: string;
+}) => Buffer | string;
+
+// Optional until @openagentinternet/agent-browser-core >= 0.5.3 is pinned:
+// with an older core the host keeps serving preview HTML unprepared (the
+// pre-0.5.3 behavior) instead of failing every MetaApp open.
+const preparePreviewHtml: PreparePreviewHtml | undefined = (
+  agentBrowserCore as { preparePreviewHtml?: PreparePreviewHtml }
+).preparePreviewHtml;
+
+export function metaAppPreviewHtmlPreparationAvailable(): boolean {
+  return preparePreviewHtml !== undefined;
+}
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
 
@@ -149,7 +166,7 @@ export function createMetaAppPreviewSessionRegistry(input?: {
       }
 
       const contentType = inferMetaAppPreviewMimeType(filePath);
-      if (/^text\/html\b/iu.test(contentType)) {
+      if (preparePreviewHtml && /^text\/html\b/iu.test(contentType)) {
         const metafileContentBaseUrl = resolveMetafileContentBaseUrl
           ? await resolveMetafileContentBaseUrl()
           : '';

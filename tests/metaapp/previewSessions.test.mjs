@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const {
   createMetaAppPreviewSessionRegistry,
   inferMetaAppPreviewMimeType,
+  metaAppPreviewHtmlPreparationAvailable,
 } = require('../../dist/core/metaapp/previewSessions.js');
 
 async function makeArtifactDir(prefix) {
@@ -135,7 +136,8 @@ test('MIME inference covers browser assets and binary fallback', () => {
   assert.equal(inferMetaAppPreviewMimeType('asset.bin'), 'application/octet-stream');
 });
 
-test('served HTML is prepared: metafile src rewritten, bridge and storage shim injected', async () => {
+test('served HTML is prepared: metafile src rewritten, bridge and storage shim injected', async (t) => {
+  if (!metaAppPreviewHtmlPreparationAvailable()) t.skip('requires agent-browser-core >= 0.5.3');
   const artifactDir = await makeArtifactDir('prepared-html');
   const imagePinId = 'f4'.repeat(32) + 'i0';
   await writeArtifactFile(
@@ -157,7 +159,8 @@ test('served HTML is prepared: metafile src rewritten, bridge and storage shim i
   assert.match(html, /__agentBrowserPreviewStorageShim/);
 });
 
-test('served HTML preparation falls back to core defaults without a resolver', async () => {
+test('served HTML preparation falls back to core defaults without a resolver', async (t) => {
+  if (!metaAppPreviewHtmlPreparationAvailable()) t.skip('requires agent-browser-core >= 0.5.3');
   const artifactDir = await makeArtifactDir('prepared-html-defaults');
   const imagePinId = 'e5'.repeat(32) + 'i0';
   await writeArtifactFile(artifactDir, 'index.html', `<img src="metafile://${imagePinId}">`);
