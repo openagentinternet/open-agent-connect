@@ -3,6 +3,8 @@
  * sections, and the new-session preset chip. Does not shadow Settings →
  * Agent presets.
  */
+import { createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -12,20 +14,25 @@ import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
 import { api } from './api.ts'
 import { A2AConversation, type A2AConversationInjected } from './A2AConversation.tsx'
 import { AppsPanel } from './AppsPanel.tsx'
+import { BotBrowserSidebar, type BrowserLocaleFace } from './BotBrowserSidebar.tsx'
 import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
+import { BotBrowserStore } from './browser-store.ts'
+import { openBrowser, startBrowserEventSource } from './browser-events.ts'
 import { appEn, APP_NS, appZh, type AppsLocaleKey } from './locale-apps.ts'
+import { browserEn, BROWSER_NS, browserZh, type BrowserLocaleKey } from './locale-browser.ts'
 import { convEn, CONV_NS, convZh, type ConversationsLocaleKey } from './locale-conversations.ts'
 import { en, NS, zh, type BotsLocaleKey } from './locale.ts'
 import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.ts'
 import type { SeatApi, SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { BOTS_CSS, PRESETS_CSS } from './styles.ts'
+import { BOTS_CSS, BROWSER_CSS, PRESETS_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     'settings.oac.bots': BotsLocaleKey
+    'settings.oac.browser': BrowserLocaleKey
     'settings.oac.conversations': ConversationsLocaleKey
     'settings.oac.services': ServicesLocaleKey
     'settings.oac.apps': AppsLocaleKey
@@ -42,11 +49,12 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + BROWSER_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'oac-dsh: bots dictionary')
+  ctx.effect(() => ctx.locale.register(BROWSER_NS, { zh: browserZh, en: browserEn }), 'oac-dsh: browser dictionary')
   ctx.effect(() => ctx.locale.register(CONV_NS, { zh: convZh, en: convEn }), 'oac-dsh: conversations dictionary')
   ctx.effect(() => ctx.locale.register(SVC_NS, { zh: svcZh, en: svcEn }), 'oac-dsh: services dictionary')
   ctx.effect(() => ctx.locale.register(APP_NS, { zh: appZh, en: appEn }), 'oac-dsh: apps dictionary')
@@ -54,6 +62,28 @@ export function apply(ctx: ClientContext): void {
   const tConv = ctx.locale.bind(CONV_NS)
   const tSvc = ctx.locale.bind(SVC_NS)
   const tApps = ctx.locale.bind(APP_NS)
+
+  // Right-sidebar Bot Browser: one store per activation, shared by the mounted
+  // panel, the Settings > Bots entry buttons, and the daemon-event listener.
+  const browserStore = new BotBrowserStore()
+  ctx.effect(() => {
+    const host = document.createElement('div')
+    host.dataset.plugin = 'open-agent-connect-dsh'
+    host.dataset.oacBrowser = ''
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    root.render(createElement(BotBrowserSidebar, {
+      store: browserStore,
+      locale: ctx.locale as unknown as BrowserLocaleFace,
+      openHome: () => openBrowser(browserStore, null),
+    }))
+    const stopEvents = startBrowserEventSource(browserStore)
+    return () => {
+      stopEvents()
+      root.unmount()
+      host.remove()
+    }
+  }, 'oac-dsh: bot browser sidebar')
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'oac-bots',
@@ -72,6 +102,7 @@ export function apply(ctx: ClientContext): void {
         from: string,
         patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
       ) => api.autoReplyConfig(from, patch),
+      browserOpen: (uri?: string) => openBrowser(browserStore, uri ?? null),
     }),
   }, BotPanel))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
