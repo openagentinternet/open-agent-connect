@@ -21,7 +21,7 @@ import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.
 import type { SeatApi, SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { BOTS_CSS, PRESETS_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, PRESETS_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -42,7 +42,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + APPS_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -112,9 +112,12 @@ export function apply(ctx: ClientContext): void {
     locale: APP_NS,
     inject: () => ({
       bots: () => api.list(),
-      list: (from: string) => api.metaappList(from),
+      list: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
       publish: (from: string, payload: Record<string, unknown>) => api.metaappPublish(from, payload),
+      update: (from: string, targetPinId: string, payload: Record<string, unknown>) =>
+        api.metaappUpdate(from, targetPinId, payload),
       remove: (from: string, targetPinId: string) => api.metaappDelete(from, targetPinId),
+      upload: (from: string, file: File) => api.metaappUpload(from, file),
     }),
   }, AppsPanel))
 

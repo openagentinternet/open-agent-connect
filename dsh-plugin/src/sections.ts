@@ -108,6 +108,30 @@ async function handleMetaappDelete(payload: unknown, run: RunFn): Promise<Metabo
   )
 }
 
+async function handleMetaappUpdate(payload: unknown, run: RunFn): Promise<MetabotCommandResult> {
+  const blocked = requireConfirm(payload, 'metabot metaapp update requires --confirm.')
+  if (blocked) return blocked
+  const from = requireFrom(payload)
+  if (typeof from !== 'string') return from
+  const targetPinId = readTrimmed(payload, 'targetPinId')
+  if (!targetPinId) return missing('missing_target_pin_id', 'targetPinId is required')
+  const body = objectOf(payload, 'payload')
+  if (body === undefined) return missing('missing_payload', 'payload is required')
+  return runMetabotWithPayloadFile(
+    ['metaapp', 'update', '--from', from, '--target-pin-id', targetPinId],
+    body,
+    '--payload-file',
+    ['--confirm'],
+    run,
+  )
+}
+
+function readPositiveInteger(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.trunc(value)
+  if (typeof value === 'string' && /^[1-9]\d*$/u.test(value.trim())) return Number.parseInt(value.trim(), 10)
+  return fallback
+}
+
 export async function dispatchSection(
   method: string,
   payload: unknown,
@@ -150,9 +174,14 @@ export async function dispatchSection(
   if (method === 'metaapp/list') {
     const from = readFrom(payload)
     const args = from ? ['metaapp', 'list', '--from', from] : ['metaapp', 'list']
+    const size = readPositiveInteger(payload && (payload as { size?: unknown }).size, 12)
+    const cursor = readTrimmed(payload, 'cursor')
+    args.push('--size', String(size))
+    if (cursor) args.push('--cursor', cursor)
     return run(args, { timeoutMs: LIST_TIMEOUT_MS })
   }
   if (method === 'metaapp/publish') return handleMetaappPublish(payload, run)
+  if (method === 'metaapp/update') return handleMetaappUpdate(payload, run)
   if (method === 'metaapp/delete') return handleMetaappDelete(payload, run)
   return undefined
 }

@@ -30,3 +30,20 @@ export async function readJsonBody(req: PluginHttpRequest): Promise<unknown> {
   if (text.trim() === '') return {}
   return JSON.parse(text) as unknown
 }
+
+const MAX_RAW_BODY_BYTES = 24 * 1024 * 1024
+
+/** Read the request as raw bytes (asset upload body), capped like the JSON path. */
+export async function readRawBody(req: PluginHttpRequest, cap = MAX_RAW_BODY_BYTES): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let total = 0
+  for await (const chunk of req) {
+    const buffer = Buffer.from(chunk)
+    total += buffer.length
+    if (total > cap) {
+      throw new Error('request body too large')
+    }
+    chunks.push(buffer)
+  }
+  return Buffer.concat(chunks)
+}
