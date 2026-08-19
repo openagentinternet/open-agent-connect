@@ -92,7 +92,7 @@ test('supported provider metadata includes all managed host providers and custom
   assert.equal(PROVIDER_DISPLAY_NAMES.codebuddy, 'CodeBuddy');
   assert.equal(PROVIDER_DISPLAY_NAMES.zcode, 'ZCode');
   assert.equal(PROVIDER_DISPLAY_NAMES.workbuddy, 'WorkBuddy');
-  assert.deepEqual(SUPPORTED_PLATFORM_IDS, SUPPORTED_LLM_PROVIDERS);
+  assert.deepEqual(SUPPORTED_PLATFORM_IDS, [...SUPPORTED_LLM_PROVIDERS, 'dsh']);
   assert.deepEqual(getPlatformSearchOrder(), HOST_SEARCH_ORDER);
   assert.deepEqual(getPlatformBinaryMap(), HOST_BINARY_MAP);
   assert.deepEqual(getPlatformDisplayNames(), PROVIDER_DISPLAY_NAMES);
@@ -105,13 +105,14 @@ test('supported provider metadata includes all managed host providers and custom
   assert.equal(isLlmProvider('codebuddy'), true);
   assert.equal(isLlmProvider('zcode'), true);
   assert.equal(isLlmProvider('workbuddy'), true);
+  assert.equal(isLlmProvider('dsh'), false);
 });
 
 test('platform registry defines managed runtime metadata and install skill roots', () => {
-  assert.equal(PLATFORM_DEFINITIONS.length, 14);
+  assert.equal(PLATFORM_DEFINITIONS.length, 15);
   assert.deepEqual(
     PLATFORM_DEFINITIONS.map((platform) => platform.id),
-    SUPPORTED_LLM_PROVIDERS,
+    [...SUPPORTED_LLM_PROVIDERS, 'dsh'],
   );
   assert.equal(PLATFORM_DEFINITIONS[0].id, 'claude-code');
 
@@ -156,6 +157,11 @@ test('platform registry defines managed runtime metadata and install skill roots
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'workbuddy' && root.path === '~/.workbuddy/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'workbuddy' && root.path === '~/.codebuddy/skills'));
   assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'shared-agents'));
+  const dsh = PLATFORM_DEFINITIONS.find((platform) => platform.id === 'dsh');
+  assert.ok(dsh);
+  assert.equal(dsh.runtime, undefined);
+  assert.equal(dsh.executor, undefined);
+  assert.ok(getInstallSkillRoots().some((root) => root.platformId === 'dsh' && root.path === '~/.dsh/skills' && root.homeEnv === 'DSH_HOME'));
 });
 
 test('kimi platform exposes a Kimi Work Desktop skill root with cross-platform paths', () => {
@@ -212,6 +218,16 @@ test('resolvePlatformSkillRootPath resolves Kimi Work Desktop under %APPDATA% on
   }
 });
 
+test('resolvePlatformSkillRootPath honors DSH_HOME for the dsh skill-bind host', () => {
+  const root = getPlatformSkillRoots('dsh').find((candidate) => candidate.id === 'dsh-home');
+  assert.ok(root);
+  const systemHome = '/Users/tester';
+  const defaultPath = resolvePlatformSkillRootPath(root, systemHome, {});
+  assert.equal(defaultPath, path.resolve(systemHome, '.dsh/skills'));
+  const overridePath = resolvePlatformSkillRootPath(root, systemHome, { DSH_HOME: '/tmp/custom-dsh' });
+  assert.equal(overridePath, path.resolve('/tmp/custom-dsh', 'skills'));
+});
+
 test('platform registry assigns provider-specific LLM icons for every managed runtime', () => {
   assert.deepEqual(
     Object.fromEntries(PLATFORM_DEFINITIONS.map((platform) => [platform.id, platform.logoPath])),
@@ -230,6 +246,7 @@ test('platform registry assigns provider-specific LLM icons for every managed ru
       codebuddy: '/ui/assets/platforms/codebuddy.svg',
       zcode: '/ui/assets/platforms/zcode.svg',
       workbuddy: '/ui/assets/platforms/codebuddy.svg',
+      dsh: '/ui/assets/platforms/dsh.svg',
     },
   );
 

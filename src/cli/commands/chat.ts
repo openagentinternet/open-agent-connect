@@ -13,6 +13,14 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+/** Parse a positive-integer flag: undefined when absent, 'invalid' when unparseable. */
+function readPositiveIntFlag(args: string[], flag: string): number | 'invalid' | undefined {
+  const raw = readFlagValue(args, flag);
+  if (raw === null) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 'invalid';
+}
+
 export async function runChatCommand(args: string[], context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
   if (args[0] === 'private') {
     const requestFile = readFlagValue(args, '--request-file');
@@ -92,6 +100,41 @@ export async function runChatCommand(args: string[], context: CliRuntimeContext)
       }
       const from = readFromFlag(args);
       return handler({ enabled: false, ...(from ? { from } : {}) });
+    }
+
+    if (subAction === 'config') {
+      const handler = context.dependencies.chat?.setAutoReply;
+      if (!handler) {
+        return commandFailed('not_implemented', 'Auto-reply config handler is not configured.');
+      }
+      const from = readFromFlag(args);
+      const enabledRaw = readFlagValue(args, '--enabled');
+      const maxTurnsRaw = readFlagValue(args, '--max-turns');
+      const cooldownMsRaw = readFlagValue(args, '--cooldown-ms');
+      const strategyId = readFlagValue(args, '--strategy') || undefined;
+      if (enabledRaw === null && maxTurnsRaw === null && cooldownMsRaw === null && strategyId === undefined) {
+        return commandFailed(
+          'invalid_flag',
+          'Auto-reply config requires at least one of --enabled, --max-turns, --cooldown-ms, --strategy.',
+        );
+      }
+      let enabled: boolean | undefined;
+      if (enabledRaw !== null) {
+        if (enabledRaw === 'true') enabled = true;
+        else if (enabledRaw === 'false') enabled = false;
+        else return commandFailed('invalid_flag', '--enabled must be true or false.');
+      }
+      const maxTurns = readPositiveIntFlag(args, '--max-turns');
+      if (maxTurns === 'invalid') return commandFailed('invalid_flag', '--max-turns must be a positive integer.');
+      const cooldownMs = readPositiveIntFlag(args, '--cooldown-ms');
+      if (cooldownMs === 'invalid') return commandFailed('invalid_flag', '--cooldown-ms must be a positive integer.');
+      return handler({
+        ...(enabled !== undefined ? { enabled } : {}),
+        ...(maxTurns !== undefined ? { maxTurns } : {}),
+        ...(cooldownMs !== undefined ? { cooldownMs } : {}),
+        ...(strategyId !== undefined ? { defaultStrategyId: strategyId } : {}),
+        ...(from ? { from } : {}),
+      });
     }
 
     return commandUnknownSubcommand(`chat auto-reply ${normalizeText(subAction)}`);

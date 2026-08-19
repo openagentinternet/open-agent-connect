@@ -184,12 +184,62 @@ test('runCli dispatches chat auto-reply commands with --from', async () => {
     stderr: { write: () => true },
     dependencies,
   }), 0);
+  assert.equal(await runCli([
+    'chat', 'auto-reply', 'config',
+    '--from', 'alice', '--enabled', 'true', '--max-turns', '15', '--cooldown-ms', '300000',
+  ], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 0);
+  assert.equal(await runCli(['chat', 'auto-reply', 'config', '--from', 'alice', '--cooldown-ms', '60000'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 0);
 
   assert.deepEqual(calls.status, [{ from: 'alice' }]);
   assert.deepEqual(calls.set, [
     { enabled: true, defaultStrategyId: 'default', from: 'alice' },
     { enabled: false, from: 'alice' },
+    { enabled: true, maxTurns: 15, cooldownMs: 300000, from: 'alice' },
+    { cooldownMs: 60000, from: 'alice' },
   ]);
+});
+
+test('runCli rejects malformed chat auto-reply config flags', async () => {
+  const calls = [];
+  const dependencies = {
+    chat: {
+      setAutoReply: async (input) => {
+        calls.push(input);
+        return commandSuccess({ enabled: true });
+      },
+    },
+  };
+
+  assert.equal(await runCli(['chat', 'auto-reply', 'config', '--from', 'alice'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 1);
+  assert.equal(await runCli(['chat', 'auto-reply', 'config', '--from', 'alice', '--enabled', 'yes'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 1);
+  assert.equal(await runCli(['chat', 'auto-reply', 'config', '--from', 'alice', '--max-turns', 'abc'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 1);
+  assert.equal(await runCli(['chat', 'auto-reply', 'config', '--from', 'alice', '--cooldown-ms', '-5'], {
+    stdout: { write: () => true },
+    stderr: { write: () => true },
+    dependencies,
+  }), 1);
+
+  assert.deepEqual(calls, []);
 });
 
 test('runCli fails `metabot chat private` when --chain value is missing', async () => {
