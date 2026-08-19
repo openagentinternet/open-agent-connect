@@ -16,6 +16,10 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
     fallbackProvider?: LlmProvider | null;
     allowChatSkills: string[];
     homepage?: MetabotHomepage;
+    dshLlmProvider?: string | null;
+    dshLlmModel?: string | null;
+    dshLlmFallbackProvider?: string | null;
+    dshLlmFallbackModel?: string | null;
 }
 export interface CreateMetabotInput {
     name: string;
@@ -27,6 +31,10 @@ export interface CreateMetabotInput {
     primaryProvider?: LlmProvider | null;
     fallbackProvider?: LlmProvider | null;
     allowChatSkills?: string[];
+    dshLlmProvider?: string | null;
+    dshLlmModel?: string | null;
+    dshLlmFallbackProvider?: string | null;
+    dshLlmFallbackModel?: string | null;
 }
 export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
     homeDir: string;
@@ -46,6 +54,10 @@ export interface UpdateMetabotInfoInput {
     fallbackProvider?: LlmProvider | null;
     allowChatSkills?: string[];
     homepage?: MetabotHomepage | null;
+    dshLlmProvider?: string | null;
+    dshLlmModel?: string | null;
+    dshLlmFallbackProvider?: string | null;
+    dshLlmFallbackModel?: string | null;
 }
 export interface SyncMetabotInfoToChainOptions {
     delayMs?: number;

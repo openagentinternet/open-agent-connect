@@ -44,7 +44,18 @@ async function runBotCommand(args, context) {
         if (!handler) {
             return (0, commandResult_1.commandFailed)('not_implemented', 'Bot profile create handler is not configured.');
         }
-        return handler({ name, ...(host ? { host } : {}) });
+        const dshLlmProvider = (0, helpers_1.readFlagValue)(args, '--dsh-llm-provider');
+        const dshLlmModel = (0, helpers_1.readFlagValue)(args, '--dsh-llm-model');
+        const dshLlmFallbackProvider = (0, helpers_1.readFlagValue)(args, '--dsh-llm-fallback-provider');
+        const dshLlmFallbackModel = (0, helpers_1.readFlagValue)(args, '--dsh-llm-fallback-model');
+        return handler({
+            name,
+            ...(host ? { host } : {}),
+            ...(dshLlmProvider ? { dshLlmProvider } : {}),
+            ...(dshLlmModel ? { dshLlmModel } : {}),
+            ...(dshLlmFallbackProvider ? { dshLlmFallbackProvider } : {}),
+            ...(dshLlmFallbackModel ? { dshLlmFallbackModel } : {}),
+        });
     }
     if (subcommand === 'update') {
         const slug = readFromSlug(args);

@@ -15,6 +15,7 @@ const bot_1 = require("./commands/bot");
 const browser_1 = require("./commands/browser");
 const chain_1 = require("./commands/chain");
 const chat_1 = require("./commands/chat");
+const conversations_1 = require("./commands/conversations");
 const file_1 = require("./commands/file");
 const trace_1 = require("./commands/trace");
 const ui_1 = require("./commands/ui");
@@ -98,6 +99,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'chat':
                     result = await (0, chat_1.runChatCommand)(rest, context);
+                    break;
+                case 'conversations':
+                    result = await (0, conversations_1.runConversationsCommand)(rest, context);
                     break;
                 case 'file':
                     result = await (0, file_1.runFileCommand)(rest, context);

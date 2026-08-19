@@ -1,6 +1,6 @@
 {
   "name": "@openagentinternet/agent-browser-name-resolvers",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -40,7 +40,7 @@
     }
   },
   "dependencies": {
-    "@openagentinternet/agent-browser-core": "0.5.1",
+    "@openagentinternet/agent-browser-core": "0.5.2",
     "viem": "2.0.0"
   },
   "scripts": {

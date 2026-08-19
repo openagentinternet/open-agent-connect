@@ -2517,6 +2517,33 @@ function createDefaultCliDependencies(context) {
             },
             setAutoReply: async (input) => requestJsonForSelectedActor('POST', '/api/chat/auto-reply/config', typeof input.from === 'string' ? input.from : undefined, input),
         },
+        conversations: {
+            list: async (input) => {
+                const params = new URLSearchParams();
+                if (input.local)
+                    params.set('local', input.local);
+                if (input.limit != null)
+                    params.set('limit', String(input.limit));
+                const suffix = params.size ? `?${params.toString()}` : '';
+                return requestJsonForSelectedActor('GET', `/api/conversations${suffix}`, input.local);
+            },
+            messages: async (input) => {
+                const params = new URLSearchParams();
+                if (input.local)
+                    params.set('local', input.local);
+                if (input.peer)
+                    params.set('peer', input.peer);
+                if (input.limit != null)
+                    params.set('limit', String(input.limit));
+                if (input.before != null)
+                    params.set('before', String(input.before));
+                if (input.after != null)
+                    params.set('after', String(input.after));
+                const suffix = params.size ? `?${params.toString()}` : '';
+                return requestJsonForSelectedActor('GET', `/api/conversations/messages${suffix}`, input.local);
+            },
+            guidance: async (input) => requestJsonForSelectedActor('POST', '/api/conversations/guidance', input.local, { local: input.local, peer: input.peer, guidance: input.guidance }),
+        },
         file: {
             upload: async (input) => requestJsonForSelectedActor('POST', '/api/file/upload', typeof input.from === 'string' ? input.from : undefined, input),
             uploadLarge: async (input) => requestJsonForSelectedActor('POST', '/api/file/upload-large', typeof input.from === 'string' ? input.from : undefined, input),
@@ -2787,6 +2814,7 @@ function mergeCliDependencies(context) {
         services: { ...defaults.services, ...provided.services },
         provider: { ...defaults.provider, ...provided.provider },
         chat: { ...defaults.chat, ...provided.chat },
+        conversations: { ...defaults.conversations, ...provided.conversations },
         file: { ...defaults.file, ...provided.file },
         wallet: { ...defaults.wallet, ...provided.wallet },
         trace: { ...defaults.trace, ...provided.trace },

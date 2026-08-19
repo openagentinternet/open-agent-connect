@@ -33,6 +33,7 @@ export interface MetabotPaths {
     chatSkillResolutionPath: string;
     profilePublishStatePath: string;
     homepageStatePath: string;
+    dshLlmPath: string;
     bioMdPath: string;
     soulMdPath: string;
     goalMdPath: string;

@@ -376,6 +376,17 @@ exports.PLATFORM_DEFINITIONS = [
             multicaReferencePath: 'agent/workbuddy.go',
         },
     },
+    {
+        id: 'dsh',
+        displayName: 'DeepSeek Harness',
+        logoPath: '/ui/assets/platforms/dsh.svg',
+        skills: {
+            roots: [
+                { id: 'dsh-home', kind: 'global', homeEnv: 'DSH_HOME', path: '~/.dsh/skills', autoBind: 'when-parent-exists' },
+                { id: 'dsh-project', kind: 'project', path: '.dsh/skills', autoBind: 'manual' },
+            ],
+        },
+    },
 ];
 exports.SUPPORTED_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS.map((platform) => platform.id);
 exports.RUNTIME_PLATFORM_IDS = exports.PLATFORM_DEFINITIONS

@@ -27,6 +27,7 @@ const platformRegistry_1 = require("../core/platform/platformRegistry");
 const llmTypes_1 = require("../core/llm/llmTypes");
 const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
 const metabotHomepage_1 = require("../core/bot/metabotHomepage");
+const dshLlm_1 = require("../core/bot/dshLlm");
 const publishService_1 = require("../core/services/publishService");
 const servicePublishChain_1 = require("../core/services/servicePublishChain");
 const myServices_1 = require("../core/services/myServices");
@@ -691,6 +692,18 @@ function buildMetabotUpdateInput(input) {
     if (hasOwnField(input, 'homepage')) {
         update.homepage = (0, metabotHomepage_1.normalizeMetabotHomepage)(input.homepage);
     }
+    if (hasOwnField(input, 'dshLlmProvider')) {
+        update.dshLlmProvider = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmProvider);
+    }
+    if (hasOwnField(input, 'dshLlmModel')) {
+        update.dshLlmModel = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmModel);
+    }
+    if (hasOwnField(input, 'dshLlmFallbackProvider')) {
+        update.dshLlmFallbackProvider = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmFallbackProvider);
+    }
+    if (hasOwnField(input, 'dshLlmFallbackModel')) {
+        update.dshLlmFallbackModel = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmFallbackModel);
+    }
     return update;
 }
 function buildMetabotCreateInput(input) {
@@ -730,6 +743,18 @@ function buildMetabotCreateInput(input) {
             throw new Error('allowChatSkills can be configured after MetaBot creation from the Bot detail page.');
         }
         createInput.allowChatSkills = allowChatSkills;
+    }
+    if (hasOwnField(input, 'dshLlmProvider')) {
+        createInput.dshLlmProvider = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmProvider);
+    }
+    if (hasOwnField(input, 'dshLlmModel')) {
+        createInput.dshLlmModel = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmModel);
+    }
+    if (hasOwnField(input, 'dshLlmFallbackProvider')) {
+        createInput.dshLlmFallbackProvider = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmFallbackProvider);
+    }
+    if (hasOwnField(input, 'dshLlmFallbackModel')) {
+        createInput.dshLlmFallbackModel = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmFallbackModel);
     }
     return createInput;
 }

@@ -37,6 +37,7 @@ const chatSkillPolicy_1 = require("../services/chatSkillPolicy");
 const avatarChainWrite_1 = require("../identity/avatarChainWrite");
 const profilePublishState_1 = require("./profilePublishState");
 const metabotPersona_1 = require("./metabotPersona");
+const dshLlm_1 = require("./dshLlm");
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
 var avatarChainWrite_2 = require("../identity/avatarChainWrite");
@@ -101,6 +102,24 @@ async function writeChatSkillPolicy(filePath, allowChatSkills) {
         allowChatSkills,
         updatedAt: new Date().toISOString(),
     }, null, 2)}\n`, 'utf8');
+}
+function dshLlmPatchFromInput(input) {
+    const patch = {};
+    if (input.dshLlmProvider !== undefined)
+        patch.dshLlmProvider = input.dshLlmProvider;
+    if (input.dshLlmModel !== undefined)
+        patch.dshLlmModel = input.dshLlmModel;
+    if (input.dshLlmFallbackProvider !== undefined)
+        patch.dshLlmFallbackProvider = input.dshLlmFallbackProvider;
+    if (input.dshLlmFallbackModel !== undefined)
+        patch.dshLlmFallbackModel = input.dshLlmFallbackModel;
+    return patch;
+}
+function hasDshLlmPatch(patch) {
+    return Object.prototype.hasOwnProperty.call(patch, 'dshLlmProvider')
+        || Object.prototype.hasOwnProperty.call(patch, 'dshLlmModel')
+        || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackProvider')
+        || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackModel');
 }
 function validateProvider(value) {
     if (value === null)
@@ -262,7 +281,7 @@ async function readProfileProviderBindings(profile) {
 }
 async function buildMetabotProfileFull(profile) {
     const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
-    const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage] = await Promise.all([
+    const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage, dshLlm] = await Promise.all([
         readTextFile(paths.bioMdPath),
         readTextFile(paths.roleMdPath),
         readTextFile(paths.soulMdPath),
@@ -271,6 +290,7 @@ async function buildMetabotProfileFull(profile) {
         readProfileProviderBindings(profile),
         readChatSkillPolicy(paths.chatSkillPolicyPath),
         (0, metabotHomepage_1.readMetabotHomepage)(paths.homepageStatePath),
+        (0, dshLlm_1.readDshLlmBinding)(paths.dshLlmPath),
     ]);
     const persona = (0, metabotPersona_1.normalizePublicMetabotPersona)({ role, soul, goal });
     return {
@@ -284,6 +304,10 @@ async function buildMetabotProfileFull(profile) {
         fallbackProvider: providerBindings.fallbackProvider,
         allowChatSkills,
         ...(homepage ? { homepage } : {}),
+        dshLlmProvider: dshLlm.dshLlmProvider ?? null,
+        dshLlmModel: dshLlm.dshLlmModel ?? null,
+        dshLlmFallbackProvider: dshLlm.dshLlmFallbackProvider ?? null,
+        dshLlmFallbackModel: dshLlm.dshLlmFallbackModel ?? null,
     };
 }
 async function listMetabotProfiles(systemHomeDir) {
@@ -351,6 +375,10 @@ async function createMetabotProfile(systemHomeDir, input) {
     if (avatar) {
         await writeTextFile(resolveAvatarPath(resolvedHome.homeDir), avatar);
     }
+    const dshLlmPatch = dshLlmPatchFromInput(input);
+    if (hasDshLlmPatch(dshLlmPatch)) {
+        await (0, dshLlm_1.writeDshLlmBinding)(paths.dshLlmPath, dshLlmPatch);
+    }
     const profile = await (0, identityProfiles_1.upsertIdentityProfile)({
         systemHomeDir,
         name,
@@ -411,6 +439,10 @@ function buildMetabotProfileDraftFromIdentity(input) {
         primaryProvider: input.primaryProvider === undefined ? null : validateProvider(input.primaryProvider),
         fallbackProvider: input.fallbackProvider === undefined ? null : validateProvider(input.fallbackProvider),
         allowChatSkills: input.allowChatSkills === undefined ? [] : (0, chatSkillPolicy_1.normalizeAllowChatSkills)(input.allowChatSkills),
+        dshLlmProvider: input.dshLlmProvider === undefined ? null : input.dshLlmProvider,
+        dshLlmModel: input.dshLlmModel === undefined ? null : input.dshLlmModel,
+        dshLlmFallbackProvider: input.dshLlmFallbackProvider === undefined ? null : input.dshLlmFallbackProvider,
+        dshLlmFallbackModel: input.dshLlmFallbackModel === undefined ? null : input.dshLlmFallbackModel,
     };
 }
 async function createMetabotProfileFromIdentity(systemHomeDir, input) {
@@ -437,6 +469,10 @@ async function createMetabotProfileFromIdentity(systemHomeDir, input) {
     ]);
     if (draft.avatarDataUrl) {
         await writeTextFile(resolveAvatarPath(draft.homeDir), draft.avatarDataUrl);
+    }
+    const dshLlmPatch = dshLlmPatchFromInput(input);
+    if (hasDshLlmPatch(dshLlmPatch)) {
+        await (0, dshLlm_1.writeDshLlmBinding)(paths.dshLlmPath, dshLlmPatch);
     }
     const profile = await (0, identityProfiles_1.upsertIdentityProfile)({
         systemHomeDir,
@@ -702,6 +738,11 @@ async function updateMetabotProfile(systemHomeDir, slug, input) {
         else {
             await (0, metabotHomepage_1.writeMetabotHomepage)(paths.homepageStatePath, homepage);
         }
+    }
+    const dshLlmPatch = dshLlmPatchFromInput(input);
+    if (hasDshLlmPatch(dshLlmPatch)) {
+        const currentDshLlm = await (0, dshLlm_1.readDshLlmBinding)(paths.dshLlmPath);
+        await (0, dshLlm_1.writeDshLlmBinding)(paths.dshLlmPath, (0, dshLlm_1.mergeDshLlmBinding)(currentDshLlm, dshLlmPatch));
     }
     if (writeProviderBindings) {
         await writeProviderBindings();
