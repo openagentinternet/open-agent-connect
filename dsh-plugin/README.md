@@ -12,7 +12,12 @@ After a DSH restart, Settings left nav gains four sibling sections: **Bots**, **
 
 ## Developer mount
 
-From this repository:
+The live DSH environment (`dsh web` at `http://127.0.0.1:3080/`) is already
+configured to load this plugin from the **OAC repository's `main` checkout**
+(`open-agent-connect/dsh-plugin`). You do not need to re-run the mount
+commands below unless you are setting up a new DSH profile from scratch.
+
+For a fresh setup:
 
 ```bash
 cd dsh-plugin
@@ -21,7 +26,27 @@ npm run build
 dsh plugin --profile web add "link:$(pwd)"
 ```
 
-Requires Node `>=20 <25` for the `metabot` CLI. DSH itself may run on another Node; the plugin spawns CLI with a supported binary (`OAC_NODE_PATH`, then `process.execPath` if in range, then nvm 20–24). Override the CLI with `OAC_METABOT_CLI_PATH`.
+**Important:** `dsh` is not on PATH by default. The DSH CLI lives in the
+[deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) checkout as
+a pnpm workspace script. Run it from that checkout:
+
+```bash
+# from the deepseek-harness root:
+pnpm dsh plugin --profile web add "link:<absolute-path>"
+```
+
+If the plugin is *already* listed in the profile's `package.json` (i.e. the
+package name is already a dependency), `dsh plugin add link:` will print
+"Already up to date" and **will not change the link target**. In that case,
+edit `~/.dsh/profiles/web/package.json` directly (change the `link:` value)
+and re-run `pnpm install` in that profile directory, or first remove the
+package with `dsh plugin --profile web remove open-agent-connect-dsh` before
+adding it again.
+
+Requires Node `>=20 <25` for the `metabot` CLI. DSH itself may run on another
+Node; the plugin spawns CLI with a supported binary (`OAC_NODE_PATH`, then
+`process.execPath` if in range, then nvm 20–24). Override the CLI with
+`OAC_METABOT_CLI_PATH`.
 
 ## Host routes
 
@@ -70,6 +95,15 @@ Then reload the DSH env:
 Keep each feature branch based on `main` and merge with `--no-ff`, exactly as
 described in the repo `AGENTS.md`.
 
+> **OAC root build & daemon.** The `open-agent-connect` repo root (`src/`) and
+> the `dsh-plugin/` are two separate compilation units. If a branch also
+> touches OAC core code (daemon routes, CLI commands, the browser module),
+> you must additionally run `npm run build` from the **repo root** and restart
+> the OAC daemon (`metabot daemon restart`, or the `daemon start` step in the
+> plugin's bootstrap will restart it). The daemon runs independently from
+> `dsh web`; restarting `dsh web` does not restart the daemon, and vice
+> versa.
+
 ## Bot Browser
 
 The plugin adds a very wide right-sidebar Bot Browser to the DSH web GUI: the
@@ -99,3 +133,4 @@ skill behaves exactly as before.
 - Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`
 - Client: `dsh.client` bundle, no second `cordis.patch.yml` row
 - Capability core remains the OAC CLI. This package does not wrap every `metabot` verb as a Cordis tool.
+- `lib/` is gitignored — build artifacts are never committed. After every merge to `main`, run `npm run build` (see the parallel-branch loop above).
