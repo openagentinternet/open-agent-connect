@@ -6,6 +6,7 @@
  */
 import { bootstrapHealth } from './bootstrap.js'
 import { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
+import { BrowserEventHub } from './browser-bridge.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
@@ -40,7 +41,23 @@ async function dispatchPost(
   ctx: HostContext,
   method: string,
   payload: unknown,
+  browserHub: BrowserEventHub,
 ): Promise<MetabotCommandResult> {
+  if (method === 'browser/open') {
+    const uri = typeof (payload as { uri?: unknown })?.uri === 'string'
+      ? (payload as { uri: string }).uri.trim()
+      : ''
+    const event = browserHub.open(uri || null)
+    if (event === null) {
+      return {
+        ok: false,
+        state: 'failed',
+        code: 'daemon_unreachable',
+        message: 'OAC daemon is not reachable; start it with "metabot daemon start".',
+      }
+    }
+    return { ok: true, state: 'success', data: event }
+  }
   if (method === 'who') {
     return handleWho()
   }
@@ -131,7 +148,39 @@ async function dispatchPost(
   return { ok: false, state: 'failed', code: 'not-found', message: `unknown oac API method "${method}"` }
 }
 
-function registerApi(ctx: HostContext, getHealth: () => HealthPayload): () => void {
+function streamBrowserEvents(
+  req: PluginHttpRequest,
+  res: PluginHttpResponse,
+  hub: BrowserEventHub,
+): void {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  })
+  res.write?.('retry: 3000\n\n')
+  const unsubscribe = hub.addListener((event) => {
+    try {
+      res.write?.(`event: browser-open\ndata: ${JSON.stringify(event)}\n\n`)
+    } catch {
+      // a broken connection is unregistered on req close below
+    }
+  })
+  req.on?.('close', () => {
+    unsubscribe()
+    try {
+      res.end?.()
+    } catch {
+      // already ended
+    }
+  })
+}
+
+function registerApi(
+  ctx: HostContext,
+  getHealth: () => HealthPayload,
+  browserHub: BrowserEventHub,
+): () => void {
   const fence = (req: PluginHttpRequest): boolean =>
     isTrustedApiRequest(req, ctx.webRuntime.trustedHosts)
 
@@ -148,6 +197,14 @@ function registerApi(ctx: HostContext, getHealth: () => HealthPayload): () => vo
         writeJson(res, 404, { ok: false, error: { code: 'not-found', message: 'unknown oac API method' } })
         return
       }
+      if (method === 'browser/events') {
+        if (req.method !== 'GET') {
+          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
+          return
+        }
+        streamBrowserEvents(req, res, browserHub)
+        return
+      }
       if (method === 'health') {
         if (req.method !== 'GET' && req.method !== 'POST') {
           writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
@@ -162,7 +219,7 @@ function registerApi(ctx: HostContext, getHealth: () => HealthPayload): () => vo
       }
       try {
         const payload = await readJsonBody(req)
-        const result = await dispatchPost(ctx, method, payload)
+        const result = await dispatchPost(ctx, method, payload, browserHub)
         const status = result.code === 'not-found' ? 404 : 200
         writeJson(res, status, result)
       } catch (error) {
@@ -184,6 +241,13 @@ function registerApi(ctx: HostContext, getHealth: () => HealthPayload): () => vo
  */
 export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promise<void> {
   let health: HealthPayload = emptyHealth()
+  const browserHub = new BrowserEventHub()
+  if (!config.skipBootstrap) {
+    ctx.effect(() => {
+      browserHub.start()
+      return () => { browserHub.stop() }
+    }, 'oac-dsh: browser event hub')
+  }
   if (config.skipBootstrap) {
     health.error = 'bootstrap skipped'
   } else {
@@ -212,10 +276,11 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       health.presets = { ok: false, message: 'agentPresets not available' }
     }
   }
-  ctx.effect(() => registerApi(ctx, () => health), 'oac-dsh: /oac/api routes')
+  ctx.effect(() => registerApi(ctx, () => health, browserHub), 'oac-dsh: /oac/api routes')
 }
 
 export type { HealthPayload, OacDshConfig }
+export { BrowserEventHub, resolveBrowserPath, resolveDaemonBaseUrl, type BrowserOpenEvent } from './browser-bridge.js'
 export { parseMetabotStdout, resolveCli, resolveMetabotCliPath, runMetabot } from './cli-bridge.js'
 export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'

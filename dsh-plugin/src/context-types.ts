@@ -11,6 +11,8 @@ export interface PluginHttpRequest {
   url?: string
   method?: string
   headers: Record<string, string | string[] | undefined>
+  /** Subject-verb wire event hook (the SSE routes use it to detect client close). */
+  on?(event: string, listener: (...args: unknown[]) => void): unknown
   [Symbol.asyncIterator](): AsyncIterator<string | Uint8Array>
 }
 
@@ -18,6 +20,8 @@ export interface PluginHttpRequest {
 export interface PluginHttpResponse {
   statusCode: number
   writeHead(status: number, headers?: Record<string, string>): void
+  /** Streaming frame writer (the browser-events SSE route uses it). */
+  write?(chunk: string | Uint8Array): unknown
   end(body?: string | Uint8Array): void
 }
 

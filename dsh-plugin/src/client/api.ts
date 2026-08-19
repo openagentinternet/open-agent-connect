@@ -253,6 +253,18 @@ export const api = {
     postEnvelope('metaapp/publish', { from, payload, confirm: true }),
   metaappDelete: async (from: string, targetPinId: string): Promise<CommandEnvelope> =>
     postEnvelope('metaapp/delete', { from, targetPinId, confirm: true }),
+  /**
+   * Open the right-sidebar Bot Browser on a resource URI (or the Browser
+   * home when `uri` is null/empty); resolves to the iframe `localUiUrl`.
+   */
+  browserOpen: async (uri?: string | null): Promise<string> => {
+    const data = await post<{ localUiUrl?: unknown }>('browser/open', { uri: uri ?? '' })
+    const url = typeof data.localUiUrl === 'string' ? data.localUiUrl : ''
+    if (url === '') {
+      throw new OacApiError('no_local_ui_url', 'OAC daemon returned no Browser URL')
+    }
+    return url
+  },
   health: async (): Promise<{ ok: boolean; error?: string }> => {
     const response = await fetch('/oac/api/health', { credentials: 'same-origin' })
     return await response.json() as { ok: boolean; error?: string }

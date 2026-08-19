@@ -34,7 +34,8 @@ export const BOTS_CSS = `
 .oac-bot-name { flex: 1; min-width: 0; font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-bot-bio { margin: 0 16px 12px; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .oac-bot-model { margin: 0 16px 12px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oac-bot-foot { display: flex; justify-content: flex-end; gap: 2px; padding: 6px 10px; border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-bot-foot { display: flex; justify-content: space-between; gap: 2px; padding: 6px 10px; border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-bot-foot-left, .oac-bot-foot-right { display: flex; align-items: center; gap: 2px; }
 .oac-icon-btn { position: relative; appearance: none; border: 0; border-radius: 7px; padding: 6px; background: none; color: var(--dsw-alias-label-tertiary); cursor: pointer; display: inline-flex; align-items: center; }
 .oac-icon-btn:hover { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
 .oac-icon-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -1px; }
@@ -181,4 +182,35 @@ export const PRESETS_CSS = `
 .oac-preset-seat-item-desc { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-caption); white-space: normal; }
 .oac-preset-seat-item-icon { flex: none; }
 .oac-preset-avatar.oac-preset-seat-icon, .oac-preset-avatar.oac-preset-seat-item-icon { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
+`
+
+export const BROWSER_CSS = `
+/* Right-sidebar Bot Browser (hosted in a body portal, like dsh-better-sidebar).
+   While open it OCCUPIES the layout: #root gives up the panel width, so the
+   conversation column lifts instead of the Browser floating over it. */
+#root { margin-right: var(--oac-browser-width, 0px); transition: margin-right .18s cubic-bezier(.4, 0, .2, 1); }
+body[data-oac-browser-dragging] #root { transition: none; }
+body[data-oac-browser-dragging] { cursor: col-resize; user-select: none; }
+.oac-browser-shell { position: fixed; top: 0; right: 0; bottom: 0; z-index: 1080; width: var(--oac-browser-width, 0px); display: flex; pointer-events: none; }
+.oac-browser-resize { flex: none; width: 6px; margin-left: -3px; align-self: stretch; cursor: col-resize; touch-action: none; pointer-events: auto; }
+.oac-browser-resize:hover, .oac-browser-resize[data-active='true'] { background: var(--dsw-alias-brand-primary); opacity: .5; }
+.oac-browser-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-2); border-left: 1px solid var(--dsw-alias-border-l2); box-shadow: var(--dsw-shadow-lv1); overflow: hidden; pointer-events: auto; }
+.oac-browser-header { flex: none; display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 12px 0 16px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-browser-title { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); white-space: nowrap; }
+.oac-browser-uri { flex: 1; min-width: 0; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-browser-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 18px; line-height: 1; cursor: pointer; }
+.oac-browser-close:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.oac-browser-body { flex: 1; min-height: 0; background: var(--dsw-alias-bg-layer-1); }
+.oac-browser-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--dsw-alias-bg-layer-0, #fff); }
+.oac-browser-landing { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; box-sizing: border-box; text-align: center; }
+.oac-browser-empty, .oac-browser-error { margin: 0; max-width: 380px; font-size: 13px; line-height: 20px; }
+.oac-browser-empty { color: var(--dsw-alias-label-secondary); }
+.oac-browser-error { color: var(--dsw-alias-state-error-primary); }
+.oac-browser-home { padding: 7px 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
+.oac-browser-home:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--dsw-alias-label-dimmed); }
+.oac-browser-reopen { position: fixed; top: 64px; right: 0; z-index: 1075; display: none; align-items: center; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-right: 0; border-radius: 10px 0 0 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 16px; cursor: pointer; pointer-events: auto; }
+.oac-browser-reopen:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.oac-browser-shell[data-open='false'] .oac-browser-resize, .oac-browser-shell[data-open='false'] .oac-browser-panel { display: none; }
+.oac-browser-shell[data-open='true'] .oac-browser-reopen { display: none; }
+.oac-browser-shell[data-open='false']:focus-within .oac-browser-reopen { outline: 2px solid var(--dsw-alias-brand-primary); }
 `

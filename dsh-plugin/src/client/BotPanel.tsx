@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   Button,
+  IconBrowseOutline16,
   IconEditOutline16,
   IconPlusOutline16,
   IconRefreshOutline16,
+  IconRightUpOutline16,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BotRow, LlmDirectory, AutoReplyConfig, ChatSkillsPayload } from './api.ts'
@@ -26,6 +28,8 @@ export interface BotPanelInjected {
     from: string,
     patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
   ) => Promise<AutoReplyConfig>
+  /** Open the right-sidebar Bot Browser; no URI opens its home. */
+  browserOpen: (uri?: string) => void
 }
 
 /** Newest first, by profile creation time. */
@@ -42,8 +46,10 @@ export function BotPanel({
   chatSkills,
   loadAutoReplyStatus,
   autoReplyConfig,
+  browserOpen,
+  close,
   t,
-}: BotPanelInjected & { t: Translate }): ReactNode {
+}: BotPanelInjected & { close: () => void; t: Translate }): ReactNode {
   const [bots, setBots] = useState<BotRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -129,6 +135,9 @@ export function BotPanel({
         <h2>{t('title')}</h2>
         <div className="oac-actions">
           <Button type="button" icon={<IconRefreshOutline16 />} onClick={reload}>{t('refresh')}</Button>
+          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => browserOpen()}>
+            {t('browserOpen')}
+          </Button>
           <Button
             type="button"
             variant="primary"
@@ -157,15 +166,33 @@ export function BotPanel({
                   <div className="oac-bot-model">{bot.dshLlmProvider}/{bot.dshLlmModel}</div>
                 ) : null}
                 <div className="oac-bot-foot">
-                  <button
-                    type="button"
-                    className="oac-icon-btn"
-                    data-tip={t('edit')}
-                    aria-label={`${t('edit')}: ${bot.name}`}
-                    onClick={() => { setEditing(bot); setError(null) }}
-                  >
-                    <IconEditOutline16 />
-                  </button>
+                  <div className="oac-bot-foot-left">
+                    {bot.globalMetaId ? (
+                      <button
+                        type="button"
+                        className="oac-icon-btn"
+                        data-tip={t('botPage')}
+                        aria-label={`${t('botPage')}: ${bot.name}`}
+                        onClick={() => {
+                          close()
+                          browserOpen(`metaid://${bot.globalMetaId}`)
+                        }}
+                      >
+                        <IconRightUpOutline16 />
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="oac-bot-foot-right">
+                    <button
+                      type="button"
+                      className="oac-icon-btn"
+                      data-tip={t('edit')}
+                      aria-label={`${t('edit')}: ${bot.name}`}
+                      onClick={() => { setEditing(bot); setError(null) }}
+                    >
+                      <IconEditOutline16 />
+                    </button>
+                  </div>
                 </div>
               </li>
             ))}
