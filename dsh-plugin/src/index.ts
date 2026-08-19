@@ -11,8 +11,9 @@ import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-s
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import type { HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
+import { uploadFileBytes } from './file-upload.js'
 import { emptyHealth, type HealthPayload } from './health.js'
-import { apiMethod, readJsonBody, writeJson } from './http.js'
+import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
 import { reconcilePresets } from './preset.js'
 import { dispatchSection } from './sections.js'
 import { isTrustedApiRequest } from './trust-fence.js'
@@ -176,6 +177,24 @@ function streamBrowserEvents(
   })
 }
 
+/** Raw MetaApp asset upload (`POST /oac/api/file/upload?from=<slug>`). */
+async function handleFileUpload(req: PluginHttpRequest): Promise<MetabotCommandResult> {
+  const url = new URL(req.url ?? '/', 'http://dsh.internal')
+  const from = url.searchParams.get('from')?.trim() ?? ''
+  if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+  const bytes = await readRawBody(req)
+  if (bytes.length === 0) {
+    return { ok: false, state: 'failed', code: 'empty_body', message: 'upload body is empty' }
+  }
+  const rawContentType = req.headers['content-type']
+  const contentType = Array.isArray(rawContentType)
+    ? rawContentType[0]?.split(';')[0]?.trim() ?? 'application/octet-stream'
+    : typeof rawContentType === 'string'
+      ? rawContentType.split(';')[0].trim()
+      : 'application/octet-stream'
+  return uploadFileBytes(from, bytes, contentType || 'application/octet-stream')
+}
+
 function registerApi(
   ctx: HostContext,
   getHealth: () => HealthPayload,
@@ -218,6 +237,12 @@ function registerApi(
         return
       }
       try {
+        if (method === 'file/upload') {
+          const result = await handleFileUpload(req)
+          const uploadStatus = result.code === 'not-found' ? 404 : 200
+          writeJson(res, uploadStatus, result)
+          return
+        }
         const payload = await readJsonBody(req)
         const result = await dispatchPost(ctx, method, payload, browserHub)
         const status = result.code === 'not-found' ? 404 : 200
@@ -301,6 +326,7 @@ export {
   slugFromPresetId,
 } from './chip-logic.js'
 export { dispatchSection } from './sections.js'
+export { uploadFileBytes } from './file-upload.js'
 export {
   generatePreset,
   presetDir,

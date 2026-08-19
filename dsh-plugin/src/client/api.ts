@@ -1,3 +1,5 @@
+import type { MetaAppListPayload, MetaAppRecord } from '../apps.ts'
+
 export class OacApiError extends Error {
   constructor(
     readonly code: string,
@@ -248,11 +250,48 @@ export const api = {
     confirm = false,
   ): Promise<CommandEnvelope> =>
     postEnvelope('services/call', { from, request, confirm }),
-  metaappList: async (from: string): Promise<unknown> => post('metaapp/list', { from }),
+  metaappList: async (from: string, size = 12, cursor = ''): Promise<MetaAppListPayload> => {
+    const data = await post<{ records?: unknown; nextCursor?: unknown; total?: unknown }>(
+      'metaapp/list',
+      { from, size, cursor },
+    )
+    const records = Array.isArray(data.records)
+      ? data.records.map((row) => normalizeMetaAppRecord(row))
+      : []
+    return {
+      records,
+      nextCursor: typeof data.nextCursor === 'string' ? data.nextCursor.trim() : '',
+      total: typeof data.total === 'number' ? data.total : records.length,
+    }
+  },
   metaappPublish: async (from: string, payload: Record<string, unknown>): Promise<CommandEnvelope> =>
     postEnvelope('metaapp/publish', { from, payload, confirm: true }),
+  metaappUpdate: async (
+    from: string,
+    targetPinId: string,
+    payload: Record<string, unknown>,
+  ): Promise<CommandEnvelope> =>
+    postEnvelope('metaapp/update', { from, targetPinId, payload, confirm: true }),
   metaappDelete: async (from: string, targetPinId: string): Promise<CommandEnvelope> =>
     postEnvelope('metaapp/delete', { from, targetPinId, confirm: true }),
+  /** Raw file upload → metafile reference. The browser sends the file bytes directly. */
+  metaappUpload: async (from: string, file: File): Promise<{ metafileUri?: string; pinId?: string }> => {
+    const response = await fetch('/oac/api/file/upload', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': file.type || 'application/octet-stream' },
+      body: file,
+    })
+    const envelope = await response.json() as Envelope
+    if (envelope.ok === false || envelope.state === 'failed') {
+      throw new OacApiError(envelope.code ?? 'upload_failed', envelope.message ?? envelope.error ?? 'upload failed')
+    }
+    const data = envelope.data as { metafileUri?: unknown; pinId?: unknown }
+    return {
+      ...(typeof data?.metafileUri === 'string' && data.metafileUri !== '' ? { metafileUri: data.metafileUri } : {}),
+      ...(typeof data?.pinId === 'string' && data.pinId !== '' ? { pinId: data.pinId } : {}),
+    }
+  },
   /**
    * Open the right-sidebar Bot Browser on a resource URI (or the Browser
    * home when `uri` is null/empty); resolves to the iframe `localUiUrl`.
@@ -330,6 +369,50 @@ export function timestampLabel(value: number): string {
     pad(date.getMonth() + 1),
     pad(date.getDate()),
   ].join('-') + ' ' + [pad(date.getHours()), pad(date.getMinutes())].join(':')
+}
+
+function normalizeMetaAppRecord(value: unknown): MetaAppRecord {
+  const record = recordOf(value)
+  const stringList = (raw: unknown): string[] | undefined => {
+    if (!Array.isArray(raw)) return undefined
+    return raw.map((item) => textOf(item)).filter(Boolean)
+  }
+  const metadata = record.metadata
+  return {
+    pinId: textOf(record.pinId) || textOf(record.id),
+    firstPinId: textOf(record.firstPinId) || undefined,
+    operation: textOf(record.operation) || undefined,
+    title: textOf(record.title) || undefined,
+    appName: textOf(record.appName) || undefined,
+    prompt: textOf(record.prompt) || undefined,
+    icon: textOf(record.icon) || undefined,
+    coverImg: textOf(record.coverImg) || undefined,
+    introImgs: stringList(record.introImgs),
+    intro: textOf(record.intro) || undefined,
+    runtime: textOf(record.runtime) || undefined,
+    version: textOf(record.version) || undefined,
+    contentType: textOf(record.contentType) || undefined,
+    content: textOf(record.content) || undefined,
+    indexFile: textOf(record.indexFile) || undefined,
+    code: textOf(record.code) || undefined,
+    contentHash: textOf(record.contentHash) || undefined,
+    codeType: textOf(record.codeType) || undefined,
+    metadata: metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? metadata as Record<string, unknown>
+      : undefined,
+    tags: stringList(record.tags),
+    disabled: record.disabled === true,
+    ownerAddress: textOf(record.ownerAddress) || undefined,
+    timestamp: typeof record.timestamp === 'number' ? record.timestamp : null,
+    txid: textOf(record.txid) || undefined,
+    txids: stringList(record.txids),
+    metaappUri: textOf(record.metaappUri) || undefined,
+    metawebUrl: textOf(record.metawebUrl) || undefined,
+    runUrl: textOf(record.runUrl) || undefined,
+    raw: record.raw !== null && typeof record.raw === 'object' && !Array.isArray(record.raw)
+      ? record.raw as Record<string, unknown>
+      : undefined,
+  }
 }
 
 function normalizeActor(value: unknown): ConversationActor {
