@@ -20,10 +20,10 @@ import {
   chainTxids,
   displayValue,
   formatTimestamp,
-  imageUrlForReference,
   metaAppUriFor,
   metaWebUrlFor,
   recordImage,
+  recordIntroImages,
   recordName,
   recordPinId,
   recordSubtitle,
@@ -31,6 +31,7 @@ import {
   recordText,
   runUrlFor,
 } from '../apps.ts'
+import { AssetImage } from './AssetImage.tsx'
 import type { AppsLocaleKey } from './locale-apps.ts'
 import { interpolate } from './parse.ts'
 import { MetaAppForm } from './MetaAppForm.tsx'
@@ -73,6 +74,13 @@ function initialsOf(name: string): string {
   return (chars.join('') || '?').toUpperCase()
 }
 
+/** Drop a cursor that cannot lead anywhere: empty page or everything fetched. */
+function correctNextCursor(rawNext: string, total: number, count: number): string {
+  if (count === 0) return ''
+  if (total > 0 && total <= count) return ''
+  return rawNext
+}
+
 export function AppsPanel({
   bots,
   list,
@@ -87,6 +95,7 @@ export function AppsPanel({
   const [records, setRecords] = useState<MetaAppRecord[]>([])
   const [cursorStack, setCursorStack] = useState<string[]>([''])
   const [nextCursor, setNextCursor] = useState('')
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState>(null)
@@ -103,7 +112,9 @@ export function AppsPanel({
       (rows) => {
         if (!current) return
         setProfiles(rows)
-        setFrom((value) => value || rows[0]?.slug || '')
+        // Default to the Bot that is currently active in OAC, else the first.
+        const active = rows.find((bot) => bot.isActive === true)
+        setFrom((value) => value || active?.slug || rows[0]?.slug || '')
       },
       (cause: unknown) => { if (current) setError(`Bots: ${errorText(cause)}`) },
     )
@@ -118,7 +129,8 @@ export function AppsPanel({
       (data) => {
         if (!current) return
         setRecords(data.records)
-        setNextCursor(data.nextCursor)
+        setTotal(data.total)
+        setNextCursor(correctNextCursor(data.nextCursor, data.total, data.records.length))
         setCursorStack([''])
         setError(null)
         setLoading(false)
@@ -150,8 +162,18 @@ export function AppsPanel({
     setLoading(true)
     try {
       const data = await list(from, PAGE_SIZE, cursor)
+      const count = data.records.length
+      if (count === 0 && cursor !== '') {
+        // Spurious trailing cursor: the page after the last returns nothing.
+        // Stay on the current page and treat it as the end.
+        setNextCursor('')
+        setTotal(data.total)
+        setError(null)
+        return
+      }
       setRecords(data.records)
-      setNextCursor(data.nextCursor)
+      setTotal(data.total)
+      setNextCursor(correctNextCursor(data.nextCursor, data.total, count))
       setCursorStack(stack)
       setError(null)
     } catch (cause) {
@@ -212,19 +234,14 @@ export function AppsPanel({
     }
   }
 
-  const tileCover = (record: MetaAppRecord): string =>
-    imageUrlForReference(recordImage(record, ['coverImg', 'coverImage', 'cover']))
-  const tileIcon = (record: MetaAppRecord): string =>
-    imageUrlForReference(recordImage(record, ['icon', 'iconImg', 'iconImage']))
-
   const renderTile = (record: MetaAppRecord): ReactNode => {
     const name = recordName(record, t('untitled'))
     const pinId = recordPinId(record)
     const subtitle = recordSubtitle(record)
     const intro = recordText(record, ['intro'])
     const tags = recordTags(record)
-    const coverSrc = tileCover(record)
-    const iconSrc = tileIcon(record)
+    const coverSrc = recordImage(record, ['coverImg', 'coverImage', 'cover'])
+    const iconSrc = recordImage(record, ['icon', 'iconImg', 'iconImage'])
     const copyKey = `pin-${pinId}`
     return (
       <li
@@ -240,10 +257,12 @@ export function AppsPanel({
         }}
       >
         <div className="oac-apps-card-cover">
-          {coverSrc ? <img className="oac-apps-cover-img" src={coverSrc} alt="" loading="lazy" /> : null}
-          {iconSrc
-            ? <img className="oac-apps-card-icon" src={iconSrc} alt="" loading="lazy" />
-            : <span className="oac-apps-card-icon oac-apps-icon-fallback" aria-hidden="true">{initialsOf(name)}</span>}
+          <AssetImage value={coverSrc} className="oac-apps-cover-img" alt="" />
+          <AssetImage
+            value={iconSrc}
+            className="oac-apps-card-icon"
+            fallback={<span className="oac-apps-card-icon oac-apps-icon-fallback" aria-hidden="true">{initialsOf(name)}</span>}
+          />
           <span className={`oac-apps-state-pill${record.disabled === true ? ' disabled' : ''}`}>
             {record.disabled === true ? t('disabledLabel') : t('runnable')}
           </span>
@@ -355,7 +374,9 @@ export function AppsPanel({
 
   const renderDetailModal = (record: MetaAppRecord): ReactNode => {
     const name = recordName(record, t('untitled'))
-    const iconSrc = tileIcon(record)
+    const iconSrc = recordImage(record, ['icon', 'iconImg', 'iconImage'])
+    const coverSrc = recordImage(record, ['coverImg', 'coverImage', 'cover'])
+    const shotValues = [coverSrc, ...recordIntroImages(record)].filter(Boolean).slice(0, 3)
     const tags = recordTags(record, 8)
     const description = recordText(record, ['prompt']) || recordText(record, ['intro'])
     return (
@@ -372,9 +393,11 @@ export function AppsPanel({
         <div className="oac-apps-modal-scroll">
         <div className="oac-apps-form" style={{ gap: 12 }}>
           <div className="oac-apps-detail-top">
-            {iconSrc
-              ? <img className="oac-apps-detail-icon" src={iconSrc} alt="" />
-              : <span className="oac-apps-detail-icon oac-apps-icon-fallback" aria-hidden="true">{initialsOf(name)}</span>}
+            <AssetImage
+              value={iconSrc}
+              className="oac-apps-detail-icon"
+              fallback={<span className="oac-apps-detail-icon oac-apps-icon-fallback" aria-hidden="true">{initialsOf(name)}</span>}
+            />
             <div className="oac-apps-detail-title">
               <h3>{name}</h3>
               {description ? <p>{description}</p> : null}
@@ -385,6 +408,13 @@ export function AppsPanel({
               ) : null}
             </div>
           </div>
+          {shotValues.length > 0 ? (
+            <div className="oac-apps-detail-shots">
+              {shotValues.map((shot) => (
+                <AssetImage key={shot} value={shot} className="oac-apps-detail-shot" alt="" />
+              ))}
+            </div>
+          ) : null}
           <div className="oac-apps-detail-actions">
             <Button
               type="button"
@@ -664,33 +694,37 @@ export function AppsPanel({
               <ul className="oac-apps-grid">
                 {records.map((record) => renderTile(record))}
               </ul>
-              <div className="oac-apps-pager" style={{ marginTop: 12 }}>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={loading || !hasPrevious}
-                  onClick={() => {
-                    const stack = cursorStack.slice(0, -1)
-                    void loadPage(stack[stack.length - 1] ?? '', stack)
-                  }}
-                >
-                  {t('pagePrev')}
-                </Button>
-                <span className="oac-apps-pager-label">{records.length}</span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={loading || !nextCursor}
-                  onClick={() => {
-                    const stack = [...cursorStack, nextCursor]
-                    void loadPage(nextCursor, stack)
-                  }}
-                >
-                  {t('pageNext')}
-                </Button>
-              </div>
+              {nextCursor || hasPrevious ? (
+                <div className="oac-apps-pager" style={{ marginTop: 12 }}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={loading || !hasPrevious}
+                    onClick={() => {
+                      const stack = cursorStack.slice(0, -1)
+                      void loadPage(stack[stack.length - 1] ?? '', stack)
+                    }}
+                  >
+                    {t('pagePrev')}
+                  </Button>
+                  <span className="oac-apps-pager-label">
+                    {total > 0 ? `${records.length} / ${total}` : String(records.length)}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={loading || !nextCursor}
+                    onClick={() => {
+                      const stack = [...cursorStack, nextCursor]
+                      void loadPage(nextCursor, stack)
+                    }}
+                  >
+                    {t('pageNext')}
+                  </Button>
+                </div>
+              ) : null}
             </>
           ) : null}
         </section>

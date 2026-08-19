@@ -88,3 +88,29 @@ test('displayValue handles arrays, objects, and scalars', () => {
   assert.equal(apps.displayValue('x'), 'x')
   assert.equal(apps.displayValue(''), '-')
 })
+
+test('pinRefFromValue extracts a bare pin from metafile URIs and indexer paths', () => {
+  const pin = 'a'.repeat(64) + 'i0'
+  assert.equal(apps.pinRefFromValue(`metafile://${pin}.jpg`), pin)
+  assert.equal(apps.pinRefFromValue(pin), pin)
+  assert.equal(
+    apps.pinRefFromValue(`https://file.metaid.io/metafile-indexer/api/v1/files/content/${pin}`),
+    pin,
+  )
+  assert.equal(apps.pinRefFromValue('not-a-pin'), '')
+  assert.equal(apps.pinRefFromValue('data:image/png;base64,AAAA'), '')
+  assert.equal(apps.pinRefFromValue(''), '')
+})
+
+test('imageUrlCandidates resolves pin refs to indexer URLs and passes http through', () => {
+  const pin = 'a'.repeat(64) + 'i0'
+  assert.deepEqual(apps.imageUrlCandidates(`metafile://${pin}.jpg`), [
+    `https://file.metaid.io/metafile-indexer/api/v1/files/content/${pin}`,
+    `https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/${pin}?process=thumbnail`,
+  ])
+  assert.deepEqual(apps.imageUrlCandidates('https://example.com/a.png'), ['https://example.com/a.png'])
+  assert.deepEqual(apps.imageUrlCandidates('data:image/png;base64,AAAA'), ['data:image/png;base64,AAAA'])
+  assert.deepEqual(apps.imageUrlCandidates(''), [])
+  assert.equal(apps.imageUrlForReference(`metafile://${pin}`),
+    `https://file.metaid.io/metafile-indexer/api/v1/files/content/${pin}`)
+})

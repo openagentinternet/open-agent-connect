@@ -158,17 +158,80 @@ export function recordImage(record: MetaAppRecord | undefined | null, keys: stri
   return ''
 }
 
+/** Asset content resolves through the metafile indexer. */
+const METAAPP_FILE_BASE_URL = 'https://file.metaid.io/metafile-indexer'
+
 /** Keep http(s) assets renderable directly; everything else is a pin ref. */
 export function isHttpUrl(value: string): boolean {
   const lower = value.trim().toLowerCase()
   return lower.startsWith('http://') || lower.startsWith('https://')
 }
 
-export function imageUrlForReference(value: string): string {
+const PIN_CONTENT_PATH_PREFIXES = [
+  '/content/',
+  '/metafile-indexer/thumbnail/',
+  '/metafile-indexer/api/v1/files/content/',
+  '/metafile-indexer/api/v1/files/accelerate/content/',
+  '/metafile-indexer/api/v1/users/avatar/accelerate/',
+] as const
+
+/**
+ * Extract a bare MetaApp asset pin id (`<64hex>i0`) from any of the reference
+ * shapes the protocol stores: a `metafile://` URI, a bare pin (with optional
+ * file extension), or a metafile-indexer content path. Mirrors the OAC
+ * daemon's `extractAvatarPinId`.
+ */
+export function pinRefFromValue(value: unknown): string {
   const raw = textOf(value)
-  if (!raw) return ''
-  if (isHttpUrl(raw)) return raw
-  return ''
+  if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return ''
+  if (/^https?:\/\//iu.test(raw)) {
+    try {
+      const pathname = new URL(raw).pathname
+      return extractPinFromPath(pathname)
+    } catch {
+      return ''
+    }
+  }
+  let ref = raw
+  if (/^metafile:\/\//iu.test(ref)) ref = ref.slice('metafile://'.length).trim()
+  ref = extractPinFromPath(ref.split(/[?#]/u)[0] ?? ref)
+  return ref
+}
+
+function extractPinFromPath(path: string): string {
+  let candidate = path
+  for (const prefix of PIN_CONTENT_PATH_PREFIXES) {
+    if (candidate.toLowerCase().startsWith(prefix)) {
+      candidate = decodeURIComponent(candidate.slice(prefix.length))
+      break
+    }
+  }
+  const match = candidate.match(METAAPP_METAFILE_REFERENCE_PATTERN)
+  return match?.[1] ?? ''
+}
+
+/**
+ * Ordered candidate URLs for an asset image, tried in order by the renderer
+ * (content first, then the accelerate thumbnail). data:/blob: and http(s)
+ * values pass through unchanged.
+ */
+export function imageUrlCandidates(value: unknown): string[] {
+  const raw = textOf(value)
+  if (!raw) return []
+  if (/^(data:|blob:)/iu.test(raw)) return [raw]
+  if (isHttpUrl(raw)) return [raw]
+  const pin = pinRefFromValue(raw)
+  if (!pin) return []
+  const encoded = encodeURIComponent(pin)
+  return [
+    `${METAAPP_FILE_BASE_URL}/api/v1/files/content/${encoded}`,
+    `${METAAPP_FILE_BASE_URL}/api/v1/files/accelerate/content/${encoded}?process=thumbnail`,
+  ]
+}
+
+/** First resolvable image URL for a ref, or '' when nothing can be shown. */
+export function imageUrlForReference(value: string): string {
+  return imageUrlCandidates(value)[0] ?? ''
 }
 
 /** e.g. `v1.0.0` -> `v1.1.0`, `v1` -> `v2`, missing -> `v1.0.0`. */

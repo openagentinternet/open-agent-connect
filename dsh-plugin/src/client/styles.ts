@@ -254,6 +254,8 @@ export const APPS_CSS = `
 .oac-apps-detail-title h3 { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
 .oac-apps-detail-title p { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
 .oac-apps-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.oac-apps-detail-shots { display: flex; gap: 8px; flex-wrap: wrap; }
+.oac-apps-detail-shot { width: 96px; height: 64px; border-radius: 8px; object-fit: cover; border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }
 .oac-apps-detail-field { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 10px; align-items: baseline; }
 .oac-apps-detail-field > span { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
 .oac-apps-detail-field > code { margin: 0; font: inherit; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
