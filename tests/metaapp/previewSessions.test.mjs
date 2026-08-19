@@ -134,3 +134,38 @@ test('MIME inference covers browser assets and binary fallback', () => {
   assert.equal(inferMetaAppPreviewMimeType('image.webp'), 'image/webp');
   assert.equal(inferMetaAppPreviewMimeType('asset.bin'), 'application/octet-stream');
 });
+
+test('served HTML is prepared: metafile src rewritten, bridge and storage shim injected', async () => {
+  const artifactDir = await makeArtifactDir('prepared-html');
+  const imagePinId = 'f4'.repeat(32) + 'i0';
+  await writeArtifactFile(
+    artifactDir,
+    'index.html',
+    `<html><head></head><body><a href="metaapp://d6${'6'.repeat(31)}i0">app</a><img src="metafile://${imagePinId}"></body></html>`,
+  );
+  const registry = createMetaAppPreviewSessionRegistry({
+    resolveMetafileContentBaseUrl: () => 'https://content.example.test/files',
+  });
+  const session = registry.create({ artifactDir, indexFile: 'index.html' });
+
+  const asset = await registry.resolveAsset({ previewId: session.previewId, assetPath: '' });
+  const html = asset.body.toString('utf8');
+
+  assert.ok(html.includes('src="https://content.example.test/files/' + imagePinId + '"'), 'metafile img src should be rewritten against the configured base');
+  assert.ok(html.includes('href="metaapp://'), 'internal href should stay an Agent Internet URI');
+  assert.match(html, /__agentBrowserPreviewBridge/);
+  assert.match(html, /__agentBrowserPreviewStorageShim/);
+});
+
+test('served HTML preparation falls back to core defaults without a resolver', async () => {
+  const artifactDir = await makeArtifactDir('prepared-html-defaults');
+  const imagePinId = 'e5'.repeat(32) + 'i0';
+  await writeArtifactFile(artifactDir, 'index.html', `<img src="metafile://${imagePinId}">`);
+  const registry = createMetaAppPreviewSessionRegistry();
+  const session = registry.create({ artifactDir, indexFile: 'index.html' });
+
+  const asset = await registry.resolveAsset({ previewId: session.previewId, assetPath: '' });
+  const html = asset.body.toString('utf8');
+
+  assert.ok(html.includes('src="https://file.metaid.io/metafile-indexer/api/v1/files/accelerate/content/' + imagePinId + '"'), 'default accelerated base should apply');
+});
