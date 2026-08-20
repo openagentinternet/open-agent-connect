@@ -70,4 +70,28 @@ export interface HostContext {
 /** Optional apply config (tests skip CLI bootstrap so they cannot start a user daemon). */
 export interface OacDshConfig {
   skipBootstrap?: boolean
+  /** Memory system gates (Phase 5+; all default enabled when omitted). */
+  memory?: {
+    enabled?: boolean
+    /** Per-turn prompt injection into oac-* preset sessions. */
+    injection?: boolean
+    /** Model-facing memory tools on oac-* preset sessions. */
+    tools?: boolean
+  }
+  /** Nightly dream scheduler (Phase 6+). */
+  dream?: {
+    enabled?: boolean
+    /** Scheduler tick period in minutes (default 10). */
+    tickMinutes?: number
+  }
+  /** Twin/Worker orchestration (Phase 7+). */
+  twin?: {
+    enabled?: boolean
+    /** Delegated worker step watchdog (default 300_000, the IDBots value). */
+    stepTimeoutMs?: number
+  }
+  /** User panel + owner binding routes (Phase 5+). */
+  user?: {
+    enabled?: boolean
+  }
 }

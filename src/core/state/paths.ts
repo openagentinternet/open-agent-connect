@@ -42,6 +42,19 @@ export interface MetabotPaths {
   roleMdPath: string;
   daemonLockPath: string;
 
+  // Memory / dream / twin-bot paths (storage layout v2 amendment 2026-08-20).
+  workspaceMemoryRoot: string;
+  memorySelfIdentityPath: string;
+  memoryRoot: string;
+  memoryMemoriesPath: string;
+  memoryKnowledgePath: string;
+  memoryImpressionsPath: string;
+  memoryExperiencePath: string;
+  memoryDreamRunsPath: string;
+  memoryPolicyPath: string;
+  memoryOrchestrationPath: string;
+  memoryTranscriptsRoot: string;
+
   // LLM runtime / binding paths.
   llmRoot: string;
   llmRuntimesPath: string;
@@ -156,6 +169,7 @@ function buildMetabotPaths(input: {
   llmExecutorTranscriptsRoot: string;
 }): MetabotPaths {
   const a2aRoot = path.join(input.runtimeRoot, 'A2A');
+  const memoryRoot = path.join(input.runtimeRoot, 'memory');
 
   return {
     systemHomeDir: input.systemHomeDir,
@@ -198,6 +212,19 @@ function buildMetabotPaths(input: {
     goalMdPath: input.goalMdPath,
     roleMdPath: input.roleMdPath,
     daemonLockPath: input.daemonLockPath,
+
+    // Memory / dream / twin-bot paths.
+    workspaceMemoryRoot: path.join(input.profileRoot, 'memory'),
+    memorySelfIdentityPath: path.join(input.profileRoot, 'memory', 'self-identity.md'),
+    memoryRoot,
+    memoryMemoriesPath: path.join(memoryRoot, 'memories.json'),
+    memoryKnowledgePath: path.join(memoryRoot, 'knowledge.json'),
+    memoryImpressionsPath: path.join(memoryRoot, 'impressions.json'),
+    memoryExperiencePath: path.join(memoryRoot, 'experience.json'),
+    memoryDreamRunsPath: path.join(memoryRoot, 'dream-runs.json'),
+    memoryPolicyPath: path.join(memoryRoot, 'policy.json'),
+    memoryOrchestrationPath: path.join(memoryRoot, 'orchestration.json'),
+    memoryTranscriptsRoot: path.join(memoryRoot, 'transcripts'),
 
     // LLM paths.
     llmRoot: input.llmRoot,
