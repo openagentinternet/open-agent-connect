@@ -37,6 +37,18 @@ import {
   resolveMetabotPaths,
   type MetabotPaths,
 } from '../core/state/paths';
+import { createMemoryStore } from '../core/memory/memoryStore';
+import { createMemoryPolicyStore } from '../core/memory/memoryPolicy';
+import {
+  applyTurnMemoryExtraction,
+  buildMemoryBlocksForRequest,
+} from '../core/memory/memoryService';
+import {
+  appendTranscriptTurn,
+  listRecentChats,
+  searchConversations,
+} from '../core/memory/transcriptStore';
+import type { MemoryCreateInput, MemoryUpdateInput } from '../core/memory/memoryTypes';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
   resolveMetabotManagerLayout,
@@ -3331,6 +3343,207 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         { local: input.local, peer: input.peer, guidance: input.guidance },
       ),
     },
+    memory: {
+      list: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const entries = await store.list({
+          ...(input.scopeKind ? { scopeKind: input.scopeKind as never } : {}),
+          ...(input.scopeKey ? { scopeKey: input.scopeKey } : {}),
+          ...(input.usageClass ? { usageClass: input.usageClass as never } : {}),
+          ...(input.status ? { status: input.status as never } : {}),
+          ...(input.origin ? { origin: input.origin as never } : {}),
+          ...(input.query ? { query: input.query } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          ...(input.includeDeleted ? { includeDeleted: true } : {}),
+        });
+        return commandSuccess({ entries });
+      },
+      add: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        const memory = await store.create({
+          text: String(payload.text ?? ''),
+          ...(typeof payload.scopeKind === 'string' ? { scopeKind: payload.scopeKind as never } : {}),
+          ...(typeof payload.scopeKey === 'string' ? { scopeKey: payload.scopeKey } : {}),
+          ...(typeof payload.usageClass === 'string' ? { usageClass: payload.usageClass as never } : {}),
+          ...(typeof payload.visibility === 'string' ? { visibility: payload.visibility as never } : {}),
+          ...(typeof payload.confidence === 'number' ? { confidence: payload.confidence } : {}),
+          ...(typeof payload.isExplicit === 'boolean' ? { isExplicit: payload.isExplicit } : {}),
+          ...(typeof payload.origin === 'string' ? { origin: payload.origin as never } : {}),
+          ...(payload.source && typeof payload.source === 'object' && !Array.isArray(payload.source)
+            ? { source: payload.source as MemoryCreateInput['source'] }
+            : {}),
+        });
+        return commandSuccess({ memory });
+      },
+      update: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        const memory = await store.update({
+          id: String(payload.id ?? ''),
+          ...(typeof payload.text === 'string' ? { text: payload.text } : {}),
+          ...(typeof payload.scopeKind === 'string' ? { scopeKind: payload.scopeKind as never } : {}),
+          ...(typeof payload.scopeKey === 'string' ? { scopeKey: payload.scopeKey } : {}),
+          ...(typeof payload.usageClass === 'string' ? { usageClass: payload.usageClass as never } : {}),
+          ...(typeof payload.visibility === 'string' ? { visibility: payload.visibility as never } : {}),
+          ...(typeof payload.confidence === 'number' ? { confidence: payload.confidence } : {}),
+          ...(typeof payload.isExplicit === 'boolean' ? { isExplicit: payload.isExplicit } : {}),
+          ...(typeof payload.status === 'string' ? { status: payload.status as MemoryUpdateInput['status'] } : {}),
+        });
+        if (!memory) {
+          return commandFailed('not_found', 'Memory entry not found in the resolved scope (or it is protected).');
+        }
+        return commandSuccess({ memory });
+      },
+      delete: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const deleted = await store.remove({
+          id: String(input.payload.id ?? ''),
+          ...(typeof input.payload.scopeKind === 'string' ? { scopeKind: input.payload.scopeKind as never } : {}),
+          ...(typeof input.payload.scopeKey === 'string' ? { scopeKey: input.payload.scopeKey } : {}),
+        });
+        if (!deleted) {
+          return commandFailed('not_found', 'Memory entry not found in the resolved scope (or it is protected).');
+        }
+        return commandSuccess({ deleted: true });
+      },
+      blocks: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const result = await buildMemoryBlocksForRequest(resolveMetabotPaths(actor.homeDir), {
+          channel: typeof input.payload.channel === 'string' ? input.payload.channel : undefined,
+          peerGlobalMetaId: typeof input.payload.peerGlobalMetaId === 'string' ? input.payload.peerGlobalMetaId : undefined,
+          externalConversationId: typeof input.payload.externalConversationId === 'string'
+            ? input.payload.externalConversationId
+            : undefined,
+          userText: typeof input.payload.userText === 'string' ? input.payload.userText : undefined,
+        });
+        return commandSuccess({
+          xml: result.xml,
+          resolutionReason: result.resolution.resolutionReason,
+          writeScope: result.resolution.writeScope,
+          memoryEnabled: result.policy.memoryEnabled,
+        });
+      },
+      extract: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const result = await applyTurnMemoryExtraction(resolveMetabotPaths(actor.homeDir), {
+          userText: String(input.payload.userText ?? ''),
+          assistantText: String(input.payload.assistantText ?? ''),
+          sessionId: typeof input.payload.sessionId === 'string' ? input.payload.sessionId : undefined,
+          channel: typeof input.payload.channel === 'string' ? input.payload.channel : undefined,
+          peerGlobalMetaId: typeof input.payload.peerGlobalMetaId === 'string' ? input.payload.peerGlobalMetaId : undefined,
+          externalConversationId: typeof input.payload.externalConversationId === 'string'
+            ? input.payload.externalConversationId
+            : undefined,
+          userMessageId: typeof input.payload.userMessageId === 'string' ? input.payload.userMessageId : undefined,
+          assistantMessageId: typeof input.payload.assistantMessageId === 'string' ? input.payload.assistantMessageId : undefined,
+        });
+        return commandSuccess(result as unknown as Record<string, unknown>);
+      },
+      policyGet: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryPolicyStore(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess({
+          effective: await store.effectivePolicy(),
+          override: await store.readOverride(),
+        });
+      },
+      policySet: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryPolicyStore(resolveMetabotPaths(actor.homeDir));
+        const allowed = [
+          'memoryEnabled',
+          'memoryImplicitUpdateEnabled',
+          'memoryLlmJudgeEnabled',
+          'memoryGuardLevel',
+          'memoryUserMemoriesMaxItems',
+          'memoryPromptMaxChars',
+          'dreamEnabled',
+        ] as const;
+        const updates: Record<string, unknown> = {};
+        for (const key of allowed) {
+          if (input.payload[key] !== undefined) updates[key] = input.payload[key];
+        }
+        const policy = await store.setOverride(updates);
+        return commandSuccess({ policy });
+      },
+      policyDelete: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryPolicyStore(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess({ deleted: await store.deleteOverride() });
+      },
+      scopes: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess({ scopes: await store.listScopes() });
+      },
+      stats: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const stats = await store.stats({
+          ...(input.scopeKind ? { scopeKind: input.scopeKind as never } : {}),
+          ...(input.scopeKey ? { scopeKey: input.scopeKey } : {}),
+        });
+        return commandSuccess({ stats });
+      },
+      transcriptAppend: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        await appendTranscriptTurn(resolveMetabotPaths(actor.homeDir), {
+          sessionId: String(input.payload.sessionId ?? ''),
+          role: input.payload.role === 'assistant' ? 'assistant' : 'user',
+          text: String(input.payload.text ?? ''),
+          ts: typeof input.payload.ts === 'number' && Number.isFinite(input.payload.ts)
+            ? input.payload.ts
+            : Date.now(),
+          channel: typeof input.payload.channel === 'string' && input.payload.channel.trim()
+            ? input.payload.channel.trim()
+            : 'dsh',
+          ...(typeof input.payload.turn === 'number' && Number.isFinite(input.payload.turn)
+            ? { turn: input.payload.turn }
+            : {}),
+          ...(typeof input.payload.peerGlobalMetaId === 'string' && input.payload.peerGlobalMetaId.trim()
+            ? { peerGlobalMetaId: input.payload.peerGlobalMetaId.trim() }
+            : {}),
+        });
+        return commandSuccess({ appended: true });
+      },
+      chats: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const chats = await listRecentChats(resolveMetabotPaths(actor.homeDir), {
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          ...(input.sortOrder ? { sortOrder: input.sortOrder } : {}),
+        });
+        return commandSuccess({ chats });
+      },
+      search: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const records = await searchConversations(resolveMetabotPaths(actor.homeDir), {
+          query: String(input.payload.query ?? ''),
+          ...(typeof input.payload.maxResults === 'number' ? { maxResults: input.payload.maxResults } : {}),
+          ...(typeof input.payload.before === 'number' ? { before: input.payload.before } : {}),
+          ...(typeof input.payload.after === 'number' ? { after: input.payload.after } : {}),
+        });
+        return commandSuccess({ records });
+      },
+    },
     file: {
       upload: async (input) => requestJsonForSelectedActor(
         'POST',
@@ -3630,6 +3843,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     provider: { ...defaults.provider, ...provided.provider },
     chat: { ...defaults.chat, ...provided.chat },
     conversations: { ...defaults.conversations, ...provided.conversations },
+    memory: { ...defaults.memory, ...provided.memory },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },
     trace: { ...defaults.trace, ...provided.trace },

@@ -14,6 +14,7 @@ import { runBrowserCommand } from './commands/browser';
 import { runChainCommand } from './commands/chain';
 import { runChatCommand } from './commands/chat';
 import { runConversationsCommand } from './commands/conversations';
+import { runMemoryCommand } from './commands/memory';
 import { runFileCommand } from './commands/file';
 import { runTraceCommand } from './commands/trace';
 import { runUiCommand } from './commands/ui';
@@ -108,6 +109,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'conversations':
           result = await runConversationsCommand(rest, context);
+          break;
+        case 'memory':
+          result = await runMemoryCommand(rest, context);
           break;
         case 'file':
           result = await runFileCommand(rest, context);

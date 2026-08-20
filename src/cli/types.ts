@@ -136,6 +136,32 @@ export interface CliDependencies {
     }) => Awaitable<MetabotCommandResult<unknown>>;
     guidance?: (input: { local: string; peer: string; guidance: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  memory?: {
+    list?: (input: {
+      from?: string;
+      scopeKind?: string;
+      scopeKey?: string;
+      usageClass?: string;
+      status?: string;
+      origin?: string;
+      query?: string;
+      limit?: number;
+      includeDeleted?: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    add?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    update?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    delete?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    blocks?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    extract?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    policyGet?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    policySet?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    policyDelete?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    scopes?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    stats?: (input: { from?: string; scopeKind?: string; scopeKey?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    transcriptAppend?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    chats?: (input: { from?: string; limit?: number; sortOrder?: 'asc' | 'desc' }) => Awaitable<MetabotCommandResult<unknown>>;
+    search?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     uploadLarge?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
