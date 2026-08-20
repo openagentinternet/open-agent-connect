@@ -322,21 +322,40 @@ export async function dispatchMemoryRoutes(
     return runMetabotWithPayloadFile(['twin', 'tasks', verb, '--from', from], entry, '--payload-file', [], run)
   }
 
-  // ---- user ---------------------------------------------------------------
+  // ---- user (local human owner identity) ---------------------------------
   if (method === 'user/who') {
-    return run(['identity', 'who'], { timeoutMs: LIST_TIMEOUT_MS })
+    return run(['user', 'who'], { timeoutMs: LIST_TIMEOUT_MS })
   }
-  if (method === 'user/bind' || method === 'user/unbind') {
-    const slug = readTrimmed(payload, 'slug')
-    if (!slug) return missing('missing_slug', 'slug is required')
-    const args = ['bot', 'bind-owner', '--from', slug]
-    if (method === 'user/unbind') {
-      args.push('--unbind')
-    } else {
-      const owner = readTrimmed(payload, 'ownerGlobalMetaId')
-      if (owner) args.push('--owner', owner)
-    }
+  if (method === 'user/create') {
+    const name = readTrimmed(payload, 'name')
+    return run(['user', 'create', '--name', name || 'User'], { timeoutMs: 60_000 })
+  }
+  if (method === 'user/import') {
+    const mnemonic = readTrimmed(payload, 'mnemonic')
+    if (!mnemonic) return missing('missing_mnemonic', 'mnemonic is required')
+    const name = readTrimmed(payload, 'name')
+    const derivationPath = readTrimmed(payload, 'path')
+    const args = ['user', 'import', '--mnemonic', mnemonic]
+    if (name) args.push('--name', name)
+    if (derivationPath) args.push('--path', derivationPath)
     return run(args, { timeoutMs: 60_000 })
+  }
+  if (method === 'user/ensure') {
+    const name = readTrimmed(payload, 'name')
+    const args = ['user', 'ensure']
+    if (name) args.push('--name', name)
+    return run(args, { timeoutMs: 60_000 })
+  }
+  if (method === 'user/rename') {
+    const name = readTrimmed(payload, 'name')
+    if (!name) return missing('missing_name', 'name is required')
+    return run(['user', 'rename', '--name', name], { timeoutMs: 60_000 })
+  }
+  if (method === 'user/reveal') {
+    return run(['user', 'reveal'], { timeoutMs: LIST_TIMEOUT_MS })
+  }
+  if (method === 'user/delete') {
+    return run(['user', 'delete'], { timeoutMs: 60_000 })
   }
   return undefined
 }

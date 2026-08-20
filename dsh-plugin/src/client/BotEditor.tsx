@@ -53,6 +53,8 @@ function sameList(left: string[], right: string[]): boolean {
 
 export function BotEditor({
   bot,
+  hasOtherTwin,
+  otherTwinName,
   directory,
   t,
   busy,
@@ -65,6 +67,8 @@ export function BotEditor({
   onDelete,
 }: {
   bot: BotRow
+  hasOtherTwin: boolean
+  otherTwinName: string
   directory: LlmDirectory | null
   t: Translate
   busy: boolean
@@ -81,6 +85,7 @@ export function BotEditor({
 }): ReactNode {
   const [tab, setTab] = useState<TabKey>('basic')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [twinAction, setTwinAction] = useState<'promote' | 'demote' | null>(null)
   const [name, setName] = useState(bot.name)
   const [bio, setBio] = useState(bot.bio ?? '')
   const [provider, setProvider] = useState(bot.dshLlmProvider ?? '')
@@ -121,6 +126,26 @@ export function BotEditor({
     dshLlmFallbackModel: fallbackModel || null,
   })
   const saveBehavior = (): Promise<void> => onSave({ role, soul, goal })
+
+  // Twin/Worker role. The daemon enforces the one-twin invariant: promoting
+  // this Bot demotes the previous twin, and demoting/clearing re-promotes the
+  // earliest-created remaining Bot, so the switch never leaves zero twins.
+  const isTwin = bot.botType === 'twin'
+  const toggleTwin = (): void => {
+    if (busy) return
+    if (isTwin) {
+      setTwinAction('demote')
+    } else if (hasOtherTwin) {
+      setTwinAction('promote')
+    } else {
+      void onSave({ botType: 'twin' })
+    }
+  }
+  const confirmTwin = (): void => {
+    const target = twinAction === 'demote' ? 'worker' : 'twin'
+    setTwinAction(null)
+    void onSave({ botType: target })
+  }
 
   // Refresh the skill catalog and the auto-reply state on every chat-tab
   // entry, like the OAC page does: skills installed later or a runtime switch
@@ -332,6 +357,25 @@ export function BotEditor({
             <div className="oac-info-row">
               <span className="oac-info-label">{t('globalMetaId')}</span>
               <code className="oac-info-value">{bot.globalMetaId ?? ''}</code>
+            </div>
+            <div className="oac-section-card">
+              <div className="oac-section-head">
+                <div className="oac-section-text">
+                  <span className="oac-section-title">{t('twinToggle')}</span>
+                  <span className="oac-section-hint">{t('twinHint')}</span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isTwin}
+                  className={isTwin ? 'oac-switch on' : 'oac-switch'}
+                  disabled={busy}
+                  onClick={toggleTwin}
+                >
+                  <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
+                  <span className="oac-switch-text">{isTwin ? t('twinOn') : t('twinOff')}</span>
+                </button>
+              </div>
             </div>
             <div className="oac-form-actions">
               <Button type="button" variant="primary" disabled={busy} onClick={() => { void saveBasic() }}>
@@ -553,6 +597,31 @@ export function BotEditor({
       >
         <p className="oac-dialog-body">
           {interpolate(t('removeConfirm', { name: bot.name, slug: bot.slug }), { name: bot.name, slug: bot.slug })}
+        </p>
+      </Modal>
+      <Modal
+        open={twinAction !== null}
+        onClose={() => setTwinAction(null)}
+        title={twinAction === 'demote' ? t('twinDemoteTitle') : t('twinPromoteTitle')}
+        className="oac-dialog"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setTwinAction(null)}>
+              {t('cancel')}
+            </Button>
+            <Button type="button" variant="primary" disabled={busy} onClick={confirmTwin}>
+              {busy ? t('saving') : t('twinConfirm')}
+            </Button>
+          </>
+        )}
+      >
+        <p className="oac-dialog-body">
+          {twinAction === 'demote'
+            ? interpolate(t('twinDemoteConfirm', { name: bot.name }), { name: bot.name })
+            : interpolate(
+              t('twinPromoteConfirm', { name: bot.name, other: otherTwinName }),
+              { name: bot.name, other: otherTwinName },
+            )}
         </p>
       </Modal>
     </div>

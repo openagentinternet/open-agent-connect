@@ -205,6 +205,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
   usage: 'metabot <command>',
   subcommands: [
     { name: 'identity', summary: 'Create the local MetaBot identity and bootstrap chain state.' },
+    { name: 'user', summary: 'Manage the local human owner identity (mnemonic create/import, backup, rename).' },
     { name: 'bot', summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.' },
     { name: 'config', summary: 'Read or change supported public runtime switches.' },
     { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
@@ -2631,6 +2632,45 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     successFields: ['text', 'updatedAt'],
     examples: ['metabot dream self-identity --from alice'],
+  },
+  {
+    commandPath: ['user'],
+    summary: 'The local human owner identity: the person who owns the Bots. A single machine-wide MetaID wallet, separate from any Bot profile.',
+    usage: 'metabot user <subcommand>',
+    subcommands: [
+      { name: 'who', summary: 'Show the owner identity (public fields only, no mnemonic).' },
+      { name: 'create', summary: 'Create a new owner identity with a fresh mnemonic.' },
+      { name: 'import', summary: 'Import an owner identity from an existing BIP39 mnemonic.' },
+      { name: 'ensure', summary: 'Return the owner identity, creating a default one when absent.' },
+      { name: 'rename', summary: 'Rename the owner identity.' },
+      { name: 'reveal', summary: 'Reveal the stored mnemonic for backup.' },
+      { name: 'delete', summary: 'Delete the owner identity (logout).' },
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['user', 'create'],
+    summary: 'Create a new owner identity. Returns the public fields plus the mnemonic once (back it up immediately).',
+    usage: 'metabot user create --name <name>',
+    requiredFlags: [{ flag: '--name', value: '<name>', description: 'Display name for the owner.' }],
+    optionalFlags: [HELP_JSON_FLAG],
+    successFields: ['identity', 'mnemonic'],
+    examples: ['metabot user create --name "Alice"'],
+  },
+  {
+    commandPath: ['user', 'import'],
+    summary: 'Import an owner identity from an existing BIP39 mnemonic.',
+    usage: 'metabot user import --name <name> --mnemonic "<words>" [--path <derivation>]',
+    requiredFlags: [
+      { flag: '--mnemonic', value: '<words>', description: 'BIP39 mnemonic phrase (12 or 24 words).' },
+    ],
+    optionalFlags: [
+      { flag: '--name', value: '<name>', description: 'Display name for the owner (defaults to "User").' },
+      { flag: '--path', value: '<derivation>', description: 'Derivation path. Defaults to m/44\'/10001\'/0\'/0/0.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['identity', 'mnemonic'],
+    examples: ['metabot user import --name "Alice" --mnemonic "word1 word2 ..."'],
   },
   {
     commandPath: ['twin'],

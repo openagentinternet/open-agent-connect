@@ -189,9 +189,11 @@ export function apply(ctx: ClientContext): void {
     locale: USER_NS,
     inject: () => ({
       who: () => api.userWho(),
-      bots: () => api.list(),
-      bind: (slug: string) => api.userBind(slug),
-      unbind: (slug: string) => api.userUnbind(slug),
+      create: (name: string) => api.userCreate(name),
+      importIdentity: (input: { name: string; mnemonic: string; path?: string }) => api.userImport(input),
+      rename: (name: string) => api.userRename(name),
+      reveal: () => api.userReveal(),
+      deleteIdentity: () => api.userDelete(),
     }),
   }, UserPanel))
   ctx.slots.inject('settings.section', () => ctx.slots.register({

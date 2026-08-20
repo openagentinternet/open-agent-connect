@@ -272,7 +272,7 @@ export const MEMORY_CSS = `
 .oac-memory-bot-select { width: auto; min-width: 180px; }
 .oac-memory-kind-select { width: auto; min-width: 140px; }
 .oac-memory-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 20px; white-space: nowrap; }
-.oac-memory-badge-twin { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); color: var(--dsw-alias-brand-primary); }
+.oac-memory-badge-twin { background: var(--dsw-alias-brand-primary); color: var(--dsw-alias-bg-layer-3); font-weight: 600; }
 .oac-memory-identity { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); white-space: pre-wrap; }
 .oac-memory-contact { text-align: left; cursor: pointer; border: 1px solid var(--dsw-alias-border-l2); transition: border-color .16s; }
 .oac-memory-contact:hover { border-color: var(--dsw-alias-label-dimmed); }
@@ -284,11 +284,11 @@ export const MEMORY_CSS = `
 `
 
 export const USER_CSS = `
-/* User section: identity rows + the Bot owner-binding list, same vocabulary. */
-.oac-user-binding-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--dsw-alias-border-l2); }
-.oac-user-binding-row:last-child { border-bottom: 0; }
-.oac-user-binding-name { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
-.oac-user-binding-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-font-mono, ui-monospace, Menlo, monospace); }
+/* User section: the human owner identity (create/import/backup/profile). */
+.oac-user-empty { align-items: flex-start; }
+.oac-mnemonic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.oac-mnemonic-word { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); font-size: 13px; color: var(--dsw-alias-label-primary); }
+.oac-mnemonic-index { flex: none; min-width: 18px; color: var(--dsw-alias-label-tertiary); font-size: 11px; text-align: right; }
 `
 
 export const PRESETS_CSS = `
