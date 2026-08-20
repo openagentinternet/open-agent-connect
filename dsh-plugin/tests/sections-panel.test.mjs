@@ -38,16 +38,28 @@ test('en and zh dictionaries stay in sync for Conversations, Services, and Apps'
   assert.match(apps, /metaapp delete --confirm/)
 })
 
-test('client registers two settings sections and the A2A sidebar footer action', async () => {
+test('en and zh dictionaries stay in sync for Memory and User', async () => {
+  const memory = await assertLocalePair('locale-memory.ts', 'memoryEn', 'memoryZh', 'MemoryLocaleKey')
+  assert.match(memory, /nav: 'Memory'/)
+  assert.match(memory, /nav: '记忆'/)
+  const user = await assertLocalePair('locale-user.ts', 'userEn', 'userZh', 'UserLocaleKey')
+  assert.match(user, /nav: 'User'/)
+  assert.match(user, /nav: '用户'/)
+})
+
+test('client registers four settings sections and the A2A sidebar footer action', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(text, /id: 'oac-bots'/)
   assert.doesNotMatch(text, /id: 'oac-services'/)
   assert.match(text, /id: 'oac-apps'/)
   assert.doesNotMatch(text, /id: 'oac-conversations'/)
+  assert.match(text, /id: 'oac-memory'/)
+  assert.match(text, /id: 'oac-user'/)
   assert.match(text, /name: 'sidebar\.footer\.action'/)
   assert.match(text, /id: 'oac-a2a'/)
   assert.match(text, /order: 20/)
-  assert.doesNotMatch(text, /order: 22/)
+  assert.match(text, /order: 21/)
+  assert.match(text, /order: 22/)
   assert.match(text, /order: 23/)
   assert.doesNotMatch(text, /id: 'oac'/)
 })

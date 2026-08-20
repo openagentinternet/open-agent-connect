@@ -48,6 +48,87 @@ export interface AgentPresetsLike {
   copy(from: string, id: string, name?: string): Promise<void>
   remove(id: string): Promise<void>
   list(): Promise<ReadonlyArray<{ id: string }>>
+  /** Live preset id for a composed agent context (e.g. 'oac-<slug>'). */
+  composedPreset?(agentCtx: unknown): string | undefined
+}
+
+/** Content block + user message shapes the agent loop consumes (structural). */
+export interface HostTextBlock {
+  type: 'text'
+  text: string
+}
+
+export interface HostUserMessage {
+  role: 'user'
+  content: HostTextBlock[]
+  source: { kind: string; plugin?: string; form?: string; sections?: Array<{ name: string; text: string }> }
+}
+
+/** Pre-step waterfall decision (the part this plugin reads/writes). */
+export interface HostPreStepDecision {
+  kind: 'enter' | 'reject'
+  messages?: HostUserMessage[]
+}
+
+export interface HostPreStepPayload {
+  agent: HostAgentLike
+  messages: HostUserMessage[]
+  turn: number
+  step: number
+  signal?: AbortSignal
+}
+
+/** Durable session event feed entry (structural). */
+export interface HostSessionEventLike {
+  type: string
+  data?: unknown
+}
+
+export interface HostSessionLike {
+  events: ReadonlyArray<HostSessionEventLike>
+  header?: { agentPreset?: string }
+}
+
+export interface HostToolDefinition {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+  output: {
+    schema: Record<string, unknown>
+    render: (args: unknown, value: unknown) => Array<{ type: 'text'; text: string }>
+  }
+  timeoutMs?: number
+  execute(args: Record<string, unknown>, exec: { signal?: AbortSignal }): Promise<unknown>
+}
+
+export interface HostAgentLike {
+  ctx: {
+    on?(event: string, listener: (...args: any[]) => unknown, options?: { prepend?: boolean }): void
+    systemPrompt?: {
+      section(section: { name: string; order: number; text: string | (() => string) }): () => void
+    }
+    tools?: {
+      register(definition: HostToolDefinition): () => void
+    }
+  }
+  session?: HostSessionLike
+  followup?(message: HostUserMessage): void
+  inject?(message: HostUserMessage): void
+  whenIdle?(): Promise<unknown>
+  cancel?(reason: unknown): void
+}
+
+export interface HostAgentsRegistryLike {
+  create(options: {
+    sessionId?: string
+    meta?: Record<string, unknown>
+    setup?: (agentCtx: unknown) => Promise<void> | void
+    signal?: AbortSignal
+  }): Promise<{ agent: HostAgentLike; dispose(): Promise<void> | void }>
+}
+
+export interface HostAgentsCreateLike {
+  agents?: HostAgentsRegistryLike
 }
 
 export interface LlmLike {
@@ -65,6 +146,9 @@ export interface HostContext {
   llm?: LlmLike
   get?(key: string): unknown
   dshHomePath?: (...segments: string[]) => string
+  /** Cordis event/waterfall surface (agent/pre-step, session/event, agent/created…). */
+  on?(event: string, listener: (...args: any[]) => unknown, options?: { prepend?: boolean }): void
+  agents?: HostAgentsRegistryLike
 }
 
 /** Optional apply config (tests skip CLI bootstrap so they cannot start a user daemon). */
@@ -75,6 +159,8 @@ export interface OacDshConfig {
     enabled?: boolean
     /** Per-turn prompt injection into oac-* preset sessions. */
     injection?: boolean
+    /** Post-turn transcript mirroring + extraction for oac-* preset sessions. */
+    extraction?: boolean
     /** Model-facing memory tools on oac-* preset sessions. */
     tools?: boolean
   }

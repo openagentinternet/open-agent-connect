@@ -265,6 +265,32 @@ export const APPS_CSS = `
 .oac-apps-share-row > code { margin: 0; font: inherit; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
 
+export const MEMORY_CSS = `
+/* Memory section: reuses the Bots card/form/tab vocabulary; the few additions
+   are the badge pill, the diary accordion, and the contact rows. All colors
+   resolve through --dsw-alias-* tokens. */
+.oac-memory-bot-select { width: auto; min-width: 180px; }
+.oac-memory-kind-select { width: auto; min-width: 140px; }
+.oac-memory-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 20px; white-space: nowrap; }
+.oac-memory-badge-twin { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); color: var(--dsw-alias-brand-primary); }
+.oac-memory-identity { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); white-space: pre-wrap; }
+.oac-memory-contact { text-align: left; cursor: pointer; border: 1px solid var(--dsw-alias-border-l2); transition: border-color .16s; }
+.oac-memory-contact:hover { border-color: var(--dsw-alias-label-dimmed); }
+.oac-memory-diary-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.oac-memory-diary-head strong { font-size: 13px; color: var(--dsw-alias-label-primary); }
+.oac-memory-diary-text { margin: 0; font-size: 13px; line-height: 21px; color: var(--dsw-alias-label-primary); white-space: pre-wrap; }
+.oac-memory-diary-sections { display: flex; flex-direction: column; gap: 4px; }
+.oac-memory-dream-date { flex: none; }
+`
+
+export const USER_CSS = `
+/* User section: identity rows + the Bot owner-binding list, same vocabulary. */
+.oac-user-binding-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-user-binding-row:last-child { border-bottom: 0; }
+.oac-user-binding-name { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.oac-user-binding-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-font-mono, ui-monospace, Menlo, monospace); }
+`
+
 export const PRESETS_CSS = `
 .oac-preset-seat { display: inline-flex; align-items: center; gap: 4px; max-width: min(100%, 240px); min-height: 28px; padding: 0 8px; border: none; border-radius: 16px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .oac-preset-seat:not(:disabled):hover, .oac-preset-seat[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); }

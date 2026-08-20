@@ -23,11 +23,15 @@ import { appEn, APP_NS, appZh, type AppsLocaleKey } from './locale-apps.ts'
 import { browserEn, BROWSER_NS, browserZh, type BrowserLocaleKey } from './locale-browser.ts'
 import { convEn, CONV_NS, convZh, type ConversationsLocaleKey } from './locale-conversations.ts'
 import { en, NS, zh, type BotsLocaleKey } from './locale.ts'
+import { memoryEn, MEMORY_NS, memoryZh, type MemoryLocaleKey } from './locale-memory.ts'
+import { userEn, USER_NS, userZh, type UserLocaleKey } from './locale-user.ts'
 import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.ts'
+import { MemoryPanel } from './MemoryPanel.tsx'
+import { UserPanel } from './UserPanel.tsx'
 import type { SeatApi, SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BROWSER_CSS, PRESETS_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BROWSER_CSS, MEMORY_CSS, PRESETS_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -36,6 +40,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.oac.conversations': ConversationsLocaleKey
     'settings.oac.services': ServicesLocaleKey
     'settings.oac.apps': AppsLocaleKey
+    'settings.oac.memory': MemoryLocaleKey
+    'settings.oac.user': UserLocaleKey
   }
   interface SlotMap {
     /** Sidebar-foot action above Settings; owner share is the column state. */
@@ -49,7 +55,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + APPS_CSS + BROWSER_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + APPS_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -58,10 +64,14 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(CONV_NS, { zh: convZh, en: convEn }), 'oac-dsh: conversations dictionary')
   ctx.effect(() => ctx.locale.register(SVC_NS, { zh: svcZh, en: svcEn }), 'oac-dsh: services dictionary')
   ctx.effect(() => ctx.locale.register(APP_NS, { zh: appZh, en: appEn }), 'oac-dsh: apps dictionary')
+  ctx.effect(() => ctx.locale.register(MEMORY_NS, { zh: memoryZh, en: memoryEn }), 'oac-dsh: memory dictionary')
+  ctx.effect(() => ctx.locale.register(USER_NS, { zh: userZh, en: userEn }), 'oac-dsh: user dictionary')
   const t = ctx.locale.bind(NS)
   const tConv = ctx.locale.bind(CONV_NS)
   const tSvc = ctx.locale.bind(SVC_NS)
   const tApps = ctx.locale.bind(APP_NS)
+  const tMemory = ctx.locale.bind(MEMORY_NS)
+  const tUser = ctx.locale.bind(USER_NS)
 
   // Right-sidebar Bot Browser: one store per activation, shared by the mounted
   // panel, the Settings > Bots entry buttons, and the daemon-event listener.
@@ -142,6 +152,48 @@ export function apply(ctx: ClientContext): void {
   }, A2AConversation))
   // Services settings section hidden until the service plugin matures; the
   // ServicesPanel, its locale dictionary, and the host routes stay in tree.
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'oac-memory',
+    order: 21,
+    label: () => tMemory('nav'),
+    locale: MEMORY_NS,
+    inject: () => ({
+      bots: () => api.list(),
+      twinCurrent: () => api.twinCurrent(),
+      memoryList: (from: string, options?: Record<string, unknown>) => api.memoryList(from, options),
+      memoryAdd: (from: string, entry: Record<string, unknown>) => api.memoryAdd(from, entry),
+      memoryUpdate: (from: string, entry: Record<string, unknown>) => api.memoryUpdate(from, entry),
+      memoryDelete: (from: string, id: string) => api.memoryDelete(from, id),
+      memoryStats: (from: string) => api.memoryStats(from),
+      memoryPolicyGet: (from: string) => api.memoryPolicyGet(from),
+      memoryPolicySet: (from: string, patch: Record<string, unknown>) => api.memoryPolicySet(from, patch),
+      memoryPolicyDelete: (from: string) => api.memoryPolicyDelete(from),
+      knowledgeList: (from: string, options?: Record<string, unknown>) => api.knowledgeList(from, options),
+      knowledgeUpdate: (from: string, entry: Record<string, unknown>) => api.knowledgeUpdate(from, entry),
+      knowledgeArchive: (from: string, id: string) => api.knowledgeArchive(from, id),
+      knowledgeDelete: (from: string, id: string) => api.knowledgeDelete(from, id),
+      impressionsList: (from: string) => api.impressionsList(from),
+      impressionsShow: (from: string, subject: string) => api.impressionsShow(from, subject),
+      dreamSummaries: (from: string, limit?: number) => api.dreamSummaries(from, limit),
+      dreamStatus: (from: string) => api.dreamStatus(from),
+      dreamSelfIdentity: (from: string) => api.dreamSelfIdentity(from),
+      dreamRun: (from: string, date: string) => api.dreamRun(from, date),
+    }),
+  }, MemoryPanel))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'oac-user',
+    order: 22,
+    label: () => tUser('nav'),
+    locale: USER_NS,
+    inject: () => ({
+      who: () => api.userWho(),
+      bots: () => api.list(),
+      bind: (slug: string) => api.userBind(slug),
+      unbind: (slug: string) => api.userUnbind(slug),
+    }),
+  }, UserPanel))
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'oac-apps',
