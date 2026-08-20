@@ -1,5 +1,9 @@
 import { sendPrivateChat } from './privateChat';
 import { loadChatPersona } from './chatPersonaLoader';
+import {
+  buildPrivateReplyMemoryContext,
+  recordPrivateChatMemoryTurn,
+} from './privateChatMemory';
 import type { ChatSkillWaitNoticeGenerator } from './chatSkillWaitNotice';
 import {
   persistA2AConversationMessageBestEffort,
@@ -507,6 +511,7 @@ export function createPrivateChatAutoReplyOrchestrator(
     operatorGuidanceText?: string | null;
     conversationCloseAllowed?: boolean;
     onSkillExecutionStart?: () => void;
+    memoryContext?: string | null;
   }): Promise<PreparedOutboundTurn | null> {
     const conversationCloseAllowed = input.conversationCloseAllowed !== false;
     let runnerResult;
@@ -520,6 +525,7 @@ export function createPrivateChatAutoReplyOrchestrator(
         operatorGuidanceText: input.operatorGuidanceText ?? null,
         conversationCloseAllowed,
         onSkillExecutionStart: input.onSkillExecutionStart,
+        memoryContext: input.memoryContext ?? null,
       });
     } catch (error) {
       // Never let a throwing runner crash the daemon loop, but never leave the
@@ -813,6 +819,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         inboundMessage: input.inboundMessage,
         operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
         onSkillExecutionStart,
+        memoryContext: await buildPrivateReplyMemoryContext(deps.paths, {
+          peerGlobalMetaId: input.peerGlobalMetaId,
+          userText: normalizeText(input.inboundMessage.content),
+        }),
       });
       if (!preparedTurn) {
         if (guidanceToConsume) {
@@ -839,6 +849,20 @@ export function createPrivateChatAutoReplyOrchestrator(
         guidanceToConsume,
       });
       if (!committedConversation) return false;
+
+      // Memory bookkeeping after a successful reply: extraction into the
+      // contact scope + an experience record for the dream pipeline. Never
+      // breaks the reply loop.
+      await recordPrivateChatMemoryTurn(deps.paths, {
+        selfGlobalMetaId: input.selfGlobalMetaId,
+        peerGlobalMetaId: input.peerGlobalMetaId,
+        conversationId: input.conversation.conversationId,
+        inboundMessageId: input.inboundMessage.messageId,
+        inboundPinId: input.inboundMessage.messagePinId ?? null,
+        inboundTimestamp: input.inboundMessage.timestamp,
+        userText: normalizeText(input.inboundMessage.content),
+        assistantText: preparedTurn.content,
+      });
 
       rateLimiter.replyTimestamps.push(getNow());
       return true;
@@ -1182,6 +1206,10 @@ export function createPrivateChatAutoReplyOrchestrator(
         // reopened) is the operator reaching out — it must not carry a close
         // marker, or the peer side would instantly re-close the conversation.
         conversationCloseAllowed: runnerConversation.turnCount > 1,
+        memoryContext: await buildPrivateReplyMemoryContext(deps.paths, {
+          peerGlobalMetaId: normalizedPeerGlobalMetaId,
+          userText: normalizeText(guidanceToConsume.guidanceText),
+        }),
       });
       if (!preparedTurn) {
         await deps.stateStore.releasePendingGuidanceClaimIfMatches(
