@@ -285,10 +285,15 @@ export const BROWSER_CSS = `
 #root { margin-right: var(--oac-browser-width, 0px); transition: margin-right .18s cubic-bezier(.4, 0, .2, 1); }
 body[data-oac-browser-dragging] #root { transition: none; }
 body[data-oac-browser-dragging] { cursor: col-resize; user-select: none; }
+body[data-oac-browser-dragging] .oac-browser-frame { pointer-events: none; }
 .oac-browser-shell { position: fixed; top: 0; right: 0; bottom: 0; z-index: 1080; width: var(--oac-browser-width, 0px); display: flex; pointer-events: none; }
-.oac-browser-resize { flex: none; width: 6px; margin-left: -3px; align-self: stretch; cursor: col-resize; touch-action: none; pointer-events: auto; }
-.oac-browser-resize:hover, .oac-browser-resize[data-active='true'] { background: var(--dsw-alias-brand-primary); opacity: .5; }
-.oac-browser-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-2); border-left: 1px solid var(--dsw-alias-border-l2); box-shadow: var(--dsw-shadow-lv1); overflow: hidden; pointer-events: auto; }
+/* Sidebar-style divider: a 12px grab strip (half overlapping the conversation
+   column) carrying a hairline knob that lights up on hover/drag, matching the
+   left sidebar's resize affordance. */
+.oac-browser-resize { flex: none; width: 12px; margin-left: -6px; align-self: stretch; display: flex; justify-content: center; cursor: col-resize; touch-action: none; pointer-events: auto; }
+.oac-browser-resize-knob { width: 2px; height: 100%; background: transparent; transition: background .12s ease; }
+.oac-browser-resize:hover .oac-browser-resize-knob, .oac-browser-resize[data-active='true'] .oac-browser-resize-knob { background: var(--dsw-alias-brand-primary); }
+.oac-browser-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-2); border-left: 1px solid var(--dsw-alias-border-l2); overflow: hidden; pointer-events: auto; }
 .oac-browser-header { flex: none; display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 12px 0 16px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-browser-title { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); white-space: nowrap; }
 .oac-browser-uri { flex: 1; min-width: 0; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

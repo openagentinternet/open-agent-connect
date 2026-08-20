@@ -8,8 +8,10 @@
  * buttons, and the daemon-event listener.
  */
 
-export const BROWSER_WIDTH_MIN = 560
-export const BROWSER_WIDTH_MAX = Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.9)
+/** Narrowest drag target: phone width. */
+export const BROWSER_WIDTH_MIN = 360
+/** Widest drag target: about three quarters of the viewport. */
+export const BROWSER_WIDTH_MAX = Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.75)
 export const BROWSER_WIDTH_DEFAULT = Math.min(
   Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.72),
   1280,
