@@ -319,6 +319,8 @@ test('runCli prints machine-readable help for bot profile/config/runtime leaf co
     dshLlmModel: 'optional DSH LLM model id or null',
     dshLlmFallbackProvider: 'optional DSH fallback LLM provider id or null',
     dshLlmFallbackModel: 'optional DSH fallback LLM model id or null',
+    botType: 'optional twin|worker; setting twin demotes the previous twin, null clears the role',
+    ownerGlobalMetaId: 'optional owner GlobalMetaID or null (null unbinds)',
     allowChatSkills: ['optional allowed private chat skill ids'],
     homepage: {
       uri: 'optional metafile://... or metaapp://... homepage target',

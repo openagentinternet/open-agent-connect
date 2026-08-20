@@ -257,6 +257,19 @@ export interface CliDependencies {
     listRuntimes?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     discoverRuntimes?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listSessions?: (input: { slug?: string; limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    bindOwner?: (input: {
+      slug: string;
+      ownerGlobalMetaId?: string;
+      unbind?: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  twin?: {
+    current?: () => Awaitable<MetabotCommandResult<unknown>>;
+    workers?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    tasksCreate?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    tasksList?: (input: { from?: string; status?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    tasksShow?: (input: { from?: string; taskId: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    tasksUpdate?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }
 

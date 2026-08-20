@@ -50,6 +50,11 @@ export async function runBotCommand(args: string[], context: CliRuntimeContext):
     const dshLlmModel = readFlagValue(args, '--dsh-llm-model');
     const dshLlmFallbackProvider = readFlagValue(args, '--dsh-llm-fallback-provider');
     const dshLlmFallbackModel = readFlagValue(args, '--dsh-llm-fallback-model');
+    const botType = readFlagValue(args, '--type');
+    if (botType !== null && botType !== 'twin' && botType !== 'worker') {
+      return commandFailed('invalid_flag', '--type must be twin or worker.');
+    }
+    const ownerGlobalMetaId = readFlagValue(args, '--owner');
     return handler({
       name,
       ...(host ? { host } : {}),
@@ -57,6 +62,27 @@ export async function runBotCommand(args: string[], context: CliRuntimeContext):
       ...(dshLlmModel ? { dshLlmModel } : {}),
       ...(dshLlmFallbackProvider ? { dshLlmFallbackProvider } : {}),
       ...(dshLlmFallbackModel ? { dshLlmFallbackModel } : {}),
+      ...(botType ? { botType } : {}),
+      ...(ownerGlobalMetaId ? { ownerGlobalMetaId } : {}),
+    });
+  }
+
+  if (subcommand === 'bind-owner') {
+    const slug = readFromSlug(args);
+    if (!slug) return missingFrom();
+    const handler = context.dependencies.bot?.bindOwner;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Bot bind-owner handler is not configured.');
+    }
+    const owner = readFlagValue(args, '--owner');
+    const unbind = hasFlag(args, '--unbind');
+    if (owner && unbind) {
+      return commandFailed('invalid_flag', '--owner and --unbind cannot be combined.');
+    }
+    return handler({
+      slug,
+      ...(owner ? { ownerGlobalMetaId: owner } : {}),
+      ...(unbind ? { unbind: true } : {}),
     });
   }
 

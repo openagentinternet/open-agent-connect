@@ -71,6 +71,12 @@ import { createImpressionStore } from '../core/memory/impressionStore';
 import { createKnowledgeStore } from '../core/memory/knowledgeStore';
 import { formatKnowledgeUpsertResult } from '../core/memory/knowledgePromptBlocks';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
+import { createOrchestrationStore } from '../core/memory/orchestrationStore';
+import {
+  buildTwinWorkerRoster,
+  formatTwinWorkerRosterBlock,
+  resolveCurrentTwinSlug,
+} from '../core/bot/twinRole';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
   resolveMetabotManagerLayout,
@@ -4139,6 +4145,140 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (input.slug) query.set('slug', input.slug);
         return requestJson(context, 'GET', `/api/bot/sessions?${query.toString()}`);
       },
+      bindOwner: async (input) => {
+        let ownerGlobalMetaId = typeof input.ownerGlobalMetaId === 'string' && input.ownerGlobalMetaId.trim()
+          ? input.ownerGlobalMetaId.trim()
+          : '';
+        if (!input.unbind && !ownerGlobalMetaId) {
+          // Default owner: the active local identity's GlobalMetaID.
+          const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+          const [profiles, activeHomeDir] = await Promise.all([
+            listIdentityProfiles(systemHomeDir).catch(() => []),
+            readActiveMetabotHome(systemHomeDir),
+          ]);
+          const active = profiles.find((profile) => profile.homeDir === activeHomeDir);
+          ownerGlobalMetaId = active?.globalMetaId?.trim() ?? '';
+          if (!ownerGlobalMetaId) {
+            return commandFailed(
+              'identity_unavailable',
+              'No active local identity with a GlobalMetaID. Pass --owner <globalMetaId> explicitly.',
+            );
+          }
+        }
+        return requestJson(
+          context,
+          'PUT',
+          `/api/bot/profiles/${encodeURIComponent(input.slug)}`,
+          { ownerGlobalMetaId: input.unbind ? null : ownerGlobalMetaId },
+        );
+      },
+    },
+    twin: {
+      current: async () => {
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const twinSlug = await resolveCurrentTwinSlug(systemHomeDir);
+        return commandSuccess({ twinSlug });
+      },
+      workers: async (input) => {
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        let twinSlug = input.from?.trim() ?? '';
+        if (!twinSlug) {
+          twinSlug = await resolveCurrentTwinSlug(systemHomeDir) ?? '';
+        }
+        if (!twinSlug) {
+          return commandFailed('twin_not_found', 'No Twin Bot exists yet. Promote one with "metabot bot update --payload-file {"botType":"twin"}".');
+        }
+        const roster = await buildTwinWorkerRoster(systemHomeDir, twinSlug);
+        return commandSuccess({
+          twinSlug,
+          workers: roster,
+          rosterBlock: formatTwinWorkerRosterBlock(roster),
+        });
+      },
+      tasksCreate: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        const task = await store.createTask({
+          title: String(payload.title ?? ''),
+          goal: typeof payload.goal === 'string' ? payload.goal : '',
+          ...(typeof payload.intent === 'string' ? { intent: payload.intent } : {}),
+          ...(typeof payload.ownerGlobalMetaId === 'string' ? { ownerGlobalMetaId: payload.ownerGlobalMetaId } : {}),
+          ...(Array.isArray(payload.steps)
+            ? {
+              steps: (payload.steps as Array<Record<string, unknown>>).map((step) => ({
+                workerSlug: String(step.workerSlug ?? ''),
+                objective: typeof step.objective === 'string' ? step.objective : '',
+                ...(Array.isArray(step.acceptanceCriteria)
+                  ? { acceptanceCriteria: step.acceptanceCriteria.filter((item): item is string => typeof item === 'string') }
+                  : {}),
+                ...(step.permissionScope && typeof step.permissionScope === 'object' && !Array.isArray(step.permissionScope)
+                  ? { permissionScope: step.permissionScope as Record<string, unknown> }
+                  : {}),
+                ...(Array.isArray(step.dependsOn)
+                  ? { dependsOn: step.dependsOn.filter((item): item is string => typeof item === 'string') }
+                  : {}),
+                ...(typeof step.idempotencyKey === 'string' ? { idempotencyKey: step.idempotencyKey } : {}),
+              })),
+            }
+            : {}),
+        });
+        return commandSuccess({ task });
+      },
+      tasksList: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const tasks = await store.listTasks({
+          ...(input.status ? { status: input.status as never } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        });
+        return commandSuccess({ tasks });
+      },
+      tasksShow: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const task = await store.getTask(input.taskId);
+        if (!task) return commandFailed('not_found', `Orchestration task not found: ${input.taskId}`);
+        return commandSuccess({ task });
+      },
+      tasksUpdate: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        const taskId = String(payload.taskId ?? '');
+        if (payload.taskStatus) {
+          const task = await store.updateTaskStatus(taskId, payload.taskStatus as never);
+          if (!task) return commandFailed('not_found', `Orchestration task not found: ${taskId}`);
+          return commandSuccess({ task });
+        }
+        if (payload.markNotified === true && payload.stepId && payload.attemptId) {
+          await store.markAttemptNotified(taskId, String(payload.stepId), String(payload.attemptId));
+          return commandSuccess({ notified: true });
+        }
+        if (payload.stepId && payload.attemptId) {
+          const attempt = await store.updateAttempt(taskId, String(payload.stepId), String(payload.attemptId), {
+            ...(typeof payload.attemptStatus === 'string' ? { status: payload.attemptStatus as never } : {}),
+            ...(typeof payload.dshSessionId === 'string' ? { dshSessionId: payload.dshSessionId } : {}),
+            ...(typeof payload.handoff === 'string' ? { handoff: payload.handoff } : {}),
+            ...(typeof payload.error === 'string' ? { error: payload.error } : {}),
+          });
+          if (!attempt) return commandFailed('not_found', 'Orchestration attempt not found.');
+          return commandSuccess({ attempt });
+        }
+        if (payload.stepId) {
+          const step = await store.updateStep(taskId, String(payload.stepId), {
+            ...(typeof payload.stepStatus === 'string' ? { status: payload.stepStatus as never } : {}),
+            ...(typeof payload.workerSlug === 'string' ? { workerSlug: payload.workerSlug } : {}),
+          });
+          if (!step) return commandFailed('not_found', 'Orchestration step not found.');
+          return commandSuccess({ step });
+        }
+        return commandFailed('invalid_payload', 'payload must carry taskStatus, stepId(+attemptId), or markNotified.');
+      },
     },
   };
 }
@@ -4163,6 +4303,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     conversations: { ...defaults.conversations, ...provided.conversations },
     memory: { ...defaults.memory, ...provided.memory },
     dream: { ...defaults.dream, ...provided.dream },
+    twin: { ...defaults.twin, ...provided.twin },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },
     trace: { ...defaults.trace, ...provided.trace },
