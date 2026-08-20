@@ -162,7 +162,8 @@ export function createTwinOrchestrator(
       if (!workerShow.ok) {
         return failure('worker_not_found', `Worker Bot not found: ${workerSlug}`)
       }
-      if (!ctx.agents?.create || !ctx.agentPresets?.mount) {
+      const agentsRegistry = ctx.agents ?? ctx.get?.('agents') as typeof ctx.agents
+      if (!agentsRegistry?.create || !ctx.agentPresets?.mount) {
         return failure('delegation_unavailable', 'The DSH agent registry or preset service is unavailable.')
       }
 
@@ -211,7 +212,7 @@ export function createTwinOrchestrator(
       let failureText: string | null = null
       let timedOut = false
       try {
-        const handle = await ctx.agents.create({
+        const handle = await agentsRegistry.create({
           sessionId: randomUUID(),
           meta: { agentPreset: presetIdForSlug(workerSlug) },
           setup: async (agentCtx: unknown) => {

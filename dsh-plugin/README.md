@@ -8,7 +8,37 @@ dsh plugin --profile web add open-agent-connect-dsh
 
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
-After a DSH restart, Settings left nav gains three sibling sections: **Bots**, **Conversations**, and **Apps** (the **Services** section is hidden until the service plugin matures). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
+After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, and **Apps** (the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
+
+## Memory, dreams, and the Twin Bot
+
+The plugin ports the IDBots memory system onto file storage (no SQLite; all
+data under `~/.metabot/profiles/<slug>/`):
+
+- **Per-turn injection** — scoped memory/experience blocks append to the
+  current user message of `oac-*` preset sessions (agent/pre-step waterfall,
+  so the loop logs them).
+- **Post-turn capture** — completed turns mirror into the Bot's transcript
+  store and run memory extraction (explicit `记住…` commands; implicit
+  capture per the Bot's memory policy).
+- **Memory tools** — `memory_user_edits`, `experience_recall`,
+  `knowledge_recall`/`knowledge_upsert`, `recent_chats`,
+  `conversation_search` on `oac-*` agents.
+- **Nightly dream** — the plugin scheduler (`dream.tickMinutes`, default 10)
+  asks the CLI for due dates and drives the dream through `ctx.llm`:
+  diary + dream memories + knowledge + person impressions + self-identity,
+  all idempotent per date.
+- **Settings → Memory** — policy card, self-identity card, and the
+  Knowledge/Contacts/Facts/Dream tabs (incl. manual run-dream).
+- **Settings → User** — active local identity + per-Bot owner bindings.
+- **Twin/Worker** — one Bot marked `botType: twin` gets the local
+  orchestration toolset and delegates to Workers as DSH sub-sessions
+  (`agents.create` + preset mount), with ORCH-NOTIFY wake-ups back into the
+  twin session.
+
+Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
+`memory.injection`, `memory.extraction`, `memory.tools`, `dream.enabled`,
+`dream.tickMinutes`, `twin.enabled`, `twin.stepTimeoutMs`.
 
 ## Developer mount
 
@@ -59,6 +89,10 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/chat/*` | `metabot chat conversations`, `messages`, `private` |
 | POST | `/oac/api/services/*` | `metabot services owned`, `publish`, `call` |
 | POST | `/oac/api/metaapp/*` | `metabot metaapp list`, `publish`, `delete` |
+| POST | `/oac/api/memory/*` | `metabot memory` verbs (list/add/update/delete/scopes/stats/policy/*, knowledge/*, impressions/*, recall, chats, search, transcript/append) |
+| POST | `/oac/api/dream/*` | `metabot dream` verbs; `dream/run` orchestrates plan → `ctx.llm` → commit in-process |
+| POST | `/oac/api/twin/*` | `metabot twin` verbs (current, workers, tasks) |
+| POST | `/oac/api/user/*` | `metabot identity who`, `bot bind-owner` |
 | POST | `/oac/api/browser/open` | resolve a resource URI (or the Browser home) to its `localUiUrl` and open it in the right-sidebar Bot Browser |
 | GET | `/oac/api/browser/events` | SSE: daemon `agent-browser:open-tab` events fanned out to the DSH web clients |
 

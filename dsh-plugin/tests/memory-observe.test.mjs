@@ -83,8 +83,15 @@ test('post-turn extraction mirrors transcripts and extracts once per completed t
   }
   listener(session, { type: 'agent-preset/selected', data: { agentPreset: 'oac-alice' } })
   listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
-  // The per-session queue drains asynchronously; wait for it.
-  await new Promise((resolve) => setTimeout(resolve, 50))
+  // The per-session queue drains asynchronously; poll until it lands.
+  const waitFor = async (predicate, timeoutMs = 3000) => {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (predicate()) return
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+  await waitFor(() => calls.filter((call) => call.args[1] === 'extract').length >= 1)
   const transcripts = calls.filter((call) => call.args[1] === 'transcript')
   const extracts = calls.filter((call) => call.args[1] === 'extract')
   assert.equal(transcripts.length, 2)
@@ -95,7 +102,7 @@ test('post-turn extraction mirrors transcripts and extracts once per completed t
   // Interrupted turns and non-oac sessions are ignored.
   calls.length = 0
   listener(session, { type: 'turn/end', data: { turn: 2, reason: { kind: 'aborted' } } })
-  await new Promise((resolve) => setTimeout(resolve, 30))
+  await new Promise((resolve) => setTimeout(resolve, 100))
   assert.equal(calls.length, 0)
 })
 
