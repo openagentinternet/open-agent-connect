@@ -270,6 +270,7 @@ export interface CliDependencies {
     tasksList?: (input: { from?: string; status?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     tasksShow?: (input: { from?: string; taskId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     tasksUpdate?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    tasksPendingNotify?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
 }
 

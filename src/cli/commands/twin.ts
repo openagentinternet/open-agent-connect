@@ -92,6 +92,11 @@ export async function runTwinCommand(
       }
       return handler({ from, payload });
     }
+    if (nested === 'pending-notify') {
+      const handler = requireTwinHandler(context, 'tasksPendingNotify');
+      if (isFailure(handler)) return handler;
+      return handler({ from });
+    }
     return commandUnknownSubcommand(`twin tasks ${String(nested ?? '')}`.trim());
   }
 

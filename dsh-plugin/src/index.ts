@@ -18,6 +18,7 @@ import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js
 import { dispatchMemoryRoutes } from './memory-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
+import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
 import { slugFromPresetId } from './chip-logic.js'
 import { reconcilePresets } from './preset.js'
 import { dispatchSection } from './sections.js'
@@ -329,15 +330,28 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   }
   if (memoryEnabled && config.memory?.tools !== false && ctx.on) {
     ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
-      try {
-        const agent = payload.agent
-        const preset = agent?.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
-        const slug = preset ? slugFromPresetId(preset) : undefined
-        if (!slug) return
-        installMemoryToolsOnAgent(agent, slug)
-      } catch {
-        // tool installation is best-effort per agent
-      }
+      void (async () => {
+        try {
+          const agent = payload.agent
+          const preset = agent?.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
+          const slug = preset ? slugFromPresetId(preset) : undefined
+          if (!slug) return
+          liveOacAgents.set(slug, agent)
+          installMemoryToolsOnAgent(agent, slug)
+          if (config.twin?.enabled === false) return
+          const shown = await runMetabot(['bot', 'show', '--from', slug], { timeoutMs: 30_000 })
+          const profile = shown.ok
+            ? (shown.data as { profile?: { botType?: string } } | undefined)?.profile
+            : undefined
+          if (profile?.botType !== 'twin') return
+          const orchestrator = installTwinOnAgent(ctx, agent, slug, {
+            stepTimeoutMs: config.twin?.stepTimeoutMs,
+          })
+          await orchestrator.deliverPendingNotifications(slug, agent)
+        } catch {
+          // tool installation is best-effort per agent
+        }
+      })()
     })
   }
 
@@ -373,6 +387,15 @@ export { dispatchSection } from './sections.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick } from './dream-scheduler.js'
+export {
+  buildDelegationMessage,
+  buildTwinToolDefinitions,
+  createTwinOrchestrator,
+  installTwinOnAgent,
+  liveOacAgents,
+  TWIN_OVERLAY_TEXT,
+  WORKER_DELEGATION_SYSTEM_PROMPT,
+} from './twin-tools.js'
 export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
 export { generateLlmText } from './llm-generate.js'
 export { uploadFileBytes } from './file-upload.js'

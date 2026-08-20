@@ -50,6 +50,8 @@ export interface AgentPresetsLike {
   list(): Promise<ReadonlyArray<{ id: string }>>
   /** Live preset id for a composed agent context (e.g. 'oac-<slug>'). */
   composedPreset?(agentCtx: unknown): string | undefined
+  /** Mount a preset composition onto a fresh agent context (agents.create setup). */
+  mount?(agentCtx: unknown, id?: string): Promise<void>
 }
 
 /** Content block + user message shapes the agent loop consumes (structural). */

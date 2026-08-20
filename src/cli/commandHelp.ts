@@ -2662,7 +2662,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   {
     commandPath: ['twin', 'tasks'],
     summary: 'Delegation task bookkeeping: create/list/show/update tasks, steps, and attempts.',
-    usage: 'metabot twin tasks <create|list|show|update> [--from <bot-slug>] [--payload-file <path>]',
+    usage: 'metabot twin tasks <create|list|show|update|pending-notify> [--from <bot-slug>] [--payload-file <path>]',
     optionalFlags: [
       FROM_BOT_FLAG,
       { flag: '--payload-file', value: '<path>', description: 'create: { title, goal?, intent?, steps?[] }; update: { taskId, taskStatus? | stepId(+attemptId)… }.' },

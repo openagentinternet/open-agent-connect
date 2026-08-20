@@ -4259,6 +4259,13 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           await store.markAttemptNotified(taskId, String(payload.stepId), String(payload.attemptId));
           return commandSuccess({ notified: true });
         }
+        if (payload.newAttempt === true && payload.stepId) {
+          const attempt = await store.addAttempt(taskId, String(payload.stepId), {
+            ...(typeof payload.dshSessionId === 'string' ? { dshSessionId: payload.dshSessionId } : {}),
+          });
+          if (!attempt) return commandFailed('not_found', 'Orchestration step not found.');
+          return commandSuccess({ attempt });
+        }
         if (payload.stepId && payload.attemptId) {
           const attempt = await store.updateAttempt(taskId, String(payload.stepId), String(payload.attemptId), {
             ...(typeof payload.attemptStatus === 'string' ? { status: payload.attemptStatus as never } : {}),
@@ -4278,6 +4285,26 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           return commandSuccess({ step });
         }
         return commandFailed('invalid_payload', 'payload must carry taskStatus, stepId(+attemptId), or markNotified.');
+      },
+      tasksPendingNotify: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const pending = await store.listUnnotifiedTerminalAttempts();
+        return commandSuccess({
+          pending: pending.map(({ task, step, attempt }) => ({
+            taskId: task.id,
+            taskTitle: task.title,
+            taskStatus: task.status,
+            stepId: step.id,
+            workerSlug: step.workerSlug,
+            attemptId: attempt.id,
+            attemptStatus: attempt.status,
+            handoff: attempt.handoff,
+            error: attempt.error,
+            endedAt: attempt.endedAt,
+          })),
+        });
       },
     },
   };
