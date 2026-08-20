@@ -37,6 +37,46 @@ import {
   resolveMetabotPaths,
   type MetabotPaths,
 } from '../core/state/paths';
+import { createMemoryStore } from '../core/memory/memoryStore';
+import { createMemoryPolicyStore } from '../core/memory/memoryPolicy';
+import {
+  applyTurnMemoryExtraction,
+  buildMemoryBlocksForRequest,
+} from '../core/memory/memoryService';
+import {
+  appendTranscriptTurn,
+  listRecentChats,
+  searchConversations,
+} from '../core/memory/transcriptStore';
+import type { MemoryCreateInput, MemoryUpdateInput } from '../core/memory/memoryTypes';
+import { createDreamStore } from '../core/memory/dreamStore';
+import {
+  commitDream,
+  dreamStatus,
+  dueDreamDates,
+  planDream,
+  runDream,
+  synthesizeDream,
+  type DreamModelLimits,
+} from '../core/memory/dreamService';
+import {
+  formatExperienceRecallResults,
+  formatExperienceTimelineFallback,
+  formatLocalDate,
+  resolveExperienceRecallQuery,
+} from '../core/memory/experiencePromptBlocks';
+import { getDayBoundsMs } from '../core/memory/dreamPrompt';
+import { createExperienceStore } from '../core/memory/experienceStore';
+import { createImpressionStore } from '../core/memory/impressionStore';
+import { createKnowledgeStore } from '../core/memory/knowledgeStore';
+import { formatKnowledgeUpsertResult } from '../core/memory/knowledgePromptBlocks';
+import { loadChatPersona } from '../core/chat/chatPersonaLoader';
+import { createOrchestrationStore } from '../core/memory/orchestrationStore';
+import {
+  buildTwinWorkerRoster,
+  formatTwinWorkerRosterBlock,
+  resolveCurrentTwinSlug,
+} from '../core/bot/twinRole';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
   resolveMetabotManagerLayout,
@@ -963,6 +1003,23 @@ function createCliLlmRuntimeResolver(paths: MetabotPaths) {
     bindingStore: createLlmBindingStore(paths),
     getPreferredRuntimeId: async () => readPreferredLlmRuntimeId(paths),
   });
+}
+
+function parseDreamLimits(payload: Record<string, unknown>): Partial<DreamModelLimits> | undefined {
+  const source = payload.limits && typeof payload.limits === 'object' && !Array.isArray(payload.limits)
+    ? payload.limits as Record<string, unknown>
+    : payload;
+  const contextWindow = typeof source.contextWindow === 'number' && Number.isFinite(source.contextWindow)
+    ? source.contextWindow
+    : undefined;
+  const maxOutputTokens = typeof source.maxOutputTokens === 'number' && Number.isFinite(source.maxOutputTokens)
+    ? source.maxOutputTokens
+    : undefined;
+  if (contextWindow === undefined && maxOutputTokens === undefined) return undefined;
+  return {
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+  };
 }
 
 async function isPortBindable(host: string, port: number): Promise<boolean> {
@@ -3331,6 +3388,486 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         { local: input.local, peer: input.peer, guidance: input.guidance },
       ),
     },
+    memory: {
+      list: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const entries = await store.list({
+          ...(input.scopeKind ? { scopeKind: input.scopeKind as never } : {}),
+          ...(input.scopeKey ? { scopeKey: input.scopeKey } : {}),
+          ...(input.usageClass ? { usageClass: input.usageClass as never } : {}),
+          ...(input.status ? { status: input.status as never } : {}),
+          ...(input.origin ? { origin: input.origin as never } : {}),
+          ...(input.query ? { query: input.query } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          ...(input.includeDeleted ? { includeDeleted: true } : {}),
+        });
+        return commandSuccess({ entries });
+      },
+      add: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        const memory = await store.create({
+          text: String(payload.text ?? ''),
+          ...(typeof payload.scopeKind === 'string' ? { scopeKind: payload.scopeKind as never } : {}),
+          ...(typeof payload.scopeKey === 'string' ? { scopeKey: payload.scopeKey } : {}),
+          ...(typeof payload.usageClass === 'string' ? { usageClass: payload.usageClass as never } : {}),
+          ...(typeof payload.visibility === 'string' ? { visibility: payload.visibility as never } : {}),
+          ...(typeof payload.confidence === 'number' ? { confidence: payload.confidence } : {}),
+          ...(typeof payload.isExplicit === 'boolean' ? { isExplicit: payload.isExplicit } : {}),
+          ...(typeof payload.origin === 'string' ? { origin: payload.origin as never } : {}),
+          ...(payload.source && typeof payload.source === 'object' && !Array.isArray(payload.source)
+            ? { source: payload.source as MemoryCreateInput['source'] }
+            : {}),
+        });
+        return commandSuccess({ memory });
+      },
+      update: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        const memory = await store.update({
+          id: String(payload.id ?? ''),
+          ...(typeof payload.text === 'string' ? { text: payload.text } : {}),
+          ...(typeof payload.scopeKind === 'string' ? { scopeKind: payload.scopeKind as never } : {}),
+          ...(typeof payload.scopeKey === 'string' ? { scopeKey: payload.scopeKey } : {}),
+          ...(typeof payload.usageClass === 'string' ? { usageClass: payload.usageClass as never } : {}),
+          ...(typeof payload.visibility === 'string' ? { visibility: payload.visibility as never } : {}),
+          ...(typeof payload.confidence === 'number' ? { confidence: payload.confidence } : {}),
+          ...(typeof payload.isExplicit === 'boolean' ? { isExplicit: payload.isExplicit } : {}),
+          ...(typeof payload.status === 'string' ? { status: payload.status as MemoryUpdateInput['status'] } : {}),
+        });
+        if (!memory) {
+          return commandFailed('not_found', 'Memory entry not found in the resolved scope (or it is protected).');
+        }
+        return commandSuccess({ memory });
+      },
+      delete: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const deleted = await store.remove({
+          id: String(input.payload.id ?? ''),
+          ...(typeof input.payload.scopeKind === 'string' ? { scopeKind: input.payload.scopeKind as never } : {}),
+          ...(typeof input.payload.scopeKey === 'string' ? { scopeKey: input.payload.scopeKey } : {}),
+        });
+        if (!deleted) {
+          return commandFailed('not_found', 'Memory entry not found in the resolved scope (or it is protected).');
+        }
+        return commandSuccess({ deleted: true });
+      },
+      blocks: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const result = await buildMemoryBlocksForRequest(resolveMetabotPaths(actor.homeDir), {
+          channel: typeof input.payload.channel === 'string' ? input.payload.channel : undefined,
+          peerGlobalMetaId: typeof input.payload.peerGlobalMetaId === 'string' ? input.payload.peerGlobalMetaId : undefined,
+          externalConversationId: typeof input.payload.externalConversationId === 'string'
+            ? input.payload.externalConversationId
+            : undefined,
+          userText: typeof input.payload.userText === 'string' ? input.payload.userText : undefined,
+        });
+        return commandSuccess({
+          xml: result.xml,
+          resolutionReason: result.resolution.resolutionReason,
+          writeScope: result.resolution.writeScope,
+          memoryEnabled: result.policy.memoryEnabled,
+        });
+      },
+      extract: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const result = await applyTurnMemoryExtraction(resolveMetabotPaths(actor.homeDir), {
+          userText: String(input.payload.userText ?? ''),
+          assistantText: String(input.payload.assistantText ?? ''),
+          sessionId: typeof input.payload.sessionId === 'string' ? input.payload.sessionId : undefined,
+          channel: typeof input.payload.channel === 'string' ? input.payload.channel : undefined,
+          peerGlobalMetaId: typeof input.payload.peerGlobalMetaId === 'string' ? input.payload.peerGlobalMetaId : undefined,
+          externalConversationId: typeof input.payload.externalConversationId === 'string'
+            ? input.payload.externalConversationId
+            : undefined,
+          userMessageId: typeof input.payload.userMessageId === 'string' ? input.payload.userMessageId : undefined,
+          assistantMessageId: typeof input.payload.assistantMessageId === 'string' ? input.payload.assistantMessageId : undefined,
+        });
+        return commandSuccess(result as unknown as Record<string, unknown>);
+      },
+      policyGet: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryPolicyStore(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess({
+          effective: await store.effectivePolicy(),
+          override: await store.readOverride(),
+        });
+      },
+      policySet: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryPolicyStore(resolveMetabotPaths(actor.homeDir));
+        const allowed = [
+          'memoryEnabled',
+          'memoryImplicitUpdateEnabled',
+          'memoryLlmJudgeEnabled',
+          'memoryGuardLevel',
+          'memoryUserMemoriesMaxItems',
+          'memoryPromptMaxChars',
+          'dreamEnabled',
+        ] as const;
+        const updates: Record<string, unknown> = {};
+        for (const key of allowed) {
+          if (input.payload[key] !== undefined) updates[key] = input.payload[key];
+        }
+        const policy = await store.setOverride(updates);
+        return commandSuccess({ policy });
+      },
+      policyDelete: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryPolicyStore(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess({ deleted: await store.deleteOverride() });
+      },
+      scopes: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess({ scopes: await store.listScopes() });
+      },
+      stats: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const stats = await store.stats({
+          ...(input.scopeKind ? { scopeKind: input.scopeKind as never } : {}),
+          ...(input.scopeKey ? { scopeKey: input.scopeKey } : {}),
+        });
+        return commandSuccess({ stats });
+      },
+      transcriptAppend: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        await appendTranscriptTurn(resolveMetabotPaths(actor.homeDir), {
+          sessionId: String(input.payload.sessionId ?? ''),
+          role: input.payload.role === 'assistant' ? 'assistant' : 'user',
+          text: String(input.payload.text ?? ''),
+          ts: typeof input.payload.ts === 'number' && Number.isFinite(input.payload.ts)
+            ? input.payload.ts
+            : Date.now(),
+          channel: typeof input.payload.channel === 'string' && input.payload.channel.trim()
+            ? input.payload.channel.trim()
+            : 'dsh',
+          ...(typeof input.payload.turn === 'number' && Number.isFinite(input.payload.turn)
+            ? { turn: input.payload.turn }
+            : {}),
+          ...(typeof input.payload.peerGlobalMetaId === 'string' && input.payload.peerGlobalMetaId.trim()
+            ? { peerGlobalMetaId: input.payload.peerGlobalMetaId.trim() }
+            : {}),
+        });
+        return commandSuccess({ appended: true });
+      },
+      chats: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const chats = await listRecentChats(resolveMetabotPaths(actor.homeDir), {
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          ...(input.sortOrder ? { sortOrder: input.sortOrder } : {}),
+        });
+        return commandSuccess({ chats });
+      },
+      search: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const records = await searchConversations(resolveMetabotPaths(actor.homeDir), {
+          query: String(input.payload.query ?? ''),
+          ...(typeof input.payload.maxResults === 'number' ? { maxResults: input.payload.maxResults } : {}),
+          ...(typeof input.payload.before === 'number' ? { before: input.payload.before } : {}),
+          ...(typeof input.payload.after === 'number' ? { after: input.payload.after } : {}),
+        });
+        return commandSuccess({ records });
+      },
+      recall: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const dreamStore = createDreamStore(paths);
+        const query = resolveExperienceRecallQuery({
+          query: typeof input.payload.query === 'string' ? input.payload.query : undefined,
+          date_from: typeof input.payload.dateFrom === 'string' ? input.payload.dateFrom : undefined,
+          date_to: typeof input.payload.dateTo === 'string' ? input.payload.dateTo : undefined,
+          granularity: typeof input.payload.granularity === 'string'
+            ? input.payload.granularity as 'day' | 'week' | 'month'
+            : undefined,
+          ...(typeof input.payload.limit === 'number' ? { limit: input.payload.limit } : {}),
+        });
+        const summaries = await dreamStore.searchDailySummaries({
+          query: query.query,
+          dateFrom: query.dateFrom,
+          dateTo: query.dateTo,
+          limit: query.limit,
+        });
+        let text: string;
+        if (summaries.length > 0) {
+          text = formatExperienceRecallResults(summaries.map((summary) => ({
+            summaryDate: summary.summaryDate,
+            summaryText: summary.summaryText,
+            sessionRefs: summary.sessionRefs,
+          })), query.granularity);
+        } else {
+          // Raw-episode timeline fallback so un-dreamed days are never blind.
+          const experienceStore = createExperienceStore(paths);
+          const fromTime = query.dateFrom ? getDayBoundsMs(query.dateFrom).startMs : undefined;
+          const toTime = query.dateTo ? getDayBoundsMs(query.dateTo).endMs : undefined;
+          const episodes = await experienceStore.listEpisodes({
+            ...(fromTime !== undefined ? { fromTime } : {}),
+            ...(toTime !== undefined ? { toTime } : {}),
+            limit: 30,
+          });
+          text = formatExperienceTimelineFallback({
+            dateFrom: query.dateFrom,
+            dateTo: query.dateTo,
+            episodes: episodes.map((episode) => ({
+              startedAt: episode.startedAt,
+              sourceChannel: episode.sourceChannel,
+              episodeType: episode.episodeType,
+              title: typeof episode.metadata.title === 'string' ? episode.metadata.title : null,
+            })),
+          });
+        }
+        return commandSuccess({ text, summaries, query });
+      },
+      knowledgeList: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const entries = await store.listKnowledge({
+          ...(input.kind ? { kind: input.kind as never } : {}),
+          ...(input.category ? { category: input.category } : {}),
+          ...(input.status ? { status: input.status as never } : {}),
+          ...(input.query ? { query: input.query } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        });
+        return commandSuccess({ entries });
+      },
+      knowledgeUpsert: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const result = await store.upsertKnowledge({
+          topic: String(input.payload.topic ?? ''),
+          summary: String(input.payload.summary ?? ''),
+          ...(typeof input.payload.kind === 'string' ? { kind: input.payload.kind as never } : {}),
+          ...(typeof input.payload.category === 'string' ? { category: input.payload.category } : {}),
+          ...(Array.isArray(input.payload.tags)
+            ? { tags: input.payload.tags.filter((tag): tag is string => typeof tag === 'string') }
+            : {}),
+          ...(typeof input.payload.origin === 'string' ? { origin: input.payload.origin as never } : {}),
+          ...(Array.isArray(input.payload.sources)
+            ? { sources: input.payload.sources as never }
+            : {}),
+        });
+        return commandSuccess({
+          entry: result.entry,
+          created: result.created,
+          revised: result.revised,
+          text: formatKnowledgeUpsertResult({
+            topic: result.entry.topic,
+            created: result.created,
+            revised: result.revised,
+            version: result.entry.version,
+            kind: result.entry.kind,
+          }),
+        });
+      },
+      knowledgeUpdate: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const entry = await store.updateKnowledge({
+          id: String(input.payload.id ?? ''),
+          ...(typeof input.payload.topic === 'string' ? { topic: input.payload.topic } : {}),
+          ...(typeof input.payload.summary === 'string' ? { summary: input.payload.summary } : {}),
+          ...(typeof input.payload.kind === 'string' ? { kind: input.payload.kind as never } : {}),
+        });
+        if (!entry) return commandFailed('not_found', 'Knowledge entry not found.');
+        return commandSuccess({ entry });
+      },
+      knowledgeArchive: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const entry = await store.archiveKnowledge(String(input.payload.id ?? ''));
+        if (!entry) return commandFailed('not_found', 'Knowledge entry not found.');
+        return commandSuccess({ entry });
+      },
+      knowledgeDelete: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const deleted = await store.deleteKnowledge(String(input.payload.id ?? ''));
+        if (!deleted) return commandFailed('not_found', 'Knowledge entry not found.');
+        return commandSuccess({ deleted: true });
+      },
+      impressionsList: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const persona = await loadChatPersona(paths);
+        const observerGlobalMetaId = persona.identity?.globalMetaId ?? '';
+        if (!observerGlobalMetaId) {
+          return commandFailed('identity_missing', 'No local MetaBot identity is loaded for this profile.');
+        }
+        const store = createImpressionStore(paths);
+        const snapshots = await store.listSnapshots(observerGlobalMetaId);
+        return commandSuccess({ observerGlobalMetaId, snapshots });
+      },
+      impressionsShow: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const persona = await loadChatPersona(paths);
+        const observerGlobalMetaId = persona.identity?.globalMetaId ?? '';
+        if (!observerGlobalMetaId) {
+          return commandFailed('identity_missing', 'No local MetaBot identity is loaded for this profile.');
+        }
+        const store = createImpressionStore(paths);
+        const snapshot = await store.getSnapshot(observerGlobalMetaId, input.subject);
+        const observations = await store.listObservations({
+          observerGlobalMetaId,
+          subjectGlobalMetaId: input.subject,
+          includeSuperseded: true,
+        });
+        return commandSuccess({ observerGlobalMetaId, subject: input.subject, snapshot, observations });
+      },
+    },
+    dream: {
+      due: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const due = await dueDreamDates(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess(due as unknown as Record<string, unknown>);
+      },
+      status: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const status = await dreamStatus(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess(status as unknown as Record<string, unknown>);
+      },
+      plan: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        if (!input.date) {
+          return commandFailed('missing_flag', '--date is required for dream plan.');
+        }
+        const limits = parseDreamLimits(input.payload);
+        const plan = await planDream(resolveMetabotPaths(actor.homeDir), {
+          date: input.date,
+          llm: typeof input.payload.llm === 'string' ? input.payload.llm : null,
+          limits,
+        });
+        return commandSuccess(plan as unknown as Record<string, unknown>);
+      },
+      synthesize: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const fragmentOutputs: Record<string, string> = {};
+        for (const [key, value] of Object.entries(input.payload.fragmentOutputs as Record<string, unknown>)) {
+          if (typeof value === 'string') fragmentOutputs[key] = value;
+        }
+        const prompt = await synthesizeDream(resolveMetabotPaths(actor.homeDir), {
+          date: String(input.payload.date),
+          llm: typeof input.payload.llm === 'string' ? input.payload.llm : null,
+          limits: parseDreamLimits(input.payload),
+          fragmentOutputs,
+        });
+        return commandSuccess(prompt as unknown as Record<string, unknown>);
+      },
+      commit: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const result = await commitDream(resolveMetabotPaths(actor.homeDir), {
+          date: String(input.payload.date),
+          outputText: String(input.payload.outputText ?? ''),
+          llm: typeof input.payload.llm === 'string' ? input.payload.llm : null,
+          isRepair: input.payload.isRepair === true,
+        });
+        if (!result.ok) {
+          return commandFailed('dream_commit_failed', result.error ?? 'dream commit failed');
+        }
+        return commandSuccess(result as unknown as Record<string, unknown>);
+      },
+      run: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const slug = path.basename(paths.profileRoot);
+        const now = new Date();
+        const date = input.date ?? formatLocalDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        const runtimeResolver = createCliLlmRuntimeResolver(paths);
+        const executor = new LlmExecutor({
+          sessionsRoot: paths.llmExecutorSessionsRoot,
+          transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+          skillsRoot: paths.skillsRoot,
+          systemHomeDir: paths.systemHomeDir,
+          env: context.env,
+          backends: createRegistryBackendFactories(),
+        });
+        const complete = async (request: { system: string; user: string; maxOutputTokens: number }): Promise<string> => {
+          const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: slug });
+          if (!resolved.runtime) {
+            throw new Error(
+              'No LLM runtime binding available for this MetaBot. Bind one with "metabot llm" '
+              + 'or drive dreams from the DSH plugin (dream plan/commit with ctx.llm).',
+            );
+          }
+          return executor.execute({
+            runtimeId: resolved.runtime.id,
+            runtime: resolved.runtime,
+            prompt: request.user,
+            systemPrompt: request.system,
+            metaBotSlug: slug,
+            timeout: 180_000,
+            outputMode: 'final',
+          });
+        };
+        const result = await runDream(paths, {
+          date,
+          llm: typeof input.payload.llm === 'string' ? input.payload.llm : null,
+          limits: parseDreamLimits(input.payload),
+          isRepair: input.payload.isRepair === true,
+        }, complete);
+        if (result.kind === 'failed') {
+          return commandFailed('dream_run_failed', result.error ?? 'dream run failed');
+        }
+        return commandSuccess(result as unknown as Record<string, unknown>);
+      },
+      summaries: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const dreamStore = createDreamStore(resolveMetabotPaths(actor.homeDir));
+        const summaries = await dreamStore.listDailySummaries({
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          ...(input.before ? { before: input.before } : {}),
+        });
+        return commandSuccess({ summaries });
+      },
+      selfIdentity: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const memoryStore = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const entries = await memoryStore.list({
+          usageClass: 'self_identity',
+          status: 'created',
+          limit: 1,
+        });
+        return commandSuccess({
+          text: entries[0]?.text ?? '',
+          updatedAt: entries[0]?.updatedAt ?? null,
+        });
+      },
+    },
     file: {
       upload: async (input) => requestJsonForSelectedActor(
         'POST',
@@ -3608,6 +4145,167 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (input.slug) query.set('slug', input.slug);
         return requestJson(context, 'GET', `/api/bot/sessions?${query.toString()}`);
       },
+      bindOwner: async (input) => {
+        let ownerGlobalMetaId = typeof input.ownerGlobalMetaId === 'string' && input.ownerGlobalMetaId.trim()
+          ? input.ownerGlobalMetaId.trim()
+          : '';
+        if (!input.unbind && !ownerGlobalMetaId) {
+          // Default owner: the active local identity's GlobalMetaID.
+          const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+          const [profiles, activeHomeDir] = await Promise.all([
+            listIdentityProfiles(systemHomeDir).catch(() => []),
+            readActiveMetabotHome(systemHomeDir),
+          ]);
+          const active = profiles.find((profile) => profile.homeDir === activeHomeDir);
+          ownerGlobalMetaId = active?.globalMetaId?.trim() ?? '';
+          if (!ownerGlobalMetaId) {
+            return commandFailed(
+              'identity_unavailable',
+              'No active local identity with a GlobalMetaID. Pass --owner <globalMetaId> explicitly.',
+            );
+          }
+        }
+        return requestJson(
+          context,
+          'PUT',
+          `/api/bot/profiles/${encodeURIComponent(input.slug)}`,
+          { ownerGlobalMetaId: input.unbind ? null : ownerGlobalMetaId },
+        );
+      },
+    },
+    twin: {
+      current: async () => {
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const twinSlug = await resolveCurrentTwinSlug(systemHomeDir);
+        return commandSuccess({ twinSlug });
+      },
+      workers: async (input) => {
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        let twinSlug = input.from?.trim() ?? '';
+        if (!twinSlug) {
+          twinSlug = await resolveCurrentTwinSlug(systemHomeDir) ?? '';
+        }
+        if (!twinSlug) {
+          return commandFailed('twin_not_found', 'No Twin Bot exists yet. Promote one with "metabot bot update --payload-file {"botType":"twin"}".');
+        }
+        const roster = await buildTwinWorkerRoster(systemHomeDir, twinSlug);
+        return commandSuccess({
+          twinSlug,
+          workers: roster,
+          rosterBlock: formatTwinWorkerRosterBlock(roster),
+        });
+      },
+      tasksCreate: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        const task = await store.createTask({
+          title: String(payload.title ?? ''),
+          goal: typeof payload.goal === 'string' ? payload.goal : '',
+          ...(typeof payload.intent === 'string' ? { intent: payload.intent } : {}),
+          ...(typeof payload.ownerGlobalMetaId === 'string' ? { ownerGlobalMetaId: payload.ownerGlobalMetaId } : {}),
+          ...(Array.isArray(payload.steps)
+            ? {
+              steps: (payload.steps as Array<Record<string, unknown>>).map((step) => ({
+                workerSlug: String(step.workerSlug ?? ''),
+                objective: typeof step.objective === 'string' ? step.objective : '',
+                ...(Array.isArray(step.acceptanceCriteria)
+                  ? { acceptanceCriteria: step.acceptanceCriteria.filter((item): item is string => typeof item === 'string') }
+                  : {}),
+                ...(step.permissionScope && typeof step.permissionScope === 'object' && !Array.isArray(step.permissionScope)
+                  ? { permissionScope: step.permissionScope as Record<string, unknown> }
+                  : {}),
+                ...(Array.isArray(step.dependsOn)
+                  ? { dependsOn: step.dependsOn.filter((item): item is string => typeof item === 'string') }
+                  : {}),
+                ...(typeof step.idempotencyKey === 'string' ? { idempotencyKey: step.idempotencyKey } : {}),
+              })),
+            }
+            : {}),
+        });
+        return commandSuccess({ task });
+      },
+      tasksList: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const tasks = await store.listTasks({
+          ...(input.status ? { status: input.status as never } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        });
+        return commandSuccess({ tasks });
+      },
+      tasksShow: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const task = await store.getTask(input.taskId);
+        if (!task) return commandFailed('not_found', `Orchestration task not found: ${input.taskId}`);
+        return commandSuccess({ task });
+      },
+      tasksUpdate: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const payload = input.payload;
+        const taskId = String(payload.taskId ?? '');
+        if (payload.taskStatus) {
+          const task = await store.updateTaskStatus(taskId, payload.taskStatus as never);
+          if (!task) return commandFailed('not_found', `Orchestration task not found: ${taskId}`);
+          return commandSuccess({ task });
+        }
+        if (payload.markNotified === true && payload.stepId && payload.attemptId) {
+          await store.markAttemptNotified(taskId, String(payload.stepId), String(payload.attemptId));
+          return commandSuccess({ notified: true });
+        }
+        if (payload.newAttempt === true && payload.stepId) {
+          const attempt = await store.addAttempt(taskId, String(payload.stepId), {
+            ...(typeof payload.dshSessionId === 'string' ? { dshSessionId: payload.dshSessionId } : {}),
+          });
+          if (!attempt) return commandFailed('not_found', 'Orchestration step not found.');
+          return commandSuccess({ attempt });
+        }
+        if (payload.stepId && payload.attemptId) {
+          const attempt = await store.updateAttempt(taskId, String(payload.stepId), String(payload.attemptId), {
+            ...(typeof payload.attemptStatus === 'string' ? { status: payload.attemptStatus as never } : {}),
+            ...(typeof payload.dshSessionId === 'string' ? { dshSessionId: payload.dshSessionId } : {}),
+            ...(typeof payload.handoff === 'string' ? { handoff: payload.handoff } : {}),
+            ...(typeof payload.error === 'string' ? { error: payload.error } : {}),
+          });
+          if (!attempt) return commandFailed('not_found', 'Orchestration attempt not found.');
+          return commandSuccess({ attempt });
+        }
+        if (payload.stepId) {
+          const step = await store.updateStep(taskId, String(payload.stepId), {
+            ...(typeof payload.stepStatus === 'string' ? { status: payload.stepStatus as never } : {}),
+            ...(typeof payload.workerSlug === 'string' ? { workerSlug: payload.workerSlug } : {}),
+          });
+          if (!step) return commandFailed('not_found', 'Orchestration step not found.');
+          return commandSuccess({ step });
+        }
+        return commandFailed('invalid_payload', 'payload must carry taskStatus, stepId(+attemptId), or markNotified.');
+      },
+      tasksPendingNotify: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createOrchestrationStore(resolveMetabotPaths(actor.homeDir));
+        const pending = await store.listUnnotifiedTerminalAttempts();
+        return commandSuccess({
+          pending: pending.map(({ task, step, attempt }) => ({
+            taskId: task.id,
+            taskTitle: task.title,
+            taskStatus: task.status,
+            stepId: step.id,
+            workerSlug: step.workerSlug,
+            attemptId: attempt.id,
+            attemptStatus: attempt.status,
+            handoff: attempt.handoff,
+            error: attempt.error,
+            endedAt: attempt.endedAt,
+          })),
+        });
+      },
     },
   };
 }
@@ -3630,6 +4328,9 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     provider: { ...defaults.provider, ...provided.provider },
     chat: { ...defaults.chat, ...provided.chat },
     conversations: { ...defaults.conversations, ...provided.conversations },
+    memory: { ...defaults.memory, ...provided.memory },
+    dream: { ...defaults.dream, ...provided.dream },
+    twin: { ...defaults.twin, ...provided.twin },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },
     trace: { ...defaults.trace, ...provided.trace },

@@ -776,6 +776,53 @@ The resulting important paths are:
 - Runtime config:
   - `/Users/tusm/.metabot/profiles/charles-zhang/.runtime/config.json`
 
+## Amendment 2026-08-20: Memory, Dream, And Twin-Bot Layout
+
+This amendment standardizes the per-profile storage used by the DSH memory,
+dream, and twin-bot system (design:
+`2026-08-20-dsh-memory-persona-system-design.md`). It activates the
+previously inert `memory/` workspace contract and adds one machine-managed
+runtime subdirectory.
+
+### Workspace layer additions (human-readable)
+
+- `memory/YYYY-MM-DD.md` — the MetaBot's daily dream diary, written by the
+  dream pipeline. Rewritten wholesale when the date is re-dreamed.
+- `memory/self-identity.md` — the MetaBot's current dream-evolved
+  self-cognition. Written only by the dream pipeline, forward-in-time only;
+  tools and humans should treat it as read-only. Lazily materialized on the
+  first dream write.
+- `MEMORY.md` remains human-curated; the memory system never overwrites it.
+
+### Runtime layer addition: `.runtime/memory/`
+
+Machine-managed JSON state for the memory system:
+
+- `memories.json` — scoped fact memories (owner/contact/conversation scopes,
+  usage classes, visibility, soft-delete status, sources)
+- `knowledge.json` — topic-anchored knowledge entries and archived revisions
+- `impressions.json` — person-anchored (GlobalMetaID) observations and
+  snapshots
+- `experience.json` — time-anchored episode/evidence ledger (evidence stores
+  hashes and references, never raw private text)
+- `dream-runs.json` — dream idempotency/retry bookkeeping and fragment cache
+- `dream-summaries.json` — structured daily dream summaries (one record per
+  date: diary text, sections, stats, session refs); the Markdown mirror lives
+  at `memory/YYYY-MM-DD.md` in the workspace layer
+- `policy.json` — per-profile memory/dream policy overrides
+- `orchestration.json` — twin delegation tasks/steps/attempts
+- `transcripts/<sessionId>.jsonl` — per-session turn mirrors used for memory
+  extraction, recall tools, and dream activity gathering
+
+Rules:
+
+- all writes are atomic (write-then-rename), matching `.runtime/state/`
+  conventions
+- all paths are resolved through the central `MetabotPaths` model
+- these files are lazily materialized on first write
+- `DREAMS.md` remains unstandardized: dream output lives in
+  `memory/YYYY-MM-DD.md` and `memory/self-identity.md` instead
+
 ## Summary
 
 MetaBot Storage Layout v2 standardizes the local filesystem model around one simple rule:

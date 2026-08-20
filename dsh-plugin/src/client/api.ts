@@ -27,6 +27,8 @@ export type BotRow = {
   dshLlmModel?: string | null
   dshLlmFallbackProvider?: string | null
   dshLlmFallbackModel?: string | null
+  botType?: 'twin' | 'worker' | null
+  ownerGlobalMetaId?: string | null
 }
 
 export type LlmDirectory = {
@@ -50,6 +52,99 @@ export type AutoReplyConfig = {
   enabled: boolean
   maxTurns: number
   cooldownMs: number
+}
+
+export type MemoryEntryRow = {
+  id: string
+  text: string
+  confidence: number
+  isExplicit: boolean
+  status: 'created' | 'stale' | 'deleted'
+  scopeKind: string
+  scopeKey: string
+  usageClass: string
+  visibility: string
+  origin: string
+  updatedAt: number
+}
+
+export type MemoryEntriesPayload = {
+  entries: MemoryEntryRow[]
+}
+
+export type MemoryPolicyPayload = {
+  effective: {
+    memoryEnabled: boolean
+    memoryImplicitUpdateEnabled: boolean
+    memoryLlmJudgeEnabled: boolean
+    memoryGuardLevel: 'strict' | 'standard' | 'relaxed'
+    memoryUserMemoriesMaxItems: number
+    memoryPromptMaxChars: number
+    dreamEnabled: boolean
+    source: string
+  }
+  override: Record<string, unknown>
+}
+
+export type KnowledgeRow = {
+  id: string
+  topic: string
+  summary: string
+  kind: 'know_how' | 'pitfall' | 'principle'
+  category?: string | null
+  status: string
+  origin: string
+  version: number
+  updatedAt: number
+}
+
+export type ImpressionSnapshotRow = {
+  subjectGlobalMetaId: string
+  summaryText: string
+  styleDescriptors: string[]
+  cooperationContext?: string | null
+  relationshipTemperature?: string | null
+  communicationGuidance?: string | null
+  uncertaintyText?: string | null
+  interactionCount: number
+  directInteractionCount: number
+  updatedAt: number
+}
+
+export type ImpressionObservationRow = {
+  id: string
+  observationText: string
+  interpretationText: string
+  dreamDate: string
+  status: string
+  createdAt: number
+}
+
+export type DreamSummaryRow = {
+  summaryDate: string
+  summaryText: string
+  sections: Record<string, string>
+  stats: Record<string, number>
+  sessionRefs: Array<{ sessionId: string; title: string }>
+}
+
+export type DreamRunRow = {
+  dreamDate: string
+  status: string
+  attemptCount: number
+  error?: string | null
+  startedAt: number
+  completedAt?: number | null
+}
+
+export type UserIdentityPayload = {
+  activeHomeDir?: string
+  identity?: {
+    name?: string
+    slug?: string
+    globalMetaId?: string
+    mvcAddress?: string
+  }
 }
 
 /** Same option sets the OAC chat settings tab offers. */
@@ -208,6 +303,43 @@ export const api = {
       cooldownMs: typeof data.cooldownMs === 'number' ? data.cooldownMs : DEFAULT_AUTO_REPLY_COOLDOWN_MS,
     }
   },
+  /** Memory panel surface (all scoped to one Bot via `from`). */
+  memoryList: async (from: string, options: Record<string, unknown> = {}): Promise<MemoryEntriesPayload> =>
+    post('memory/list', { from, ...options }),
+  memoryAdd: async (from: string, entry: Record<string, unknown>): Promise<unknown> =>
+    post('memory/add', { from, ...entry }),
+  memoryUpdate: async (from: string, entry: Record<string, unknown>): Promise<unknown> =>
+    post('memory/update', { from, ...entry }),
+  memoryDelete: async (from: string, id: string): Promise<unknown> =>
+    post('memory/delete', { from, id }),
+  memoryStats: async (from: string): Promise<unknown> => post('memory/stats', { from }),
+  memoryPolicyGet: async (from: string): Promise<unknown> => post('memory/policy/get', { from }),
+  memoryPolicySet: async (from: string, patch: Record<string, unknown>): Promise<unknown> =>
+    post('memory/policy/set', { from, patch }),
+  memoryPolicyDelete: async (from: string): Promise<unknown> => post('memory/policy/delete', { from }),
+  knowledgeList: async (from: string, options: Record<string, unknown> = {}): Promise<unknown> =>
+    post('memory/knowledge/list', { from, ...options }),
+  knowledgeUpsert: async (from: string, entry: Record<string, unknown>): Promise<unknown> =>
+    post('memory/knowledge/upsert', { from, ...entry }),
+  knowledgeUpdate: async (from: string, entry: Record<string, unknown>): Promise<unknown> =>
+    post('memory/knowledge/update', { from, ...entry }),
+  knowledgeArchive: async (from: string, id: string): Promise<unknown> =>
+    post('memory/knowledge/archive', { from, id }),
+  knowledgeDelete: async (from: string, id: string): Promise<unknown> =>
+    post('memory/knowledge/delete', { from, id }),
+  impressionsList: async (from: string): Promise<unknown> => post('memory/impressions/list', { from }),
+  impressionsShow: async (from: string, subject: string): Promise<unknown> =>
+    post('memory/impressions/show', { from, subject }),
+  dreamStatus: async (from: string): Promise<unknown> => post('dream/status', { from }),
+  dreamSummaries: async (from: string, limit = 30): Promise<unknown> =>
+    post('dream/summaries', { from, limit }),
+  dreamSelfIdentity: async (from: string): Promise<{ text?: string }> =>
+    post('dream/self-identity', { from }),
+  dreamRun: async (from: string, date: string): Promise<unknown> => post('dream/run', { from, date }),
+  twinCurrent: async (): Promise<{ twinSlug?: string | null }> => post('twin/current'),
+  userWho: async (): Promise<unknown> => post('user/who'),
+  userBind: async (slug: string): Promise<unknown> => post('user/bind', { slug }),
+  userUnbind: async (slug: string): Promise<unknown> => post('user/unbind', { slug }),
   /** A2A conversation summaries, sorted newest first (OAC /ui/conversations source). */
   conversations: async (from: string): Promise<ConversationSummary[]> => {
     const data = await post<{ conversations?: unknown }>('conversations/list', { from })

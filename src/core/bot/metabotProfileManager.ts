@@ -58,6 +58,15 @@ import {
   writeDshLlmBinding,
   type DshLlmBinding,
 } from './dshLlm';
+import {
+  botRolePatchFromInput,
+  hasBotRolePatch,
+  mergeBotRoleInfo,
+  readBotRoleInfo,
+  writeBotRoleInfo,
+  type BotRoleInfo,
+  type MetabotBotType,
+} from './botRole';
 
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
@@ -78,6 +87,8 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
   dshLlmModel?: string | null;
   dshLlmFallbackProvider?: string | null;
   dshLlmFallbackModel?: string | null;
+  botType?: MetabotBotType | null;
+  ownerGlobalMetaId?: string | null;
 }
 
 export interface CreateMetabotInput {
@@ -94,6 +105,8 @@ export interface CreateMetabotInput {
   dshLlmModel?: string | null;
   dshLlmFallbackProvider?: string | null;
   dshLlmFallbackModel?: string | null;
+  botType?: MetabotBotType | null;
+  ownerGlobalMetaId?: string | null;
 }
 
 export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
@@ -119,6 +132,8 @@ export interface UpdateMetabotInfoInput {
   dshLlmModel?: string | null;
   dshLlmFallbackProvider?: string | null;
   dshLlmFallbackModel?: string | null;
+  botType?: MetabotBotType | null;
+  ownerGlobalMetaId?: string | null;
 }
 
 export interface SyncMetabotInfoToChainOptions {
@@ -432,7 +447,7 @@ async function readProfileProviderBindings(profile: IdentityProfileRecord): Prom
 
 async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<MetabotProfileFull> {
   const paths = resolveMetabotPaths(profile.homeDir);
-  const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage, dshLlm] = await Promise.all([
+  const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage, dshLlm, botRole] = await Promise.all([
     readTextFile(paths.bioMdPath),
     readTextFile(paths.roleMdPath),
     readTextFile(paths.soulMdPath),
@@ -442,6 +457,7 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     readChatSkillPolicy(paths.chatSkillPolicyPath),
     readMetabotHomepage(paths.homepageStatePath),
     readDshLlmBinding(paths.dshLlmPath),
+    readBotRoleInfo(paths.botRoleStatePath),
   ]);
   const persona = normalizePublicMetabotPersona({ role, soul, goal });
 
@@ -460,6 +476,9 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     dshLlmModel: dshLlm.dshLlmModel ?? null,
     dshLlmFallbackProvider: dshLlm.dshLlmFallbackProvider ?? null,
     dshLlmFallbackModel: dshLlm.dshLlmFallbackModel ?? null,
+    // Unset reads as 'worker' (IDBots normalizes any non-twin bot to worker).
+    botType: botRole.botType ?? 'worker',
+    ownerGlobalMetaId: botRole.ownerGlobalMetaId ?? null,
   };
 }
 
@@ -536,6 +555,10 @@ export async function createMetabotProfile(
   const dshLlmPatch = dshLlmPatchFromInput(input);
   if (hasDshLlmPatch(dshLlmPatch)) {
     await writeDshLlmBinding(paths.dshLlmPath, dshLlmPatch);
+  }
+  const botRolePatch = botRolePatchFromInput(input);
+  if (hasBotRolePatch(botRolePatch)) {
+    await writeBotRoleInfo(paths.botRoleStatePath, botRolePatch);
   }
 
   const profile = await upsertIdentityProfile({
@@ -636,6 +659,10 @@ export async function createMetabotProfileFromIdentity(
   const dshLlmPatch = dshLlmPatchFromInput(input);
   if (hasDshLlmPatch(dshLlmPatch)) {
     await writeDshLlmBinding(paths.dshLlmPath, dshLlmPatch);
+  }
+  const botRoleCreatePatch = botRolePatchFromInput(input);
+  if (hasBotRolePatch(botRoleCreatePatch)) {
+    await writeBotRoleInfo(paths.botRoleStatePath, botRoleCreatePatch);
   }
 
   const profile = await upsertIdentityProfile({
@@ -925,6 +952,11 @@ export async function updateMetabotProfile(
   if (hasDshLlmPatch(dshLlmPatch)) {
     const currentDshLlm = await readDshLlmBinding(paths.dshLlmPath);
     await writeDshLlmBinding(paths.dshLlmPath, mergeDshLlmBinding(currentDshLlm, dshLlmPatch));
+  }
+  const botRolePatch = botRolePatchFromInput(input);
+  if (hasBotRolePatch(botRolePatch)) {
+    const currentBotRole = await readBotRoleInfo(paths.botRoleStatePath);
+    await writeBotRoleInfo(paths.botRoleStatePath, mergeBotRoleInfo(currentBotRole, botRolePatch));
   }
 
   if (writeProviderBindings) {

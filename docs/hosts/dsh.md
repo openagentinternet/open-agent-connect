@@ -38,14 +38,52 @@ On apply the plugin starts the OAC daemon and binds `metabot-*` into
 `metabot` is available it runs `metabot host bind-skills --host dsh`. Bind or CLI
 failures show in Settings → Bots. They must not crash the DSH process.
 
-After install, Settings left nav has four sibling sections:
+After install, Settings left nav gains these OAC sections:
 
 - Bots
-- Conversations
-- Services
+- Memory
+- User
 - Apps
 
-There is no nested OAC hub.
+(Services stays hidden until the service plugin matures; A2A Chat lives in
+the sidebar footer, not in Settings.) There is no nested OAC hub.
+
+## Memory, dreams, and the Twin Bot
+
+Every Bot gets the ported IDBots memory system automatically:
+
+- **Per-turn injection**: the Bot's long-term memories (scoped facts, its
+  dream-written self-identity, value boundaries, the last 7 days of dream
+  diaries, and the knowledge hot layer) are appended to the current user
+  message on every turn of `oac-*` preset sessions.
+- **Post-turn capture**: completed turns are mirrored into the Bot's
+  transcript store and scanned for durable facts (explicit `记住…` /
+  `remember this…` commands always work; implicit capture follows the memory
+  policy).
+- **Memory tools**: `memory_user_edits`, `experience_recall`,
+  `knowledge_recall`/`knowledge_upsert`, `recent_chats`, and
+  `conversation_search` are available to the Bot in those sessions.
+- **Nightly dream**: a scheduler in the plugin reviews each Bot's day
+  (00:00–06:00 local, staggered per Bot; missed nights catch up when the
+  host is running) and writes the diary (`memory/YYYY-MM-DD.md` in the Bot's
+  profile), dream memories, knowledge points, person impressions, and the
+  evolving self-identity. Requires the Bot's DSH provider/model on its
+  profile (set at creation).
+- **Settings → Memory**: per-Bot policy card, the read-only self-identity,
+  and the Knowledge/Contacts/Facts/Dream tabs (with a manual "run dream"
+  date picker).
+- **Settings → User**: the active local identity and each Bot's owner
+  binding. Bots default to `worker`; exactly one Bot per machine can be the
+  **Twin** (`metabot bot update --from <slug> --payload-file
+  {"botType":"twin"}` or `bot create --type twin`), which gains the local
+  delegation toolset (`local_workers_list`, `local_worker_delegate`,
+  `twin_task_status`, `twin_task_cancel`, `worker_session_stop`) and runs
+  Worker Bots as DSH sub-sessions.
+
+All memory data lives in files under `~/.metabot/profiles/<slug>/` (never
+SQLite): human-readable diaries in `memory/`, machine JSON under
+`.runtime/memory/`. The `metabot memory`, `metabot dream`, and `metabot
+twin` CLI groups expose the whole surface.
 
 ## First Bot
 

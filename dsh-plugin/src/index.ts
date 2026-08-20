@@ -10,10 +10,16 @@ import { BrowserEventHub } from './browser-bridge.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
-import type { HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
+import type { HostAgentLike, HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { uploadFileBytes } from './file-upload.js'
 import { emptyHealth, type HealthPayload } from './health.js'
 import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
+import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
+import { dispatchMemoryRoutes } from './memory-routes.js'
+import { applyDreamScheduler } from './dream-scheduler.js'
+import { installMemoryToolsOnAgent } from './memory-tools.js'
+import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
+import { slugFromPresetId } from './chip-logic.js'
 import { reconcilePresets } from './preset.js'
 import { dispatchSection } from './sections.js'
 import { isTrustedApiRequest } from './trust-fence.js'
@@ -44,8 +50,7 @@ async function dispatchPost(
   payload: unknown,
   browserHub: BrowserEventHub,
 ): Promise<MetabotCommandResult> {
-  if (method === 'browser/open') {
-    const uri = typeof (payload as { uri?: unknown })?.uri === 'string'
+  if (method === 'browser/open') {    const uri = typeof (payload as { uri?: unknown })?.uri === 'string'
       ? (payload as { uri: string }).uri.trim()
       : ''
     const event = browserHub.open(uri || null)
@@ -144,6 +149,10 @@ async function dispatchPost(
     if (!guidance) return { ok: false, state: 'failed', code: 'missing_guidance', message: 'guidance is required' }
     return runConversationGuidance(from, peer, guidance)
   }
+  const memory = await dispatchMemoryRoutes(method, payload, {
+    llm: ctx.llm as unknown as import('./llm-generate.js').LlmStreamLike | undefined,
+  })
+  if (memory !== undefined) return memory
   const section = await dispatchSection(method, payload)
   if (section !== undefined) return section
   return { ok: false, state: 'failed', code: 'not-found', message: `unknown oac API method "${method}"` }
@@ -302,6 +311,55 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
     }
   }
   ctx.effect(() => registerApi(ctx, () => health, browserHub), 'oac-dsh: /oac/api routes')
+
+  // Memory system: per-turn injection, post-turn extraction, and per-agent
+  // memory tools for oac-* preset sessions. Each piece is config-gated and
+  // best-effort — failures never break a DSH turn.
+  const memoryEnabled = config.memory?.enabled !== false
+  if (memoryEnabled && config.memory?.injection !== false) {
+    ctx.effect(() => {
+      applyMemoryInjection(ctx)
+      return () => undefined
+    }, 'oac-dsh: memory injection')
+  }
+  if (memoryEnabled && config.memory?.extraction !== false) {
+    ctx.effect(() => {
+      applyMemoryExtraction(ctx)
+      return () => undefined
+    }, 'oac-dsh: memory extraction')
+  }
+  if (memoryEnabled && config.memory?.tools !== false && ctx.on) {
+    ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
+      void (async () => {
+        try {
+          const agent = payload.agent
+          const preset = agent?.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
+          const slug = preset ? slugFromPresetId(preset) : undefined
+          if (!slug) return
+          liveOacAgents.set(slug, agent)
+          installMemoryToolsOnAgent(agent, slug)
+          if (config.twin?.enabled === false) return
+          const shown = await runMetabot(['bot', 'show', '--from', slug], { timeoutMs: 30_000 })
+          const profile = shown.ok
+            ? (shown.data as { profile?: { botType?: string } } | undefined)?.profile
+            : undefined
+          if (profile?.botType !== 'twin') return
+          const orchestrator = installTwinOnAgent(ctx, agent, slug, {
+            stepTimeoutMs: config.twin?.stepTimeoutMs,
+          })
+          await orchestrator.deliverPendingNotifications(slug, agent)
+        } catch {
+          // tool installation is best-effort per agent
+        }
+      })()
+    })
+  }
+
+  // Nightly dream scheduler: ticks on a timer while the DSH host is alive;
+  // the CLI's due-date arithmetic owns window/catch-up/backoff decisions.
+  if (config.dream?.enabled !== false) {
+    applyDreamScheduler(ctx, { tickMinutes: config.dream?.tickMinutes })
+  }
 }
 
 export type { HealthPayload, OacDshConfig }
@@ -326,6 +384,20 @@ export {
   slugFromPresetId,
 } from './chip-logic.js'
 export { dispatchSection } from './sections.js'
+export { dispatchMemoryRoutes } from './memory-routes.js'
+export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
+export { applyDreamScheduler, runDreamSchedulerTick } from './dream-scheduler.js'
+export {
+  buildDelegationMessage,
+  buildTwinToolDefinitions,
+  createTwinOrchestrator,
+  installTwinOnAgent,
+  liveOacAgents,
+  TWIN_OVERLAY_TEXT,
+  WORKER_DELEGATION_SYSTEM_PROMPT,
+} from './twin-tools.js'
+export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
+export { generateLlmText } from './llm-generate.js'
 export { uploadFileBytes } from './file-upload.js'
 export {
   generatePreset,

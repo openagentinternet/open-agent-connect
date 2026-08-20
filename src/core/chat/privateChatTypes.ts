@@ -74,6 +74,9 @@ export interface ChatReplyRunnerInput {
   strategy: ChatStrategy | null;
   inboundMessage?: PrivateChatMessage | null;
   operatorGuidanceText?: string | null;
+  /** Scoped memory + experience blocks for this turn (contact scope; the
+   * privacy gate already applied). Rendered as one prompt section. */
+  memoryContext?: string | null;
   // When false, the reply must not close the conversation: the prompt forbids
   // farewell output and the orchestrator strips any close marker the model
   // still emits. Used for session-opening guided turns.

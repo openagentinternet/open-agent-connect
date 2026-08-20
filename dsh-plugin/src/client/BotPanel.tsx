@@ -160,6 +160,7 @@ export function BotPanel({
                 <div className="oac-bot-main">
                   <BotAvatar name={bot.name} src={bot.avatarDataUrl} />
                   <span className="oac-bot-name">{bot.name}</span>
+                  {bot.botType === 'twin' ? <span className="oac-memory-badge oac-memory-badge-twin">Twin</span> : null}
                 </div>
                 {bot.bio ? <p className="oac-bot-bio">{bot.bio}</p> : null}
                 {bot.dshLlmProvider && bot.dshLlmModel ? (

@@ -77,6 +77,8 @@ import type {
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
 import { normalizeOptionalDshLlmId } from '../core/bot/dshLlm';
+import { normalizeBotType, normalizeOptionalGlobalMetaId } from '../core/bot/botRole';
+import { applyTwinInvariant } from '../core/bot/twinRole';
 import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
 import {
   buildPublishedService,
@@ -1052,6 +1054,16 @@ function buildMetabotUpdateInput(input: Record<string, unknown>): UpdateMetabotI
   if (hasOwnField(input, 'dshLlmFallbackModel')) {
     update.dshLlmFallbackModel = normalizeOptionalDshLlmId(input.dshLlmFallbackModel);
   }
+  if (hasOwnField(input, 'botType')) {
+    const botType = normalizeBotType(input.botType);
+    if (input.botType !== null && input.botType !== undefined && !botType) {
+      throw new Error('botType must be "twin" or "worker".');
+    }
+    update.botType = botType;
+  }
+  if (hasOwnField(input, 'ownerGlobalMetaId')) {
+    update.ownerGlobalMetaId = normalizeOptionalGlobalMetaId(input.ownerGlobalMetaId);
+  }
   return update;
 }
 
@@ -1104,6 +1116,16 @@ function buildMetabotCreateInput(input: Record<string, unknown>): CreateMetabotI
   }
   if (hasOwnField(input, 'dshLlmFallbackModel')) {
     createInput.dshLlmFallbackModel = normalizeOptionalDshLlmId(input.dshLlmFallbackModel);
+  }
+  if (hasOwnField(input, 'botType')) {
+    const botType = normalizeBotType(input.botType);
+    if (input.botType !== null && input.botType !== undefined && !botType) {
+      throw new Error('botType must be "twin" or "worker".');
+    }
+    createInput.botType = botType;
+  }
+  if (hasOwnField(input, 'ownerGlobalMetaId')) {
+    createInput.ownerGlobalMetaId = normalizeOptionalGlobalMetaId(input.ownerGlobalMetaId);
   }
   return createInput;
 }
@@ -17081,6 +17103,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
             setup: buildMetabotSetupStatus(identity),
             llmBinding,
             ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
+            ...(createInput.botType === 'twin'
+              ? {
+                twinInvariant: await applyTwinInvariant(normalizedSystemHomeDir, { preferredTwinSlug: profile.slug })
+                  .catch(() => null),
+              }
+              : {}),
           });
         } catch (error) {
           await deleteMetabotProfile(normalizedSystemHomeDir, resolvedHome.slug)
@@ -17315,6 +17343,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
           const hostPersonaProjection = shouldSyncHostPersona
             ? await syncCodexPersonaProjection(profile)
             : undefined;
+          // Role changes re-assert the one-twin invariant: a new twin demotes
+          // the previous one; demoting/clearing the twin repairs by promoting
+          // the earliest-created remaining Bot. Best-effort, never blocks.
+          const twinInvariant = update.botType !== undefined
+            ? await applyTwinInvariant(
+              normalizedSystemHomeDir,
+              update.botType === 'twin' ? { preferredTwinSlug: profile.slug } : {},
+            ).catch(() => null)
+            : null;
           return commandSuccess({
             profile,
             chainWrites,
@@ -17322,6 +17359,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             // (or nothing needed publishing), hence the constant ok flag.
             chainSync: { ok: true },
             ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
+            ...(twinInvariant ? { twinInvariant } : {}),
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -17447,10 +17485,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
       deleteProfile: async ({ slug }) => {
         try {
           const result = await deleteMetabotProfile(normalizedSystemHomeDir, slug);
+          // Deleting the twin repairs the invariant by promoting the
+          // earliest-created remaining Bot. Best-effort, never blocks.
+          const twinInvariant = await applyTwinInvariant(normalizedSystemHomeDir, {})
+            .catch(() => null);
           return commandSuccess({
             deleted: true,
             profile: result.profile,
             removedExecutorSessions: result.removedExecutorSessions,
+            ...(twinInvariant?.promoted ? { twinInvariant } : {}),
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

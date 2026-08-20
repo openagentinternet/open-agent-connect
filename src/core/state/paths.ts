@@ -36,11 +36,26 @@ export interface MetabotPaths {
   profilePublishStatePath: string;
   homepageStatePath: string;
   dshLlmPath: string;
+  botRoleStatePath: string;
   bioMdPath: string;
   soulMdPath: string;
   goalMdPath: string;
   roleMdPath: string;
   daemonLockPath: string;
+
+  // Memory / dream / twin-bot paths (storage layout v2 amendment 2026-08-20).
+  workspaceMemoryRoot: string;
+  memorySelfIdentityPath: string;
+  memoryRoot: string;
+  memoryMemoriesPath: string;
+  memoryKnowledgePath: string;
+  memoryImpressionsPath: string;
+  memoryExperiencePath: string;
+  memoryDreamRunsPath: string;
+  memoryDreamSummariesPath: string;
+  memoryPolicyPath: string;
+  memoryOrchestrationPath: string;
+  memoryTranscriptsRoot: string;
 
   // LLM runtime / binding paths.
   llmRoot: string;
@@ -146,6 +161,7 @@ function buildMetabotPaths(input: {
   roleMdPath: string;
   daemonLockPath: string;
   dshLlmPath: string;
+  botRoleStatePath: string;
   llmRoot: string;
   llmRuntimesPath: string;
   llmBindingsPath: string;
@@ -156,6 +172,7 @@ function buildMetabotPaths(input: {
   llmExecutorTranscriptsRoot: string;
 }): MetabotPaths {
   const a2aRoot = path.join(input.runtimeRoot, 'A2A');
+  const memoryRoot = path.join(input.runtimeRoot, 'memory');
 
   return {
     systemHomeDir: input.systemHomeDir,
@@ -193,11 +210,26 @@ function buildMetabotPaths(input: {
     profilePublishStatePath: input.profilePublishStatePath,
     homepageStatePath: path.join(input.stateRoot, 'homepage.json'),
     dshLlmPath: input.dshLlmPath,
+    botRoleStatePath: input.botRoleStatePath,
     bioMdPath: input.bioMdPath,
     soulMdPath: input.soulMdPath,
     goalMdPath: input.goalMdPath,
     roleMdPath: input.roleMdPath,
     daemonLockPath: input.daemonLockPath,
+
+    // Memory / dream / twin-bot paths.
+    workspaceMemoryRoot: path.join(input.profileRoot, 'memory'),
+    memorySelfIdentityPath: path.join(input.profileRoot, 'memory', 'self-identity.md'),
+    memoryRoot,
+    memoryMemoriesPath: path.join(memoryRoot, 'memories.json'),
+    memoryKnowledgePath: path.join(memoryRoot, 'knowledge.json'),
+    memoryImpressionsPath: path.join(memoryRoot, 'impressions.json'),
+    memoryExperiencePath: path.join(memoryRoot, 'experience.json'),
+    memoryDreamRunsPath: path.join(memoryRoot, 'dream-runs.json'),
+    memoryDreamSummariesPath: path.join(memoryRoot, 'dream-summaries.json'),
+    memoryPolicyPath: path.join(memoryRoot, 'policy.json'),
+    memoryOrchestrationPath: path.join(memoryRoot, 'orchestration.json'),
+    memoryTranscriptsRoot: path.join(memoryRoot, 'transcripts'),
 
     // LLM paths.
     llmRoot: input.llmRoot,
@@ -257,6 +289,7 @@ export function resolveMetabotPaths(homeDir: string): MetabotPaths {
     chatSkillResolutionPath: path.join(stateRoot, 'chat-skill-resolution.json'),
     profilePublishStatePath: path.join(stateRoot, 'profile-publish-state.json'),
     dshLlmPath: path.join(stateRoot, 'dsh-llm.json'),
+    botRoleStatePath: path.join(stateRoot, 'bot-role.json'),
     bioMdPath: path.join(profileRoot, 'BIO.md'),
     soulMdPath: path.join(profileRoot, 'SOUL.md'),
     goalMdPath: path.join(profileRoot, 'GOAL.md'),
