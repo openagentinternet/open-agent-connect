@@ -61,9 +61,16 @@ import {
 } from '../core/memory/dreamService';
 import {
   formatExperienceRecallResults,
+  formatExperienceTimelineFallback,
   formatLocalDate,
   resolveExperienceRecallQuery,
 } from '../core/memory/experiencePromptBlocks';
+import { getDayBoundsMs } from '../core/memory/dreamPrompt';
+import { createExperienceStore } from '../core/memory/experienceStore';
+import { createImpressionStore } from '../core/memory/impressionStore';
+import { createKnowledgeStore } from '../core/memory/knowledgeStore';
+import { formatKnowledgeUpsertResult } from '../core/memory/knowledgePromptBlocks';
+import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
   resolveMetabotManagerLayout,
@@ -3578,7 +3585,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       recall: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
         if (!('homeDir' in actor)) return actor;
-        const dreamStore = createDreamStore(resolveMetabotPaths(actor.homeDir));
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const dreamStore = createDreamStore(paths);
         const query = resolveExperienceRecallQuery({
           query: typeof input.payload.query === 'string' ? input.payload.query : undefined,
           date_from: typeof input.payload.dateFrom === 'string' ? input.payload.dateFrom : undefined,
@@ -3594,14 +3602,138 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           dateTo: query.dateTo,
           limit: query.limit,
         });
-        // The raw-episode timeline fallback joins in the experience-store
-        // phase; until then an empty summary list yields the empty message.
-        const text = formatExperienceRecallResults(summaries.map((summary) => ({
-          summaryDate: summary.summaryDate,
-          summaryText: summary.summaryText,
-          sessionRefs: summary.sessionRefs,
-        })), query.granularity);
+        let text: string;
+        if (summaries.length > 0) {
+          text = formatExperienceRecallResults(summaries.map((summary) => ({
+            summaryDate: summary.summaryDate,
+            summaryText: summary.summaryText,
+            sessionRefs: summary.sessionRefs,
+          })), query.granularity);
+        } else {
+          // Raw-episode timeline fallback so un-dreamed days are never blind.
+          const experienceStore = createExperienceStore(paths);
+          const fromTime = query.dateFrom ? getDayBoundsMs(query.dateFrom).startMs : undefined;
+          const toTime = query.dateTo ? getDayBoundsMs(query.dateTo).endMs : undefined;
+          const episodes = await experienceStore.listEpisodes({
+            ...(fromTime !== undefined ? { fromTime } : {}),
+            ...(toTime !== undefined ? { toTime } : {}),
+            limit: 30,
+          });
+          text = formatExperienceTimelineFallback({
+            dateFrom: query.dateFrom,
+            dateTo: query.dateTo,
+            episodes: episodes.map((episode) => ({
+              startedAt: episode.startedAt,
+              sourceChannel: episode.sourceChannel,
+              episodeType: episode.episodeType,
+              title: typeof episode.metadata.title === 'string' ? episode.metadata.title : null,
+            })),
+          });
+        }
         return commandSuccess({ text, summaries, query });
+      },
+      knowledgeList: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const entries = await store.listKnowledge({
+          ...(input.kind ? { kind: input.kind as never } : {}),
+          ...(input.category ? { category: input.category } : {}),
+          ...(input.status ? { status: input.status as never } : {}),
+          ...(input.query ? { query: input.query } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        });
+        return commandSuccess({ entries });
+      },
+      knowledgeUpsert: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const result = await store.upsertKnowledge({
+          topic: String(input.payload.topic ?? ''),
+          summary: String(input.payload.summary ?? ''),
+          ...(typeof input.payload.kind === 'string' ? { kind: input.payload.kind as never } : {}),
+          ...(typeof input.payload.category === 'string' ? { category: input.payload.category } : {}),
+          ...(Array.isArray(input.payload.tags)
+            ? { tags: input.payload.tags.filter((tag): tag is string => typeof tag === 'string') }
+            : {}),
+          ...(typeof input.payload.origin === 'string' ? { origin: input.payload.origin as never } : {}),
+          ...(Array.isArray(input.payload.sources)
+            ? { sources: input.payload.sources as never }
+            : {}),
+        });
+        return commandSuccess({
+          entry: result.entry,
+          created: result.created,
+          revised: result.revised,
+          text: formatKnowledgeUpsertResult({
+            topic: result.entry.topic,
+            created: result.created,
+            revised: result.revised,
+            version: result.entry.version,
+            kind: result.entry.kind,
+          }),
+        });
+      },
+      knowledgeUpdate: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const entry = await store.updateKnowledge({
+          id: String(input.payload.id ?? ''),
+          ...(typeof input.payload.topic === 'string' ? { topic: input.payload.topic } : {}),
+          ...(typeof input.payload.summary === 'string' ? { summary: input.payload.summary } : {}),
+          ...(typeof input.payload.kind === 'string' ? { kind: input.payload.kind as never } : {}),
+        });
+        if (!entry) return commandFailed('not_found', 'Knowledge entry not found.');
+        return commandSuccess({ entry });
+      },
+      knowledgeArchive: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const entry = await store.archiveKnowledge(String(input.payload.id ?? ''));
+        if (!entry) return commandFailed('not_found', 'Knowledge entry not found.');
+        return commandSuccess({ entry });
+      },
+      knowledgeDelete: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createKnowledgeStore(resolveMetabotPaths(actor.homeDir));
+        const deleted = await store.deleteKnowledge(String(input.payload.id ?? ''));
+        if (!deleted) return commandFailed('not_found', 'Knowledge entry not found.');
+        return commandSuccess({ deleted: true });
+      },
+      impressionsList: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const persona = await loadChatPersona(paths);
+        const observerGlobalMetaId = persona.identity?.globalMetaId ?? '';
+        if (!observerGlobalMetaId) {
+          return commandFailed('identity_missing', 'No local MetaBot identity is loaded for this profile.');
+        }
+        const store = createImpressionStore(paths);
+        const snapshots = await store.listSnapshots(observerGlobalMetaId);
+        return commandSuccess({ observerGlobalMetaId, snapshots });
+      },
+      impressionsShow: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const persona = await loadChatPersona(paths);
+        const observerGlobalMetaId = persona.identity?.globalMetaId ?? '';
+        if (!observerGlobalMetaId) {
+          return commandFailed('identity_missing', 'No local MetaBot identity is loaded for this profile.');
+        }
+        const store = createImpressionStore(paths);
+        const snapshot = await store.getSnapshot(observerGlobalMetaId, input.subject);
+        const observations = await store.listObservations({
+          observerGlobalMetaId,
+          subjectGlobalMetaId: input.subject,
+          includeSuperseded: true,
+        });
+        return commandSuccess({ observerGlobalMetaId, subject: input.subject, snapshot, observations });
       },
     },
     dream: {

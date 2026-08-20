@@ -183,5 +183,72 @@ export async function runMemoryCommand(
     return handler({ from, payload });
   }
 
+  if (subcommand === 'recall') {
+    const handler = requireMemoryHandler(context, 'recall');
+    if (isFailure(handler)) return handler;
+    const payload = await readPayload(context, args, { required: false });
+    if (isFailure(payload)) return payload;
+    return handler({ from, payload });
+  }
+
+  if (subcommand === 'knowledge') {
+    if (nested === 'list') {
+      const handler = requireMemoryHandler(context, 'knowledgeList');
+      if (isFailure(handler)) return handler;
+      const limit = readOptionalLimit(args);
+      if (limit === 'invalid') {
+        return commandFailed('invalid_flag', '--limit must be a positive integer.');
+      }
+      return handler({
+        from,
+        kind: readFlagValue(args, '--kind') ?? undefined,
+        category: readFlagValue(args, '--category') ?? undefined,
+        status: readFlagValue(args, '--status') ?? undefined,
+        query: readFlagValue(args, '--query') ?? undefined,
+        ...(limit !== undefined ? { limit } : {}),
+      });
+    }
+    if (nested === 'upsert') {
+      const handler = requireMemoryHandler(context, 'knowledgeUpsert');
+      if (isFailure(handler)) return handler;
+      const payload = await readPayload(context, args, { required: true });
+      if (isFailure(payload)) return payload;
+      if (typeof payload.topic !== 'string' || typeof payload.summary !== 'string') {
+        return commandFailed('invalid_payload', 'payload.topic and payload.summary are required.');
+      }
+      return handler({ from, payload });
+    }
+    if (nested === 'update' || nested === 'archive' || nested === 'delete') {
+      const key = nested === 'update' ? 'knowledgeUpdate' : nested === 'archive' ? 'knowledgeArchive' : 'knowledgeDelete';
+      const handler = requireMemoryHandler(context, key);
+      if (isFailure(handler)) return handler;
+      const payload = await readPayload(context, args, { required: true });
+      if (isFailure(payload)) return payload;
+      if (typeof payload.id !== 'string') {
+        return commandFailed('invalid_payload', 'payload.id is required.');
+      }
+      return handler({ from, payload });
+    }
+    return commandUnknownSubcommand(`memory knowledge ${String(nested ?? '')}`.trim());
+  }
+
+  if (subcommand === 'impressions') {
+    if (nested === 'list') {
+      const handler = requireMemoryHandler(context, 'impressionsList');
+      if (isFailure(handler)) return handler;
+      return handler({ from });
+    }
+    if (nested === 'show') {
+      const handler = requireMemoryHandler(context, 'impressionsShow');
+      if (isFailure(handler)) return handler;
+      const subject = readFlagValue(args, '--subject');
+      if (!subject) {
+        return commandMissingFlag('--subject');
+      }
+      return handler({ from, subject });
+    }
+    return commandUnknownSubcommand(`memory impressions ${String(nested ?? '')}`.trim());
+  }
+
   return commandUnknownSubcommand(`memory ${String(subcommand ?? '')}`.trim());
 }

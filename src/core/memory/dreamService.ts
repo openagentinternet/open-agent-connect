@@ -22,11 +22,15 @@ import {
   parseDreamOutput,
   validateSelfIdentity,
   type DreamDueResult,
-  type DreamImpressionUpdate,
-  type DreamKnowledgeUpdate,
+  type DreamImpressionPromptSubject,
+  type DreamKnowledgeExisting,
   type DreamOutput,
 } from './dreamPrompt';
 import { createDreamStore, hashDreamFragmentContent, type DreamRun, type DreamStore } from './dreamStore';
+import { createExperienceStore, type ExperienceStore } from './experienceStore';
+import { createImpressionStore, type ImpressionStore } from './impressionStore';
+import { applyDreamImpressionUpdates, buildDreamImpressionSubjects } from './impressionService';
+import { createKnowledgeStore, type KnowledgeStore } from './knowledgeStore';
 import { createMemoryStore, type MemoryStore } from './memoryStore';
 import path from 'node:path';
 
@@ -142,17 +146,28 @@ export interface DreamCommitResult {
 export interface DreamServiceDeps {
   dreamStore?: DreamStore;
   memoryStore?: MemoryStore;
-  /** Phase 3 hooks: applied best-effort; never fail the run. */
-  applyImpressionUpdates?: (input: {
-    date: string;
-    dreamVersion: number;
-    observerGlobalMetaId: string | null;
-    updates: DreamImpressionUpdate[];
-  }) => Promise<void>;
-  applyKnowledgeUpdates?: (input: {
-    date: string;
-    updates: DreamKnowledgeUpdate[];
-  }) => Promise<void>;
+  experienceStore?: ExperienceStore;
+  impressionStore?: ImpressionStore;
+  knowledgeStore?: KnowledgeStore;
+}
+
+interface ResolvedDreamStores {
+  dreamStore: DreamStore;
+  memoryStore: MemoryStore;
+  experienceStore: ExperienceStore;
+  impressionStore: ImpressionStore;
+  knowledgeStore: KnowledgeStore;
+}
+
+function resolveDreamStores(paths: MetabotPaths, deps: DreamServiceDeps): ResolvedDreamStores {
+  const experienceStore = deps.experienceStore ?? createExperienceStore(paths);
+  return {
+    dreamStore: deps.dreamStore ?? createDreamStore(paths),
+    memoryStore: deps.memoryStore ?? createMemoryStore(paths),
+    experienceStore,
+    impressionStore: deps.impressionStore ?? createImpressionStore(paths, { experienceStore }),
+    knowledgeStore: deps.knowledgeStore ?? createKnowledgeStore(paths),
+  };
 }
 
 /**
@@ -193,7 +208,8 @@ export async function planDream(
   input: { date: string; llm?: string | null; limits?: Partial<DreamModelLimits> },
   deps: DreamServiceDeps = {},
 ): Promise<DreamPlanResult> {
-  const dreamStore = deps.dreamStore ?? createDreamStore(paths);
+  const stores = resolveDreamStores(paths, deps);
+  const { dreamStore } = stores;
   const date = input.date;
   const llm = input.llm ?? null;
   await resetStaleRunningRun(dreamStore, date);
@@ -202,12 +218,23 @@ export async function planDream(
   const activity = await dreamStore.gatherActivity({ startMs, endMs });
   const persona = await loadDreamPersona(paths);
   const budgets = resolveDreamBudgets(input.limits);
+  const impressionSubjects = persona.globalMetaId
+    ? await buildDreamImpressionSubjects({
+      experienceStore: stores.experienceStore,
+      impressionStore: stores.impressionStore,
+      observerGlobalMetaId: persona.globalMetaId,
+      fromTime: startMs,
+      toTime: endMs,
+    })
+    : [];
+  const existingKnowledge: DreamKnowledgeExisting[] = await stores.knowledgeStore.listKnowledgeForDream(60);
 
   if (
     activity.sessions.length === 0
     && activity.taskRuns.length === 0
     && activity.groupTasks.length === 0
     && (activity.groupChats?.length ?? 0) === 0
+    && impressionSubjects.length === 0
   ) {
     // Nothing happened that day — no LLM call, no summary, still recorded.
     await dreamStore.beginRun(date, llm, DREAM_VERSION);
@@ -226,6 +253,8 @@ export async function planDream(
       date,
       activity,
       activityTokenBudget: budgets.fastPathInputTokens,
+      impressionSubjects,
+      existingKnowledge,
     });
     return { kind: 'prompt', date, mode: 'fast', ...prompt, maxOutputTokens: budgets.maxOutputTokens };
   }
@@ -239,6 +268,8 @@ export async function planDream(
       date,
       activity,
       activityTokenBudget: budgets.fastPathInputTokens,
+      impressionSubjects,
+      existingKnowledge,
     });
     return { kind: 'prompt', date, mode: 'fast', ...prompt, maxOutputTokens: budgets.maxOutputTokens };
   }
@@ -304,7 +335,8 @@ export async function synthesizeDream(
   },
   deps: DreamServiceDeps = {},
 ): Promise<Extract<DreamPlanResult, { kind: 'prompt' }>> {
-  const dreamStore = deps.dreamStore ?? createDreamStore(paths);
+  const stores = resolveDreamStores(paths, deps);
+  const dreamStore = stores.dreamStore;
   const date = input.date;
   const llm = input.llm ?? null;
   const budgets = resolveDreamBudgets(input.limits);
@@ -374,6 +406,16 @@ export async function synthesizeDream(
     activity.orderCount,
     activity.groupTasks,
   );
+  const impressionSubjects: DreamImpressionPromptSubject[] = persona.globalMetaId
+    ? await buildDreamImpressionSubjects({
+      experienceStore: stores.experienceStore,
+      impressionStore: stores.impressionStore,
+      observerGlobalMetaId: persona.globalMetaId,
+      fromTime: startMs,
+      toTime: endMs,
+    })
+    : [];
+  const existingKnowledge: DreamKnowledgeExisting[] = await stores.knowledgeStore.listKnowledgeForDream(60);
   const prompt = buildDreamPrompt({
     botName: persona.botName,
     role: persona.role,
@@ -382,6 +424,8 @@ export async function synthesizeDream(
     activity: synthesisActivity,
     activityTokenBudget: budgets.fastPathInputTokens,
     sourceMode: 'fragment_summaries',
+    impressionSubjects,
+    existingKnowledge,
   });
   return { kind: 'prompt', date, mode: 'fast', ...prompt, maxOutputTokens: budgets.maxOutputTokens };
 }
@@ -397,8 +441,9 @@ export async function commitDream(
   },
   deps: DreamServiceDeps = {},
 ): Promise<DreamCommitResult> {
-  const dreamStore = deps.dreamStore ?? createDreamStore(paths);
-  const memoryStore = deps.memoryStore ?? createMemoryStore(paths);
+  const stores = resolveDreamStores(paths, deps);
+  const dreamStore = stores.dreamStore;
+  const memoryStore = stores.memoryStore;
   const date = input.date;
   const isRepair = input.isRepair === true;
 
@@ -560,24 +605,47 @@ export async function commitDream(
     }
   }
 
-  // Phase 3 hooks — best effort, never fail the run.
-  if (deps.applyImpressionUpdates && output.impressionUpdates.length > 0) {
+  // Impression + knowledge consolidation — best effort, never fails the run.
+  if (persona.globalMetaId && output.impressionUpdates.length > 0) {
     try {
-      await deps.applyImpressionUpdates({
-        date,
+      const subjects = await buildDreamImpressionSubjects({
+        experienceStore: stores.experienceStore,
+        impressionStore: stores.impressionStore,
+        observerGlobalMetaId: persona.globalMetaId,
+        fromTime: startMs,
+        toTime: endMs,
+      });
+      await applyDreamImpressionUpdates({
+        impressionStore: stores.impressionStore,
+        observerGlobalMetaId: persona.globalMetaId,
+        dreamDate: date,
         dreamVersion: DREAM_VERSION,
-        observerGlobalMetaId: persona.globalMetaId ?? null,
+        modelId: llm,
+        subjects,
         updates: output.impressionUpdates,
       });
     } catch {
       // impression consolidation failure keeps the dream result intact
     }
   }
-  if (deps.applyKnowledgeUpdates && output.knowledgeUpdates.length > 0) {
-    try {
-      await deps.applyKnowledgeUpdates({ date, updates: output.knowledgeUpdates });
-    } catch {
-      // knowledge consolidation failure keeps the dream result intact
+  if (output.knowledgeUpdates.length > 0) {
+    for (const update of output.knowledgeUpdates) {
+      try {
+        await stores.knowledgeStore.upsertKnowledge({
+          topic: update.topic,
+          summary: update.summary,
+          kind: update.kind,
+          category: update.category ?? null,
+          origin: 'dream',
+          sourceDreamDate: date,
+          sources: [
+            ...(update.episodeIds ?? []).map((episodeId) => ({ episodeId, sourceChannel: 'experience' })),
+            ...(update.evidenceIds ?? []).map((evidenceId) => ({ evidenceId, sourceChannel: 'experience' })),
+          ],
+        });
+      } catch {
+        // A single bad entry never aborts the rest of the batch.
+      }
     }
   }
 

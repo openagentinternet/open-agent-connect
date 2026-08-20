@@ -5,8 +5,14 @@
 import { promises as fs } from 'node:fs';
 
 import type { MetabotPaths } from '../state/paths';
+import { loadChatPersona } from '../chat/chatPersonaLoader';
+import { buildCognitionPromptBlock } from './cognitionContext';
 import { createDreamStore, type DreamStore } from './dreamStore';
-import { buildExperiencePromptBlocksXml } from './experiencePromptBlocks';
+import { createExperienceStore, type ExperienceStore } from './experienceStore';
+import { buildExperiencePromptBlocksXml, RECENT_SUMMARIES_PROMPT_DAYS } from './experiencePromptBlocks';
+import { createImpressionStore, type ImpressionStore } from './impressionStore';
+import { buildKnowledgeBlock, KNOWLEDGE_PROMPT_MAX_ITEMS } from './knowledgePromptBlocks';
+import { createKnowledgeStore, type KnowledgeStore } from './knowledgeStore';
 import { extractTurnMemoryChanges } from './memoryExtractor';
 import { judgeMemoryCandidate } from './memoryJudge';
 import { buildScopedMemoryPromptBlocks } from './memoryPromptBlocks';
@@ -14,7 +20,6 @@ import { resolveMemoryScopes, type ResolvedMemoryScopes } from './memoryScopeRes
 import { createMemoryPolicyStore, type MemoryPolicyStore } from './memoryPolicy';
 import { createMemoryStore, type MemoryStore } from './memoryStore';
 import { normalizeMemoryMatchKey, scoreDeleteMatch } from './memoryText';
-import { RECENT_SUMMARIES_PROMPT_DAYS } from './experiencePromptBlocks';
 import type {
   ApplyTurnMemoryUpdatesOptions,
   ApplyTurnMemoryUpdatesResult,
@@ -55,11 +60,19 @@ async function readSelfIdentityText(store: MemoryStore): Promise<string> {
 export async function buildMemoryBlocksForRequest(
   paths: MetabotPaths,
   input: MemoryBlocksRequest,
-  stores: { memory?: MemoryStore; policy?: MemoryPolicyStore; dream?: DreamStore } = {},
+  stores: {
+    memory?: MemoryStore;
+    policy?: MemoryPolicyStore;
+    dream?: DreamStore;
+    knowledge?: KnowledgeStore;
+    experience?: ExperienceStore;
+    impressions?: ImpressionStore;
+  } = {},
 ): Promise<MemoryBlocksResult> {
   const memory = stores.memory ?? createMemoryStore(paths);
   const policyStore = stores.policy ?? createMemoryPolicyStore(paths);
   const dream = stores.dream ?? createDreamStore(paths);
+  const knowledge = stores.knowledge ?? createKnowledgeStore(paths);
   const policy = await policyStore.effectivePolicy();
   const resolution = resolveMemoryScopes({
     sourceChannel: input.channel,
@@ -127,8 +140,35 @@ export async function buildMemoryBlocksForRequest(
     valueBoundaries,
   });
 
+  // Knowledge hot layer: local (owner) sessions only, matching the IDBots
+  // cowork channel — A2A replies do not get the knowledge block.
+  let knowledgeXml = '';
+  if (resolution.ownerReadPolicy === 'all') {
+    const knowledgeEntries = await knowledge.listKnowledge({
+      status: 'active',
+      limit: KNOWLEDGE_PROMPT_MAX_ITEMS,
+      touchLastUsed: true,
+    });
+    knowledgeXml = buildKnowledgeBlock(knowledgeEntries);
+  }
+
+  // Person-anchor cognition block for direct external (A2A 1:1) conversations.
+  let cognitionXml = '';
+  if (resolution.resolutionReason === 'contact_direct' && input.peerGlobalMetaId) {
+    const experience = stores.experience ?? createExperienceStore(paths);
+    const impressions = stores.impressions ?? createImpressionStore(paths, { experienceStore: experience });
+    const persona = await loadChatPersona(paths);
+    const observerGlobalMetaId = persona.identity?.globalMetaId ?? '';
+    if (observerGlobalMetaId) {
+      cognitionXml = await buildCognitionPromptBlock(
+        { experienceStore: experience, impressionStore: impressions },
+        { observerGlobalMetaId, subjectGlobalMetaId: input.peerGlobalMetaId },
+      );
+    }
+  }
+
   return {
-    xml: [scopedXml, experienceXml].filter(Boolean).join('\n\n'),
+    xml: [scopedXml, experienceXml, knowledgeXml, cognitionXml].filter(Boolean).join('\n\n'),
     policy,
     resolution,
   };

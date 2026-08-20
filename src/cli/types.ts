@@ -162,6 +162,20 @@ export interface CliDependencies {
     chats?: (input: { from?: string; limit?: number; sortOrder?: 'asc' | 'desc' }) => Awaitable<MetabotCommandResult<unknown>>;
     search?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     recall?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    knowledgeList?: (input: {
+      from?: string;
+      kind?: string;
+      category?: string;
+      status?: string;
+      query?: string;
+      limit?: number;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    knowledgeUpsert?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    knowledgeUpdate?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    knowledgeArchive?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    knowledgeDelete?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    impressionsList?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    impressionsShow?: (input: { from?: string; subject: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   dream?: {
     due?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
