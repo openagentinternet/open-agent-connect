@@ -51,6 +51,7 @@ export interface MetabotPaths {
   memoryImpressionsPath: string;
   memoryExperiencePath: string;
   memoryDreamRunsPath: string;
+  memoryDreamSummariesPath: string;
   memoryPolicyPath: string;
   memoryOrchestrationPath: string;
   memoryTranscriptsRoot: string;
@@ -222,6 +223,7 @@ function buildMetabotPaths(input: {
     memoryImpressionsPath: path.join(memoryRoot, 'impressions.json'),
     memoryExperiencePath: path.join(memoryRoot, 'experience.json'),
     memoryDreamRunsPath: path.join(memoryRoot, 'dream-runs.json'),
+    memoryDreamSummariesPath: path.join(memoryRoot, 'dream-summaries.json'),
     memoryPolicyPath: path.join(memoryRoot, 'policy.json'),
     memoryOrchestrationPath: path.join(memoryRoot, 'orchestration.json'),
     memoryTranscriptsRoot: path.join(memoryRoot, 'transcripts'),

@@ -49,6 +49,21 @@ import {
   searchConversations,
 } from '../core/memory/transcriptStore';
 import type { MemoryCreateInput, MemoryUpdateInput } from '../core/memory/memoryTypes';
+import { createDreamStore } from '../core/memory/dreamStore';
+import {
+  commitDream,
+  dreamStatus,
+  dueDreamDates,
+  planDream,
+  runDream,
+  synthesizeDream,
+  type DreamModelLimits,
+} from '../core/memory/dreamService';
+import {
+  formatExperienceRecallResults,
+  formatLocalDate,
+  resolveExperienceRecallQuery,
+} from '../core/memory/experiencePromptBlocks';
 import {
   normalizeSystemHomeDir as normalizeSelectedSystemHomeDir,
   resolveMetabotManagerLayout,
@@ -975,6 +990,23 @@ function createCliLlmRuntimeResolver(paths: MetabotPaths) {
     bindingStore: createLlmBindingStore(paths),
     getPreferredRuntimeId: async () => readPreferredLlmRuntimeId(paths),
   });
+}
+
+function parseDreamLimits(payload: Record<string, unknown>): Partial<DreamModelLimits> | undefined {
+  const source = payload.limits && typeof payload.limits === 'object' && !Array.isArray(payload.limits)
+    ? payload.limits as Record<string, unknown>
+    : payload;
+  const contextWindow = typeof source.contextWindow === 'number' && Number.isFinite(source.contextWindow)
+    ? source.contextWindow
+    : undefined;
+  const maxOutputTokens = typeof source.maxOutputTokens === 'number' && Number.isFinite(source.maxOutputTokens)
+    ? source.maxOutputTokens
+    : undefined;
+  if (contextWindow === undefined && maxOutputTokens === undefined) return undefined;
+  return {
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+  };
 }
 
 async function isPortBindable(host: string, port: number): Promise<boolean> {
@@ -3543,6 +3575,160 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         });
         return commandSuccess({ records });
       },
+      recall: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const dreamStore = createDreamStore(resolveMetabotPaths(actor.homeDir));
+        const query = resolveExperienceRecallQuery({
+          query: typeof input.payload.query === 'string' ? input.payload.query : undefined,
+          date_from: typeof input.payload.dateFrom === 'string' ? input.payload.dateFrom : undefined,
+          date_to: typeof input.payload.dateTo === 'string' ? input.payload.dateTo : undefined,
+          granularity: typeof input.payload.granularity === 'string'
+            ? input.payload.granularity as 'day' | 'week' | 'month'
+            : undefined,
+          ...(typeof input.payload.limit === 'number' ? { limit: input.payload.limit } : {}),
+        });
+        const summaries = await dreamStore.searchDailySummaries({
+          query: query.query,
+          dateFrom: query.dateFrom,
+          dateTo: query.dateTo,
+          limit: query.limit,
+        });
+        // The raw-episode timeline fallback joins in the experience-store
+        // phase; until then an empty summary list yields the empty message.
+        const text = formatExperienceRecallResults(summaries.map((summary) => ({
+          summaryDate: summary.summaryDate,
+          summaryText: summary.summaryText,
+          sessionRefs: summary.sessionRefs,
+        })), query.granularity);
+        return commandSuccess({ text, summaries, query });
+      },
+    },
+    dream: {
+      due: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const due = await dueDreamDates(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess(due as unknown as Record<string, unknown>);
+      },
+      status: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const status = await dreamStatus(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess(status as unknown as Record<string, unknown>);
+      },
+      plan: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        if (!input.date) {
+          return commandFailed('missing_flag', '--date is required for dream plan.');
+        }
+        const limits = parseDreamLimits(input.payload);
+        const plan = await planDream(resolveMetabotPaths(actor.homeDir), {
+          date: input.date,
+          llm: typeof input.payload.llm === 'string' ? input.payload.llm : null,
+          limits,
+        });
+        return commandSuccess(plan as unknown as Record<string, unknown>);
+      },
+      synthesize: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const fragmentOutputs: Record<string, string> = {};
+        for (const [key, value] of Object.entries(input.payload.fragmentOutputs as Record<string, unknown>)) {
+          if (typeof value === 'string') fragmentOutputs[key] = value;
+        }
+        const prompt = await synthesizeDream(resolveMetabotPaths(actor.homeDir), {
+          date: String(input.payload.date),
+          llm: typeof input.payload.llm === 'string' ? input.payload.llm : null,
+          limits: parseDreamLimits(input.payload),
+          fragmentOutputs,
+        });
+        return commandSuccess(prompt as unknown as Record<string, unknown>);
+      },
+      commit: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const result = await commitDream(resolveMetabotPaths(actor.homeDir), {
+          date: String(input.payload.date),
+          outputText: String(input.payload.outputText ?? ''),
+          llm: typeof input.payload.llm === 'string' ? input.payload.llm : null,
+          isRepair: input.payload.isRepair === true,
+        });
+        if (!result.ok) {
+          return commandFailed('dream_commit_failed', result.error ?? 'dream commit failed');
+        }
+        return commandSuccess(result as unknown as Record<string, unknown>);
+      },
+      run: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const slug = path.basename(paths.profileRoot);
+        const now = new Date();
+        const date = input.date ?? formatLocalDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+        const runtimeResolver = createCliLlmRuntimeResolver(paths);
+        const executor = new LlmExecutor({
+          sessionsRoot: paths.llmExecutorSessionsRoot,
+          transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+          skillsRoot: paths.skillsRoot,
+          systemHomeDir: paths.systemHomeDir,
+          env: context.env,
+          backends: createRegistryBackendFactories(),
+        });
+        const complete = async (request: { system: string; user: string; maxOutputTokens: number }): Promise<string> => {
+          const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: slug });
+          if (!resolved.runtime) {
+            throw new Error(
+              'No LLM runtime binding available for this MetaBot. Bind one with "metabot llm" '
+              + 'or drive dreams from the DSH plugin (dream plan/commit with ctx.llm).',
+            );
+          }
+          return executor.execute({
+            runtimeId: resolved.runtime.id,
+            runtime: resolved.runtime,
+            prompt: request.user,
+            systemPrompt: request.system,
+            metaBotSlug: slug,
+            timeout: 180_000,
+            outputMode: 'final',
+          });
+        };
+        const result = await runDream(paths, {
+          date,
+          llm: typeof input.payload.llm === 'string' ? input.payload.llm : null,
+          limits: parseDreamLimits(input.payload),
+          isRepair: input.payload.isRepair === true,
+        }, complete);
+        if (result.kind === 'failed') {
+          return commandFailed('dream_run_failed', result.error ?? 'dream run failed');
+        }
+        return commandSuccess(result as unknown as Record<string, unknown>);
+      },
+      summaries: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const dreamStore = createDreamStore(resolveMetabotPaths(actor.homeDir));
+        const summaries = await dreamStore.listDailySummaries({
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+          ...(input.before ? { before: input.before } : {}),
+        });
+        return commandSuccess({ summaries });
+      },
+      selfIdentity: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const memoryStore = createMemoryStore(resolveMetabotPaths(actor.homeDir));
+        const entries = await memoryStore.list({
+          usageClass: 'self_identity',
+          status: 'created',
+          limit: 1,
+        });
+        return commandSuccess({
+          text: entries[0]?.text ?? '',
+          updatedAt: entries[0]?.updatedAt ?? null,
+        });
+      },
     },
     file: {
       upload: async (input) => requestJsonForSelectedActor(
@@ -3844,6 +4030,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     chat: { ...defaults.chat, ...provided.chat },
     conversations: { ...defaults.conversations, ...provided.conversations },
     memory: { ...defaults.memory, ...provided.memory },
+    dream: { ...defaults.dream, ...provided.dream },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },
     trace: { ...defaults.trace, ...provided.trace },

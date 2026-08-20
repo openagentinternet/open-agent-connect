@@ -5,7 +5,8 @@
 import { promises as fs } from 'node:fs';
 
 import type { MetabotPaths } from '../state/paths';
-import { buildSelfIdentityBlock, buildValueBoundariesBlock } from './experiencePromptBlocks';
+import { createDreamStore, type DreamStore } from './dreamStore';
+import { buildExperiencePromptBlocksXml } from './experiencePromptBlocks';
 import { extractTurnMemoryChanges } from './memoryExtractor';
 import { judgeMemoryCandidate } from './memoryJudge';
 import { buildScopedMemoryPromptBlocks } from './memoryPromptBlocks';
@@ -13,6 +14,7 @@ import { resolveMemoryScopes, type ResolvedMemoryScopes } from './memoryScopeRes
 import { createMemoryPolicyStore, type MemoryPolicyStore } from './memoryPolicy';
 import { createMemoryStore, type MemoryStore } from './memoryStore';
 import { normalizeMemoryMatchKey, scoreDeleteMatch } from './memoryText';
+import { RECENT_SUMMARIES_PROMPT_DAYS } from './experiencePromptBlocks';
 import type {
   ApplyTurnMemoryUpdatesOptions,
   ApplyTurnMemoryUpdatesResult,
@@ -53,10 +55,11 @@ async function readSelfIdentityText(store: MemoryStore): Promise<string> {
 export async function buildMemoryBlocksForRequest(
   paths: MetabotPaths,
   input: MemoryBlocksRequest,
-  stores: { memory?: MemoryStore; policy?: MemoryPolicyStore } = {},
+  stores: { memory?: MemoryStore; policy?: MemoryPolicyStore; dream?: DreamStore } = {},
 ): Promise<MemoryBlocksResult> {
   const memory = stores.memory ?? createMemoryStore(paths);
   const policyStore = stores.policy ?? createMemoryPolicyStore(paths);
+  const dream = stores.dream ?? createDreamStore(paths);
   const policy = await policyStore.effectivePolicy();
   const resolution = resolveMemoryScopes({
     sourceChannel: input.channel,
@@ -104,14 +107,25 @@ export async function buildMemoryBlocksForRequest(
     maxTotalChars: policy.memoryPromptMaxChars,
   });
 
+  // The experience hot layer describes the bot itself (self-identity, its
+  // self-distilled conduct rules, its recent dream diaries) — never owner
+  // facts — so it is injected for every channel, matching the IDBots A2A path.
   const selfIdentityText = await readSelfIdentityText(memory);
-  const valueBoundaries = resolution.ownerReadPolicy === 'all'
-    ? await memory.list({ usageClass: 'value_boundary', status: 'created', limit: VALUE_BOUNDARIES_MAX_ITEMS })
-    : [];
-  const experienceXml = [
-    selfIdentityText ? buildSelfIdentityBlock(selfIdentityText) : '',
-    buildValueBoundariesBlock(valueBoundaries),
-  ].filter(Boolean).join('\n\n');
+  const valueBoundaries = await memory.list({
+    usageClass: 'value_boundary',
+    status: 'created',
+    limit: VALUE_BOUNDARIES_MAX_ITEMS,
+  });
+  const recentSummaries = await dream.listDailySummaries({ limit: RECENT_SUMMARIES_PROMPT_DAYS });
+  const experienceXml = buildExperiencePromptBlocksXml({
+    identityText: selfIdentityText || null,
+    summaries: recentSummaries.map((summary) => ({
+      summaryDate: summary.summaryDate,
+      summaryText: summary.summaryText,
+      sessionRefs: summary.sessionRefs,
+    })),
+    valueBoundaries,
+  });
 
   return {
     xml: [scopedXml, experienceXml].filter(Boolean).join('\n\n'),

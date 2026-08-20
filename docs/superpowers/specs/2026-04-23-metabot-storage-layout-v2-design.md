@@ -806,6 +806,9 @@ Machine-managed JSON state for the memory system:
 - `experience.json` — time-anchored episode/evidence ledger (evidence stores
   hashes and references, never raw private text)
 - `dream-runs.json` — dream idempotency/retry bookkeeping and fragment cache
+- `dream-summaries.json` — structured daily dream summaries (one record per
+  date: diary text, sections, stats, session refs); the Markdown mirror lives
+  at `memory/YYYY-MM-DD.md` in the workspace layer
 - `policy.json` — per-profile memory/dream policy overrides
 - `orchestration.json` — twin delegation tasks/steps/attempts
 - `transcripts/<sessionId>.jsonl` — per-session turn mirrors used for memory
