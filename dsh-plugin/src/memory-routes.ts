@@ -48,7 +48,7 @@ function withFrom(args: string[], payload: unknown): string[] | MetabotCommandRe
 }
 
 /** dream plan → LLM → (fragments) → commit, with one identity-expansion retry. */
-async function runDreamWithLlm(
+export async function runDreamWithLlm(
   payload: unknown,
   run: RunFn,
   llm: LlmStreamLike,
@@ -139,7 +139,7 @@ async function runDreamWithLlm(
     })
     return runMetabotWithPayloadFile(
       ['dream', 'commit', '--from', from],
-      { date, outputText, llm: llmTag },
+      { date, outputText, llm: llmTag, ...(body.isRepair === true ? { isRepair: true } : {}) },
       '--payload-file',
       [],
       run,

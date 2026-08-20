@@ -16,6 +16,7 @@ import { emptyHealth, type HealthPayload } from './health.js'
 import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
 import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
+import { applyDreamScheduler } from './dream-scheduler.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { slugFromPresetId } from './chip-logic.js'
 import { reconcilePresets } from './preset.js'
@@ -339,6 +340,12 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       }
     })
   }
+
+  // Nightly dream scheduler: ticks on a timer while the DSH host is alive;
+  // the CLI's due-date arithmetic owns window/catch-up/backoff decisions.
+  if (config.dream?.enabled !== false) {
+    applyDreamScheduler(ctx, { tickMinutes: config.dream?.tickMinutes })
+  }
 }
 
 export type { HealthPayload, OacDshConfig }
@@ -365,6 +372,7 @@ export {
 export { dispatchSection } from './sections.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
+export { applyDreamScheduler, runDreamSchedulerTick } from './dream-scheduler.js'
 export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
 export { generateLlmText } from './llm-generate.js'
 export { uploadFileBytes } from './file-upload.js'
