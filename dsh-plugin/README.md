@@ -8,7 +8,7 @@ dsh plugin --profile web add open-agent-connect-dsh
 
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
-After a DSH restart, Settings left nav gains four sibling sections: **Bots**, **Conversations**, **Services**, and **Apps**. New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
+After a DSH restart, Settings left nav gains three sibling sections: **Bots**, **Conversations**, and **Apps** (the **Services** section is hidden until the service plugin matures). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
 
 ## Developer mount
 

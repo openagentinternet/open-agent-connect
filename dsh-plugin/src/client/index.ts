@@ -1,5 +1,5 @@
 /**
- * Browser half of open-agent-connect-dsh: locale dictionaries, four Settings
+ * Browser half of open-agent-connect-dsh: locale dictionaries, the Settings
  * sections, and the new-session preset chip. Does not shadow Settings →
  * Agent presets.
  */
@@ -140,22 +140,8 @@ export function apply(ctx: ClientContext): void {
         api.conversationGuidance(from, peer, guidance),
     }),
   }, A2AConversation))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'oac-services',
-    order: 22,
-    label: () => tSvc('nav'),
-    locale: SVC_NS,
-    inject: () => ({
-      bots: () => api.list(),
-      owned: (from: string) => api.servicesOwned(from),
-      orders: (from: string, serviceId: string) => api.servicesOrders(from, serviceId),
-      publish: (from: string, payload: Record<string, unknown>) => api.servicesPublish(from, payload),
-      revoke: (from: string, serviceId: string) => api.servicesRevoke(from, serviceId),
-      call: (from: string, request: Record<string, unknown>, confirm?: boolean) =>
-        api.servicesCall(from, request, confirm),
-    }),
-  }, ServicesPanel))
+  // Services settings section hidden until the service plugin matures; the
+  // ServicesPanel, its locale dictionary, and the host routes stay in tree.
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'oac-apps',
