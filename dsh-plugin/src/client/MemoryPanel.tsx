@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Button,
-  IconChevronDownSmallOutline16,
-  IconChevronRightOutline16,
+  IconChevronDownOutline14,
+  IconChevronRightOutline14,
   IconPlusOutline16,
   IconRefreshOutline16,
   Modal,
@@ -56,6 +56,19 @@ const USAGE_CLASSES = [
   'work_review',
   'value_boundary',
 ] as const
+
+const USAGE_CLASS_LABEL_KEY: Record<string, MemoryLocaleKey> = {
+  profile_fact: 'usageProfileFact',
+  preference: 'usagePreference',
+  operational_preference: 'usageOperationalPreference',
+  work_review: 'usageWorkReview',
+  value_boundary: 'usageValueBoundary',
+}
+
+function usageClassLabel(t: Translate, usageClass: string): string {
+  const key = USAGE_CLASS_LABEL_KEY[usageClass]
+  return key ? t(key) : usageClass
+}
 
 function yesterdayLocal(): string {
   const now = new Date()
@@ -241,7 +254,7 @@ function PolicyCard({ from, t, memoryPolicyGet, memoryPolicySet, memoryPolicyDel
         </div>
         <button type="button" className="oac-icon-btn" onClick={() => setOpen((value) => !value)}
           aria-label={open ? t('policyHide') : t('policyShow')}>
-          {open ? <IconChevronDownSmallOutline16 /> : <IconChevronRightOutline16 />}
+          {open ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
         </button>
       </div>
       {open && policy ? (
@@ -546,8 +559,10 @@ function FactsTab({ from, t, injected }: {
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
   const [addText, setAddText] = useState('')
+  const [addUsageClass, setAddUsageClass] = useState<string>('profile_fact')
   const [editing, setEditing] = useState<MemoryEntryRow | null>(null)
   const [editText, setEditText] = useState('')
+  const [editUsageClass, setEditUsageClass] = useState<string>('profile_fact')
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
@@ -591,11 +606,15 @@ function FactsTab({ from, t, injected }: {
           <p className="oac-note">{entry.text}</p>
           <div className="oac-row">
             <span className="oac-memory-badge">
-              {entry.usageClass} · {entry.origin}{entry.status !== 'created' ? ` · ${entry.status}` : ''}
+              {usageClassLabel(t, entry.usageClass)} · {entry.origin}{entry.status !== 'created' ? ` · ${entry.status}` : ''}
             </span>
             {entry.usageClass !== 'self_identity' ? (
               <div className="oac-actions">
-                <Button type="button" onClick={() => { setEditing(entry); setEditText(entry.text) }}>
+                <Button type="button" onClick={() => {
+                  setEditing(entry)
+                  setEditText(entry.text)
+                  setEditUsageClass(USAGE_CLASS_LABEL_KEY[entry.usageClass] ? entry.usageClass : 'profile_fact')
+                }}>
                   {t('factsEdit')}
                 </Button>
                 <Button type="button" onClick={() => {
@@ -619,7 +638,7 @@ function FactsTab({ from, t, injected }: {
           <>
             <Button type="button" variant="outline" onClick={() => setAdding(false)}>{t('factsCancel')}</Button>
             <Button type="button" variant="primary" disabled={!addText.trim()} onClick={() => {
-              void injected.memoryAdd(from, { text: addText.trim(), isExplicit: true }).then(() => {
+              void injected.memoryAdd(from, { text: addText.trim(), isExplicit: true, usageClass: addUsageClass }).then(() => {
                 setAdding(false)
                 setAddText('')
                 setTick((v) => v + 1)
@@ -634,6 +653,15 @@ function FactsTab({ from, t, injected }: {
             <textarea className="oac-input" value={addText}
               onChange={(event) => setAddText(event.target.value)} />
           </label>
+          <label className="oac-field">
+            <span className="oac-field-label">{t('factsFieldClass')}</span>
+            <select className="oac-input oac-input-select" value={addUsageClass}
+              onChange={(event) => setAddUsageClass(event.target.value)}>
+              {USAGE_CLASSES.map((value) => (
+                <option key={value} value={value}>{usageClassLabel(t, value)}</option>
+              ))}
+            </select>
+          </label>
         </div>
       </Modal>
       <Modal
@@ -646,7 +674,7 @@ function FactsTab({ from, t, injected }: {
             <Button type="button" variant="outline" onClick={() => setEditing(null)}>{t('factsCancel')}</Button>
             <Button type="button" variant="primary" disabled={!editText.trim()} onClick={() => {
               if (!editing) return
-              void injected.memoryUpdate(from, { id: editing.id, text: editText.trim() }).then(() => {
+              void injected.memoryUpdate(from, { id: editing.id, text: editText.trim(), usageClass: editUsageClass }).then(() => {
                 setEditing(null)
                 setTick((v) => v + 1)
               })
@@ -659,6 +687,15 @@ function FactsTab({ from, t, injected }: {
             <span className="oac-field-label">{t('factsFieldText')}</span>
             <textarea className="oac-input" value={editText}
               onChange={(event) => setEditText(event.target.value)} />
+          </label>
+          <label className="oac-field">
+            <span className="oac-field-label">{t('factsFieldClass')}</span>
+            <select className="oac-input oac-input-select" value={editUsageClass}
+              onChange={(event) => setEditUsageClass(event.target.value)}>
+              {USAGE_CLASSES.map((value) => (
+                <option key={value} value={value}>{usageClassLabel(t, value)}</option>
+              ))}
+            </select>
           </label>
         </div>
       </Modal>

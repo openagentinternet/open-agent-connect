@@ -90,9 +90,12 @@ export function BotPanel({
   }
 
   if (editing) {
+    const otherTwin = (bots ?? []).find((row) => row.botType === 'twin' && row.slug !== editing.slug)
     return (
       <BotEditor
         bot={editing}
+        hasOtherTwin={Boolean(otherTwin)}
+        otherTwinName={otherTwin?.name ?? ''}
         directory={directory}
         t={t}
         busy={busy}

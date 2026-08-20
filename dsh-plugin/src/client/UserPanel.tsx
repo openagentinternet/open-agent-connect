@@ -1,15 +1,18 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Button, IconRefreshOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { BotRow, UserIdentityPayload } from './api.ts'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { OwnerIdentityRow, OwnerWhoPayload, OwnerWritePayload } from './api.ts'
 import type { UserLocaleKey } from './locale-user.ts'
 
 type Translate = (key: UserLocaleKey, vars?: Record<string, string | number>) => string
+type View = 'loading' | 'empty' | 'create' | 'import' | 'backup' | 'profile'
 
 export interface UserPanelInjected {
-  who: () => Promise<UserIdentityPayload>
-  bots: () => Promise<BotRow[]>
-  bind: (slug: string) => Promise<unknown>
-  unbind: (slug: string) => Promise<unknown>
+  who: () => Promise<OwnerWhoPayload>
+  create: (name: string) => Promise<OwnerWritePayload>
+  importIdentity: (input: { name: string; mnemonic: string; path?: string }) => Promise<OwnerWritePayload>
+  rename: (name: string) => Promise<OwnerWhoPayload>
+  reveal: () => Promise<{ mnemonic: string }>
+  deleteIdentity: () => Promise<{ deleted?: boolean }>
 }
 
 function CopyValue({ value, t }: { value: string; t: Translate }): ReactNode {
@@ -31,41 +34,138 @@ function CopyValue({ value, t }: { value: string; t: Translate }): ReactNode {
   )
 }
 
-export function UserPanel({ who, bots, bind, unbind, t }: UserPanelInjected & { close: () => void; t: Translate }): ReactNode {
-  const [identity, setIdentity] = useState<UserIdentityPayload['identity'] | null>(null)
-  const [rows, setRows] = useState<BotRow[] | null>(null)
+function MnemonicGrid({ mnemonic }: { mnemonic: string }): ReactNode {
+  const words = mnemonic.split(/\s+/).filter(Boolean)
+  return (
+    <ol className="oac-mnemonic-grid">
+      {words.map((word, index) => (
+        <li className="oac-mnemonic-word" key={`${index}-${word}`}>
+          <span className="oac-mnemonic-index">{index + 1}</span>
+          <span>{word}</span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+export function UserPanel(injected: UserPanelInjected & { close: () => void; t: Translate }): ReactNode {
+  const { t } = injected
+  const [view, setView] = useState<View>('loading')
+  const [identity, setIdentity] = useState<OwnerIdentityRow | null>(null)
+  const [mnemonic, setMnemonic] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [busySlug, setBusySlug] = useState<string | null>(null)
-  const [note, setNote] = useState<'saved' | 'failed' | null>(null)
-  const [tick, setTick] = useState(0)
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    let current = true
-    void Promise.all([who(), bots()]).then(
-      ([whoResult, botRows]) => {
-        if (!current) return
-        setIdentity(whoResult.identity ?? null)
-        setRows(botRows)
-        setError(null)
+  // Create / import form state.
+  const [nameDraft, setNameDraft] = useState('')
+  const [mnemonicDraft, setMnemonicDraft] = useState('')
+  const [pathDraft, setPathDraft] = useState('')
+
+  // Profile view state.
+  const [nameEdit, setNameEdit] = useState('')
+  const [nameNote, setNameNote] = useState<'saving' | 'saved' | 'error' | null>(null)
+  const [revealOpen, setRevealOpen] = useState(false)
+  const [revealMnemonic, setRevealMnemonic] = useState('')
+  const [logoutOpen, setLogoutOpen] = useState(false)
+
+  const load = useCallback(() => {
+    setView('loading')
+    setError(null)
+    void injected.who().then(
+      (result) => {
+        if (result.identity) {
+          setIdentity(result.identity)
+          setNameEdit(result.identity.name)
+          setView('profile')
+        } else {
+          setIdentity(null)
+          setView('empty')
+        }
       },
-      (cause: unknown) => { if (current) setError(cause instanceof Error ? cause.message : String(cause)) },
+      (cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : String(cause))
+        setView('empty')
+      },
     )
-    return () => { current = false }
-  }, [who, bots, tick])
+  }, [injected])
 
-  const act = async (slug: string, action: 'bind' | 'unbind'): Promise<void> => {
-    setBusySlug(slug)
-    setNote(null)
-    try {
-      if (action === 'bind') await bind(slug)
-      else await unbind(slug)
-      setNote('saved')
-      setTick((value) => value + 1)
-    } catch {
-      setNote('failed')
-    } finally {
-      setBusySlug(null)
+  useEffect(() => { load() }, [load])
+
+  const applyWrite = (result: OwnerWritePayload): void => {
+    setIdentity(result.identity)
+    setNameEdit(result.identity.name)
+    setMnemonic(result.mnemonic ?? '')
+    setView('backup')
+  }
+
+  const onCreate = (): void => {
+    setBusy(true)
+    setError(null)
+    void injected.create(nameDraft.trim()).then(
+      (result) => { applyWrite(result); setBusy(false) },
+      (cause: unknown) => { setError(cause instanceof Error ? cause.message : String(cause)); setBusy(false) },
+    )
+  }
+
+  const onImport = (): void => {
+    setBusy(true)
+    setError(null)
+    const input = {
+      name: nameDraft.trim(),
+      mnemonic: mnemonicDraft.trim(),
+      ...(pathDraft.trim() ? { path: pathDraft.trim() } : {}),
     }
+    void injected.importIdentity(input).then(
+      (result) => { applyWrite(result); setBusy(false) },
+      (cause: unknown) => {
+        const message = cause instanceof Error ? cause.message : String(cause)
+        setError(/mnemonic/i.test(message) ? t('invalidMnemonic') : message)
+        setBusy(false)
+      },
+    )
+  }
+
+  const finishBackup = (): void => {
+    setMnemonic('')
+    setView('profile')
+  }
+
+  const saveName = (): void => {
+    const next = nameEdit.trim()
+    if (!next || !identity || next === identity.name) return
+    setNameNote('saving')
+    void injected.rename(next).then(
+      (result) => {
+        if (result.identity) setIdentity(result.identity)
+        setNameNote('saved')
+      },
+      () => setNameNote('error'),
+    )
+  }
+
+  const openReveal = (): void => {
+    setRevealOpen(true)
+    setRevealMnemonic('')
+    void injected.reveal().then(
+      (result) => setRevealMnemonic(result.mnemonic ?? ''),
+      () => setRevealMnemonic(''),
+    )
+  }
+
+  const confirmLogout = (): void => {
+    setBusy(true)
+    void injected.deleteIdentity().then(
+      () => {
+        setBusy(false)
+        setLogoutOpen(false)
+        setIdentity(null)
+        setNameDraft('')
+        setMnemonicDraft('')
+        setPathDraft('')
+        setView('empty')
+      },
+      (cause: unknown) => { setError(cause instanceof Error ? cause.message : String(cause)); setBusy(false); setLogoutOpen(false) },
+    )
   }
 
   return (
@@ -73,28 +173,124 @@ export function UserPanel({ who, bots, bind, unbind, t }: UserPanelInjected & { 
       <div className="oac-row">
         <h2>{t('title')}</h2>
         <div className="oac-actions">
-          <Button type="button" icon={<IconRefreshOutline16 />} onClick={() => setTick((v) => v + 1)}>
-            {t('refresh')}
-          </Button>
+          <Button type="button" onClick={load}>{t('refresh')}</Button>
         </div>
       </div>
       {error ? <div className="oac-error">{error}</div> : null}
-      <section className="oac-section-card">
-        <div className="oac-section-text">
-          <span className="oac-section-title">{t('identityTitle')}</span>
-          <span className="oac-section-hint">{t('identityHint')}</span>
-        </div>
-        {identity === null && !error ? <div className="oac-muted">{t('loading')}</div> : null}
-        {identity ? (
+
+      {view === 'loading' ? <div className="oac-muted">{t('loading')}</div> : null}
+
+      {view === 'empty' ? (
+        <section className="oac-section-card oac-user-empty">
+          <span className="oac-section-title">{t('emptyTitle')}</span>
+          <p className="oac-hint">{t('emptyHint')}</p>
+          <div className="oac-form-actions">
+            <Button type="button" variant="primary" onClick={() => { setError(null); setView('create') }}>
+              {t('emptyCreate')}
+            </Button>
+            <Button type="button" onClick={() => { setError(null); setView('import') }}>
+              {t('emptyImport')}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {view === 'create' ? (
+        <section className="oac-section-card">
+          <span className="oac-section-title">{t('createTitle')}</span>
+          <p className="oac-hint">{t('createHint')}</p>
+          <div className="oac-form">
+            <label className="oac-field">
+              <span className="oac-field-label">{t('nameField')}</span>
+              <Input value={nameDraft} placeholder={t('namePlaceholder')} onChange={(event) => setNameDraft(event.target.value)} />
+            </label>
+            <div className="oac-form-actions">
+              <Button type="button" variant="outline" disabled={busy} onClick={() => setView('empty')}>{t('cancel')}</Button>
+              <Button type="button" variant="primary" disabled={busy} onClick={onCreate}>
+                {busy ? t('working') : t('createSubmit')}
+              </Button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {view === 'import' ? (
+        <section className="oac-section-card">
+          <span className="oac-section-title">{t('importTitle')}</span>
+          <p className="oac-hint">{t('importHint')}</p>
+          <div className="oac-form">
+            <label className="oac-field">
+              <span className="oac-field-label">{t('nameField')}</span>
+              <Input value={nameDraft} placeholder={t('namePlaceholder')} onChange={(event) => setNameDraft(event.target.value)} />
+            </label>
+            <label className="oac-field">
+              <span className="oac-field-label">{t('mnemonicField')}</span>
+              <textarea
+                className="oac-input"
+                rows={3}
+                value={mnemonicDraft}
+                placeholder={t('mnemonicPlaceholder')}
+                onChange={(event) => setMnemonicDraft(event.target.value)}
+              />
+            </label>
+            <label className="oac-field">
+              <span className="oac-field-label">{t('pathField')}</span>
+              <Input value={pathDraft} placeholder={t('pathHint')} onChange={(event) => setPathDraft(event.target.value)} />
+            </label>
+            <div className="oac-form-actions">
+              <Button type="button" variant="outline" disabled={busy} onClick={() => setView('empty')}>{t('cancel')}</Button>
+              <Button type="button" variant="primary" disabled={busy || !mnemonicDraft.trim()} onClick={onImport}>
+                {busy ? t('working') : t('importSubmit')}
+              </Button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {view === 'backup' ? (
+        <section className="oac-section-card">
+          <span className="oac-section-title">{t('backupTitle')}</span>
+          <p className="oac-note warn">{t('backupWarning')}</p>
+          <MnemonicGrid mnemonic={mnemonic} />
+          <div className="oac-form-actions">
+            <CopyValue value={mnemonic} t={t} />
+            <Button type="button" variant="primary" onClick={finishBackup}>{t('backupConfirm')}</Button>
+          </div>
+        </section>
+      ) : null}
+
+      {view === 'profile' && identity ? (
+        <section className="oac-section-card">
+          <div className="oac-section-head">
+            <div className="oac-section-text">
+              <span className="oac-section-title">{t('profileTitle')}</span>
+              <span className="oac-section-hint">{t('profileHint')}</span>
+            </div>
+            <div className="oac-actions">
+              <Button type="button" onClick={openReveal}>{t('backupBtn')}</Button>
+              <Button type="button" variant="outline" className="oac-danger-outline" onClick={() => setLogoutOpen(true)}>
+                {t('logoutBtn')}
+              </Button>
+            </div>
+          </div>
+          <div className="oac-form">
+            <label className="oac-field">
+              <span className="oac-field-label">{t('nameField')}</span>
+              <Input value={nameEdit} onChange={(event) => { setNameEdit(event.target.value); setNameNote(null) }} />
+            </label>
+            <div className="oac-form-actions">
+              <Button
+                type="button"
+                variant="primary"
+                disabled={nameNote === 'saving' || !nameEdit.trim() || nameEdit.trim() === identity.name}
+                onClick={saveName}
+              >
+                {nameNote === 'saving' ? t('savingName') : t('saveName')}
+              </Button>
+              {nameNote === 'saved' ? <span className="oac-note success">{t('nameSaved')}</span> : null}
+            </div>
+          </div>
           <div className="oac-info">
-            <div className="oac-info-row">
-              <span className="oac-info-label">{t('fieldName')}</span>
-              <span className="oac-info-value">{identity.name ?? '-'}</span>
-            </div>
-            <div className="oac-info-row">
-              <span className="oac-info-label">{t('fieldSlug')}</span>
-              <span className="oac-info-value">{identity.slug ?? '-'}</span>
-            </div>
             {identity.globalMetaId ? (
               <div className="oac-info-row">
                 <span className="oac-info-label">{t('fieldGlobalMetaId')}</span>
@@ -107,42 +303,54 @@ export function UserPanel({ who, bots, bind, unbind, t }: UserPanelInjected & { 
                 <CopyValue value={identity.mvcAddress} t={t} />
               </div>
             ) : null}
+            {identity.metaId ? (
+              <div className="oac-info-row">
+                <span className="oac-info-label">{t('fieldMetaId')}</span>
+                <CopyValue value={identity.metaId} t={t} />
+              </div>
+            ) : null}
+            {identity.createdAt ? (
+              <div className="oac-info-row">
+                <span className="oac-info-label">{t('fieldCreatedAt')}</span>
+                <span className="oac-info-value">{identity.createdAt}</span>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        {identity === null && error ? <div className="oac-muted">{t('identityEmpty')}</div> : null}
-      </section>
-      <section className="oac-section-card">
-        <div className="oac-section-text">
-          <span className="oac-section-title">{t('bindingsTitle')}</span>
-          <span className="oac-section-hint">{t('bindingsHint')}</span>
-        </div>
-        {note === 'saved' ? <span className="oac-note success">{t('bindingSaved')}</span> : null}
-        {note === 'failed' ? <span className="oac-note error">{t('bindingFailed')}</span> : null}
-        {(rows ?? []).map((bot) => (
-          <div className="oac-user-binding-row" key={bot.slug}>
-            <span className={`oac-memory-badge${bot.botType === 'twin' ? ' oac-memory-badge-twin' : ''}`}>
-              {bot.botType === 'twin' ? t('bindingTwin') : t('bindingWorker')}
-            </span>
-            <span className="oac-user-binding-name">{bot.name}</span>
-            <span className="oac-hint oac-user-binding-owner">
-              {bot.ownerGlobalMetaId ?? t('bindingNone')}
-            </span>
-            {bot.ownerGlobalMetaId ? (
-              <Button type="button" disabled={busySlug === bot.slug} onClick={() => void act(bot.slug, 'unbind')}>
-                {busySlug === bot.slug ? t('bindingSaving') : t('bindingUnbind')}
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                disabled={busySlug === bot.slug || !identity?.globalMetaId}
-                onClick={() => void act(bot.slug, 'bind')}
-              >
-                {busySlug === bot.slug ? t('bindingSaving') : t('bindingBind')}
-              </Button>
-            )}
-          </div>
-        ))}
-      </section>
+        </section>
+      ) : null}
+
+      <Modal
+        open={revealOpen}
+        onClose={() => setRevealOpen(false)}
+        title={t('revealTitle')}
+        className="oac-dialog"
+        footer={(
+          <>
+            <CopyValue value={revealMnemonic} t={t} />
+            <Button type="button" variant="primary" onClick={() => setRevealOpen(false)}>{t('cancel')}</Button>
+          </>
+        )}
+      >
+        <p className="oac-note warn">{t('revealWarning')}</p>
+        {revealMnemonic ? <MnemonicGrid mnemonic={revealMnemonic} /> : <div className="oac-muted">{t('loading')}</div>}
+      </Modal>
+
+      <Modal
+        open={logoutOpen}
+        onClose={() => setLogoutOpen(false)}
+        title={t('logoutTitle')}
+        className="oac-dialog-delete"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setLogoutOpen(false)}>{t('cancel')}</Button>
+            <Button type="button" variant="outline" className="oac-danger-outline" disabled={busy} onClick={confirmLogout}>
+              {busy ? t('working') : t('logoutConfirm')}
+            </Button>
+          </>
+        )}
+      >
+        <p className="oac-dialog-body">{t('logoutWarning')}</p>
+      </Modal>
     </div>
   )
 }

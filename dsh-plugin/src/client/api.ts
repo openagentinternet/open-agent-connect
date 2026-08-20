@@ -137,14 +137,26 @@ export type DreamRunRow = {
   completedAt?: number | null
 }
 
-export type UserIdentityPayload = {
-  activeHomeDir?: string
-  identity?: {
-    name?: string
-    slug?: string
-    globalMetaId?: string
-    mvcAddress?: string
-  }
+export type OwnerIdentityRow = {
+  name: string
+  path?: string
+  publicKey?: string
+  chatPublicKey?: string
+  mvcAddress?: string
+  metaId?: string
+  globalMetaId?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type OwnerWhoPayload = {
+  identity: OwnerIdentityRow | null
+}
+
+export type OwnerWritePayload = {
+  identity: OwnerIdentityRow
+  /** Returned once on create/import so the UI can drive the backup view. */
+  mnemonic?: string
 }
 
 /** Same option sets the OAC chat settings tab offers. */
@@ -312,12 +324,13 @@ export const api = {
     post('memory/update', { from, ...entry }),
   memoryDelete: async (from: string, id: string): Promise<unknown> =>
     post('memory/delete', { from, id }),
-  memoryStats: async (from: string): Promise<unknown> => post('memory/stats', { from }),
-  memoryPolicyGet: async (from: string): Promise<unknown> => post('memory/policy/get', { from }),
+  memoryStats: async (from: string): Promise<{ stats?: { total: number; created: number; stale: number } }> =>
+    post('memory/stats', { from }),
+  memoryPolicyGet: async (from: string): Promise<MemoryPolicyPayload> => post('memory/policy/get', { from }),
   memoryPolicySet: async (from: string, patch: Record<string, unknown>): Promise<unknown> =>
     post('memory/policy/set', { from, patch }),
   memoryPolicyDelete: async (from: string): Promise<unknown> => post('memory/policy/delete', { from }),
-  knowledgeList: async (from: string, options: Record<string, unknown> = {}): Promise<unknown> =>
+  knowledgeList: async (from: string, options: Record<string, unknown> = {}): Promise<{ entries?: KnowledgeRow[] }> =>
     post('memory/knowledge/list', { from, ...options }),
   knowledgeUpsert: async (from: string, entry: Record<string, unknown>): Promise<unknown> =>
     post('memory/knowledge/upsert', { from, ...entry }),
@@ -327,19 +340,27 @@ export const api = {
     post('memory/knowledge/archive', { from, id }),
   knowledgeDelete: async (from: string, id: string): Promise<unknown> =>
     post('memory/knowledge/delete', { from, id }),
-  impressionsList: async (from: string): Promise<unknown> => post('memory/impressions/list', { from }),
-  impressionsShow: async (from: string, subject: string): Promise<unknown> =>
+  impressionsList: async (from: string): Promise<{ snapshots?: ImpressionSnapshotRow[] }> =>
+    post('memory/impressions/list', { from }),
+  impressionsShow: async (
+    from: string,
+    subject: string,
+  ): Promise<{ snapshot?: ImpressionSnapshotRow | null; observations?: ImpressionObservationRow[] }> =>
     post('memory/impressions/show', { from, subject }),
-  dreamStatus: async (from: string): Promise<unknown> => post('dream/status', { from }),
-  dreamSummaries: async (from: string, limit = 30): Promise<unknown> =>
+  dreamStatus: async (from: string): Promise<{ runs?: DreamRunRow[] }> => post('dream/status', { from }),
+  dreamSummaries: async (from: string, limit = 30): Promise<{ summaries?: DreamSummaryRow[] }> =>
     post('dream/summaries', { from, limit }),
   dreamSelfIdentity: async (from: string): Promise<{ text?: string }> =>
     post('dream/self-identity', { from }),
   dreamRun: async (from: string, date: string): Promise<unknown> => post('dream/run', { from, date }),
   twinCurrent: async (): Promise<{ twinSlug?: string | null }> => post('twin/current'),
-  userWho: async (): Promise<unknown> => post('user/who'),
-  userBind: async (slug: string): Promise<unknown> => post('user/bind', { slug }),
-  userUnbind: async (slug: string): Promise<unknown> => post('user/unbind', { slug }),
+  userWho: async (): Promise<OwnerWhoPayload> => post('user/who'),
+  userCreate: async (name: string): Promise<OwnerWritePayload> => post('user/create', { name }),
+  userImport: async (input: { name: string; mnemonic: string; path?: string }): Promise<OwnerWritePayload> =>
+    post('user/import', input),
+  userRename: async (name: string): Promise<OwnerWhoPayload> => post('user/rename', { name }),
+  userReveal: async (): Promise<{ mnemonic: string }> => post('user/reveal'),
+  userDelete: async (): Promise<{ deleted?: boolean }> => post('user/delete'),
   /** A2A conversation summaries, sorted newest first (OAC /ui/conversations source). */
   conversations: async (from: string): Promise<ConversationSummary[]> => {
     const data = await post<{ conversations?: unknown }>('conversations/list', { from })

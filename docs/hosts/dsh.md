@@ -71,14 +71,25 @@ Every Bot gets the ported IDBots memory system automatically:
   profile (set at creation).
 - **Settings → Memory**: per-Bot policy card, the read-only self-identity,
   and the Knowledge/Contacts/Facts/Dream tabs (with a manual "run dream"
-  date picker).
-- **Settings → User**: the active local identity and each Bot's owner
-  binding. Bots default to `worker`; exactly one Bot per machine can be the
-  **Twin** (`metabot bot update --from <slug> --payload-file
-  {"botType":"twin"}` or `bot create --type twin`), which gains the local
-  delegation toolset (`local_workers_list`, `local_worker_delegate`,
-  `twin_task_status`, `twin_task_cancel`, `worker_session_stop`) and runs
-  Worker Bots as DSH sub-sessions.
+  date picker). Facts can be added/edited by hand with a usage-class
+  (personal fact / preference / operational preference / work review / value
+  boundary).
+- **Settings → User**: the local human **owner** identity — the person who
+  talks to the Bots, not a Bot. Create a new identity (fresh mnemonic) or
+  import one from a BIP39 mnemonic, back up the mnemonic, and rename it. It
+  is stored once per machine at `~/.metabot/owner/identity.json` (mode 0600)
+  and is separate from every Bot profile. Bots can bind it as their owner
+  (`metabot bot bind-owner` defaults to this identity).
+- **Twin / Worker**: Bots default to `worker`; exactly one Bot per machine is
+  the **Twin**. Toggle it on the Bot edit page (Basic tab, "Twin Bot"
+  switch); the one-twin invariant is enforced automatically (promoting a Bot
+  demotes the previous twin, demoting re-promotes the earliest remaining Bot).
+  The twin is badged in the Bots tile list. Equivalent CLI: `metabot bot
+  update --from <slug> --payload-file {"botType":"twin"}` or `bot create
+  --type twin`. The Twin gains the local delegation toolset
+  (`local_workers_list`, `local_worker_delegate`, `twin_task_status`,
+  `twin_task_cancel`, `worker_session_stop`) and runs Worker Bots as DSH
+  sub-sessions.
 
 All memory data lives in files under `~/.metabot/profiles/<slug>/` (never
 SQLite): human-readable diaries in `memory/`, machine JSON under

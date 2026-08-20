@@ -115,6 +115,9 @@ The hidden machine-managed layer inside the profile:
     metabot-post-buzz/
     ...
 
+  owner/
+    identity.json
+
   profiles/
     <slug>/
       AGENTS.md
@@ -191,6 +194,29 @@ Rules:
 - skills are global, not profile-private, in v2
 - host integration may later use symlinks or adapters to read this directory
 - do not store persona state or private memory here
+
+#### `owner/`
+
+Purpose:
+
+- hold the single machine-wide human "owner" identity: the person who owns and
+  talks to the Bots. This is a MetaID wallet that is NOT a Bot profile. Bots
+  reference it through their `ownerGlobalMetaId` binding.
+
+Allowed contents:
+
+- `identity.json` — the owner identity record (name, derivation path, public
+  key, chat public key, MVC address, metaId, globalMetaId, and the mnemonic).
+
+Rules:
+
+- there is at most one owner identity per machine; `identity.json` is written
+  with mode `0600` because it contains the mnemonic.
+- the mnemonic is secret material and must never be copied into `manager/`,
+  `skills/`, or any profile workspace/runtime file.
+- public, non-secret owner fields (name, globalMetaId, MVC address) may be
+  surfaced in UI and CLI output; the mnemonic is only returned by an explicit
+  reveal/backup action.
 
 ## Profile Workspace Layer
 

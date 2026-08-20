@@ -643,9 +643,20 @@ Tool names, parameters, and limits are ported 1:1 from
 
 ### 7.6 `src/plugins/user.ts` (host) + routes
 
-- `/oac/api/user/who` → `metabot identity who`; `/oac/api/user/bindings` →
-  `bot list` projected to `{slug, name, botType, ownerGlobalMetaId}`;
-  `/oac/api/user/bind` / `unbind` → `bot bind-owner`.
+The User panel manages the local human **owner** identity (the person who
+talks to the Bots), not a Bot. It is backed by the OAC `metabot user` CLI
+group and the `src/core/owner/ownerIdentity.ts` store
+(`~/.metabot/owner/identity.json`, mode 0600, holds the mnemonic; see the
+storage-layout spec `owner/` section):
+
+- `/oac/api/user/who` → `metabot user who` (public fields only).
+- `/oac/api/user/create` → `metabot user create --name` (fresh mnemonic).
+- `/oac/api/user/import` → `metabot user import --mnemonic [--name] [--path]`.
+- `/oac/api/user/rename` → `metabot user rename --name`.
+- `/oac/api/user/reveal` → `metabot user reveal` (backup view).
+- `/oac/api/user/delete` → `metabot user delete` (logout).
+- `bot bind-owner` (no `--owner`) now defaults the owner to this identity's
+  GlobalMetaID, falling back to the active Bot identity.
 
 ### 7.7 Client half
 
@@ -663,13 +674,18 @@ Tool names, parameters, and limits are ported 1:1 from
   - **Dream** — diary entries per date with expandable sections/stats,
     failed runs with retry, date-picker "Run dream now"
     (`dream run --date`).
-- **`oac-user` Settings section** (`order: 22`): local identity card (name,
-  avatar, MetaID/GlobalMetaID, MVC address — read-only fields with copy
-  buttons; name edit via existing identity flow if available, else
-  read-only), and a Bot binding list (each Bot: type badge, bound owner,
-  bind/unbind buttons).
-- **Bots panel additions**: twin badge on the twin card, owner-binding
-  status line.
+- **`oac-user` Settings section** (`order: 22`): the local human owner
+  identity, IDBots-style state machine — empty (create / import), create
+  (name), import (name + mnemonic + optional derivation path), backup
+  (numbered mnemonic grid + copy + "I've backed it up"), and profile
+  (editable name, read-only GlobalMetaID/MVC/MetaID/created with copy,
+  "Backup mnemonic" reveal modal, "Log out" delete with confirmation). No
+  Bot binding list.
+- **Bots panel additions**: a filled "Twin" badge on the twin tile, and a
+  "Twin Bot" switch on the Bot edit page Basic tab. The one-twin invariant
+  (promote demotes the previous twin; demote re-promotes the earliest
+  remaining Bot) is enforced by the daemon, so the switch never leaves zero
+  twins.
 - New locale namespaces `settings.oac.memory`, `settings.oac.user` (en + zh,
   parity-tested); CSS added to `styles.ts` consuming only `--dsw-alias-*`
   tokens, copying the same DSH surface vocabulary as the existing panels

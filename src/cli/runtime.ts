@@ -30,6 +30,7 @@ import {
 } from '../core/identity/identityProfiles';
 import { resolveIdentityCreateProfileHome } from '../core/identity/profileWorkspace';
 import { resolveProfileNameMatch } from '../core/identity/profileNameResolution';
+import { readOwnerIdentity } from '../core/owner/ownerIdentity';
 import { renderResolvedSkillContract } from '../core/skills/skillResolver';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
 import {
@@ -4150,18 +4151,23 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           ? input.ownerGlobalMetaId.trim()
           : '';
         if (!input.unbind && !ownerGlobalMetaId) {
-          // Default owner: the active local identity's GlobalMetaID.
+          // Default owner: the local human owner identity first, then the
+          // active Bot identity as a fallback.
           const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-          const [profiles, activeHomeDir] = await Promise.all([
-            listIdentityProfiles(systemHomeDir).catch(() => []),
-            readActiveMetabotHome(systemHomeDir),
-          ]);
-          const active = profiles.find((profile) => profile.homeDir === activeHomeDir);
-          ownerGlobalMetaId = active?.globalMetaId?.trim() ?? '';
+          const ownerIdentity = await readOwnerIdentity(systemHomeDir).catch(() => null);
+          ownerGlobalMetaId = ownerIdentity?.globalMetaId?.trim() ?? '';
+          if (!ownerGlobalMetaId) {
+            const [profiles, activeHomeDir] = await Promise.all([
+              listIdentityProfiles(systemHomeDir).catch(() => []),
+              readActiveMetabotHome(systemHomeDir),
+            ]);
+            const active = profiles.find((profile) => profile.homeDir === activeHomeDir);
+            ownerGlobalMetaId = active?.globalMetaId?.trim() ?? '';
+          }
           if (!ownerGlobalMetaId) {
             return commandFailed(
               'identity_unavailable',
-              'No active local identity with a GlobalMetaID. Pass --owner <globalMetaId> explicitly.',
+              'No local owner identity or active Bot with a GlobalMetaID. Pass --owner <globalMetaId> explicitly.',
             );
           }
         }
