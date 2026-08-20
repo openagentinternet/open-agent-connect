@@ -102,6 +102,11 @@ export function BotBrowserSidebar({
   const onDragStart = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0) return
     event.preventDefault()
+    // Capture the pointer on the handle so moves keep flowing even when the
+    // cursor crosses onto the iframe (which would otherwise swallow them and
+    // stall the drag). The iframe also drops pointer-events via CSS while the
+    // body carries data-oac-browser-dragging.
+    event.currentTarget.setPointerCapture(event.pointerId)
     dragRef.current = { startX: event.clientX, startWidth: state.width }
     document.body.setAttribute('data-oac-browser-dragging', '')
     setDragging(true)
