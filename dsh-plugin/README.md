@@ -182,7 +182,7 @@ page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 
 ## Layout
 
-- Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`
+- Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`, `approval`
 - Client: `dsh.client` bundle, no second `cordis.patch.yml` row
 - Capability core remains the OAC CLI. This package does not wrap every `metabot` verb as a Cordis tool.
 - `lib/` is gitignored — build artifacts are never committed. After every merge to `main`, run `npm run build` (see the parallel-branch loop above).

@@ -43,8 +43,10 @@ export const name = 'oac-dsh'
 
 /**
  * `agentPresets` and `llm` are required. `webServer` + `webRuntime` are the trust seam.
+ * `approval` is required so publish can call the DSH native confirmation dialog
+ * (Cordis throws `cannot get property "approval" without inject` otherwise).
  */
-export const inject = ['webServer', 'webRuntime', 'agentPresets', 'llm']
+export const inject = ['webServer', 'webRuntime', 'agentPresets', 'llm', 'approval']
 
 export const API_PREFIX = '/oac/api'
 

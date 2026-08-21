@@ -96,13 +96,26 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-export function approvalOf(ctx: HostContext): HostApproval | undefined {
-  if (ctx.approval && typeof ctx.approval.request === 'function') return ctx.approval
-  const found = ctx.get?.('approval')
-  if (found && typeof found === 'object' && typeof (found as HostApproval).request === 'function') {
-    return found as HostApproval
+function asApproval(value: unknown): HostApproval | undefined {
+  if (value && typeof value === 'object' && typeof (value as HostApproval).request === 'function') {
+    return value as HostApproval
   }
   return undefined
+}
+
+/** Resolve DSH native approval. Cordis throws if this fiber did not inject `approval`. */
+export function approvalOf(ctx: HostContext): HostApproval | undefined {
+  try {
+    const direct = asApproval(ctx.approval)
+    if (direct) return direct
+  } catch {
+    // Property access without inject throws; fall through.
+  }
+  try {
+    return asApproval(ctx.get?.('approval'))
+  } catch {
+    return undefined
+  }
 }
 
 async function actorHomeDir(slug: string): Promise<string> {
@@ -555,10 +568,14 @@ function liveAgentBySessionId(
   if (!sessionId) return undefined
   const rememberedAgent = remembered.get(sessionId)
   if (rememberedAgent) return rememberedAgent
-  const registry = ctx.agents ?? (ctx.get?.('agents') as HostContext['agents'])
-  const found = registry?.get?.(sessionId)
-  if (found) return found
-  return registry?.list?.().find((agent) => agentSessionId(agent) === sessionId)
+  try {
+    const registry = ctx.agents ?? (ctx.get?.('agents') as HostContext['agents'])
+    const found = registry?.get?.(sessionId)
+    if (found) return found
+    return registry?.list?.().find((agent) => agentSessionId(agent) === sessionId)
+  } catch {
+    return undefined
+  }
 }
 
 function oacSlugOf(ctx: HostContext, agent: HostAgentLike): string | undefined {
