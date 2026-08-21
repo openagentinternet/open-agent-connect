@@ -43,7 +43,7 @@ export const BROWSER_STRATEGY_TEXT = [
   '- Use bot_browser_open_uri with a metaapp://, metaid://, pin://, or preview-metaapp:// URI to open a known page. Use bot_browser_tabs to list/close/switch tabs.',
   '- Use bot_browser_read_page when the user asks what the page says or whether you can see the app on the right. For MetaApps, follow source_dir / APP.md; never claim you cannot see the current URI if <active_tab> lists one.',
   '- Discover apps with search_metaapps. Remix with bot_browser_fork_current_app — never Bash `metabot metaapp source` (the DSH sandbox cannot write ~/.metabot/cache). After a fork, READ the files with your file tools before editing (the host Edit tool requires a Read first). Preview with bot_browser_preview_local, publish with bot_browser_publish_app only after preview and explicit user confirmation (the host shows a native approval dialog).',
-  '- When you mention an app, person, or pin in your reply, ALWAYS write a markdown link whose destination is the https://openagentinternet.org/browser/... URL from the tool output (DSH strips metaapp:// hrefs). Reuse search_metaapps bullet lines verbatim. NEVER shorten a globalMetaId or pinId. Never mention an app or author as plain text.',
+  '- When you mention an app, person, or pin in your reply, ALWAYS write a markdown link: [title](metaapp://<pinId>), [name](metaid://<globalMetaId>), or [pin](pin://<pinId>). Reuse search_metaapps bullet lines verbatim. NEVER use https:// web2 URLs. NEVER shorten a globalMetaId or pinId. Never mention an app or author as plain text.',
   '- Never use Playwright or external browser automation.',
 ].join('\n')
 
@@ -428,7 +428,7 @@ export function buildBrowserToolDefinitions(input: {
       async execute(args) {
         const limit = Math.min(20, Math.max(1, Math.floor(numberArg(args, 'limit') ?? 8)))
         const mode = textArg(args, 'mode') || 'search'
-        const nextStepHint = 'Pick the single best match for the user\'s intent and open it with bot_browser_open_uri. When listing apps in your reply, REUSE the bullet lines above verbatim (they are already https://openagentinternet.org/browser/... markdown links — DSH strips metaapp:// hrefs). NEVER mention an app or an author as plain text. Offer 2–3 alternatives if the best one might not be what they meant; if nothing fits, say so instead of opening a random app.'
+        const nextStepHint = 'Pick the single best match for the user\'s intent and open it with bot_browser_open_uri. When listing apps in your reply, REUSE the bullet lines above verbatim: app titles and author names MUST remain markdown links ([title](metaapp://<pinId>), [name](metaid://<id>)) — never mention an app or an author as plain text, and never rewrite them as https:// URLs. Offer 2–3 alternatives if the best one might not be what they meant; if nothing fits, say so instead of opening a random app.'
 
         if (mode === 'forks') {
           const pinId = parseMetaAppPinIdFromUri(textArg(args, 'pinId'))

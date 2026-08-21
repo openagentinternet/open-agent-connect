@@ -125,8 +125,8 @@ test('search_metaapps formats CLI hits as markdown links', async () => {
     agent.ctx.tools.register(definition)
   }
   const text = await tools.find((tool) => tool.name === 'search_metaapps').execute({ query: '牌局' }, {})
-  assert.match(text, new RegExp(`\\[半糖牌局\\]\\(https://openagentinternet\\.org/browser/metaapp/${PIN}\\)`))
-  assert.match(text, /\[bob\]\(https:\/\/openagentinternet\.org\/browser\/metaid\/idq1bob\)/)
+  assert.match(text, new RegExp(`\\[半糖牌局\\]\\(metaapp://${PIN}\\)`))
+  assert.match(text, /\[bob\]\(metaid:\/\/idq1bob\)/)
 })
 
 test('bot_browser_publish_app asks DSH approval and skips CLI when cancelled', async () => {

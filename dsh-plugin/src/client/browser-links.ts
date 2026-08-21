@@ -1,24 +1,18 @@
 /**
  * Make Agent Internet names and URIs clickable in DSH chat.
  *
- * DSH MarkdownText only keeps http(s)/mailto hrefs, so metaapp:// links are
- * stripped to plain text. Search results therefore use
- * https://openagentinternet.org/browser/... destinations. This module:
- * 1. intercepts those clicks (and leftover custom-scheme hrefs) to open the
- *    right-sidebar Bot Browser instead of a new tab,
- * 2. wraps bare metaapp:// / metaid:// / pin:// / pinid:// / pin ids in the
- *    conversation DOM,
- * 3. wraps exact titles from the latest search catalog when the model restates
- *    them as plain text.
+ * DSH MarkdownText strips non-http(s) hrefs, so [title](metaapp://pin) renders
+ * as plain "title". This module restores native Agent Internet links in the DOM
+ * (metaapp://, metaid://, pin://, pinid://) and intercepts clicks to open the
+ * right-sidebar Bot Browser. It never writes https:// web2 hrefs.
  */
 import {
   normalizeBotBrowserUri,
-  publicBrowserHref,
   type BrowserCatalogEntry,
 } from '../browser-protocol.ts'
 
 const SKIP_WRAP = new Set(['A', 'BUTTON', 'CODE', 'INPUT', 'PRE', 'SCRIPT', 'STYLE', 'TEXTAREA'])
-const BARE_URI_RE = /(?:metaid|metaapp|map|metafile|pin|pinid|preview-metaapp):\/\/[A-Za-z0-9][A-Za-z0-9._~%/@-]*|(?:https:\/\/openagentinternet\.org\/browser\/[^\s)<>]+)|\b[0-9a-f]{64}i0\b/gi
+const BARE_URI_RE = /(?:metaid|metaapp|map|metafile|pin|pinid|preview-metaapp):\/\/[A-Za-z0-9][A-Za-z0-9._~%/@-]*|\b[0-9a-f]{64}i0\b/gi
 
 let catalog: BrowserCatalogEntry[] = []
 
@@ -47,18 +41,21 @@ function isSkippable(el: Element): boolean {
   return false
 }
 
-function wrapRange(textNode: Text, start: number, end: number, href: string, uri: string): Text | null {
+function setAgentHref(anchor: HTMLAnchorElement, uri: string): void {
+  anchor.setAttribute('href', uri)
+  anchor.dataset.oacAgentLink = uri
+  anchor.classList.add('oac-agent-link')
+}
+
+function wrapRange(textNode: Text, start: number, end: number, uri: string, label: string): Text | null {
   const value = textNode.nodeValue ?? ''
   const parent = textNode.parentNode
   if (!parent || start < 0 || end > value.length || start >= end) return null
   const after = value.slice(end)
-  const mid = value.slice(start, end)
   textNode.nodeValue = value.slice(0, start)
   const anchor = document.createElement('a')
-  anchor.href = href
-  anchor.dataset.oacAgentLink = uri
-  anchor.className = 'oac-agent-link'
-  anchor.textContent = mid
+  setAgentHref(anchor, uri)
+  anchor.textContent = label
   parent.insertBefore(anchor, textNode.nextSibling)
   if (!after) return null
   const tail = document.createTextNode(after)
@@ -74,7 +71,7 @@ function wrapBareUris(textNode: Text): boolean {
   const raw = match[0]
   const uri = normalizeBotBrowserUri(raw)
   if (!uri) return false
-  wrapRange(textNode, match.index, match.index + raw.length, publicBrowserHref(uri), uri)
+  wrapRange(textNode, match.index, match.index + raw.length, uri, raw)
   return true
 }
 
@@ -84,13 +81,25 @@ function wrapCatalogTitle(textNode: Text): boolean {
   for (const entry of catalog) {
     const index = value.indexOf(entry.title)
     if (index < 0) continue
-    wrapRange(textNode, index, index + entry.title.length, entry.href, entry.uri)
+    wrapRange(textNode, index, index + entry.title.length, entry.uri, entry.title)
     return true
   }
   return false
 }
 
+function rewriteExistingAnchors(root: ParentNode): void {
+  for (const node of Array.from(root.querySelectorAll('a[href]'))) {
+    const anchor = node as HTMLAnchorElement
+    if (anchor.closest('.oac-browser-shell')) continue
+    const uri = normalizeBotBrowserUri(anchor.getAttribute('href') || '')
+    if (!uri) continue
+    if (anchor.getAttribute('href') === uri && anchor.dataset.oacAgentLink === uri) continue
+    setAgentHref(anchor, uri)
+  }
+}
+
 function enhanceTree(root: Node): void {
+  if (root instanceof Element || root instanceof Document) rewriteExistingAnchors(root)
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   const nodes: Text[] = []
   let current = walker.nextNode()
@@ -108,7 +117,7 @@ function enhanceTree(root: Node): void {
 }
 
 function hrefOfAnchor(anchor: HTMLAnchorElement): string {
-  return (anchor.getAttribute('href') || anchor.href || '').trim()
+  return (anchor.getAttribute('href') || '').trim()
 }
 
 /** Capture chat / tool-card clicks so Agent Internet hrefs open the Bot Browser. */
