@@ -22,8 +22,8 @@ import { resolveMetasoInfrastructureEndpoints } from '../network/metasoInfrastru
 
 const DEFAULT_SOCKET_ENDPOINTS = [resolveMetasoInfrastructureEndpoints().socket];
 
-const DEFAULT_RECONNECT_DELAY_MS = 5_000;
-const MAX_RECONNECT_DELAY_MS = 60_000;
+const DEFAULT_RECONNECT_DELAY_MS = 15_000;
+const MAX_RECONNECT_DELAY_MS = 300_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_SEEN_PIN_IDS = 5_000;
 
