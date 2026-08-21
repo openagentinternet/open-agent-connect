@@ -9,11 +9,14 @@ const plugin = await import('../lib/index.js')
 const PIN = `${'d'.repeat(64)}i0`
 
 function fakeHub(snapshot, onCommand) {
+  const opens = []
   return {
+    opens,
     getSnapshot: () => snapshot,
     clientCount: () => (snapshot.open ? 1 : 0),
     open(uri, source = 'host') {
-      return { uri, localUiUrl: `http://127.0.0.1:1/browser`, source }
+      opens.push({ uri, source })
+      return { uri, localUiUrl: uri ? `http://127.0.0.1:1/browser` : 'http://127.0.0.1:1/browser', source }
     },
     requestCommand: async (command) => onCommand(command),
   }
@@ -251,6 +254,84 @@ test('installBrowserToolsOnAgent is idempotent on the same agent', () => {
   plugin.installBrowserToolsOnAgent(agent, 'alice', hub, cache)
   plugin.installBrowserToolsOnAgent(agent, 'alice', hub, cache)
   assert.equal(tools.filter((tool) => tool.name === 'bot_browser_open_uri').length, 1)
+})
+
+test('bot_browser_open_uri with no uri opens the Bot Browser homepage', async () => {
+  const { agent, tools } = fakeAgent()
+  const hub = fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false }))
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => ({ ok: true, state: 'success', data: {} }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const open = tools.find((tool) => tool.name === 'bot_browser_open_uri')
+  const text = await open.execute({}, {})
+  assert.match(text, /homepage/)
+  assert.deepEqual(hub.opens, [{ uri: null, source: 'host' }])
+  const homeAlias = await open.execute({ uri: 'home' }, {})
+  assert.match(homeAlias, /homepage/)
+  assert.equal(plugin.isBrowserHomeUri(''), true)
+  assert.equal(plugin.isBrowserHomeUri('home'), true)
+  assert.equal(plugin.isBrowserHomeUri(`metaapp://${PIN}`), false)
+})
+
+test('bot_browser_fork_current_app asks the live iframe when snapshot tabs are empty', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'oac-dsh-fork-'))
+  const previousHome = process.env.HOME
+  const previousLocal = process.env.OAC_DSH_NO_LOCAL_READ
+  process.env.HOME = home
+  process.env.OAC_DSH_NO_LOCAL_READ = '1'
+  const commands = []
+  const cli = []
+  try {
+    const { agent, tools } = fakeAgent()
+    const hub = fakeHub({ open: true, tabs: [] }, async (command) => {
+      commands.push(command)
+      return {
+        requestId: 'x',
+        ok: true,
+        action: 'get-tab-info',
+        info: {
+          id: 1,
+          uri: `metaapp://${PIN}`,
+          title: '番茄钟',
+          isActive: true,
+          current: null,
+        },
+      }
+    })
+    for (const definition of plugin.buildBrowserToolDefinitions({
+      slug: 'alice',
+      hub,
+      cache: plugin.createBrowserSourceCache(),
+      hostAgent: agent,
+      run: async (args) => {
+        cli.push(args)
+        return {
+          ok: true,
+          state: 'success',
+          data: { dir: join(home, 'fork'), indexFile: 'index.html', title: '番茄钟' },
+        }
+      },
+    })) {
+      agent.ctx.tools.register(definition)
+    }
+    const text = await tools.find((tool) => tool.name === 'bot_browser_fork_current_app').execute({}, {})
+    assert.deepEqual(commands[0], { action: 'get-tab-info' })
+    assert.equal(cli[0][1], 'source')
+    assert.equal(cli[0][cli[0].indexOf('--pin-id') + 1], PIN)
+    assert.match(text, /READ the files/)
+    assert.match(text, /Do not use Bash/)
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME
+    else process.env.HOME = previousHome
+    if (previousLocal === undefined) delete process.env.OAC_DSH_NO_LOCAL_READ
+    else process.env.OAC_DSH_NO_LOCAL_READ = previousLocal
+  }
 })
 
 test('approvalOf and bindBrowserToolInstall survive Cordis uninjected approval access', () => {

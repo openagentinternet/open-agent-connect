@@ -259,6 +259,11 @@ export class BrowserEventHub {
       localUiUrl: uri ? `${baseUrl}${resolveBrowserPath(uri)}` : `${baseUrl}/browser`,
       source,
     }
+    this.snapshot = {
+      ...this.snapshot,
+      open: true,
+      ...(uri ? {} : { tabs: [], rendererType: null }),
+    }
     this.emitFrame({ event: 'browser-open', data: event })
     for (const listener of this.listeners.values()) {
       try {

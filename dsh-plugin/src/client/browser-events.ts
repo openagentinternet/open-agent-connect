@@ -12,7 +12,7 @@
 import { api } from './api.ts'
 import type { BotBrowserIframeBridge } from './browser-iframe.ts'
 import type { BotBrowserStore } from './browser-store.ts'
-import type { BrowserCommandRequest, BrowserOpenSource } from '../browser-protocol.ts'
+import { decideBrowserOpenAction, type BrowserCommandRequest, type BrowserOpenSource } from '../browser-protocol.ts'
 
 /** Subscribe to host-half browser-open + command events; returns an unsubscribe. */
 export function startBrowserEventSource(
@@ -36,21 +36,25 @@ export function startBrowserEventSource(
       if (!url) return
       const origin: BrowserOpenSource = data.source === 'daemon' ? 'daemon' : 'host'
       const snap = store.getSnapshot()
-      if (origin === 'daemon') {
+      const decision = decideBrowserOpenAction({
+        source: origin,
+        uri: typeof data.uri === 'string' ? data.uri : null,
+        localUiUrl: url,
+        hasIframeUrl: Boolean(snap.url),
+      })
+      if (decision.kind === 'ensure-open') {
         if (snap.url) store.ensureOpen()
         else store.open(url)
         iframe.reportNow()
         return
       }
-      if (snap.open && snap.url) {
-        const uri = typeof data.uri === 'string' ? data.uri.trim() : ''
-        if (uri) {
-          void iframe.runCommand({ requestId: 'ui-open', action: 'open-tab', uri })
-        }
+      if (decision.kind === 'open-tab') {
+        void iframe.runCommand({ requestId: 'ui-open', action: 'open-tab', uri: decision.uri })
         store.ensureOpen()
         return
       }
-      store.open(url)
+      store.open(decision.url)
+      iframe.reportNow()
     } catch {
       // a malformed frame is not fatal; keep listening
     }

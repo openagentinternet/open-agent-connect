@@ -52,6 +52,7 @@ test('formatMetaAppCandidates keeps titles and authors as markdown links', () =>
 test('buildBrowserContextXml describes a closed sidebar without inventing a page', () => {
   const xml = plugin.buildBrowserContextXml({ snapshot: { open: false, tabs: [] } })
   assert.match(xml, /Bot Browser sidebar is not open/)
+  assert.match(xml, /bot_browser_open_uri with no uri/)
   assert.match(xml, /<active_tab \/>/)
   assert.doesNotMatch(xml, /metaapp:\/\//)
 })
@@ -74,4 +75,56 @@ test('buildBrowserContextXml lists the live active tab and source_dir', () => {
   assert.match(xml, /<active_tab title="半糖牌局" renderer="html-iframe" source_dir="\/tmp\/cache\/app"/)
   assert.match(xml, new RegExp(`metaapp://${pin}`))
   assert.match(xml, /bot_browser_read_page/)
+})
+
+test('decideBrowserOpenAction loads home and does not invent an open-tab', () => {
+  assert.deepEqual(
+    plugin.decideBrowserOpenAction({
+      source: 'host',
+      uri: null,
+      localUiUrl: 'http://127.0.0.1:1/browser',
+      hasIframeUrl: false,
+    }),
+    { kind: 'load', url: 'http://127.0.0.1:1/browser' },
+  )
+  assert.deepEqual(
+    plugin.decideBrowserOpenAction({
+      source: 'host',
+      uri: null,
+      localUiUrl: 'http://127.0.0.1:1/browser',
+      hasIframeUrl: true,
+    }),
+    { kind: 'load', url: 'http://127.0.0.1:1/browser' },
+  )
+  assert.deepEqual(
+    plugin.decideBrowserOpenAction({
+      source: 'host',
+      uri: `metaapp://${'c'.repeat(64)}i0`,
+      localUiUrl: 'http://127.0.0.1:1/browser/metaapp/x',
+      hasIframeUrl: true,
+    }),
+    { kind: 'open-tab', uri: `metaapp://${'c'.repeat(64)}i0` },
+  )
+  assert.deepEqual(
+    plugin.decideBrowserOpenAction({
+      source: 'daemon',
+      uri: `metaapp://${'c'.repeat(64)}i0`,
+      localUiUrl: 'http://127.0.0.1:1/browser/metaapp/x',
+      hasIframeUrl: true,
+    }),
+    { kind: 'ensure-open' },
+  )
+})
+
+test('applyTabInfo marks the hydrated tab active', () => {
+  const pin = 'c'.repeat(64) + 'i0'
+  const next = plugin.applyTabInfo({ tabs: [], activeTabId: null }, {
+    id: 3,
+    uri: `metaapp://${pin}`,
+    title: '番茄钟',
+    isActive: true,
+  })
+  assert.equal(next.activeTabId, 3)
+  assert.equal(next.tabs[0].uri, `metaapp://${pin}`)
+  assert.equal(next.tabs[0].isActive, true)
 })

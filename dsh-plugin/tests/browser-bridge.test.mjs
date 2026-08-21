@@ -42,6 +42,21 @@ test('hub.open returns null until a daemon base URL is known', () => {
   hub.stop()
 })
 
+test('hub.open(null) loads the homepage and marks the snapshot open', async () => {
+  const hub = new BrowserEventHub({ METABOT_DAEMON_BASE_URL: 'http://127.0.0.1:9' })
+  hub.start()
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    const event = hub.open(null, 'host')
+    assert.equal(event.uri, null)
+    assert.equal(event.localUiUrl, 'http://127.0.0.1:9/browser')
+    assert.equal(hub.getSnapshot().open, true)
+    assert.deepEqual(hub.getSnapshot().tabs, [])
+  } finally {
+    hub.stop()
+  }
+})
+
 test('hub forwards agent-browser:open-tab events to web listeners', async () => {
   const received = []
   const server = createServer((req, res) => {
