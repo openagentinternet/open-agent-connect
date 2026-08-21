@@ -13,6 +13,7 @@ import {
   botsBySlugFromList,
   filterSelectablePresets,
   modelSelectionToApply,
+  presetIdForSlug,
   shouldApplyStagedPreset,
 } from '../chip-logic.ts'
 import { messageOf } from './preset-display.ts'
@@ -67,6 +68,8 @@ export class BotPresetSeatController {
 
   private fallback = ''
   private staged: string | undefined
+  /** Blank sessions already defaulted to the Twin, so apply() stays idempotent. */
+  private twinDefaulted = new Set<string>()
 
   constructor(
     private readonly api: SeatApi,
@@ -114,10 +117,27 @@ export class BotPresetSeatController {
     this.set({ current: id, error: null })
   }
 
+  /** The Twin's preset id, used as the default for new blank sessions. */
+  private twinPresetId(): string | undefined {
+    const bots = this.store.getSnapshot().botsBySlug
+    const twinSlug = Object.values(bots).find((bot) => bot.botType === 'twin')?.slug
+    if (!twinSlug) return undefined
+    return presetIdForSlug(twinSlug)
+  }
+
   async apply(): Promise<void> {
-    const staged = this.staged
     const session = this.currentSession()
-    if (staged === undefined || session === undefined) return
+    if (session === undefined) return
+    let staged = this.staged
+    if (staged === undefined) {
+      // New blank sessions default to the Twin Bot (the owner's chief-of-staff);
+      // an explicit chip pick still wins, and each session is defaulted once.
+      if (!session.blank || this.twinDefaulted.has(session.id)) return
+      const twin = this.twinPresetId()
+      if (!twin || session.agentPreset === twin) return
+      staged = twin
+      this.twinDefaulted.add(session.id)
+    }
     if (!shouldApplyStagedPreset(session, staged)) {
       if (!session.blank || session.agentPreset === staged) this.staged = undefined
       return

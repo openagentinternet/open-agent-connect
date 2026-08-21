@@ -37,3 +37,13 @@ test('blank-session select applies stored DSH model only when advertised', async
   assert.match(store, /modelSelectionToApply/)
   assert.match(store, /composer model picker remains available/)
 })
+
+test('blank sessions default to the Twin Bot preset once', async () => {
+  const store = await readFile(join(root, 'src/client/preset-seat-store.ts'), 'utf8')
+  assert.match(store, /default to the Twin Bot/)
+  assert.match(store, /twinPresetId/)
+  assert.match(store, /botType === 'twin'/)
+  assert.match(store, /twinDefaulted/)
+  const logic = await readFile(join(root, 'src/chip-logic.ts'), 'utf8')
+  assert.match(logic, /botType\?: 'twin' \| 'worker' \| null/)
+})
