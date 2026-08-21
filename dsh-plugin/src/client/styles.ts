@@ -414,4 +414,5 @@ body[data-oac-browser-dragging] .oac-browser-frame { pointer-events: none; }
 .oac-browser-shell[data-open='false'] .oac-browser-resize, .oac-browser-shell[data-open='false'] .oac-browser-panel { display: none; }
 .oac-browser-shell[data-open='true'] .oac-browser-reopen { display: none; }
 .oac-browser-shell[data-open='false']:focus-within .oac-browser-reopen { outline: 2px solid var(--dsw-alias-brand-primary); }
+a.oac-agent-link, a[data-oac-agent-link] { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 `

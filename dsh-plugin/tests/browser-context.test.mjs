@@ -45,8 +45,54 @@ test('formatMetaAppCandidates keeps titles and authors as markdown links', () =>
     tags: ['game'],
     updatedAt: 1_700_000_000,
   }])
-  assert.match(text, new RegExp(`\\[Desk\\]\\(metaapp://${pin}\\)`))
-  assert.match(text, /\[alice\]\(metaid:\/\/idq1alice\) \(your MetaBot\)/)
+  assert.match(text, new RegExp(`\\[Desk\\]\\(https://openagentinternet\\.org/browser/metaapp/${pin}\\)`))
+  assert.match(text, /\[alice\]\(https:\/\/openagentinternet\.org\/browser\/metaid\/idq1alice\) \(your MetaBot\)/)
+})
+
+test('normalizeBotBrowserUri recovers Agent Internet URIs from public https hrefs', () => {
+  const pin = 'd'.repeat(64) + 'i0'
+  assert.equal(plugin.normalizeBotBrowserUri(`metaapp://${pin}`), `metaapp://${pin}`)
+  assert.equal(plugin.normalizeBotBrowserUri(`pinid://${pin}`), `pin://${pin}`)
+  assert.equal(
+    plugin.normalizeBotBrowserUri(`https://openagentinternet.org/browser/metaapp/${pin}`),
+    `metaapp://${pin}`,
+  )
+  assert.equal(
+    plugin.normalizeBotBrowserUri('https://openagentinternet.org/browser/metaid/idq1alice'),
+    'metaid://idq1alice',
+  )
+  assert.equal(
+    plugin.normalizeBotBrowserUri(`https://openagentinternet.org/browser/pin/${pin}`),
+    `pin://${pin}`,
+  )
+  assert.equal(plugin.normalizeBotBrowserUri(pin), `pin://${pin}`)
+  assert.equal(plugin.isBotBrowserUri('https://example.com'), false)
+  assert.equal(plugin.publicBrowserHref(`metaapp://${pin}`), `https://openagentinternet.org/browser/metaapp/${pin}`)
+})
+
+test('linkifyAgentInternetUris uses public https destinations DSH will keep', () => {
+  const pin = 'e'.repeat(64) + 'i0'
+  const output = plugin.linkifyAgentInternetUris(`open metaapp://${pin} and pinid://${pin}`)
+  assert.match(output, new RegExp(`\\[metaapp://${pin}\\]\\(https://openagentinternet\\.org/browser/metaapp/${pin}\\)`))
+  assert.match(output, new RegExp(`\\[pinid://${pin}\\]\\(https://openagentinternet\\.org/browser/pin/${pin}\\)`))
+  const already = plugin.linkifyAgentInternetUris(`[Desk](https://openagentinternet.org/browser/metaapp/${pin})`)
+  assert.equal(already, `[Desk](https://openagentinternet.org/browser/metaapp/${pin})`)
+})
+
+test('wrapKnownCatalogTitles links restated names without eating longer titles', () => {
+  const pinA = 'a'.repeat(64) + 'i0'
+  const pinB = 'b'.repeat(64) + 'i0'
+  const catalog = plugin.catalogFromMetaAppCandidates([
+    { pinId: pinA, title: '番茄钟 · Pomodoro Timer (蓝调版)', publisherName: 'Lucy', publisherGlobalMetaId: 'idq1lucy' },
+    { pinId: pinB, title: '番茄钟 · Pomodoro Timer', publisherName: 'Sunny', publisherGlobalMetaId: 'idq1sunny' },
+  ])
+  const text = plugin.wrapKnownCatalogTitles(
+    '链上一共找到 2 款：\n番茄钟 · Pomodoro Timer (蓝调版) — 蓝色主题\n番茄钟 · Pomodoro Timer — 简洁高效',
+    catalog,
+  )
+  assert.match(text, new RegExp(`\\[番茄钟 · Pomodoro Timer \\(蓝调版\\)\\]\\(https://openagentinternet\\.org/browser/metaapp/${pinA}\\)`))
+  assert.match(text, new RegExp(`\\[番茄钟 · Pomodoro Timer\\]\\(https://openagentinternet\\.org/browser/metaapp/${pinB}\\)`))
+  assert.doesNotMatch(text, /链上一共找到 2 款：\[/)
 })
 
 test('buildBrowserContextXml describes a closed sidebar without inventing a page', () => {

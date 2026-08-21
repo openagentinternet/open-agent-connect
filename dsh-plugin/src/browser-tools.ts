@@ -13,8 +13,10 @@ import { join } from 'node:path'
 import { constants as fsConstants } from 'node:fs'
 import type { BrowserEventHub } from './browser-bridge.js'
 import {
+  catalogFromMetaAppCandidates,
   formatBotBrowserTabs,
   formatMetaAppCandidates,
+  normalizeBotBrowserUri,
   parseMetaAppPinIdFromUri,
   readRendererFromEnvelope,
   slugifyTitle,
@@ -41,6 +43,7 @@ export const BROWSER_STRATEGY_TEXT = [
   '- Use bot_browser_open_uri with a metaapp://, metaid://, pin://, or preview-metaapp:// URI to open a known page. Use bot_browser_tabs to list/close/switch tabs.',
   '- Use bot_browser_read_page when the user asks what the page says or whether you can see the app on the right. For MetaApps, follow source_dir / APP.md; never claim you cannot see the current URI if <active_tab> lists one.',
   '- Discover apps with search_metaapps. Remix with bot_browser_fork_current_app — never Bash `metabot metaapp source` (the DSH sandbox cannot write ~/.metabot/cache). After a fork, READ the files with your file tools before editing (the host Edit tool requires a Read first). Preview with bot_browser_preview_local, publish with bot_browser_publish_app only after preview and explicit user confirmation (the host shows a native approval dialog).',
+  '- When you mention an app, person, or pin in your reply, ALWAYS write a markdown link whose destination is the https://openagentinternet.org/browser/... URL from the tool output (DSH strips metaapp:// hrefs). Reuse search_metaapps bullet lines verbatim. NEVER shorten a globalMetaId or pinId. Never mention an app or author as plain text.',
   '- Never use Playwright or external browser automation.',
 ].join('\n')
 
@@ -260,17 +263,18 @@ export function buildBrowserToolDefinitions(input: {
 
   const openUri = async (uri: string): Promise<string> => {
     if (isBrowserHomeUri(uri)) return openHome()
+    const resolved = normalizeBotBrowserUri(uri) ?? uri
     const snapshot = hub.getSnapshot()
     if (snapshot.open && hub.clientCount() > 0) {
-      const result = await hub.requestCommand({ action: 'open-tab', uri })
-      if (!result.ok) return `Opened ${uri}, but the Browser did not confirm: ${commandError(result)}`
-      return `Opened ${uri} in the Bot Browser. Current tabs (* = active):\n${formatBotBrowserTabs(result.tabs ?? snapshot.tabs)}`
+      const result = await hub.requestCommand({ action: 'open-tab', uri: resolved })
+      if (!result.ok) return `Opened ${resolved}, but the Browser did not confirm: ${commandError(result)}`
+      return `Opened ${resolved} in the Bot Browser. Current tabs (* = active):\n${formatBotBrowserTabs(result.tabs ?? snapshot.tabs)}`
     }
-    const event = hub.open(uri, 'host')
+    const event = hub.open(resolved, 'host')
     if (event === null) {
-      return `Failed to open ${uri}: OAC daemon is not reachable. ${SURFACE_HINT}`
+      return `Failed to open ${resolved}: OAC daemon is not reachable. ${SURFACE_HINT}`
     }
-    return `Opened ${uri} in the Bot Browser (${event.localUiUrl}).`
+    return `Opened ${resolved} in the Bot Browser (${event.localUiUrl}).`
   }
 
   return [
@@ -424,7 +428,7 @@ export function buildBrowserToolDefinitions(input: {
       async execute(args) {
         const limit = Math.min(20, Math.max(1, Math.floor(numberArg(args, 'limit') ?? 8)))
         const mode = textArg(args, 'mode') || 'search'
-        const nextStepHint = 'Pick the single best match for the user\'s intent and open it with bot_browser_open_uri. When listing apps in your reply, REUSE the bullet lines above verbatim: app titles and author names MUST remain markdown links — never mention an app or an author as plain text. Offer 2–3 alternatives if the best one might not be what they meant; if nothing fits, say so instead of opening a random app.'
+        const nextStepHint = 'Pick the single best match for the user\'s intent and open it with bot_browser_open_uri. When listing apps in your reply, REUSE the bullet lines above verbatim (they are already https://openagentinternet.org/browser/... markdown links — DSH strips metaapp:// hrefs). NEVER mention an app or an author as plain text. Offer 2–3 alternatives if the best one might not be what they meant; if nothing fits, say so instead of opening a random app.'
 
         if (mode === 'forks') {
           const pinId = parseMetaAppPinIdFromUri(textArg(args, 'pinId'))
@@ -439,6 +443,7 @@ export function buildBrowserToolDefinitions(input: {
           if (items.length === 0) {
             return `No remixes (forks) found for metaapp://${pinId}. If the user expected some, the lineage may simply not exist yet — say so honestly.`
           }
+          hub.publishCatalog(catalogFromMetaAppCandidates(items))
           return `${items.length} direct remix(es) of metaapp://${pinId}:\n\n${formatMetaAppCandidates(items)}`
         }
 
@@ -467,6 +472,7 @@ export function buildBrowserToolDefinitions(input: {
         if (items.length === 0) {
           return `No on-chain MetaApps matched${query ? ` "${query}"` : ''}${publisher ? ` from ${publisher}` : ''}${sinceDays ? ` in the last ${sinceDays} days` : ''}. Tell the user honestly; do NOT invent apps.`
         }
+        hub.publishCatalog(catalogFromMetaAppCandidates(items))
         return `${items.length} on-chain MetaApp candidate(s), best first:\n\n${formatMetaAppCandidates(items)}\n\n${nextStepHint}`
       },
     },

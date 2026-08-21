@@ -18,6 +18,7 @@ function fakeHub(snapshot, onCommand) {
       opens.push({ uri, source })
       return { uri, localUiUrl: uri ? `http://127.0.0.1:1/browser` : 'http://127.0.0.1:1/browser', source }
     },
+    publishCatalog() {},
     requestCommand: async (command) => onCommand(command),
   }
 }
@@ -124,8 +125,8 @@ test('search_metaapps formats CLI hits as markdown links', async () => {
     agent.ctx.tools.register(definition)
   }
   const text = await tools.find((tool) => tool.name === 'search_metaapps').execute({ query: '牌局' }, {})
-  assert.match(text, new RegExp(`\\[半糖牌局\\]\\(metaapp://${PIN}\\)`))
-  assert.match(text, /\[bob\]\(metaid:\/\/idq1bob\)/)
+  assert.match(text, new RegExp(`\\[半糖牌局\\]\\(https://openagentinternet\\.org/browser/metaapp/${PIN}\\)`))
+  assert.match(text, /\[bob\]\(https:\/\/openagentinternet\.org\/browser\/metaid\/idq1bob\)/)
 })
 
 test('bot_browser_publish_app asks DSH approval and skips CLI when cancelled', async () => {
@@ -277,6 +278,25 @@ test('bot_browser_open_uri with no uri opens the Bot Browser homepage', async ()
   assert.equal(plugin.isBrowserHomeUri(''), true)
   assert.equal(plugin.isBrowserHomeUri('home'), true)
   assert.equal(plugin.isBrowserHomeUri(`metaapp://${PIN}`), false)
+})
+
+test('bot_browser_open_uri accepts public https and pinid hrefs', async () => {
+  const { agent, tools } = fakeAgent()
+  const hub = fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false }))
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => ({ ok: true, state: 'success', data: {} }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const open = tools.find((tool) => tool.name === 'bot_browser_open_uri')
+  await open.execute({ uri: `https://openagentinternet.org/browser/metaapp/${PIN}` }, {})
+  assert.deepEqual(hub.opens[0], { uri: `metaapp://${PIN}`, source: 'host' })
+  await open.execute({ uri: `pinid://${PIN}` }, {})
+  assert.deepEqual(hub.opens[1], { uri: `pin://${PIN}`, source: 'host' })
 })
 
 test('bot_browser_fork_current_app asks the live iframe when snapshot tabs are empty', async () => {

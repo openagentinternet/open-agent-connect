@@ -434,13 +434,20 @@ export {
 } from './browser-tools.js'
 export {
   applyTabInfo,
+  catalogFromMetaAppCandidates,
   decideBrowserOpenAction,
   formatBotBrowserTabs,
   formatMetaAppCandidates,
+  isBotBrowserUri,
+  linkifyAgentInternetUris,
+  normalizeBotBrowserUri,
   parseMetaAppPinIdFromUri,
+  publicBrowserHref,
   reduceBrowserTabs,
+  resolveBrowserPath,
+  wrapKnownCatalogTitles,
 } from './browser-protocol.js'
-export { BrowserEventHub, resolveBrowserPath, resolveDaemonBaseUrl, type BrowserOpenEvent } from './browser-bridge.js'
+export { BrowserEventHub, resolveDaemonBaseUrl, type BrowserOpenEvent } from './browser-bridge.js'
 export { parseMetabotStdout, resolveCli, resolveMetabotCliPath, runMetabot } from './cli-bridge.js'
 export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'

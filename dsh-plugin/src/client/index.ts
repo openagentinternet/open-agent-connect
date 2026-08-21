@@ -19,6 +19,7 @@ import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
+import { startAgentLinkInterceptor } from './browser-links.ts'
 import { BotBrowserIframeBridge } from './browser-iframe.ts'
 import { appEn, APP_NS, appZh, type AppsLocaleKey } from './locale-apps.ts'
 import { browserEn, BROWSER_NS, browserZh, type BrowserLocaleKey } from './locale-browser.ts'
@@ -116,8 +117,10 @@ export function apply(ctx: ClientContext): void {
         iframeBridge.reportNow()
       })
       const stopEvents = startBrowserEventSource(browserStore, iframeBridge)
+      const stopLinks = startAgentLinkInterceptor((uri) => openBrowser(browserStore, uri))
       return () => {
         stopEvents()
+        stopLinks()
         stopOpenWatch()
         stopBridge()
         root.unmount()

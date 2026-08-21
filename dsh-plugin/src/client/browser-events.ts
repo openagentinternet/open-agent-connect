@@ -12,7 +12,8 @@
 import { api } from './api.ts'
 import type { BotBrowserIframeBridge } from './browser-iframe.ts'
 import type { BotBrowserStore } from './browser-store.ts'
-import { decideBrowserOpenAction, type BrowserCommandRequest, type BrowserOpenSource } from '../browser-protocol.ts'
+import { decideBrowserOpenAction, type BrowserCatalogEntry, type BrowserCommandRequest, type BrowserOpenSource } from '../browser-protocol.ts'
+import { rememberCatalog } from './browser-links.ts'
 
 /** Subscribe to host-half browser-open + command events; returns an unsubscribe. */
 export function startBrowserEventSource(
@@ -70,6 +71,15 @@ export function startBrowserEventSource(
   }
   source.addEventListener('browser-open', onOpen)
   source.addEventListener('browser-command', onCommand)
+  const onCatalog = (event: MessageEvent<string>): void => {
+    try {
+      const data = JSON.parse(event.data) as { apps?: BrowserCatalogEntry[] }
+      if (Array.isArray(data.apps)) rememberCatalog(data.apps)
+    } catch {
+      // keep listening
+    }
+  }
+  source.addEventListener('browser-catalog', onCatalog)
   return () => source?.close()
 }
 

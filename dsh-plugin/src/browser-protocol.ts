@@ -8,6 +8,156 @@
 
 export const METAAPP_PIN_ID_PATTERN = /^[0-9a-f]{64}i0$/iu
 
+/** Public web origin whose /browser/* paths DSH MarkdownText will keep as http(s) links. */
+export const PUBLIC_BROWSER_ORIGIN = 'https://openagentinternet.org'
+
+const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile', 'pin'])
+const BROWSER_DOMAIN_ALIAS_PATTERN = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu
+const PREVIEW_METAAPP_URI_PATTERN = /^preview-metaapp:\/\/([^/?#]+)(\/.*)?$/iu
+const BOT_BROWSER_URI_PROTOCOL_RE = /^(metaid|metaapp|map|metafile|pin|pinid|preview-metaapp):/iu
+const AGENT_INTERNET_URI_RE = /\b(?:metaid|metaapp|map|metafile|pin|pinid|preview-metaapp):\/\/[A-Za-z0-9][A-Za-z0-9._~%/@-]*/gi
+const AGENT_INTERNET_URI_HINT_RE = /(?:metaid|metaapp|map|metafile|pin|pinid|preview-metaapp):\/\//i
+const CODE_SEGMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)/g
+const TRAILING_URI_PUNCTUATION_RE = /[.,;:!?]+$/
+const BARE_PINID_RE = /(?<![/:=\w])([0-9a-f]{64}i0)(?![0-9a-f])/gi
+const PUBLIC_BROWSER_PATH_RE = /^\/browser\/(metaapp|metaid|metafile|pin|pinid|preview-metaapp)\/(.+)$/iu
+
+/**
+ * Mirror of OAC's `resolveLocalBrowserPath` so the bridge, public https links,
+ * and the CLI produce the same `/browser/...` path forms.
+ */
+export function resolveBrowserPath(uri: string): string {
+  const trimmedUri = uri.trim()
+  const match = trimmedUri === uri
+    ? /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)$/iu.exec(uri)
+    : null
+  let scheme = match?.[1]?.toLowerCase()
+  if (scheme === 'pinid') scheme = 'pin'
+  const resourceId = match?.[2]
+  if (scheme && resourceId && BROWSER_DEEP_LINK_SCHEMES.has(scheme)) {
+    return `/browser/${scheme}/${encodeURIComponent(resourceId)}`
+  }
+  const previewMatch = trimmedUri === uri ? PREVIEW_METAAPP_URI_PATTERN.exec(uri) : null
+  if (previewMatch) {
+    const host = previewMatch[1]
+    const rawPath = previewMatch[2] || ''
+    const segments = rawPath.split('/').filter(Boolean).map((segment) => encodeURIComponent(segment))
+    const pathSuffix = segments.length ? '/' + segments.join('/') : ''
+    return `/browser/preview-metaapp/${encodeURIComponent(host)}${pathSuffix}`
+  }
+  if (!match && trimmedUri === uri && METAAPP_PIN_ID_PATTERN.test(uri)) {
+    return `/browser/pin/${encodeURIComponent(uri)}`
+  }
+  if (!match && trimmedUri === uri && BROWSER_DOMAIN_ALIAS_PATTERN.test(uri)) {
+    return `/browser/metaid/${encodeURIComponent(uri)}`
+  }
+  const query = new URLSearchParams()
+  query.set('uri', uri)
+  return `/browser?${query.toString()}`
+}
+
+/** Whether href should open the right-sidebar Bot Browser instead of a new tab. */
+export function isBotBrowserUri(href: string): boolean {
+  return normalizeBotBrowserUri(href) !== null
+}
+
+/**
+ * Recover the Agent Internet URI from a markdown/DOM href.
+ * Accepts metaapp://, metaid://, pin://, pinid://, map://, metafile://,
+ * preview-metaapp://, bare pin ids, and https://openagentinternet.org/browser/...
+ */
+export function normalizeBotBrowserUri(href: string): string | null {
+  const trimmed = href.trim()
+  if (!trimmed) return null
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol === 'https:' && url.hostname === 'openagentinternet.org') {
+      const path = url.pathname.replace(/\/+$/u, '') || '/'
+      const match = PUBLIC_BROWSER_PATH_RE.exec(path)
+      if (match) {
+        const scheme = match[1].toLowerCase() === 'pinid' ? 'pin' : match[1].toLowerCase()
+        const rest = decodeURIComponent(match[2])
+        if (scheme === 'preview-metaapp') return `preview-metaapp://${rest}`
+        return `${scheme}://${rest}`
+      }
+      const nested = url.searchParams.get('uri')
+      if (nested) return normalizeBotBrowserUri(nested)
+    }
+  } catch {
+    // not an absolute URL — fall through to scheme / bare-pin checks
+  }
+  const pinid = /^pinid:\/\/(.+)$/iu.exec(trimmed)
+  if (pinid) return `pin://${pinid[1]}`
+  if (BOT_BROWSER_URI_PROTOCOL_RE.test(trimmed)) return trimmed
+  if (METAAPP_PIN_ID_PATTERN.test(trimmed)) return `pin://${trimmed.toLowerCase()}`
+  return null
+}
+
+/** https://openagentinternet.org/browser/... form that DSH MarkdownText will keep as an <a>. */
+export function publicBrowserHref(uri: string): string {
+  const normalized = normalizeBotBrowserUri(uri) ?? uri.trim()
+  return `${PUBLIC_BROWSER_ORIGIN}${resolveBrowserPath(normalized)}`
+}
+
+export type BrowserCatalogEntry = {
+  title: string
+  href: string
+  uri: string
+}
+
+function linkifyPlainSegment(segment: string): string {
+  let out = segment.replace(BARE_PINID_RE, (pin: string) => `[${pin}](${publicBrowserHref(`pin://${pin}`)})`)
+  out = out.replace(AGENT_INTERNET_URI_RE, (rawMatch: string, offset: number, full: string) => {
+    if (full.slice(Math.max(0, offset - 2), offset) === '](') return rawMatch
+    if (full[offset - 1] === '<') return rawMatch
+    const match = rawMatch.replace(TRAILING_URI_PUNCTUATION_RE, '')
+    if (!match) return rawMatch
+    const uri = normalizeBotBrowserUri(match) ?? match
+    return `[${match}](${publicBrowserHref(uri)})${rawMatch.slice(match.length)}`
+  })
+  return out
+}
+
+/**
+ * Turn bare Agent Internet URIs and pin ids into markdown links whose
+ * destinations are https://openagentinternet.org/browser/... so DSH's
+ * MarkdownText (http/https/mailto only) keeps them clickable.
+ */
+export function linkifyAgentInternetUris(content: string): string {
+  if (!content) return content
+  if (!AGENT_INTERNET_URI_HINT_RE.test(content) && !BARE_PINID_RE.test(content)) return content
+  BARE_PINID_RE.lastIndex = 0
+  return content
+    .split(CODE_SEGMENT_RE)
+    .map((segment) => {
+      if (!segment.startsWith('`')) return linkifyPlainSegment(segment)
+      if (segment.startsWith('```')) return segment
+      const inner = segment.slice(1, -1)
+      const linkified = linkifyPlainSegment(inner)
+      return linkified !== inner ? linkified : segment
+    })
+    .join('')
+}
+
+/** Longest-first exact title wraps; existing markdown links are left intact. */
+export function wrapKnownCatalogTitles(text: string, catalog: readonly BrowserCatalogEntry[]): string {
+  if (!text || catalog.length === 0) return text
+  const titles = catalog
+    .filter((entry) => entry.title.trim().length >= 2)
+    .slice()
+    .sort((a, b) => b.title.length - a.title.length)
+  let out = text
+  const linkChunk = /(\[[^\]]+\]\([^)]+\))/g
+  for (const entry of titles) {
+    out = out.split(linkChunk).map((segment) => {
+      if (segment.startsWith('[')) return segment
+      if (!segment.includes(entry.title)) return segment
+      return segment.split(entry.title).join(`[${entry.title}](${entry.href})`)
+    }).join('')
+  }
+  return out
+}
+
 /** One ABC tab as the host/client snapshot sees it. */
 export type BrowserTabInfo = {
   id: number
@@ -249,7 +399,7 @@ export function formatMetaAppCandidates(items: readonly MetaAppSearchCandidate[]
       : ''
     const publisherLabel = (item.publisherName || item.publisherGlobalMetaId || 'unknown').replace(/[[\]]/g, '')
     const publisher = item.publisherGlobalMetaId
-      ? `by [${publisherLabel}](metaid://${item.publisherGlobalMetaId})${item.isOwn ? ' (your MetaBot)' : ''}`
+      ? `by [${publisherLabel}](${publicBrowserHref(`metaid://${item.publisherGlobalMetaId}`)})${item.isOwn ? ' (your MetaBot)' : ''}`
       : ''
     const tags = Array.isArray(item.tags) ? item.tags.filter((tag) => typeof tag === 'string' && tag.trim()) : []
     const meta = [
@@ -257,8 +407,25 @@ export function formatMetaAppCandidates(items: readonly MetaAppSearchCandidate[]
       tags.length ? `tags: ${tags.join(', ')}` : '',
       item.updatedAt ? `updated: ${new Date(item.updatedAt * 1000).toISOString().slice(0, 10)}` : '',
     ].filter(Boolean).join(' | ')
-    return `- [${linkTitle}](metaapp://${item.pinId})${intro}\n  ${meta}`
+    return `- [${linkTitle}](${publicBrowserHref(`metaapp://${item.pinId}`)})${intro}\n  ${meta}`
   }).join('\n')
+}
+
+export function catalogFromMetaAppCandidates(items: readonly MetaAppSearchCandidate[]): BrowserCatalogEntry[] {
+  const entries: BrowserCatalogEntry[] = []
+  for (const item of items) {
+    const title = (item.title || item.appName || '').trim()
+    if (title.length >= 2 && item.pinId) {
+      const uri = `metaapp://${item.pinId}`
+      entries.push({ title, href: publicBrowserHref(uri), uri })
+    }
+    const publisher = (item.publisherName || '').trim()
+    if (publisher.length >= 2 && item.publisherGlobalMetaId) {
+      const uri = `metaid://${item.publisherGlobalMetaId}`
+      entries.push({ title: publisher, href: publicBrowserHref(uri), uri })
+    }
+  }
+  return entries
 }
 
 export function slugifyTitle(title: string): string {
