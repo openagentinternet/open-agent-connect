@@ -231,39 +231,17 @@ test('browser/state and command-result routes update the hub', async () => {
   assert.equal(body.data.tabs[0].title, '半糖牌局')
 })
 
-test('browser tools are skipped on standard created, then installed when the session switches to oac-*', () => {
-  const { agent, tools } = fakeAgent()
-  agent.id = 'sess-1'
-  const listeners = []
-  let preset = 'standard'
+test('bindBrowserToolInstall registers bot_browser_open_uri on the host tools registry', () => {
+  const tools = []
   plugin.bindBrowserToolInstall(
     {
-      on: (event, listener) => listeners.push({ event, listener }),
-      agentPresets: { composedPreset: () => preset },
+      tools: { register(definition) { tools.push(definition); return () => {} } },
+      systemPrompt: { section() { return () => {} } },
     },
     fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
     plugin.createBrowserSourceCache(),
   )
-  const created = listeners.find((entry) => entry.event === 'agent/created')
-  const selected = listeners.find((entry) => entry.event === 'session/event')
-  const selectedDirect = listeners.find((entry) => entry.event === 'agent-preset/selected')
-  assert.ok(created)
-  assert.ok(selected)
-  assert.ok(selectedDirect)
-
-  created.listener({ agent })
-  assert.equal(tools.some((tool) => tool.name === 'bot_browser_open_uri'), false)
-
-  preset = 'oac-alice'
-  selected.listener(
-    { id: 'sess-1' },
-    { type: 'agent-preset/selected', data: { agentPreset: 'oac-alice' } },
-  )
   assert.equal(tools.some((tool) => tool.name === 'bot_browser_open_uri'), true)
-
-  const count = tools.length
-  selectedDirect.listener('sess-1', 'oac-alice')
-  assert.equal(tools.length, count)
 })
 
 test('installBrowserToolsOnAgent is idempotent on the same agent', () => {
@@ -276,6 +254,7 @@ test('installBrowserToolsOnAgent is idempotent on the same agent', () => {
 })
 
 test('approvalOf and bindBrowserToolInstall survive Cordis uninjected approval access', () => {
+  const tools = []
   const cordisLike = {
     get approval() {
       throw new Error('cannot get property "approval" without inject')
@@ -283,7 +262,8 @@ test('approvalOf and bindBrowserToolInstall survive Cordis uninjected approval a
     get(name) {
       throw new Error(`cannot get property "${name}" without inject`)
     },
-    on() {},
+    tools: { register(definition) { tools.push(definition); return () => {} } },
+    systemPrompt: { section() { return () => {} } },
   }
   assert.equal(plugin.approvalOf(cordisLike), undefined)
   plugin.bindBrowserToolInstall(
@@ -291,6 +271,7 @@ test('approvalOf and bindBrowserToolInstall survive Cordis uninjected approval a
     fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
     plugin.createBrowserSourceCache(),
   )
+  assert.equal(tools.some((tool) => tool.name === 'bot_browser_open_uri'), true)
 })
 
 function request(method, url, payload) {

@@ -162,15 +162,15 @@ Agent linkage is two layers:
   so `metabot browser tab open --uri` opens this sidebar. When the iframe is
   already loaded, the plugin does **not** reload it: ABC inside the iframe
   already received the daemon event.
-- **Native Cordis tools** on every `oac-*` session (same pattern as memory/twin):
-  `bot_browser_tabs`, `bot_browser_open_uri`, `bot_browser_preview_local`,
-  `bot_browser_read_page`, `search_metaapps`, `bot_browser_fork_current_app`,
-  `bot_browser_publish_app`. They are installed when the agent is created on an
-  `oac-*` preset **and** when a blank session switches onto one (DSH new chats
-  start on `standard` and recompose; there is no second `agent/created`). Tab
-  control uses ABC `postMessage` from the DSH parent. Search/fork/publish wrap
-  the OAC CLI. Publish asks DSH `ctx.approval` (the native confirmation dialog)
-  before `publish-project --confirm`.
+- **Native Cordis tools** registered on the host global tool layer (so they are
+  in the model's function list from the first turn, including after a blank
+  session recomposes from `standard` to `oac-*`): `bot_browser_tabs`,
+  `bot_browser_open_uri`, `bot_browser_preview_local`, `bot_browser_read_page`,
+  `search_metaapps`, `bot_browser_fork_current_app`, `bot_browser_publish_app`.
+  Tab control uses ABC `postMessage` from the DSH parent. Search/fork/publish
+  wrap the OAC CLI. Publish asks DSH `ctx.approval` (the native confirmation
+  dialog) before `publish-project --confirm`. Live page context injection stays
+  `oac-*` only.
 
 Each `oac-*` turn also injects a live `<browser_context>` block at the
 user-message tail (active tab URI/title, open tabs, MetaApp `source_dir` when
@@ -182,7 +182,7 @@ page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 
 ## Layout
 
-- Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`, `approval`
+- Host: Cordis `name` `oac-dsh`, `inject` `webServer`, `webRuntime`, `agentPresets`, `llm`, `approval`, `tools`, `systemPrompt`
 - Client: `dsh.client` bundle, no second `cordis.patch.yml` row
 - Capability core remains the OAC CLI. This package does not wrap every `metabot` verb as a Cordis tool.
 - `lib/` is gitignored — build artifacts are never committed. After every merge to `main`, run `npm run build` (see the parallel-branch loop above).

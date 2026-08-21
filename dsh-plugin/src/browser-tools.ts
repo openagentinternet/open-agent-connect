@@ -29,8 +29,6 @@ import type {
   HostApproval,
   HostApprovalOutcome,
   HostContext,
-  HostSessionEventLike,
-  HostSessionLike,
   HostToolDefinition,
   HostToolExec,
 } from './context-types.js'
@@ -191,9 +189,18 @@ export function buildBrowserToolDefinitions(input: {
   approval?: HostApproval
   hostAgent: HostAgentLike
   run?: RunFn
+  host?: HostContext
 }): HostToolDefinition[] {
-  const { slug, hub, cache, approval, hostAgent } = input
+  const { slug, hub, cache, approval, hostAgent, host } = input
   const run = input.run ?? runMetabot
+
+  const actorSlug = (exec?: HostToolExec): string => {
+    if (host && exec?.agent) {
+      const live = oacSlugOf(host, exec.agent)
+      if (live) return live
+    }
+    return slug
+  }
 
   const openUri = async (uri: string): Promise<string> => {
     const snapshot = hub.getSnapshot()
@@ -301,7 +308,7 @@ export function buildBrowserToolDefinitions(input: {
       },
       output: TEXT_OUTPUT,
       timeoutMs: 60_000,
-      async execute(args) {
+      async execute(args, exec) {
         if (!hub.getSnapshot().open) throw new Error(SURFACE_HINT)
         const tabId = numberArg(args, 'tabId')
         const result = await hub.requestCommand({
@@ -327,7 +334,7 @@ export function buildBrowserToolDefinitions(input: {
           rendererType = readRendererFromEnvelope(infoResult.info?.current).type ?? ''
         }
         if (rendererType === 'html-iframe' || parseMetaAppPinIdFromUri(uri)) {
-          const source = await resolveMetaAppSource(uri, slug, cache, run)
+          const source = await resolveMetaAppSource(uri, actorSlug(exec), cache, run)
           if (source) {
             return [
               `This page ("${content?.title ?? result.activeTab?.title ?? uri}") is rendered by the MetaApp "${source.title}" inside a sandboxed frame — its live page text cannot be extracted from outside.`,
@@ -419,7 +426,7 @@ export function buildBrowserToolDefinitions(input: {
       },
       output: TEXT_OUTPUT,
       timeoutMs: 90_000,
-      async execute(args) {
+      async execute(args, exec) {
         let uri = textArg(args, 'uri')
         if (!uri) {
           uri = hub.getSnapshot().tabs.find((tab) => tab.isActive)?.uri ?? ''
@@ -431,13 +438,14 @@ export function buildBrowserToolDefinitions(input: {
         if (!pinId) {
           throw new Error(`The current page (${uri}) is not a MetaApp and cannot be forked. Only metaapp:// pages can be forked.`)
         }
-        const home = await actorHomeDir(slug)
+        const from = actorSlug(exec)
+        const home = await actorHomeDir(from)
         const parent = join(home, 'workspace', 'metaapps')
         await mkdir(parent, { recursive: true })
         const titleGuess = hub.getSnapshot().tabs.find((tab) => tab.isActive)?.title || pinId
         const outDir = join(parent, `${slugifyTitle(titleGuess)}-${pinId.slice(0, 8)}-${Date.now()}`)
         const result = await run(
-          ['metaapp', 'source', '--pin-id', pinId, '--out', outDir, '--from', slug],
+          ['metaapp', 'source', '--pin-id', pinId, '--out', outDir, '--from', from],
           { timeoutMs: 90_000 },
         )
         const data = dataOf(result) as {
@@ -522,7 +530,7 @@ export function buildBrowserToolDefinitions(input: {
         })
 
         const published = await run(
-          ['metaapp', 'publish-project', '--project-dir', dir, '--from', slug, '--confirm'],
+          ['metaapp', 'publish-project', '--project-dir', dir, '--from', actorSlug(exec), '--confirm'],
           { timeoutMs: 180_000 },
         )
         const data = dataOf(published) as {
@@ -552,30 +560,6 @@ const installedBrowserTools = new WeakSet<object>()
 
 function isDuplicateToolError(error: unknown): boolean {
   return error instanceof Error && /already registered/.test(error.message)
-}
-
-function agentSessionId(agent: HostAgentLike): string {
-  if (typeof agent.id === 'string' && agent.id) return agent.id
-  if (typeof agent.session?.id === 'string' && agent.session.id) return agent.session.id
-  return ''
-}
-
-function liveAgentBySessionId(
-  ctx: HostContext,
-  sessionId: string,
-  remembered: Map<string, HostAgentLike>,
-): HostAgentLike | undefined {
-  if (!sessionId) return undefined
-  const rememberedAgent = remembered.get(sessionId)
-  if (rememberedAgent) return rememberedAgent
-  try {
-    const registry = ctx.agents ?? (ctx.get?.('agents') as HostContext['agents'])
-    const found = registry?.get?.(sessionId)
-    if (found) return found
-    return registry?.list?.().find((agent) => agentSessionId(agent) === sessionId)
-  } catch {
-    return undefined
-  }
 }
 
 function oacSlugOf(ctx: HostContext, agent: HostAgentLike): string | undefined {
@@ -615,11 +599,11 @@ export function installBrowserToolsOnAgent(
 }
 
 /**
- * Register Bot Browser tools when an agent is already on an oac-* preset
- * (agent/created) and again when a blank session switches onto one
- * (agent-preset/selected). DSH creates new chats on `standard` then recomposes
- * to `oac-<slug>` without a second created event — install-on-created-only
- * leaves the model with injected <browser_context> and unknown native tools.
+ * Register Bot Browser tools on the host global tool layer during plugin apply.
+ * Per-agent install on agent/created races DSH's blank-session recompose
+ * (new chats start on `standard`, then switch to `oac-*` without a second
+ * created event) and loses the first-turn function list. Global registration
+ * is visible to every session from boot.
  */
 export function bindBrowserToolInstall(
   ctx: HostContext,
@@ -627,50 +611,28 @@ export function bindBrowserToolInstall(
   cache: BrowserSourceCache,
   run: RunFn = runMetabot,
 ): void {
-  if (!ctx.on) return
   const approval = approvalOf(ctx)
-  const remembered = new Map<string, HostAgentLike>()
-  const install = (agent: HostAgentLike | undefined, slugHint?: string): void => {
-    if (!agent?.ctx) return
-    const slug = slugHint ?? oacSlugOf(ctx, agent)
-    if (!slug) return
-    installBrowserToolsOnAgent(agent, slug, hub, cache, approval, run)
+  ctx.systemPrompt?.section({
+    name: 'oac:browser-strategy',
+    order: 160,
+    text: BROWSER_STRATEGY_TEXT,
+  })
+  const hostAgent: HostAgentLike = { ctx }
+  for (const definition of buildBrowserToolDefinitions({
+    slug: '',
+    hub,
+    cache,
+    approval,
+    hostAgent,
+    run,
+    host: ctx,
+  })) {
+    try {
+      ctx.tools?.register(definition)
+    } catch (error) {
+      if (!isDuplicateToolError(error)) {
+        ctx.logger?.warn?.(`[oac-dsh] browser tool install failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
   }
-  const installForSession = (sessionId: string, agentPreset: string): void => {
-    const slug = slugFromPresetId(agentPreset)
-    if (!slug) return
-    install(liveAgentBySessionId(ctx, sessionId, remembered), slug)
-  }
-  ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
-    try {
-      const agent = payload.agent
-      const sessionId = agent ? agentSessionId(agent) : ''
-      if (sessionId) remembered.set(sessionId, agent)
-      install(agent)
-    } catch (error) {
-      ctx.logger?.warn?.(`[oac-dsh] browser tool install failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  })
-  ctx.on('agent/disposed', (payload: { agent: HostAgentLike }) => {
-    const sessionId = payload.agent ? agentSessionId(payload.agent) : ''
-    if (sessionId) remembered.delete(sessionId)
-  })
-  ctx.on('session/event', (session: HostSessionLike, event: HostSessionEventLike) => {
-    try {
-      if (event?.type !== 'agent-preset/selected') return
-      const agentPreset = (event.data as { agentPreset?: unknown } | undefined)?.agentPreset
-      if (typeof agentPreset !== 'string') return
-      const sessionId = typeof session?.id === 'string' ? session.id : ''
-      installForSession(sessionId, agentPreset)
-    } catch (error) {
-      ctx.logger?.warn?.(`[oac-dsh] browser tool install failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  })
-  ctx.on('agent-preset/selected', (sessionId: string, agentPreset: string) => {
-    try {
-      installForSession(sessionId, agentPreset)
-    } catch (error) {
-      ctx.logger?.warn?.(`[oac-dsh] browser tool install failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  })
 }
