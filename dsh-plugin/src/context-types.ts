@@ -181,6 +181,12 @@ export interface HostContext {
   agents?: HostAgentsRegistryLike
   /** Present when the DSH web composition mounts user-approval. */
   approval?: HostApproval
+  tools?: {
+    register(definition: HostToolDefinition): () => void
+  }
+  systemPrompt?: {
+    section(section: { name: string; order: number; text: string | (() => string) }): () => void
+  }
 }
 
 /** Optional apply config (tests skip CLI bootstrap so they cannot start a user daemon). */

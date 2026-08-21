@@ -9,7 +9,7 @@ const plugin = await import('../lib/index.js')
 test('host export has the namespace-plugin shape (no stray default)', () => {
   assert.equal('default' in plugin, false)
   assert.equal(plugin.name, 'oac-dsh')
-  assert.deepEqual(plugin.inject, ['webServer', 'webRuntime', 'agentPresets', 'llm', 'approval'])
+  assert.deepEqual(plugin.inject, ['webServer', 'webRuntime', 'agentPresets', 'llm', 'approval', 'tools', 'systemPrompt'])
   assert.equal(typeof plugin.apply, 'function')
 })
 
