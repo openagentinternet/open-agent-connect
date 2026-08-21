@@ -22,6 +22,10 @@ test('resolveBrowserPath mirrors the CLI path forms for deep links', () => {
     resolveBrowserPath('pin://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0'),
     '/browser/pin/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
   )
+  assert.equal(
+    resolveBrowserPath('pinid://0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0'),
+    '/browser/pin/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefi0',
+  )
 })
 
 test('resolveBrowserPath maps bare pins and domain aliases', () => {

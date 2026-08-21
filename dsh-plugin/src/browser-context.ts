@@ -41,7 +41,7 @@ const HOW_TO = [
   'How to FIND and REMIX apps:',
   '- When the user wants to find/discover an app (not open a known one), call search_metaapps first (query/tag/publisher/sinceDays), open the best match with bot_browser_open_uri, and offer 2-3 alternatives by name. For remix children of an app, use search_metaapps with mode="forks".',
   '- To modify the app currently on the right, call bot_browser_fork_current_app (no Bash, no `metabot metaapp source`). Then READ the files with your file tools before editing.',
-  '- When you mention a specific app or bot in your reply, write it as a markdown link: [title](metaapp://<pinId>) or [name](metaid://<globalMetaId>). NEVER shorten a globalMetaId or pinId.',
+  '- When you mention a specific app, person, or pin in your reply, write a markdown link to the https://openagentinternet.org/browser/... URL (metaapp, metaid, or pin). DSH strips custom-scheme hrefs such as metaapp://. NEVER shorten a globalMetaId or pinId. Never mention an app or author as plain text.',
   '- NEVER use Playwright, screenshots, or any external browser automation: the Bot Browser is not a Playwright browser and needs none.',
 ].join('\n')
 

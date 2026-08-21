@@ -27,11 +27,14 @@ import { readFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type {
-  BrowserCommandRequest,
-  BrowserCommandResult,
-  BrowserOpenSource,
-  BrowserSnapshot,
+import {
+  normalizeBotBrowserUri,
+  resolveBrowserPath,
+  type BrowserCommandRequest,
+  type BrowserCommandResult,
+  type BrowserCatalogEntry,
+  type BrowserOpenSource,
+  type BrowserSnapshot,
 } from './browser-protocol.js'
 
 /** One open request fanned out to the DSH web clients. */
@@ -45,50 +48,13 @@ export interface BrowserOpenEvent {
 export type BrowserSseFrame =
   | { event: 'browser-open'; data: BrowserOpenEvent }
   | { event: 'browser-command'; data: BrowserCommandRequest }
+  | { event: 'browser-catalog'; data: { apps: BrowserCatalogEntry[] } }
 
 const COMMAND_TIMEOUT_MS = 10_000
 
 const EMPTY_SNAPSHOT: BrowserSnapshot = { open: false, tabs: [] }
 
-/** Deep-link schemes `metabot browser` maps to `/browser/<scheme>/<id>` paths. */
-const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile', 'pin'])
-const BROWSER_PIN_ID_PATTERN = /^[0-9a-f]{64}i0$/iu
-const BROWSER_DOMAIN_ALIAS_PATTERN = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu
-const PREVIEW_METAAPP_URI_PATTERN = /^preview-metaapp:\/\/([^/?#]+)(\/.*)?$/iu
-
-/**
- * Mirror of OAC's `resolveLocalBrowserPath` (src/cli/runtime.ts) so the
- * bridge and the CLI produce byte-identical `/browser/...` path forms for the
- * same URI without spawning a process per open.
- */
-export function resolveBrowserPath(uri: string): string {
-  const trimmedUri = uri.trim()
-  const match = trimmedUri === uri
-    ? /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)$/iu.exec(uri)
-    : null
-  const scheme = match?.[1]?.toLowerCase()
-  const resourceId = match?.[2]
-  if (scheme && resourceId && BROWSER_DEEP_LINK_SCHEMES.has(scheme)) {
-    return `/browser/${scheme}/${encodeURIComponent(resourceId)}`
-  }
-  const previewMatch = trimmedUri === uri ? PREVIEW_METAAPP_URI_PATTERN.exec(uri) : null
-  if (previewMatch) {
-    const host = previewMatch[1]
-    const rawPath = previewMatch[2] || ''
-    const segments = rawPath.split('/').filter(Boolean).map((segment) => encodeURIComponent(segment))
-    const pathSuffix = segments.length ? '/' + segments.join('/') : ''
-    return `/browser/preview-metaapp/${encodeURIComponent(host)}${pathSuffix}`
-  }
-  if (!match && trimmedUri === uri && BROWSER_PIN_ID_PATTERN.test(uri)) {
-    return `/browser/pin/${encodeURIComponent(uri)}`
-  }
-  if (!match && trimmedUri === uri && BROWSER_DOMAIN_ALIAS_PATTERN.test(uri)) {
-    return `/browser/metaid/${encodeURIComponent(uri)}`
-  }
-  const query = new URLSearchParams()
-  query.set('uri', uri)
-  return `/browser?${query.toString()}`
-}
+export { resolveBrowserPath }
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/u, '')
@@ -188,6 +154,7 @@ export class BrowserEventHub {
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private started = false
   private snapshot: BrowserSnapshot = EMPTY_SNAPSHOT
+  private catalog: BrowserCatalogEntry[] = []
 
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
 
@@ -239,12 +206,26 @@ export class BrowserEventHub {
     return () => { this.listeners.delete(id) }
   }
 
-  /** SSE sink for DSH web clients (open + tab commands). */
+  /** SSE sink for DSH web clients (open + tab commands + search catalog). */
   addClient(listener: (frame: BrowserSseFrame) => void): () => void {
     const id = this.nextClientId
     this.nextClientId += 1
     this.clients.set(id, listener)
+    if (this.catalog.length > 0) {
+      try {
+        listener({ event: 'browser-catalog', data: { apps: this.catalog } })
+      } catch {
+        // one bad client must not block registration
+      }
+    }
     return () => { this.clients.delete(id) }
+  }
+
+  /** Remember search hits so the web client can turn restated names into links. */
+  publishCatalog(apps: BrowserCatalogEntry[]): void {
+    this.catalog = apps
+    if (apps.length === 0) return
+    this.emitFrame({ event: 'browser-catalog', data: { apps } })
   }
 
   /**
@@ -254,15 +235,16 @@ export class BrowserEventHub {
   open(uri: string | null, source: BrowserOpenSource = 'host'): BrowserOpenEvent | null {
     const baseUrl = this.baseUrl
     if (baseUrl === null) return null
+    const resolved = uri && uri.trim() ? (normalizeBotBrowserUri(uri) ?? uri.trim()) : null
     const event: BrowserOpenEvent = {
-      uri,
-      localUiUrl: uri ? `${baseUrl}${resolveBrowserPath(uri)}` : `${baseUrl}/browser`,
+      uri: resolved,
+      localUiUrl: resolved ? `${baseUrl}${resolveBrowserPath(resolved)}` : `${baseUrl}/browser`,
       source,
     }
     this.snapshot = {
       ...this.snapshot,
       open: true,
-      ...(uri ? {} : { tabs: [], rendererType: null }),
+      ...(resolved ? {} : { tabs: [], rendererType: null }),
     }
     this.emitFrame({ event: 'browser-open', data: event })
     for (const listener of this.listeners.values()) {
