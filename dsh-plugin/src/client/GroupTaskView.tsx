@@ -1,0 +1,816 @@
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  Button,
+  IconPlusOutline16,
+  IconRefreshOutline16,
+  IconSendOutline16,
+  IconWarningOutline16,
+  Input,
+  MarkdownText,
+  Modal,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  timestampLabel,
+  type BotRow,
+  type GroupTaskDetailPayload,
+  type GroupTaskListTab,
+  type GroupTaskMemberRow,
+  type GroupTaskSummaryRow,
+} from './api.ts'
+import { BotAvatar } from './BotAvatar.tsx'
+import type { ConversationsLocaleKey } from './locale-conversations.ts'
+
+type Translate = (key: ConversationsLocaleKey, vars?: Record<string, string | number>) => string
+
+export interface GroupTaskInjectedApi {
+  list: (tab: GroupTaskListTab, includeArchived: boolean) => Promise<GroupTaskSummaryRow[]>
+  detail: (chair: string, taskId: number) => Promise<GroupTaskDetailPayload>
+  create: (input: {
+    title: string
+    goal: string
+    acceptanceCriteria?: string
+    workerSlugs?: string[]
+    chairSlug?: string
+  }) => Promise<{ chairSlug: string; taskId: number }>
+  post: (chair: string, taskId: number, input: { content: string; asSlug?: string; asOwner?: boolean }) => Promise<unknown>
+  close: (
+    chair: string,
+    taskId: number,
+    input: { outcome: 'done' | 'cancelled'; rating?: number; ratingComment?: string; reason?: string },
+  ) => Promise<unknown>
+  reopen: (chair: string, taskId: number, reason?: string) => Promise<unknown>
+  kick: (chair: string, taskId: number, member: { slug?: string; globalMetaId?: string }, reason?: string) => Promise<unknown>
+  rename: (chair: string, taskId: number, displayName: string) => Promise<unknown>
+  pin: (chair: string, taskId: number, pinned: boolean) => Promise<unknown>
+  archive: (chair: string, taskId: number, archived: boolean) => Promise<unknown>
+}
+
+const DETAIL_POLL_MS = 15_000
+
+function errorText(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
+function taskLabel(task: { displayName: string | null; title: string }): string {
+  return task.displayName?.trim() || task.title
+}
+
+function statusKey(status: GroupTaskSummaryRow['status']): ConversationsLocaleKey {
+  switch (status) {
+    case 'planning': return 'gtStatusPlanning'
+    case 'executing': return 'gtStatusExecuting'
+    case 'review': return 'gtStatusReview'
+    case 'done': return 'gtStatusDone'
+    case 'cancelled': return 'gtStatusCancelled'
+  }
+}
+
+function workStatusKey(workStatus: GroupTaskMemberRow['workStatus']): ConversationsLocaleKey {
+  switch (workStatus) {
+    case 'working': return 'gtWorkWorking'
+    case 'idle': return 'gtWorkIdle'
+    case 'timeout': return 'gtWorkTimeout'
+    case 'error': return 'gtWorkError'
+    default: return 'gtWorkUnknown'
+  }
+}
+
+function StatusBadge({ status, t }: { status: GroupTaskSummaryRow['status']; t: Translate }): ReactNode {
+  return <span className={`oac-gt-badge oac-gt-status-${status}`}>{t(statusKey(status))}</span>
+}
+
+/** One row in the left task list: pin marker, title, badges, members, time. */
+function TaskListRow({
+  task,
+  active,
+  onSelect,
+  t,
+}: {
+  task: GroupTaskSummaryRow
+  active: boolean
+  onSelect: () => void
+  t: Translate
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      className={active ? 'oac-a2a-row oac-gt-row active' : 'oac-a2a-row oac-gt-row'}
+      onClick={onSelect}
+    >
+      <span className="oac-a2a-row-main">
+        <span className="oac-gt-row-title">
+          {task.pinned ? <span className="oac-gt-pin-mark" title={t('gtPinned')}>★</span> : null}
+          <span className="oac-a2a-row-name">{taskLabel(task)}</span>
+          {task.openTeam ? <span className="oac-gt-badge oac-gt-openteam">{t('gtOpenTeam')}</span> : null}
+        </span>
+        <span className="oac-gt-row-meta">
+          <StatusBadge status={task.status} t={t} />
+          <span className="oac-a2a-row-text">{t('gtMemberCount', { count: task.memberCount })}</span>
+        </span>
+      </span>
+      <span className="oac-a2a-row-time">{timestampLabel(task.updatedAt)}</span>
+    </button>
+  )
+}
+
+/** Star rating input/display (1-5). */
+function Stars({ value, onChange }: { value: number; onChange?: (value: number) => void }): ReactNode {
+  return (
+    <span className="oac-gt-stars">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          className={star <= value ? 'oac-gt-star on' : 'oac-gt-star'}
+          disabled={!onChange}
+          onClick={() => onChange?.(star)}
+        >
+          ★
+        </button>
+      ))}
+    </span>
+  )
+}
+
+/**
+ * Group Task surface inside the A2A panel: task list on the left, task detail
+ * (info, members, deliverables, checkpoint banner, transcript, composer) on
+ * the right — the OAC port of the IDBots Bot Home group-task page.
+ * `createSignal` increments when the panel header's New button is pressed.
+ */
+export function GroupTaskView({
+  bots,
+  gt,
+  t,
+  createSignal,
+}: {
+  bots: BotRow[]
+  gt: GroupTaskInjectedApi
+  t: Translate
+  createSignal: number
+}): ReactNode {
+  const [filter, setFilter] = useState<GroupTaskListTab>('active')
+  const [tasks, setTasks] = useState<GroupTaskSummaryRow[] | null>(null)
+  const [listError, setListError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<{ chair: string; taskId: number } | null>(null)
+  const [detail, setDetail] = useState<GroupTaskDetailPayload | null>(null)
+  const [detailStatus, setDetailStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [actionNote, setActionNote] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [tick, setTick] = useState(0)
+
+  // Composer
+  const [draft, setDraft] = useState('')
+  const [speakAs, setSpeakAs] = useState('owner')
+
+  // Create modal
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [newTitle, setNewTitle] = useState('')
+  const [newGoal, setNewGoal] = useState('')
+  const [newAcceptance, setNewAcceptance] = useState('')
+  const [newChair, setNewChair] = useState('')
+  const [newWorkers, setNewWorkers] = useState<string[]>([])
+
+  // Close modal
+  const [closeOpen, setCloseOpen] = useState(false)
+  const [closeOutcome, setCloseOutcome] = useState<'done' | 'cancelled'>('done')
+  const [closeRating, setCloseRating] = useState(5)
+  const [closeComment, setCloseComment] = useState('')
+
+  // Kick confirm modal
+  const [kickTarget, setKickTarget] = useState<GroupTaskMemberRow | null>(null)
+
+  // Rename modal
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameDraft, setRenameDraft] = useState('')
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastCreateSignal = useRef(createSignal)
+
+  const reload = useCallback((): void => setTick((value) => value + 1), [])
+
+  useEffect(() => {
+    if (createSignal !== lastCreateSignal.current) {
+      lastCreateSignal.current = createSignal
+      setCreateError(null)
+      setCreateOpen(true)
+    }
+  }, [createSignal])
+
+  // Task list follows the filter; keep the previous rows on screen during
+  // reloads so the list does not flash.
+  useEffect(() => {
+    let current = true
+    void gt.list(filter, filter === 'all').then(
+      (rows) => {
+        if (!current) return
+        setTasks(rows)
+        setListError(null)
+        setSelected((value) => {
+          if (value && rows.some((row) => row.chairSlug === value.chair && row.id === value.taskId)) return value
+          const first = rows[0]
+          return first ? { chair: first.chairSlug, taskId: first.id } : null
+        })
+      },
+      (cause: unknown) => {
+        if (!current) return
+        setListError(errorText(cause))
+        setTasks([])
+      },
+    )
+    return () => { current = false }
+  }, [gt, filter, tick])
+
+  const loadDetail = useCallback(async (target: { chair: string; taskId: number }, silent = false): Promise<void> => {
+    if (!silent) {
+      setDetailStatus('loading')
+      setDetailError(null)
+    }
+    try {
+      const data = await gt.detail(target.chair, target.taskId)
+      setDetail(data)
+      setDetailStatus('ready')
+    } catch (cause) {
+      if (!silent) {
+        setDetailError(errorText(cause))
+        setDetailStatus('error')
+      }
+    }
+  }, [gt])
+
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null)
+      setDetailStatus('idle')
+      return
+    }
+    setActionNote(null)
+    void loadDetail(selected)
+    pollRef.current = setInterval(() => { void loadDetail(selected, true) }, DETAIL_POLL_MS)
+    return () => {
+      if (pollRef.current !== null) clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }, [selected, loadDetail])
+
+  const runAction = useCallback(async (work: () => Promise<unknown>, refreshList = true): Promise<boolean> => {
+    setBusy(true)
+    setActionNote(null)
+    try {
+      await work()
+      if (selected) await loadDetail(selected, true)
+      if (refreshList) reload()
+      return true
+    } catch (cause) {
+      setActionNote(`${t('gtActionFailed')} ${errorText(cause)}`)
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }, [selected, loadDetail, reload, t])
+
+  const onSend = async (): Promise<void> => {
+    const content = draft.trim()
+    if (!selected || !content || busy) return
+    const sender = speakAs === 'owner' ? { asOwner: true } : { asSlug: speakAs }
+    const sent = await runAction(() => gt.post(selected.chair, selected.taskId, { content, ...sender }), false)
+    if (sent) setDraft('')
+  }
+
+  const onCreate = async (): Promise<void> => {
+    const title = newTitle.trim()
+    const goal = newGoal.trim()
+    if (!title || !goal || createBusy) return
+    setCreateBusy(true)
+    setCreateError(null)
+    try {
+      const created = await gt.create({
+        title,
+        goal,
+        acceptanceCriteria: newAcceptance.trim() || undefined,
+        workerSlugs: newWorkers.length > 0 ? newWorkers : undefined,
+        chairSlug: newChair || undefined,
+      })
+      setCreateOpen(false)
+      setNewTitle('')
+      setNewGoal('')
+      setNewAcceptance('')
+      setNewWorkers([])
+      setFilter('active')
+      setSelected({ chair: created.chairSlug, taskId: created.taskId })
+      reload()
+    } catch (cause) {
+      setCreateError(`${t('gtCreateFailed')} ${errorText(cause)}`)
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
+  const onCloseTask = async (): Promise<void> => {
+    if (!selected) return
+    const input = closeOutcome === 'done'
+      ? { outcome: closeOutcome, rating: closeRating, ratingComment: closeComment.trim() || undefined }
+      : { outcome: closeOutcome, reason: closeComment.trim() || undefined }
+    const done = await runAction(() => gt.close(selected.chair, selected.taskId, input))
+    if (done) setCloseOpen(false)
+  }
+
+  const onKick = async (): Promise<void> => {
+    if (!selected || !kickTarget) return
+    const member = kickTarget.slug ? { slug: kickTarget.slug } : { globalMetaId: kickTarget.globalMetaId ?? '' }
+    const done = await runAction(() => gt.kick(selected.chair, selected.taskId, member))
+    if (done) setKickTarget(null)
+  }
+
+  const onRename = async (): Promise<void> => {
+    if (!selected) return
+    const done = await runAction(() => gt.rename(selected.chair, selected.taskId, renameDraft.trim()))
+    if (done) setRenameOpen(false)
+  }
+
+  const memberBots = detail
+    ? detail.members.filter((member) => member.slug && bots.some((bot) => bot.slug === member.slug))
+    : []
+  const terminal = detail !== null && (detail.status === 'done' || detail.status === 'cancelled')
+  const twinBot = bots.find((bot) => bot.botType === 'twin') ?? null
+
+  return (
+    <div className="oac-a2a-body">
+      <div className="oac-a2a-list">
+        <div className="oac-a2a-list-head">
+          <select
+            className="oac-input oac-input-select"
+            value={filter}
+            aria-label={t('gtFilterAll')}
+            onChange={(event) => setFilter(event.target.value as GroupTaskListTab)}
+          >
+            <option value="active">{t('gtFilterActive')}</option>
+            <option value="done">{t('gtFilterDone')}</option>
+            <option value="cancelled">{t('gtFilterCancelled')}</option>
+            <option value="all">{t('gtFilterAll')}</option>
+          </select>
+          <Button type="button" variant="outline" size="sm" icon={<IconRefreshOutline16 />} onClick={reload}>
+            {t('gtRefresh')}
+          </Button>
+        </div>
+        {listError ? <p className="oac-note error">{listError}</p> : null}
+        <div className="oac-a2a-list-rows">
+          {tasks === null ? <p className="oac-note saving">{t('gtLoading')}</p> : null}
+          {tasks !== null && tasks.length === 0 ? <p className="oac-note">{t('gtEmpty')}</p> : null}
+          {tasks?.map((task) => (
+            <TaskListRow
+              key={`${task.chairSlug}:${task.id}`}
+              task={task}
+              active={selected?.chair === task.chairSlug && selected.taskId === task.id}
+              onSelect={() => setSelected({ chair: task.chairSlug, taskId: task.id })}
+              t={t}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="oac-a2a-thread">
+        {detailStatus === 'idle' ? (
+          <div className="oac-gt-placeholder"><span className="oac-note">{t('gtSelectTask')}</span></div>
+        ) : null}
+        {detailStatus === 'loading' ? (
+          <div className="oac-gt-placeholder"><span className="oac-note saving">{t('gtLoading')}</span></div>
+        ) : null}
+        {detailStatus === 'error' ? (
+          <div className="oac-gt-placeholder"><span className="oac-note error">{detailError ?? t('gtError')}</span></div>
+        ) : null}
+        {detailStatus === 'ready' && detail !== null ? (
+          <>
+            <div className="oac-a2a-thread-head oac-gt-head">
+              <div className="oac-gt-head-main">
+                <strong>{taskLabel(detail)}</strong>
+                <span className="oac-gt-head-badges">
+                  <StatusBadge status={detail.status} t={t} />
+                  {detail.openTeam ? <span className="oac-gt-badge oac-gt-openteam">{t('gtOpenTeam')}</span> : null}
+                  {detail.stall && !terminal ? (
+                    <span className="oac-gt-badge oac-gt-stall"><IconWarningOutline16 size={12} />{t('gtStall')}</span>
+                  ) : null}
+                  {detail.rating !== null ? <Stars value={detail.rating} /> : null}
+                </span>
+              </div>
+              <div className="oac-gt-head-actions">
+                {!terminal ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        setCloseOutcome('done')
+                        setCloseRating(5)
+                        setCloseComment('')
+                        setCloseOpen(true)
+                      }}
+                    >
+                      {t('gtAccept')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="oac-danger-outline"
+                      disabled={busy}
+                      onClick={() => {
+                        setCloseOutcome('cancelled')
+                        setCloseComment('')
+                        setCloseOpen(true)
+                      }}
+                    >
+                      {t('gtCancelTask')}
+                    </Button>
+                  </>
+                ) : null}
+                {detail.status === 'review' ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => { void runAction(() => gt.reopen(detail.chairSlug, detail.id)) }}
+                  >
+                    {t('gtReopen')}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+            <div className="oac-gt-detail">
+              {actionNote ? <p className="oac-note error">{actionNote}</p> : null}
+              <section className="oac-gt-section">
+                <div className="oac-gt-field">
+                  <span className="oac-gt-field-label">{t('gtGoal')}</span>
+                  <p className="oac-gt-field-value">{detail.goal}</p>
+                </div>
+                {detail.acceptanceCriteria ? (
+                  <div className="oac-gt-field">
+                    <span className="oac-gt-field-label">{t('gtAcceptance')}</span>
+                    <p className="oac-gt-field-value">{detail.acceptanceCriteria}</p>
+                  </div>
+                ) : null}
+                <div className="oac-gt-local-actions">
+                  <button
+                    type="button"
+                    className="oac-a2a-guidance-toggle"
+                    onClick={() => {
+                      setRenameDraft(detail.displayName ?? '')
+                      setRenameOpen(true)
+                    }}
+                  >
+                    {t('gtRename')}
+                  </button>
+                  <button
+                    type="button"
+                    className="oac-a2a-guidance-toggle"
+                    disabled={busy}
+                    onClick={() => { void runAction(() => gt.pin(detail.chairSlug, detail.id, !detail.pinned)) }}
+                  >
+                    {detail.pinned ? t('gtUnpin') : t('gtPin')}
+                  </button>
+                  <button
+                    type="button"
+                    className="oac-a2a-guidance-toggle"
+                    disabled={busy}
+                    onClick={() => { void runAction(() => gt.archive(detail.chairSlug, detail.id, detail.archivedAt == null)) }}
+                  >
+                    {detail.archivedAt == null ? t('gtArchive') : t('gtUnarchive')}
+                  </button>
+                </div>
+              </section>
+              <section className="oac-gt-section">
+                <span className="oac-gt-field-label">{t('gtMembers')}</span>
+                <ul className="oac-gt-members">
+                  {detail.members.map((member) => {
+                    const bot = member.slug ? bots.find((row) => row.slug === member.slug) : undefined
+                    const name = member.displayName ?? bot?.name ?? member.slug ?? member.globalMetaId ?? '?'
+                    return (
+                      <li key={member.id} className="oac-gt-member">
+                        <BotAvatar name={name} src={member.avatar ?? bot?.avatarDataUrl} className="oac-gt-member-avatar" />
+                        <span className="oac-gt-member-main">
+                          <span className="oac-gt-member-name">
+                            {name}
+                            {member.role === 'chair' ? <span className="oac-gt-badge oac-gt-chair">{t('gtChair')}</span> : null}
+                            {member.slug == null ? <span className="oac-gt-badge oac-gt-openteam">{t('gtRemote')}</span> : null}
+                          </span>
+                          <span className={`oac-gt-member-work oac-gt-work-${member.workStatus}`}>
+                            {t(workStatusKey(member.workStatus))}
+                          </span>
+                        </span>
+                        {member.role !== 'chair' && !terminal ? (
+                          <button
+                            type="button"
+                            className="oac-gt-member-kick"
+                            disabled={busy}
+                            onClick={() => setKickTarget(member)}
+                          >
+                            {t('gtKick')}
+                          </button>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
+              {detail.deliverables.length > 0 ? (
+                <section className="oac-gt-section">
+                  <span className="oac-gt-field-label">{t('gtDeliverables')}</span>
+                  <ul className="oac-gt-deliverables">
+                    {detail.deliverables.map((row) => (
+                      <li key={row.id} className="oac-gt-deliverable">
+                        <span className={`oac-gt-badge oac-gt-deliverable-${row.status}`}>{row.status}</span>
+                        {row.kind ? <span className="oac-gt-deliverable-kind">{row.kind}</span> : null}
+                        {row.uri ? <code className="oac-gt-deliverable-uri">{row.uri}</code> : null}
+                        <span className="oac-a2a-row-time">{timestampLabel(row.createdAt)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              {detail.openCheckpointSummary && !terminal ? (
+                <section className="oac-gt-checkpoint">
+                  <span className="oac-gt-checkpoint-title">
+                    <IconWarningOutline16 size={14} />
+                    {t('gtCheckpointOpen')}
+                  </span>
+                  <p className="oac-gt-field-value">{detail.openCheckpointSummary}</p>
+                  <span className="oac-gt-checkpoint-hint">{t('gtCheckpointHint')}</span>
+                </section>
+              ) : null}
+              <section className="oac-gt-section oac-gt-transcript">
+                <span className="oac-gt-field-label">{t('gtTranscript')}</span>
+                {detail.messages.length === 0 ? <p className="oac-note">{t('gtNoMessages')}</p> : null}
+                {detail.messages.map((message) => {
+                  const isMarkdown = message.contentType === 'text/markdown'
+                  const senderName = message.senderSuspect
+                    ? t('gtSuspectSender')
+                    : (message.senderName ?? message.senderGlobalMetaId ?? '?')
+                  return (
+                    <div key={message.pinId ?? `idx-${message.index}`} className="oac-a2a-msg oac-a2a-msg-peer oac-gt-msg">
+                      <BotAvatar
+                        name={senderName}
+                        src={message.senderSuspect ? undefined : (message.senderAvatar ?? undefined)}
+                        className="oac-a2a-msg-avatar"
+                      />
+                      <div className="oac-a2a-msg-body">
+                        <div className="oac-a2a-msg-head">
+                          <span className={message.senderSuspect ? 'oac-a2a-msg-name oac-gt-suspect' : 'oac-a2a-msg-name'}>
+                            {senderName}
+                          </span>
+                          <span className="oac-a2a-msg-meta">
+                            <span className="oac-a2a-msg-time">{timestampLabel(message.timestamp)}</span>
+                          </span>
+                        </div>
+                        <div className="oac-a2a-bubble oac-a2a-bubble-peer">
+                          {isMarkdown
+                            ? <MarkdownText text={message.content} />
+                            : <span className="oac-a2a-msg-text">{message.content}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </section>
+            </div>
+            {!terminal ? (
+              <div className="oac-a2a-composer">
+                <div className="oac-a2a-composer-row">
+                  <select
+                    className="oac-input oac-input-select oac-gt-sender-select"
+                    value={speakAs}
+                    aria-label={t('gtPostAs')}
+                    onChange={(event) => setSpeakAs(event.target.value)}
+                  >
+                    <option value="owner">{t('gtPostAsOwner')}</option>
+                    {memberBots.map((member) => {
+                      const bot = bots.find((row) => row.slug === member.slug)
+                      return (
+                        <option key={member.slug ?? member.id} value={member.slug ?? ''}>
+                          {bot?.name ?? member.displayName ?? member.slug}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <Input
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder={t('gtMessagePlaceholder')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault()
+                        if (!busy) void onSend()
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="primary"
+                    icon={<IconSendOutline16 />}
+                    disabled={busy || !draft.trim()}
+                    onClick={() => { void onSend() }}
+                  >
+                    {busy ? t('gtWorking') : t('send')}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+
+      <Modal
+        open={createOpen}
+        onClose={() => { if (!createBusy) setCreateOpen(false) }}
+        title={t('gtCreateTitle')}
+        className="oac-dialog"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={createBusy} onClick={() => setCreateOpen(false)}>
+              {t('gtCancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              icon={<IconPlusOutline16 />}
+              disabled={createBusy || !newTitle.trim() || !newGoal.trim()}
+              onClick={() => { void onCreate() }}
+            >
+              {createBusy ? t('gtWorking') : t('gtCreate')}
+            </Button>
+          </>
+        )}
+      >
+        <div className="oac-gt-form">
+          {createError ? <p className="oac-note error">{createError}</p> : null}
+          {createBusy ? <p className="oac-note saving">{t('gtCreating')}</p> : null}
+          <label className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtFieldTitle')}</span>
+            <Input
+              value={newTitle}
+              disabled={createBusy}
+              onChange={(event) => setNewTitle(event.target.value)}
+              placeholder={t('gtFieldTitlePlaceholder')}
+            />
+          </label>
+          <label className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtFieldGoal')}</span>
+            <textarea
+              className="oac-input oac-gt-textarea"
+              value={newGoal}
+              disabled={createBusy}
+              rows={3}
+              onChange={(event) => setNewGoal(event.target.value)}
+              placeholder={t('gtFieldGoalPlaceholder')}
+            />
+          </label>
+          <label className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtFieldAcceptance')}</span>
+            <textarea
+              className="oac-input oac-gt-textarea"
+              value={newAcceptance}
+              disabled={createBusy}
+              rows={2}
+              onChange={(event) => setNewAcceptance(event.target.value)}
+              placeholder={t('gtFieldAcceptancePlaceholder')}
+            />
+          </label>
+          <label className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtFieldChair')}</span>
+            <select
+              className="oac-input oac-input-select"
+              value={newChair}
+              disabled={createBusy}
+              onChange={(event) => setNewChair(event.target.value)}
+            >
+              <option value="">
+                {twinBot ? `${twinBot.name} ${t('gtTwinDefault')}` : t('gtTwinDefault')}
+              </option>
+              {bots.map((bot) => (
+                <option key={bot.slug} value={bot.slug}>{bot.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtFieldWorkers')}</span>
+            <div className="oac-gt-worker-picks">
+              {bots
+                .filter((bot) => bot.slug !== (newChair || twinBot?.slug))
+                .map((bot) => (
+                  <label key={bot.slug} className="oac-gt-worker-pick">
+                    <input
+                      type="checkbox"
+                      disabled={createBusy}
+                      checked={newWorkers.includes(bot.slug)}
+                      onChange={(event) => {
+                        setNewWorkers((value) => event.target.checked
+                          ? [...value, bot.slug]
+                          : value.filter((slug) => slug !== bot.slug))
+                      }}
+                    />
+                    <BotAvatar name={bot.name} src={bot.avatarDataUrl} className="oac-gt-member-avatar" />
+                    <span>{bot.name}</span>
+                  </label>
+                ))}
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={closeOpen}
+        onClose={() => { if (!busy) setCloseOpen(false) }}
+        title={closeOutcome === 'done' ? t('gtAccept') : t('gtCancelTask')}
+        className="oac-dialog-delete"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setCloseOpen(false)}>
+              {t('gtCancel')}
+            </Button>
+            <Button type="button" variant="primary" disabled={busy} onClick={() => { void onCloseTask() }}>
+              {busy ? t('gtWorking') : t('gtConfirm')}
+            </Button>
+          </>
+        )}
+      >
+        <div className="oac-gt-form">
+          {closeOutcome === 'done' ? (
+            <div className="oac-gt-form-field">
+              <span className="oac-gt-field-label">{t('gtRating')}</span>
+              <Stars value={closeRating} onChange={setCloseRating} />
+            </div>
+          ) : null}
+          <label className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtRatingComment')}</span>
+            <textarea
+              className="oac-input oac-gt-textarea"
+              value={closeComment}
+              disabled={busy}
+              rows={2}
+              onChange={(event) => setCloseComment(event.target.value)}
+            />
+          </label>
+        </div>
+      </Modal>
+
+      <Modal
+        open={kickTarget !== null}
+        onClose={() => { if (!busy) setKickTarget(null) }}
+        title={t('gtKick')}
+        className="oac-dialog-delete"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setKickTarget(null)}>
+              {t('gtCancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              className="oac-danger-outline"
+              disabled={busy}
+              onClick={() => { void onKick() }}
+            >
+              {busy ? t('gtWorking') : t('gtConfirm')}
+            </Button>
+          </>
+        )}
+      >
+        <p className="oac-dialog-body">
+          {t('gtKickConfirm', {
+            name: kickTarget?.displayName ?? kickTarget?.slug ?? kickTarget?.globalMetaId ?? '?',
+          })}
+        </p>
+      </Modal>
+
+      <Modal
+        open={renameOpen}
+        onClose={() => { if (!busy) setRenameOpen(false) }}
+        title={t('gtRename')}
+        className="oac-dialog-delete"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setRenameOpen(false)}>
+              {t('gtCancel')}
+            </Button>
+            <Button type="button" variant="primary" disabled={busy} onClick={() => { void onRename() }}>
+              {busy ? t('gtWorking') : t('gtConfirm')}
+            </Button>
+          </>
+        )}
+      >
+        <div className="oac-gt-form">
+          <Input
+            value={renameDraft}
+            disabled={busy}
+            onChange={(event) => setRenameDraft(event.target.value)}
+            placeholder={t('gtRenamePlaceholder')}
+          />
+        </div>
+      </Modal>
+    </div>
+  )
+}

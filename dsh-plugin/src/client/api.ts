@@ -204,6 +204,96 @@ export type ConversationThread = {
   messages: ConversationMessage[]
 }
 
+export type GroupTaskStatus = 'planning' | 'executing' | 'review' | 'done' | 'cancelled'
+export type GroupTaskListTab = 'active' | 'done' | 'cancelled' | 'all'
+
+export type GroupTaskMemberPreview = {
+  name: string
+  avatar: string | null
+  role: 'chair' | 'worker'
+  slug: string | null
+  remote: boolean
+}
+
+export type GroupTaskSummaryRow = {
+  id: number
+  chairSlug: string
+  groupId: string | null
+  title: string
+  displayName: string | null
+  goal: string
+  status: GroupTaskStatus
+  pinned: boolean
+  archivedAt: number | null
+  openTeam: boolean
+  memberCount: number
+  chairName: string | null
+  members: GroupTaskMemberPreview[]
+  rating: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export type GroupTaskMemberRow = {
+  id: number
+  slug: string | null
+  globalMetaId: string | null
+  role: 'chair' | 'worker'
+  status: string
+  displayName: string | null
+  avatar: string | null
+  removedAt: number | null
+  lastSpeakAt: number | null
+  workStatus: 'working' | 'idle' | 'timeout' | 'error' | 'unknown'
+  inviteStatus: string
+}
+
+export type GroupTaskDeliverableRow = {
+  id: number
+  kind: string | null
+  uri: string | null
+  status: string
+  msgPinId: string | null
+  createdAt: number
+}
+
+export type GroupTaskMessageRow = {
+  index: number
+  pinId: string | null
+  senderGlobalMetaId: string | null
+  senderName: string | null
+  senderAvatar: string | null
+  content: string
+  contentType: string | null
+  /** Epoch ms (normalized from the chain's epoch-second field). */
+  timestamp: number
+  senderSuspect: boolean
+}
+
+export type GroupTaskDetailPayload = {
+  id: number
+  chairSlug: string
+  groupId: string | null
+  title: string
+  displayName: string | null
+  goal: string
+  acceptanceCriteria: string | null
+  status: GroupTaskStatus
+  pinned: boolean
+  archivedAt: number | null
+  openTeam: boolean
+  stall: boolean
+  rating: number | null
+  ratingComment: string | null
+  createdAt: number
+  updatedAt: number
+  closedAt: number | null
+  members: GroupTaskMemberRow[]
+  deliverables: GroupTaskDeliverableRow[]
+  messages: GroupTaskMessageRow[]
+  openCheckpointSummary: string | null
+}
+
 type Envelope = {
   ok?: boolean
   state?: string
@@ -388,6 +478,53 @@ export const api = {
   },
   conversationGuidance: async (from: string, peer: string, guidance: string): Promise<CommandEnvelope> =>
     postEnvelope('conversations/guidance', { from, peer, guidance }),
+  /** Group task surface (chair-addressed; the daemon owns the store). */
+  grouptaskList: async (tab: GroupTaskListTab = 'all', includeArchived = false): Promise<GroupTaskSummaryRow[]> => {
+    const data = await post<{ tasks?: unknown }>('grouptask/list', { tab, includeArchived })
+    const rows = Array.isArray(data.tasks) ? data.tasks : []
+    return rows.map((row) => normalizeGroupTaskSummary(row))
+  },
+  grouptaskDetail: async (chair: string, taskId: number): Promise<GroupTaskDetailPayload> =>
+    normalizeGroupTaskDetail(await post('grouptask/detail', { chair, taskId })),
+  grouptaskCreate: async (input: {
+    title: string
+    goal: string
+    acceptanceCriteria?: string
+    workerSlugs?: string[]
+    chairSlug?: string
+  }): Promise<{ chairSlug: string; taskId: number }> => {
+    const data = await post<{ chairSlug?: unknown; task?: unknown }>('grouptask/create', input)
+    const task = recordOf(data.task)
+    return {
+      chairSlug: textOf(data.chairSlug),
+      taskId: Math.trunc(toNumber(task.id)),
+    }
+  },
+  grouptaskPost: async (
+    chair: string,
+    taskId: number,
+    input: { content: string; asSlug?: string; asOwner?: boolean },
+  ): Promise<CommandEnvelope> => postEnvelope('grouptask/post', { chair, taskId, ...input }),
+  grouptaskClose: async (
+    chair: string,
+    taskId: number,
+    input: { outcome: 'done' | 'cancelled'; rating?: number; ratingComment?: string; reason?: string },
+  ): Promise<CommandEnvelope> => postEnvelope('grouptask/close', { chair, taskId, ...input }),
+  grouptaskReopen: async (chair: string, taskId: number, reason?: string): Promise<CommandEnvelope> =>
+    postEnvelope('grouptask/reopen', { chair, taskId, ...(reason ? { reason } : {}) }),
+  grouptaskKick: async (
+    chair: string,
+    taskId: number,
+    member: { slug?: string; globalMetaId?: string },
+    reason?: string,
+  ): Promise<CommandEnvelope> =>
+    postEnvelope('grouptask/kick', { chair, taskId, ...member, ...(reason ? { reason } : {}) }),
+  grouptaskRename: async (chair: string, taskId: number, displayName: string): Promise<CommandEnvelope> =>
+    postEnvelope('grouptask/rename', { chair, taskId, displayName }),
+  grouptaskPin: async (chair: string, taskId: number, pinned: boolean): Promise<CommandEnvelope> =>
+    postEnvelope('grouptask/pin', { chair, taskId, pinned }),
+  grouptaskArchive: async (chair: string, taskId: number, archived: boolean): Promise<CommandEnvelope> =>
+    postEnvelope('grouptask/archive', { chair, taskId, archived }),
   chatPrivate: async (from: string, to: string, content: string): Promise<CommandEnvelope> =>
     postEnvelope('chat/private', { from, to, content }),
   servicesOwned: async (from: string): Promise<unknown> => post('services/owned/list', { from }),
@@ -622,6 +759,126 @@ function collapseOrderProgress(rows: unknown[]): unknown[] {
     collapsed.push(row)
   }
   return collapsed
+}
+
+const GROUP_TASK_STATUSES: GroupTaskStatus[] = ['planning', 'executing', 'review', 'done', 'cancelled']
+
+function statusOf(value: unknown): GroupTaskStatus {
+  const text = textOf(value) as GroupTaskStatus
+  return GROUP_TASK_STATUSES.includes(text) ? text : 'planning'
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value == null) return null
+  const parsed = toNumber(value)
+  return parsed > 0 ? parsed : null
+}
+
+function normalizeGroupTaskMemberPreview(value: unknown): GroupTaskMemberPreview {
+  const record = recordOf(value)
+  return {
+    name: textOf(record.name),
+    avatar: textOf(record.avatar) || null,
+    role: textOf(record.role) === 'chair' ? 'chair' : 'worker',
+    slug: textOf(record.slug) || null,
+    remote: record.remote === true || record.slug == null,
+  }
+}
+
+function normalizeGroupTaskSummary(value: unknown): GroupTaskSummaryRow {
+  const record = recordOf(value)
+  return {
+    id: Math.trunc(toNumber(record.id)),
+    chairSlug: textOf(record.chairSlug),
+    groupId: textOf(record.groupId) || null,
+    title: textOf(record.title),
+    displayName: textOf(record.displayName) || null,
+    goal: textOf(record.goal),
+    status: statusOf(record.status),
+    pinned: record.pinned === true,
+    archivedAt: nullableNumber(record.archivedAt),
+    openTeam: record.openTeam === true,
+    memberCount: Math.max(0, Math.trunc(toNumber(record.memberCount))),
+    chairName: textOf(record.chairName) || null,
+    members: Array.isArray(record.members) ? record.members.map(normalizeGroupTaskMemberPreview) : [],
+    rating: nullableNumber(record.rating),
+    createdAt: toNumber(record.createdAt),
+    updatedAt: toNumber(record.updatedAt),
+  }
+}
+
+function normalizeGroupTaskMember(value: unknown): GroupTaskMemberRow {
+  const record = recordOf(value)
+  const work = textOf(record.workStatus)
+  return {
+    id: Math.trunc(toNumber(record.id)),
+    slug: textOf(record.slug) || null,
+    globalMetaId: textOf(record.globalMetaId) || null,
+    role: textOf(record.role) === 'chair' ? 'chair' : 'worker',
+    status: textOf(record.status) || 'assigned',
+    displayName: textOf(record.displayName) || null,
+    avatar: textOf(record.avatar) || null,
+    removedAt: nullableNumber(record.removedAt),
+    lastSpeakAt: nullableNumber(record.lastSpeakAt),
+    workStatus: work === 'working' || work === 'idle' || work === 'timeout' || work === 'error' ? work : 'unknown',
+    inviteStatus: textOf(record.inviteStatus) || 'none',
+  }
+}
+
+function normalizeGroupTaskMessage(value: unknown): GroupTaskMessageRow {
+  const record = recordOf(value)
+  return {
+    index: Math.trunc(toNumber(record.index)),
+    pinId: textOf(record.pinId) || null,
+    senderGlobalMetaId: textOf(record.senderGlobalMetaId) || null,
+    senderName: textOf(record.senderName) || null,
+    senderAvatar: textOf(record.senderAvatar) || null,
+    content: typeof record.content === 'string' ? record.content : '',
+    contentType: textOf(record.contentType) || null,
+    timestamp: toTimestampMs(record.chainTimestamp ?? record.timestamp),
+    senderSuspect: record.senderSuspect === true,
+  }
+}
+
+function normalizeGroupTaskDetail(value: unknown): GroupTaskDetailPayload {
+  const record = recordOf(value)
+  return {
+    id: Math.trunc(toNumber(record.id)),
+    chairSlug: textOf(record.chairSlug),
+    groupId: textOf(record.groupId) || null,
+    title: textOf(record.title),
+    displayName: textOf(record.displayName) || null,
+    goal: textOf(record.goal),
+    acceptanceCriteria: textOf(record.acceptanceCriteria) || null,
+    status: statusOf(record.status),
+    pinned: record.pinned === true,
+    archivedAt: nullableNumber(record.archivedAt),
+    openTeam: record.openTeam === true,
+    stall: record.stall === true,
+    rating: nullableNumber(record.rating),
+    ratingComment: textOf(record.ratingComment) || null,
+    createdAt: toNumber(record.createdAt),
+    updatedAt: toNumber(record.updatedAt),
+    closedAt: nullableNumber(record.closedAt),
+    members: Array.isArray(record.members)
+      ? record.members.map(normalizeGroupTaskMember).filter((member) => member.removedAt == null)
+      : [],
+    deliverables: Array.isArray(record.deliverables)
+      ? record.deliverables.map((row) => {
+        const entry = recordOf(row)
+        return {
+          id: Math.trunc(toNumber(entry.id)),
+          kind: textOf(entry.kind) || null,
+          uri: textOf(entry.uri) || null,
+          status: textOf(entry.status) || 'pending',
+          msgPinId: textOf(entry.msgPinId) || null,
+          createdAt: toNumber(entry.createdAt),
+        }
+      })
+      : [],
+    messages: Array.isArray(record.messages) ? record.messages.map(normalizeGroupTaskMessage) : [],
+    openCheckpointSummary: textOf(record.openCheckpointSummary) || null,
+  }
 }
 
 function normalizeMessage(value: unknown): ConversationMessage {

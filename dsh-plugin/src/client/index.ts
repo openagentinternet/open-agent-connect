@@ -31,7 +31,7 @@ import { UserPanel } from './UserPanel.tsx'
 import type { SeatApi, SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BROWSER_CSS, MEMORY_CSS, PRESETS_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BROWSER_CSS, GROUPTASK_CSS, MEMORY_CSS, PRESETS_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -55,7 +55,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + APPS_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + APPS_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -148,6 +148,18 @@ export function apply(ctx: ClientContext): void {
       send: (from: string, to: string, content: string) => api.chatPrivate(from, to, content),
       guidance: (from: string, peer: string, guidance: string) =>
         api.conversationGuidance(from, peer, guidance),
+      grouptask: {
+        list: (tab, includeArchived) => api.grouptaskList(tab, includeArchived),
+        detail: (chair, taskId) => api.grouptaskDetail(chair, taskId),
+        create: (input) => api.grouptaskCreate(input),
+        post: (chair, taskId, input) => api.grouptaskPost(chair, taskId, input),
+        close: (chair, taskId, input) => api.grouptaskClose(chair, taskId, input),
+        reopen: (chair, taskId, reason) => api.grouptaskReopen(chair, taskId, reason),
+        kick: (chair, taskId, member, reason) => api.grouptaskKick(chair, taskId, member, reason),
+        rename: (chair, taskId, displayName) => api.grouptaskRename(chair, taskId, displayName),
+        pin: (chair, taskId, pinned) => api.grouptaskPin(chair, taskId, pinned),
+        archive: (chair, taskId, archived) => api.grouptaskArchive(chair, taskId, archived),
+      },
     }),
   }, A2AConversation))
   // Services settings section hidden until the service plugin matures; the
