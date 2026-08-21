@@ -79,13 +79,15 @@ test('per-bot reads return null (CLI fallback) for an unknown profile', async ()
     assert.equal(await localRead.localMemoryStats('no-such-bot', {}), null)
     assert.equal(await localRead.localDreamSelfIdentity('no-such-bot'), null)
     assert.equal(await localRead.localBotShow('no-such-bot'), null)
+    assert.equal(await localRead.localConversationsList('no-such-bot'), null)
+    assert.equal(await localRead.localConversationsMessages('no-such-bot', 'idpeer'), null)
   } finally {
     process.env.HOME = ORIGINAL_HOME
     await rm(home, { recursive: true, force: true })
   }
 })
 
-test('in-process user read is dramatically faster than spawning the CLI', async () => {
+test('in-process user read is fast (no CLI subprocess boot)', async () => {
   const home = await makeHome()
   process.env.HOME = home
   try {
@@ -96,14 +98,11 @@ test('in-process user read is dramatically faster than spawning the CLI', async 
     await localRead.localUserWho()
     const localMs = Number(process.hrtime.bigint() - localStart) / 1e6
 
-    const cliStart = process.hrtime.bigint()
-    await runCli(['user', 'who', '--json'], makeCliContext(home).context)
-    const cliMs = Number(process.hrtime.bigint() - cliStart) / 1e6
-
-    // The in-process read should be a small fraction of a CLI subprocess boot.
-    // Keep the bound generous to stay stable across machines.
+    // A spawned `metabot` CLI boots the whole command tree (~0.7-1s). The
+    // in-process read must stay far below that; keep the bound generous so it
+    // is stable across machines. (runCli here is in-process, so it is not a
+    // fair comparison target.)
     assert.ok(localMs < 400, `in-process read too slow: ${localMs.toFixed(1)}ms`)
-    assert.ok(localMs < cliMs, `expected in-process (${localMs.toFixed(1)}ms) < CLI (${cliMs.toFixed(1)}ms)`)
   } finally {
     process.env.HOME = ORIGINAL_HOME
     await rm(home, { recursive: true, force: true })
