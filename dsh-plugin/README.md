@@ -165,9 +165,12 @@ Agent linkage is two layers:
 - **Native Cordis tools** on every `oac-*` session (same pattern as memory/twin):
   `bot_browser_tabs`, `bot_browser_open_uri`, `bot_browser_preview_local`,
   `bot_browser_read_page`, `search_metaapps`, `bot_browser_fork_current_app`,
-  `bot_browser_publish_app`. Tab control uses ABC `postMessage` from the DSH
-  parent. Search/fork/publish wrap the OAC CLI. Publish asks DSH
-  `ctx.approval` (the native confirmation dialog) before `publish-project --confirm`.
+  `bot_browser_publish_app`. They are installed when the agent is created on an
+  `oac-*` preset **and** when a blank session switches onto one (DSH new chats
+  start on `standard` and recompose; there is no second `agent/created`). Tab
+  control uses ABC `postMessage` from the DSH parent. Search/fork/publish wrap
+  the OAC CLI. Publish asks DSH `ctx.approval` (the native confirmation dialog)
+  before `publish-project --confirm`.
 
 Each `oac-*` turn also injects a live `<browser_context>` block at the
 user-message tail (active tab URI/title, open tabs, MetaApp `source_dir` when

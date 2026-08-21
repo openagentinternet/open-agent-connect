@@ -91,6 +91,7 @@ export interface HostSessionEventLike {
 }
 
 export interface HostSessionLike {
+  id?: string
   events: ReadonlyArray<HostSessionEventLike>
   header?: { agentPreset?: string }
 }
@@ -128,6 +129,7 @@ export interface HostApproval {
 }
 
 export interface HostAgentLike {
+  id?: string
   ctx: {
     on?(event: string, listener: (...args: any[]) => unknown, options?: { prepend?: boolean }): void
     systemPrompt?: {
@@ -151,6 +153,8 @@ export interface HostAgentsRegistryLike {
     setup?: (agentCtx: unknown) => Promise<void> | void
     signal?: AbortSignal
   }): Promise<{ agent: HostAgentLike; dispose(): Promise<void> | void }>
+  get?(id: string): HostAgentLike | undefined
+  list?(): HostAgentLike[]
 }
 
 export interface HostAgentsCreateLike {

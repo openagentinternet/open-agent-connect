@@ -21,6 +21,7 @@ import {
   type BrowserCommandResult,
   type MetaAppSearchCandidate,
 } from './browser-protocol.js'
+import { slugFromPresetId } from './chip-logic.js'
 import { runMetabot } from './cli-bridge.js'
 import type { RunFn } from './cli-payload.js'
 import type {
@@ -28,6 +29,8 @@ import type {
   HostApproval,
   HostApprovalOutcome,
   HostContext,
+  HostSessionEventLike,
+  HostSessionLike,
   HostToolDefinition,
   HostToolExec,
 } from './context-types.js'
@@ -532,6 +535,37 @@ export function buildBrowserToolDefinitions(input: {
   ]
 }
 
+const installedBrowserTools = new WeakSet<object>()
+
+function isDuplicateToolError(error: unknown): boolean {
+  return error instanceof Error && /already registered/.test(error.message)
+}
+
+function agentSessionId(agent: HostAgentLike): string {
+  if (typeof agent.id === 'string' && agent.id) return agent.id
+  if (typeof agent.session?.id === 'string' && agent.session.id) return agent.session.id
+  return ''
+}
+
+function liveAgentBySessionId(
+  ctx: HostContext,
+  sessionId: string,
+  remembered: Map<string, HostAgentLike>,
+): HostAgentLike | undefined {
+  if (!sessionId) return undefined
+  const rememberedAgent = remembered.get(sessionId)
+  if (rememberedAgent) return rememberedAgent
+  const registry = ctx.agents ?? (ctx.get?.('agents') as HostContext['agents'])
+  const found = registry?.get?.(sessionId)
+  if (found) return found
+  return registry?.list?.().find((agent) => agentSessionId(agent) === sessionId)
+}
+
+function oacSlugOf(ctx: HostContext, agent: HostAgentLike): string | undefined {
+  const preset = agent.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
+  return preset ? slugFromPresetId(preset) : undefined
+}
+
 export function installBrowserToolsOnAgent(
   agent: HostAgentLike,
   slug: string,
@@ -540,6 +574,7 @@ export function installBrowserToolsOnAgent(
   approval: HostApproval | undefined,
   run: RunFn = runMetabot,
 ): void {
+  if (installedBrowserTools.has(agent)) return
   agent.ctx.systemPrompt?.section({
     name: 'oac:browser-strategy',
     order: 160,
@@ -553,6 +588,72 @@ export function installBrowserToolsOnAgent(
     hostAgent: agent,
     run,
   })) {
-    agent.ctx.tools?.register(definition)
+    try {
+      agent.ctx.tools?.register(definition)
+    } catch (error) {
+      if (!isDuplicateToolError(error)) throw error
+    }
   }
+  installedBrowserTools.add(agent)
+}
+
+/**
+ * Register Bot Browser tools when an agent is already on an oac-* preset
+ * (agent/created) and again when a blank session switches onto one
+ * (agent-preset/selected). DSH creates new chats on `standard` then recomposes
+ * to `oac-<slug>` without a second created event — install-on-created-only
+ * leaves the model with injected <browser_context> and unknown native tools.
+ */
+export function bindBrowserToolInstall(
+  ctx: HostContext,
+  hub: BrowserEventHub,
+  cache: BrowserSourceCache,
+  run: RunFn = runMetabot,
+): void {
+  if (!ctx.on) return
+  const approval = approvalOf(ctx)
+  const remembered = new Map<string, HostAgentLike>()
+  const install = (agent: HostAgentLike | undefined, slugHint?: string): void => {
+    if (!agent?.ctx) return
+    const slug = slugHint ?? oacSlugOf(ctx, agent)
+    if (!slug) return
+    installBrowserToolsOnAgent(agent, slug, hub, cache, approval, run)
+  }
+  const installForSession = (sessionId: string, agentPreset: string): void => {
+    const slug = slugFromPresetId(agentPreset)
+    if (!slug) return
+    install(liveAgentBySessionId(ctx, sessionId, remembered), slug)
+  }
+  ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
+    try {
+      const agent = payload.agent
+      const sessionId = agent ? agentSessionId(agent) : ''
+      if (sessionId) remembered.set(sessionId, agent)
+      install(agent)
+    } catch (error) {
+      ctx.logger?.warn?.(`[oac-dsh] browser tool install failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
+  ctx.on('agent/disposed', (payload: { agent: HostAgentLike }) => {
+    const sessionId = payload.agent ? agentSessionId(payload.agent) : ''
+    if (sessionId) remembered.delete(sessionId)
+  })
+  ctx.on('session/event', (session: HostSessionLike, event: HostSessionEventLike) => {
+    try {
+      if (event?.type !== 'agent-preset/selected') return
+      const agentPreset = (event.data as { agentPreset?: unknown } | undefined)?.agentPreset
+      if (typeof agentPreset !== 'string') return
+      const sessionId = typeof session?.id === 'string' ? session.id : ''
+      installForSession(sessionId, agentPreset)
+    } catch (error) {
+      ctx.logger?.warn?.(`[oac-dsh] browser tool install failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
+  ctx.on('agent-preset/selected', (sessionId: string, agentPreset: string) => {
+    try {
+      installForSession(sessionId, agentPreset)
+    } catch (error) {
+      ctx.logger?.warn?.(`[oac-dsh] browser tool install failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
 }

@@ -10,9 +10,8 @@ import { BrowserEventHub } from './browser-bridge.js'
 import { applyBrowserInjection } from './browser-context.js'
 import { parseBrowserCommandResult, parseBrowserSnapshot } from './browser-protocol.js'
 import {
-  approvalOf,
+  bindBrowserToolInstall,
   createBrowserSourceCache,
-  installBrowserToolsOnAgent,
   resolveMetaAppSource,
 } from './browser-tools.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
@@ -410,19 +409,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       })()
     })
   }
-  if (ctx.on) {
-    ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
-      try {
-        const agent = payload.agent
-        const preset = agent?.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
-        const slug = preset ? slugFromPresetId(preset) : undefined
-        if (!slug) return
-        installBrowserToolsOnAgent(agent, slug, browserHub, sourceCache, approvalOf(ctx))
-      } catch {
-        // tool installation is best-effort per agent
-      }
-    })
-  }
+  bindBrowserToolInstall(ctx, browserHub, sourceCache)
 
   // Nightly dream scheduler: ticks on a timer while the DSH host is alive;
   // the CLI's due-date arithmetic owns window/catch-up/backoff decisions.
@@ -436,6 +423,7 @@ export { applyBrowserInjection, buildBrowserContextXml } from './browser-context
 export {
   BROWSER_STRATEGY_TEXT,
   approvalOf,
+  bindBrowserToolInstall,
   buildBrowserToolDefinitions,
   createBrowserSourceCache,
   installBrowserToolsOnAgent,

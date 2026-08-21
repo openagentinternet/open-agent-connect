@@ -231,6 +231,50 @@ test('browser/state and command-result routes update the hub', async () => {
   assert.equal(body.data.tabs[0].title, '半糖牌局')
 })
 
+test('browser tools are skipped on standard created, then installed when the session switches to oac-*', () => {
+  const { agent, tools } = fakeAgent()
+  agent.id = 'sess-1'
+  const listeners = []
+  let preset = 'standard'
+  plugin.bindBrowserToolInstall(
+    {
+      on: (event, listener) => listeners.push({ event, listener }),
+      agentPresets: { composedPreset: () => preset },
+    },
+    fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
+    plugin.createBrowserSourceCache(),
+  )
+  const created = listeners.find((entry) => entry.event === 'agent/created')
+  const selected = listeners.find((entry) => entry.event === 'session/event')
+  const selectedDirect = listeners.find((entry) => entry.event === 'agent-preset/selected')
+  assert.ok(created)
+  assert.ok(selected)
+  assert.ok(selectedDirect)
+
+  created.listener({ agent })
+  assert.equal(tools.some((tool) => tool.name === 'bot_browser_open_uri'), false)
+
+  preset = 'oac-alice'
+  selected.listener(
+    { id: 'sess-1' },
+    { type: 'agent-preset/selected', data: { agentPreset: 'oac-alice' } },
+  )
+  assert.equal(tools.some((tool) => tool.name === 'bot_browser_open_uri'), true)
+
+  const count = tools.length
+  selectedDirect.listener('sess-1', 'oac-alice')
+  assert.equal(tools.length, count)
+})
+
+test('installBrowserToolsOnAgent is idempotent on the same agent', () => {
+  const { agent, tools } = fakeAgent()
+  const hub = fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false }))
+  const cache = plugin.createBrowserSourceCache()
+  plugin.installBrowserToolsOnAgent(agent, 'alice', hub, cache)
+  plugin.installBrowserToolsOnAgent(agent, 'alice', hub, cache)
+  assert.equal(tools.filter((tool) => tool.name === 'bot_browser_open_uri').length, 1)
+})
+
 function request(method, url, payload) {
   return {
     method,
