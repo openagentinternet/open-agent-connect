@@ -728,3 +728,53 @@ test('simplemsg listener accepts socket messages without an explicit recipient o
   assert.equal(conversation.messages[0].content, 'missing recipient should still persist');
   assert.equal(conversation.messages[0].pinId, 'incoming-pin-no-recipient');
 });
+
+test('circuit breaker opens after repeated handshake failures and stops reconnecting', async (t) => {
+  const systemHomeDir = await createSystemHome(t);
+  const keys = createIdentityPair();
+  await createProfile(systemHomeDir, {
+    name: 'Alpha Bot',
+    slug: 'alpha-bot',
+    globalMetaId: 'idq1alpha0000000000000000000000000000',
+    keys,
+  });
+
+  const harness = createSocketHarness();
+  const manager = createA2ASimplemsgListenerManager({
+    systemHomeDir,
+    socketClientFactory: harness.socketClientFactory,
+    socketEndpoints: [
+      { url: 'wss://primary.example', path: '/socket/socket.io' },
+    ],
+    // Tiny retry delays so the exponential backoff fires inside the test.
+    reconnectDelayMs: 1,
+    maxReconnectDelayMs: 4,
+  });
+
+  await manager.start();
+  assert.equal(harness.sockets.length, 1);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const socket = harness.sockets[harness.sockets.length - 1];
+    await socket.emitServer('connect_error', new Error(`relay down ${attempt}`));
+    if (attempt < 4) {
+      // Let the 1-4ms backoff timer fire and create the next socket.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+  }
+
+  // 1 initial socket + 4 retries; the 5th failure opens the breaker.
+  assert.equal(harness.sockets.length, 5);
+  const socketsAtBreaker = harness.sockets.length;
+
+  // While the breaker is open no further reconnects happen (the half-open
+  // probe is minutes away).
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(harness.sockets.length, socketsAtBreaker);
+
+  // A manager stop/start resets the breaker and reconnects once.
+  manager.stop();
+  await manager.start();
+  assert.equal(harness.sockets.length, socketsAtBreaker + 1);
+  manager.stop();
+});

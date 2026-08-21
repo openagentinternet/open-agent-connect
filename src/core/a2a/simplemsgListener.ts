@@ -25,6 +25,11 @@ const DEFAULT_SOCKET_ENDPOINTS = [resolveMetasoInfrastructureEndpoints().socket]
 const DEFAULT_RECONNECT_DELAY_MS = 15_000;
 const MAX_RECONNECT_DELAY_MS = 300_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+// Circuit breaker: after this many consecutive handshake failures the profile
+// stops reconnecting entirely and probes once per breaker-probe interval, so
+// an unreachable relay degrades to a trickle instead of a reconnect storm.
+const CIRCUIT_BREAKER_FAILURES_BEFORE_OPEN = 5;
+const CIRCUIT_BREAKER_PROBE_MS = 10 * 60_000;
 const MAX_SEEN_PIN_IDS = 5_000;
 
 export interface A2ASimplemsgSocketEndpoint {
@@ -46,8 +51,9 @@ export interface A2ASimplemsgSocketOptions {
     type: 'pc';
   };
   reconnection: boolean;
-  reconnectionDelay: number;
-  reconnectionDelayMax: number;
+  /** socket.io retry knobs; unused when `reconnection` is false (the listener owns retries). */
+  reconnectionDelay?: number;
+  reconnectionDelayMax?: number;
   transports: string[];
 }
 
@@ -196,6 +202,15 @@ function createProfileSimplemsgListener(input: {
   let activeEndpointIndex = 0;
   let heartbeatSocket: A2ASimplemsgSocketClient | null = null;
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  // Reconnection circuit breaker state (the profile listener is recreated on
+  // every manager start, so this state naturally resets across watchdog
+  // restarts).
+  let failureStreak = 0;
+  let breakerOpen = false;
+  let everConnected = false;
+  let manuallyStopped = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let probeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const stopHeartbeat = (socket?: A2ASimplemsgSocketClient): void => {
     if (socket && heartbeatSocket !== socket) return;
@@ -314,10 +329,23 @@ function createProfileSimplemsgListener(input: {
 
   const registerSocket = (socket: A2ASimplemsgSocketClient, endpointIndex: number): void => {
     socket.on('connect', () => {
+      everConnected = true;
+      failureStreak = 0;
+      breakerOpen = false;
+      if (probeTimer) {
+        clearTimeout(probeTimer);
+        probeTimer = null;
+      }
       startHeartbeat(socket);
     });
     socket.on('disconnect', () => {
       stopHeartbeat(socket);
+      if (manuallyStopped) return;
+      // A failed handshake surfaces through connect_error; only an established
+      // connection dropping here counts toward the breaker.
+      if (!everConnected) return;
+      activeEndpointIndex = 0;
+      recordConnectionFailure();
     });
     socket.on('heartbeat_ack', () => {
       // The ack confirms that the Metaso socket registered the heartbeat ping.
@@ -340,48 +368,111 @@ function createProfileSimplemsgListener(input: {
     socket.on('connect_error', (error: Error) => {
       input.onError?.(error);
       stopHeartbeat(socket);
-      if (endpointIndex !== activeEndpointIndex || endpointIndex >= input.endpoints.length - 1) {
+      if (manuallyStopped) return;
+      if (endpointIndex === activeEndpointIndex && endpointIndex < input.endpoints.length - 1) {
+        // Fail over to the next endpoint once.
+        activeEndpointIndex += 1;
+        try {
+          socket.removeAllListeners();
+          socket.disconnect();
+        } catch {
+          // Best effort fallback shutdown.
+        }
+        connectEndpoint(activeEndpointIndex);
         return;
       }
-
-      activeEndpointIndex += 1;
       try {
         socket.removeAllListeners();
         socket.disconnect();
       } catch {
         // Best effort fallback shutdown.
       }
-      connectEndpoint(activeEndpointIndex);
+      recordConnectionFailure();
     });
   };
 
   const connectEndpoint = (endpointIndex: number): void => {
     const endpoint = input.endpoints[endpointIndex];
     if (!endpoint) return;
+    // The listener owns reconnection through the circuit breaker below, so
+    // socket.io's built-in retry loop stays off.
     const socket = input.socketClientFactory(endpoint, {
       path: endpoint.path,
       query: {
         metaid: input.identity.globalMetaId,
         type: 'pc',
       },
-      reconnection: true,
-      reconnectionDelay: input.reconnectDelayMs,
-      reconnectionDelayMax: input.maxReconnectDelayMs,
+      reconnection: false,
       transports: ['websocket'],
     });
     registerSocket(socket, endpointIndex);
     sockets.push(socket);
   };
 
+  const clearReconnectTimers = (): void => {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (probeTimer) {
+      clearTimeout(probeTimer);
+      probeTimer = null;
+    }
+  };
+
+  /** Stop retrying and wait for a half-open probe instead of hammering. */
+  const openBreaker = (): void => {
+    breakerOpen = true;
+    probeTimer = setTimeout(() => {
+      probeTimer = null;
+      if (manuallyStopped) return;
+      breakerOpen = false;
+      failureStreak = 0;
+      activeEndpointIndex = 0;
+      connectEndpoint(activeEndpointIndex);
+    }, CIRCUIT_BREAKER_PROBE_MS);
+    probeTimer.unref?.();
+  };
+
+  /** Retry once after an exponential backoff between 15s and 5min. */
+  const scheduleReconnect = (): void => {
+    if (retryTimer || breakerOpen || manuallyStopped) return;
+    const exponent = Math.min(Math.max(failureStreak - 1, 0), 8);
+    const delay = Math.min(input.reconnectDelayMs * (2 ** exponent), input.maxReconnectDelayMs);
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (manuallyStopped || breakerOpen) return;
+      activeEndpointIndex = 0;
+      connectEndpoint(activeEndpointIndex);
+    }, delay);
+    retryTimer.unref?.();
+  };
+
+  const recordConnectionFailure = (): void => {
+    if (manuallyStopped) return;
+    failureStreak += 1;
+    if (failureStreak >= CIRCUIT_BREAKER_FAILURES_BEFORE_OPEN) {
+      openBreaker();
+      return;
+    }
+    scheduleReconnect();
+  };
+
   return {
     start() {
       if (sockets.length > 0) return;
+      manuallyStopped = false;
+      breakerOpen = false;
+      failureStreak = 0;
+      everConnected = false;
       activeEndpointIndex = 0;
       connectEndpoint(activeEndpointIndex);
     },
 
     stop() {
+      manuallyStopped = true;
       stopHeartbeat();
+      clearReconnectTimers();
       for (const socket of sockets) {
         try {
           socket.removeAllListeners();
