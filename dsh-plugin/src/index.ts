@@ -21,6 +21,7 @@ import { uploadFileBytes } from './file-upload.js'
 import { emptyHealth, type HealthPayload } from './health.js'
 import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
 import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
+import { dispatchGroupTaskRoutes } from './grouptask.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
@@ -164,6 +165,8 @@ async function dispatchPost(
     if (!guidance) return { ok: false, state: 'failed', code: 'missing_guidance', message: 'guidance is required' }
     return runConversationGuidance(from, peer, guidance)
   }
+  const grouptask = await dispatchGroupTaskRoutes(method, payload)
+  if (grouptask !== undefined) return grouptask
   const memory = await dispatchMemoryRoutes(method, payload, {
     llm: ctx.llm as unknown as import('./llm-generate.js').LlmStreamLike | undefined,
   })
@@ -399,6 +402,7 @@ export {
   slugFromPresetId,
 } from './chip-logic.js'
 export { dispatchSection } from './sections.js'
+export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick } from './dream-scheduler.js'

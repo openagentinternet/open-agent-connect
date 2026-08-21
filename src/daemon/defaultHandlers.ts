@@ -203,6 +203,7 @@ import {
   type FetchPrivateHistory,
 } from '../core/chat/privateConversation';
 import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/localMnemonicSigner';
+import { createGroupTaskDaemonHandlers } from './grouptaskHandlers';
 import type { LocalIdentitySecrets, SecretStore } from '../core/secrets/secretStore';
 import {
   confirmWalletTransfer,
@@ -15890,6 +15891,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
         return streamConversationEventsForLocalBot(localGlobalMetaId, profile?.homeDir, rawInput.signal);
       },
     },
+    grouptask: createGroupTaskDaemonHandlers({
+      systemHomeDir: normalizedSystemHomeDir,
+      createSignerForProfileHome,
+      adapters,
+      resolvePeerChatPublicKey,
+      log: (message) => console.warn(message),
+    }),
     chat: {
       privateConversation: async (rawInput) => {
         const actor = await resolveActorChatContext(rawInput.from);

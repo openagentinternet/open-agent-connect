@@ -52,11 +52,11 @@ function hasSentChatSkillWaitNotice(
 }
 
 // Order-protocol records (ORDER/ORDER_STATUS/DELIVERY/NeedsRating/ORDER_END)
-// are service traffic, not conversation. Keep them out of the LLM chat
-// context so a completed service exchange does not read as a finished
-// conversation and nudge the model into closing the chat early.
+// and OpenTeam recruitment envelopes are service traffic, not conversation.
+// Keep them out of the LLM chat context so a completed service exchange does
+// not read as a finished conversation and nudge the model into closing early.
 function filterChatPromptMessages(messages: PrivateChatMessage[]): PrivateChatMessage[] {
-  return messages.filter((message) => classifySimplemsgContent(message.content).kind !== 'order_protocol');
+  return messages.filter((message) => classifySimplemsgContent(message.content).kind === 'private_chat');
 }
 
 export interface PrivateChatAutoReplyDependencies {
@@ -1100,6 +1100,14 @@ export function createPrivateChatAutoReplyOrchestrator(
       // ---- Order-protocol path: record-only, no turn counting, no reply ----
 
       if (simplemsgClassification.kind === 'order_protocol') {
+        await deps.stateStore.upsertConversation(conversation);
+        return;
+      }
+
+      // ---- OpenTeam envelope path: record-only, handled by the group-task
+      // engine (IDBots interceptOpenTeamEnvelope parity — never reaches LLM) ----
+
+      if (simplemsgClassification.kind === 'openteam_envelope') {
         await deps.stateStore.upsertConversation(conversation);
         return;
       }

@@ -3,6 +3,7 @@ import {
   Button,
   IconCloseOutline16,
   IconNewChatOutline16,
+  IconPlusOutline16,
   IconSendOutline16,
   Input,
   MarkdownText,
@@ -17,6 +18,7 @@ import {
   type ConversationThread,
 } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
+import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 
 type Translate = (key: ConversationsLocaleKey, vars?: Record<string, string | number>) => string
@@ -27,6 +29,7 @@ export interface A2AConversationInjected {
   thread: (from: string, peer: string) => Promise<ConversationThread>
   send: (from: string, to: string, content: string) => Promise<unknown>
   guidance: (from: string, peer: string, guidance: string) => Promise<unknown>
+  grouptask: GroupTaskInjectedApi
 }
 
 const GUIDANCE_POLL_MS = 1500
@@ -119,9 +122,12 @@ export function A2AConversation({
   thread,
   send,
   guidance,
+  grouptask,
   t,
 }: A2AConversationInjected & { wide: boolean; t: Translate }): ReactNode {
   const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<'private' | 'grouptask'>('private')
+  const [gtCreateSignal, setGtCreateSignal] = useState(0)
   const [profiles, setProfiles] = useState<BotRow[]>([])
   const [from, setFrom] = useState('')
   const [summaries, setSummaries] = useState<ConversationSummary[] | null>(null)
@@ -317,18 +323,50 @@ export function A2AConversation({
           <div className="oac-a2a-mask" aria-hidden="true" onClick={() => setOpen(false)} />
           <div className="oac-a2a-panel" role="dialog" aria-modal="true" aria-label={t('title')}>
             <div className="oac-a2a-header">
-              <h2>{t('title')}</h2>
-              <button
-                ref={closeButtonRef}
-                type="button"
-                className="oac-a2a-close"
-                aria-label={t('close')}
-                onClick={() => setOpen(false)}
-              >
-                <IconCloseOutline16 size={14} />
-              </button>
+              <div className="oac-gt-header-left">
+                <h2>{t('title')}</h2>
+                <div className="oac-tablist oac-gt-mode-tabs" role="tablist">
+                  {(['private', 'grouptask'] as const).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      role="tab"
+                      className="oac-tab"
+                      data-active={mode === key}
+                      onClick={() => setMode(key)}
+                    >
+                      {t(key === 'private' ? 'tabPrivate' : 'tabGroup')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="oac-gt-header-right">
+                {mode === 'grouptask' ? (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    icon={<IconPlusOutline16 />}
+                    onClick={() => setGtCreateSignal((value) => value + 1)}
+                  >
+                    {t('gtNew')}
+                  </Button>
+                ) : null}
+                <button
+                  ref={closeButtonRef}
+                  type="button"
+                  className="oac-a2a-close"
+                  aria-label={t('close')}
+                  onClick={() => setOpen(false)}
+                >
+                  <IconCloseOutline16 size={14} />
+                </button>
+              </div>
             </div>
-            <div className="oac-a2a-body">
+            {mode === 'grouptask' ? (
+              <GroupTaskView bots={profiles} gt={grouptask} t={t} createSignal={gtCreateSignal} />
+            ) : null}
+            <div className="oac-a2a-body" style={mode === 'grouptask' ? { display: 'none' } : undefined}>
               <div className="oac-a2a-list">
                 <div className="oac-a2a-list-head">
                   <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-bot-avatar" />

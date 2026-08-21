@@ -5,6 +5,12 @@ export type SimplemsgOrderProtocolTag =
   | 'NeedsRating'
   | 'ORDER_END';
 
+export type SimplemsgOpenTeamTag =
+  | 'OPENTEAM_INVITE'
+  | 'OPENTEAM_ACCEPT'
+  | 'OPENTEAM_DECLINE'
+  | 'OPENTEAM_KICK';
+
 export type SimplemsgClassification =
   | { kind: 'private_chat' }
   | {
@@ -13,6 +19,11 @@ export type SimplemsgClassification =
       orderTxid: string | null;
       orderPinId: string | null;
       reason: string | null;
+    }
+  | {
+      /** OpenTeam group-task recruitment envelope — record-only, never LLM. */
+      kind: 'openteam_envelope';
+      tag: SimplemsgOpenTeamTag;
     };
 
 const ORDER_TXID_RE = /^[0-9a-f]{64}$/i;
@@ -45,10 +56,20 @@ function extractOrderPinId(value: unknown): string | null {
   return normalizeText(match?.[1]) || null;
 }
 
+const OPENTEAM_TAG_RE = /^\[(OPENTEAM_(?:INVITE|ACCEPT|DECLINE|KICK))[\]:]/;
+
 export function classifySimplemsgContent(content: unknown): SimplemsgClassification {
   const text = normalizeText(content);
   if (!text) {
     return { kind: 'private_chat' };
+  }
+
+  const openteamMatch = text.match(OPENTEAM_TAG_RE);
+  if (openteamMatch) {
+    return {
+      kind: 'openteam_envelope',
+      tag: openteamMatch[1] as SimplemsgOpenTeamTag,
+    };
   }
 
   const match = text.match(TAG_RE);
