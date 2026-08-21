@@ -22,16 +22,33 @@
  * `~/.metabot/runtime/daemon.json` — the file `metabot daemon start` writes,
  * so the CLI and this bridge always agree on the running daemon.
  */
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import type {
+  BrowserCommandRequest,
+  BrowserCommandResult,
+  BrowserOpenSource,
+  BrowserSnapshot,
+} from './browser-protocol.js'
 
 /** One open request fanned out to the DSH web clients. */
 export interface BrowserOpenEvent {
   uri: string | null
   localUiUrl: string
+  /** daemon = ABC iframe already received the open; host = DSH must navigate. */
+  source: BrowserOpenSource
 }
+
+export type BrowserSseFrame =
+  | { event: 'browser-open'; data: BrowserOpenEvent }
+  | { event: 'browser-command'; data: BrowserCommandRequest }
+
+const COMMAND_TIMEOUT_MS = 10_000
+
+const EMPTY_SNAPSHOT: BrowserSnapshot = { open: false, tabs: [] }
 
 /** Deep-link schemes `metabot browser` maps to `/browser/<scheme>/<id>` paths. */
 const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile', 'pin'])
@@ -155,13 +172,22 @@ const RETRY_DELAY_MS = 2_000
  * ride the same path, so both the agent-driven and the button-driven flows
  * land on identical sidebar behavior.
  */
+type PendingCommand = {
+  resolve: (result: BrowserCommandResult) => void
+  timeout: ReturnType<typeof setTimeout>
+}
+
 export class BrowserEventHub {
   private readonly listeners = new Map<number, (event: BrowserOpenEvent) => void>()
+  private readonly clients = new Map<number, (frame: BrowserSseFrame) => void>()
+  private readonly pending = new Map<string, PendingCommand>()
   private nextListenerId = 0
+  private nextClientId = 0
   private baseUrl: string | null = null
   private subscription: (() => void) | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private started = false
+  private snapshot: BrowserSnapshot = EMPTY_SNAPSHOT
 
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
 
@@ -179,10 +205,30 @@ export class BrowserEventHub {
     this.subscription?.()
     this.subscription = null
     this.listeners.clear()
+    this.clients.clear()
+    for (const pending of this.pending.values()) clearTimeout(pending.timeout)
+    this.pending.clear()
   }
 
   get daemonBaseUrl(): string | null {
     return this.baseUrl
+  }
+
+  getSnapshot(): BrowserSnapshot {
+    return this.snapshot
+  }
+
+  /** Replace the last-reported client snapshot (POST /oac/api/browser/state). */
+  applySnapshot(snapshot: BrowserSnapshot): void {
+    this.snapshot = {
+      open: snapshot.open === true,
+      tabs: Array.isArray(snapshot.tabs) ? snapshot.tabs : [],
+      rendererType: typeof snapshot.rendererType === 'string' ? snapshot.rendererType : snapshot.rendererType ?? null,
+    }
+  }
+
+  clientCount(): number {
+    return this.clients.size
   }
 
   /** Register a web-client listener; returns an unsubscribe function. */
@@ -193,17 +239,27 @@ export class BrowserEventHub {
     return () => { this.listeners.delete(id) }
   }
 
+  /** SSE sink for DSH web clients (open + tab commands). */
+  addClient(listener: (frame: BrowserSseFrame) => void): () => void {
+    const id = this.nextClientId
+    this.nextClientId += 1
+    this.clients.set(id, listener)
+    return () => { this.clients.delete(id) }
+  }
+
   /**
    * Resolve and broadcast one open (agent-driven event or UI-initiated call).
    * Returns the event when the daemon base URL is known, else null.
    */
-  open(uri: string | null): BrowserOpenEvent | null {
+  open(uri: string | null, source: BrowserOpenSource = 'host'): BrowserOpenEvent | null {
     const baseUrl = this.baseUrl
     if (baseUrl === null) return null
     const event: BrowserOpenEvent = {
       uri,
       localUiUrl: uri ? `${baseUrl}${resolveBrowserPath(uri)}` : `${baseUrl}/browser`,
+      source,
     }
+    this.emitFrame({ event: 'browser-open', data: event })
     for (const listener of this.listeners.values()) {
       try {
         listener(event)
@@ -212,6 +268,56 @@ export class BrowserEventHub {
       }
     }
     return event
+  }
+
+  /**
+   * Ask a connected DSH web client to run one ABC tab command and wait for
+   * POST /oac/api/browser/command-result. Fails fast when no client is listening.
+   */
+  requestCommand(
+    command: Omit<BrowserCommandRequest, 'requestId'>,
+    timeoutMs = COMMAND_TIMEOUT_MS,
+  ): Promise<BrowserCommandResult> {
+    if (this.clients.size === 0) {
+      return Promise.resolve({
+        requestId: '',
+        ok: false,
+        error: 'The Bot Browser surface is not open; ask the user to open Bot Browser, or call bot_browser_open_uri first.',
+      })
+    }
+    const requestId = randomUUID()
+    const request: BrowserCommandRequest = { ...command, requestId }
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(requestId)
+        resolve({
+          requestId,
+          ok: false,
+          error: 'Bot Browser did not respond in time. The sidebar may be closed or still loading.',
+        })
+      }, timeoutMs)
+      this.pending.set(requestId, { resolve, timeout })
+      this.emitFrame({ event: 'browser-command', data: request })
+    })
+  }
+
+  completeCommand(result: BrowserCommandResult): boolean {
+    const pending = this.pending.get(result.requestId)
+    if (!pending) return false
+    this.pending.delete(result.requestId)
+    clearTimeout(pending.timeout)
+    pending.resolve(result)
+    return true
+  }
+
+  private emitFrame(frame: BrowserSseFrame): void {
+    for (const listener of this.clients.values()) {
+      try {
+        listener(frame)
+      } catch {
+        // one bad client must not block the rest
+      }
+    }
   }
 
   private async connect(): Promise<void> {
@@ -229,7 +335,7 @@ export class BrowserEventHub {
       onEvent: (eventName, data) => {
         if (eventName !== 'agent-browser:open-tab') return
         const uri = parseOpenTabData(data)
-        if (uri !== null) this.open(uri)
+        if (uri !== null) this.open(uri, 'daemon')
       },
       onClose: () => this.scheduleRetry(),
       onError: () => this.scheduleRetry(),

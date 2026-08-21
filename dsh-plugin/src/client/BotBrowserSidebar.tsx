@@ -60,10 +60,12 @@ export function BotBrowserSidebar({
   store,
   locale,
   openHome,
+  onIframe,
 }: {
   store: BotBrowserStore
   locale: BrowserLocaleFace
   openHome: () => void
+  onIframe?: (iframe: HTMLIFrameElement | null) => void
 }): ReactNode {
   // Wrap subscribe/getSnapshot in arrows: React's useSyncExternalStore calls
   // the subscribe reference as a bare function, so an unbound prototype method
@@ -141,8 +143,8 @@ export function BotBrowserSidebar({
       <div className="oac-browser-panel">
         <header className="oac-browser-header">
           <h2 className="oac-browser-title">{t('title')}</h2>
-          <span className="oac-browser-uri" title={state.url ?? ''}>
-            {state.url ?? ''}
+          <span className="oac-browser-uri" title={state.activeUri || state.url || ''}>
+            {state.activeUri || state.url || ''}
           </span>
           <button
             type="button"
@@ -161,6 +163,7 @@ export function BotBrowserSidebar({
               src={state.url}
               title={t('title')}
               allow="clipboard-read; clipboard-write; fullscreen"
+              ref={(element) => onIframe?.(element)}
             />
           ) : (
             <div className="oac-browser-landing">

@@ -19,6 +19,7 @@ import { BotPanel } from './BotPanel.tsx'
 import { BotPresetSeat, type BotPresetSeatInjected } from './BotPresetSeat.tsx'
 import { BotBrowserStore } from './browser-store.ts'
 import { openBrowser, startBrowserEventSource } from './browser-events.ts'
+import { BotBrowserIframeBridge } from './browser-iframe.ts'
 import { appEn, APP_NS, appZh, type AppsLocaleKey } from './locale-apps.ts'
 import { browserEn, BROWSER_NS, browserZh, type BrowserLocaleKey } from './locale-browser.ts'
 import { convEn, CONV_NS, convZh, type ConversationsLocaleKey } from './locale-conversations.ts'
@@ -76,6 +77,7 @@ export function apply(ctx: ClientContext): void {
   // Right-sidebar Bot Browser: one store per activation, shared by the mounted
   // panel, the Settings > Bots entry buttons, and the daemon-event listener.
   const browserStore = new BotBrowserStore()
+  const iframeBridge = new BotBrowserIframeBridge(browserStore, (snapshot) => api.browserState(snapshot))
   ctx.effect(() => {
     const host = document.createElement('div')
     host.dataset.plugin = 'open-agent-connect-dsh'
@@ -102,11 +104,22 @@ export function apply(ctx: ClientContext): void {
           store: browserStore,
           locale: ctx.locale as unknown as BrowserLocaleFace,
           openHome: () => openBrowser(browserStore, null),
+          onIframe: (frame) => iframeBridge.setIframe(frame),
         }),
       ))
-      const stopEvents = startBrowserEventSource(browserStore)
+      const stopBridge = iframeBridge.start()
+      let lastOpen = browserStore.getSnapshot().open
+      const stopOpenWatch = browserStore.subscribe(() => {
+        const open = browserStore.getSnapshot().open
+        if (open === lastOpen) return
+        lastOpen = open
+        iframeBridge.reportNow()
+      })
+      const stopEvents = startBrowserEventSource(browserStore, iframeBridge)
       return () => {
         stopEvents()
+        stopOpenWatch()
+        stopBridge()
         root.unmount()
         host.remove()
       }

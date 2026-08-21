@@ -7,6 +7,14 @@
 import { bootstrapHealth } from './bootstrap.js'
 import { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
 import { BrowserEventHub } from './browser-bridge.js'
+import { applyBrowserInjection } from './browser-context.js'
+import { parseBrowserCommandResult, parseBrowserSnapshot } from './browser-protocol.js'
+import {
+  approvalOf,
+  createBrowserSourceCache,
+  installBrowserToolsOnAgent,
+  resolveMetaAppSource,
+} from './browser-tools.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
@@ -57,10 +65,11 @@ async function dispatchPost(
   payload: unknown,
   browserHub: BrowserEventHub,
 ): Promise<MetabotCommandResult> {
-  if (method === 'browser/open') {    const uri = typeof (payload as { uri?: unknown })?.uri === 'string'
+  if (method === 'browser/open') {
+    const uri = typeof (payload as { uri?: unknown })?.uri === 'string'
       ? (payload as { uri: string }).uri.trim()
       : ''
-    const event = browserHub.open(uri || null)
+    const event = browserHub.open(uri || null, 'host')
     if (event === null) {
       return {
         ok: false,
@@ -70,6 +79,22 @@ async function dispatchPost(
       }
     }
     return { ok: true, state: 'success', data: event }
+  }
+  if (method === 'browser/state') {
+    const snapshot = parseBrowserSnapshot(payload)
+    if (!snapshot) {
+      return { ok: false, state: 'failed', code: 'invalid_snapshot', message: 'browser snapshot is invalid' }
+    }
+    browserHub.applySnapshot(snapshot)
+    return { ok: true, state: 'success', data: snapshot }
+  }
+  if (method === 'browser/command-result') {
+    const result = parseBrowserCommandResult(payload)
+    if (!result) {
+      return { ok: false, state: 'failed', code: 'invalid_command_result', message: 'browser command result is invalid' }
+    }
+    browserHub.completeCommand(result)
+    return { ok: true, state: 'success' }
   }
   if (method === 'who') {
     return handleWho()
@@ -187,9 +212,9 @@ function streamBrowserEvents(
     connection: 'keep-alive',
   })
   res.write?.('retry: 3000\n\n')
-  const unsubscribe = hub.addListener((event) => {
+  const unsubscribe = hub.addClient((frame) => {
     try {
-      res.write?.(`event: browser-open\ndata: ${JSON.stringify(event)}\n\n`)
+      res.write?.(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`)
     } catch {
       // a broken connection is unregistered on req close below
     }
@@ -294,6 +319,7 @@ function registerApi(
 export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promise<void> {
   let health: HealthPayload = emptyHealth()
   const browserHub = new BrowserEventHub()
+  const sourceCache = createBrowserSourceCache()
   if (!config.skipBootstrap) {
     ctx.effect(() => {
       browserHub.start()
@@ -340,6 +366,18 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       return () => undefined
     }, 'oac-dsh: memory injection')
   }
+  ctx.effect(() => {
+    applyBrowserInjection(
+      ctx,
+      () => browserHub.getSnapshot(),
+      async (uri, slug) => {
+        if (!uri) return null
+        const resolved = await resolveMetaAppSource(uri, slug, sourceCache).catch(() => null)
+        return resolved ? { dir: resolved.dir, indexFile: resolved.indexFile } : null
+      },
+    )
+    return () => undefined
+  }, 'oac-dsh: browser context injection')
   if (memoryEnabled && config.memory?.extraction !== false) {
     ctx.effect(() => {
       applyMemoryExtraction(ctx)
@@ -372,6 +410,19 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       })()
     })
   }
+  if (ctx.on) {
+    ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
+      try {
+        const agent = payload.agent
+        const preset = agent?.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
+        const slug = preset ? slugFromPresetId(preset) : undefined
+        if (!slug) return
+        installBrowserToolsOnAgent(agent, slug, browserHub, sourceCache, approvalOf(ctx))
+      } catch {
+        // tool installation is best-effort per agent
+      }
+    })
+  }
 
   // Nightly dream scheduler: ticks on a timer while the DSH host is alive;
   // the CLI's due-date arithmetic owns window/catch-up/backoff decisions.
@@ -381,6 +432,20 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
 }
 
 export type { HealthPayload, OacDshConfig }
+export { applyBrowserInjection, buildBrowserContextXml } from './browser-context.js'
+export {
+  BROWSER_STRATEGY_TEXT,
+  approvalOf,
+  buildBrowserToolDefinitions,
+  createBrowserSourceCache,
+  installBrowserToolsOnAgent,
+} from './browser-tools.js'
+export {
+  formatBotBrowserTabs,
+  formatMetaAppCandidates,
+  parseMetaAppPinIdFromUri,
+  reduceBrowserTabs,
+} from './browser-protocol.js'
 export { BrowserEventHub, resolveBrowserPath, resolveDaemonBaseUrl, type BrowserOpenEvent } from './browser-bridge.js'
 export { parseMetabotStdout, resolveCli, resolveMetabotCliPath, runMetabot } from './cli-bridge.js'
 export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'

@@ -66,6 +66,16 @@ function systemHomeDir(): string {
 }
 
 /** Resolve a `--from` slug/name to a profile homeDir, mirroring the CLI. */
+export async function localActorHomeDir(from: string): Promise<string | null> {
+  try {
+    if (process.env.OAC_DSH_NO_LOCAL_READ) return null
+    return await resolveActorHomeDir(from)
+  } catch {
+    return null
+  }
+}
+
+/** Resolve a `--from` slug/name to a profile homeDir, mirroring the CLI. */
 async function resolveActorHomeDir(from: string): Promise<string | null> {
   const identityProfiles = core('core/identity/identityProfiles.js')
   const nameResolution = core('core/identity/profileNameResolution.js')

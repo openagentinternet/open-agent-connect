@@ -657,6 +657,25 @@ export const api = {
     }
     return url
   },
+  browserState: async (snapshot: {
+    open: boolean
+    tabs: Array<{ id: number; uri: string | null; title: string | null; isActive: boolean }>
+    rendererType?: string | null
+  }): Promise<void> => {
+    await post('browser/state', snapshot)
+  },
+  browserCommandResult: async (result: {
+    requestId: string
+    ok: boolean
+    error?: string
+    action?: string
+    tabs?: unknown
+    activeTab?: unknown
+    content?: unknown
+    info?: unknown
+  }): Promise<void> => {
+    await post('browser/command-result', result)
+  },
   health: async (): Promise<{ ok: boolean; error?: string }> => {
     const response = await fetch('/oac/api/health', { credentials: 'same-origin' })
     return await response.json() as { ok: boolean; error?: string }

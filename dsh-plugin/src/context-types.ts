@@ -104,7 +104,27 @@ export interface HostToolDefinition {
     render: (args: unknown, value: unknown) => Array<{ type: 'text'; text: string }>
   }
   timeoutMs?: number
-  execute(args: Record<string, unknown>, exec: { signal?: AbortSignal }): Promise<unknown>
+  execute(args: Record<string, unknown>, exec: HostToolExec): Promise<unknown>
+}
+
+/** Runtime facts DSH passes into tool execute (structural subset of ToolRunContext). */
+export interface HostToolExec {
+  signal?: AbortSignal
+  agent?: HostAgentLike
+  callId?: string
+}
+
+/** DSH native one-shot approval (ctx.approval.request). */
+export type HostApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+
+export interface HostApproval {
+  request(req: {
+    agent: unknown
+    toolName: string
+    callId?: string
+    reason?: string
+    signal?: AbortSignal
+  }): Promise<HostApprovalOutcome>
 }
 
 export interface HostAgentLike {
@@ -155,6 +175,8 @@ export interface HostContext {
   /** Cordis event/waterfall surface (agent/pre-step, session/event, agent/created…). */
   on?(event: string, listener: (...args: any[]) => unknown, options?: { prepend?: boolean }): void
   agents?: HostAgentsRegistryLike
+  /** Present when the DSH web composition mounts user-approval. */
+  approval?: HostApproval
 }
 
 /** Optional apply config (tests skip CLI bootstrap so they cannot start a user daemon). */
