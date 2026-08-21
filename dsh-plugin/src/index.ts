@@ -10,6 +10,7 @@ import { BrowserEventHub } from './browser-bridge.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { localBotList, localBotShow } from './local-read.js'
 import type { HostAgentLike, HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { uploadFileBytes } from './file-upload.js'
 import { emptyHealth, type HealthPayload } from './health.js'
@@ -68,6 +69,8 @@ async function dispatchPost(
     return handleWho()
   }
   if (method === 'bots/list') {
+    const local = await localBotList()
+    if (local) return local
     return runMetabot(['bot', 'list'], { timeoutMs: PING_TIMEOUT_MS })
   }
   if (method === 'bots/show') {
@@ -75,6 +78,8 @@ async function dispatchPost(
       ? (payload as { slug: string }).slug.trim()
       : ''
     if (!slug) return { ok: false, state: 'failed', code: 'missing_slug', message: 'slug is required' }
+    const local = await localBotShow(slug)
+    if (local) return local
     return runMetabot(['bot', 'show', '--from', slug])
   }
   if (method === 'bots/create') {

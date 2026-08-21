@@ -15,6 +15,19 @@ import {
   type RunFn,
 } from './cli-payload.js'
 import { generateLlmText, type LlmStreamLike } from './llm-generate.js'
+import {
+  localDreamSelfIdentity,
+  localDreamStatus,
+  localDreamSummaries,
+  localImpressionsList,
+  localImpressionsShow,
+  localKnowledgeList,
+  localMemoryList,
+  localMemoryPolicyGet,
+  localMemoryStats,
+  localTwinCurrent,
+  localUserWho,
+} from './local-read.js'
 
 const LIST_TIMEOUT_MS = 30_000
 const DREAM_CLI_TIMEOUT_MS = 120_000
@@ -176,6 +189,11 @@ export async function dispatchMemoryRoutes(
 
   // ---- memory reads/writes ------------------------------------------------
   if (method === 'memory/list') {
+    const from = readTrimmed(payload, 'from')
+    if (from) {
+      const local = await localMemoryList(from, body)
+      if (local) return local
+    }
     const args = withFrom(['memory', 'list'], payload)
     if (!Array.isArray(args)) return args
     for (const [flag, key] of [
@@ -201,6 +219,13 @@ export async function dispatchMemoryRoutes(
     return runMetabotWithPayloadFile(['memory', verb, '--from', from], entry, '--payload-file', [], run)
   }
   if (method === 'memory/scopes' || method === 'memory/stats') {
+    if (method === 'memory/stats') {
+      const from = readTrimmed(payload, 'from')
+      if (from) {
+        const local = await localMemoryStats(from, body)
+        if (local) return local
+      }
+    }
     const args = withFrom(['memory', method.slice('memory/'.length)], payload)
     if (!Array.isArray(args)) return args
     const scopeKind = readTrimmed(payload, 'scopeKind')
@@ -226,6 +251,13 @@ export async function dispatchMemoryRoutes(
     return run(args, { timeoutMs: LIST_TIMEOUT_MS })
   }
   if (method === 'memory/policy/get' || method === 'memory/policy/delete') {
+    if (method === 'memory/policy/get') {
+      const from = readTrimmed(payload, 'from')
+      if (from) {
+        const local = await localMemoryPolicyGet(from)
+        if (local) return local
+      }
+    }
     const args = withFrom(['memory', 'policy', method.endsWith('/get') ? 'get' : 'delete'], payload)
     if (!Array.isArray(args)) return args
     return run(args, { timeoutMs: LIST_TIMEOUT_MS })
@@ -237,6 +269,11 @@ export async function dispatchMemoryRoutes(
     return runMetabotWithPayloadFile(['memory', 'policy', 'set', '--from', from], patch, '--payload-file', [], run)
   }
   if (method === 'memory/knowledge/list') {
+    const from = readTrimmed(payload, 'from')
+    if (from) {
+      const local = await localKnowledgeList(from, body)
+      if (local) return local
+    }
     const args = withFrom(['memory', 'knowledge', 'list'], payload)
     if (!Array.isArray(args)) return args
     for (const [flag, key] of [['--kind', 'kind'], ['--category', 'category'], ['--status', 'status'], ['--query', 'query']] as const) {
@@ -255,14 +292,24 @@ export async function dispatchMemoryRoutes(
     return runMetabotWithPayloadFile(['memory', 'knowledge', verb, '--from', from], entry, '--payload-file', [], run)
   }
   if (method === 'memory/impressions/list') {
+    const from = readTrimmed(payload, 'from')
+    if (from) {
+      const local = await localImpressionsList(from)
+      if (local) return local
+    }
     const args = withFrom(['memory', 'impressions', 'list'], payload)
     if (!Array.isArray(args)) return args
     return run(args, { timeoutMs: LIST_TIMEOUT_MS })
   }
   if (method === 'memory/impressions/show') {
+    const subject = readTrimmed(payload, 'subject')
+    const from = readTrimmed(payload, 'from')
+    if (from && subject) {
+      const local = await localImpressionsShow(from, subject)
+      if (local) return local
+    }
     const args = withFrom(['memory', 'impressions', 'show'], payload)
     if (!Array.isArray(args)) return args
-    const subject = readTrimmed(payload, 'subject')
     if (!subject) return missing('missing_subject', 'subject is required')
     args.push('--subject', subject)
     return run(args, { timeoutMs: LIST_TIMEOUT_MS })
@@ -270,11 +317,25 @@ export async function dispatchMemoryRoutes(
 
   // ---- dream --------------------------------------------------------------
   if (method === 'dream/due' || method === 'dream/status' || method === 'dream/self-identity') {
+    const from = readTrimmed(payload, 'from')
+    if (from && method === 'dream/status') {
+      const local = await localDreamStatus(from)
+      if (local) return local
+    }
+    if (from && method === 'dream/self-identity') {
+      const local = await localDreamSelfIdentity(from)
+      if (local) return local
+    }
     const args = withFrom(['dream', method.slice('dream/'.length)], payload)
     if (!Array.isArray(args)) return args
     return run(args, { timeoutMs: LIST_TIMEOUT_MS })
   }
   if (method === 'dream/summaries') {
+    const from = readTrimmed(payload, 'from')
+    if (from) {
+      const local = await localDreamSummaries(from, typeof body.limit === 'number' ? body.limit : undefined)
+      if (local) return local
+    }
     const args = withFrom(['dream', 'summaries'], payload)
     if (!Array.isArray(args)) return args
     if (typeof body.limit === 'number') args.push('--limit', String(Math.trunc(body.limit)))
@@ -291,6 +352,8 @@ export async function dispatchMemoryRoutes(
 
   // ---- twin ---------------------------------------------------------------
   if (method === 'twin/current') {
+    const local = await localTwinCurrent()
+    if (local) return local
     return run(['twin', 'current'], { timeoutMs: LIST_TIMEOUT_MS })
   }
   if (method === 'twin/workers') {
@@ -324,6 +387,8 @@ export async function dispatchMemoryRoutes(
 
   // ---- user (local human owner identity) ---------------------------------
   if (method === 'user/who') {
+    const local = await localUserWho()
+    if (local) return local
     return run(['user', 'who'], { timeoutMs: LIST_TIMEOUT_MS })
   }
   if (method === 'user/create') {
