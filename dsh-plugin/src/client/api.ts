@@ -294,6 +294,40 @@ export type GroupTaskDetailPayload = {
   openCheckpointSummary: string | null
 }
 
+/** Guest-side OpenTeam membership (a local Bot joined someone else's task). */
+export type OpenTeamCollabRow = {
+  groupId: string
+  slug: string
+  botName: string
+  inviterGlobalMetaId: string
+  inviterName: string | null
+  taskTitle: string
+  goalSummary: string | null
+  status: 'active' | 'left'
+  activatedAt: number | null
+  leftAt: number | null
+  leftCause: string | null
+}
+
+export type OpenTeamGuestInviteRow = {
+  groupId: string
+  inviteId: string
+  slug: string
+  botName: string
+  inviterName: string | null
+  taskTitle: string
+  goalSummary: string | null
+  requiredSkills: string[]
+  status: 'invited' | 'accepted' | 'declined' | 'skipped' | 'expired'
+  declineReason: string | null
+  createdAt: number
+}
+
+export type OpenTeamCollabsPayload = {
+  memberships: OpenTeamCollabRow[]
+  guestInvites: OpenTeamGuestInviteRow[]
+}
+
 type Envelope = {
   ok?: boolean
   state?: string
@@ -525,6 +559,35 @@ export const api = {
     postEnvelope('grouptask/pin', { chair, taskId, pinned }),
   grouptaskArchive: async (chair: string, taskId: number, archived: boolean): Promise<CommandEnvelope> =>
     postEnvelope('grouptask/archive', { chair, taskId, archived }),
+  grouptaskInvite: async (
+    chair: string,
+    taskId: number,
+    input: { globalMetaId: string; name?: string; requiredSkills?: string[]; allowReinvite?: boolean },
+  ): Promise<CommandEnvelope> => postEnvelope('grouptask/invite', { chair, taskId, ...input }),
+  grouptaskCollabs: async (): Promise<OpenTeamCollabsPayload> => {
+    const data = await post<{ memberships?: unknown; guestInvites?: unknown }>('grouptask/collabs', {})
+    const memberships = Array.isArray(data.memberships) ? data.memberships : []
+    const guestInvites = Array.isArray(data.guestInvites) ? data.guestInvites : []
+    return {
+      memberships: memberships.map((row) => normalizeOpenTeamCollab(row)),
+      guestInvites: guestInvites.map((row) => normalizeOpenTeamGuestInvite(row)),
+    }
+  },
+  grouptaskCollabMessages: async (
+    slug: string,
+    groupId: string,
+    limit = 100,
+  ): Promise<{ collab: OpenTeamCollabRow; messages: GroupTaskMessageRow[] }> => {
+    const data = await post<{ membership?: unknown; messages?: unknown }>(
+      'grouptask/collab-messages',
+      { slug, groupId, limit },
+    )
+    const rows = Array.isArray(data.messages) ? data.messages : []
+    return {
+      collab: normalizeOpenTeamCollab(data.membership),
+      messages: rows.map((row) => normalizeGroupTaskMessage(row)),
+    }
+  },
   chatPrivate: async (from: string, to: string, content: string): Promise<CommandEnvelope> =>
     postEnvelope('chat/private', { from, to, content }),
   servicesOwned: async (from: string): Promise<unknown> => post('services/owned/list', { from }),
@@ -837,6 +900,45 @@ function normalizeGroupTaskMessage(value: unknown): GroupTaskMessageRow {
     contentType: textOf(record.contentType) || null,
     timestamp: toTimestampMs(record.chainTimestamp ?? record.timestamp),
     senderSuspect: record.senderSuspect === true,
+  }
+}
+
+function normalizeOpenTeamCollab(value: unknown): OpenTeamCollabRow {
+  const record = recordOf(value)
+  return {
+    groupId: textOf(record.groupId),
+    slug: textOf(record.slug),
+    botName: textOf(record.botName) || textOf(record.slug),
+    inviterGlobalMetaId: textOf(record.inviterGlobalMetaId),
+    inviterName: textOf(record.inviterName) || null,
+    taskTitle: textOf(record.taskTitle),
+    goalSummary: textOf(record.goalSummary) || null,
+    status: textOf(record.status) === 'left' ? 'left' : 'active',
+    activatedAt: record.activatedAt == null ? null : toNumber(record.activatedAt),
+    leftAt: record.leftAt == null ? null : toNumber(record.leftAt),
+    leftCause: textOf(record.leftCause) || null,
+  }
+}
+
+function normalizeOpenTeamGuestInvite(value: unknown): OpenTeamGuestInviteRow {
+  const record = recordOf(value)
+  const status = textOf(record.status)
+  return {
+    groupId: textOf(record.groupId),
+    inviteId: textOf(record.inviteId),
+    slug: textOf(record.slug),
+    botName: textOf(record.botName) || textOf(record.slug),
+    inviterName: textOf(record.inviterName) || null,
+    taskTitle: textOf(record.taskTitle),
+    goalSummary: textOf(record.goalSummary) || null,
+    requiredSkills: Array.isArray(record.requiredSkills)
+      ? record.requiredSkills.filter((entry): entry is string => typeof entry === 'string')
+      : [],
+    status: status === 'accepted' || status === 'declined' || status === 'skipped' || status === 'expired'
+      ? status
+      : 'invited',
+    declineReason: textOf(record.declineReason) || null,
+    createdAt: toNumber(record.createdAt),
   }
 }
 

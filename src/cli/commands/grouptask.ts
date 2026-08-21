@@ -237,5 +237,47 @@ export async function runGroupTaskCommand(
     return handler({ ...ref, archived: action === 'archive' });
   }
 
+  if (action === 'invite') {
+    const handler = requireHandler(context, 'invite');
+    if (!handler) return commandFailed('not_implemented', 'Group task invite handler is not configured.');
+    const ref = readTaskRefFlags(args);
+    if (isFailure(ref)) return ref;
+    const globalMetaId = normalizeText(readFlagValue(args, '--global-metaid'));
+    if (!globalMetaId) return commandMissingFlag('--global-metaid');
+    return handler({
+      ...ref,
+      globalMetaId,
+      name: normalizeText(readFlagValue(args, '--name')) || undefined,
+      requiredSkills: readCsvFlag(args, '--skills'),
+      allowReinvite: hasFlag(args, '--allow-reinvite') || undefined,
+    });
+  }
+
+  if (action === 'invites') {
+    const handler = requireHandler(context, 'invites');
+    if (!handler) return commandFailed('not_implemented', 'Group task invites handler is not configured.');
+    const ref = readTaskRefFlags(args);
+    if (isFailure(ref)) return ref;
+    return handler({ ...ref });
+  }
+
+  if (action === 'collabs') {
+    const handler = requireHandler(context, 'collabs');
+    if (!handler) return commandFailed('not_implemented', 'Group task collabs handler is not configured.');
+    return handler({});
+  }
+
+  if (action === 'collab-messages') {
+    const handler = requireHandler(context, 'collabMessages');
+    if (!handler) return commandFailed('not_implemented', 'Group task collab-messages handler is not configured.');
+    const slug = normalizeText(readFlagValue(args, '--bot'));
+    if (!slug) return commandMissingFlag('--bot');
+    const groupId = normalizeText(readFlagValue(args, '--group'));
+    if (!groupId) return commandMissingFlag('--group');
+    const limit = readIntFlag(args, '--limit');
+    if (limit === 'invalid') return commandFailed('invalid_flag', '--limit must be an integer.');
+    return handler({ slug, groupId, limit });
+  }
+
   return commandUnknownSubcommand(`grouptask ${args.join(' ')}`.trim());
 }

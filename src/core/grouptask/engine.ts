@@ -19,13 +19,30 @@ import { createGroupTaskStore, type GroupTaskStore } from './store';
 import {
   GROUP_TASK_REWORK_AT_KV_PREFIX,
   clearGroupTaskReviewDeliveryGuards,
+  openteamStoreFor,
   postGroupTaskMessage,
   syncGroupTaskMessages,
   type GroupTaskProfileRef,
   type GroupTaskServiceContext,
 } from './service';
 import {
+  OPENTEAM_EXPIRY_SKEW_SECONDS,
+  OPENTEAM_JOIN_CONFIRM_TIMEOUT_MS,
+  OPENTEAM_PENDING_MARGIN_MS,
+  buildOpenTeamAcceptMessage,
+  buildOpenTeamDeclineMessage,
+  isOpenTeamEnvelopeText,
+  parseOpenTeamEnvelope,
+  type OpenTeamInvitePayload,
+} from './openteam';
+import type { OpenTeamMembershipRecord, OpenTeamStore } from './openteamStore';
+import { fetchGroupInfo, fetchGroupMembers, joinGroupOnChain, sendGroupMessageOnChain } from './transport';
+import { syncGroupMessages } from './backfill';
+import { createPrivateChatStateStore } from '../chat/privateChatStateStore';
+import {
   decideGroupTaskResponders,
+  isHostNotice,
+  isMentioned,
   parseGroupTaskTags,
   isNoReplyResponse,
   type GroupTaskResponderDecision,
@@ -93,11 +110,27 @@ export interface GroupTaskEnginePersona {
 
 export type GroupTaskPersonaLoader = (profile: GroupTaskProfileRef) => Promise<GroupTaskEnginePersona>;
 
+/** Inbound private message shape the OpenTeam envelope scan consumes. */
+export interface GroupTaskInboundPrivateMessage {
+  messageId: string;
+  senderGlobalMetaId: string;
+  content: string;
+  timestamp: number;
+}
+
 export interface GroupTaskEngineOptions {
   ctx: GroupTaskServiceContext;
   runLlmTurn: GroupTaskEngineLlmRunner;
   /** Defaults to reading BIO/SOUL/GOAL/ROLE markdown from the profile home. */
   loadPersona?: GroupTaskPersonaLoader;
+  /**
+   * Inbound private messages of a profile (OpenTeam envelope scan source).
+   * Defaults to the profile's private-chat state store, which the daemon's
+   * simplemsg listener/backfill keeps up to date.
+   */
+  readInboundPrivateMessages?: (
+    profile: GroupTaskProfileRef,
+  ) => Promise<GroupTaskInboundPrivateMessage[]>;
   intervalMs?: number;
   driverGraceMs?: number;
   maxWorkerRepliesPerTick?: number;
@@ -150,6 +183,25 @@ async function defaultPersonaLoader(profile: GroupTaskProfileRef): Promise<Group
     readOptionalFile(paths.goalMdPath),
   ]);
   return { role, bio, soul, goal };
+}
+
+async function defaultInboundPrivateMessages(
+  profile: GroupTaskProfileRef,
+): Promise<GroupTaskInboundPrivateMessage[]> {
+  try {
+    const store = createPrivateChatStateStore(resolveMetabotPaths(profile.homeDir));
+    const state = await store.readState();
+    return state.messages
+      .filter((message) => message.direction === 'inbound')
+      .map((message) => ({
+        messageId: message.messageId,
+        senderGlobalMetaId: message.senderGlobalMetaId,
+        content: message.content,
+        timestamp: message.timestamp,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 interface SeatInfo extends GroupTaskResponderSeat {
@@ -692,6 +744,393 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
   }
 
   // -------------------------------------------------------------------------
+  // OpenTeam: envelope scan (both sides)
+  // -------------------------------------------------------------------------
+
+  const inboundReader = options.readInboundPrivateMessages ?? defaultInboundPrivateMessages;
+
+  async function declineGuestInvite(
+    profile: GroupTaskProfileRef,
+    openteam: OpenTeamStore,
+    payload: OpenTeamInvitePayload,
+    status: 'declined' | 'expired' | 'skipped',
+    reason: string,
+  ): Promise<void> {
+    await openteam.createGuestInvite({
+      groupId: payload.groupId,
+      inviteId: payload.inviteId,
+      inviterGlobalMetaId: payload.inviterGlobalMetaId,
+      inviterName: payload.inviterName || null,
+      taskTitle: payload.taskTitle,
+      goalSummary: payload.goalSummary || null,
+      requiredSkills: payload.requiredSkills,
+      targetGlobalMetaId: payload.targetGlobalMetaId,
+      expiresAt: payload.expiresAt,
+      status,
+      declineReason: reason,
+    });
+    if (status === 'skipped' || !ctx.sendPrivateMessage) return;
+    try {
+      await ctx.sendPrivateMessage({
+        fromSlug: profile.slug,
+        toGlobalMetaId: payload.inviterGlobalMetaId,
+        content: buildOpenTeamDeclineMessage(payload.inviteId, reason),
+      });
+    } catch (error) {
+      log(`[OpenTeam] Decline reply failed for invite ${payload.inviteId}: `
+        + `${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Guest-side invite handling (IDBots openTeamGuestService parity):
+   * validate → sign simplegroupjoin OURSELVES → membership → ACCEPT reply.
+   * Auto-accept; the only silent skips are duplicates and foreign targets.
+   */
+  async function handleGuestInvite(
+    profile: GroupTaskProfileRef,
+    openteam: OpenTeamStore,
+    message: GroupTaskInboundPrivateMessage,
+    payload: OpenTeamInvitePayload,
+  ): Promise<void> {
+    if (await openteam.getGuestInviteByInviteId(payload.inviteId)) return; // duplicate
+    if (!ctx.sendPrivateMessage) {
+      log('[OpenTeam] Private-message sending is not wired; ignoring inbound invite');
+      return;
+    }
+
+    const selfGmid = normalizeGmid(profile.globalMetaId);
+    if (!selfGmid || normalizeGmid(payload.targetGlobalMetaId) !== selfGmid) {
+      await declineGuestInvite(profile, openteam, payload, 'skipped', 'target_mismatch');
+      return;
+    }
+    const senderGmid = normalizeGmid(message.senderGlobalMetaId);
+    if (senderGmid && senderGmid !== normalizeGmid(payload.inviterGlobalMetaId)) {
+      await declineGuestInvite(profile, openteam, payload, 'declined', 'inviter_mismatch');
+      return;
+    }
+    const membership = await openteam.getMembership(payload.groupId, profile.slug);
+    if (membership?.status === 'active') {
+      await declineGuestInvite(profile, openteam, payload, 'declined', 'already_member');
+      return;
+    }
+    if (payload.expiresAt + OPENTEAM_EXPIRY_SKEW_SECONDS < Math.floor(now() / 1000)) {
+      await declineGuestInvite(profile, openteam, payload, 'expired', 'invite_expired');
+      return;
+    }
+
+    const info = await fetchGroupInfo(payload.groupId, ctx.transport);
+    if (info.status === 'not_found') {
+      await declineGuestInvite(profile, openteam, payload, 'declined', 'invalid_group');
+      return;
+    }
+    if (info.status === 'error') {
+      throw new Error(`Group verification failed for ${payload.groupId} (indexer unreachable)`);
+    }
+    const creator = normalizeGmid(info.info.createUserGlobalMetaId)
+      || normalizeGmid(info.info.createUserMetaId);
+    if (!creator || creator !== normalizeGmid(payload.inviterGlobalMetaId)) {
+      await declineGuestInvite(profile, openteam, payload, 'declined', 'inviter_not_chair');
+      return;
+    }
+
+    const signer = await ctx.signerForSlug(profile.slug);
+    const { pinId: joinedPinId } = await joinGroupOnChain(signer, payload.groupId);
+    await openteam.createGuestInvite({
+      groupId: payload.groupId,
+      inviteId: payload.inviteId,
+      inviterGlobalMetaId: payload.inviterGlobalMetaId,
+      inviterName: payload.inviterName || null,
+      taskTitle: payload.taskTitle,
+      goalSummary: payload.goalSummary || null,
+      requiredSkills: payload.requiredSkills,
+      targetGlobalMetaId: payload.targetGlobalMetaId,
+      expiresAt: payload.expiresAt,
+      status: 'accepted',
+      joinedPinId,
+    });
+    await openteam.createMembership({
+      groupId: payload.groupId,
+      slug: profile.slug,
+      inviterGlobalMetaId: payload.inviterGlobalMetaId,
+      inviterName: payload.inviterName || null,
+      taskTitle: payload.taskTitle,
+      goalSummary: payload.goalSummary || null,
+      inviteId: payload.inviteId,
+      joinedPinId,
+    });
+    await ctx.sendPrivateMessage({
+      fromSlug: profile.slug,
+      toGlobalMetaId: payload.inviterGlobalMetaId,
+      content: buildOpenTeamAcceptMessage(payload.inviteId, joinedPinId),
+    });
+  }
+
+  async function scanOpenTeamEnvelopes(
+    profile: GroupTaskProfileRef,
+    openteam: OpenTeamStore,
+  ): Promise<void> {
+    const messages = await inboundReader(profile);
+    for (const message of messages) {
+      if (!message.content.includes('[OPENTEAM_')) continue;
+      const guardKey = `openteam_processed:${message.messageId}`;
+      if (await openteam.kvGet(guardKey)) continue;
+      const retryKey = `openteam_env_retry:${message.messageId}`;
+      try {
+        const envelope = parseOpenTeamEnvelope(message.content);
+        if (envelope?.kind === 'invite') {
+          await handleGuestInvite(profile, openteam, message, envelope.payload);
+        } else if (envelope?.kind === 'accept') {
+          const invite = await openteam.getInviteByInviteId(envelope.inviteId);
+          if (invite && invite.status === 'pending'
+            && normalizeGmid(message.senderGlobalMetaId) === normalizeGmid(invite.inviteeGlobalMetaId)) {
+            await openteam.updateInvite(envelope.inviteId, {
+              status: 'accepted',
+              joinedPinId: envelope.joinedPinId,
+              respondedAt: now(),
+            });
+          }
+        } else if (envelope?.kind === 'decline') {
+          const invite = await openteam.getInviteByInviteId(envelope.inviteId);
+          if (invite && invite.status === 'pending'
+            && normalizeGmid(message.senderGlobalMetaId) === normalizeGmid(invite.inviteeGlobalMetaId)) {
+            await openteam.updateInvite(envelope.inviteId, {
+              status: 'declined',
+              declineReason: envelope.reason || null,
+              respondedAt: now(),
+            });
+          }
+        } else if (envelope?.kind === 'kick') {
+          const membership = await openteam.getMembership(envelope.payload.groupId, profile.slug);
+          if (membership?.status === 'active') {
+            await openteam.leaveMembership(
+              envelope.payload.groupId,
+              profile.slug,
+              'kick',
+              envelope.payload.reason || null,
+            );
+          }
+        }
+        await openteam.kvSet(guardKey, String(now()));
+        await openteam.kvDelete(retryKey);
+      } catch (error) {
+        const failures = (Number((await openteam.kvGet(retryKey)) ?? '0') || 0) + 1;
+        await openteam.kvSet(retryKey, String(failures));
+        log(`[OpenTeam] Envelope ${message.messageId} failed (${failures}/${MSG_RETRY_MAX_FAILURES}): `
+          + `${error instanceof Error ? error.message : String(error)}`);
+        if (failures >= MSG_RETRY_MAX_FAILURES) {
+          await openteam.kvSet(guardKey, `failed:${now()}`);
+          await openteam.kvDelete(retryKey);
+        }
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // OpenTeam: inviter maintenance (expiry + join confirmation + welcome)
+  // -------------------------------------------------------------------------
+
+  async function maintainInviterInvites(
+    profile: GroupTaskProfileRef,
+    openteam: OpenTeamStore,
+  ): Promise<void> {
+    const invites = await openteam.listInvites();
+    for (const invite of invites) {
+      if (invite.status === 'pending'
+        && now() > invite.expiresAt * 1000 + OPENTEAM_PENDING_MARGIN_MS) {
+        await openteam.updateInvite(invite.inviteId, {
+          status: 'expired',
+          declineReason: 'invite_response_timeout',
+        });
+        continue;
+      }
+      if (invite.status !== 'accepted' || invite.memberAddedAt != null) continue;
+
+      const respondedAt = invite.respondedAt ?? invite.createdAt;
+      if (now() > respondedAt + OPENTEAM_JOIN_CONFIRM_TIMEOUT_MS) {
+        await openteam.updateInvite(invite.inviteId, {
+          status: 'expired',
+          declineReason: 'join_confirm_timeout',
+        });
+        continue;
+      }
+
+      let memberIds: string[] | null = null;
+      try {
+        memberIds = await fetchGroupMembers(invite.groupId, ctx.transport);
+      } catch {
+        memberIds = null;
+      }
+      const joined = (memberIds ?? []).some(
+        (id) => normalizeGmid(id) === normalizeGmid(invite.inviteeGlobalMetaId),
+      );
+      if (!joined) continue;
+
+      const store = storeFor(ctx, profile);
+      const task = await store.getTaskById(invite.taskId);
+      if (!task) {
+        await openteam.updateInvite(invite.inviteId, { memberAddedAt: now() });
+        continue;
+      }
+      const members = await store.listMembers(invite.taskId);
+      const alreadySeated = members.some(
+        (member) => normalizeGmid(member.globalMetaId) === normalizeGmid(invite.inviteeGlobalMetaId),
+      );
+      if (!alreadySeated) {
+        await store.addMember({
+          taskId: invite.taskId,
+          slug: null,
+          globalMetaId: invite.inviteeGlobalMetaId,
+          role: 'worker',
+          joinedPinId: invite.joinedPinId,
+          displayName: invite.inviteeName,
+        });
+        const skills = invite.requiredSkills.length > 0
+          ? ` (skills: ${invite.requiredSkills.join(', ')})`
+          : '';
+        await postHostNotice(task, profile.slug,
+          `[GROUP_TASK_NOTICE:openteam_joined] ${invite.inviteeName || invite.inviteeGlobalMetaId} `
+          + `joined this task as a remote OpenTeam member${skills}.`);
+      }
+      await openteam.updateInvite(invite.inviteId, { memberAddedAt: now() });
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // OpenTeam: guest replies (@-mention only, from this machine)
+  // -------------------------------------------------------------------------
+
+  async function runGuestReplies(
+    profile: GroupTaskProfileRef,
+    openteam: OpenTeamStore,
+    membership: OpenTeamMembershipRecord,
+  ): Promise<void> {
+    const store = storeFor(ctx, profile);
+    try {
+      const memberIds = await fetchGroupMembers(membership.groupId, ctx.transport);
+      await syncGroupMessages({
+        store,
+        groupId: membership.groupId,
+        trustedGlobalMetaIds: new Set((memberIds ?? []).map((id) => normalizeGmid(id))),
+        transport: ctx.transport,
+      });
+    } catch {
+      return; // indexer down: retry next tick
+    }
+
+    const selfGmid = normalizeGmid(profile.globalMetaId);
+    const mentionTarget = {
+      name: profile.name,
+      globalMetaId: profile.globalMetaId,
+      metaId: profile.metaId,
+    };
+    const budgetKey = `guest:${membership.groupId}:${profile.slug}`;
+
+    const page = await store.listMessages(membership.groupId, { limit: MESSAGE_FETCH_LIMIT });
+    const pending = page.messages.filter((message) => message.index > membership.lastProcessedIndex);
+
+    for (const message of pending) {
+      const senderGmid = normalizeGmid(message.senderGlobalMetaId);
+      const wantsReply = !message.senderSuspect
+        && senderGmid !== selfGmid
+        && !isHostNotice(message.content)
+        && isMentioned(message, mentionTarget);
+      if (!wantsReply) {
+        await openteam.updateMembershipCursor(membership.groupId, profile.slug, message.index);
+        continue;
+      }
+
+      const spent = replyCounts.get(budgetKey) ?? 0;
+      if (spent >= replyBudget) {
+        await openteam.updateMembershipCursor(membership.groupId, profile.slug, message.index);
+        continue;
+      }
+      const last = lastReplyAt.get(budgetKey) ?? 0;
+      if (now() - last < workerCooldownMs) break; // defer; cursor stays put
+
+      const retryKey = `openteam_msg_retry:${membership.groupId}:${message.index}`;
+      try {
+        const persona = await loadPersona(profile).catch(() => ({} as GroupTaskEnginePersona));
+        const chairName = membership.inviterName || membership.inviterGlobalMetaId;
+        const systemPrompt = buildGroupTaskSystemPrompt({
+          identity: {
+            name: profile.name,
+            globalMetaId: profile.globalMetaId,
+            role: persona.role,
+            bio: persona.bio,
+            soul: persona.soul,
+            goal: persona.goal,
+          },
+          task: {
+            title: membership.taskTitle,
+            goal: membership.goalSummary || membership.taskTitle,
+            acceptanceCriteria: null,
+          },
+          seats: [
+            { name: chairName, role: 'chair', remote: true },
+            { name: profile.name, role: 'worker', remote: false },
+          ],
+          chairName,
+          role: 'worker',
+        });
+        const prompt = buildGroupTaskTurnContext({
+          task: { id: membership.id, title: membership.taskTitle },
+          recentMessages: page.messages.filter((entry) => entry.index <= message.index),
+          target: message,
+          nowMs: now(),
+        });
+        const reply = (await options.runLlmTurn({
+          profile,
+          role: 'worker',
+          systemPrompt,
+          prompt,
+        })).trim();
+
+        replyCounts.set(budgetKey, spent + 1);
+        lastReplyAt.set(budgetKey, now());
+
+        if (reply && !isNoReplyResponse(reply)) {
+          const signer = await ctx.signerForSlug(profile.slug);
+          await sendGroupMessageOnChain(signer, membership.groupId, {
+            content: reply,
+            nickName: profile.name,
+            replyPin: message.pinId ?? undefined,
+          });
+        }
+        await openteam.updateMembershipCursor(membership.groupId, profile.slug, message.index);
+        await openteam.kvDelete(retryKey);
+      } catch (error) {
+        const failures = (Number((await openteam.kvGet(retryKey)) ?? '0') || 0) + 1;
+        await openteam.kvSet(retryKey, String(failures));
+        log(`[OpenTeam] Guest reply at index ${message.index} of ${membership.groupId} failed `
+          + `(${failures}/${MSG_RETRY_MAX_FAILURES}): ${error instanceof Error ? error.message : String(error)}`);
+        if (failures >= MSG_RETRY_MAX_FAILURES) {
+          await openteam.updateMembershipCursor(membership.groupId, profile.slug, message.index);
+          await openteam.kvDelete(retryKey);
+          continue;
+        }
+        break;
+      }
+    }
+  }
+
+  async function processOpenTeamForProfile(profile: GroupTaskProfileRef): Promise<void> {
+    const openteam = openteamStoreFor(ctx, profile);
+    await scanOpenTeamEnvelopes(profile, openteam);
+    await maintainInviterInvites(profile, openteam);
+    const memberships = await openteam.listMemberships({ activeOnly: true });
+    for (const membership of memberships) {
+      if (membership.slug !== profile.slug) continue;
+      try {
+        await runGuestReplies(profile, openteam, membership);
+      } catch (error) {
+        log(`[OpenTeam] Guest drive failed for group ${membership.groupId}: `
+          + `${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Tick
   // -------------------------------------------------------------------------
 
@@ -726,6 +1165,12 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
             log(`[GroupTaskEngine] Task ${task.id} drive failed: `
               + `${error instanceof Error ? error.message : String(error)}`);
           }
+        }
+        try {
+          await processOpenTeamForProfile(profile);
+        } catch (error) {
+          log(`[OpenTeam] Profile ${profile.slug} processing failed: `
+            + `${error instanceof Error ? error.message : String(error)}`);
         }
       }
     } finally {

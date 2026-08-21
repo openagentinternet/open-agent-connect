@@ -9,6 +9,8 @@
 import { resolveMetabotPaths } from '../state/paths';
 import type { Signer } from '../signing/signer';
 import { createGroupTaskStore, type GroupTaskStore } from './store';
+import { createOpenTeamStore, type OpenTeamStore } from './openteamStore';
+import { buildOpenTeamKickMessage } from './openteam';
 import {
   createGroupOnChain,
   fetchGroupMembers,
@@ -65,6 +67,19 @@ export interface GroupTaskServiceContext {
   ownerIdentity(): Promise<GroupTaskOwnerRef | null>;
   /** Store override seam (tests); default resolves the profile runtime root. */
   storeForProfile?(profile: GroupTaskProfileRef): GroupTaskStore;
+  /** OpenTeam store seam (tests); default resolves the profile runtime root. */
+  openteamStoreForProfile?(profile: GroupTaskProfileRef): OpenTeamStore;
+  /**
+   * Send an ECDH private message (/protocols/simplemsg) from a local profile.
+   * Wired by the daemon (peer chat pubkey resolver + profile signer); absent
+   * in contexts without private-chat access — OpenTeam verbs then fail with
+   * `openteam_unavailable`.
+   */
+  sendPrivateMessage?(input: {
+    fromSlug: string;
+    toGlobalMetaId: string;
+    content: string;
+  }): Promise<{ pinId: string | null }>;
   transport?: GroupTaskTransportOptions;
   log?(message: string): void;
 }
@@ -79,6 +94,12 @@ export class GroupTaskServiceError extends Error {
 function storeFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): GroupTaskStore {
   if (ctx.storeForProfile) return ctx.storeForProfile(profile);
   return createGroupTaskStore(resolveMetabotPaths(profile.homeDir));
+}
+
+/** OpenTeam handshake store for a profile (exported for the engine). */
+export function openteamStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): OpenTeamStore {
+  if (ctx.openteamStoreForProfile) return ctx.openteamStoreForProfile(profile);
+  return createOpenTeamStore(resolveMetabotPaths(profile.homeDir));
 }
 
 function logOf(ctx: GroupTaskServiceContext): (message: string) => void {
@@ -886,6 +907,28 @@ export async function kickGroupTaskMember(
       `[GroupTask] Moderation announcement failed for task ${taskId}: `
       + `${error instanceof Error ? error.message : String(error)}`,
     );
+  }
+
+  // Remote OpenTeam member: send the one-way [OPENTEAM_KICK] envelope so the
+  // guest side marks its membership left. Best-effort — the removal holds.
+  if (member.slug == null && member.globalMetaId && ctx.sendPrivateMessage) {
+    try {
+      await ctx.sendPrivateMessage({
+        fromSlug: chair.slug,
+        toGlobalMetaId: member.globalMetaId,
+        content: buildOpenTeamKickMessage({
+          v: 1,
+          groupId: task.groupId!,
+          taskTitle: task.title,
+          reason: reason ?? '',
+        }),
+      });
+    } catch (error) {
+      log(
+        `[GroupTask] OpenTeam kick notice failed for task ${taskId}: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   const chainRemovalConfirmed = await confirmChainRemoval(

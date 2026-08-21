@@ -167,6 +167,10 @@ export interface MetabotDaemonHttpHandlers {
     rename?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     setPinned?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     setArchived?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    invite?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    invites?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    collabs?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    collabMessages?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   conversations?: {
     list?: (input: {

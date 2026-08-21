@@ -3391,6 +3391,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         rename: post('/api/grouptask/rename'),
         setPinned: post('/api/grouptask/pin'),
         setArchived: post('/api/grouptask/archive'),
+        invite: post('/api/grouptask/invite'),
+        invites: get('/api/grouptask/invites'),
+        collabs: get('/api/grouptask/collabs'),
+        collabMessages: get('/api/grouptask/collab-messages'),
       };
     })(),
     conversations: {
@@ -5037,6 +5041,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
         ? signer
         : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profileHomeDir), adapters })),
       adapters,
+      resolvePeerChatPublicKey,
       log: (message) => console.warn(message),
     }),
     runLlmTurn: async (turn) => {

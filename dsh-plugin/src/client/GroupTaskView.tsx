@@ -15,7 +15,11 @@ import {
   type GroupTaskDetailPayload,
   type GroupTaskListTab,
   type GroupTaskMemberRow,
+  type GroupTaskMessageRow,
   type GroupTaskSummaryRow,
+  type OpenTeamCollabRow,
+  type OpenTeamCollabsPayload,
+  type OpenTeamGuestInviteRow,
 } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
@@ -43,6 +47,13 @@ export interface GroupTaskInjectedApi {
   rename: (chair: string, taskId: number, displayName: string) => Promise<unknown>
   pin: (chair: string, taskId: number, pinned: boolean) => Promise<unknown>
   archive: (chair: string, taskId: number, archived: boolean) => Promise<unknown>
+  invite: (
+    chair: string,
+    taskId: number,
+    input: { globalMetaId: string; name?: string; requiredSkills?: string[]; allowReinvite?: boolean },
+  ) => Promise<unknown>
+  collabs: () => Promise<OpenTeamCollabsPayload>
+  collabMessages: (slug: string, groupId: string) => Promise<{ collab: OpenTeamCollabRow; messages: GroupTaskMessageRow[] }>
 }
 
 const DETAIL_POLL_MS = 15_000
@@ -72,6 +83,16 @@ function workStatusKey(workStatus: GroupTaskMemberRow['workStatus']): Conversati
     case 'timeout': return 'gtWorkTimeout'
     case 'error': return 'gtWorkError'
     default: return 'gtWorkUnknown'
+  }
+}
+
+function guestInviteStatusKey(status: OpenTeamGuestInviteRow['status']): ConversationsLocaleKey {
+  switch (status) {
+    case 'accepted': return 'gtGuestInviteAccepted'
+    case 'declined': return 'gtGuestInviteDeclined'
+    case 'skipped': return 'gtGuestInviteSkipped'
+    case 'expired': return 'gtGuestInviteExpired'
+    default: return 'gtGuestInviteInvited'
   }
 }
 
@@ -157,6 +178,7 @@ export function GroupTaskView({
   const [detailStatus, setDetailStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [detailError, setDetailError] = useState<string | null>(null)
   const [actionNote, setActionNote] = useState<string | null>(null)
+  const [infoNote, setInfoNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
 
@@ -186,6 +208,21 @@ export function GroupTaskView({
   // Rename modal
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameDraft, setRenameDraft] = useState('')
+
+  // OpenTeam: guest-side collaborations (memberships + received invites)
+  const [collabs, setCollabs] = useState<OpenTeamCollabsPayload>({ memberships: [], guestInvites: [] })
+  const [selectedCollab, setSelectedCollab] = useState<{ slug: string; groupId: string } | null>(null)
+  const [collabDetail, setCollabDetail] = useState<{ collab: OpenTeamCollabRow; messages: GroupTaskMessageRow[] } | null>(null)
+  const [collabStatus, setCollabStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [collabError, setCollabError] = useState<string | null>(null)
+
+  // OpenTeam: invite-remote modal (chair side)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteBusy, setInviteBusy] = useState(false)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+  const [inviteGmid, setInviteGmid] = useState('')
+  const [inviteName, setInviteName] = useState('')
+  const [inviteSkills, setInviteSkills] = useState('')
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastCreateSignal = useRef(createSignal)
@@ -224,6 +261,45 @@ export function GroupTaskView({
     return () => { current = false }
   }, [gt, filter, tick])
 
+  // Guest-side collaborations refresh with the list (failures leave the
+  // section hidden rather than surfacing an error).
+  useEffect(() => {
+    let current = true
+    void gt.collabs().then(
+      (payload) => { if (current) setCollabs(payload) },
+      () => { if (current) setCollabs({ memberships: [], guestInvites: [] }) },
+    )
+    return () => { current = false }
+  }, [gt, tick])
+
+  const loadCollab = useCallback(async (target: { slug: string; groupId: string }, silent = false): Promise<void> => {
+    if (!silent) {
+      setCollabStatus('loading')
+      setCollabError(null)
+    }
+    try {
+      const data = await gt.collabMessages(target.slug, target.groupId)
+      setCollabDetail(data)
+      setCollabStatus('ready')
+    } catch (cause) {
+      if (!silent) {
+        setCollabError(errorText(cause))
+        setCollabStatus('error')
+      }
+    }
+  }, [gt])
+
+  useEffect(() => {
+    if (!selectedCollab) {
+      setCollabDetail(null)
+      setCollabStatus('idle')
+      return
+    }
+    void loadCollab(selectedCollab)
+    const poll = setInterval(() => { void loadCollab(selectedCollab, true) }, DETAIL_POLL_MS)
+    return () => clearInterval(poll)
+  }, [selectedCollab, loadCollab])
+
   const loadDetail = useCallback(async (target: { chair: string; taskId: number }, silent = false): Promise<void> => {
     if (!silent) {
       setDetailStatus('loading')
@@ -248,6 +324,7 @@ export function GroupTaskView({
       return
     }
     setActionNote(null)
+    setInfoNote(null)
     void loadDetail(selected)
     pollRef.current = setInterval(() => { void loadDetail(selected, true) }, DETAIL_POLL_MS)
     return () => {
@@ -331,6 +408,30 @@ export function GroupTaskView({
     if (done) setRenameOpen(false)
   }
 
+  const onInvite = async (): Promise<void> => {
+    const globalMetaId = inviteGmid.trim()
+    if (!selected || !globalMetaId || inviteBusy) return
+    setInviteBusy(true)
+    setInviteError(null)
+    try {
+      const requiredSkills = inviteSkills.split(',').map((entry) => entry.trim()).filter(Boolean)
+      await gt.invite(selected.chair, selected.taskId, {
+        globalMetaId,
+        name: inviteName.trim() || undefined,
+        requiredSkills: requiredSkills.length > 0 ? requiredSkills : undefined,
+      })
+      setInviteOpen(false)
+      setInviteGmid('')
+      setInviteName('')
+      setInviteSkills('')
+      setInfoNote(t('gtInviteSent'))
+    } catch (cause) {
+      setInviteError(`${t('gtInviteFailed')} ${errorText(cause)}`)
+    } finally {
+      setInviteBusy(false)
+    }
+  }
+
   const memberBots = detail
     ? detail.members.filter((member) => member.slug && bots.some((bot) => bot.slug === member.slug))
     : []
@@ -364,14 +465,156 @@ export function GroupTaskView({
             <TaskListRow
               key={`${task.chairSlug}:${task.id}`}
               task={task}
-              active={selected?.chair === task.chairSlug && selected.taskId === task.id}
-              onSelect={() => setSelected({ chair: task.chairSlug, taskId: task.id })}
+              active={selectedCollab === null && selected?.chair === task.chairSlug && selected.taskId === task.id}
+              onSelect={() => {
+                setSelectedCollab(null)
+                setSelected({ chair: task.chairSlug, taskId: task.id })
+              }}
               t={t}
             />
           ))}
+          {collabs.memberships.length > 0 || collabs.guestInvites.length > 0 ? (
+            <div className="oac-gt-collabs">
+              <span className="oac-gt-collabs-title">{t('gtCollabs')}</span>
+              {collabs.memberships.map((collab) => (
+                <button
+                  key={`${collab.groupId}:${collab.slug}`}
+                  type="button"
+                  className={
+                    selectedCollab?.groupId === collab.groupId && selectedCollab.slug === collab.slug
+                      ? 'oac-a2a-row oac-gt-row active'
+                      : 'oac-a2a-row oac-gt-row'
+                  }
+                  onClick={() => setSelectedCollab({ slug: collab.slug, groupId: collab.groupId })}
+                >
+                  <span className="oac-a2a-row-main">
+                    <span className="oac-gt-row-title">
+                      <span className="oac-a2a-row-name">{collab.taskTitle || collab.groupId}</span>
+                      <span className="oac-gt-badge oac-gt-openteam">{t('gtOpenTeam')}</span>
+                    </span>
+                    <span className="oac-gt-row-meta">
+                      <span className={collab.status === 'active' ? 'oac-gt-badge oac-gt-status-executing' : 'oac-gt-badge oac-gt-status-cancelled'}>
+                        {collab.status === 'active' ? t('gtCollabActive') : t('gtCollabLeft')}
+                      </span>
+                      <span className="oac-a2a-row-text">{collab.botName}</span>
+                    </span>
+                  </span>
+                  {collab.activatedAt !== null ? (
+                    <span className="oac-a2a-row-time">{timestampLabel(collab.activatedAt)}</span>
+                  ) : null}
+                </button>
+              ))}
+              {collabs.guestInvites
+                .filter((invite) => !collabs.memberships.some(
+                  (collab) => collab.groupId === invite.groupId && collab.slug === invite.slug,
+                ))
+                .map((invite) => (
+                  <div key={invite.inviteId} className="oac-a2a-row oac-gt-row oac-gt-guest-invite">
+                    <span className="oac-a2a-row-main">
+                      <span className="oac-gt-row-title">
+                        <span className="oac-a2a-row-name">{invite.taskTitle || invite.groupId}</span>
+                        <span className="oac-gt-badge oac-gt-openteam">{t('gtOpenTeam')}</span>
+                      </span>
+                      <span className="oac-gt-row-meta">
+                        <span className="oac-gt-badge">{t(guestInviteStatusKey(invite.status))}</span>
+                        <span className="oac-a2a-row-text">{invite.botName}</span>
+                      </span>
+                    </span>
+                    <span className="oac-a2a-row-time">{timestampLabel(invite.createdAt)}</span>
+                  </div>
+                ))}
+            </div>
+          ) : null}
         </div>
       </div>
       <div className="oac-a2a-thread">
+        {selectedCollab !== null ? (
+          <>
+            {collabStatus === 'idle' || collabStatus === 'loading' ? (
+              <div className="oac-gt-placeholder"><span className="oac-note saving">{t('gtLoading')}</span></div>
+            ) : null}
+            {collabStatus === 'error' ? (
+              <div className="oac-gt-placeholder"><span className="oac-note error">{collabError ?? t('gtError')}</span></div>
+            ) : null}
+            {collabStatus === 'ready' && collabDetail !== null ? (() => {
+              const collab = collabDetail.collab
+              const guestBot = bots.find((bot) => bot.slug === collab.slug)
+              const guestGmid = (guestBot?.globalMetaId ?? '').toLowerCase()
+              return (
+                <>
+                  <div className="oac-a2a-thread-head oac-gt-head">
+                    <div className="oac-gt-head-main">
+                      <strong>{collab.taskTitle || collab.groupId}</strong>
+                      <span className="oac-gt-head-badges">
+                        <span className="oac-gt-badge oac-gt-openteam">{t('gtOpenTeam')}</span>
+                        <span className={collab.status === 'active'
+                          ? 'oac-gt-badge oac-gt-status-executing'
+                          : 'oac-gt-badge oac-gt-status-cancelled'}
+                        >
+                          {collab.status === 'active' ? t('gtCollabActive') : t('gtCollabLeft')}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                  <div className="oac-gt-detail">
+                    <section className="oac-gt-section">
+                      {collab.goalSummary ? (
+                        <div className="oac-gt-field">
+                          <span className="oac-gt-field-label">{t('gtGoal')}</span>
+                          <p className="oac-gt-field-value">{collab.goalSummary}</p>
+                        </div>
+                      ) : null}
+                      <p className="oac-note">
+                        {t('gtCollabBy', { name: collab.inviterName ?? collab.inviterGlobalMetaId })}
+                        {' · '}
+                        {t('gtCollabReadonly')}
+                      </p>
+                    </section>
+                    <section className="oac-gt-section oac-gt-transcript">
+                      <span className="oac-gt-field-label">{t('gtTranscript')}</span>
+                      {collabDetail.messages.length === 0 ? <p className="oac-note">{t('gtNoMessages')}</p> : null}
+                      {collabDetail.messages.map((message) => {
+                        const isMarkdown = message.contentType === 'text/markdown'
+                        const ownMessage = guestGmid !== ''
+                          && (message.senderGlobalMetaId ?? '').toLowerCase() === guestGmid
+                        const senderName = message.senderName ?? message.senderGlobalMetaId ?? '?'
+                        return (
+                          <div
+                            key={message.pinId ?? `idx-${message.index}`}
+                            className="oac-a2a-msg oac-a2a-msg-peer oac-gt-msg"
+                          >
+                            <BotAvatar
+                              name={senderName}
+                              src={message.senderAvatar ?? undefined}
+                              className="oac-a2a-msg-avatar"
+                            />
+                            <div className="oac-a2a-msg-body">
+                              <div className="oac-a2a-msg-head">
+                                <span className="oac-a2a-msg-name">
+                                  {senderName}
+                                  {ownMessage ? <span className="oac-gt-badge oac-gt-chair">{t('gtYourBot')}</span> : null}
+                                </span>
+                                <span className="oac-a2a-msg-meta">
+                                  <span className="oac-a2a-msg-time">{timestampLabel(message.timestamp)}</span>
+                                </span>
+                              </div>
+                              <div className="oac-a2a-bubble oac-a2a-bubble-peer">
+                                {isMarkdown
+                                  ? <MarkdownText text={message.content} />
+                                  : <span className="oac-a2a-msg-text">{message.content}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </section>
+                  </div>
+                </>
+              )
+            })() : null}
+          </>
+        ) : (
+          <>
         {detailStatus === 'idle' ? (
           <div className="oac-gt-placeholder"><span className="oac-note">{t('gtSelectTask')}</span></div>
         ) : null}
@@ -443,6 +686,7 @@ export function GroupTaskView({
             </div>
             <div className="oac-gt-detail">
               {actionNote ? <p className="oac-note error">{actionNote}</p> : null}
+              {infoNote ? <p className="oac-note">{infoNote}</p> : null}
               <section className="oac-gt-section">
                 <div className="oac-gt-field">
                   <span className="oac-gt-field-label">{t('gtGoal')}</span>
@@ -484,7 +728,22 @@ export function GroupTaskView({
                 </div>
               </section>
               <section className="oac-gt-section">
-                <span className="oac-gt-field-label">{t('gtMembers')}</span>
+                <span className="oac-gt-field-label">
+                  {t('gtMembers')}
+                  {!terminal ? (
+                    <button
+                      type="button"
+                      className="oac-a2a-guidance-toggle oac-gt-invite-toggle"
+                      disabled={busy}
+                      onClick={() => {
+                        setInviteError(null)
+                        setInviteOpen(true)
+                      }}
+                    >
+                      {t('gtInviteRemote')}
+                    </button>
+                  ) : null}
+                </span>
                 <ul className="oac-gt-members">
                   {detail.members.map((member) => {
                     const bot = member.slug ? bots.find((row) => row.slug === member.slug) : undefined
@@ -621,6 +880,8 @@ export function GroupTaskView({
             ) : null}
           </>
         ) : null}
+          </>
+        )}
       </div>
 
       <Modal
@@ -784,6 +1045,57 @@ export function GroupTaskView({
             name: kickTarget?.displayName ?? kickTarget?.slug ?? kickTarget?.globalMetaId ?? '?',
           })}
         </p>
+      </Modal>
+
+      <Modal
+        open={inviteOpen}
+        onClose={() => { if (!inviteBusy) setInviteOpen(false) }}
+        title={t('gtInviteRemote')}
+        className="oac-dialog"
+        footer={(
+          <>
+            <Button type="button" variant="outline" disabled={inviteBusy} onClick={() => setInviteOpen(false)}>
+              {t('gtCancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={inviteBusy || !inviteGmid.trim()}
+              onClick={() => { void onInvite() }}
+            >
+              {inviteBusy ? t('gtWorking') : t('gtInviteSend')}
+            </Button>
+          </>
+        )}
+      >
+        <div className="oac-gt-form">
+          {inviteError ? <p className="oac-note error">{inviteError}</p> : null}
+          <label className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtInviteGmid')}</span>
+            <Input
+              value={inviteGmid}
+              disabled={inviteBusy}
+              onChange={(event) => setInviteGmid(event.target.value)}
+              placeholder={t('gtInviteGmidPlaceholder')}
+            />
+          </label>
+          <label className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtInviteName')}</span>
+            <Input
+              value={inviteName}
+              disabled={inviteBusy}
+              onChange={(event) => setInviteName(event.target.value)}
+            />
+          </label>
+          <label className="oac-gt-form-field">
+            <span className="oac-gt-field-label">{t('gtInviteSkills')}</span>
+            <Input
+              value={inviteSkills}
+              disabled={inviteBusy}
+              onChange={(event) => setInviteSkills(event.target.value)}
+            />
+          </label>
+        </div>
       </Modal>
 
       <Modal

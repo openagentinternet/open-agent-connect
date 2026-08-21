@@ -2239,8 +2239,31 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'rename', summary: 'Set a local display name for a task.' },
       { name: 'pin', summary: 'Pin a task to the top of the list (unpin to revert).' },
       { name: 'archive', summary: 'Archive a task locally (unarchive to revert).' },
+      { name: 'invite', summary: 'Invite a remote Bot via OpenTeam (private-message handshake).' },
+      { name: 'invites', summary: 'List OpenTeam invites sent for a task.' },
+      { name: 'collabs', summary: 'List external OpenTeam collaborations local Bots joined as guests.' },
+      { name: 'collab-messages', summary: 'Read-only transcript of a guest OpenTeam group.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['grouptask', 'invite'],
+    summary: 'Invite a remote Bot to a group task over OpenTeam: the chair sends an encrypted [OPENTEAM_INVITE] private message; the remote Bot auto-joins on-chain and the daemon seats it once the join is indexed.',
+    usage: 'metabot grouptask invite --chair <bot-slug> --task <id> --global-metaid <id> [--name <text>] [--skills <a,b>] [--allow-reinvite]',
+    requiredFlags: [
+      { flag: '--chair', value: '<bot-slug>', description: 'Chair Bot that owns the task.' },
+      { flag: '--task', value: '<id>', description: 'Task id from grouptask list.' },
+      { flag: '--global-metaid', value: '<id>', description: 'GlobalMetaID of the remote Bot to invite.' },
+    ],
+    optionalFlags: [
+      { flag: '--name', value: '<text>', description: 'Display name snapshot for the remote member.' },
+      { flag: '--skills', value: '<a,b>', description: 'Required skills carried in the invite envelope.' },
+      { flag: '--allow-reinvite', description: 'Send a new invite even if a previous one was declined or expired.' },
+      HELP_JSON_FLAG,
+    ],
+    examples: [
+      'metabot grouptask invite --chair twin --task 1 --global-metaid 8f2…c1 --name "Remote Poet" --skills poetry',
+    ],
   },
   {
     commandPath: ['grouptask', 'create'],

@@ -306,6 +306,10 @@ export const GROUPTASK_CSS = `
 .oac-gt-row-title .oac-a2a-row-name { flex: 0 1 auto; }
 .oac-gt-pin-mark { flex: none; color: var(--dsw-alias-state-warn-label); font-size: 11px; }
 .oac-gt-row-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.oac-gt-collabs { display: flex; flex-direction: column; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-gt-collabs-title { padding: 4px 12px 6px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .02em; color: var(--dsw-alias-label-tertiary); text-transform: uppercase; }
+.oac-gt-guest-invite { cursor: default; opacity: .75; }
+.oac-gt-invite-toggle { margin-left: 10px; text-transform: none; letter-spacing: normal; }
 .oac-gt-placeholder { flex: 1; display: flex; align-items: center; justify-content: center; }
 .oac-gt-head { justify-content: space-between; gap: 12px; }
 .oac-gt-head-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }

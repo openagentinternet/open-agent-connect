@@ -97,6 +97,10 @@ test('every advertised grouptask endpoint dispatches to its verb', async () => {
       rename: record('rename'),
       setPinned: record('setPinned'),
       setArchived: record('setArchived'),
+      invite: record('invite'),
+      invites: record('invites'),
+      collabs: record('collabs'),
+      collabMessages: record('collabMessages'),
     },
   };
   const posts = [
@@ -109,8 +113,16 @@ test('every advertised grouptask endpoint dispatches to its verb', async () => {
     '/api/grouptask/rename',
     '/api/grouptask/pin',
     '/api/grouptask/archive',
+    '/api/grouptask/invite',
   ];
-  const gets = ['/api/grouptask/list', '/api/grouptask/detail', '/api/grouptask/messages'];
+  const gets = [
+    '/api/grouptask/list',
+    '/api/grouptask/detail',
+    '/api/grouptask/messages',
+    '/api/grouptask/invites',
+    '/api/grouptask/collabs',
+    '/api/grouptask/collab-messages',
+  ];
   for (const pathname of posts) {
     const { context } = createContext({ method: 'POST', pathname, handlers });
     assert.equal(await handleGroupTaskRoutes(context), true, pathname);
@@ -120,7 +132,8 @@ test('every advertised grouptask endpoint dispatches to its verb', async () => {
     assert.equal(await handleGroupTaskRoutes(context), true, pathname);
   }
   assert.deepEqual(verbsHit.sort(), [
-    'close', 'create', 'detail', 'kickMember', 'list', 'messages',
+    'close', 'collabMessages', 'collabs', 'create', 'detail', 'invite', 'invites',
+    'kickMember', 'list', 'messages',
     'postMessage', 'rename', 'reopen', 'setArchived', 'setMemberStatus', 'setPinned',
   ]);
 });

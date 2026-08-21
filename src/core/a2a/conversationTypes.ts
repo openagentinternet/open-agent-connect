@@ -1,7 +1,7 @@
 import type { A2ADeliveryArtifact } from './deliveryArtifacts';
 
 export type A2AConversationDirection = 'incoming' | 'outgoing';
-export type A2AConversationMessageKind = 'private_chat' | 'order_protocol';
+export type A2AConversationMessageKind = 'private_chat' | 'order_protocol' | 'openteam_envelope';
 export type A2AConversationProtocolTag =
   | 'ORDER'
   | 'ORDER_STATUS'

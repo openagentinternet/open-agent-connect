@@ -111,6 +111,42 @@ test('grouptask pin/archive toggle to their inverse verbs', async () => {
   assert.equal(unarchive.calls[0].args[1], 'unarchive')
 })
 
+test('grouptask/invite maps the OpenTeam invite flags with a write timeout', async () => {
+  const ok = await capture('grouptask/invite', {
+    chair: 'twin',
+    taskId: 2,
+    globalMetaId: 'IDREMOTE',
+    name: 'Remote Poet',
+    requiredSkills: ['poetry', 'zh'],
+    allowReinvite: true,
+  })
+  const { args, options } = ok.calls[0]
+  assert.deepEqual(args.slice(0, 2), ['grouptask', 'invite'])
+  assert.equal(args[args.indexOf('--global-metaid') + 1], 'IDREMOTE')
+  assert.equal(args[args.indexOf('--name') + 1], 'Remote Poet')
+  assert.equal(args[args.indexOf('--skills') + 1], 'poetry,zh')
+  assert.ok(args.includes('--allow-reinvite'))
+  assert.ok(options.timeoutMs >= 120_000)
+
+  const missing = await capture('grouptask/invite', { chair: 'twin', taskId: 2 })
+  assert.equal(missing.result.code, 'missing_global_metaid')
+})
+
+test('grouptask collabs and collab-messages map guest-side reads', async () => {
+  const collabs = await capture('grouptask/collabs', {})
+  assert.deepEqual(collabs.calls[0].args, ['grouptask', 'collabs'])
+
+  const messages = await capture('grouptask/collab-messages', { slug: 'worker-1', groupId: 'grp-9', limit: 50 })
+  const args = messages.calls[0].args
+  assert.deepEqual(args.slice(0, 2), ['grouptask', 'collab-messages'])
+  assert.equal(args[args.indexOf('--bot') + 1], 'worker-1')
+  assert.equal(args[args.indexOf('--group') + 1], 'grp-9')
+  assert.equal(args[args.indexOf('--limit') + 1], '50')
+
+  const missing = await capture('grouptask/collab-messages', { slug: 'worker-1' })
+  assert.equal(missing.result.code, 'missing_group_id')
+})
+
 test('unknown grouptask methods fail with not-found', async () => {
   const { result } = await capture('grouptask/bogus', {})
   assert.equal(result.ok, false)

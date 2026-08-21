@@ -19,12 +19,16 @@ const POST_VERBS: Record<string, GroupTaskVerb> = {
   '/api/grouptask/rename': 'rename',
   '/api/grouptask/pin': 'setPinned',
   '/api/grouptask/archive': 'setArchived',
+  '/api/grouptask/invite': 'invite',
 };
 
 const GET_VERBS: Record<string, GroupTaskVerb> = {
   '/api/grouptask/list': 'list',
   '/api/grouptask/detail': 'detail',
   '/api/grouptask/messages': 'messages',
+  '/api/grouptask/invites': 'invites',
+  '/api/grouptask/collabs': 'collabs',
+  '/api/grouptask/collab-messages': 'collabMessages',
 };
 
 function queryToInput(url: URL): Record<string, unknown> {

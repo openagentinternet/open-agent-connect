@@ -224,5 +224,47 @@ export async function dispatchGroupTaskRoutes(
     )
   }
 
+  if (method === 'grouptask/invite') {
+    const ref = readTaskRef(body)
+    if (isFailure(ref)) return ref
+    const globalMetaId = readTrimmed(body, 'globalMetaId')
+    if (!globalMetaId) return failed('missing_global_metaid', 'globalMetaId is required')
+    const args = [
+      'grouptask', 'invite',
+      '--chair', ref.chair, '--task', String(ref.taskId),
+      '--global-metaid', globalMetaId,
+    ]
+    const name = readTrimmed(body, 'name')
+    if (name) args.push('--name', name)
+    const skills = readStringList(body, 'requiredSkills')
+    if (skills.length > 0) args.push('--skills', skills.join(','))
+    if (body.allowReinvite === true) args.push('--allow-reinvite')
+    return run(args, { timeoutMs: WRITE_TIMEOUT_MS })
+  }
+
+  if (method === 'grouptask/invites') {
+    const ref = readTaskRef(body)
+    if (isFailure(ref)) return ref
+    return run(
+      ['grouptask', 'invites', '--chair', ref.chair, '--task', String(ref.taskId)],
+      { timeoutMs: READ_TIMEOUT_MS },
+    )
+  }
+
+  if (method === 'grouptask/collabs') {
+    return run(['grouptask', 'collabs'], { timeoutMs: READ_TIMEOUT_MS })
+  }
+
+  if (method === 'grouptask/collab-messages') {
+    const slug = readTrimmed(body, 'slug')
+    if (!slug) return failed('missing_slug', 'slug is required')
+    const groupId = readTrimmed(body, 'groupId')
+    if (!groupId) return failed('missing_group_id', 'groupId is required')
+    const args = ['grouptask', 'collab-messages', '--bot', slug, '--group', groupId]
+    const limit = readInt(body, 'limit')
+    if (limit !== undefined) args.push('--limit', String(limit))
+    return run(args, { timeoutMs: READ_TIMEOUT_MS })
+  }
+
   return failed('not-found', `unknown grouptask API method "${method}"`)
 }

@@ -159,6 +159,9 @@ export function apply(ctx: ClientContext): void {
         rename: (chair, taskId, displayName) => api.grouptaskRename(chair, taskId, displayName),
         pin: (chair, taskId, pinned) => api.grouptaskPin(chair, taskId, pinned),
         archive: (chair, taskId, archived) => api.grouptaskArchive(chair, taskId, archived),
+        invite: (chair, taskId, input) => api.grouptaskInvite(chair, taskId, input),
+        collabs: () => api.grouptaskCollabs(),
+        collabMessages: (slug, groupId) => api.grouptaskCollabMessages(slug, groupId),
       },
     }),
   }, A2AConversation))

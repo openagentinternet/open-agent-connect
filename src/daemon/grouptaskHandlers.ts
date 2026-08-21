@@ -31,8 +31,15 @@ import {
   type GroupTaskProfileRef,
   type GroupTaskServiceContext,
 } from '../core/grouptask/service';
+import {
+  inviteRemoteMember,
+  listOpenTeamCollabMessages,
+  listOpenTeamCollabs,
+  listOpenTeamInvites,
+} from '../core/grouptask/openteamService';
 import { GroupTaskStoreError } from '../core/grouptask/store';
 import type { GroupTaskTransportOptions } from '../core/grouptask/transport';
+import { sendPrivateChat } from '../core/chat/privateChat';
 import type { GroupTaskListTab, GroupTaskMemberStatus } from '../core/grouptask/types';
 import {
   getMetabotProfile,
@@ -60,6 +67,10 @@ export interface GroupTaskDaemonHandlers {
   rename: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   setPinned: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   setArchived: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  invite: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  invites: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  collabs: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  collabMessages: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +166,8 @@ export interface CreateGroupTaskDaemonHandlersInput {
   systemHomeDir: string;
   createSignerForProfileHome: (homeDir: string) => Signer;
   adapters: ChainAdapterRegistry;
+  /** Peer chat pubkey resolver; enables OpenTeam private-message envelopes. */
+  resolvePeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   transport?: GroupTaskTransportOptions;
   log?: (message: string) => void;
 }
@@ -164,6 +177,49 @@ export function createGroupTaskServiceContext(
   input: CreateGroupTaskDaemonHandlersInput,
 ): GroupTaskServiceContext {
   let ownerSigner: Signer | null = null;
+
+  const signerForSlug = async (slug: string): Promise<Signer> => {
+    const profile = await getMetabotProfile(input.systemHomeDir, slug);
+    if (!profile) {
+      throw new GroupTaskServiceError('profile_not_found', `MetaBot profile not found: ${slug}`);
+    }
+    return input.createSignerForProfileHome(profile.homeDir);
+  };
+
+  const resolvePeerKey = input.resolvePeerChatPublicKey;
+  const sendPrivateMessage = resolvePeerKey
+    ? async (message: { fromSlug: string; toGlobalMetaId: string; content: string }) => {
+      const signer = await signerForSlug(message.fromSlug);
+      const identity = await signer.getPrivateChatIdentity();
+      const peerChatPublicKey = await resolvePeerKey(message.toGlobalMetaId);
+      if (!peerChatPublicKey) {
+        throw new GroupTaskServiceError(
+          'peer_chat_key_unavailable',
+          `No chat public key found for ${message.toGlobalMetaId}`,
+        );
+      }
+      const sent = sendPrivateChat({
+        fromIdentity: {
+          globalMetaId: identity.globalMetaId,
+          privateKeyHex: identity.privateKeyHex,
+        },
+        toGlobalMetaId: message.toGlobalMetaId,
+        peerChatPublicKey,
+        content: message.content,
+      });
+      const write = await signer.writePin({
+        operation: 'create',
+        path: sent.path,
+        encryption: sent.encryption,
+        version: sent.version,
+        contentType: sent.contentType,
+        payload: sent.payload,
+        encoding: 'utf-8',
+        network: 'mvc',
+      });
+      return { pinId: normalizeText(write.pinId) || null };
+    }
+    : undefined;
 
   return {
     listProfiles: async () => {
@@ -177,13 +233,8 @@ export function createGroupTaskServiceContext(
       if (!profile) return null;
       return toProfileRef(profile, await readProfileMetaId(profile.homeDir));
     },
-    signerForSlug: async (slug) => {
-      const profile = await getMetabotProfile(input.systemHomeDir, slug);
-      if (!profile) {
-        throw new GroupTaskServiceError('profile_not_found', `MetaBot profile not found: ${slug}`);
-      }
-      return input.createSignerForProfileHome(profile.homeDir);
-    },
+    signerForSlug,
+    ...(sendPrivateMessage ? { sendPrivateMessage } : {}),
     ownerIdentity: async (): Promise<GroupTaskOwnerRef | null> => {
       const owner = await readOwnerIdentity(input.systemHomeDir);
       if (!owner) return null;
@@ -352,6 +403,41 @@ export function createGroupTaskDaemonHandlers(
       return run(() => (archived
         ? archiveGroupTask(ctx, ref.chair, ref.taskId)
         : unarchiveGroupTask(ctx, ref.chair, ref.taskId)));
+    },
+
+    invite: async (body) => {
+      const ref = readTaskRef(body);
+      if (isFailure(ref)) return ref;
+      const globalMetaId = normalizeText(body.globalMetaId);
+      if (!globalMetaId) return commandFailed('invitee_required', 'globalMetaId is required');
+      return run(async () => {
+        const invite = await inviteRemoteMember(ctx, ref.chair, ref.taskId, {
+          globalMetaId,
+          name: normalizeText(body.name) || null,
+          requiredSkills: readStringArray(body.requiredSkills),
+          allowReinvite: readBool(body.allowReinvite) ?? false,
+        });
+        return { invite };
+      });
+    },
+
+    invites: async (body) => {
+      const ref = readTaskRef(body);
+      if (isFailure(ref)) return ref;
+      return run(async () => ({ invites: await listOpenTeamInvites(ctx, ref.chair, ref.taskId) }));
+    },
+
+    collabs: async () => run(async () => listOpenTeamCollabs(ctx)),
+
+    collabMessages: async (body) => {
+      const slug = normalizeText(body.slug);
+      const groupId = normalizeText(body.groupId);
+      if (!slug || !groupId) {
+        return commandFailed('collab_ref_required', 'slug and groupId are required');
+      }
+      return run(() => listOpenTeamCollabMessages(ctx, slug, groupId, {
+        limit: readInt(body.limit) ?? undefined,
+      }));
     },
   };
 }
