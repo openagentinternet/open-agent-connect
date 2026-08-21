@@ -221,6 +221,7 @@ export function apply(ctx: ClientContext): void {
         name: bot.name,
         slug: bot.slug,
         ...(bot.avatarDataUrl === undefined ? {} : { avatarDataUrl: bot.avatarDataUrl }),
+        ...(bot.botType === undefined || bot.botType === null ? {} : { botType: bot.botType }),
         dshLlmProvider: bot.dshLlmProvider,
         dshLlmModel: bot.dshLlmModel,
       })),

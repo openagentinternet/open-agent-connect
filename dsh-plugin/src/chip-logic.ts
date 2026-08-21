@@ -29,6 +29,8 @@ export type ChipBot = {
   avatarDataUrl?: string
   dshLlmProvider?: string | null
   dshLlmModel?: string | null
+  /** Local Twin/Worker role; the Twin is the default for new blank sessions. */
+  botType?: 'twin' | 'worker' | null
 }
 
 export type ChipSession = {
