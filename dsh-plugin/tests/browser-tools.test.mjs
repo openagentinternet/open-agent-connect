@@ -275,6 +275,24 @@ test('installBrowserToolsOnAgent is idempotent on the same agent', () => {
   assert.equal(tools.filter((tool) => tool.name === 'bot_browser_open_uri').length, 1)
 })
 
+test('approvalOf and bindBrowserToolInstall survive Cordis uninjected approval access', () => {
+  const cordisLike = {
+    get approval() {
+      throw new Error('cannot get property "approval" without inject')
+    },
+    get(name) {
+      throw new Error(`cannot get property "${name}" without inject`)
+    },
+    on() {},
+  }
+  assert.equal(plugin.approvalOf(cordisLike), undefined)
+  plugin.bindBrowserToolInstall(
+    cordisLike,
+    fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
+    plugin.createBrowserSourceCache(),
+  )
+})
+
 function request(method, url, payload) {
   return {
     method,
