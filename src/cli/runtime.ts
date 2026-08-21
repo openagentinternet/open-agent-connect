@@ -133,6 +133,8 @@ import {
 import type { Signer } from '../core/signing/signer';
 import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain, llmDiscoverySweepRunningForHomeDir, type A2ACallerReplyResumeReport } from '../daemon/defaultHandlers';
+import { createGroupTaskServiceContext } from '../daemon/grouptaskHandlers';
+import { createGroupTaskEngine } from '../core/grouptask/engine';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import {
@@ -5024,6 +5026,50 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   } catch (error) {
     console.warn('[app-session runtime] start failed:', error instanceof Error ? error.message : String(error));
   }
+  // Group Task engine: 5s ticker that drives every non-terminal group task
+  // chaired by a local profile (message sync, tag side effects, chair/worker
+  // LLM turns, stall heartbeat). Cheap when no tasks exist — the tick only
+  // reads local profile state files.
+  const groupTaskEngine = createGroupTaskEngine({
+    ctx: createGroupTaskServiceContext({
+      systemHomeDir,
+      createSignerForProfileHome: (profileHomeDir) => (profileHomeDir === homeDir
+        ? signer
+        : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profileHomeDir), adapters })),
+      adapters,
+      log: (message) => console.warn(message),
+    }),
+    runLlmTurn: async (turn) => {
+      const profilePaths = resolveMetabotPaths(turn.profile.homeDir);
+      const runtimeResolver = createLlmRuntimeResolver({
+        runtimeStore: createLlmRuntimeStore(profilePaths),
+        bindingStore: createLlmBindingStore(profilePaths),
+        getPreferredRuntimeId: async () => {
+          try {
+            const raw = await fs.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+            const data = JSON.parse(raw) as { runtimeId?: string | null };
+            return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+          } catch {
+            return null;
+          }
+        },
+      });
+      const result = await runLlmPromptWithRuntimeFallback({
+        runtimeResolver,
+        llmExecutor,
+        metaBotSlug: turn.profile.slug,
+        prompt: turn.prompt,
+        systemPrompt: turn.systemPrompt,
+        timeoutMs: 120_000,
+        pollIntervalMs: 500,
+      });
+      if (result.status !== 'completed') {
+        throw new Error(result.error || `Group task LLM turn ended with status ${result.status}`);
+      }
+      return result.output;
+    },
+  });
+  groupTaskEngine.start();
   // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
   // them (with their remaining budget) or settle expired waits into the
   // timeout + refund path. Runs even when the simplemsg listener is disabled —
@@ -5050,6 +5096,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     simplemsgPresenceWatchdog.stop();
     simplemsgListener.stop();
     chatAutoReplyBackfill.stop();
+    groupTaskEngine.stop();
     try {
       await handlers.stopAppSessionRuntime?.();
     } catch (error) {
