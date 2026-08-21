@@ -21,6 +21,8 @@ export type BotBrowserState = {
   open: boolean
   /** The daemon `localUiUrl` currently loaded (null = landing/empty state). */
   url: string | null
+  /** Live ABC active-tab URI reported by the iframe bridge. */
+  activeUri: string | null
   /** Panel width in CSS px (drives `--oac-browser-width`). */
   width: number
   /** Last open failure message (landing state shows it when set). */
@@ -31,6 +33,7 @@ export class BotBrowserStore {
   private state: BotBrowserState = {
     open: false,
     url: null,
+    activeUri: null,
     width: BROWSER_WIDTH_DEFAULT,
     error: null,
   }
@@ -51,7 +54,18 @@ export class BotBrowserStore {
 
   /** Open the sidebar, loading the given page (null keeps the landing state). */
   open(url: string | null): void {
-    this.set({ open: true, url, error: null })
+    this.set({ open: true, url, error: null, ...(url === this.state.url ? {} : { activeUri: null }) })
+  }
+
+  /** Keep the sidebar open without changing the iframe src (daemon already navigated). */
+  ensureOpen(): void {
+    if (this.state.open) return
+    this.set({ open: true, error: null })
+  }
+
+  setActiveUri(uri: string | null): void {
+    if (this.state.activeUri === uri) return
+    this.set({ activeUri: uri })
   }
 
   /** Open the sidebar to the landing state carrying an open failure message. */

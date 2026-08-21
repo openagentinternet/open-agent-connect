@@ -94,7 +94,9 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/twin/*` | `metabot twin` verbs (current, workers, tasks) |
 | POST | `/oac/api/user/*` | `metabot identity who`, `bot bind-owner` |
 | POST | `/oac/api/browser/open` | resolve a resource URI (or the Browser home) to its `localUiUrl` and open it in the right-sidebar Bot Browser |
-| GET | `/oac/api/browser/events` | SSE: daemon `agent-browser:open-tab` events fanned out to the DSH web clients |
+| POST | `/oac/api/browser/state` | DSH web client reports the live ABC tab snapshot used for per-turn `<browser_context>` |
+| POST | `/oac/api/browser/command-result` | DSH web client returns one iframe tab-command result |
+| GET | `/oac/api/browser/events` | SSE: `browser-open` (daemon or host) plus `browser-command` (tab control for native tools) |
 
 The host process is the only process that talks to `metabot`. The client half does not spawn CLI.
 
@@ -153,14 +155,27 @@ Entry points:
 - The Browser panel has a close button and a width drag handle (default
   `min(72vw, 1280px)`).
 
-Agent linkage needs no skill change. The host half keeps a persistent SSE
-subscription to the daemon's `/api/browser/events` (the same channel the
-standalone Browser page uses), so every `metabot browser tab open --uri`
-issued by the `/metabot-browser` skill registers this sidebar as an open
-Browser page: the daemon fans the open out to it and the sidebar opens on the
-resolved `localUiUrl`. When the plugin is not mounted (Codex, Claude Code,
-OpenClaw, ...), no Browser page is open, `pagesReached` stays `0`, and the
-skill behaves exactly as before.
+Agent linkage is two layers:
+
+- **CLI skills** (`/metabot-browser`, `/metabot-metaapp`) still work. The host
+  half keeps a persistent SSE subscription to the daemon's `/api/browser/events`,
+  so `metabot browser tab open --uri` opens this sidebar. When the iframe is
+  already loaded, the plugin does **not** reload it: ABC inside the iframe
+  already received the daemon event.
+- **Native Cordis tools** on every `oac-*` session (same pattern as memory/twin):
+  `bot_browser_tabs`, `bot_browser_open_uri`, `bot_browser_preview_local`,
+  `bot_browser_read_page`, `search_metaapps`, `bot_browser_fork_current_app`,
+  `bot_browser_publish_app`. Tab control uses ABC `postMessage` from the DSH
+  parent. Search/fork/publish wrap the OAC CLI. Publish asks DSH
+  `ctx.approval` (the native confirmation dialog) before `publish-project --confirm`.
+
+Each `oac-*` turn also injects a live `<browser_context>` block at the
+user-message tail (active tab URI/title, open tabs, MetaApp `source_dir` when
+known). If the sidebar is closed, the block says so — the model must not guess
+from earlier CLI opens.
+
+When the plugin is not mounted (Codex, Claude Code, OpenClaw, ...), no Browser
+page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 
 ## Layout
 
