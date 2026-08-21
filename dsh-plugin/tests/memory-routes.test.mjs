@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+// These tests assert the CLI verb mapping through the mocked `run`; disable
+// the in-process local-read fast path so every route exercises the CLI path.
+process.env.OAC_DSH_NO_LOCAL_READ = '1'
+
 const plugin = await import('../lib/index.js')
 
 async function capture(method, payload, options = {}) {
