@@ -442,7 +442,6 @@ export {
   linkifyAgentInternetUris,
   normalizeBotBrowserUri,
   parseMetaAppPinIdFromUri,
-  publicBrowserHref,
   reduceBrowserTabs,
   resolveBrowserPath,
   wrapKnownCatalogTitles,

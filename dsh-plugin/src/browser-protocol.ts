@@ -8,9 +8,6 @@
 
 export const METAAPP_PIN_ID_PATTERN = /^[0-9a-f]{64}i0$/iu
 
-/** Public web origin whose /browser/* paths DSH MarkdownText will keep as http(s) links. */
-export const PUBLIC_BROWSER_ORIGIN = 'https://openagentinternet.org'
-
 const BROWSER_DEEP_LINK_SCHEMES = new Set(['metaid', 'metaapp', 'metafile', 'pin'])
 const BROWSER_DOMAIN_ALIAS_PATTERN = /^(?=.{3,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu
 const PREVIEW_METAAPP_URI_PATTERN = /^preview-metaapp:\/\/([^/?#]+)(\/.*)?$/iu
@@ -23,8 +20,8 @@ const BARE_PINID_RE = /(?<![/:=\w])([0-9a-f]{64}i0)(?![0-9a-f])/gi
 const PUBLIC_BROWSER_PATH_RE = /^\/browser\/(metaapp|metaid|metafile|pin|pinid|preview-metaapp)\/(.+)$/iu
 
 /**
- * Mirror of OAC's `resolveLocalBrowserPath` so the bridge, public https links,
- * and the CLI produce the same `/browser/...` path forms.
+ * Mirror of OAC's `resolveLocalBrowserPath` so the bridge and the CLI produce
+ * the same `/browser/...` path forms.
  */
 export function resolveBrowserPath(uri: string): string {
   const trimmedUri = uri.trim()
@@ -64,7 +61,8 @@ export function isBotBrowserUri(href: string): boolean {
 /**
  * Recover the Agent Internet URI from a markdown/DOM href.
  * Accepts metaapp://, metaid://, pin://, pinid://, map://, metafile://,
- * preview-metaapp://, bare pin ids, and https://openagentinternet.org/browser/...
+ * preview-metaapp://, and bare pin ids. Also recovers leftover
+ * openagentinternet.org /browser/… hrefs so they can be rewritten to native URIs.
  */
 export function normalizeBotBrowserUri(href: string): string | null {
   const trimmed = href.trim()
@@ -93,12 +91,6 @@ export function normalizeBotBrowserUri(href: string): string | null {
   return null
 }
 
-/** https://openagentinternet.org/browser/... form that DSH MarkdownText will keep as an <a>. */
-export function publicBrowserHref(uri: string): string {
-  const normalized = normalizeBotBrowserUri(uri) ?? uri.trim()
-  return `${PUBLIC_BROWSER_ORIGIN}${resolveBrowserPath(normalized)}`
-}
-
 export type BrowserCatalogEntry = {
   title: string
   href: string
@@ -106,22 +98,20 @@ export type BrowserCatalogEntry = {
 }
 
 function linkifyPlainSegment(segment: string): string {
-  let out = segment.replace(BARE_PINID_RE, (pin: string) => `[${pin}](${publicBrowserHref(`pin://${pin}`)})`)
+  let out = segment.replace(BARE_PINID_RE, (pin: string) => `[${pin}](pin://${pin})`)
   out = out.replace(AGENT_INTERNET_URI_RE, (rawMatch: string, offset: number, full: string) => {
     if (full.slice(Math.max(0, offset - 2), offset) === '](') return rawMatch
     if (full[offset - 1] === '<') return rawMatch
     const match = rawMatch.replace(TRAILING_URI_PUNCTUATION_RE, '')
     if (!match) return rawMatch
-    const uri = normalizeBotBrowserUri(match) ?? match
-    return `[${match}](${publicBrowserHref(uri)})${rawMatch.slice(match.length)}`
+    return `[${match}](${match})${rawMatch.slice(match.length)}`
   })
   return out
 }
 
 /**
- * Turn bare Agent Internet URIs and pin ids into markdown links whose
- * destinations are https://openagentinternet.org/browser/... so DSH's
- * MarkdownText (http/https/mailto only) keeps them clickable.
+ * Turn bare Agent Internet URIs and pin ids into markdown links
+ * (`[metaapp://…](metaapp://…)`, `[pinId](pin://…)`).
  */
 export function linkifyAgentInternetUris(content: string): string {
   if (!content) return content
@@ -399,7 +389,7 @@ export function formatMetaAppCandidates(items: readonly MetaAppSearchCandidate[]
       : ''
     const publisherLabel = (item.publisherName || item.publisherGlobalMetaId || 'unknown').replace(/[[\]]/g, '')
     const publisher = item.publisherGlobalMetaId
-      ? `by [${publisherLabel}](${publicBrowserHref(`metaid://${item.publisherGlobalMetaId}`)})${item.isOwn ? ' (your MetaBot)' : ''}`
+      ? `by [${publisherLabel}](metaid://${item.publisherGlobalMetaId})${item.isOwn ? ' (your MetaBot)' : ''}`
       : ''
     const tags = Array.isArray(item.tags) ? item.tags.filter((tag) => typeof tag === 'string' && tag.trim()) : []
     const meta = [
@@ -407,7 +397,7 @@ export function formatMetaAppCandidates(items: readonly MetaAppSearchCandidate[]
       tags.length ? `tags: ${tags.join(', ')}` : '',
       item.updatedAt ? `updated: ${new Date(item.updatedAt * 1000).toISOString().slice(0, 10)}` : '',
     ].filter(Boolean).join(' | ')
-    return `- [${linkTitle}](${publicBrowserHref(`metaapp://${item.pinId}`)})${intro}\n  ${meta}`
+    return `- [${linkTitle}](metaapp://${item.pinId})${intro}\n  ${meta}`
   }).join('\n')
 }
 
@@ -417,12 +407,12 @@ export function catalogFromMetaAppCandidates(items: readonly MetaAppSearchCandid
     const title = (item.title || item.appName || '').trim()
     if (title.length >= 2 && item.pinId) {
       const uri = `metaapp://${item.pinId}`
-      entries.push({ title, href: publicBrowserHref(uri), uri })
+      entries.push({ title, href: uri, uri })
     }
     const publisher = (item.publisherName || '').trim()
     if (publisher.length >= 2 && item.publisherGlobalMetaId) {
       const uri = `metaid://${item.publisherGlobalMetaId}`
-      entries.push({ title: publisher, href: publicBrowserHref(uri), uri })
+      entries.push({ title: publisher, href: uri, uri })
     }
   }
   return entries
