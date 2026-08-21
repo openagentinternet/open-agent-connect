@@ -125,6 +125,20 @@ export interface CliDependencies {
       from?: string;
     }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  grouptask?: {
+    create?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    detail?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    messages?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    postMessage?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    close?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    reopen?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    kickMember?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    setMemberStatus?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    rename?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    setPinned?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    setArchived?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   conversations?: {
     list?: (input: { local: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     messages?: (input: {

@@ -3364,6 +3364,33 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         input,
       ),
     },
+    grouptask: (() => {
+      const post = (routePath: string) => async (input: Record<string, unknown>) =>
+        requestJsonForSelectedActor('POST', routePath, undefined, input);
+      const get = (routePath: string) => async (input: Record<string, unknown>) => {
+        const params = new URLSearchParams();
+        for (const [key, value] of Object.entries(input)) {
+          if (value == null || value === '') continue;
+          params.set(key, String(value));
+        }
+        const suffix = params.size ? `?${params.toString()}` : '';
+        return requestJsonForSelectedActor('GET', `${routePath}${suffix}`, undefined);
+      };
+      return {
+        create: post('/api/grouptask/create'),
+        list: get('/api/grouptask/list'),
+        detail: get('/api/grouptask/detail'),
+        messages: get('/api/grouptask/messages'),
+        postMessage: post('/api/grouptask/message'),
+        close: post('/api/grouptask/close'),
+        reopen: post('/api/grouptask/reopen'),
+        kickMember: post('/api/grouptask/member/kick'),
+        setMemberStatus: post('/api/grouptask/member/status'),
+        rename: post('/api/grouptask/rename'),
+        setPinned: post('/api/grouptask/pin'),
+        setArchived: post('/api/grouptask/archive'),
+      };
+    })(),
     conversations: {
       list: async (input) => {
         const params = new URLSearchParams();
@@ -4333,6 +4360,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     services: { ...defaults.services, ...provided.services },
     provider: { ...defaults.provider, ...provided.provider },
     chat: { ...defaults.chat, ...provided.chat },
+    grouptask: { ...defaults.grouptask, ...provided.grouptask },
     conversations: { ...defaults.conversations, ...provided.conversations },
     memory: { ...defaults.memory, ...provided.memory },
     dream: { ...defaults.dream, ...provided.dream },
