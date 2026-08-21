@@ -10,7 +10,12 @@ import { BrowserEventHub } from './browser-bridge.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
-import { localBotList, localBotShow } from './local-read.js'
+import {
+  localBotList,
+  localBotShow,
+  localConversationsList,
+  localConversationsMessages,
+} from './local-read.js'
 import type { HostAgentLike, HostContext, OacDshConfig, PluginHttpRequest, PluginHttpResponse } from './context-types.js'
 import { uploadFileBytes } from './file-upload.js'
 import { emptyHealth, type HealthPayload } from './health.js'
@@ -134,6 +139,9 @@ async function dispatchPost(
       ? (payload as { from: string }).from.trim()
       : ''
     if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
+    const limitRaw = (payload as { limit?: unknown })?.limit
+    const local = await localConversationsList(from, typeof limitRaw === 'number' ? limitRaw : undefined)
+    if (local) return local
     return listConversations(from)
   }
   if (method === 'conversations/messages') {
@@ -142,6 +150,8 @@ async function dispatchPost(
     const peer = typeof body.peer === 'string' ? body.peer.trim() : ''
     if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
     if (!peer) return { ok: false, state: 'failed', code: 'missing_peer', message: 'peer is required' }
+    const local = await localConversationsMessages(from, peer)
+    if (local) return local
     return getConversationMessages(from, peer)
   }
   if (method === 'conversations/guidance') {

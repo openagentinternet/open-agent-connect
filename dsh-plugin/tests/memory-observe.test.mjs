@@ -41,6 +41,10 @@ test('pre-step injection appends the memory block for oac presets only', async (
   assert.equal(decision.messages.length, 2)
   assert.equal(decision.messages[1].source.plugin, 'oac-dsh')
   assert.match(decision.messages[1].content[0].text, /美式咖啡/)
+  // The injected message is persisted as a `user/message` session event; DSH
+  // refuses to reload any session whose user/message events lack an id.
+  assert.equal(typeof decision.messages[1].id, 'string')
+  assert.notEqual(decision.messages[1].id, '')
 
   // Non-oac presets pass through untouched.
   const other = fakeCtx('standard')

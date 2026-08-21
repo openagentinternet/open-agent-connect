@@ -329,3 +329,63 @@ export function localDreamSelfIdentity(from: string): Promise<MetabotCommandResu
     })
   })
 }
+
+// ---- A2A conversations ----------------------------------------------------
+// The daemon's `/api/conversations` enrichment only refreshes peer names from
+// the profile index; the stored A2A data already carries names/avatars, so we
+// serve the projection directly and skip the CLI + daemon round-trip.
+
+async function resolveProfileRecord(from: string): Promise<{ homeDir: string; globalMetaId: string } | null> {
+  const identityProfiles = core('core/identity/identityProfiles.js')
+  const nameResolution = core('core/identity/profileNameResolution.js')
+  const list = fn<(dir: string) => Promise<Array<{ homeDir: string; globalMetaId: string }>>>(
+    identityProfiles,
+    'listIdentityProfiles',
+  )
+  const match = fn<
+    (name: string, profiles: unknown[]) => { status: string; match?: { homeDir: string; globalMetaId: string } }
+  >(nameResolution, 'resolveProfileNameMatch')
+  const home = systemHomeDir()
+  const profiles = await list(home).catch(() => [])
+  const resolved = match(from, profiles)
+  return resolved.status === 'ok' && resolved.match ? resolved.match : null
+}
+
+export function localConversationsList(from: string, limit?: number): Promise<MetabotCommandResult | null> {
+  return attempt(async () => {
+    const profile = await resolveProfileRecord(from)
+    if (!profile) return null
+    const { listPeerConversationSummaries } = core('core/a2a/conversationProjection.js') as {
+      listPeerConversationSummaries: (input: Record<string, unknown>) => Promise<unknown>
+    }
+    const result = await listPeerConversationSummaries({
+      homeDir: profile.homeDir,
+      localGlobalMetaId: profile.globalMetaId,
+      ...(typeof limit === 'number' ? { limit } : {}),
+    })
+    return success(result)
+  })
+}
+
+export function localConversationsMessages(
+  from: string,
+  peer: string,
+  options: { limit?: number; before?: number; after?: number } = {},
+): Promise<MetabotCommandResult | null> {
+  return attempt(async () => {
+    const profile = await resolveProfileRecord(from)
+    if (!profile) return null
+    const { readPeerConversationMessages } = core('core/a2a/conversationProjection.js') as {
+      readPeerConversationMessages: (input: Record<string, unknown>) => Promise<unknown>
+    }
+    const result = await readPeerConversationMessages({
+      homeDir: profile.homeDir,
+      localGlobalMetaId: profile.globalMetaId,
+      peerGlobalMetaId: peer,
+      ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
+      ...(typeof options.before === 'number' ? { before: options.before } : {}),
+      ...(typeof options.after === 'number' ? { after: options.after } : {}),
+    })
+    return success(result)
+  })
+}

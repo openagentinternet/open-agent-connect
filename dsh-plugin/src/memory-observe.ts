@@ -5,6 +5,7 @@
  * extraction + transcript mirroring (session/event feed, turn/end). Both are
  * best-effort: they never break a turn on failure.
  */
+import { randomUUID } from 'node:crypto'
 import { runMetabot } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { slugFromPresetId } from './chip-logic.js'
@@ -84,6 +85,7 @@ export function applyMemoryInjection(ctx: HostContext, options: MemoryObserveOpt
           : ''
         if (!xml.trim()) return decision
         const memoryMessage: HostUserMessage = {
+          id: randomUUID(),
           role: 'user',
           content: [{ type: 'text', text: xml } as HostTextBlock],
           source: {

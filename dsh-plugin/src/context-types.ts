@@ -61,6 +61,10 @@ export interface HostTextBlock {
 }
 
 export interface HostUserMessage {
+  /** Stable message identity. DSH persists pre-step messages as `user/message`
+   * session events and refuses to reload any that lack an id, so plugin-built
+   * messages must carry one. */
+  id?: string
   role: 'user'
   content: HostTextBlock[]
   source: { kind: string; plugin?: string; form?: string; sections?: Array<{ name: string; text: string }> }
