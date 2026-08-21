@@ -409,7 +409,7 @@ body[data-oac-browser-dragging] .oac-browser-frame { pointer-events: none; }
 .oac-browser-error { color: var(--dsw-alias-state-error-primary); }
 .oac-browser-home { padding: 7px 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
 .oac-browser-home:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--dsw-alias-label-dimmed); }
-.oac-browser-reopen { position: fixed; top: 64px; right: 0; z-index: 1075; display: none; align-items: center; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-right: 0; border-radius: 10px 0 0 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 16px; cursor: pointer; pointer-events: auto; }
+.oac-browser-reopen { position: fixed; top: 64px; right: 0; z-index: 1075; display: flex; align-items: center; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-right: 0; border-radius: 10px 0 0 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 16px; cursor: pointer; pointer-events: auto; }
 .oac-browser-reopen:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .oac-browser-shell[data-open='false'] .oac-browser-resize, .oac-browser-shell[data-open='false'] .oac-browser-panel { display: none; }
 .oac-browser-shell[data-open='true'] .oac-browser-reopen { display: none; }

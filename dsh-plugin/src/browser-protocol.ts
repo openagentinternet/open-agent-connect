@@ -185,6 +185,41 @@ export function activeTabOf(state: BrowserTabState): BrowserTabInfo | null {
   return state.tabs.find((tab) => tab.id === state.activeTabId) ?? null
 }
 
+/** Fold one get-tab-info / get-content tab into the live list. */
+export function applyTabInfo(state: BrowserTabState, tab: BrowserTabInfo): BrowserTabState {
+  const tabs = upsertTab(state.tabs, tab)
+  if (tab.isActive) {
+    return { tabs: markActive(tabs, tab.id), activeTabId: tab.id }
+  }
+  return { tabs, activeTabId: state.activeTabId }
+}
+
+export type BrowserOpenDecision =
+  | { kind: 'load'; url: string }
+  | { kind: 'open-tab'; uri: string }
+  | { kind: 'ensure-open' }
+
+/**
+ * How the DSH web client should apply one browser-open SSE frame.
+ * Host home (empty URI) always loads `/browser` so the right sidebar opens
+ * on the Bot Browser homepage. Daemon frames do not reload an existing iframe
+ * (ABC already received the tab).
+ */
+export function decideBrowserOpenAction(input: {
+  source: BrowserOpenSource
+  uri: string | null
+  localUiUrl: string
+  hasIframeUrl: boolean
+}): BrowserOpenDecision {
+  const uri = (input.uri ?? '').trim()
+  if (input.source === 'daemon') {
+    return input.hasIframeUrl ? { kind: 'ensure-open' } : { kind: 'load', url: input.localUiUrl }
+  }
+  if (!uri) return { kind: 'load', url: input.localUiUrl }
+  if (input.hasIframeUrl) return { kind: 'open-tab', uri }
+  return { kind: 'load', url: input.localUiUrl }
+}
+
 export function formatBotBrowserTabs(tabs: readonly BrowserTabInfo[]): string {
   if (tabs.length === 0) return 'No open tabs.'
   return tabs

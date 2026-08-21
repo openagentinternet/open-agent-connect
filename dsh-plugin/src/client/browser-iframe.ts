@@ -7,6 +7,7 @@
  */
 import {
   activeTabOf,
+  applyTabInfo,
   emptyTabState,
   readRendererFromEnvelope,
   reduceBrowserTabs,
@@ -35,6 +36,7 @@ function recordOf(value: unknown): Record<string, unknown> | null {
 
 export class BotBrowserIframeBridge {
   private iframe: HTMLIFrameElement | null = null
+  private attachedIframe: HTMLIFrameElement | null = null
   private tabs: BrowserTabState = emptyTabState()
   private rendererType: string | null = null
   private seq = 0
@@ -64,10 +66,21 @@ export class BotBrowserIframeBridge {
   }
 
   setIframe(iframe: HTMLIFrameElement | null): void {
+    if (iframe === this.iframe) return
     this.iframe = iframe
-    this.tabs = emptyTabState()
-    this.rendererType = null
-    this.store.setActiveUri(null)
+    if (iframe === null) {
+      this.scheduleReport()
+      return
+    }
+    if (iframe !== this.attachedIframe) {
+      this.attachedIframe = iframe
+      this.tabs = emptyTabState()
+      this.rendererType = null
+      this.store.setActiveUri(null)
+      iframe.addEventListener('load', () => {
+        void this.hydrateFromIframe()
+      })
+    }
     this.scheduleReport()
   }
 
@@ -103,7 +116,11 @@ export class BotBrowserIframeBridge {
     return true
   }
 
-  private askIframe(type: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  private askIframe(
+    type: string,
+    extra: Record<string, unknown> = {},
+    timeoutMs = COMMAND_TIMEOUT_MS,
+  ): Promise<Record<string, unknown>> {
     const requestId = `oac-dsh-${Date.now()}-${++this.seq}`
     if (!this.postToIframe({ type, version: 1, requestId, ...extra })) {
       return Promise.reject(new Error('Bot Browser iframe is not loaded'))
@@ -112,23 +129,49 @@ export class BotBrowserIframeBridge {
       const timeout = window.setTimeout(() => {
         this.pending.delete(requestId)
         reject(new Error('Bot Browser did not respond in time'))
-      }, COMMAND_TIMEOUT_MS)
+      }, timeoutMs)
       this.pending.set(requestId, { resolve, reject, timeout })
     })
   }
 
-  private async refreshRenderer(tabId?: number): Promise<void> {
+  private async refreshRenderer(tabId?: number, timeoutMs = COMMAND_TIMEOUT_MS): Promise<void> {
     try {
-      const data = await this.askIframe('agent-browser:get-tab-info', tabId === undefined ? {} : { tabId })
+      const data = await this.askIframe(
+        'agent-browser:get-tab-info',
+        tabId === undefined ? {} : { tabId },
+        timeoutMs,
+      )
       if (data.ok === false) return
       const result = recordOf(data.result) ?? data
       this.rendererType = readRendererFromEnvelope(result.current).type ?? null
       const uri = typeof result.uri === 'string' ? result.uri : null
       if (uri) this.store.setActiveUri(uri)
+      const id = typeof result.id === 'number' ? result.id : (typeof result.tabId === 'number' ? result.tabId : null)
+      if (id !== null) {
+        this.tabs = applyTabInfo(this.tabs, {
+          id,
+          uri,
+          title: typeof result.title === 'string' ? result.title : null,
+          isActive: result.isActive !== false,
+        })
+      }
     } catch {
       // renderer refresh is best-effort
     }
     this.scheduleReport()
+  }
+
+  private async hydrateFromIframe(): Promise<void> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (this.stopped || this.iframe === null) return
+      try {
+        await this.refreshRenderer(undefined, 500)
+        if (this.tabs.tabs.length > 0) return
+      } catch {
+        // ABC may still be booting
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 200))
+    }
   }
 
   private snapshot(): BrowserSnapshot {
@@ -221,6 +264,16 @@ export class BotBrowserIframeBridge {
             truncated: result.truncated === true,
           }
           this.rendererType = readRendererFromEnvelope(result.current).type ?? this.rendererType
+          if (content.uri || typeof result.id === 'number' || typeof result.tabId === 'number') {
+            this.tabs = applyTabInfo(this.tabs, {
+              id: content.tabId,
+              uri: content.uri,
+              title: content.title,
+              isActive: true,
+            })
+            if (content.uri) this.store.setActiveUri(content.uri)
+            this.scheduleReport()
+          }
           return {
             requestId: command.requestId,
             ok: true,
@@ -234,10 +287,18 @@ export class BotBrowserIframeBridge {
           id: typeof result.id === 'number' ? result.id : command.tabId ?? 0,
           uri: typeof result.uri === 'string' ? result.uri : null,
           title: typeof result.title === 'string' ? result.title : null,
-          isActive: result.isActive === true,
+          isActive: result.isActive !== false,
           current: result.current ?? null,
         }
         this.rendererType = readRendererFromEnvelope(info.current).type ?? this.rendererType
+        this.tabs = applyTabInfo(this.tabs, {
+          id: info.id,
+          uri: info.uri,
+          title: info.title,
+          isActive: info.isActive,
+        })
+        if (info.uri) this.store.setActiveUri(info.uri)
+        this.scheduleReport()
         return {
           requestId: command.requestId,
           ok: true,

@@ -430,8 +430,11 @@ export {
   buildBrowserToolDefinitions,
   createBrowserSourceCache,
   installBrowserToolsOnAgent,
+  isBrowserHomeUri,
 } from './browser-tools.js'
 export {
+  applyTabInfo,
+  decideBrowserOpenAction,
   formatBotBrowserTabs,
   formatMetaAppCandidates,
   parseMetaAppPinIdFromUri,

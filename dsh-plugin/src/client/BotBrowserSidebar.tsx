@@ -179,7 +179,10 @@ export function BotBrowserSidebar({
           )}
         </div>
       </div>
-      <button type="button" className="oac-browser-reopen" aria-label={t('title')} onClick={() => store.toggle()}>
+      <button type="button" className="oac-browser-reopen" aria-label={t('title')} onClick={() => {
+        if (state.url) store.toggle()
+        else openHome()
+      }}>
         <span className="oac-browser-reopen-label">{t('landing')}</span>
       </button>
     </div>
