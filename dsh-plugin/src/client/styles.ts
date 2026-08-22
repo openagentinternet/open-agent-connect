@@ -383,12 +383,17 @@ export const PRESETS_CSS = `
 export const BROWSER_CSS = `
 /* Right-sidebar Bot Browser (hosted in a body portal, like dsh-better-sidebar).
    While open it OCCUPIES the layout: #root gives up the panel width, so the
-   conversation column lifts instead of the Browser floating over it. */
+   conversation column lifts instead of the Browser floating over it.
+   Layering: the DSH convention is 1000 = full-viewport modal layer (Settings
+   shell, Modal dialogs, the A2A overlay below) and 1100 = above-modals
+   (menus, toasts). The shell sits at 990 — above in-app chrome, below every
+   modal — so an open modal masks and blocks the Browser like the rest of the
+   app instead of the Browser covering the dialog. */
 #root { margin-right: var(--oac-browser-width, 0px); transition: margin-right .18s cubic-bezier(.4, 0, .2, 1); }
 body[data-oac-browser-dragging] #root { transition: none; }
 body[data-oac-browser-dragging] { cursor: col-resize; user-select: none; }
 body[data-oac-browser-dragging] .oac-browser-frame { pointer-events: none; }
-.oac-browser-shell { position: fixed; top: 0; right: 0; bottom: 0; z-index: 1080; width: var(--oac-browser-width, 0px); display: flex; pointer-events: none; }
+.oac-browser-shell { position: fixed; top: 0; right: 0; bottom: 0; z-index: 990; width: var(--oac-browser-width, 0px); display: flex; pointer-events: none; }
 /* Sidebar-style divider: a 12px grab strip (half overlapping the conversation
    column) carrying a hairline knob that lights up on hover/drag, matching the
    left sidebar's resize affordance. */
