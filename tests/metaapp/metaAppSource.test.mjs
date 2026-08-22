@@ -238,6 +238,32 @@ test('materializeMetaAppSource rejects non-zip packages and download failures', 
   assert.equal(downloadFailed.code, 'metaapp_source_download_failed');
 });
 
+test('materializeMetaAppSource forks from the artifact cache when pin fetch fails', async () => {
+  const homeDir = await createProfileHome('metabot-metaapp-source-cache-fetch-fail-');
+  const sourceDir = await makeSourceTree();
+  const { entry } = await seedArtifactCache(homeDir, sourceDir);
+  const outDir = path.join(homeDir, 'workspace', 'cached-remix');
+
+  const result = await materializeMetaAppSource(
+    { pinId: VALID_PIN_ID, outDir },
+    {
+      homeDir,
+      fetch: async () => {
+        throw new TypeError('fetch failed');
+      },
+      manApiBaseUrl: MAN_API_BASE_URL,
+      now: () => NOW_MS,
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.dir, outDir);
+  assert.equal(result.data.indexFile, entry.indexFile);
+  assert.equal(result.data.sourcePinId, VALID_PIN_ID);
+  assert.equal(await readFile(path.join(outDir, 'index.html'), 'utf8'), '<h1>Pomodoro</h1>');
+  assert.ok(existsSync(path.join(outDir, '.metaapp-fork.json')));
+});
+
 test('materializeMetaAppSource refuses a non-empty --out directory', async () => {
   const homeDir = await createProfileHome('metabot-metaapp-source-clobber-');
   const sourceDir = await makeSourceTree();

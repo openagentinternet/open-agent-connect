@@ -201,6 +201,39 @@ test('searchMetaApps defaults to the production base URL and honors the env over
   }
 });
 
+test('searchMetaApps retries a transient abort then succeeds', async () => {
+  let calls = 0;
+  const fetchFn = async () => {
+    calls += 1;
+    if (calls === 1) {
+      const error = new Error('This operation was aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+    return jsonResponse({ code: 0, data: { items: [sampleItem()], nextCursor: null, hasMore: false } });
+  };
+  const page = await searchMetaApps({ keyword: 'game' }, { baseUrl: 'https://so.example.com', fetchFn });
+  assert.equal(calls, 2);
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0].title, 'Pomodoro');
+});
+
+test('searchMetaApps does not retry application errors', async () => {
+  let calls = 0;
+  const fetchFn = async () => {
+    calls += 1;
+    return jsonResponse({ code: 40000, message: 'bad query' });
+  };
+  await assert.rejects(
+    () => searchMetaApps({ keyword: 'x' }, { baseUrl: 'https://so.example.com', fetchFn }),
+    (error) => {
+      assert.ok(error instanceof MetaAppSearchApiError);
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
+});
+
 test('searchMetaApps passes an abort signal with the configured timeout', async () => {
   const { calls, fetchFn } = captureFetch({ code: 0, data: { items: [] } });
   await searchMetaApps({}, { baseUrl: 'https://so.example.com', fetchFn, timeoutMs: 1234 });

@@ -124,3 +124,24 @@ test('artifact cache reports shared stats and clears a pin artifact', async () =
   assert.equal(after.pinRecordCount, 0);
   assert.equal(await store.getArtifact(descriptor), null);
 });
+
+test('artifact cache resolves a written package by pinId', async () => {
+  const systemHome = await mkdtempTempRoot('oac-metaapp-artifact-cache-by-pin-');
+  const store = createMetaAppArtifactCacheStore(await makeProfileRoot(systemHome, 'alice'));
+  const descriptor = {
+    metaAppPinId: METAAPP_PIN_ID,
+    contentReference: CONTENT_REFERENCE,
+    contentType: 'application/zip',
+    indexFile: 'index.html',
+    modifyHistory: null,
+  };
+  const written = await store.writeArtifact({
+    ...descriptor,
+    archive: await makeZipBuffer('By Pin'),
+  });
+
+  const hit = await store.getArtifactByPinId(METAAPP_PIN_ID);
+  assert.equal(hit?.cacheKey, written.cacheKey);
+  assert.equal(hit?.artifactDir, written.artifactDir);
+  assert.equal(await store.getArtifactByPinId('not-a-pin'), null);
+});

@@ -55,6 +55,33 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isTransientSourceError(error: unknown): boolean {
+  const name = error && typeof error === 'object' ? String((error as { name?: unknown }).name || '') : '';
+  if (name === 'AbortError' || name === 'TimeoutError') {
+    return true;
+  }
+  const message = errorMessage(error).toLowerCase();
+  return message.includes('fetch failed')
+    || message.includes('failed to fetch')
+    || message.includes('aborted')
+    || message.includes('timed out')
+    || message.includes('timeout')
+    || message.includes('network');
+}
+
+function isTransientSourceFailure(result: MetabotCommandResult<never>): boolean {
+  const code = result.code || '';
+  if (code === 'metaapp_source_failed' || code === 'metaapp_source_download_failed') {
+    return true;
+  }
+  const message = (result.message || '').toLowerCase();
+  return message.includes('fetch failed')
+    || message.includes('failed to fetch')
+    || message.includes('aborted')
+    || message.includes('timed out')
+    || message.includes('timeout');
+}
+
 function normalizeTags(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((tag) => (typeof tag === 'string' ? tag.trim() : '')).filter(Boolean)
@@ -99,21 +126,31 @@ async function resolveSourcePackage(
       pinRecord: Record<string, unknown>;
     };
   } = {};
-  const resolved = await resolveMetaAppPinToRecord({
-    pinId,
-    fetch: fetchImpl,
-    manApiBaseUrl: deps.manApiBaseUrl,
-    metafileContentBaseUrl: deps.metafileContentBaseUrl,
-    createPreviewSession: (input) => {
-      captured.descriptor = {
-        contentReference: input.contentReference,
-        contentType: input.contentType,
-        indexFile: input.indexFile,
-        pinRecord: input.pinRecord,
-      };
-      return { localPreviewUrl: '' };
-    },
-  });
+  let resolved: Awaited<ReturnType<typeof resolveMetaAppPinToRecord>>;
+  try {
+    resolved = await resolveMetaAppPinToRecord({
+      pinId,
+      fetch: fetchImpl,
+      manApiBaseUrl: deps.manApiBaseUrl,
+      metafileContentBaseUrl: deps.metafileContentBaseUrl,
+      createPreviewSession: (input) => {
+        captured.descriptor = {
+          contentReference: input.contentReference,
+          contentType: input.contentType,
+          indexFile: input.indexFile,
+          pinRecord: input.pinRecord,
+        };
+        return { localPreviewUrl: '' };
+      },
+    });
+  } catch (error) {
+    return commandFailed(
+      'metaapp_source_failed',
+      isTransientSourceError(error)
+        ? `Unable to resolve MetaApp pin (network): ${errorMessage(error)}`
+        : errorMessage(error),
+    );
+  }
   if (!resolved.ok) {
     return mapResolveFailure(resolved);
   }
@@ -161,12 +198,29 @@ export async function materializeMetaAppSource(
   }
 
   const artifactCache = deps.artifactCache ?? createMetaAppArtifactCacheStore(deps.homeDir);
-  const resolved = await resolveSourcePackage(pinId, deps, artifactCache);
-  if ('state' in resolved) {
-    return resolved;
+  let resolved: ResolvedSourcePackage | MetabotCommandResult<never>;
+  try {
+    resolved = await resolveSourcePackage(pinId, deps, artifactCache);
+  } catch (error) {
+    resolved = commandFailed('metaapp_source_failed', errorMessage(error));
   }
 
-  const { artifact, title, tags } = resolved;
+  let pack: ResolvedSourcePackage;
+  if ('state' in resolved) {
+    // Bot Browser viewing already extracts the zip into the shared cache.
+    // When MAN/metafile fetch fails, still fork from that local copy.
+    const cached = typeof artifactCache.getArtifactByPinId === 'function'
+      ? await artifactCache.getArtifactByPinId(pinId)
+      : null;
+    if (!cached || !isTransientSourceFailure(resolved)) {
+      return resolved;
+    }
+    pack = { artifact: cached, title: pinId, tags: [] };
+  } else {
+    pack = resolved;
+  }
+
+  const { artifact, title, tags } = pack;
   if (!input.outDir) {
     return commandSuccess({
       dir: artifact.artifactDir,

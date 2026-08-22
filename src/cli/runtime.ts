@@ -2750,7 +2750,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         manApiBaseUrl: infrastructure.manApiBaseUrl,
         metafileContentBaseUrl: infrastructure.metafileContentBaseUrl,
       },
-    );
+    ).catch((error) => commandFailed(
+      'metaapp_source_failed',
+      error instanceof Error ? error.message : String(error),
+    ));
   }
 
   return {

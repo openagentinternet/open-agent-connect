@@ -431,6 +431,7 @@ export {
   createBrowserSourceCache,
   installBrowserToolsOnAgent,
   isBrowserHomeUri,
+  sessionApprovalPolicy,
 } from './browser-tools.js'
 export {
   applyTabInfo,

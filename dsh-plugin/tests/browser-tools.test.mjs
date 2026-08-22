@@ -129,6 +129,71 @@ test('search_metaapps formats CLI hits as markdown links', async () => {
   assert.match(text, /\[bob\]\(metaid:\/\/idq1bob\)/)
 })
 
+test('search_metaapps retries once on abort then returns candidates', async () => {
+  let calls = 0
+  const { agent, tools } = fakeAgent()
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub: fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => {
+      calls += 1
+      if (calls === 1) {
+        return { ok: false, state: 'failed', message: 'This operation was aborted' }
+      }
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          items: [{ pinId: PIN, title: '半糖牌局', publisherName: 'bob', publisherGlobalMetaId: 'idq1bob' }],
+        },
+      }
+    },
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const text = await tools.find((tool) => tool.name === 'search_metaapps').execute({ query: '牌局' }, {})
+  assert.equal(calls, 2)
+  assert.match(text, new RegExp(`\\[半糖牌局\\]\\(metaapp://${PIN}\\)`))
+})
+
+test('bot_browser_publish_app skips the native dialog when approval policy is never', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-publish-never-'))
+  await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
+  await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
+  const calls = []
+  const asked = []
+  const { agent, tools } = fakeAgent()
+  agent.session = { events: [{ type: 'approval/policy', data: { policy: 'never' } }] }
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub: fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false })),
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    approval: {
+      async request(req) {
+        asked.push(req)
+        return 'rejected'
+      },
+    },
+    run: async (args) => {
+      calls.push(args)
+      return { ok: true, state: 'success', data: { firstPinId: PIN, metaappUri: `metaapp://${PIN}` } }
+    },
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const text = await tools.find((tool) => tool.name === 'bot_browser_publish_app').execute(
+    { dir, title: 'Test App' },
+    { agent },
+  )
+  assert.equal(asked.length, 0)
+  assert.equal(calls.length, 1)
+  assert.match(calls[0].join(' '), /publish-project/)
+  assert.match(text, new RegExp(`metaapp://${PIN}`))
+})
+
 test('bot_browser_publish_app asks DSH approval and skips CLI when cancelled', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-publish-'))
   await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
