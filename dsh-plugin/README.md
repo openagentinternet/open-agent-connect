@@ -149,9 +149,9 @@ the Browser occupies the layout instead of floating over it).
 
 Entry points:
 
-- **Settings → Bots** header gains a **Bot Browser** button (closes Settings and opens the Browser home).
-- Each Bot card gains a **Bot Page** button that closes Settings and opens that
-  Bot's page (`metaid://<globalMetaId>`) in the right sidebar.
+- **Settings → Bots** header gains a **Bot Browser** button (closes Settings as the Browser home opens).
+- Each Bot card gains a **Bot Page** button that closes Settings as that Bot's
+  page (`metaid://<globalMetaId>`) opens in the right sidebar.
 - The Browser panel has a close button and a width drag handle (default
   `min(50vw, 1280px)`).
 
