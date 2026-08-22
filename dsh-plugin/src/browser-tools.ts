@@ -42,7 +42,7 @@ export const BROWSER_STRATEGY_TEXT = [
   '- To open Bot Browser / the right sidebar / the homepage, call bot_browser_open_uri with NO uri. That shows the Bot Browser home on the right. Do not invent a URI.',
   '- Use bot_browser_open_uri with a metaapp://, metaid://, pin://, or preview-metaapp:// URI to open a known page. Use bot_browser_tabs to list/close/switch tabs.',
   '- Use bot_browser_read_page when the user asks what the page says or whether you can see the app on the right. For MetaApps, follow source_dir / APP.md; never claim you cannot see the current URI if <active_tab> lists one.',
-  '- Discover apps with search_metaapps. Remix with bot_browser_fork_current_app — never Bash `metabot metaapp source` (the DSH sandbox cannot write ~/.metabot/cache). After a fork, READ the files with your file tools before editing (the host Edit tool requires a Read first). Preview with bot_browser_preview_local, publish with bot_browser_publish_app only after preview and explicit user confirmation (the host shows a native approval dialog).',
+  '- Discover apps with search_metaapps. Remix with bot_browser_fork_current_app — never Bash `metabot metaapp source` (the DSH sandbox cannot write ~/.metabot/cache). After a fork, READ the files with your file tools before editing (the host Edit tool requires a Read first). Preview with bot_browser_preview_local, publish with bot_browser_publish_app only after preview and explicit user confirmation (native DSH approval when prompts are enabled; if approval prompts are disabled, the user\'s explicit chat confirmation is the gate).',
   '- When you mention an app, person, or pin in your reply, ALWAYS write a markdown link: [title](metaapp://<pinId>), [name](metaid://<globalMetaId>), or [pin](pin://<pinId>). Reuse search_metaapps bullet lines verbatim. NEVER use https:// web2 URLs. NEVER shorten a globalMetaId or pinId. Never mention an app or author as plain text.',
   '- Never use Playwright or external browser automation.',
 ].join('\n')
@@ -165,6 +165,44 @@ export function approvalOf(ctx: HostContext): HostApproval | undefined {
   } catch {
     return undefined
   }
+}
+
+/** Last `approval/policy` event on the agent's session, if any. */
+export function sessionApprovalPolicy(agent: HostAgentLike | undefined): 'ask' | 'never' | undefined {
+  const events = agent?.session?.events
+  if (!events) return undefined
+  let policy: 'ask' | 'never' | undefined
+  for (const event of events) {
+    if (event.type !== 'approval/policy') continue
+    const data = event.data
+    if (!data || typeof data !== 'object') continue
+    const value = (data as { policy?: unknown }).policy
+    if (value === 'ask' || value === 'never') policy = value
+  }
+  return policy
+}
+
+function approvalPolicyOf(gate: HostApproval, agent: HostAgentLike | undefined): 'ask' | 'never' | undefined {
+  const session = agent?.session
+  if (session && typeof gate.overrideOf === 'function') {
+    try {
+      const fromService = gate.overrideOf(session)
+      if (fromService === 'ask' || fromService === 'never') return fromService
+    } catch {
+      // Fall through to the session-event fold.
+    }
+  }
+  return sessionApprovalPolicy(agent)
+}
+
+function isTransientToolError(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase()
+  return message.includes('aborted')
+    || message.includes('timed out')
+    || message.includes('timeout')
+    || message.includes('fetch failed')
+    || message.includes('failed to fetch')
+    || message.includes('network')
 }
 
 async function actorHomeDir(slug: string): Promise<string> {
@@ -424,22 +462,29 @@ export function buildBrowserToolDefinitions(input: {
         },
       },
       output: TEXT_OUTPUT,
-      timeoutMs: 30_000,
+      timeoutMs: 45_000,
       async execute(args) {
         const limit = Math.min(20, Math.max(1, Math.floor(numberArg(args, 'limit') ?? 8)))
         const mode = textArg(args, 'mode') || 'search'
         const nextStepHint = 'Pick the single best match for the user\'s intent and open it with bot_browser_open_uri. When listing apps in your reply, REUSE the bullet lines above verbatim: app titles and author names MUST remain markdown links ([title](metaapp://<pinId>), [name](metaid://<id>)) — never mention an app or an author as plain text, and never rewrite them as https:// URLs. Offer 2–3 alternatives if the best one might not be what they meant; if nothing fits, say so instead of opening a random app.'
+
+        const runSearch = async (cliArgs: string[]) => {
+          try {
+            return asCandidates(dataOf(await run(cliArgs, { timeoutMs: 35_000 })))
+          } catch (error) {
+            if (!isTransientToolError(error)) throw error
+            return asCandidates(dataOf(await run(cliArgs, { timeoutMs: 35_000 })))
+          }
+        }
 
         if (mode === 'forks') {
           const pinId = parseMetaAppPinIdFromUri(textArg(args, 'pinId'))
           if (!pinId) {
             throw new Error('search_metaapps mode="forks" requires a valid pinId (or metaapp://<pinId>).')
           }
-          const result = await run(
+          const items = await runSearch(
             ['metaapp', 'forks', '--pin-id', pinId, '--limit', String(limit)],
-            { timeoutMs: 20_000 },
           )
-          const items = asCandidates(dataOf(result))
           if (items.length === 0) {
             return `No remixes (forks) found for metaapp://${pinId}. If the user expected some, the lineage may simply not exist yet — say so honestly.`
           }
@@ -456,8 +501,7 @@ export function buildBrowserToolDefinitions(input: {
         if (tag) cliArgs.push('--tag', tag)
         if (publisher) cliArgs.push('--publisher', publisher)
         if (typeof sinceDays === 'number' && sinceDays > 0) cliArgs.push('--since-days', String(Math.floor(sinceDays)))
-        let result = await run(cliArgs, { timeoutMs: 20_000 })
-        let items = asCandidates(dataOf(result))
+        let items = await runSearch(cliArgs)
         if (items.length === 0 && query) {
           const tokens = query.split(/\s+/u)
           if (tokens.length > 1) {
@@ -465,8 +509,7 @@ export function buildBrowserToolDefinitions(input: {
             if (tag) retry.push('--tag', tag)
             if (publisher) retry.push('--publisher', publisher)
             if (typeof sinceDays === 'number' && sinceDays > 0) retry.push('--since-days', String(Math.floor(sinceDays)))
-            result = await run(retry, { timeoutMs: 20_000 })
-            items = asCandidates(dataOf(result))
+            items = await runSearch(retry)
           }
         }
         if (items.length === 0) {
@@ -534,7 +577,7 @@ export function buildBrowserToolDefinitions(input: {
     },
     {
       name: 'bot_browser_publish_app',
-      description: 'Publish a local MetaApp directory (from bot_browser_fork_current_app or built in the workspace) on-chain under the user\'s MetaID. Requires APP.md at the directory root: a natural-language doc for other agents (what it does, structure, params/outputs, subpages, protocols, remix notes — facts only). Writes on-chain, COSTS fees, IRREVERSIBLE: always preview first with bot_browser_preview_local AND get explicit user confirmation; never publish without both or without APP.md. Host shows a native DSH approval dialog; cancel aborts. forkedFrom provenance is recorded automatically for forks.',
+      description: 'Publish a local MetaApp directory (from bot_browser_fork_current_app or built in the workspace) on-chain under the user\'s MetaID. Requires APP.md at the directory root: a natural-language doc for other agents (what it does, structure, params/outputs, subpages, protocols, remix notes — facts only). Writes on-chain, COSTS fees, IRREVERSIBLE: always preview first with bot_browser_preview_local AND get explicit user confirmation; never publish without both or without APP.md. Host shows a native DSH approval dialog when prompts are enabled; if approval prompts are disabled in the session, the user\'s explicit chat confirmation is the gate and CLI --confirm is used. forkedFrom provenance is recorded automatically for forks.',
       parameters: {
         type: 'object',
         properties: {
@@ -576,15 +619,18 @@ export function buildBrowserToolDefinitions(input: {
           throw new Error('Publish refused: DSH approval is not available in this composition, so on-chain publish cannot be confirmed.')
         }
         const agent = exec.agent ?? hostAgent
-        const outcome: HostApprovalOutcome = await gate.request({
-          agent,
-          toolName: 'bot_browser_publish_app',
-          ...(exec.callId ? { callId: exec.callId } : {}),
-          reason,
-          signal: exec.signal,
-        })
-        if (outcome !== 'allowed-once') {
-          return `Publish cancelled by the user in the confirmation dialog (${outcome}). Do not retry unless the user explicitly asks to publish again.`
+        const policy = approvalPolicyOf(gate, agent)
+        if (policy !== 'never') {
+          const outcome: HostApprovalOutcome = await gate.request({
+            agent,
+            toolName: 'bot_browser_publish_app',
+            ...(exec.callId ? { callId: exec.callId } : {}),
+            reason,
+            signal: exec.signal,
+          })
+          if (outcome !== 'allowed-once') {
+            return `Publish cancelled by the user in the confirmation dialog (${outcome}). Do not retry unless the user explicitly asks to publish again.`
+          }
         }
         await mergeManifest(dir, {
           ...(title ? { title } : {}),

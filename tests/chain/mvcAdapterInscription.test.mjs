@@ -58,3 +58,24 @@ test('mvcChainAdapter buildInscription keeps totalCost positive from local UTXO 
     __clearPendingMvcSpentOutpointsForTests?.();
   }
 });
+
+test('mvcChainAdapter fetchUtxos retries a transient fetch failed', async () => {
+  __clearPendingMvcSpentOutpointsForTests?.();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      throw new TypeError('fetch failed');
+    }
+    return { json: async () => ({ data: { list: [] } }) };
+  };
+  try {
+    const utxos = await mvcChainAdapter.fetchUtxos(FIXTURE_ADDRESS);
+    assert.deepEqual(utxos, []);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    __clearPendingMvcSpentOutpointsForTests?.();
+  }
+});

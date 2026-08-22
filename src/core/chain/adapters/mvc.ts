@@ -29,6 +29,7 @@ const METALET_HOST = 'https://www.metalet.space';
 const NET = 'livenet';
 const P2PKH_INPUT_SIZE = 148;
 const DEFAULT_MVC_FEE_RATE = 1;
+const MVC_FETCH_RETRY_DELAYS_MS = [400, 1000];
 
 /** Deferred tracking: maps rawTx hex → tracking info for after broadcast */
 interface DeferredMvcTracker {
@@ -52,6 +53,41 @@ export function __clearPendingMvcSpentOutpointsForTests(): void {
 function toFiniteNumber(value: unknown): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function isTransientMvcFetchError(error: unknown): boolean {
+  const name = error && typeof error === 'object' ? String((error as { name?: unknown }).name || '') : '';
+  if (name === 'AbortError' || name === 'TimeoutError') {
+    return true;
+  }
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return message.includes('fetch failed')
+    || message.includes('failed to fetch')
+    || message.includes('network')
+    || message.includes('econnreset')
+    || message.includes('etimedout')
+    || message.includes('socket')
+    || message.includes('aborted')
+    || message.includes('timed out')
+    || message.includes('timeout');
+}
+
+async function mvcFetch(url: string, init?: RequestInit): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MVC_FETCH_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= MVC_FETCH_RETRY_DELAYS_MS.length || !isTransientMvcFetchError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, MVC_FETCH_RETRY_DELAYS_MS[attempt]);
+      });
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 async function getV3AddressType(): Promise<AddressType> {
@@ -109,7 +145,7 @@ export const mvcChainAdapter: ChainAdapter = {
 
     while (true) {
       const params = new URLSearchParams({ address, net: NET, ...(flag ? { flag } : {}) });
-      const response = await fetch(`${METALET_HOST}/wallet-api/v4/mvc/address/utxo-list?${params}`);
+      const response = await mvcFetch(`${METALET_HOST}/wallet-api/v4/mvc/address/utxo-list?${params}`);
       const json = await response.json() as {
         data?: { list?: Array<{ txid: string; outIndex: number; value: number; height: number; flag?: string }> };
       };
@@ -155,7 +191,7 @@ export const mvcChainAdapter: ChainAdapter = {
   async fetchFeeRate(): Promise<number> {
     try {
       const url = `${METALET_HOST}/wallet-api/v4/mvc/fee/summary?net=${NET}`;
-      const response = await fetch(url);
+      const response = await mvcFetch(url);
       const json = await response.json() as { code?: number; data?: { list?: Array<{ title?: string; feeRate?: number }> } };
       if (json?.code !== 0) return DEFAULT_MVC_FEE_RATE;
       const list = json?.data?.list ?? [];
@@ -169,7 +205,7 @@ export const mvcChainAdapter: ChainAdapter = {
 
   async fetchRawTx(txid: string): Promise<string> {
     const params = new URLSearchParams({ txId: txid, chain: 'mvc', net: NET });
-    const response = await fetch(`${METALET_HOST}/wallet-api/v3/tx/raw?${params}`);
+    const response = await mvcFetch(`${METALET_HOST}/wallet-api/v3/tx/raw?${params}`);
     const json = await response.json() as {
       code?: number; message?: string;
       data?: { rawTx?: string; hex?: string };
@@ -181,7 +217,7 @@ export const mvcChainAdapter: ChainAdapter = {
   },
 
   async broadcastTx(rawTx: string): Promise<string> {
-    const response = await fetch(`${METALET_HOST}/wallet-api/v3/tx/broadcast`, {
+    const response = await mvcFetch(`${METALET_HOST}/wallet-api/v3/tx/broadcast`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chain: 'mvc', net: NET, rawTx }),

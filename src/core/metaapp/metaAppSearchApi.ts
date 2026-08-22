@@ -11,7 +11,9 @@
 
 export const DEFAULT_METAAPP_SEARCH_BASE_URL = 'https://so.metaid.io';
 const METASO_P2P_BASE_URL_ENV = 'METASO_P2P_BASE_URL';
-const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
+const SEARCH_RETRY_ATTEMPTS = 2;
+const SEARCH_RETRY_DELAY_MS = 400;
 const MAX_PAGE_SIZE = 100;
 
 type FetchResponse = {
@@ -131,7 +133,32 @@ function normalizePage(raw: unknown): MetaAppSearchPage {
   };
 }
 
-async function fetchApiData(
+function isTransientSearchError(error: unknown): boolean {
+  if (error instanceof MetaAppSearchApiError) {
+    return false;
+  }
+  const name = error && typeof error === 'object' ? String((error as { name?: unknown }).name || '') : '';
+  if (name === 'AbortError' || name === 'TimeoutError') {
+    return true;
+  }
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return message.includes('aborted')
+    || message.includes('fetch failed')
+    || message.includes('failed to fetch')
+    || message.includes('timed out')
+    || message.includes('timeout')
+    || message.includes('network')
+    || message.includes('econnreset')
+    || message.includes('etimedout');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function fetchApiDataOnce(
   url: string,
   fetchFn: MetaAppSearchFetchFn,
   timeoutMs: number,
@@ -156,9 +183,37 @@ async function fetchApiData(
       throw new MetaAppSearchNotFoundError(message);
     }
     throw new MetaAppSearchApiError(Number.isFinite(code) ? code : -1, message);
+  } catch (error) {
+    if (error instanceof MetaAppSearchApiError) {
+      throw error;
+    }
+    if (controller.signal.aborted || (error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError')) {
+      throw new Error(`MetaApp search timed out after ${timeoutMs}ms.`);
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchApiData(
+  url: string,
+  fetchFn: MetaAppSearchFetchFn,
+  timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= SEARCH_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetchApiDataOnce(url, fetchFn, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= SEARCH_RETRY_ATTEMPTS || !isTransientSearchError(error)) {
+        throw error;
+      }
+      await delay(SEARCH_RETRY_DELAY_MS);
+    }
+  }
+  throw lastError;
 }
 
 export type MetaAppSearchApiOptions = {

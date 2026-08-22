@@ -62,6 +62,8 @@ export interface MetaAppArtifactCacheStore {
   artifactsRoot: string;
   pinsRoot: string;
   getArtifact(input: MetaAppArtifactDescriptor): Promise<MetaAppArtifactCacheEntry | null>;
+  /** Look up a previously extracted package by MetaApp pinId (pin record + artifact). */
+  getArtifactByPinId(pinId: string): Promise<MetaAppArtifactCacheEntry | null>;
   writeArtifact(input: MetaAppArtifactDescriptor & { archive: Buffer }): Promise<MetaAppArtifactCacheEntry>;
   getStats(): Promise<MetaAppArtifactCacheStats>;
   clear(input?: MetaAppArtifactCacheClearInput): Promise<MetaAppArtifactCacheClearResult>;
@@ -342,6 +344,35 @@ export function createMetaAppArtifactCacheStore(
     cacheRoot,
     artifactsRoot,
     pinsRoot,
+
+    async getArtifactByPinId(pinId) {
+      let recordPath: string;
+      try {
+        recordPath = pinCacheFilePath(pinsRoot, safePinId(pinId));
+      } catch {
+        return null;
+      }
+      const record = readObject(await readJsonFile(recordPath));
+      if (!record) {
+        return null;
+      }
+      let cacheKey: string;
+      try {
+        cacheKey = safeCacheKey(record.cacheKey);
+      } catch {
+        return null;
+      }
+      const artifactRoot = path.join(artifactsRoot, cacheKey);
+      const manifest = normalizeManifest(await readJsonFile(path.join(artifactRoot, 'manifest.json')));
+      if (!manifest || manifest.cacheKey !== cacheKey) {
+        return null;
+      }
+      const entry = toEntry({ artifactsRoot, cacheKey, manifest });
+      if (!await assertFileExists(path.join(entry.artifactDir, manifest.indexFile))) {
+        return null;
+      }
+      return entry;
+    },
 
     async getArtifact(input) {
       const descriptor = normalizeDescriptor(input);

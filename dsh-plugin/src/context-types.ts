@@ -126,6 +126,8 @@ export interface HostApproval {
     reason?: string
     signal?: AbortSignal
   }): Promise<HostApprovalOutcome>
+  /** Present on DSH ApprovalService; last session override without the configured default. */
+  overrideOf?(session: unknown): 'ask' | 'never' | undefined
 }
 
 export interface HostAgentLike {
