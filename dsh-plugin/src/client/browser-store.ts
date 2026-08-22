@@ -12,8 +12,9 @@
 export const BROWSER_WIDTH_MIN = 360
 /** Widest drag target: about three quarters of the viewport. */
 export const BROWSER_WIDTH_MAX = Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.75)
+/** Default open width: about half the viewport, capped. */
 export const BROWSER_WIDTH_DEFAULT = Math.min(
-  Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.72),
+  Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.5),
   1280,
 )
 

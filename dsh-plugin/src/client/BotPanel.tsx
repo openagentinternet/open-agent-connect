@@ -138,7 +138,7 @@ export function BotPanel({
         <h2>{t('title')}</h2>
         <div className="oac-actions">
           <Button type="button" icon={<IconRefreshOutline16 />} onClick={reload}>{t('refresh')}</Button>
-          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => browserOpen()}>
+          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => { close(); browserOpen() }}>
             {t('browserOpen')}
           </Button>
           <Button
