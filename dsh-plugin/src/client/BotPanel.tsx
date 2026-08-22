@@ -28,8 +28,8 @@ export interface BotPanelInjected {
     from: string,
     patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
   ) => Promise<AutoReplyConfig>
-  /** Open the right-sidebar Bot Browser; no URI opens its home. */
-  browserOpen: (uri?: string) => void
+  /** Open the right-sidebar Bot Browser; no URI opens its home. Resolves once the sidebar has visibly reacted; never rejects. */
+  browserOpen: (uri?: string) => Promise<void>
 }
 
 /** Newest first, by profile creation time. */
@@ -138,7 +138,7 @@ export function BotPanel({
         <h2>{t('title')}</h2>
         <div className="oac-actions">
           <Button type="button" icon={<IconRefreshOutline16 />} onClick={reload}>{t('refresh')}</Button>
-          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => { close(); browserOpen() }}>
+          <Button type="button" icon={<IconBrowseOutline16 />} onClick={() => { void browserOpen().then(close) }}>
             {t('browserOpen')}
           </Button>
           <Button
@@ -178,8 +178,7 @@ export function BotPanel({
                         data-tip={t('botPage')}
                         aria-label={`${t('botPage')}: ${bot.name}`}
                         onClick={() => {
-                          close()
-                          browserOpen(`metaid://${bot.globalMetaId}`)
+                          void browserOpen(`metaid://${bot.globalMetaId}`).then(close)
                         }}
                       >
                         <IconRightUpOutline16 />

@@ -83,17 +83,23 @@ export function startBrowserEventSource(
   return () => source?.close()
 }
 
-/** Resolve a URI (or the Browser home) and open the sidebar on it. */
-export function openBrowser(store: BotBrowserStore, uri: string | null): void {
+/**
+ * Resolve a URI (or the Browser home) and open the sidebar on it. Resolves
+ * once the sidebar has visibly reacted — opened on the resolved URL, or the
+ * navigation was handed to the already-loaded iframe — and never rejects:
+ * failures land in the landing-state error instead. Callers can hook the
+ * resolution to sync follow-up UI (e.g. closing Settings) with the moment
+ * the Browser appears.
+ */
+export function openBrowser(store: BotBrowserStore, uri: string | null): Promise<void> {
   const snap = store.getSnapshot()
   if (snap.open && snap.url && uri) {
-    void api.browserOpen(uri).catch((cause: unknown) => {
+    return api.browserOpen(uri).then(() => undefined, (cause: unknown) => {
       store.fail(cause instanceof Error ? cause.message : String(cause))
     })
-    return
   }
-  void api.browserOpen(uri).then(
-    (url) => store.open(url),
-    (cause: unknown) => store.fail(cause instanceof Error ? cause.message : String(cause)),
+  return api.browserOpen(uri).then(
+    (url) => { store.open(url) },
+    (cause: unknown) => { store.fail(cause instanceof Error ? cause.message : String(cause)) },
   )
 }
