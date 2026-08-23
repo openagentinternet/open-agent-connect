@@ -294,6 +294,18 @@ export type GroupTaskDetailPayload = {
   openCheckpointSummary: string | null
 }
 
+/** Read-only `metabot grouptask health` snapshot shown as the panel banner. */
+export type GroupTaskHealthPayload = {
+  chairSlug: string | null
+  chairReason: string | null
+  ownerPresent: boolean
+  ownerGlobalMetaId: string | null
+  simplemsgListenerEnabled: boolean
+  activeTasks: number
+  totalTasks: number
+  engineLogLines: string[]
+}
+
 /** Guest-side OpenTeam membership (a local Bot joined someone else's task). */
 export type OpenTeamCollabRow = {
   groupId: string
@@ -588,6 +600,8 @@ export const api = {
       messages: rows.map((row) => normalizeGroupTaskMessage(row)),
     }
   },
+  grouptaskHealth: async (): Promise<GroupTaskHealthPayload> =>
+    normalizeGroupTaskHealth(await post('grouptask/health', {})),
   chatPrivate: async (from: string, to: string, content: string): Promise<CommandEnvelope> =>
     postEnvelope('chat/private', { from, to, content }),
   servicesOwned: async (from: string): Promise<unknown> => post('services/owned/list', { from }),
@@ -864,6 +878,26 @@ function normalizeGroupTaskMemberPreview(value: unknown): GroupTaskMemberPreview
     role: textOf(record.role) === 'chair' ? 'chair' : 'worker',
     slug: textOf(record.slug) || null,
     remote: record.remote === true || record.slug == null,
+  }
+}
+
+function normalizeGroupTaskHealth(value: unknown): GroupTaskHealthPayload {
+  const record = recordOf(value)
+  const chair = recordOf(record.chair)
+  const owner = recordOf(record.ownerIdentity)
+  const tasks = recordOf(record.tasks)
+  const engine = recordOf(record.engine)
+  return {
+    chairSlug: chair.resolvable === true ? textOf(chair.slug) || null : null,
+    chairReason: chair.resolvable === false ? textOf(chair.reason) || null : null,
+    ownerPresent: owner.present === true,
+    ownerGlobalMetaId: owner.present === true ? textOf(owner.globalMetaId) || null : null,
+    simplemsgListenerEnabled: record.simplemsgListenerEnabled !== false,
+    activeTasks: Math.max(0, Math.trunc(toNumber(tasks.active))),
+    totalTasks: Math.max(0, Math.trunc(toNumber(tasks.total))),
+    engineLogLines: Array.isArray(engine.recentLines)
+      ? engine.recentLines.map((line) => textOf(line)).filter((line) => line !== '')
+      : [],
   }
 }
 

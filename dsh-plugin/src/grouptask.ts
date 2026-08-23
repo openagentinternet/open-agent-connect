@@ -266,5 +266,9 @@ export async function dispatchGroupTaskRoutes(
     return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
+  if (method === 'grouptask/health') {
+    return run(['grouptask', 'health'], { timeoutMs: READ_TIMEOUT_MS })
+  }
+
   return failed('not-found', `unknown grouptask API method "${method}"`)
 }

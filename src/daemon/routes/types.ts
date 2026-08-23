@@ -171,6 +171,7 @@ export interface MetabotDaemonHttpHandlers {
     invites?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     collabs?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     collabMessages?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    health?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   conversations?: {
     list?: (input: {

@@ -147,6 +147,13 @@ test('grouptask collabs and collab-messages map guest-side reads', async () => {
   assert.equal(missing.result.code, 'missing_group_id')
 })
 
+test('grouptask/health maps a read-only preflight with a read timeout', async () => {
+  const { result, calls } = await capture('grouptask/health', {})
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls[0].args, ['grouptask', 'health'])
+  assert.ok(calls[0].options.timeoutMs < 120_000, 'health is a local read, not a chain write')
+})
+
 test('unknown grouptask methods fail with not-found', async () => {
   const { result } = await capture('grouptask/bogus', {})
   assert.equal(result.ok, false)

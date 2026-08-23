@@ -279,5 +279,11 @@ export async function runGroupTaskCommand(
     return handler({ slug, groupId, limit });
   }
 
+  if (action === 'health') {
+    const handler = requireHandler(context, 'health');
+    if (!handler) return commandFailed('not_implemented', 'Group task health handler is not configured.');
+    return handler({});
+  }
+
   return commandUnknownSubcommand(`grouptask ${args.join(' ')}`.trim());
 }

@@ -13,6 +13,7 @@ import {
   timestampLabel,
   type BotRow,
   type GroupTaskDetailPayload,
+  type GroupTaskHealthPayload,
   type GroupTaskListTab,
   type GroupTaskMemberRow,
   type GroupTaskMessageRow,
@@ -54,6 +55,7 @@ export interface GroupTaskInjectedApi {
   ) => Promise<unknown>
   collabs: () => Promise<OpenTeamCollabsPayload>
   collabMessages: (slug: string, groupId: string) => Promise<{ collab: OpenTeamCollabRow; messages: GroupTaskMessageRow[] }>
+  health: () => Promise<GroupTaskHealthPayload>
 }
 
 const DETAIL_POLL_MS = 15_000
@@ -211,6 +213,7 @@ export function GroupTaskView({
 
   // OpenTeam: guest-side collaborations (memberships + received invites)
   const [collabs, setCollabs] = useState<OpenTeamCollabsPayload>({ memberships: [], guestInvites: [] })
+  const [health, setHealth] = useState<GroupTaskHealthPayload | null>(null)
   const [selectedCollab, setSelectedCollab] = useState<{ slug: string; groupId: string } | null>(null)
   const [collabDetail, setCollabDetail] = useState<{ collab: OpenTeamCollabRow; messages: GroupTaskMessageRow[] } | null>(null)
   const [collabStatus, setCollabStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -268,6 +271,17 @@ export function GroupTaskView({
     void gt.collabs().then(
       (payload) => { if (current) setCollabs(payload) },
       () => { if (current) setCollabs({ memberships: [], guestInvites: [] }) },
+    )
+    return () => { current = false }
+  }, [gt, tick])
+
+  // Preflight banner: chair/owner/listener prerequisites plus the recent
+  // engine log, refreshed with the list so silent failures become visible.
+  useEffect(() => {
+    let current = true
+    void gt.health().then(
+      (payload) => { if (current) setHealth(payload) },
+      () => { if (current) setHealth(null) },
     )
     return () => { current = false }
   }, [gt, tick])
@@ -438,6 +452,16 @@ export function GroupTaskView({
   const terminal = detail !== null && (detail.status === 'done' || detail.status === 'cancelled')
   const twinBot = bots.find((bot) => bot.botType === 'twin') ?? null
 
+  const healthWarnings: string[] = []
+  if (health) {
+    if (!health.chairSlug) healthWarnings.push(t('gtHealthNoChair', { reason: health.chairReason ?? '' }))
+    if (!health.ownerPresent) healthWarnings.push(t('gtHealthNoOwner'))
+    if (!health.simplemsgListenerEnabled) healthWarnings.push(t('gtHealthListenerOff'))
+  }
+  const healthDetail = health?.engineLogLines.length
+    ? health.engineLogLines.join('\n')
+    : null
+
   return (
     <div className="oac-a2a-body">
       <div className="oac-a2a-list">
@@ -457,6 +481,22 @@ export function GroupTaskView({
             {t('gtRefresh')}
           </Button>
         </div>
+        {health !== null
+          ? (
+            <p
+              className={healthWarnings.length > 0 ? 'oac-note error' : 'oac-note saving'}
+              title={healthDetail ?? t('gtHealthOkDetail', {
+                chair: health.chairSlug ?? '',
+                active: health.activeTasks,
+                total: health.totalTasks,
+              })}
+            >
+              {healthWarnings.length > 0
+                ? healthWarnings.join(' · ')
+                : t('gtHealthOk', { chair: health.chairSlug ?? '', active: health.activeTasks })}
+            </p>
+          )
+          : null}
         {listError ? <p className="oac-note error">{listError}</p> : null}
         <div className="oac-a2a-list-rows">
           {tasks === null ? <p className="oac-note saving">{t('gtLoading')}</p> : null}

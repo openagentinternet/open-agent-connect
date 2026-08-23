@@ -3346,6 +3346,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         invites: get('/api/grouptask/invites'),
         collabs: get('/api/grouptask/collabs'),
         collabMessages: get('/api/grouptask/collab-messages'),
+        health: get('/api/grouptask/health'),
       };
     })(),
     conversations: {

@@ -29,6 +29,7 @@ const GET_VERBS: Record<string, GroupTaskVerb> = {
   '/api/grouptask/invites': 'invites',
   '/api/grouptask/collabs': 'collabs',
   '/api/grouptask/collab-messages': 'collabMessages',
+  '/api/grouptask/health': 'health',
 };
 
 function queryToInput(url: URL): Record<string, unknown> {

@@ -2221,6 +2221,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'invites', summary: 'List OpenTeam invites sent for a task.' },
       { name: 'collabs', summary: 'List external OpenTeam collaborations local Bots joined as guests.' },
       { name: 'collab-messages', summary: 'Read-only transcript of a guest OpenTeam group.' },
+      { name: 'health', summary: 'Preflight snapshot: chair/owner prerequisites, listener switch, task counts, recent engine log.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },

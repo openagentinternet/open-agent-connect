@@ -178,6 +178,7 @@ export function apply(ctx: ClientContext): void {
         invite: (chair, taskId, input) => api.grouptaskInvite(chair, taskId, input),
         collabs: () => api.grouptaskCollabs(),
         collabMessages: (slug, groupId) => api.grouptaskCollabMessages(slug, groupId),
+        health: () => api.grouptaskHealth(),
       },
     }),
   }, A2AConversation))

@@ -37,6 +37,9 @@ import {
   listOpenTeamCollabs,
   listOpenTeamInvites,
 } from '../core/grouptask/openteamService';
+import { getGroupTaskHealth } from '../core/grouptask/health';
+import { resolveGroupTaskEngineLogPath } from '../core/grouptask/engineLog';
+import { createConfigStore } from '../core/config/configStore';
 import { GroupTaskStoreError } from '../core/grouptask/store';
 import type { GroupTaskTransportOptions } from '../core/grouptask/transport';
 import { sendPrivateChat } from '../core/chat/privateChat';
@@ -52,7 +55,7 @@ import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { createRuntimeStateStore } from '../core/state/runtimeStateStore';
-import { resolveMetabotPaths } from '../core/state/paths';
+import { resolveMetabotDaemonPaths, resolveMetabotPaths } from '../core/state/paths';
 
 export interface GroupTaskDaemonHandlers {
   create: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
@@ -71,6 +74,7 @@ export interface GroupTaskDaemonHandlers {
   invites: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   collabs: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   collabMessages: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  health: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -439,5 +443,20 @@ export function createGroupTaskDaemonHandlers(
         limit: readInt(body.limit) ?? undefined,
       }));
     },
+
+    health: async () => run(async () => {
+      const daemonPaths = resolveMetabotDaemonPaths(input.systemHomeDir);
+      return getGroupTaskHealth(ctx, {
+        readSimplemsgListenerEnabled: async () => {
+          try {
+            const config = await createConfigStore(resolveMetabotPaths(input.systemHomeDir)).read();
+            return config.a2a.simplemsgListenerEnabled;
+          } catch {
+            return true;
+          }
+        },
+        engineLogFile: resolveGroupTaskEngineLogPath(daemonPaths.logsRoot),
+      });
+    }),
   };
 }
