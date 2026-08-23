@@ -39,6 +39,16 @@ import {
 } from '../core/grouptask/openteamService';
 import { getGroupTaskHealth } from '../core/grouptask/health';
 import { resolveGroupTaskEngineLogPath } from '../core/grouptask/engineLog';
+import {
+  createGroupTaskFromProposal,
+  evaluateStaffingOwnerGate,
+  listStaffingProposals,
+  proposeGroupTaskStaffing,
+  recordStaffingOwnerDecision,
+} from '../core/grouptask/staffingService';
+import { searchGroupTaskSeatCandidates, type SeatImpressionSnapshot } from '../core/grouptask/candidateSearch';
+import { GroupTaskStaffingError } from '../core/grouptask/staffing';
+import { createImpressionStore } from '../core/memory/impressionStore';
 import { createConfigStore } from '../core/config/configStore';
 import { GroupTaskStoreError } from '../core/grouptask/store';
 import type { GroupTaskTransportOptions } from '../core/grouptask/transport';
@@ -75,6 +85,11 @@ export interface GroupTaskDaemonHandlers {
   collabs: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   collabMessages: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   health: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  staffingPropose: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  staffingList: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  staffingDecide: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  staffingCreate: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  staffingSearch: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +286,11 @@ export function createGroupTaskDaemonHandlers(
     try {
       return commandSuccess(await work());
     } catch (error) {
-      if (error instanceof GroupTaskServiceError || error instanceof GroupTaskStoreError) {
+      if (
+        error instanceof GroupTaskServiceError
+        || error instanceof GroupTaskStoreError
+        || error instanceof GroupTaskStaffingError
+      ) {
         return commandFailed(error.code, error.message);
       }
       return commandFailed('grouptask_failed', error instanceof Error ? error.message : String(error));
@@ -456,6 +475,111 @@ export function createGroupTaskDaemonHandlers(
           }
         },
         engineLogFile: resolveGroupTaskEngineLogPath(daemonPaths.logsRoot),
+      });
+    }),
+
+    staffingPropose: async (body) => run(async () => {
+      const title = normalizeText(body.title);
+      const goal = normalizeText(body.goal);
+      if (!title || !goal) {
+        throw new GroupTaskServiceError('missing_input', 'title and goal are required');
+      }
+      let plan: unknown = body.plan;
+      const planRaw = normalizeText(body.planJson);
+      if (!plan && planRaw) {
+        plan = JSON.parse(planRaw) as unknown;
+      }
+      return proposeGroupTaskStaffing(ctx, {
+        chairSlug: normalizeText(body.chairSlug) || undefined,
+        title,
+        goal,
+        acceptanceCriteria: normalizeText(body.acceptanceCriteria) || null,
+        plan,
+        triggeringWish: normalizeText(body.triggeringWish) || undefined,
+        sourceSessionId: normalizeText(body.sourceSessionId) || null,
+        language: normalizeText(body.language) === 'en' ? 'en' : 'zh',
+      });
+    }),
+
+    staffingList: async (body) => run(async () => {
+      const proposals = await listStaffingProposals(ctx, normalizeText(body.chairSlug) || undefined);
+      return { proposals };
+    }),
+
+    staffingDecide: async (body) => run(async () => {
+      const chair = normalizeText(body.chairSlug);
+      if (!chair) throw new GroupTaskServiceError('missing_chair', 'chairSlug is required');
+      const proposalId = readInt(body.proposalId);
+      if (!proposalId || proposalId <= 0) {
+        throw new GroupTaskServiceError('missing_proposal', 'proposalId must be a positive integer');
+      }
+      const decision = normalizeText(body.decision);
+      if (decision !== 'confirm' && decision !== 'revise' && decision !== 'skip') {
+        throw new GroupTaskServiceError('invalid_decision', "decision must be 'confirm', 'revise', or 'skip'");
+      }
+      return {
+        proposal: await recordStaffingOwnerDecision(ctx, chair, proposalId, decision),
+      };
+    }),
+
+    staffingCreate: async (body) => run(async () => {
+      const proposalId = readInt(body.proposalId);
+      if (!proposalId || proposalId <= 0) {
+        throw new GroupTaskServiceError('missing_proposal', 'proposalId must be a positive integer');
+      }
+      const sessionMessages = Array.isArray(body.sessionMessages)
+        ? body.sessionMessages
+        : undefined;
+      const created = await createGroupTaskFromProposal(ctx, {
+        chairSlug: normalizeText(body.chairSlug) || undefined,
+        proposalId,
+        sessionMessages,
+      });
+      return {
+        chairSlug: created.chairSlug,
+        task: created.task.task,
+        taskId: created.task.task.id,
+        pendingRemoteSeats: created.pendingRemoteSeats,
+        decision: created.decision,
+      };
+    }),
+
+    staffingSearch: async (body) => run(async () => {
+      const profiles = await listMetabotProfiles(input.systemHomeDir).catch(() => [] as MetabotProfileFull[]);
+      const twin = profiles.find((profile) => profile.botType === 'twin') ?? null;
+      const impressionStore = twin
+        ? createImpressionStore(resolveMetabotPaths(twin.homeDir))
+        : null;
+      const twinGmid = twin?.globalMetaId?.trim() || null;
+      return searchGroupTaskSeatCandidates({
+        listLocalWorkers: async () => profiles
+          .filter((profile) => profile.botType !== 'twin')
+          .map((profile) => ({
+            slug: profile.slug,
+            name: profile.name,
+            enabled: true,
+            botType: profile.botType ?? null,
+            globalMetaId: profile.globalMetaId || null,
+            bio: profile.bio || null,
+            role: profile.role || null,
+            goal: profile.goal || null,
+            chatSkills: Array.isArray(profile.allowChatSkills) ? profile.allowChatSkills : [],
+          })),
+        getObserverGlobalMetaId: async () => twinGmid,
+        ...(impressionStore && twinGmid
+          ? {
+            // Structural view: capabilityTags/collaborationFacts land with the
+            // Round L sedimentation; absent fields read as verdict 'unknown'.
+            getImpressionSnapshot: async (observer: string, subject: string) =>
+              (await impressionStore.getSnapshot(observer, subject)) as SeatImpressionSnapshot | null,
+          }
+          : {}),
+      }, {
+        query: normalizeText(body.query) || undefined,
+        roleHint: normalizeText(body.seat) || normalizeText(body.roleHint) || undefined,
+        domainLabel: normalizeText(body.domainLabel) || undefined,
+        skills: readStringArray(body.skills),
+        limit: readInt(body.limit) ?? undefined,
       });
     }),
   };

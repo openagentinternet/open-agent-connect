@@ -129,7 +129,7 @@ test('create gate: awaiting owner blocks; explicit decision and chat replies ope
     (error) => error.code === 'OWNER_CONFIRM_REQUIRED',
   );
 
-  const decided = await recordStaffingOwnerDecision(ctx, 'twin-bot', proposal.id, 'confirmed');
+  const decided = await recordStaffingOwnerDecision(ctx, 'twin-bot', proposal.id, 'confirm');
   assert.equal(decided.status, 'confirmed');
 
   const created = await createGroupTaskFromProposal(ctx, { proposalId: proposal.id });

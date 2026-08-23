@@ -3347,6 +3347,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         collabs: get('/api/grouptask/collabs'),
         collabMessages: get('/api/grouptask/collab-messages'),
         health: get('/api/grouptask/health'),
+        staffingPropose: post('/api/grouptask/staffing/propose'),
+        staffingList: get('/api/grouptask/staffing/list'),
+        staffingDecide: post('/api/grouptask/staffing/decide'),
+        staffingCreate: post('/api/grouptask/staffing/create'),
+        staffingSearch: post('/api/grouptask/staffing/search'),
       };
     })(),
     conversations: {

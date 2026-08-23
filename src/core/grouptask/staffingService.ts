@@ -139,7 +139,7 @@ export async function evaluateStaffingOwnerGate(
   const proposal = await requireUsableProposal(ctx, chair, input.proposalId, now());
 
   // 1. Explicit recorded decision wins (DSH slate card / CLI verb).
-  if (proposal.ownerDecision === 'confirmed') {
+  if (proposal.ownerDecision === 'confirm') {
     return { allowed: true, decision: 'owner_confirmed', proposal };
   }
   if (proposal.ownerDecision === 'skip') {

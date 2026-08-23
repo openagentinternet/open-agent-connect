@@ -23,7 +23,7 @@ import {
   type GroupTaskStaffingProposalStatus,
 } from './staffing';
 
-export type StaffingOwnerDecisionMarker = 'confirmed' | 'revise' | 'skip';
+export type StaffingOwnerDecisionMarker = 'confirm' | 'revise' | 'skip';
 
 export interface GroupTaskStaffingProposalRecord {
   id: number;
@@ -35,7 +35,7 @@ export interface GroupTaskStaffingProposalRecord {
   plan: GroupTaskStaffingPlan;
   status: GroupTaskStaffingProposalStatus;
   skipAuthorized: boolean;
-  /** Last explicit owner decision recorded via UI/CLI ('confirmed'|'revise'|'skip'). */
+  /** Last explicit owner decision recorded via UI/CLI ('confirm'|'revise'|'skip'). */
   ownerDecision: StaffingOwnerDecisionMarker | null;
   createdTaskId: number | null;
   createdAt: number;
@@ -112,7 +112,7 @@ const CREATABLE_STATUSES: readonly GroupTaskStaffingProposalStatus[] = [
 ];
 
 function restoredStatus(record: GroupTaskStaffingProposalRecord): GroupTaskStaffingProposalStatus {
-  if (record.ownerDecision === 'confirmed') return 'confirmed';
+  if (record.ownerDecision === 'confirm') return 'confirmed';
   if (record.ownerDecision === 'skip') return 'skip_authorized';
   return 'pending';
 }
@@ -237,7 +237,7 @@ export function createStaffingStore(paths: MetabotPaths): StaffingStore {
       }
       record.ownerDecision = decision;
       const now = Date.now();
-      if (decision === 'confirmed') {
+      if (decision === 'confirm') {
         record.status = 'confirmed';
         record.confirmedAt = now;
       } else if (decision === 'skip') {
@@ -278,7 +278,7 @@ function normalizeProposalRecord(value: unknown): GroupTaskStaffingProposalRecor
     || record.status === 'cancelled'
     ? record.status
     : 'pending';
-  const ownerDecision = record.ownerDecision === 'confirmed'
+  const ownerDecision = record.ownerDecision === 'confirm'
     || record.ownerDecision === 'revise'
     || record.ownerDecision === 'skip'
     ? record.ownerDecision
