@@ -304,3 +304,63 @@ test('supersede chains mark the prior observation superseded and rebuild reflect
   assert.equal(all.length, 2);
   assert.ok(all.some((observation) => observation.status === 'superseded'));
 });
+
+test('collaboration facts sediment into snapshots and survive rebuilds', async () => {
+  const paths = await createTempProfileHome();
+  const store = createImpressionStore(paths);
+
+  // No observations at all: a fact alone still materializes a snapshot.
+  await store.appendCollaborationFact({
+    observerGlobalMetaId: OBSERVER,
+    subjectGlobalMetaId: SUBJECT,
+    taskId: 7,
+    title: 'Landing page',
+    outcome: 'done',
+    seatRole: 'worker',
+    evidencePinIds: ['pin-1'],
+  });
+  let snapshot = await store.getSnapshot(OBSERVER, SUBJECT);
+  assert.ok(snapshot, 'fact-only snapshot exists');
+  assert.equal(snapshot.collaborationFacts.length, 1);
+  assert.equal(snapshot.collaborationFacts[0].outcome, 'done');
+  assert.equal(snapshot.collaborationFacts[0].seatRole, 'worker');
+  assert.equal(snapshot.summaryText, '');
+
+  // Multiple facts: last 10, chronological.
+  for (let index = 0; index < 12; index += 1) {
+    await store.appendCollaborationFact({
+      observerGlobalMetaId: OBSERVER,
+      subjectGlobalMetaId: SUBJECT,
+      taskId: 8 + index,
+      title: `Task ${index}`,
+      outcome: index % 2 === 0 ? 'cancelled' : 'kicked',
+    });
+  }
+  snapshot = await store.getSnapshot(OBSERVER, SUBJECT);
+  assert.equal(snapshot.collaborationFacts.length, 10);
+  assert.equal(snapshot.collaborationFacts[snapshot.collaborationFacts.length - 1].taskId, 19);
+
+  // Rebuild after dream observations arrive keeps the facts attached.
+  const observation = await store.appendObservation({
+    observerGlobalMetaId: OBSERVER,
+    subjectGlobalMetaId: SUBJECT,
+    episodeId: null,
+    evidenceIds: [],
+    observationText: 'worked together',
+    interpretationText: 'reliable collaborator',
+    dimensions: {},
+    communicationGuidance: null,
+    confidence: {},
+    dreamDate: '2026-08-24',
+    dreamVersion: 1,
+    modelId: null,
+    sourceHash: 'hash-1',
+  });
+  assert.equal(observation.created, true);
+  const rebuilt = await store.rebuildSnapshot(OBSERVER, SUBJECT);
+  assert.ok(rebuilt.summaryText.includes('reliable'));
+  assert.equal(rebuilt.collaborationFacts.length, 10);
+
+  // Other subjects are untouched.
+  assert.equal(await store.getSnapshot(OBSERVER, 'gm-someone-else'), null);
+});

@@ -35,10 +35,32 @@ export interface ImpressionObservation {
   createdAt: number;
 }
 
+/** Deterministic collaboration fact recorded by the group task engine. */
+export interface ImpressionCollaborationFact {
+  id: string;
+  observerGlobalMetaId: string;
+  subjectGlobalMetaId: string;
+  taskId: number;
+  title: string;
+  outcome: string;
+  seatRole?: string;
+  evidencePinIds: string[];
+  recordedAt: number;
+}
+
 export interface ImpressionSnapshot {
   observerGlobalMetaId: string;
   subjectGlobalMetaId: string;
   firstSeenAt: number;
+  capabilityTags: string[];
+  collaborationFacts: Array<{
+    taskId: number;
+    title: string;
+    outcome: string;
+    seatRole?: string;
+    evidencePinIds: string[];
+    recordedAt: number;
+  }>;
   lastSeenAt: number;
   interactionCount: number;
   directInteractionCount: number;
@@ -78,6 +100,7 @@ interface ImpressionsFile {
   version: number;
   observations: ImpressionObservation[];
   snapshots: ImpressionSnapshot[];
+  collaborationFacts: ImpressionCollaborationFact[];
 }
 
 const MAX_OBSERVATION_TEXT = 4_000;
@@ -163,6 +186,50 @@ function normalizeObservation(value: unknown): ImpressionObservation | null {
   };
 }
 
+function normalizeCollaborationFact(value: unknown): ImpressionCollaborationFact | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const observer = asText(record.observerGlobalMetaId);
+  const subject = asText(record.subjectGlobalMetaId);
+  const id = asText(record.id);
+  if (!observer || !subject || !id) return null;
+  const seatRole = asText(record.seatRole);
+  return {
+    id,
+    observerGlobalMetaId: observer,
+    subjectGlobalMetaId: subject,
+    taskId: Number(record.taskId) || 0,
+    title: asText(record.title).slice(0, 200),
+    outcome: asText(record.outcome) || 'unknown',
+    ...(seatRole ? { seatRole } : {}),
+    evidencePinIds: Array.isArray(record.evidencePinIds)
+      ? record.evidencePinIds.map((pin) => asText(pin)).filter(Boolean).slice(0, 20)
+      : [],
+    recordedAt: Number(record.recordedAt) || 0,
+  };
+}
+
+/** Snapshot view of the facts ledger for one observer→subject pair (last 10). */
+function factsForSnapshot(
+  facts: ImpressionCollaborationFact[],
+  observerGlobalMetaId: string,
+  subjectGlobalMetaId: string,
+): ImpressionSnapshot['collaborationFacts'] {
+  return facts
+    .filter((fact) => fact.observerGlobalMetaId === observerGlobalMetaId
+      && fact.subjectGlobalMetaId === subjectGlobalMetaId)
+    .sort((left, right) => left.recordedAt - right.recordedAt)
+    .slice(-10)
+    .map((fact) => ({
+      taskId: fact.taskId,
+      title: fact.title,
+      outcome: fact.outcome,
+      ...(fact.seatRole ? { seatRole: fact.seatRole } : {}),
+      evidencePinIds: fact.evidencePinIds,
+      recordedAt: fact.recordedAt,
+    }));
+}
+
 function normalizeSnapshot(value: unknown): ImpressionSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -172,6 +239,28 @@ function normalizeSnapshot(value: unknown): ImpressionSnapshot | null {
   return {
     observerGlobalMetaId: observer,
     subjectGlobalMetaId: subject,
+    capabilityTags: Array.isArray(record.capabilityTags)
+      ? record.capabilityTags.map((tag) => asText(tag)).filter(Boolean).slice(0, 20)
+      : [],
+    collaborationFacts: Array.isArray(record.collaborationFacts)
+      ? record.collaborationFacts
+        .map((fact) => {
+          // Embedded views carry no id/observer/subject — map them directly.
+          const row = (fact && typeof fact === 'object' ? fact : {}) as Record<string, unknown>;
+          const seatRole = asText(row.seatRole);
+          return {
+            taskId: Number(row.taskId) || 0,
+            title: asText(row.title).slice(0, 200),
+            outcome: asText(row.outcome) || 'unknown',
+            ...(seatRole ? { seatRole } : {}),
+            evidencePinIds: Array.isArray(row.evidencePinIds)
+              ? row.evidencePinIds.map((pin) => asText(pin)).filter(Boolean).slice(0, 20)
+              : [],
+            recordedAt: Number(row.recordedAt) || 0,
+          };
+        })
+        .slice(-10)
+      : [],
     firstSeenAt: Number(record.firstSeenAt) || 0,
     lastSeenAt: Number(record.lastSeenAt) || 0,
     interactionCount: Math.max(0, Math.floor(Number(record.interactionCount) || 0)),
@@ -220,6 +309,15 @@ export interface ImpressionStore {
   getSnapshot(observerGlobalMetaId: string, subjectGlobalMetaId: string): Promise<ImpressionSnapshot | null>;
   listSnapshots(observerGlobalMetaId: string, limit?: number): Promise<ImpressionSnapshot[]>;
   rebuildSnapshot(observerGlobalMetaId: string, subjectGlobalMetaId: string): Promise<ImpressionSnapshot | null>;
+  appendCollaborationFact(input: {
+    observerGlobalMetaId: string;
+    subjectGlobalMetaId: string;
+    taskId: number;
+    title: string;
+    outcome: string;
+    seatRole?: string;
+    evidencePinIds?: string[];
+  }): Promise<ImpressionCollaborationFact>;
 }
 
 export function createImpressionStore(
@@ -240,7 +338,7 @@ export function createImpressionStore(
       const raw = await fs.readFile(filePath, 'utf8');
       const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { version: 1, observations: [], snapshots: [] };
+        return { version: 1, observations: [], snapshots: [], collaborationFacts: [] };
       }
       const record = parsed as Record<string, unknown>;
       return {
@@ -251,10 +349,13 @@ export function createImpressionStore(
         snapshots: Array.isArray(record.snapshots)
           ? record.snapshots.map(normalizeSnapshot).filter((s): s is ImpressionSnapshot => s !== null)
           : [],
+        collaborationFacts: Array.isArray(record.collaborationFacts)
+          ? record.collaborationFacts.map(normalizeCollaborationFact).filter((f): f is ImpressionCollaborationFact => f !== null)
+          : [],
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { version: 1, observations: [], snapshots: [] };
+        return { version: 1, observations: [], snapshots: [], collaborationFacts: [] };
       }
       throw error;
     }
@@ -428,6 +529,69 @@ export function createImpressionStore(
         .slice(0, Math.min(500, Math.max(1, Math.floor(limit))));
     },
 
+    async appendCollaborationFact(input) {
+      return enqueue(async () => {
+        const file = await readFile();
+        const fact: ImpressionCollaborationFact = {
+          id: `fact-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          observerGlobalMetaId: input.observerGlobalMetaId.trim().toLowerCase(),
+          subjectGlobalMetaId: input.subjectGlobalMetaId.trim().toLowerCase(),
+          taskId: input.taskId,
+          title: input.title.slice(0, 200),
+          outcome: input.outcome,
+          ...(input.seatRole ? { seatRole: input.seatRole } : {}),
+          evidencePinIds: (input.evidencePinIds ?? []).slice(0, 20),
+          recordedAt: Date.now(),
+        };
+        file.collaborationFacts.push(fact);
+        // Refresh the snapshot view in the same write so readers (staffing
+        // search) see the fact without waiting for a dream rebuild.
+        const snapshotIndex = file.snapshots.findIndex((snapshot) => (
+          snapshot.observerGlobalMetaId === fact.observerGlobalMetaId
+          && snapshot.subjectGlobalMetaId === fact.subjectGlobalMetaId
+        ));
+        const pairFacts = factsForSnapshot(
+          file.collaborationFacts,
+          fact.observerGlobalMetaId,
+          fact.subjectGlobalMetaId,
+        );
+        const now = Date.now();
+        if (snapshotIndex >= 0) {
+          file.snapshots[snapshotIndex].collaborationFacts = pairFacts;
+          file.snapshots[snapshotIndex].updatedAt = now;
+        } else if (pairFacts.length > 0) {
+          file.snapshots.push({
+            observerGlobalMetaId: fact.observerGlobalMetaId,
+            subjectGlobalMetaId: fact.subjectGlobalMetaId,
+            firstSeenAt: pairFacts[0].recordedAt,
+            lastSeenAt: pairFacts[pairFacts.length - 1].recordedAt,
+            capabilityTags: [],
+            collaborationFacts: pairFacts,
+            interactionCount: 0,
+            directInteractionCount: 0,
+            summaryText: '',
+            styleDescriptors: [],
+            cooperationContext: null,
+            relationshipTemperature: null,
+            communicationGuidance: null,
+            uncertaintyText: null,
+            latestObservationId: '',
+            snapshotVersion: IMPRESSION_SNAPSHOT_VERSION,
+            sourceHash: sha256(JSON.stringify({
+              factsOnly: true,
+              observer: fact.observerGlobalMetaId,
+              subject: fact.subjectGlobalMetaId,
+              facts: pairFacts.map((entry) => [entry.taskId, entry.outcome, entry.recordedAt]),
+            })),
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+        await writeFile(file);
+        return fact;
+      });
+    },
+
     async rebuildSnapshot(observerGlobalMetaId, subjectGlobalMetaId) {
       return enqueue(async () => {
         const file = await readFile();
@@ -447,12 +611,54 @@ export function createImpressionStore(
           && snapshot.subjectGlobalMetaId === subjectGlobalMetaId
         ));
 
+        const pairFacts = factsForSnapshot(
+          file.collaborationFacts,
+          observerGlobalMetaId,
+          subjectGlobalMetaId,
+        );
         if (observations.length === 0) {
-          if (snapshotIndex >= 0) {
-            file.snapshots.splice(snapshotIndex, 1);
-            await writeFile(file);
+          if (pairFacts.length === 0) {
+            if (snapshotIndex >= 0) {
+              file.snapshots.splice(snapshotIndex, 1);
+              await writeFile(file);
+            }
+            return null;
           }
-          return null;
+          // Facts alone still carry a snapshot (staffing searches read them).
+          const now = Date.now();
+          const factsOnly: ImpressionSnapshot = {
+            observerGlobalMetaId,
+            subjectGlobalMetaId,
+            firstSeenAt: pairFacts[0].recordedAt,
+            lastSeenAt: pairFacts[pairFacts.length - 1].recordedAt,
+            capabilityTags: [],
+            collaborationFacts: pairFacts,
+            interactionCount: 0,
+            directInteractionCount: 0,
+            summaryText: '',
+            styleDescriptors: [],
+            cooperationContext: null,
+            relationshipTemperature: null,
+            communicationGuidance: null,
+            uncertaintyText: null,
+            latestObservationId: '',
+            snapshotVersion: IMPRESSION_SNAPSHOT_VERSION,
+            sourceHash: sha256(JSON.stringify({
+              factsOnly: true,
+              observer: observerGlobalMetaId,
+              subject: subjectGlobalMetaId,
+              facts: pairFacts.map((fact) => [fact.taskId, fact.outcome, fact.recordedAt]),
+            })),
+            createdAt: now,
+            updatedAt: now,
+          };
+          if (snapshotIndex >= 0) {
+            file.snapshots[snapshotIndex] = factsOnly;
+          } else {
+            file.snapshots.push(factsOnly);
+          }
+          await writeFile(file);
+          return factsOnly;
         }
 
         // Interaction stats come from the experience ledger when available.
@@ -527,6 +733,8 @@ export function createImpressionStore(
           uncertaintyText,
           latestObservationId: latest.id,
           snapshotVersion: IMPRESSION_SNAPSHOT_VERSION,
+          capabilityTags: [],
+          collaborationFacts: pairFacts,
           sourceHash,
           createdAt: prior?.createdAt ?? now,
           updatedAt: now,

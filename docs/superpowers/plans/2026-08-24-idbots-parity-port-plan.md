@@ -148,6 +148,42 @@ Port into `src/core/grouptask/`:
 **Exit**: behavior-matrix tests mirroring the IDBots staffing suites
 (skip/revise/confirm/keep-roster/last-intent/TTL/CAS).
 
+### Phase 1 — Staffing pipeline ✅ (2026-08-24)
+
+Rounds landed (each commit + eric buzz):
+
+- **G** pure staffing module verbatim port (`43be2564`): seat roles/caps,
+  plan validation, skip-confirm + interrogative filter, owner-reply
+  classification, last-intent gate, session split, 24 h TTL, slate builder.
+  Adaptation: local seats carry `candidateSlug`; remote keep GlobalMetaId.
+- **H** proposal store + service (`8d0f5d71`): JSON store with CAS
+  claim/release/markCreated, TTL at read time; propose / recordOwnerDecision
+  / evaluateOwnerGate (explicit decision > chat-reply last-intent >
+  persisted skip) / createGroupTaskFromProposal (gate → cap → claim →
+  create; release on chain failure; pendingRemoteSeats for OpenTeam).
+- **I** candidate search (`46c26bd5`): metaso-p2p bot-search client, CJK
+  tokenization + fuzzy scoring, per-seat query seeds, impression verdicts
+  (boost +4 / demote −8 / block), match-first merge with LOCAL_TIE_MARGIN=4,
+  degrade-to-local on presence down.
+- **J** CLI + daemon surface (`32c14b82`): `metabot grouptask staffing
+  propose|list|decide|create|search`, `/api/grouptask/staffing/*` routes,
+  real profile data feed (bio/role/goal/allowChatSkills, twin observer,
+  per-twin impression snapshots).
+- **K** DSH slate card (`1af617cd`): staffing card above the task list with
+  Confirm/Revise/Skip and Create actions; host routes; en/zh copy.
+- **L** impression sedimentation (this round): collaboration-facts ledger in
+  the chair's impressions file, merged into snapshots (fact-only snapshots
+  supported), recorded on task close (done/cancelled) and kick (kicked) with
+  the staffing seat role resolved from the creating proposal; search
+  verdicts read them back.
+
+Live verification (2026-08-24, real daemon + chain): seat search ranked
+local workers; propose → zh slate; decide confirm; gated create → task #15
+with Paul Graham joined on-chain; close done rating 5; fact sedimented;
+re-search shows **boost +4** (`prior done on "Staffing pipeline live
+test"`). Dream-side collaborationFacts emission deferred to Phase 2
+(dream-prompt schema addition rides the engine-parity round).
+
 ### Phase 2 — Engine behavior parity with IDBots daemon
 
 Diff-driven port of the missing engine machinery (OAC already has: tags, review

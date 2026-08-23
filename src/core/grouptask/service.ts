@@ -11,6 +11,7 @@ import type { Signer } from '../signing/signer';
 import { createGroupTaskStore, type GroupTaskStore } from './store';
 import { createOpenTeamStore, type OpenTeamStore } from './openteamStore';
 import { createStaffingStore, type StaffingStore } from './staffingStore';
+import { recordKickImpression, recordTaskCloseImpressions } from './impressions';
 import { buildOpenTeamKickMessage } from './openteam';
 import {
   createGroupOnChain,
@@ -736,6 +737,16 @@ export async function closeGroupTask(
   } catch {
     // No summary yet (task closed before review) — nothing to finalize.
   }
+  // Chair→member impression sedimentation (staffing memory); best-effort.
+  try {
+    const members = await store.listMembers(taskId);
+    await recordTaskCloseImpressions(ctx, chairSlug, closed, members, opts.status);
+  } catch (error) {
+    logOf(ctx)(
+      `[GroupTask] Impression sedimentation failed on close of task ${taskId}: `
+      + `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   return getGroupTaskDetail(ctx, chairSlug, taskId, { sync: false });
 }
 
@@ -901,6 +912,9 @@ export async function kickGroupTaskMember(
     globalMetaId: member.slug == null ? member.globalMetaId : undefined,
     removePinId: pinId,
   });
+
+  // Kick sedimentation: the chair records a kicked fact for staffing memory.
+  await recordKickImpression(ctx, chairSlug, task, member).catch(() => undefined);
 
   // Deterministic moderation notice from the chair. A failed announcement
   // must not roll back the removal.
