@@ -685,11 +685,37 @@ export function createImpressionStore(
         const descriptorCandidates = new Set<string>();
         let communicationGuidance: string | null = null;
         let uncertaintyText: string | null = null;
+        const dreamCapabilityTags = new Set<string>();
+        const dreamFacts: ImpressionSnapshot['collaborationFacts'] = [];
         for (const observation of observations) {
           for (const [key, value] of Object.entries(observation.dimensions)) {
             latestDimensions.set(key, value);
             if (['styleDescriptors', 'style_descriptors', 'communicationStyle', 'communication_style', 'style'].includes(key)) {
               for (const descriptor of extractStringList(value)) descriptorCandidates.add(descriptor);
+            }
+            if (key === 'capabilityTags' && Array.isArray(value)) {
+              for (const tag of value) {
+                const text = asText(tag);
+                if (text) dreamCapabilityTags.add(text.slice(0, 60));
+              }
+            }
+            if (key === 'collaborationFacts' && Array.isArray(value)) {
+              for (const fact of value) {
+                const row = (fact && typeof fact === 'object' ? fact : {}) as Record<string, unknown>;
+                const outcome = asText(row.outcome);
+                if (!outcome) continue;
+                const seatRole = asText(row.seatRole);
+                dreamFacts.push({
+                  taskId: Number(row.taskId) || 0,
+                  title: asText(row.title).slice(0, 200),
+                  outcome,
+                  ...(seatRole ? { seatRole } : {}),
+                  evidencePinIds: Array.isArray(row.pinIds)
+                    ? row.pinIds.map((pin) => asText(pin)).filter(Boolean).slice(0, 20)
+                    : [],
+                  recordedAt: observation.createdAt,
+                });
+              }
             }
           }
           if (observation.communicationGuidance) communicationGuidance = observation.communicationGuidance;
@@ -733,8 +759,12 @@ export function createImpressionStore(
           uncertaintyText,
           latestObservationId: latest.id,
           snapshotVersion: IMPRESSION_SNAPSHOT_VERSION,
-          capabilityTags: [],
-          collaborationFacts: pairFacts,
+          capabilityTags: [...dreamCapabilityTags].slice(0, 20),
+          collaborationFacts: [...dreamFacts, ...pairFacts]
+            .filter((fact, index, all) => all.findIndex((other) => other.taskId === fact.taskId
+              && other.outcome === fact.outcome
+              && other.title === fact.title) === index)
+            .slice(-10),
           sourceHash,
           createdAt: prior?.createdAt ?? now,
           updatedAt: now,

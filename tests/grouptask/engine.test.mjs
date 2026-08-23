@@ -358,3 +358,28 @@ test('engine: a poison message advances the cursor after five failures', async (
   assert.equal((await h.chairStore.getTaskById(task.id)).lastProcessedIndex, 1);
   assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1);
 });
+
+test('engine: [DEPENDS_ON] holds the worker reply until the upstream deliverable exists', async () => {
+  const h = createHarness('metabot-gt-engine-depends-');
+  const task = await h.seedTask('executing');
+  const upstreamPin = 'a'.repeat(64) + 'i0';
+
+  // Dispatch with an unsatisfied dependency: the reply is held, cursor stays.
+  h.pushHistory('IDTWIN', `@worker 1 build the poster [DEPENDS_ON:${upstreamPin}]`, { mention: ['IDWORKER1'] });
+  h.llmTurns.push('starting now');
+  await h.engine.tick();
+  assert.equal(h.pins.filter((pin) => pin.label === 'worker-1').length, 0, 'no reply while upstream missing');
+  assert.equal((await h.chairStore.getTaskById(task.id)).lastProcessedIndex, -1, 'cursor held');
+
+  // Upstream deliverable already on-chain when the dispatch is processed:
+  // the dependency is satisfied and the worker replies.
+  const h2 = createHarness('metabot-gt-engine-depends-met-');
+  const task2 = await h2.seedTask('executing');
+  h2.pushHistory('IDWORKER1', `upstream ready [DELIVERABLE] pin: pin://${upstreamPin}`);
+  await h2.engine.tick();
+  h2.pushHistory('IDTWIN', `@worker 1 build the poster [DEPENDS_ON:${upstreamPin}]`, { mention: ['IDWORKER1'] });
+  h2.llmTurns.push('verified, thanks', 'starting now');
+  await h2.engine.tick();
+  await h2.engine.tick();
+  assert.ok(h2.pins.some((pin) => pin.label === 'worker-1'), 'worker replied once upstream landed');
+});

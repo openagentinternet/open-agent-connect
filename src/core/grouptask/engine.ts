@@ -41,6 +41,7 @@ import { syncGroupMessages } from './backfill';
 import { createPrivateChatStateStore } from '../chat/privateChatStateStore';
 import {
   decideGroupTaskResponders,
+  isEnforceableDependencyToken,
   isHostNotice,
   isMentioned,
   parseGroupTaskTags,
@@ -71,6 +72,9 @@ export const GROUP_TASK_DRIVER_KV_PREFIX = 'group_task_driver:';
 export const GROUP_TASK_PLANNED_KV_PREFIX = 'group_task_chair_planned:';
 export const GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = 'group_task_chair_plan_attempts:';
 export const GROUP_TASK_MSG_RETRY_KV_PREFIX = 'group_task_msg_retry:';
+export const GROUP_TASK_DEP_WAIT_KV_PREFIX = 'group_task_dep_wait:';
+/** [DEPENDS_ON] holds a worker reply at most this long before proceeding. */
+const DEPENDENCY_WAIT_MAX_MS = 15 * 60_000;
 export const GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = 'group_task_review_summary:';
 
 const DEFAULT_INTERVAL_MS = 5_000;
@@ -577,6 +581,28 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       const last = lastReplyAt.get(key) ?? 0;
       if (now() - last < cooldown) return 'defer';
 
+      // [DEPENDS_ON:<pin>] hold (IDBots parity): a worker dispatch whose
+      // upstream deliverable has not landed waits, bounded by 15 minutes.
+      if (decision.role === 'worker') {
+        const dependsOn = parseGroupTaskTags(input.message.content).dependsOn;
+        if (dependsOn && isEnforceableDependencyToken(dependsOn)) {
+          const satisfied = await input.store.listDeliverables(input.task.id).then(
+            (rows) => rows.some((row) => row.status !== 'rejected'
+              && ((row.uri ?? '').includes(dependsOn) || row.msgPinId === dependsOn)),
+          ).catch(() => true);
+          if (!satisfied) {
+            const waitKey = `${GROUP_TASK_DEP_WAIT_KV_PREFIX}${input.task.id}:${input.message.index}`;
+            const since = Number((await input.store.kvGet(waitKey)) ?? '0') || 0;
+            if (!since) {
+              await input.store.kvSet(waitKey, String(now()));
+              return 'defer';
+            }
+            if (now() - since < DEPENDENCY_WAIT_MAX_MS) return 'defer';
+            await input.store.kvDelete(waitKey); // bounded: proceed without upstream
+          }
+        }
+      }
+
       const reply = (await runSeatTurn({
         seat,
         task: input.task,
@@ -733,7 +759,21 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
         log(`[GroupTaskEngine] Message ${message.index} of task ${current.id} failed `
           + `(${failures}/${MSG_RETRY_MAX_FAILURES}): ${error instanceof Error ? error.message : String(error)}`);
         if (failures >= MSG_RETRY_MAX_FAILURES) {
-          // Poison message: give up on replies, keep the cursor moving.
+          // Poison message: give up on replies, keep the cursor moving — but
+          // run the idempotent tag side effects once so a dying [STATUS:*] or
+          // [DELIVERABLE] line is not lost (IDBots GT#26 parity).
+          try {
+            current = await applyTagSideEffects(
+              store,
+              current,
+              profile.slug,
+              message,
+              parseGroupTaskTags(message.content),
+              seats,
+            );
+          } catch {
+            // Tag reprocess is best-effort; the cursor advances regardless.
+          }
           await store.updateTaskCursor(current.id, message.index);
           await store.kvDelete(retryKey);
           continue;
