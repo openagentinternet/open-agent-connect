@@ -1,0 +1,233 @@
+# IDBots → OAC Parity Port Plan
+
+Date: 2026-08-24 · Branch: `dsh-idbots-port` · Source baseline: IDBots `main` @ `012557f6` (v0.5.4)
+
+## Goal
+
+Port the stable IDBots feature set into Open Agent Connect so that DSH users who
+install the OAC plugin get feature parity with the IDBots desktop app:
+
+1. **Group tasks** (群任务) — including the Aug 22–24 staffing pipeline and
+   **OpenTeam** remote membership, with wire-level interoperability: an OAC-side
+   Bot and an IDBots-side Bot must be able to join the same group task and
+   collaborate.
+2. **MetaWeb search / read** (`search_metaweb`, `read_metaweb_pin`).
+3. **SimpleNote publishing** (`post_simplenote`) with the chain-upload approval
+   gate.
+4. **Knowledge base + learning** (per-bot corpora with FTS5, procedure memory,
+   autonomous study jobs).
+
+**CLI-first rule**: every capability lands in the `metabot` CLI / daemon core
+(`src/core/*`, daemon routes, CLI verbs) so it is reusable from Codex, Claude
+Code, and other hosts. The DSH plugin only adds host routes, native tools,
+Settings/conversation UI, and en/zh i18n.
+
+**Out of scope**: IDBots Composer UI changes (DSH ships its own better
+composer), `/goal` and `/export` session commands (DSH-native equivalents
+exist), anything Electron-renderer-specific.
+
+## Guiding rules
+
+- **Wire compatibility with IDBots.** Group-task traffic rides the same MetaID
+  protocols (`/protocols/simplegroupcreate|join|chat|removeuser`, encrypted
+  simplemsg, idchat presence) and the same bracket-tag grammar
+  (`[DELIVERABLE]`, `[STATUS:…]`, `[WORKING]`, `[STANDBY]`,
+  `[DEPENDS_ON:<pinId>]`, `[CHECKPOINT…]`, `[PLAN_CHANGE]`, `[FREEZE]`,
+  `[OPENTEAM_*]` envelopes). Nothing OAC-proprietary on the wire.
+- **Storage follows layout v2** (`docs/superpowers/specs/2026-04-23-metabot-storage-layout-v2-design.md`):
+  primary state as JSON in the workspace layer; derived SQLite is permitted in
+  the runtime layer (`runtime.sqlite` precedent, lazily created).
+- Each phase = scoped commits + scoped verification (build + targeted
+  `node --test` files; fast tier when core is touched) + `--no-ff` merge to
+  `main` + `eric` buzz per round. Phases 3–5 are independent of the
+  group-task track and may interleave.
+
+## Current state (audit, 2026-08-24)
+
+**The previous group-task port is already on `main` and code-complete on every
+layer** (merge `1e9c2c34`: core store/transport/engine/OpenTeam, CLI verbs,
+daemon routes + handlers, engine auto-start in the daemon, dsh-plugin host
+routes, dual-tab UI with full en/zh i18n, fast-tier unit tests). Later merges
+did not touch it. "It doesn't run" is operational, not missing code. Top
+culprits found:
+
+| # | Culprit | Evidence |
+|---|---|---|
+| 1 | Stale daemon: `daemonConfigMatchesContext` hashes only env config, not the CLI build, so a pre-merge daemon keeps serving without `/api/grouptask/*` (404) and without the engine | `src/cli/runtime.ts:1202-1210` |
+| 2 | `dsh-plugin/src/cli-bridge.ts:60-66` prefers an npm-installed `open-agent-connect` over the sibling repo `dist/`; an old npm install ⇒ `metabot: unknown subcommand grouptask` | `dsh-plugin/src/cli-bridge.ts` |
+| 3 | Every panel read spawns a CLI subprocess (60 s timeout); memory panels got an in-process fast path (`local-read.ts`) but grouptask never did | `dsh-plugin/src/grouptask.ts:14-16` |
+| 4 | Engine turns require a per-profile LLM runtime; without one the chair planning turn fails 3× and tasks stall in `planning` | `src/cli/runtime.ts:4990-5018`, `engine.ts` `PLAN_ATTEMPTS_MAX` |
+| 5 | Identity prerequisites: chair resolves to the twin Bot (now the machine-wide default), owner identity needed for owner-join / as-owner posts | `service.ts:273-287, 252-266` |
+| 6 | OpenTeam envelope intake silently dead when the a2a simplemsg listener is disabled (`daemonConfig.a2a.simplemsgListenerEnabled && providerPresence.enabled`) | `src/cli/runtime.ts:4947-4950` |
+
+**IDBots delta not yet in OAC** (Aug 22–24, all on IDBots `main`):
+
+- Staffing pipeline: seat roles (content/design/engineering/promotion/domain,
+  cap 8), staffing proposals with owner gate + 24 h TTL + CAS claim/release,
+  skip-confirm detection with interrogative filter, owner-reply classification
+  with last-intent-wins, candidate search merging local workers + production
+  bot search (`so.metaid.io/api/bots/search`) + impression verdicts
+  (boost/demote/block) with local-tie-break, `list_online_bots` presence.
+- Engine additions: deliverable parse + verification retries, deterministic
+  acceptance summaries (review entry / close), HITL checkpoints, plan changes,
+  `[DEPENDS_ON]` bounded hold, `[WORKING]`/auto-ACK, attribution enrichment
+  with SUSPECT marking, review→executing reopen, kick moderation notice.
+- OpenTeam guest side: metafile deliverable upload, on-chain membership
+  self-check (2-strike absence).
+- Orchestration bridge onto canonical tasks/steps/attempts.
+- Dream `collaborationFacts` + impression sedimentation on close/kick/deliverable
+  verdict (feeds future staffing searches).
+
+**OAC lacks entirely**: MetaWeb search/read, `post_simplenote` + upload gate,
+knowledge base stack, procedure memory, study jobs.
+
+## Phases
+
+### Phase 0 — Make the shipped group-task port actually run
+
+Fix the operational layer, verify end-to-end in the live DSH env, document.
+
+1. **Version-aware daemon lifecycle**: fold the package version + a `dist/`
+   build fingerprint into the daemon context hash so auto-start replaces
+   daemons from older builds (`src/cli/runtime.ts`).
+2. **DSH read fast path**: serve grouptask list/detail/messages reads
+   in-process from the host via the `local-read.ts` pattern (read-only against
+   the JSON store); writes keep the CLI path.
+3. **Prerequisite surfacing**: a grouptask health verb (chair resolvable,
+   owner identity present, LLM runtime configured, simplemsg listener on) +
+   status banner in `GroupTaskView`.
+4. **Listener default**: enable the a2a simplemsg listener + provider presence
+   by default (or auto-enable when any group task / OpenTeam membership
+   exists) — pick the smallest safe default.
+5. **Integration test**: boot the daemon once and exercise the grouptask route
+   path with stub chain/LLM adapters; register in `INTEGRATION_FILES` if slow.
+6. **Docs**: user-facing section in `dsh-plugin/README.md` (link install,
+   daemon restart behavior) + retroactive design spec under
+   `docs/superpowers/specs/`; live-DSH verification checklist.
+
+**Exit**: a group task created from the DSH UI runs its chair planning turn
+and worker replies locally; prerequisites and failures are visible in the UI.
+
+### Phase 1 — Staffing pipeline (wish → slate → owner gate → staffed task)
+
+Port into `src/core/grouptask/`:
+
+- Staffing proposal **store** (JSON, workspace layer) with CAS
+  claim/release, TTL, consumed/skip-authorized states.
+- **Pure staffing module** ported near-verbatim for behavior parity:
+  `normalizeStaffingPlan`, `validateStaffingPlan`, seat roles + caps,
+  `detectSkipConfirmInWish` (+ interrogative filter), owner-reply
+  classification patterns (keep-roster / revise / confirm / skip), last-intent
+  gate, slate text builder.
+- **Candidate search**: local twin workers + production bot search
+  (`POST so.metaid.io/api/bots/search`) + OAC impression-store verdicts +
+  online-presence source (network bots online). Match-first ranking with
+  local tie-break margin; remote-search failure degrades to local-only.
+- **Service**: `proposeStaffing` → owner gate → `createGroupTask` requires an
+  unconsumed, unexpired, CAS-claimed proposal; `pendingRemoteSeats` returned
+  for OpenTeam invites.
+- CLI verbs (`propose-staffing`, `search-candidates`, gated `create`),
+  daemon routes, dsh host routes.
+- **DSH UI**: staffing slate card in `GroupTaskView` with explicit
+  confirm / revise / skip actions and candidate match reasons. (The chat-reply
+  classifier is still ported — it drives CLI-originated flows and tests; the
+  DSH primary surface is the explicit card.)
+- Dream prompt `collaborationFacts` + impression sedimentation on close/kick/
+  deliverable verdict.
+
+**Exit**: behavior-matrix tests mirroring the IDBots staffing suites
+(skip/revise/confirm/keep-roster/last-intent/TTL/CAS).
+
+### Phase 2 — Engine behavior parity with IDBots daemon
+
+Diff-driven port of the missing engine machinery (OAC already has: tags, review
+ceremony, stall, driver mutex, cooldowns/budgets):
+
+- Deliverables: parse + verification with retry loop.
+- Acceptance summaries (deterministic, immutable snapshots) at review entry
+  and close; owner private report.
+- Checkpoints (HITL open/resolve/cancel) with human-gate responder silencing.
+- Plan changes, `[DEPENDS_ON]` bounded hold, `[WORKING]`/`[STANDBY]` +
+  host auto-ACK, attribution enrichment + SUSPECT marking, review reopen
+  path, kick moderation notice.
+- OpenTeam guest: metafile deliverable upload, membership self-check cadence.
+- Orchestration bridge onto OAC's twin orchestration store (canonical
+  tasks/steps/attempts per worker turn).
+- **Worker skill turns (design note)**: IDBots runs worker turns through its
+  in-process CoworkRunner + DSH runtime subprocess. The OAC daemon has no DSH
+  runtime and must not grow one; v1 keeps plain LLM turns with richer prompts
+  and memory injection. A tool-enabled unattended-turn substrate (needed here
+  and by Phase 5 study jobs) is a separate design spike: a bounded function
+  calling loop over daemon-side service calls, no host involvement.
+
+**Exit**: engine behavior-matrix tests mirroring the IDBots daemon suites
+(gating, tags, budgets, ACK ordering, dependency gate, review silence).
+
+### Phase 3 — MetaWeb search / read (M1)
+
+- `src/core/metaweb/`: search service + pin-read service (HTTPS to
+  `so.metaid.io`, env-overridable base URL, 10 s timeout mapped to
+  model-readable retry text) + the MetaWeb URI/citation lib (`pin://`,
+  `metaapp://`, `metafile://`; never Web2 viewer URLs).
+- CLI `metabot metaweb search|read` + daemon routes.
+- DSH: native tools `search_metaweb` / `read_metaweb_pin` on `oac-*` agents
+  (in-process), the worldview prompt section (search-first, cross-language
+  retry, untrusted-content guard, protocol follow-up hints), clickable
+  MetaWeb URIs in chat (extend the existing `metaapp://` link handling).
+- Codex/other hosts: skillpack skill wrapping the CLI verbs.
+
+### Phase 4 — `post_simplenote` + chain-upload gate
+
+- `src/core/` SimpleNote pin builder (protocol `1.0.1` payload, verified
+  shape) over the existing chain-write + metafile upload paths; MVC/DOGE
+  network selection with files uploaded on MVC regardless.
+- CLI `metabot simplenote post`; DSH native tool `post_simplenote`.
+- Approval gate: port `chainUploadGate` (symlink-aware workspace containment,
+  `metafile://` pass-through) with DSH `ctx.approval` as the confirm surface;
+  timeout/decline = not approved.
+
+### Phase 5 — Knowledge base + learning (M2–M4)
+
+- **Storage**: raw corpus in the workspace layer
+  (`knowledge-bases/<kbId>/raw/…`), derived per-KB FTS5 index in the runtime
+  layer (SQLite allowed there; `node:sqlite` with graceful LIKE fallback).
+- Port the text lib (CJK bigram tokenizer, paragraph-preferring chunker,
+  SimpleNote-JSON unwrap), registry store, learn/query service (incremental
+  by sha256, bm25 + phrase ranking, corrupt-index self-heal), agent tools
+  (`knowledge_base_list/query/add_document/learn`), volatile prompt block.
+- **Procedure memory (M3)**: procedure store (JSON, title-fingerprint dedupe,
+  version bump), `procedure_recall/save/archive` tools + hot prompt block,
+  use-count tracking.
+- **Study jobs (M4)**: job store + nightly drain window in the daemon;
+  unattended study turns over the Phase-2 spike substrate (tool allowlist,
+  pin-budget wrapper, last-JSON-fence report parsing, consecutive-failure
+  cutoff).
+- DSH UI: corpus tab in Settings → Memory, study-jobs status panel.
+
+## Key source references
+
+IDBots (all under `/Users/tusm/Documents/MetaID_Projects/IDBots/IDBots/`):
+group task core `src/main/groupTaskStore.ts`, `src/main/services/groupTask*.ts`
+(service/daemon/staffing/candidateSearch/session/prompts/deliverableParser/
+acceptanceSummary/orchestrationBridge), OpenTeam `src/main/services/openTeam*.ts`
++ `src/main/openTeamMembershipStore.ts`, transport
+`src/main/services/groupChatTransport.ts` + backfill + mention utils, bot search
+`src/main/services/botSearchService.ts`, skill `SKILLs/metabot-group-task/`;
+MetaWeb `src/main/services/metaweb{Search,Pin}Service.ts`, tools
+`src/main/libs/metawebLearningAgentTools.ts`, `metawebUri.ts`; SimpleNote
+`src/main/libs/postSimpleNoteAgentTools.ts`, `chainUploadGate.ts`; KB
+`src/main/knowledgeBaseStore.ts`, `src/main/services/knowledgeBaseService.ts`,
+`src/main/knowledgeBaseIndexStore.ts`, `src/main/libs/knowledgeBaseText.ts`,
+`knowledgeBaseAgentTools.ts`; learning `metawebStudyJobStore.ts`,
+`services/metawebStudyService.ts`, procedures in `src/main/metaidKnowledgeStore.ts`.
+Design docs: `docs/group-task-orchestration-improvements-2026-08-09.md`,
+`docs/metaweb-learning-roadmap.md`, `docs/metaweb-search-backend-requirements.md`,
+`docs/metaid_protocols/02-content-app.md`.
+
+OAC (under this repo): core `src/core/grouptask/` (types/store/transport/
+backfill/service/engine/openteam*), CLI `src/cli/commands/grouptask.ts`,
+daemon `src/daemon/routes/grouptask.ts` + `grouptaskHandlers.ts`, engine boot
+`src/cli/runtime.ts:4984-5024`, dsh-plugin `dsh-plugin/src/grouptask.ts` +
+`src/client/GroupTaskView.tsx` + `A2AConversation.tsx`; memory/impression/
+orchestration stores under `src/core/memory/`; local-read fast path
+`dsh-plugin/src/local-read.ts`.
