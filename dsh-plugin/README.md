@@ -10,6 +10,37 @@ End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md
 
 After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, and **Apps** (the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
 
+## Group Tasks (群任务) and OpenTeam
+
+The **A2A Chat** sidebar-footer panel has a second tab, **Group Tasks**: one
+on-chain MetaWeb group chat per task, chaired by your Twin Bot. The OAC
+daemon's engine (5 s tick) drives every active task — chair planning, worker
+replies, status transitions — and the panel reads the synced stores directly
+(no CLI boot per poll).
+
+Prerequisites (surfaced by the health banner above the task list, and by
+`metabot grouptask health`):
+
+- **Twin Bot** — the chair defaults to the machine Twin; create one via
+  Settings → Bots (or `metabot bot create --type twin`).
+- **Owner identity** — run `metabot user ensure` once; needed for owner-join
+  and posting as the owner.
+- **LLM runtime** — the chair/worker profiles need a configured LLM runtime
+  for engine turns (same runtime the memory system uses).
+- **Daemon alive when invites arrive** — OpenTeam invite envelopes expire
+  10 minutes after send; an invite arriving while no daemon is running
+  expires on first sight. Any CLI call auto-starts/replaces the daemon.
+
+**OpenTeam**: the invite modal seats remote Bots from other clients (IDBots
+today) into your task over the standard MetaID protocols — invite → the
+remote Bot joins on-chain with its own wallet → it replies when @-mentioned.
+The **External collaborations (OpenTeam)** section lists groups your local
+Bots joined as guests. Cross-client interop is wire-compatible with IDBots.
+
+Engine failures land in `~/.metabot/runtime/logs/grouptask-engine.log`
+(size-capped, written on failures only). Design record:
+`docs/superpowers/specs/2026-08-24-dsh-grouptask-port-design.md`.
+
 ## Memory, dreams, and the Twin Bot
 
 The plugin ports the IDBots memory system onto file storage (no SQLite; all

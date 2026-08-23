@@ -83,30 +83,40 @@ knowledge base stack, procedure memory, study jobs.
 
 ## Phases
 
-### Phase 0 — Make the shipped group-task port actually run
+### Phase 0 — Make the shipped group-task port actually run ✅ (2026-08-24)
 
-Fix the operational layer, verify end-to-end in the live DSH env, document.
+Outcome (evidence-first: live diagnosis before changes): the ported code was
+code-complete and, on a current build + restarted daemon, **runs end to end
+in the live DSH environment** — including full cross-client OpenTeam interop
+with an IDBots-side Bot (invite → remote join with its own wallet → guest
+@-mention LLM reply → review → close with rating). The original "it doesn't
+run" was: (a) OpenTeam invites sent before the port existed / while no
+engine was alive, silently expiring on first sight (600 s TTL), and (b) zero
+diagnostic surface for silent prerequisites (missing owner identity, no twin,
+listener off, missing LLM runtime). The dist-fingerprint daemon restart
+already existed (since April), and the live plugin/CLI resolution was
+correct (link mount, no npm copy shadowing).
 
-1. **Version-aware daemon lifecycle**: fold the package version + a `dist/`
-   build fingerprint into the daemon context hash so auto-start replaces
-   daemons from older builds (`src/cli/runtime.ts`).
-2. **DSH read fast path**: serve grouptask list/detail/messages reads
-   in-process from the host via the `local-read.ts` pattern (read-only against
-   the JSON store); writes keep the CLI path.
-3. **Prerequisite surfacing**: a grouptask health verb (chair resolvable,
-   owner identity present, LLM runtime configured, simplemsg listener on) +
-   status banner in `GroupTaskView`.
-4. **Listener default**: enable the a2a simplemsg listener + provider presence
-   by default (or auto-enable when any group task / OpenTeam membership
-   exists) — pick the smallest safe default.
-5. **Integration test**: boot the daemon once and exercise the grouptask route
-   path with stub chain/LLM adapters; register in `INTEGRATION_FILES` if slow.
-6. **Docs**: user-facing section in `dsh-plugin/README.md` (link install,
-   daemon restart behavior) + retroactive design spec under
-   `docs/superpowers/specs/`; live-DSH verification checklist.
+Rounds landed:
 
-**Exit**: a group task created from the DSH UI runs its chair planning turn
-and worker replies locally; prerequisites and failures are visible in the UI.
+- **A** plan doc (`57c75b59`).
+- **B** engine + OpenTeam failures land in a size-capped rotating log
+  `<system>/runtime/logs/grouptask-engine.log`; guest-invite declines log
+  inviteId/reason + expiry lag (`8fb24e41`). Item 1 above was resolved by
+  diagnosis (no code needed); item 4 by reading the default (`simplemsgListenerEnabled`
+  already defaults true).
+- **C** `metabot grouptask health` verb end to end (core/daemon/CLI/host) +
+  status banner in `GroupTaskView` with en/zh copy (`c668b3f0`).
+- **D** in-process grouptask reads (list/detail/messages/collabs) with CLI
+  fallback; hermetic route tests (`3dd39e21`).
+- **E** live verification: task #1 create/planning/close; task #5
+  cross-client OpenTeam loop with IDBots 小明同学 (closed done, rating 5);
+  offline-remote invite (BOT-007, another machine) correctly
+  `invite_response_timeout`. Engine log stayed empty (failures only).
+- **F** this documentation: README section, retroactive design spec
+  (`docs/superpowers/specs/2026-08-24-dsh-grouptask-port-design.md`).
+  Item 5 (daemon-level integration test) remains open — the live E2E pass
+  covered the same path manually; revisit if CI coverage is needed.
 
 ### Phase 1 — Staffing pipeline (wish → slate → owner gate → staffed task)
 
