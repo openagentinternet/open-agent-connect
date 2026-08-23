@@ -247,3 +247,26 @@ test('grouptask store acceptance summaries version and finalize', async () => {
   await store.updateAcceptanceSummaryPublishedPin(task.id, 'pin-pub');
   assert.equal((await store.getLatestAcceptanceSummary(task.id)).publishedGroupPinId, 'pin-pub');
 });
+
+test('deliverable dedupe lookup and correction reopen reset verification state', async () => {
+  const { store } = createStore('metabot-gt-store-deliverable-');
+  const task = await createTask(store);
+  const row = await store.addDeliverable({
+    taskId: task.id,
+    msgPinId: 'pin-msg-1',
+    authorGlobalMetaId: 'IDWORKER1',
+    kind: 'pin',
+    uri: 'pin://abc',
+  });
+  await store.updateDeliverableVerification(row.id, { sources: [] }, 'confirmed', 'delivered');
+
+  const found = await store.findDeliverableByMsgPinAndUri(task.id, 'pin-msg-1', 'pin://abc', 'pin');
+  assert.equal(found?.id, row.id);
+  assert.equal(await store.findDeliverableByMsgPinAndUri(task.id, 'pin-msg-1', 'pin://other', 'pin'), null);
+
+  const reopened = await store.reopenDeliverable(row.id);
+  assert.equal(reopened.status, 'pending');
+  assert.equal(reopened.verification, null);
+  assert.equal(reopened.confirmation, 'unconfirmed');
+  assert.equal(await store.reopenDeliverable(9999), null);
+});

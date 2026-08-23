@@ -177,6 +177,14 @@ export interface GroupTaskStore {
   addDeliverable(input: AddGroupTaskDeliverableInput): Promise<GroupTaskDeliverable>;
   listDeliverables(taskId: number): Promise<GroupTaskDeliverable[]>;
   hasDeliverableWithMsgPin(taskId: number, msgPinId: string): Promise<boolean>;
+  findDeliverableByMsgPinAndUri(
+    taskId: number,
+    msgPinId: string,
+    uri: string | null,
+    kind: string | null,
+  ): Promise<GroupTaskDeliverable | null>;
+  /** Correction supersede: reopen a rejected/stale row for re-verification. */
+  reopenDeliverable(deliverableId: number): Promise<GroupTaskDeliverable | null>;
   deleteDeliverable(deliverableId: number): Promise<boolean>;
   updateDeliverableVerification(
     deliverableId: number,
@@ -627,6 +635,25 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       const state = await readState();
       return state.deliverables.some((entry) => entry.taskId === taskId && entry.msgPinId === msgPinId);
     },
+
+    findDeliverableByMsgPinAndUri: async (taskId, msgPinId, uri, kind) => {
+      const state = await readState();
+      return state.deliverables.find((entry) => entry.taskId === taskId
+        && entry.msgPinId === msgPinId
+        && (entry.uri ?? null) === (uri ?? null)
+        && (entry.kind ?? null) === (kind ?? null)) ?? null;
+    },
+
+    reopenDeliverable: (deliverableId) => enqueue(async () => {
+      const state = await readState();
+      const deliverable = state.deliverables.find((entry) => entry.id === deliverableId);
+      if (!deliverable) return null;
+      deliverable.status = 'pending';
+      deliverable.verification = null;
+      deliverable.confirmation = 'unconfirmed';
+      await writeState(state);
+      return deliverable;
+    }),
 
     deleteDeliverable: (deliverableId) => enqueue(async () => {
       const state = await readState();

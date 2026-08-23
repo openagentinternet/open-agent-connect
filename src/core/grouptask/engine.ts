@@ -512,17 +512,49 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     // Member tags (non-chair local members)
     if (senderSeat && !fromChair) {
       if (tags.deliverables.length > 0 && message.pinId) {
-        const alreadyRecorded = await store.hasDeliverableWithMsgPin(task.id, message.pinId);
-        if (!alreadyRecorded) {
-          for (const candidate of tags.deliverables) {
-            await store.addDeliverable({
-              taskId: task.id,
-              msgPinId: message.pinId,
-              authorGlobalMetaId: message.senderGlobalMetaId,
-              kind: candidate.kind,
-              uri: candidate.uri,
-            });
+        let recordedAny = false;
+        for (const candidate of tags.deliverables) {
+          // Per-(msgPin, uri, kind) dedupe (IDBots parity): the same line
+          // replayed through indexer re-sync never double-records.
+          const existing = await store.findDeliverableByMsgPinAndUri(
+            task.id,
+            message.pinId,
+            candidate.uri,
+            candidate.kind,
+          );
+          if (existing) continue;
+          await store.addDeliverable({
+            taskId: task.id,
+            msgPinId: message.pinId,
+            authorGlobalMetaId: message.senderGlobalMetaId,
+            kind: candidate.kind,
+            uri: candidate.uri,
+          });
+          recordedAny = true;
+          if (candidate.correction) {
+            // Correction supersede: reopen this author's superseded row
+            // (same URI pin, else the newest rejected row) for re-check.
+            const rows = await store.listDeliverables(task.id);
+            const pinOf = (uri: string | null): string | null => {
+              const match = /([0-9a-f]{64}i\d+)/i.exec(uri ?? '');
+              return match ? match[1]!.toLowerCase() : null;
+            };
+            const targetPin = pinOf(candidate.uri);
+            const mine = rows.filter((row) => row.authorGlobalMetaId === message.senderGlobalMetaId
+              && row.status !== 'accepted');
+            const superseded = (targetPin && mine.find((row) => pinOf(row.uri) === targetPin))
+              ?? mine[mine.length - 1]
+              ?? null;
+            if (superseded) {
+              await store.reopenDeliverable(superseded.id);
+              log(`[GroupTaskEngine] Deliverable ${superseded.id} of task ${task.id} superseded `
+                + `by correction in message ${message.index}`);
+            }
           }
+        }
+        if (!recordedAny) {
+          log(`[GroupTaskEngine] Deliverable candidates of message ${message.index} `
+            + `on task ${task.id} were duplicates; nothing recorded`);
         }
       }
       if (tags.working) {
