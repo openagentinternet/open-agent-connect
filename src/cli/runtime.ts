@@ -134,6 +134,10 @@ import { createMetabotDaemon } from '../daemon';
 import { createDefaultMetabotDaemonHandlers, fetchPeerChatPublicKey as fetchPeerChatPublicKeyFromChain, llmDiscoverySweepRunningForHomeDir, type A2ACallerReplyResumeReport } from '../daemon/defaultHandlers';
 import { createGroupTaskServiceContext } from '../daemon/grouptaskHandlers';
 import { createGroupTaskEngine } from '../core/grouptask/engine';
+import {
+  createGroupTaskEngineLogWriter,
+  resolveGroupTaskEngineLogPath,
+} from '../core/grouptask/engineLog';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import {
@@ -4980,7 +4984,12 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   // Group Task engine: 5s ticker that drives every non-terminal group task
   // chaired by a local profile (message sync, tag side effects, chair/worker
   // LLM turns, stall heartbeat). Cheap when no tasks exist — the tick only
-  // reads local profile state files.
+  // reads local profile state files. Engine failures land in the size-capped
+  // engine log (the detached daemon's stdio is ignored, console.warn alone
+  // would evaporate).
+  const groupTaskEngineLog = createGroupTaskEngineLogWriter({
+    logFile: resolveGroupTaskEngineLogPath(daemonPaths.logsRoot),
+  });
   const groupTaskEngine = createGroupTaskEngine({
     ctx: createGroupTaskServiceContext({
       systemHomeDir,
@@ -4989,7 +4998,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
         : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profileHomeDir), adapters })),
       adapters,
       resolvePeerChatPublicKey,
-      log: (message) => console.warn(message),
+      log: (message) => {
+        console.warn(message);
+        groupTaskEngineLog(message);
+      },
     }),
     runLlmTurn: async (turn) => {
       const profilePaths = resolveMetabotPaths(turn.profile.homeDir);

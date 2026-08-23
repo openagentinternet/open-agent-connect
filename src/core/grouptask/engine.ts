@@ -756,6 +756,13 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     status: 'declined' | 'expired' | 'skipped',
     reason: string,
   ): Promise<void> {
+    const expiryLagSeconds = status === 'expired'
+      ? Math.max(0, Math.floor(now() / 1000) - payload.expiresAt)
+      : 0;
+    log(`[OpenTeam] Guest invite ${payload.inviteId} (task "${payload.taskTitle}") for `
+      + `${profile.slug} from ${payload.inviterName || payload.inviterGlobalMetaId} `
+      + `→ ${status}/${reason}`
+      + (status === 'expired' ? ` — expired ${expiryLagSeconds}s before processing (engine offline at arrival?)` : ''));
     await openteam.createGuestInvite({
       groupId: payload.groupId,
       inviteId: payload.inviteId,
