@@ -340,6 +340,123 @@ export function localDreamSelfIdentity(from: string): Promise<MetabotCommandResu
   })
 }
 
+// ---- group tasks ----------------------------------------------------------
+// The daemon engine's 5s tick keeps the per-profile grouptask stores synced
+// from the chain indexers, so the panel reads can be served straight from the
+// local JSON stores (sync:false semantics) instead of booting a CLI per poll.
+// Writes, guest transcripts, and the health preflight stay on the CLI.
+
+async function grouptaskServiceContext(): Promise<Record<string, unknown> | null> {
+  const manager = core('core/bot/metabotProfileManager.js')
+  const list = fn<(dir: string) => Promise<Array<Record<string, unknown>>>>(manager, 'listMetabotProfiles')
+  const stateStore = core('core/state/runtimeStateStore.js')
+  const createState = fn<(homeDir: string) => { readState: () => Promise<{ identity?: { metaId?: unknown } }> }>(
+    stateStore,
+    'createRuntimeStateStore',
+  )
+  const profiles = await list(systemHomeDir()).catch(() => [])
+  const refs = await Promise.all(profiles.map(async (profile) => ({
+    slug: typeof profile.slug === 'string' ? profile.slug : '',
+    homeDir: typeof profile.homeDir === 'string' ? profile.homeDir : '',
+    name: typeof profile.name === 'string' ? profile.name : '',
+    globalMetaId: typeof profile.globalMetaId === 'string' ? profile.globalMetaId : null,
+    metaId: await createState(profile.homeDir as string)
+      .readState()
+      .then((state) => (typeof state.identity?.metaId === 'string' ? state.identity.metaId : null))
+      .catch(() => null),
+    botType: profile.botType === 'twin' ? 'twin' : profile.botType === 'worker' ? 'worker' : null,
+    avatar: typeof profile.avatarDataUrl === 'string' ? profile.avatarDataUrl : null,
+  })))
+  if (!refs.some((ref) => ref.slug !== '')) return null
+  return {
+    listProfiles: async () => refs,
+    getProfile: async (slug: string) => refs.find((ref) => ref.slug === slug) ?? null,
+  }
+}
+
+function normalizeGrouptaskTab(tab: string): 'active' | 'done' | 'cancelled' | 'all' {
+  return tab === 'active' || tab === 'done' || tab === 'cancelled' ? tab : 'all'
+}
+
+export function localGrouptaskList(
+  tab: string,
+  includeArchived: boolean,
+): Promise<MetabotCommandResult | null> {
+  return attempt(async () => {
+    const ctx = await grouptaskServiceContext()
+    if (!ctx) return null
+    const { listGroupTaskSummaries } = core('core/grouptask/service.js') as {
+      listGroupTaskSummaries: (ctx: unknown, options: Record<string, unknown>) => Promise<unknown[]>
+    }
+    const tasks = await listGroupTaskSummaries(ctx, {
+      tab: normalizeGrouptaskTab(tab),
+      includeArchived,
+    })
+    return success({ tasks })
+  })
+}
+
+export function localGrouptaskDetail(
+  chair: string,
+  taskId: number,
+  view: string,
+): Promise<MetabotCommandResult | null> {
+  return attempt(async () => {
+    const ctx = await grouptaskServiceContext()
+    if (!ctx) return null
+    const { getGroupTaskDetail } = core('core/grouptask/service.js') as {
+      getGroupTaskDetail: (
+        ctx: unknown,
+        chairSlug: string,
+        taskId: number,
+        opts: { view: 'summary' | 'full'; sync: boolean },
+      ) => Promise<unknown>
+    }
+    const detail = await getGroupTaskDetail(ctx, chair, taskId, {
+      view: view === 'summary' ? 'summary' : 'full',
+      sync: false,
+    })
+    return success(detail)
+  })
+}
+
+export function localGrouptaskMessages(
+  chair: string,
+  taskId: number,
+  limit: number | undefined,
+  beforeIndex: number | undefined,
+): Promise<MetabotCommandResult | null> {
+  return attempt(async () => {
+    const ctx = await grouptaskServiceContext()
+    if (!ctx) return null
+    const { listGroupTaskMessages } = core('core/grouptask/service.js') as {
+      listGroupTaskMessages: (
+        ctx: unknown,
+        chairSlug: string,
+        taskId: number,
+        opts: { limit?: number; beforeIndex?: number; sync: boolean },
+      ) => Promise<unknown>
+    }
+    const page = await listGroupTaskMessages(ctx, chair, taskId, {
+      ...(typeof limit === 'number' ? { limit } : {}),
+      ...(typeof beforeIndex === 'number' ? { beforeIndex } : {}),
+      sync: false,
+    })
+    return success(page)
+  })
+}
+
+export function localGrouptaskCollabs(): Promise<MetabotCommandResult | null> {
+  return attempt(async () => {
+    const ctx = await grouptaskServiceContext()
+    if (!ctx) return null
+    const { listOpenTeamCollabs } = core('core/grouptask/openteamService.js') as {
+      listOpenTeamCollabs: (ctx: unknown) => Promise<unknown>
+    }
+    return success(await listOpenTeamCollabs(ctx))
+  })
+}
+
 // ---- A2A conversations ----------------------------------------------------
 // The daemon's `/api/conversations` enrichment only refreshes peer names from
 // the profile index; the stored A2A data already carries names/avatars, so we

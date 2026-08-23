@@ -3,6 +3,10 @@ import test from 'node:test'
 
 const plugin = await import('../lib/index.js')
 
+// These tests assert CLI argv mapping only; the in-process local-read fast
+// path must stay out of the way (it reads the real ~/.metabot otherwise).
+process.env.OAC_DSH_NO_LOCAL_READ = '1'
+
 async function capture(method, payload) {
   const calls = []
   const result = await plugin.dispatchGroupTaskRoutes(method, payload, {

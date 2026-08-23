@@ -108,3 +108,67 @@ test('in-process user read is fast (no CLI subprocess boot)', async () => {
     await rm(home, { recursive: true, force: true })
   }
 })
+
+test('localGrouptask reads serve the store without spawning the CLI', async () => {
+  const home = await makeHome()
+  process.env.HOME = home
+  try {
+    // Hand-written profile fixture: manager index + profile home + twin role
+    // marker (the CLI bootstrap path needs the on-chain reward faucet, which
+    // is unavailable in hermetic tests).
+    const profilesRoot = join(home, '.metabot', 'profiles')
+    const homeDir = join(profilesRoot, 'twinchair')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(join(home, '.metabot', 'manager'), { recursive: true })
+    writeFileSync(
+      join(home, '.metabot', 'manager', 'identity-profiles.json'),
+      JSON.stringify({
+        profiles: [{
+          name: 'TwinChair',
+          slug: 'twinchair',
+          homeDir,
+          globalMetaId: 'idlocaltwin0000000000000000000000000000',
+          mvcAddress: 'addr-local-twin',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }],
+      }),
+    )
+    const paths = require('../../dist/core/state/paths.js').resolveMetabotPaths(homeDir)
+    mkdirSync(join(homeDir, '.runtime', 'state'), { recursive: true })
+    writeFileSync(paths.botRoleStatePath, JSON.stringify({ botType: 'twin' }))
+
+    const store = require('../../dist/core/grouptask/store.js').createGroupTaskStore(paths)
+    const task = await store.createTask({
+      groupId: 'group-pin-local-1',
+      title: 'Local read fixture',
+      goal: 'Serve reads in-process',
+      chairSlug: 'twinchair',
+      createdBy: 'user',
+    })
+    assert.equal(task.id, 1)
+
+    const empty = await localRead.localGrouptaskCollabs()
+    assert.equal(empty.ok, true)
+    assert.deepEqual(empty.data, { memberships: [], guestInvites: [] })
+
+    const list = await localRead.localGrouptaskList('all', false)
+    assert.equal(list.ok, true)
+    assert.equal(list.data.tasks.length, 1)
+    assert.equal(list.data.tasks[0].chairSlug, 'twinchair')
+    assert.equal(list.data.tasks[0].title, 'Local read fixture')
+
+    const doneOnly = await localRead.localGrouptaskList('done', false)
+    assert.equal(doneOnly.ok, true)
+    assert.equal(doneOnly.data.tasks.length, 0)
+
+    const detail = await localRead.localGrouptaskDetail('twinchair', 1, 'full')
+    assert.equal(detail.ok, true)
+    assert.equal(detail.data.id, 1)
+    assert.equal(detail.data.status, 'planning')
+    assert.deepEqual(detail.data.members, [])
+  } finally {
+    process.env.HOME = ORIGINAL_HOME
+    await rm(home, { recursive: true, force: true })
+  }
+})

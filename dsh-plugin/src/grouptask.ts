@@ -4,6 +4,12 @@
  * undefined for non-grouptask methods so index.ts can chain dispatchers.
  */
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import {
+  localGrouptaskCollabs,
+  localGrouptaskDetail,
+  localGrouptaskList,
+  localGrouptaskMessages,
+} from './local-read.js'
 
 type RunMetabot = typeof runMetabot
 
@@ -92,6 +98,9 @@ export async function dispatchGroupTaskRoutes(
     const tab = readTrimmed(body, 'tab')
     if (tab) args.push('--tab', tab)
     if (body.includeArchived === true) args.push('--include-archived')
+    // Store-only read; the daemon engine's 5s tick keeps the stores synced.
+    const local = await localGrouptaskList(tab, body.includeArchived === true)
+    if (local) return local
     return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
@@ -102,6 +111,11 @@ export async function dispatchGroupTaskRoutes(
     const view = readTrimmed(body, 'view')
     if (view) args.push('--view', view)
     if (body.sync === false) args.push('--no-sync')
+    if (body.sync !== true) {
+      // Store-only read; the daemon engine's 5s tick keeps the stores synced.
+      const local = await localGrouptaskDetail(ref.chair, ref.taskId, view)
+      if (local) return local
+    }
     return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
@@ -114,6 +128,10 @@ export async function dispatchGroupTaskRoutes(
     const beforeIndex = readInt(body, 'beforeIndex')
     if (beforeIndex !== undefined) args.push('--before-index', String(beforeIndex))
     if (body.sync === false) args.push('--no-sync')
+    if (body.sync !== true) {
+      const local = await localGrouptaskMessages(ref.chair, ref.taskId, limit, beforeIndex)
+      if (local) return local
+    }
     return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
@@ -252,6 +270,8 @@ export async function dispatchGroupTaskRoutes(
   }
 
   if (method === 'grouptask/collabs') {
+    const local = await localGrouptaskCollabs()
+    if (local) return local
     return run(['grouptask', 'collabs'], { timeoutMs: READ_TIMEOUT_MS })
   }
 
