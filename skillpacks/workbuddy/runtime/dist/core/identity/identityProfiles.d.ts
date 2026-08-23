@@ -1,7 +1,6 @@
 export interface IdentityManagerPaths {
     managerRoot: string;
     profilesPath: string;
-    activeHomePath: string;
 }
 export interface IdentityProfileRecord {
     name: string;
@@ -31,10 +30,3 @@ export declare function deleteIdentityProfile(input: {
     systemHomeDir: string;
     slug: string;
 }): Promise<IdentityProfileRecord | null>;
-export declare function readActiveMetabotHomeSync(systemHomeDir: string): string | null;
-export declare function readActiveMetabotHome(systemHomeDir: string): Promise<string | null>;
-export declare function setActiveMetabotHome(input: {
-    systemHomeDir: string;
-    homeDir: string;
-    now?: () => number;
-}): Promise<string>;

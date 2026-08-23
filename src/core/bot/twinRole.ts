@@ -107,6 +107,25 @@ export async function resolveCurrentTwinSlug(systemHomeDir: string): Promise<str
   return null;
 }
 
+/**
+ * The machine default Bot's home directory. The Twin Bot IS the machine's
+ * default Bot: every no-`--from` command and panel default resolves to it.
+ * Falls back to the earliest-created Bot's home — the same pick
+ * applyTwinInvariant's repair makes — so the default exists whenever any Bot
+ * does, even if role storage is transiently twin-less. Null only when no Bots
+ * exist. Callers that must verify the actual twin role (twin verbs, tool
+ * re-authorization) use resolveCurrentTwinSlug instead.
+ */
+export async function resolveTwinHomeDir(systemHomeDir: string): Promise<string | null> {
+  const profiles = await listMetabotProfiles(systemHomeDir);
+  let earliest: MetabotProfileFull | null = null;
+  for (const profile of profiles) {
+    if (!earliest || profile.createdAt < earliest.createdAt) earliest = profile;
+    if ((await readBotType(profile)) === 'twin') return profile.homeDir;
+  }
+  return earliest?.homeDir ?? null;
+}
+
 export interface TwinWorkerRosterEntry {
   slug: string;
   name: string;

@@ -698,7 +698,7 @@ test('runCli prints services owned help with read and mutation subcommands', asy
   assert.equal(groupExitCode, 0);
   const groupOutput = groupStdout.join('');
   assert.match(groupOutput, /^Usage:\s+metabot services owned <subcommand>/m);
-  assert.match(groupOutput, /list\s+List services owned by the active, selected, or all local MetaBots\./);
+  assert.match(groupOutput, /list\s+List services owned by the Twin Bot, selected, or all local MetaBots\./);
   assert.match(groupOutput, /modify\s+Publish an on-chain modification for one owned service\./);
 
   const listStdout = [];
@@ -1199,7 +1199,7 @@ test('runCli prints machine-readable skills resolve help for `metabot skills res
   assert.ok(output.examples.includes('metabot skills resolve --skill metabot-network-manage --format json'));
 });
 
-test('runCli prints identity group help with create/who/list/assign subcommands', async () => {
+test('runCli prints identity group help with create/who/list subcommands', async () => {
   const stdout = [];
 
   const exitCode = await runCli(['identity', '--help'], {
@@ -1215,7 +1215,7 @@ test('runCli prints identity group help with create/who/list/assign subcommands'
   assert.match(output, /^\s+create\s+/m);
   assert.match(output, /^\s+who\s+/m);
   assert.match(output, /^\s+list\s+/m);
-  assert.match(output, /^\s+assign\s+/m);
+  assert.doesNotMatch(output, /^\s+assign\s+/m);
 });
 
 test('runCli prints identity create help with MetaBot terminology', async () => {
@@ -1293,7 +1293,6 @@ test('runCli machine-readable help resolves every public leaf command to its exa
     ['identity', 'create'],
     ['identity', 'who'],
     ['identity', 'list'],
-    ['identity', 'assign'],
     ['bot', 'list'],
     ['bot', 'show'],
     ['bot', 'create'],

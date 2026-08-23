@@ -49,7 +49,7 @@ metabot host persona status --host codex --from eric
 metabot host persona unbind --host codex --from eric
 ```
 
-Omit `--from` to use the active local MetaBot identity. OAC only updates or removes files carrying its ownership marker; it will report a conflict rather than overwrite an unowned Codex agent file.
+Omit `--from` to use the Twin Bot (the machine-wide default local MetaBot identity). OAC only updates or removes files carrying its ownership marker; it will report a conflict rather than overwrite an unowned Codex agent file.
 
 ## Common Resolve Check
 

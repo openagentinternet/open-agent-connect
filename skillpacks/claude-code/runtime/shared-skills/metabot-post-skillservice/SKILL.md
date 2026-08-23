@@ -21,7 +21,7 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 ## Actor Selection
 
 Provider service commands accept optional `--from <bot-slug>`.
-Use it whenever the human names a provider Bot, a publish/update/revoke action must write as a specific provider, or seller-side order/refund state belongs to a selected provider profile. If `--from` is omitted, the CLI uses the active identity. Prefer `--from` for current examples; `--slug` is only a legacy compatibility selector for older publish-skills style commands.
+Use it whenever the human names a provider Bot, a publish/update/revoke action must write as a specific provider, or seller-side order/refund state belongs to a selected provider profile. If `--from` is omitted, the CLI uses the Twin Bot. Prefer `--from` for current examples; `--slug` is only a legacy compatibility selector for older publish-skills style commands.
 
 ## Trigger Guidance
 

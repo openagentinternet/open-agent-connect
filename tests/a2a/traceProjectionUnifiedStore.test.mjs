@@ -17,7 +17,6 @@ const {
 } = require('../../dist/core/a2a/traceProjection.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const {
-  setActiveMetabotHome,
   upsertIdentityProfile,
 } = require('../../dist/core/identity/identityProfiles.js');
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
@@ -58,11 +57,6 @@ async function createProfileFixture() {
     homeDir,
     globalMetaId: LOCAL_GLOBAL_META_ID,
     mvcAddress: 'mvc-alice',
-    now: () => BASE_TIME,
-  });
-  await setActiveMetabotHome({
-    systemHomeDir,
-    homeDir: profile.homeDir,
     now: () => BASE_TIME,
   });
   return { systemHomeDir, homeDir: profile.homeDir, profile };

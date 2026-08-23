@@ -17,7 +17,6 @@ export interface MetabotPaths {
   stateRoot: string;
   locksRoot: string;
   identityProfilesPath: string;
-  activeHomePath: string;
   infrastructureConfigPath: string;
   configPath: string;
   identitySecretsPath: string;
@@ -191,7 +190,6 @@ function buildMetabotPaths(input: {
     stateRoot: input.stateRoot,
     locksRoot: input.locksRoot,
     identityProfilesPath: path.join(input.managerRoot, 'identity-profiles.json'),
-    activeHomePath: path.join(input.managerRoot, 'active-home.json'),
     infrastructureConfigPath: path.join(input.managerRoot, 'infrastructure.json'),
     configPath: path.join(input.runtimeRoot, 'config.json'),
     identitySecretsPath: input.identitySecretsPath,

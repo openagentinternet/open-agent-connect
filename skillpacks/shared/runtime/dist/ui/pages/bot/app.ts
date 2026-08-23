@@ -90,14 +90,14 @@ function setSelectedBotDefault(toggle){
   var slug=profile.slug;
   if(toggle)toggle.classList.toggle('loading',true);
   var status=q('[data-default-bot-status]');if(status){status.textContent=uiText('bot.saving','Saving...');status.className='save-status saving'}
-  return api('/api/bot/profiles/'+encodeURIComponent(slug)+'/activate',{method:'POST'}).then(function(){
+  return api('/api/bot/profiles/'+encodeURIComponent(slug),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({botType:'twin'})}).then(function(){
     state.profiles.forEach(function(p){p.isActive=p.slug===slug});
     renderMetabotList();
     renderDetailHeader(selectedProfile());
-    var done=q('[data-default-bot-status]');if(done){done.textContent=uiText('bot.defaultBotSaved','Default Bot updated.');done.className='save-status success'}
+    var done=q('[data-default-bot-status]');if(done){done.textContent=uiText('bot.defaultBotSaved','Twin Bot updated.');done.className='save-status success'}
   }).catch(function(error){
     if(toggle)toggle.classList.toggle('loading',false);
-    var failed=q('[data-default-bot-status]');if(failed){failed.textContent=error&&error.message?error.message:uiText('bot.defaultBotSaveFailed','Failed to update the default Bot.');failed.className='save-status error'}
+    var failed=q('[data-default-bot-status]');if(failed){failed.textContent=error&&error.message?error.message:uiText('bot.defaultBotSaveFailed','Failed to update the Twin Bot.');failed.className='save-status error'}
   });
 }
 function avatarMarkup(profile,large){var value=profile&&profile.avatarDataUrl;var initials=((profile&&profile.name)||'MB').trim().slice(0,2).toUpperCase()||'MB';if(value)return'<img src="'+esc(value)+'" alt="">';return esc(initials)}
@@ -105,7 +105,7 @@ function selectedProfile(){return state.profiles.find(function(p){return p.slug=
 function mergeProfileUpdate(prev,updated){
   if(!prev)return updated;
   // isActive and setup are derived by the list endpoint and are absent
-  // from the PUT response. Carry them over so the default badge / toggle
+  // from the PUT response. Carry them over so the Twin Bot badge / toggle
   // and the setup alert keep their state until the next full reload.
   if(prev.isActive!==undefined&&updated.isActive===undefined)updated.isActive=prev.isActive;
   if(prev.setup!==undefined&&updated.setup===undefined)updated.setup=prev.setup;
@@ -343,8 +343,8 @@ function noLlmLabelMarkup(profile){
 function defaultBotLabelMarkup(profile){
   if(!profile||profile.isActive!==true)return '';
   if(state.profiles.length<2)return '';
-  var title=uiText('bot.isDefaultBot','This is the default Bot');
-  return '<span class="metabot-default-label" title="'+esc(title)+'" aria-label="'+esc(title)+'">'+esc(uiText('bot.defaultBadge','Default'))+'</span>';
+  var title=uiText('bot.isDefaultBot','This is the Twin Bot');
+  return '<span class="metabot-default-label" title="'+esc(title)+'" aria-label="'+esc(title)+'">'+esc(uiText('bot.defaultBadge','Twin Bot'))+'</span>';
 }
 function runtimeIconMarkup(runtime){
   var key=String((runtime&&runtime.provider)||'generic');
@@ -1058,7 +1058,7 @@ function renderBotHero(profile){
     defaultToggle.classList.toggle('loading',false);
     defaultToggle.disabled=isDefault;
     defaultToggle.setAttribute('aria-checked',isDefault?'true':'false');
-    var defaultTitle=isDefault?uiText('bot.isDefaultBot','This is the default Bot'):uiText('bot.setAsDefault','Set as default');
+    var defaultTitle=isDefault?uiText('bot.isDefaultBot','This is the Twin Bot'):uiText('bot.setAsDefault','Set as Twin Bot');
     defaultToggle.setAttribute('aria-label',defaultTitle);
     defaultToggle.setAttribute('title',defaultTitle);
     var defaultText=queryWithin(defaultToggle,'.toggle-text');if(defaultText)defaultText.textContent=isDefault?uiText('bot.autoReplyOn','On'):uiText('bot.autoReplyOff','Off');

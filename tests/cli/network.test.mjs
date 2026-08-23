@@ -14,6 +14,7 @@ const {
   commandSuccess,
   commandWaiting,
 } = require('../../dist/core/contracts/commandResult.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 function deriveSystemHome(homeDir) {
   const normalizedHomeDir = path.resolve(homeDir);
@@ -50,9 +51,12 @@ function createProfileHome(prefix, slug = 'test-profile') {
     }, null, 2)}\n`,
     'utf8',
   );
+  // The Twin Bot is the default actor (there is no active-home pointer file).
+  const botRoleStatePath = resolveMetabotPaths(homeDir).botRoleStatePath;
+  mkdirSync(path.dirname(botRoleStatePath), { recursive: true });
   writeFileSync(
-    path.join(managerRoot, 'active-home.json'),
-    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
+    botRoleStatePath,
+    `${JSON.stringify({ botType: 'twin', ownerGlobalMetaId: null, updatedAt: new Date(now).toISOString() }, null, 2)}\n`,
     'utf8',
   );
   return homeDir;

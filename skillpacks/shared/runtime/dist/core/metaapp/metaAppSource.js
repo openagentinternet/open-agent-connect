@@ -15,6 +15,31 @@ const pinId_1 = require("./pinId");
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
 }
+function isTransientSourceError(error) {
+    const name = error && typeof error === 'object' ? String(error.name || '') : '';
+    if (name === 'AbortError' || name === 'TimeoutError') {
+        return true;
+    }
+    const message = errorMessage(error).toLowerCase();
+    return message.includes('fetch failed')
+        || message.includes('failed to fetch')
+        || message.includes('aborted')
+        || message.includes('timed out')
+        || message.includes('timeout')
+        || message.includes('network');
+}
+function isTransientSourceFailure(result) {
+    const code = result.code || '';
+    if (code === 'metaapp_source_failed' || code === 'metaapp_source_download_failed') {
+        return true;
+    }
+    const message = (result.message || '').toLowerCase();
+    return message.includes('fetch failed')
+        || message.includes('failed to fetch')
+        || message.includes('aborted')
+        || message.includes('timed out')
+        || message.includes('timeout');
+}
 function normalizeTags(value) {
     return Array.isArray(value)
         ? value.map((tag) => (typeof tag === 'string' ? tag.trim() : '')).filter(Boolean)
@@ -45,21 +70,29 @@ async function resolveSourcePackage(pinId, deps, artifactCache) {
     // the artifact cache happens afterwards via the shared artifactDownload
     // path so failures map to precise CLI error codes.
     const captured = {};
-    const resolved = await (0, agent_browser_core_1.resolveMetaAppPinToRecord)({
-        pinId,
-        fetch: fetchImpl,
-        manApiBaseUrl: deps.manApiBaseUrl,
-        metafileContentBaseUrl: deps.metafileContentBaseUrl,
-        createPreviewSession: (input) => {
-            captured.descriptor = {
-                contentReference: input.contentReference,
-                contentType: input.contentType,
-                indexFile: input.indexFile,
-                pinRecord: input.pinRecord,
-            };
-            return { localPreviewUrl: '' };
-        },
-    });
+    let resolved;
+    try {
+        resolved = await (0, agent_browser_core_1.resolveMetaAppPinToRecord)({
+            pinId,
+            fetch: fetchImpl,
+            manApiBaseUrl: deps.manApiBaseUrl,
+            metafileContentBaseUrl: deps.metafileContentBaseUrl,
+            createPreviewSession: (input) => {
+                captured.descriptor = {
+                    contentReference: input.contentReference,
+                    contentType: input.contentType,
+                    indexFile: input.indexFile,
+                    pinRecord: input.pinRecord,
+                };
+                return { localPreviewUrl: '' };
+            },
+        });
+    }
+    catch (error) {
+        return (0, commandResult_1.commandFailed)('metaapp_source_failed', isTransientSourceError(error)
+            ? `Unable to resolve MetaApp pin (network): ${errorMessage(error)}`
+            : errorMessage(error));
+    }
     if (!resolved.ok) {
         return mapResolveFailure(resolved);
     }
@@ -98,11 +131,29 @@ async function materializeMetaAppSource(input, deps) {
         return (0, commandResult_1.commandFailed)('invalid_argument', 'Invalid MetaApp pinId. Expected a 64-hex MetaWeb pinId ending in i0.');
     }
     const artifactCache = deps.artifactCache ?? (0, artifactCache_1.createMetaAppArtifactCacheStore)(deps.homeDir);
-    const resolved = await resolveSourcePackage(pinId, deps, artifactCache);
-    if ('state' in resolved) {
-        return resolved;
+    let resolved;
+    try {
+        resolved = await resolveSourcePackage(pinId, deps, artifactCache);
     }
-    const { artifact, title, tags } = resolved;
+    catch (error) {
+        resolved = (0, commandResult_1.commandFailed)('metaapp_source_failed', errorMessage(error));
+    }
+    let pack;
+    if ('state' in resolved) {
+        // Bot Browser viewing already extracts the zip into the shared cache.
+        // When MAN/metafile fetch fails, still fork from that local copy.
+        const cached = typeof artifactCache.getArtifactByPinId === 'function'
+            ? await artifactCache.getArtifactByPinId(pinId)
+            : null;
+        if (!cached || !isTransientSourceFailure(resolved)) {
+            return resolved;
+        }
+        pack = { artifact: cached, title: pinId, tags: [] };
+    }
+    else {
+        pack = resolved;
+    }
+    const { artifact, title, tags } = pack;
     if (!input.outDir) {
         return (0, commandResult_1.commandSuccess)({
             dir: artifact.artifactDir,

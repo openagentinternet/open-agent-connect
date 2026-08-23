@@ -79,16 +79,6 @@ const handleBotRoutes = async (context) => {
         context.sendJson(status, result);
         return true;
     }
-    const activateMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/activate$/);
-    if (activateMatch && req.method === 'POST') {
-        const slug = normalizeSlug(activateMatch[1]);
-        const result = handlers.bot?.activateProfile
-            ? await handlers.bot.activateProfile({ slug })
-            : (0, commandResult_1.commandFailed)('not_implemented', 'MetaBot profile activate handler not configured.');
-        const status = result.ok ? 200 : result.code === 'profile_not_found' ? 404 : 400;
-        context.sendJson(status, result);
-        return true;
-    }
     const walletMatch = url.pathname.match(/^\/api\/bot\/profiles\/([^/]+)\/wallet$/);
     if (walletMatch && req.method === 'GET') {
         const slug = normalizeSlug(walletMatch[1]);

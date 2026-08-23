@@ -13,7 +13,8 @@ const {
   getMetabotProfile,
   updateMetabotProfile,
 } = require('../../dist/core/bot/metabotProfileManager.js');
-const { listIdentityProfiles, readActiveMetabotHome, setActiveMetabotHome, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { readBotRoleInfo, writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
+const { listIdentityProfiles, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
@@ -289,7 +290,7 @@ test('default bot handlers create, list, and fetch MetaBot profiles', async (t) 
   assert.equal(fetched.data.profile.bio, 'Builds small tools on the Agent Internet.');
 });
 
-test('default bot handlers activate a profile as the CLI-managed default Bot', async (t) => {
+test('default bot handlers designate the twin Bot through updateProfile botType', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-handlers-');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -304,30 +305,29 @@ test('default bot handlers activate a profile as the CLI-managed default Bot', a
     ...makeChainedCreateOverrides(),
   });
 
-  const missing = await handlers.bot.activateProfile({ slug: 'missing' });
+  const missing = await handlers.bot.updateProfile({ slug: 'missing', botType: 'twin' });
   assert.equal(missing.ok, false);
   assert.equal(missing.code, 'profile_not_found');
 
-  const activated = await handlers.bot.activateProfile({ slug: eric.slug });
-  assert.equal(activated.ok, true);
-  assert.equal(activated.data.slug, eric.slug);
-  assert.equal(activated.data.activeHomeDir, eric.homeDir);
+  const promoted = await handlers.bot.updateProfile({ slug: eric.slug, botType: 'twin' });
+  assert.equal(promoted.ok, true);
+  assert.equal(promoted.data.profile.slug, eric.slug);
+  assert.equal(promoted.data.profile.botType, 'twin');
 
-  // The CLI view agrees: the active home pointer now names Eric's home.
-  assert.equal(await readActiveMetabotHome(systemHomeDir), eric.homeDir);
-
-  // listProfiles reflects the live active home, not the daemon startup home.
+  // listProfiles reflects the live twin role, not the daemon startup home.
   const listed = await handlers.bot.listProfiles();
   const bySlug = new Map(listed.data.profiles.map((profile) => [profile.slug, profile]));
   assert.equal(bySlug.get(eric.slug).isActive, true);
   assert.equal(bySlug.get(alice.slug).isActive, false);
 
-  // Activating Alice replaces Eric as the single default Bot.
-  await handlers.bot.activateProfile({ slug: alice.slug });
+  // Promoting Alice replaces Eric as the single twin Bot.
+  await handlers.bot.updateProfile({ slug: alice.slug, botType: 'twin' });
   const relisted = await handlers.bot.listProfiles();
   const reBySlug = new Map(relisted.data.profiles.map((profile) => [profile.slug, profile]));
   assert.equal(reBySlug.get(alice.slug).isActive, true);
   assert.equal(reBySlug.get(eric.slug).isActive, false);
+  const demotedRole = await readBotRoleInfo(resolveMetabotPaths(eric.homeDir).botRoleStatePath);
+  assert.equal(demotedRole.botType, 'worker');
 });
 
 test('default bot config handlers persist chain config per MetaBot profile', async (t) => {
@@ -1200,7 +1200,7 @@ test('default metaapp.publishProject preserves whitelisted feeAssist data on upl
   assert.equal('ignored' in result.data, false);
 });
 
-test('default LLM handlers use the active profile when actor selectors are omitted', async (t) => {
+test('default LLM handlers use the twin profile when actor selectors are omitted', async (t) => {
   const homeDir = await createProfileHome('metabot-default-llm-handlers-', 'active-bot');
   t.after(async () => {
     await cleanupProfileHome(homeDir);
@@ -1213,7 +1213,7 @@ test('default LLM handlers use the active profile when actor selectors are omitt
     globalMetaId: 'gm-active',
     mvcAddress: 'mvc-active',
   });
-  await setActiveMetabotHome({ systemHomeDir, homeDir });
+  await writeBotRoleInfo(resolveMetabotPaths(homeDir).botRoleStatePath, { botType: 'twin' });
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,

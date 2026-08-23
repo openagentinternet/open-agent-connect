@@ -43,7 +43,6 @@ function createHarness(options = {}) {
     identity: [],
     identityWho: [],
     identityList: [],
-    identityAssign: [],
     trace: [],
     ui: [],
   };
@@ -120,17 +119,6 @@ function createHarness(options = {}) {
                   globalMetaId: 'gm-alice',
                 },
               ],
-            });
-          },
-          assign: async (input) => {
-            calls.identityAssign.push(input);
-            return commandSuccess({
-              activeHomeDir: '/tmp/home-b',
-              assignedProfile: {
-                name: input.name,
-                homeDir: '/tmp/home-b',
-                globalMetaId: 'gm-bob',
-              },
             });
           },
         },
@@ -304,23 +292,19 @@ test('runCli dispatches `metabot identity list` and returns known local profiles
   });
 });
 
-test('runCli dispatches `metabot identity assign --name` and returns the assigned profile', async () => {
+test('runCli rejects the removed `metabot identity assign` subcommand as unknown', async () => {
   const harness = createHarness();
   const exitCode = await runCli(['identity', 'assign', '--name', 'Bob'], harness.context);
 
-  assert.equal(exitCode, 0);
-  assert.deepEqual(harness.calls.identityAssign, [{ name: 'Bob' }]);
+  assert.equal(exitCode, 1);
+  assert.deepEqual(harness.calls.identity, []);
+  assert.deepEqual(harness.calls.identityWho, []);
+  assert.deepEqual(harness.calls.identityList, []);
   assert.deepEqual(parseLastJson(harness.stdout), {
-    ok: true,
-    state: 'success',
-    data: {
-      activeHomeDir: '/tmp/home-b',
-      assignedProfile: {
-        name: 'Bob',
-        homeDir: '/tmp/home-b',
-        globalMetaId: 'gm-bob',
-      },
-    },
+    ok: false,
+    state: 'failed',
+    code: 'unknown_command',
+    message: 'Unknown command: identity assign --name Bob',
   });
 });
 
@@ -560,7 +544,7 @@ test('runCli dispatches `metabot ui open` with actor, session, and service selec
   }]);
 });
 
-test('runCli doctor fails closed when no active profile is initialized', async () => {
+test('runCli doctor fails closed when no twin bot is initialized', async () => {
   const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const stdout = [];
   const stderr = [];
@@ -584,7 +568,7 @@ test('runCli doctor fails closed when no active profile is initialized', async (
     ok: false,
     state: 'failed',
     code: 'cli_execution_failed',
-    message: 'No active profile initialized.',
+    message: 'No Twin Bot initialized.',
   });
 });
 

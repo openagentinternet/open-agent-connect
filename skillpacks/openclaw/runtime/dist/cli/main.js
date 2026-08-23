@@ -7,6 +7,7 @@ const version_1 = require("./version");
 const daemon_1 = require("./commands/daemon");
 const doctor_1 = require("./commands/doctor");
 const identity_1 = require("./commands/identity");
+const user_1 = require("./commands/user");
 const network_1 = require("./commands/network");
 const provider_1 = require("./commands/provider");
 const services_1 = require("./commands/services");
@@ -15,7 +16,11 @@ const bot_1 = require("./commands/bot");
 const browser_1 = require("./commands/browser");
 const chain_1 = require("./commands/chain");
 const chat_1 = require("./commands/chat");
+const grouptask_1 = require("./commands/grouptask");
 const conversations_1 = require("./commands/conversations");
+const memory_1 = require("./commands/memory");
+const dream_1 = require("./commands/dream");
+const twin_1 = require("./commands/twin");
 const file_1 = require("./commands/file");
 const trace_1 = require("./commands/trace");
 const ui_1 = require("./commands/ui");
@@ -88,6 +93,9 @@ async function runCli(argv, cliContext = {}) {
                 case 'identity':
                     result = await (0, identity_1.runIdentityCommand)(rest, context);
                     break;
+                case 'user':
+                    result = await (0, user_1.runUserCommand)(rest, context);
+                    break;
                 case 'network':
                     result = await (0, network_1.runNetworkCommand)(rest, context);
                     break;
@@ -100,8 +108,20 @@ async function runCli(argv, cliContext = {}) {
                 case 'chat':
                     result = await (0, chat_1.runChatCommand)(rest, context);
                     break;
+                case 'grouptask':
+                    result = await (0, grouptask_1.runGroupTaskCommand)(rest, context);
+                    break;
                 case 'conversations':
                     result = await (0, conversations_1.runConversationsCommand)(rest, context);
+                    break;
+                case 'memory':
+                    result = await (0, memory_1.runMemoryCommand)(rest, context);
+                    break;
+                case 'dream':
+                    result = await (0, dream_1.runDreamCommand)(rest, context);
+                    break;
+                case 'twin':
+                    result = await (0, twin_1.runTwinCommand)(rest, context);
                     break;
                 case 'file':
                     result = await (0, file_1.runFileCommand)(rest, context);

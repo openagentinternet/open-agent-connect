@@ -27,11 +27,15 @@ const {
   validateAvatarDataUrl,
 } = require('../../dist/core/bot/metabotProfileManager.js');
 const {
-  readActiveMetabotHome,
   resolveIdentityManagerPaths,
-  setActiveMetabotHome,
   upsertIdentityProfile,
 } = require('../../dist/core/identity/identityProfiles.js');
+const { writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
+const {
+  applyTwinInvariant,
+  resolveCurrentTwinSlug,
+  resolveTwinHomeDir,
+} = require('../../dist/core/bot/twinRole.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
@@ -1202,13 +1206,12 @@ test('getMetabotWalletInfo prefers runtime MVC address map over legacy secret mv
   assert.equal(wallet.addresses.mvc, 'mvc-runtime-address');
 });
 
-test('deleteMetabotProfile removes manager records, active profile pointer, profile files, and executor sessions for the slug', async () => {
+test('deleteMetabotProfile removes manager records, profile files, and executor sessions for the slug; deleting the twin leaves no twin until applyTwinInvariant repairs it', async () => {
   const systemHomeDir = await createSystemHome();
+  const keeper = await createMetabotProfile(systemHomeDir, { name: 'Keeper Bot' });
   const created = await createMetabotProfile(systemHomeDir, { name: 'Delete Bot' });
-  await setActiveMetabotHome({
-    systemHomeDir,
-    homeDir: created.homeDir,
-  });
+  await writeBotRoleInfo(resolveMetabotPaths(created.homeDir).botRoleStatePath, { botType: 'twin' });
+  assert.equal(await resolveCurrentTwinSlug(systemHomeDir), created.slug);
   const paths = resolveMetabotPaths(created.homeDir);
   const sessionPath = path.join(paths.llmExecutorSessionsRoot, 'session-delete-bot.json');
   const transcriptPath = path.join(paths.llmExecutorTranscriptsRoot, 'session-delete-bot.log');
@@ -1223,8 +1226,12 @@ test('deleteMetabotProfile removes manager records, active profile pointer, prof
   const deleted = await deleteMetabotProfile(systemHomeDir, created.slug);
 
   assert.equal(deleted.profile.slug, created.slug);
-  assert.deepEqual(await listMetabotProfiles(systemHomeDir), []);
-  assert.equal(await readActiveMetabotHome(systemHomeDir), null);
+  assert.deepEqual((await listMetabotProfiles(systemHomeDir)).map((profile) => profile.slug), [keeper.slug]);
+  assert.equal(await resolveCurrentTwinSlug(systemHomeDir), null);
+  assert.equal(await resolveTwinHomeDir(systemHomeDir), keeper.homeDir);
+  await applyTwinInvariant(systemHomeDir);
+  assert.equal(await resolveCurrentTwinSlug(systemHomeDir), keeper.slug);
+  assert.equal(await resolveTwinHomeDir(systemHomeDir), keeper.homeDir);
   await assert.rejects(() => access(created.homeDir), /ENOENT/);
   await assert.rejects(() => access(sessionPath), /ENOENT/);
   await assert.rejects(() => access(transcriptPath), /ENOENT/);

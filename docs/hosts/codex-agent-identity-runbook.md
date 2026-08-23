@@ -1,6 +1,6 @@
 # Codex Agent Bot Identity Runbook
 
-Use this runbook when you want Codex to reliably create or switch to a local Bot identity by name.
+Use this runbook when you want Codex to reliably create a local Bot identity by name or, only when the operator explicitly asks, designate it as the Twin Bot.
 
 The CLI and storage paths still use `metabot` and `~/.metabot`; keep those exact
 terms in commands and path references.
@@ -8,7 +8,7 @@ terms in commands and path references.
 ## Agent Goal
 
 - treat the Bot identity name as the canonical local reference
-- if the name already exists locally, switch to the indexed profile that best matches it
+- if the name already exists locally, reuse the indexed profile that best matches it
 - if the name does not exist, create it in its own canonical profile home
 - finish with an explicit `identity who` verification report
 
@@ -31,17 +31,21 @@ If any precondition fails, stop and return a concise blocked report.
 
 ## Canonical V2 Layout
 
-The active v2 layout separates global machine state from per-Bot profile state:
+The current v2 layout separates global machine state from per-Bot profile state:
 
 - `~/.metabot/manager/identity-profiles.json` is the global profile index
-- `~/.metabot/manager/active-home.json` is the active profile pointer
 - `~/.metabot/profiles/<slug>/` is one Bot profile home
 - `~/.metabot/profiles/<slug>/.runtime/` is the machine-managed runtime layer
 
-CLI resolves the canonical profile home from the requested name and the manager index.
-Do not hand-compute the filesystem slug or inject `METABOT_HOME` for the normal create and switch flow.
+The Twin Bot (the machine-wide default actor) is derived from each profile's
+`botType`: the profile marked `twin` wins; if no profile is marked twin, the
+earliest-created profile acts as the default. There is no active profile
+pointer file.
 
-## Deterministic Create/Switch Flow
+CLI resolves the canonical profile home from the requested name and the manager index.
+Do not hand-compute the filesystem slug or inject `METABOT_HOME` for the normal create flow.
+
+## Deterministic Create Flow
 
 Run from current shell with the requested target name:
 
@@ -51,22 +55,23 @@ TARGET_NAME="David"
 # 1) Inspect local identities first
 metabot identity list
 
-# 2) If name already exists, switch directly
-metabot identity assign --name "$TARGET_NAME"
-```
-
-If step 2 fails because the name does not exist, create the profile and let the CLI resolve the canonical profile home:
-
-```bash
-TARGET_NAME="David"
+# 2) If the name does not exist, create the profile and let the CLI resolve the canonical profile home
 metabot identity create --name "$TARGET_NAME"
 ```
 
-Then switch explicitly (idempotent and keeps final state clear):
+If the name already exists, the profile is already usable; there is no
+separate switch step. Commands run without `--from` resolve to the Twin Bot.
+
+Only when the operator explicitly wants to change the Twin Bot to this
+profile, designate it with the structured botType update:
 
 ```bash
-metabot identity assign --name "$TARGET_NAME"
+printf '{"botType":"twin"}\n' > twin-payload.json
+metabot bot update --from "$TARGET_NAME" --payload-file twin-payload.json
 ```
+
+Setting `botType` to `twin` demotes the previous Twin Bot; at most one Twin
+Bot exists per machine.
 
 ## Conflict Handling
 
@@ -74,13 +79,13 @@ If create returns `identity_name_taken`:
 
 - do not force-create a second profile with the same name
 - run `metabot identity list`
-- run `metabot identity assign --name "$TARGET_NAME"`
+- the existing profile needs no switch step; designate it as the Twin Bot with the structured botType update above only when the operator explicitly wants to change the Twin Bot
 
 If create returns `identity_name_conflict`:
 
 - do not patch `.runtime/` files
 - run `metabot identity who` and `metabot identity list`
-- assign the intended existing profile with `metabot identity assign --name "$TARGET_NAME"` when available
+- if the intended existing profile is available, no switch step is needed; designate it as the Twin Bot with the structured botType update above only when the operator explicitly wants to change the Twin Bot
 
 ## Verification
 
@@ -94,8 +99,8 @@ metabot doctor
 
 Success criteria:
 
-- `identity who` returns the target name
 - `identity list` includes target name as an existing profile
+- `identity who` returns the target name when it was designated as the Twin Bot (or when it is the earliest-created profile)
 - `metabot doctor` remains healthy (`ok: true` checks for runtime reachability)
 
 ## Expected Final Report Format
@@ -106,5 +111,5 @@ Return:
 - target name
 - result: `success`, `failed`, or `blocked`
 - commands executed
-- active identity summary from `metabot identity who`
+- Twin Bot summary from `metabot identity who`
 - follow-up action required (if any)

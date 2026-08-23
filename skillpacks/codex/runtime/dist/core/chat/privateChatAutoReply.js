@@ -4,6 +4,7 @@ exports.unwrapPrivateChatContent = unwrapPrivateChatContent;
 exports.createPrivateChatAutoReplyOrchestrator = createPrivateChatAutoReplyOrchestrator;
 const privateChat_1 = require("./privateChat");
 const chatPersonaLoader_1 = require("./chatPersonaLoader");
+const privateChatMemory_1 = require("./privateChatMemory");
 const conversationPersistence_1 = require("../a2a/conversationPersistence");
 const simplemsgClassifier_1 = require("../a2a/simplemsgClassifier");
 const privateChatSendFailureLog_1 = require("./privateChatSendFailureLog");
@@ -25,11 +26,11 @@ function hasSentChatSkillWaitNotice(messages, forMessageId) {
         && message.extensions?.[CHAT_SKILL_WAIT_NOTICE_FOR_EXTENSION] === forMessageId));
 }
 // Order-protocol records (ORDER/ORDER_STATUS/DELIVERY/NeedsRating/ORDER_END)
-// are service traffic, not conversation. Keep them out of the LLM chat
-// context so a completed service exchange does not read as a finished
-// conversation and nudge the model into closing the chat early.
+// and OpenTeam recruitment envelopes are service traffic, not conversation.
+// Keep them out of the LLM chat context so a completed service exchange does
+// not read as a finished conversation and nudge the model into closing early.
 function filterChatPromptMessages(messages) {
-    return messages.filter((message) => (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content).kind !== 'order_protocol');
+    return messages.filter((message) => (0, simplemsgClassifier_1.classifySimplemsgContent)(message.content).kind === 'private_chat');
 }
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -352,6 +353,7 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 operatorGuidanceText: input.operatorGuidanceText ?? null,
                 conversationCloseAllowed,
                 onSkillExecutionStart: input.onSkillExecutionStart,
+                memoryContext: input.memoryContext ?? null,
             });
         }
         catch (error) {
@@ -569,6 +571,10 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 inboundMessage: input.inboundMessage,
                 operatorGuidanceText: guidanceToConsume?.guidanceText ?? null,
                 onSkillExecutionStart,
+                memoryContext: await (0, privateChatMemory_1.buildPrivateReplyMemoryContext)(deps.paths, {
+                    peerGlobalMetaId: input.peerGlobalMetaId,
+                    userText: normalizeText(input.inboundMessage.content),
+                }),
             });
             if (!preparedTurn) {
                 if (guidanceToConsume) {
@@ -591,6 +597,19 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
             });
             if (!committedConversation)
                 return false;
+            // Memory bookkeeping after a successful reply: extraction into the
+            // contact scope + an experience record for the dream pipeline. Never
+            // breaks the reply loop.
+            await (0, privateChatMemory_1.recordPrivateChatMemoryTurn)(deps.paths, {
+                selfGlobalMetaId: input.selfGlobalMetaId,
+                peerGlobalMetaId: input.peerGlobalMetaId,
+                conversationId: input.conversation.conversationId,
+                inboundMessageId: input.inboundMessage.messageId,
+                inboundPinId: input.inboundMessage.messagePinId ?? null,
+                inboundTimestamp: input.inboundMessage.timestamp,
+                userText: normalizeText(input.inboundMessage.content),
+                assistantText: preparedTurn.content,
+            });
             rateLimiter.replyTimestamps.push(getNow());
             return true;
         }
@@ -808,6 +827,12 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 await deps.stateStore.upsertConversation(conversation);
                 return;
             }
+            // ---- OpenTeam envelope path: record-only, handled by the group-task
+            // engine (IDBots interceptOpenTeamEnvelope parity — never reaches LLM) ----
+            if (simplemsgClassification.kind === 'openteam_envelope') {
+                await deps.stateStore.upsertConversation(conversation);
+                return;
+            }
             // Inbound messages are always persisted above so they stay visible and
             // recoverable; only the automated reply is gated by the enabled flag.
             if (!config.enabled)
@@ -897,6 +922,10 @@ function createPrivateChatAutoReplyOrchestrator(deps, config) {
                 // reopened) is the operator reaching out — it must not carry a close
                 // marker, or the peer side would instantly re-close the conversation.
                 conversationCloseAllowed: runnerConversation.turnCount > 1,
+                memoryContext: await (0, privateChatMemory_1.buildPrivateReplyMemoryContext)(deps.paths, {
+                    peerGlobalMetaId: normalizedPeerGlobalMetaId,
+                    userText: normalizeText(guidanceToConsume.guidanceText),
+                }),
             });
             if (!preparedTurn) {
                 await deps.stateStore.releasePendingGuidanceClaimIfMatches(conversation.conversationId, guidanceToConsume);

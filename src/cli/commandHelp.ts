@@ -174,7 +174,7 @@ const CHAIN_WRITE_FLAG: CommandHelpFlag = {
 const FROM_BOT_FLAG: CommandHelpFlag = {
   flag: '--from',
   value: '<bot-slug>',
-  description: 'Optional local MetaBot actor. Omit to use the active identity.',
+  description: 'Optional local MetaBot actor. Omit to use the Twin Bot.',
 };
 
 const FILE_UPLOAD_CHAIN_FLAG: CommandHelpFlag = {
@@ -264,7 +264,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['bot', 'list'],
-    summary: 'List local MetaBot profiles and indicate which profile is currently active.',
+    summary: 'List local MetaBot profiles and indicate which profile is the Twin Bot.',
     usage: 'metabot bot list',
     successFields: ['profiles'],
     examples: ['metabot bot list'],
@@ -298,11 +298,11 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['bot', 'bind-owner'],
-    summary: 'Bind a local MetaBot to its owner GlobalMetaID (defaults to the active local identity).',
+    summary: 'Bind a local MetaBot to its owner GlobalMetaID (defaults to the local owner or Twin Bot identity).',
     usage: 'metabot bot bind-owner --from <bot-slug> [--owner <globalMetaId>] [--unbind]',
     requiredFlags: [FROM_BOT_FLAG],
     optionalFlags: [
-      { flag: '--owner', value: '<globalMetaId>', description: 'Owner GlobalMetaID. Omit to bind the active local identity.' },
+      { flag: '--owner', value: '<globalMetaId>', description: 'Owner GlobalMetaID. Omit to bind the local owner or Twin Bot identity.' },
       { flag: '--unbind', description: 'Clear the owner binding.' },
       HELP_JSON_FLAG,
     ],
@@ -419,7 +419,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['bot', 'runtimes', 'list'],
-    summary: 'List known LLM runtimes visible to the selected or active MetaBot profile.',
+    summary: 'List known LLM runtimes visible to the selected or Twin Bot profile.',
     usage: 'metabot bot runtimes list [--from <bot-slug>]',
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     successFields: ['runtimes'],
@@ -427,7 +427,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['bot', 'runtimes', 'discover'],
-    summary: 'Refresh discovered LLM runtimes for the selected or active MetaBot profile.',
+    summary: 'Refresh discovered LLM runtimes for the selected or Twin Bot profile.',
     usage: 'metabot bot runtimes discover [--from <bot-slug>]',
     optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
     successFields: ['runtimes'],
@@ -486,7 +486,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     successFields: ['host', 'profile', 'agentName', 'agentFilePath', 'sourceFiles', 'state', 'action'],
     failureSemantics: [
       'Fails with invalid_argument when --host is not codex.',
-      'Fails when the selected or active identity cannot be resolved.',
+      'Fails when the selected or Twin Bot identity cannot be resolved.',
       'Fails with host_persona_source_missing when ROLE.md, SOUL.md, and GOAL.md are all empty or missing.',
       'Fails with host_persona_conflict rather than overwriting a file not owned by OAC.',
     ],
@@ -639,19 +639,18 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['identity'],
-    summary: 'Identity commands for creating, listing, and switching local MetaBot identity profiles.',
+    summary: 'Identity commands for creating and listing local MetaBot identity profiles.',
     usage: 'metabot identity <subcommand>',
     subcommands: [
       { name: 'create', summary: 'Create one local MetaBot identity from a human-provided name.' },
-      { name: 'who', summary: 'Show which local MetaBot identity is currently active.' },
+      { name: 'who', summary: 'Show the current Twin Bot identity.' },
       { name: 'list', summary: 'List local MetaBot identity profiles discovered on this machine.' },
-      { name: 'assign', summary: 'Switch the active local MetaBot identity profile by name.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['identity', 'create'],
-    summary: 'Create one local MetaBot identity and complete the validated bootstrap flow for the current active home.',
+    summary: 'Create one local MetaBot identity and complete the validated bootstrap flow for the selected home.',
     usage: 'metabot identity create --name <display-name> [--host <provider>]',
     requiredFlags: [
       { flag: '--name', value: '<display-name>', description: 'Human-facing name for the new local MetaBot identity.' },
@@ -670,7 +669,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Fails with identity_name_taken when another local profile on this machine already uses the same name.',
-      'Fails with identity_name_conflict when another active local identity already exists under the current home.',
+      'Fails with identity_name_conflict when the selected home already hosts a different local identity.',
       'Fails when the bootstrap flow cannot derive keys, claim subsidy, or persist identity state.',
     ],
     examples: [
@@ -679,7 +678,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['identity', 'who'],
-    summary: 'Show the currently active local MetaBot identity and active home directory.',
+    summary: 'Show the current Twin Bot identity and its home directory.',
     usage: 'metabot identity who',
     successFields: [
       'activeHomeDir',
@@ -689,39 +688,18 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       'identity.mvcAddress',
     ],
     failureSemantics: [
-      'Fails when no local identity is initialized for the current active home.',
+      'Fails when no Twin Bot is initialized.',
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
   {
     commandPath: ['identity', 'list'],
-    summary: 'List local MetaBot identity profiles on this machine and report the current active home.',
+    summary: 'List local MetaBot identity profiles on this machine and report the current Twin Bot home.',
     usage: 'metabot identity list',
     successFields: [
       'systemHomeDir',
       'activeHomeDir',
       'profiles',
-    ],
-    optionalFlags: [HELP_JSON_FLAG],
-  },
-  {
-    commandPath: ['identity', 'assign'],
-    summary: 'Switch the active local MetaBot identity profile by display name.',
-    usage: 'metabot identity assign --name <display-name>',
-    requiredFlags: [
-      { flag: '--name', value: '<display-name>', description: 'Existing local MetaBot identity profile name to activate.' },
-    ],
-    successFields: [
-      'activeHomeDir',
-      'assignedProfile.name',
-      'assignedProfile.globalMetaId',
-    ],
-    failureSemantics: [
-      'Fails when no local profile matches the requested name.',
-      'Fails when multiple profiles share the same name and assignment is ambiguous.',
-    ],
-    examples: [
-      'metabot identity assign --name "Charles"',
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -1802,7 +1780,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'Owner-side service commands backing the my-services UI.',
     usage: 'metabot services owned <subcommand>',
     subcommands: [
-      { name: 'list', summary: 'List services owned by the active, selected, or all local MetaBots.' },
+      { name: 'list', summary: 'List services owned by the Twin Bot, selected, or all local MetaBots.' },
       { name: 'orders', summary: 'List completed/refunded orders for one owned service.' },
       { name: 'modify', summary: 'Publish an on-chain modification for one owned service.' },
       { name: 'revoke', summary: 'Publish an on-chain revocation for one owned service.' },
@@ -1811,7 +1789,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['services', 'owned', 'list'],
-    summary: 'List services owned by the active, selected, or all local MetaBots.',
+    summary: 'List services owned by the Twin Bot, selected, or all local MetaBots.',
     usage: 'metabot services owned list [--from <bot-slug> | --all] [--page <n>] [--page-size <n>] [--refresh]',
     optionalFlags: [
       FROM_BOT_FLAG,
@@ -1997,7 +1975,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     ],
     failureSemantics: [
       'Prefer `metabot services orders inspect` and `metabot services refunds settle` for new automation.',
-      'Provider operations resolve the active local MetaBot and fail before settlement when no active identity exists.',
+      'Provider operations resolve the Twin Bot and fail before settlement when no Twin Bot exists.',
       'Refund settlement returns a machine-readable blocker instead of marking an order refunded without proof.',
     ],
     examples: [
@@ -3172,7 +3150,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['llm', 'bindings'],
-    summary: 'List LLM bindings for one MetaBot profile. Omit --from to use the active identity.',
+    summary: 'List LLM bindings for one MetaBot profile. Omit --from to use the Twin Bot.',
     usage: 'metabot llm bindings [--from <bot-slug>]',
     optionalFlags: [
       FROM_BOT_FLAG,
@@ -3207,7 +3185,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['llm', 'unbind'],
-    summary: 'Remove one LLM binding from the selected MetaBot profile. Omit --from to use the active identity.',
+    summary: 'Remove one LLM binding from the selected MetaBot profile. Omit --from to use the Twin Bot.',
     usage: 'metabot llm unbind [--from <bot-slug>] --binding-id <binding-id>',
     requiredFlags: [
       { flag: '--binding-id', value: '<binding-id>', description: 'Binding identifier to remove.' },
@@ -3236,7 +3214,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['llm', 'get-preferred'],
-    summary: 'Read the preferred LLM runtime for one MetaBot profile. Omit --from to use the active identity.',
+    summary: 'Read the preferred LLM runtime for one MetaBot profile. Omit --from to use the Twin Bot.',
     usage: 'metabot llm get-preferred [--from <bot-slug>]',
     optionalFlags: [
       FROM_BOT_FLAG,

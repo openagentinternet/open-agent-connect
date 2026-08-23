@@ -844,7 +844,9 @@ test('buildAgentConnectSkillpacks publishes merged identity-manage workflow in t
   assert.match(content, /identity create --name "\$TARGET_NAME" --host <host>/);
   assert.match(content, /shared host-neutral copy contains\s+`<host>`/i);
   assert.match(content, /identity list/);
-  assert.match(content, /identity assign --name/);
+  assert.match(content, /bot update --from "David" --payload-file twin-payload\.json/);
+  assert.match(content, /\{"botType":"twin"\}/);
+  assert.doesNotMatch(content, /identity assign/);
   assert.match(content, /identity who/);
   assert.match(content, /metabot doctor/);
   assert.match(content, /ui open --page bot/);
@@ -1166,7 +1168,7 @@ test('codex install runbook documents install verification and first-run handoff
   assert.match(installRunbook, /Open Agent Connect: Connect your local AI agent to an open agent network/i);
   assert.match(installRunbook, /what Open Agent Connect now enables/i);
   assert.match(installRunbook, /Do not return only raw command output/i);
-  assert.match(installRunbook, /key `metabot doctor` verification fields only when an active identity exists/i);
+  assert.match(installRunbook, /key `metabot doctor` verification fields only when a Twin Bot exists/i);
   assert.match(installRunbook, /~\/\.metabot\/manager\//);
   assert.match(installRunbook, /~\/\.metabot\/profiles\/<slug>\//);
   assert.match(installRunbook, /~\/\.metabot\/skills\//);

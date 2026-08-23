@@ -10,7 +10,9 @@ import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 const require = createRequire(import.meta.url);
 const { runCli } = require('../../dist/cli/main.js');
 const { commandSuccess } = require('../../dist/core/contracts/commandResult.js');
-const { upsertIdentityProfile, setActiveMetabotHome } = require('../../dist/core/identity/identityProfiles.js');
+const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createInfrastructureConfigStore } = require('../../dist/core/config/infrastructureConfigStore.js');
 const { writeMetaAppZipArchive } = require('../../dist/core/metaapp/zipArchive.js');
 
@@ -182,7 +184,7 @@ async function withStubMetaAppServer(run) {
   }
 }
 
-async function makeActiveProfileSystemHome() {
+async function makeTwinProfileSystemHome() {
   const systemHome = await mkdtempTempRoot('oac-cli-metaapp-source-');
   const homeDir = path.join(systemHome, '.metabot', 'profiles', 'alice');
   await upsertIdentityProfile({
@@ -191,7 +193,8 @@ async function makeActiveProfileSystemHome() {
     homeDir,
     globalMetaId: 'gmid-alice',
   });
-  await setActiveMetabotHome({ systemHomeDir: systemHome, homeDir });
+  // The Twin Bot is the default actor: commands without --from resolve to it.
+  await writeBotRoleInfo(resolveMetabotPaths(homeDir).botRoleStatePath, { botType: 'twin' });
   return systemHome;
 }
 
@@ -202,7 +205,7 @@ async function pointManApiAt(systemHome, baseUrl) {
 }
 
 test('runCli default `metabot metaapp source` handler downloads into the shared cache', async () => {
-  const systemHome = await makeActiveProfileSystemHome();
+  const systemHome = await makeTwinProfileSystemHome();
 
   await withStubMetaAppServer(async ({ baseUrl }) => {
     await pointManApiAt(systemHome, baseUrl);
@@ -219,14 +222,14 @@ test('runCli default `metabot metaapp source` handler downloads into the shared 
     assert.equal(envelope.data.indexFile, 'index.html');
     assert.equal(envelope.data.title, 'Stub App');
     assert.equal('markerPath' in envelope.data, false);
-    // The cache lives under the active profile home inside the temp system home.
+    // The cache lives under the twin profile home inside the temp system home.
     assert.ok(envelope.data.dir.startsWith(systemHome), `cache dir ${envelope.data.dir} must stay under the temp system home`);
     assert.equal(await readFile(path.join(envelope.data.dir, 'index.html'), 'utf8'), '<h1>Stub App</h1>');
   });
 });
 
 test('runCli default `metabot metaapp source --out` handler copies the source and writes the fork marker', async () => {
-  const systemHome = await makeActiveProfileSystemHome();
+  const systemHome = await makeTwinProfileSystemHome();
 
   await withStubMetaAppServer(async ({ baseUrl }) => {
     await pointManApiAt(systemHome, baseUrl);
@@ -260,7 +263,7 @@ test('runCli default `metabot metaapp source --out` handler copies the source an
 });
 
 test('runCli default `metabot metaapp source` handler maps a missing pin to metaapp_not_found', async () => {
-  const systemHome = await makeActiveProfileSystemHome();
+  const systemHome = await makeTwinProfileSystemHome();
   const missingPinId = `${'00000000'.repeat(8)}i0`;
 
   await withStubMetaAppServer(async ({ baseUrl }) => {

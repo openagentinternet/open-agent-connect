@@ -862,3 +862,30 @@ Within a profile:
 - secrets and machine-managed runtime state live under `.runtime/`
 
 This creates a clean foundation for the first public version of MetaBot and gives future host compatibility a stable storage contract.
+
+## Amendment 2026-08-22: Twin Bot replaces the active-profile pointer
+
+The "default bot / active bot" concept is merged into the Twin Bot role.
+This amendment supersedes the `manager/` "currently active profile pointer"
+purpose and the `active-home.json` entry in the allowed-contents list above.
+
+- `~/.metabot/manager/active-home.json` is deprecated. The runtime no longer
+  writes or reads it. A leftover file from older installs is ignored in place;
+  uninstall flows may still remove it.
+- The machine-wide default actor is the Twin Bot, derived live from profile
+  role state (`<profile>/.runtime/botRole.json`, surfaced as `botType`):
+  the profile marked `twin` wins; when no twin exists, the earliest-created
+  profile in `identity-profiles.json` acts as the default; when no profiles
+  exist, resolution fails with "No Twin Bot initialized."
+- The Twin Bot only changes through explicit structured `botType` operations:
+  `metabot bot create --type twin`,
+  `metabot bot update --from <slug> --payload-file` with
+  `{"botType":"twin"}` (which demotes the previous twin; at most one twin per
+  machine), or the Twin Bot toggle on the `/ui/bot` management page.
+  Free-form switching commands are removed: `metabot identity assign` and the
+  daemon route `POST /api/bot/profiles/<slug>/activate` no longer exist.
+- Wire compatibility is preserved: the profiles API still emits `isActive`
+  (now meaning "is the Twin Bot"), and `metabot identity who` / `identity
+  list` keep the `activeHomeDir` field name with the twin-derived value.
+- The `METABOT_HOME` environment variable remains the explicit per-invocation
+  override and is unaffected by this amendment.

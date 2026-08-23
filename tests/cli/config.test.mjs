@@ -45,9 +45,11 @@ function createProfileHome(prefix, slug = 'test-profile') {
     }, null, 2)}\n`,
     'utf8',
   );
+  const botRoleStatePath = resolveMetabotPaths(homeDir).botRoleStatePath;
+  mkdirSync(path.dirname(botRoleStatePath), { recursive: true });
   writeFileSync(
-    path.join(managerRoot, 'active-home.json'),
-    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
+    botRoleStatePath,
+    `${JSON.stringify({ botType: 'twin', ownerGlobalMetaId: null, updatedAt: new Date(now).toISOString() }, null, 2)}\n`,
     'utf8',
   );
   return homeDir;
@@ -90,9 +92,12 @@ function createProfilePair(prefix) {
     }, null, 2)}\n`,
     'utf8',
   );
+  // The pointer file is gone; mark Bob as the Twin Bot (the default actor).
+  const bobRoleStatePath = resolveMetabotPaths(bobHome).botRoleStatePath;
+  mkdirSync(path.dirname(bobRoleStatePath), { recursive: true });
   writeFileSync(
-    path.join(managerRoot, 'active-home.json'),
-    `${JSON.stringify({ homeDir: bobHome, updatedAt: now }, null, 2)}\n`,
+    bobRoleStatePath,
+    `${JSON.stringify({ botType: 'twin', ownerGlobalMetaId: null, updatedAt: new Date(now).toISOString() }, null, 2)}\n`,
     'utf8',
   );
   return { aliceHome, bobHome };

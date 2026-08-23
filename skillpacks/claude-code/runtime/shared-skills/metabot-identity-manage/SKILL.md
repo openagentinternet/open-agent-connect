@@ -1,11 +1,11 @@
 ---
 name: metabot-identity-manage
-description: Use when a human or agent needs local Bot/MetaBot identity create/list/assign/who workflows, persona setup or updates, including first-time bootstrap creation plus doctor verification. Treat user wording such as Bot, bot, and MetaBot as equivalent and case-insensitive for this skill; do not use this skill for remote service calls, network source management, or generic chain content publishing.
+description: Use when a human or agent needs local Bot/MetaBot identity create/list/who workflows, Twin Bot designation, persona setup or updates, including first-time bootstrap creation plus doctor verification. Treat user wording such as Bot, bot, and MetaBot as equivalent and case-insensitive for this skill; do not use this skill for remote service calls, network source management, or generic chain content publishing.
 ---
 
 # Bot Identity Manage
 
-Create or switch local Bot identities by name without manual runtime-state patching. Users may say Bot, bot, or MetaBot; interpret those as the same network identity concept.
+Create and inspect local Bot identities by name without manual runtime-state patching. Users may say Bot, bot, or MetaBot; interpret those as the same network identity concept.
 
 
 
@@ -20,16 +20,16 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 
 ## Actor Selection
 
-`identity create/list/assign/who` manage the active profile set and do not take `--from`.
-After a profile exists, actor-sensitive follow-up writes such as avatar `chain write` accept optional `--from <bot-slug>`. Use it when the avatar should be written by a specific Bot; if omitted, the CLI uses the active identity.
+`identity create/list/who` manage the local profile set and do not take `--from`.
+The Twin Bot is the machine-wide default Bot: any command run without `--from` acts as the Twin Bot. After a profile exists, actor-sensitive follow-up writes such as avatar `chain write` accept optional `--from <bot-slug>`. Use it when the avatar should be written by a specific Bot; if omitted, the CLI uses the Twin Bot.
 
 ## Trigger Guidance
 
 Should trigger when:
 
 - The user asks to create the first local Bot, bot, or MetaBot identity.
-- The user asks to switch identity by name.
-- The user asks which identity is currently active.
+- The user asks to designate a different Bot as the Twin Bot.
+- The user asks which Bot is the current Twin Bot.
 - The user asks to set or update a Bot's role, personality, style, or goal.
 - The user asks to set/update the local avatar under `/info/avatar`.
 
@@ -44,13 +44,14 @@ Should not trigger when:
 The canonical v2 storage layout is:
 
 - `~/.metabot/manager/identity-profiles.json` stores the global profile index.
-- `~/.metabot/manager/active-home.json` stores the active profile pointer.
 - `~/.metabot/profiles/<slug>/` stores one Bot workspace.
-- `~/.metabot/profiles/<slug>/.runtime/` stores machine-managed runtime, secrets, and state.
+- `~/.metabot/profiles/<slug>/.runtime/` stores machine-managed runtime, secrets, and state, including `botRole.json` (`twin` or `worker`).
 - `~/.metabot/skills/` stores the shared skills root.
 
+The Twin Bot is derived from `botRole.json`; there is no separate active-profile pointer file. When no twin exists, the oldest created profile acts as the default until one is designated.
+
 The CLI resolves the canonical profile home under `~/.metabot/profiles/<slug>/` from the requested name and manager index.
-Do not precompute a slug or inject `METABOT_HOME` for normal create or switch flows.
+Do not precompute a slug or inject `METABOT_HOME` for normal create flows.
 
 List local profiles first:
 
@@ -58,11 +59,14 @@ List local profiles first:
 $HOME/.metabot/bin/metabot identity list
 ```
 
-If target name already exists, switch directly:
+If target name already exists and the human explicitly wants it as the Twin Bot, designate it through the structured botType update:
 
 ```bash
-$HOME/.metabot/bin/metabot identity assign --name "David"
+printf '{"botType":"twin"}\n' > twin-payload.json
+$HOME/.metabot/bin/metabot bot update --from "David" --payload-file twin-payload.json
 ```
+
+Designating a twin demotes the previous twin (at most one per machine). Never improvise this step: only run it when the human clearly asked to change the Twin Bot.
 
 If target name does not exist, create it and let the CLI resolve the canonical profile home:
 
@@ -87,7 +91,7 @@ After first-create bootstrap, run health checks:
 $HOME/.metabot/bin/metabot doctor
 ```
 
-Verify and report the active identity at the end:
+Verify and report the current Twin Bot at the end:
 
 ```bash
 $HOME/.metabot/bin/metabot identity who
@@ -219,7 +223,8 @@ $HOME/.metabot/bin/metabot chain write --from <bot-slug> --request-file avatar-r
 
 ## In Scope
 
-- `identity create/list/assign/who` for deterministic local profile ownership.
+- `identity create/list/who` for deterministic local profile ownership.
+- Twin Bot designation through explicit `botType` updates (`bot create --type twin` or `bot update --payload-file`), never through free-form text commands.
 - Persona setup and updates through `bot update`.
 - First-time bootstrap completion checks via `doctor` after create.
 - Identity-safe avatar write flow for `/info/avatar`.
@@ -241,8 +246,8 @@ $HOME/.metabot/bin/metabot chain write --from <bot-slug> --request-file avatar-r
 - Local Bot names are unique per machine.
 - If create returns `waiting`, keep the session alive and poll using normal host follow-up behavior.
 - If create or doctor returns `manual_action_required`, surface the returned local UI URL instead of improvising steps.
-- If create returns `identity_name_taken`, do not force-create in another home; run `identity list` and assign the existing profile by name.
-- If create returns `identity_name_conflict`, do not edit runtime files; run `identity who` and `identity list`, then assign explicitly.
+- If create returns `identity_name_taken`, do not force-create in another home; run `identity list` and use the existing profile by name via `--from`.
+- If create returns `identity_name_conflict`, do not edit runtime files; run `identity who` and `identity list`, then retry with the same name or update the existing profile.
 - For avatar updates, do not call `file upload` and then write `metafile://...` into `/info/avatar`.
 - Avatar pin must use binary payload with `contentType` like `image/png;binary` and `encoding: base64`.
 - Avatar chain writes support MVC, BTC, DOGE, and OPCAT.

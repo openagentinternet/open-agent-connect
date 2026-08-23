@@ -38,6 +38,7 @@ const avatarChainWrite_1 = require("../identity/avatarChainWrite");
 const profilePublishState_1 = require("./profilePublishState");
 const metabotPersona_1 = require("./metabotPersona");
 const dshLlm_1 = require("./dshLlm");
+const botRole_1 = require("./botRole");
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
 var avatarChainWrite_2 = require("../identity/avatarChainWrite");
@@ -281,7 +282,7 @@ async function readProfileProviderBindings(profile) {
 }
 async function buildMetabotProfileFull(profile) {
     const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
-    const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage, dshLlm] = await Promise.all([
+    const [bio, role, soul, goal, avatarDataUrl, providerBindings, allowChatSkills, homepage, dshLlm, botRole] = await Promise.all([
         readTextFile(paths.bioMdPath),
         readTextFile(paths.roleMdPath),
         readTextFile(paths.soulMdPath),
@@ -291,6 +292,7 @@ async function buildMetabotProfileFull(profile) {
         readChatSkillPolicy(paths.chatSkillPolicyPath),
         (0, metabotHomepage_1.readMetabotHomepage)(paths.homepageStatePath),
         (0, dshLlm_1.readDshLlmBinding)(paths.dshLlmPath),
+        (0, botRole_1.readBotRoleInfo)(paths.botRoleStatePath),
     ]);
     const persona = (0, metabotPersona_1.normalizePublicMetabotPersona)({ role, soul, goal });
     return {
@@ -308,6 +310,9 @@ async function buildMetabotProfileFull(profile) {
         dshLlmModel: dshLlm.dshLlmModel ?? null,
         dshLlmFallbackProvider: dshLlm.dshLlmFallbackProvider ?? null,
         dshLlmFallbackModel: dshLlm.dshLlmFallbackModel ?? null,
+        // Unset reads as 'worker' (IDBots normalizes any non-twin bot to worker).
+        botType: botRole.botType ?? 'worker',
+        ownerGlobalMetaId: botRole.ownerGlobalMetaId ?? null,
     };
 }
 async function listMetabotProfiles(systemHomeDir) {
@@ -378,6 +383,10 @@ async function createMetabotProfile(systemHomeDir, input) {
     const dshLlmPatch = dshLlmPatchFromInput(input);
     if (hasDshLlmPatch(dshLlmPatch)) {
         await (0, dshLlm_1.writeDshLlmBinding)(paths.dshLlmPath, dshLlmPatch);
+    }
+    const botRolePatch = (0, botRole_1.botRolePatchFromInput)(input);
+    if ((0, botRole_1.hasBotRolePatch)(botRolePatch)) {
+        await (0, botRole_1.writeBotRoleInfo)(paths.botRoleStatePath, botRolePatch);
     }
     const profile = await (0, identityProfiles_1.upsertIdentityProfile)({
         systemHomeDir,
@@ -473,6 +482,10 @@ async function createMetabotProfileFromIdentity(systemHomeDir, input) {
     const dshLlmPatch = dshLlmPatchFromInput(input);
     if (hasDshLlmPatch(dshLlmPatch)) {
         await (0, dshLlm_1.writeDshLlmBinding)(paths.dshLlmPath, dshLlmPatch);
+    }
+    const botRoleCreatePatch = (0, botRole_1.botRolePatchFromInput)(input);
+    if ((0, botRole_1.hasBotRolePatch)(botRoleCreatePatch)) {
+        await (0, botRole_1.writeBotRoleInfo)(paths.botRoleStatePath, botRoleCreatePatch);
     }
     const profile = await (0, identityProfiles_1.upsertIdentityProfile)({
         systemHomeDir,
@@ -743,6 +756,11 @@ async function updateMetabotProfile(systemHomeDir, slug, input) {
     if (hasDshLlmPatch(dshLlmPatch)) {
         const currentDshLlm = await (0, dshLlm_1.readDshLlmBinding)(paths.dshLlmPath);
         await (0, dshLlm_1.writeDshLlmBinding)(paths.dshLlmPath, (0, dshLlm_1.mergeDshLlmBinding)(currentDshLlm, dshLlmPatch));
+    }
+    const botRolePatch = (0, botRole_1.botRolePatchFromInput)(input);
+    if ((0, botRole_1.hasBotRolePatch)(botRolePatch)) {
+        const currentBotRole = await (0, botRole_1.readBotRoleInfo)(paths.botRoleStatePath);
+        await (0, botRole_1.writeBotRoleInfo)(paths.botRoleStatePath, (0, botRole_1.mergeBotRoleInfo)(currentBotRole, botRolePatch));
     }
     if (writeProviderBindings) {
         await writeProviderBindings();

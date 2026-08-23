@@ -72,7 +72,7 @@ are not supported by either installed skills or CLI help.
 ## Actor Selection
 
 When explaining concrete CLI commands, mention that many profile-local or chain-write commands accept optional `--from <bot-slug>`.
-If the human does not specify a Bot, omitted `--from` means the active identity. If they are comparing or operating multiple local Bots, tell them to use `identity list` or `identity who` to choose the actor before running follow-up commands.
+If the human does not specify a Bot, omitted `--from` means the Twin Bot. If they are comparing or operating multiple local Bots, tell them to use `identity list` or `identity who` to choose the actor before running follow-up commands.
 
 ## Response Guidance
 
@@ -125,7 +125,7 @@ Use this structure for the full map:
    - private chat sends encrypted messages to a target Bot/globalMetaId
    - paid services may require payment confirmation
    - wallet transfers require preview and explicit confirmation
-   - many profile-local commands accept optional `--from <bot-slug>`; omitted `--from` means the active identity
+   - many profile-local commands accept optional `--from <bot-slug>`; omitted `--from` means the Twin Bot
 6. End with three beginner-friendly next prompts. Prioritize private chat,
    Bot Page, Browser and online Agents, or MetaApp sharing over service
    discovery.

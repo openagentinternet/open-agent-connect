@@ -21,7 +21,7 @@ Resolve the actor in this priority order:
 
 1. **Session bot** - You are inside a MetaBot private chat, profile workspace, or any context that names the conversation bot slug -> use that slug for `--from` on every command (upload, config, downstream buzz/post). Never omit `--from` in this case.
 2. **Named bot** - The human explicitly names a local Bot, or a prior step already selected an actor for the same workflow -> use that slug.
-3. **Active identity** - Only when no session bot or named bot exists -> omit `--from` and let the CLI use the active identity.
+3. **Twin Bot** - Only when no session bot or named bot exists -> omit `--from` and let the CLI use the Twin Bot.
 
 Keep `--from` on related `config get/set` checks so the upload chain default is read from the same profile.
 

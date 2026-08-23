@@ -7,6 +7,8 @@ import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { createConfigStore } = require('../../dist/core/config/configStore.js');
+const { writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 const DEFAULT_BROWSER_CONFIG = {
   blockExplorerBaseUrl: 'https://www.mvcscan.com/tx',
@@ -68,11 +70,8 @@ async function withTempProfileHome(action) {
     }, null, 2)}\n`,
     'utf8',
   );
-  await fs.writeFile(
-    path.join(managerRoot, 'active-home.json'),
-    `${JSON.stringify({ homeDir, updatedAt: now }, null, 2)}\n`,
-    'utf8',
-  );
+  // The Twin Bot is the default actor (there is no active-home pointer file).
+  await writeBotRoleInfo(resolveMetabotPaths(homeDir).botRoleStatePath, { botType: 'twin' });
 
   process.env.HOME = systemHome;
   process.env.METABOT_HOME = homeDir;

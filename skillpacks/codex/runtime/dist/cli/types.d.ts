@@ -66,9 +66,6 @@ export interface CliDependencies {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         who?: () => Awaitable<MetabotCommandResult<unknown>>;
         list?: () => Awaitable<MetabotCommandResult<unknown>>;
-        assign?: (input: {
-            name: string;
-        }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     network?: {
         listServices?: (input: {
@@ -170,6 +167,24 @@ export interface CliDependencies {
             from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    grouptask?: {
+        create?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        detail?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        messages?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        postMessage?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        close?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        reopen?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        kickMember?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        setMemberStatus?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        rename?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        setPinned?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        setArchived?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        invite?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        invites?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        collabs?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        collabMessages?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
     conversations?: {
         list?: (input: {
             local: string;
@@ -186,6 +201,139 @@ export interface CliDependencies {
             local: string;
             peer: string;
             guidance: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    memory?: {
+        list?: (input: {
+            from?: string;
+            scopeKind?: string;
+            scopeKey?: string;
+            usageClass?: string;
+            status?: string;
+            origin?: string;
+            query?: string;
+            limit?: number;
+            includeDeleted?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        add?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        update?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        delete?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        blocks?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        extract?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        policyGet?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        policySet?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        policyDelete?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        scopes?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        stats?: (input: {
+            from?: string;
+            scopeKind?: string;
+            scopeKey?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        transcriptAppend?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        chats?: (input: {
+            from?: string;
+            limit?: number;
+            sortOrder?: 'asc' | 'desc';
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        search?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        recall?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeList?: (input: {
+            from?: string;
+            kind?: string;
+            category?: string;
+            status?: string;
+            query?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeUpsert?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeUpdate?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeArchive?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        knowledgeDelete?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        impressionsList?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        impressionsShow?: (input: {
+            from?: string;
+            subject: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    dream?: {
+        due?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        status?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        plan?: (input: {
+            from?: string;
+            date?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        run?: (input: {
+            from?: string;
+            date?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        synthesize?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        commit?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        summaries?: (input: {
+            from?: string;
+            limit?: number;
+            before?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        selfIdentity?: (input: {
+            from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     file?: {
@@ -330,6 +478,37 @@ export interface CliDependencies {
         listSessions?: (input: {
             slug?: string;
             limit: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        bindOwner?: (input: {
+            slug: string;
+            ownerGlobalMetaId?: string;
+            unbind?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    twin?: {
+        current?: () => Awaitable<MetabotCommandResult<unknown>>;
+        workers?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        tasksCreate?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        tasksList?: (input: {
+            from?: string;
+            status?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        tasksShow?: (input: {
+            from?: string;
+            taskId: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        tasksUpdate?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        tasksPendingNotify?: (input: {
+            from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
 }

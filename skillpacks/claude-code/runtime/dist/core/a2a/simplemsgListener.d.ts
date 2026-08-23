@@ -20,8 +20,9 @@ export interface A2ASimplemsgSocketOptions {
         type: 'pc';
     };
     reconnection: boolean;
-    reconnectionDelay: number;
-    reconnectionDelayMax: number;
+    /** socket.io retry knobs; unused when `reconnection` is false (the listener owns retries). */
+    reconnectionDelay?: number;
+    reconnectionDelayMax?: number;
     transports: string[];
 }
 export type A2ASimplemsgSocketClientFactory = (endpoint: A2ASimplemsgSocketEndpoint, options: A2ASimplemsgSocketOptions) => A2ASimplemsgSocketClient;

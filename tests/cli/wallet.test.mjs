@@ -11,6 +11,8 @@ const { createDefaultCliDependencies } = require('../../dist/cli/runtime.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 const { commandSuccess, commandAwaitingConfirmation, commandFailed } = require('../../dist/core/contracts/commandResult.js');
 const adapterRegistryModule = require('../../dist/core/chain/adapters/registry.js');
+const { writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 function makeFakeAdapter(chain, calls, overrides = {}) {
   return {
@@ -60,7 +62,8 @@ async function withPatchedWalletRuntime(t, options, fn) {
       updatedAt: 1,
     }],
   }, null, 2)}\n`);
-  await writeFile(path.join(managerRoot, 'active-home.json'), `${JSON.stringify({ homeDir }, null, 2)}\n`);
+  // The Twin Bot is the default actor (there is no active-home pointer file).
+  await writeBotRoleInfo(resolveMetabotPaths(homeDir).botRoleStatePath, { botType: 'twin' });
 
   const stateStore = createRuntimeStateStore(homeDir);
   await stateStore.writeState({

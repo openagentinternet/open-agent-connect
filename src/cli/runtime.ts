@@ -22,10 +22,9 @@ import {
   unbindHostPersonaProjection,
 } from '../core/host/hostPersonaProjection';
 import { uploadLocalFileToChain } from '../core/files/uploadFile';
+import { resolveTwinHomeDir } from '../core/bot/twinRole';
 import {
   listIdentityProfiles,
-  readActiveMetabotHome,
-  setActiveMetabotHome,
   type IdentityProfileRecord,
 } from '../core/identity/identityProfiles';
 import { resolveIdentityCreateProfileHome } from '../core/identity/profileWorkspace';
@@ -692,27 +691,6 @@ async function readIdentityProfilesReadonly(systemHomeDir: string): Promise<Iden
     .filter((profile): profile is IdentityProfileRecord => Boolean(profile));
 }
 
-async function readActiveHomeReadonly(systemHomeDir: string): Promise<string | null> {
-  const layout = resolveMetabotManagerLayout(systemHomeDir);
-  let raw: string;
-  try {
-    raw = await fs.promises.readFile(layout.activeHomePath, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as { homeDir?: unknown };
-    const homeDir = typeof parsed.homeDir === 'string' ? normalizeEnvText(parsed.homeDir) : '';
-    return homeDir ? path.resolve(homeDir) : null;
-  } catch {
-    return null;
-  }
-}
-
 async function resolveActorProfileReadonly(
   context: CliRuntimeContext,
   from?: string,
@@ -733,9 +711,9 @@ async function resolveActorProfileReadonly(
     profile = resolved.match;
   } else {
     const explicitHome = normalizeEnvText(context.env.METABOT_HOME);
-    const selectedHome = explicitHome ? path.resolve(explicitHome) : await readActiveHomeReadonly(systemHomeDir);
+    const selectedHome = explicitHome ? path.resolve(explicitHome) : await resolveTwinHomeDir(systemHomeDir);
     if (!selectedHome) {
-      return commandFailed('profile_not_found', 'No active MetaBot profile found for dry-run delivery.');
+      return commandFailed('profile_not_found', 'No Twin Bot profile found for dry-run delivery.');
     }
     profile = profiles.find((entry) => path.resolve(entry.homeDir) === selectedHome);
     if (!profile) {
@@ -767,15 +745,15 @@ async function resolveActorProfileSlug(
   }
 
   const profiles = await listIdentityProfiles(systemHomeDir).catch(() => []);
-  const activeHomeDir = path.resolve(normalizeHomeDir(context.env, context.cwd));
-  const activeProfile = profiles.find((profile) => path.resolve(profile.homeDir) === activeHomeDir);
-  if (!activeProfile?.slug) {
+  const twinHomeDir = path.resolve(normalizeHomeDir(context.env, context.cwd));
+  const twinProfile = profiles.find((profile) => path.resolve(profile.homeDir) === twinHomeDir);
+  if (!twinProfile?.slug) {
     return commandFailed(
       'profile_not_found',
-      `Active MetaBot profile not found in the manager index for home: ${activeHomeDir}`,
+      `Twin Bot profile not found in the manager index for home: ${twinHomeDir}`,
     );
   }
-  return { slug: activeProfile.slug };
+  return { slug: twinProfile.slug };
 }
 
 function cloneContextWithHomeDir(context: CliRuntimeContext, homeDir: string): CliRuntimeContext {
@@ -2983,7 +2961,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
             allowUnindexedExplicitHome: true,
           })
           : null;
-        const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
+        const twinHomeDir = await resolveTwinHomeDir(systemHomeDir);
         let targetHomeDir: string | null = null;
         if (explicitHomeDir) {
           const explicitState = await createRuntimeStateStore(explicitHomeDir).readState();
@@ -2991,10 +2969,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           if (explicitName && explicitName !== normalizedName) {
             return commandFailed(
               'identity_name_conflict',
-              `Current local identity is "${explicitName}". Switch profile first or choose the same name.`,
+              `Current local identity is "${explicitName}". Update that profile or choose the same name.`,
             );
           }
-          if (explicitState.identity || explicitHomeDir === activeHomeDir) {
+          if (explicitState.identity || explicitHomeDir === twinHomeDir) {
             targetHomeDir = explicitHomeDir;
           }
         }
@@ -3037,77 +3015,43 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       },
       who: async () => {
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-        const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
-        if (!activeHomeDir) {
+        const twinHomeDir = await resolveTwinHomeDir(systemHomeDir);
+        if (!twinHomeDir) {
           return commandFailed(
             'identity_profile_not_initialized',
-            'No active profile initialized.'
+            'No Twin Bot initialized.'
           );
         }
 
         const profiles = await listIdentityProfiles(systemHomeDir);
-        const activeProfile = profiles.find((profile) => profile.homeDir === activeHomeDir);
-        if (!activeProfile) {
+        const twinProfile = profiles.find((profile) => profile.homeDir === twinHomeDir);
+        if (!twinProfile) {
           return commandFailed(
             'identity_profile_not_initialized',
-            'No active profile initialized.'
+            'No Twin Bot initialized.'
           );
         }
 
         return commandSuccess({
-          activeHomeDir,
+          activeHomeDir: twinHomeDir,
           systemHomeDir,
           identity: {
-            name: activeProfile.name,
-            slug: activeProfile.slug,
-            aliases: activeProfile.aliases,
-            globalMetaId: activeProfile.globalMetaId,
-            mvcAddress: activeProfile.mvcAddress,
+            name: twinProfile.name,
+            slug: twinProfile.slug,
+            aliases: twinProfile.aliases,
+            globalMetaId: twinProfile.globalMetaId,
+            mvcAddress: twinProfile.mvcAddress,
           },
         });
       },
       list: async () => {
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
         const profiles = await listIdentityProfiles(systemHomeDir);
-        const activeHomeDir = await readActiveMetabotHome(systemHomeDir);
+        const twinHomeDir = await resolveTwinHomeDir(systemHomeDir);
         return commandSuccess({
           systemHomeDir,
-          activeHomeDir: activeHomeDir || null,
+          activeHomeDir: twinHomeDir || null,
           profiles,
-        });
-      },
-      assign: async (input) => {
-        const targetName = normalizeEnvText(input.name);
-        if (!targetName) {
-          return commandFailed('missing_name', 'MetaBot identity name is required for identity assign.');
-        }
-
-        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-        const profiles = await listIdentityProfiles(systemHomeDir);
-        const resolved = resolveProfileNameMatch(targetName, profiles);
-
-        if (resolved.status === 'not_found') {
-          return commandFailed(
-            'identity_profile_not_found',
-            resolved.message
-          );
-        }
-        if (resolved.status === 'ambiguous') {
-          return commandFailed(
-            'identity_profile_ambiguous',
-            resolved.message
-          );
-        }
-
-        const selected = resolved.match;
-        await setActiveMetabotHome({
-          systemHomeDir,
-          homeDir: selected.homeDir,
-        });
-
-        return commandSuccess({
-          activeHomeDir: selected.homeDir,
-          assignedProfile: selected,
         });
       },
     },
@@ -4188,22 +4132,22 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           : '';
         if (!input.unbind && !ownerGlobalMetaId) {
           // Default owner: the local human owner identity first, then the
-          // active Bot identity as a fallback.
+          // Twin Bot identity as a fallback.
           const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
           const ownerIdentity = await readOwnerIdentity(systemHomeDir).catch(() => null);
           ownerGlobalMetaId = ownerIdentity?.globalMetaId?.trim() ?? '';
           if (!ownerGlobalMetaId) {
-            const [profiles, activeHomeDir] = await Promise.all([
+            const [profiles, twinHomeDir] = await Promise.all([
               listIdentityProfiles(systemHomeDir).catch(() => []),
-              readActiveMetabotHome(systemHomeDir),
+              resolveTwinHomeDir(systemHomeDir),
             ]);
-            const active = profiles.find((profile) => profile.homeDir === activeHomeDir);
-            ownerGlobalMetaId = active?.globalMetaId?.trim() ?? '';
+            const twin = profiles.find((profile) => profile.homeDir === twinHomeDir);
+            ownerGlobalMetaId = twin?.globalMetaId?.trim() ?? '';
           }
           if (!ownerGlobalMetaId) {
             return commandFailed(
               'identity_unavailable',
-              'No local owner identity or active Bot with a GlobalMetaID. Pass --owner <globalMetaId> explicitly.',
+              'No local owner identity or Twin Bot with a GlobalMetaID. Pass --owner <globalMetaId> explicitly.',
             );
           }
         }
@@ -4228,7 +4172,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           twinSlug = await resolveCurrentTwinSlug(systemHomeDir) ?? '';
         }
         if (!twinSlug) {
-          return commandFailed('twin_not_found', 'No Twin Bot exists yet. Promote one with "metabot bot update --payload-file {"botType":"twin"}".');
+          return commandFailed('twin_not_found', 'No Twin Bot exists yet. Designate one with: metabot bot update --from <bot-slug> --payload-file <file> (payload: {"botType":"twin"}).');
         }
         const roster = await buildTwinWorkerRoster(systemHomeDir, twinSlug);
         return commandSuccess({
@@ -4727,7 +4671,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     llmExecutor,
     // Wire the live per-home config resolver so each profile orchestrator reads
     // the same object that handlers.chat.setAutoReply mutates. Without this,
-    // toggling Auto-Reply off in /ui/bot (or via the CLI) for a non-default bot
+    // toggling Auto-Reply off in /ui/bot (or via the CLI) for a non-Twin Bot
     // would be ignored — the orchestrator would keep reading the daemon-default
     // shared config.
     resolveAutoReplyConfigForHome: (homeDir) => handlers.resolveAutoReplyConfigForHome(homeDir),

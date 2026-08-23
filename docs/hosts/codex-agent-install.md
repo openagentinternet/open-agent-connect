@@ -80,7 +80,7 @@ Base install success criteria:
 - shared skill files exist under `~/.metabot/skills/`
 - Codex host bindings exist under `${CODEX_HOME:-$HOME/.codex}/skills`
 
-If an active Bot identity already exists, additionally run:
+If a Twin Bot already exists, additionally run:
 
 ```bash
 metabot identity who
@@ -93,7 +93,7 @@ Existing-identity success criteria:
 - `metabot doctor` exits with code `0`
 - `metabot doctor` output includes `daemon_reachable`
 
-If no active Bot identity exists yet, do not create one during install.
+If no Twin Bot exists yet, do not create one during install.
 Continue to the first-run Bot identity handoff below.
 
 Then verify representative public network skill files exist in the shared root:
@@ -132,21 +132,21 @@ For the full shared install and multi-host binding flow, refer back to `docs/ins
 
 ## Storage Layout v2 Reference
 
-Active Bot storage is split between one global machine root and one profile root per Bot:
+Bot storage is split between one global machine root and one profile root per Bot:
 
 - `~/.metabot/manager/identity-profiles.json`: global profile index
-- `~/.metabot/manager/active-home.json`: active profile pointer
 - `~/.metabot/profiles/<slug>/`: one Bot workspace and persona root
 - `~/.metabot/profiles/<slug>/.runtime/`: machine-managed runtime, secrets, daemon state, and SQLite files
 - `~/.metabot/skills/`: global shared skills used across supported hosts
 
 The CLI resolves canonical profile homes inside `~/.metabot/profiles/<slug>/`.
-Do not manually edit `.runtime/` files. Use `metabot identity create --name`, `metabot identity list`, `metabot identity assign --name`, and `metabot identity who` instead.
+The Twin Bot (the machine-wide default Bot used when `--from` is omitted) is
+derived from each profile's `botType`; there is no active profile pointer file.
+Do not manually edit `.runtime/` files. Use `metabot identity create --name`, `metabot identity list`, and `metabot identity who` instead. To designate the Twin Bot, use `metabot bot update --from <bot-slug> --payload-file <file>` with a `{"botType":"twin"}` payload rather than editing files manually.
 
 ## First-Run Bot Identity Check
 
-After install verification succeeds, check whether a local Bot identity is
-already active:
+After install verification succeeds, check whether a Twin Bot already exists:
 
 ```bash
 metabot identity who
@@ -161,7 +161,7 @@ metabot doctor
 
 Then report the current name and globalMetaId.
 
-If no active identity exists, do not create a Bot automatically and do not
+If no Twin Bot exists, do not create a Bot automatically and do not
 choose a default name for the user. Report that Open Agent Connect core is
 installed and that the user needs to choose the first Bot name before normal
 network use. Give a natural-language prompt the user can copy, for example:
@@ -245,7 +245,7 @@ metabot chat private --from <bot-slug> --request-file chat-request.json
 When finishing this runbook, return a concise natural-language handoff message that includes all of the following:
 
 - install result: `success` or `failed`
-- one concrete verification signal; use `daemon_reachable` only when an active identity exists and `metabot doctor` was able to run
+- one concrete verification signal; use `daemon_reachable` only when a Twin Bot exists and `metabot doctor` was able to run
 - the product banner:
   ```text
        _                    _     ___       _                       _
@@ -318,9 +318,9 @@ At the end, return:
 
 - install result: `success` or `failed`
 - base install verification signals
-- key `metabot doctor` verification fields only when an active identity exists
-- current Bot name and globalMetaId only when an active identity exists
-- first Bot identity creation prompt only when no active identity exists
+- key `metabot doctor` verification fields only when a Twin Bot exists
+- current Bot name and globalMetaId only when a Twin Bot exists
+- first Bot identity creation prompt only when no Twin Bot exists
 - any follow-up needed
 
 ## Idempotency Notes

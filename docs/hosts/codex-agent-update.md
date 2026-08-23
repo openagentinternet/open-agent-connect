@@ -168,7 +168,7 @@ metabot identity --help >/dev/null
 if metabot identity who >/tmp/open-agent-connect-identity.json 2>/tmp/open-agent-connect-identity.err; then
   metabot doctor
 else
-  echo "Open Agent Connect core update is complete, but no active Bot identity exists yet."
+  echo "Open Agent Connect core update is complete, but no Twin Bot exists yet."
 fi
 ```
 
@@ -179,7 +179,7 @@ Apply mode acceptance criteria:
 - shared skills are refreshed under `~/.metabot/skills/`
 - `oac doctor` verifies the shim, shared skills, `~/.agents/skills`, and detected platform bindings
 - `metabot --version` reports the expected version
-- `metabot doctor` is run only when an active Bot identity exists
+- `metabot doctor` is run only when a Twin Bot exists
 
 ## Shared Install Reference
 

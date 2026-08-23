@@ -52,12 +52,6 @@ function normalizeIndexedHomeDirs(value: unknown): Set<string> {
   return indexedHomeDirs;
 }
 
-function parseActiveHomePayload(value: unknown): string | null {
-  const record = normalizeRecord(value);
-  const homeDir = normalizeText(record?.homeDir);
-  return homeDir ? path.resolve(homeDir) : null;
-}
-
 export interface MetabotManagerLayout {
   systemHomeDir: string;
   metabotRoot: string;
@@ -65,14 +59,13 @@ export interface MetabotManagerLayout {
   skillsRoot: string;
   profilesRoot: string;
   identityProfilesPath: string;
-  activeHomePath: string;
 }
 
 export interface MetabotHomeSelection {
   systemHomeDir: string;
   homeDir: string;
   paths: MetabotPaths;
-  source: 'explicit' | 'active';
+  source: 'explicit' | 'twin';
 }
 
 interface ResolveMetabotHomeSelectionInput {
@@ -111,7 +104,6 @@ export function resolveMetabotManagerLayout(systemHomeDir: string): MetabotManag
     skillsRoot: path.join(metabotRoot, 'skills'),
     profilesRoot: path.join(metabotRoot, 'profiles'),
     identityProfilesPath: managerPaths.profilesPath,
-    activeHomePath: managerPaths.activeHomePath,
   };
 }
 
@@ -165,25 +157,42 @@ function validateExplicitMetabotHome(input: {
   return normalizedHomeDir;
 }
 
-function resolveIndexedActiveHome(systemHomeDir: string): string | null {
+/**
+ * The machine default Bot is the Twin Bot (see core/bot/twinRole.ts); there is
+ * no separate active-home pointer anymore. Resolved sync from the manager
+ * index plus each profile's bot-role.json: the twin's home, else the
+ * earliest-created profile's (the same pick the twin invariant's repair
+ * makes), else null when no indexed profiles exist. A stale manager-level
+ * active-home.json from older versions is deliberately not consulted.
+ */
+function resolveIndexedTwinHome(systemHomeDir: string): string | null {
   const layout = resolveMetabotManagerLayout(systemHomeDir);
-  const activeHome = parseActiveHomePayload(readJsonFileSync<unknown>(layout.activeHomePath));
-  if (!activeHome) {
-    return null;
+  const record = normalizeRecord(readJsonFileSync<unknown>(layout.identityProfilesPath));
+  const rawProfiles = Array.isArray(record?.profiles) ? record.profiles : [];
+  let twinHome: string | null = null;
+  let earliest: { homeDir: string; createdAt: number } | null = null;
+  for (const rawEntry of rawProfiles) {
+    const entry = normalizeRecord(rawEntry);
+    const homeDirRaw = normalizeText(entry?.homeDir);
+    if (!homeDirRaw) continue;
+    const homeDir = path.resolve(homeDirRaw);
+    if (!isDirectProfileHome(layout.profilesRoot, homeDir)) continue;
+    if (!twinHome) {
+      const role = normalizeRecord(
+        readJsonFileSync<unknown>(resolveMetabotPaths(homeDir).botRoleStatePath)
+      );
+      if (role?.botType === 'twin') {
+        twinHome = homeDir;
+      }
+    }
+    const createdAt = typeof entry?.createdAt === 'number' && Number.isFinite(entry.createdAt)
+      ? entry.createdAt
+      : Number.POSITIVE_INFINITY;
+    if (!earliest || createdAt < earliest.createdAt) {
+      earliest = { homeDir, createdAt };
+    }
   }
-  if (!isDirectProfileHome(layout.profilesRoot, activeHome)) {
-    return null;
-  }
-  const indexedHomeDirs = normalizeIndexedHomeDirs(readJsonFileSync<unknown>(layout.identityProfilesPath));
-  if (!indexedHomeDirs.has(activeHome)) {
-    return null;
-  }
-  return activeHome;
-}
-
-export function readIndexedActiveMetabotHomeSync(systemHomeDir: string): string | null {
-  assertNoLegacyOnlyLayout(systemHomeDir);
-  return resolveIndexedActiveHome(systemHomeDir);
+  return twinHome ?? earliest?.homeDir ?? null;
 }
 
 export function resolveMetabotHomeSelection(input: ResolveMetabotHomeSelectionInput): MetabotHomeSelection {
@@ -205,16 +214,16 @@ export function resolveMetabotHomeSelection(input: ResolveMetabotHomeSelectionIn
     };
   }
 
-  const activeHomeDir = resolveIndexedActiveHome(systemHomeDir);
-  if (!activeHomeDir) {
-    throw new Error('No active profile initialized.');
+  const twinHomeDir = resolveIndexedTwinHome(systemHomeDir);
+  if (!twinHomeDir) {
+    throw new Error('No Twin Bot initialized.');
   }
 
   return {
     systemHomeDir,
-    homeDir: activeHomeDir,
-    paths: resolveMetabotPaths(activeHomeDir),
-    source: 'active',
+    homeDir: twinHomeDir,
+    paths: resolveMetabotPaths(twinHomeDir),
+    source: 'twin',
   };
 }
 
