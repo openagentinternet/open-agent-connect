@@ -10,6 +10,7 @@ import { resolveMetabotPaths } from '../state/paths';
 import type { Signer } from '../signing/signer';
 import { createGroupTaskStore, type GroupTaskStore } from './store';
 import { createOpenTeamStore, type OpenTeamStore } from './openteamStore';
+import { createStaffingStore, type StaffingStore } from './staffingStore';
 import { buildOpenTeamKickMessage } from './openteam';
 import {
   createGroupOnChain,
@@ -69,6 +70,8 @@ export interface GroupTaskServiceContext {
   storeForProfile?(profile: GroupTaskProfileRef): GroupTaskStore;
   /** OpenTeam store seam (tests); default resolves the profile runtime root. */
   openteamStoreForProfile?(profile: GroupTaskProfileRef): OpenTeamStore;
+  /** Staffing store seam (tests); default resolves the profile runtime root. */
+  staffingStoreForProfile?(profile: GroupTaskProfileRef): StaffingStore;
   /**
    * Send an ECDH private message (/protocols/simplemsg) from a local profile.
    * Wired by the daemon (peer chat pubkey resolver + profile signer); absent
@@ -102,11 +105,18 @@ export function openteamStoreFor(ctx: GroupTaskServiceContext, profile: GroupTas
   return createOpenTeamStore(resolveMetabotPaths(profile.homeDir));
 }
 
+/** Staffing proposal store for a profile (exported for the staffing service). */
+export function staffingStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): StaffingStore {
+  if (ctx.staffingStoreForProfile) return ctx.staffingStoreForProfile(profile);
+  return createStaffingStore(resolveMetabotPaths(profile.homeDir));
+}
+
 function logOf(ctx: GroupTaskServiceContext): (message: string) => void {
   return ctx.log ?? (() => undefined);
 }
 
-async function requireProfile(ctx: GroupTaskServiceContext, slug: string): Promise<GroupTaskProfileRef> {
+/** Resolve a profile by slug or fail (exported for the staffing service). */
+export async function requireProfile(ctx: GroupTaskServiceContext, slug: string): Promise<GroupTaskProfileRef> {
   const profile = await ctx.getProfile(slug.trim());
   if (!profile) {
     throw new GroupTaskServiceError('profile_not_found', `MetaBot profile not found: ${slug}`);
