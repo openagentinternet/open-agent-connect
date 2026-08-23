@@ -38,7 +38,7 @@ import {
 import type { OpenTeamMembershipRecord, OpenTeamStore } from './openteamStore';
 import { fetchGroupInfo, fetchGroupMembers, joinGroupOnChain, sendGroupMessageOnChain } from './transport';
 import { syncGroupMessages } from './backfill';
-import { verifyTaskDeliverables } from './deliverableVerification';
+import { extractDeliverablePinId, verifyTaskDeliverables } from './deliverableVerification';
 import { createPrivateChatStateStore } from '../chat/privateChatStateStore';
 import {
   decideGroupTaskResponders,
@@ -372,6 +372,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     chairSlug: string,
     target: 'executing' | 'review',
     message: GroupTaskMessage,
+    ownerGmid: string | null,
+    chairProfile: GroupTaskProfileRef,
   ): Promise<GroupTaskRecord> {
     if (task.status === target) return task;
     if (!GROUP_TASK_LEGAL_TRANSITIONS[task.status].includes(target)) return task;
@@ -397,9 +399,37 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if (target === 'review') {
       await store.kvDelete(`${GROUP_TASK_REWORK_AT_KV_PREFIX}${task.id}`);
       await store.closeOpenCheckpoints(task.id, 'resolved', 'superseded by review entry');
-      await runReviewCeremony(store, updated, chairSlug, message);
+      await runReviewCeremony(store, updated, chairSlug, message, ownerGmid, chairProfile);
     }
     return updated;
+  }
+
+  /** IDBots parity label: verified on-chain, indexer lag, or unverified. */
+  function deliverableVerificationLabel(row: { confirmation: string; verification: string | null }): string {
+    if (row.confirmation === 'confirmed') return 'on-chain ✓';
+    if (row.verification && row.verification.includes('"not_found"')) return 'pending sync';
+    return 'unverified';
+  }
+
+  function preview(text: string | null | undefined, cap: number): string {
+    const value = (text ?? '').replace(/\s+/gu, ' ').trim();
+    return value.length > cap ? `${value.slice(0, cap)}…` : value;
+  }
+
+  /** Deterministic fallback conclusion from the chair's review message. */
+  function fallbackConclusion(reviewMessage: GroupTaskMessage): string | null {
+    return reviewMessage.content
+      .replace(/\[[A-Z_]+(?::[^\]]*)?\]/gu, '')
+      .replace(/\s+/gu, ' ')
+      .trim()
+      .slice(0, 120) || null;
+  }
+
+  /** Extract the 【结论】 first line from the LLM owner report. */
+  function extractChairConclusion(report: string): string | null {
+    const match = /【结论】\s*([^\n]{1,160})/.exec(report);
+    if (!match) return null;
+    return match[1]!.trim().slice(0, 120) || null;
   }
 
   async function runReviewCeremony(
@@ -407,17 +437,15 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     task: GroupTaskRecord,
     chairSlug: string,
     reviewMessage: GroupTaskMessage,
+    ownerGmid: string | null,
+    chairProfile: GroupTaskProfileRef,
   ): Promise<void> {
     const guardKey = `${GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX}${task.id}`;
     if (await store.kvGet(guardKey)) return;
     const members = await store.listMembers(task.id);
     const deliverables = await store.listDeliverables(task.id);
     const planChanges = await store.listPlanChanges(task.id);
-    const conclusion = reviewMessage.content
-      .replace(/\[[A-Z_]+(?::[^\]]*)?\]/gu, '')
-      .replace(/\s+/gu, ' ')
-      .trim()
-      .slice(0, 300) || null;
+    let conclusion = fallbackConclusion(reviewMessage);
 
     await store.addAcceptanceSummary({
       taskId: task.id,
@@ -447,23 +475,100 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       publishedGroupPinId: null,
     });
 
-    const lines = [
-      '[GROUP_TASK_NOTICE:review_summary] Task entered review — owner acceptance requested.',
-      `Goal: ${task.goal}`,
-      `Acceptance criteria: ${task.acceptanceCriteria ?? '(none specified)'}`,
-    ];
-    if (deliverables.length > 0) {
-      lines.push('Deliverables:');
-      for (const row of deliverables) {
-        lines.push(`- [${row.status}] ${row.kind ?? 'text'}${row.uri ? ` ${row.uri}` : ''}`);
+    // LLM owner private report (IDBots maybeSendOwnerReport parity): the
+    // chair narrates the saved summary to the owner first; the 【结论】 first
+    // line becomes the stamped conclusion the group notice re-renders from.
+    if (ownerGmid && ctx.sendPrivateMessage) {
+      try {
+        const record = {
+          goal: preview(task.goal, 160),
+          acceptanceCriteria: preview(task.acceptanceCriteria, 160) || '(none specified)',
+          deliverables: deliverables.map((row) => ({
+            kind: row.kind, uri: row.uri, status: row.status,
+            verification: deliverableVerificationLabel(row),
+          })),
+          members: members
+            .filter((member) => member.removedAt == null)
+            .map((member) => ({ name: member.displayName ?? member.slug, role: member.role })),
+          planChanges: planChanges.slice(0, 3).map((change) => preview(change.summary, 160)),
+        };
+        const report = (await options.runLlmTurn({
+          profile: chairProfile,
+          role: 'chair',
+          systemPrompt: 'You are the chair of a group task reporting to the owner. Reply in the owner\'s language.',
+          prompt: [
+            'The task below just entered review. Write a short private report to the owner.',
+            'First line must be exactly 【结论】followed by a one-sentence verdict (max 120 chars).',
+            'Then 3-6 bullet lines: goal, deliverables with their verification labels, member contributions, plan changes.',
+            'Facts only — every claim must come from the record below; never invent outcomes or ratings.',
+            JSON.stringify(record),
+          ].join('\n'),
+        })).trim();
+        const extracted = extractChairConclusion(report);
+        if (extracted) {
+          conclusion = extracted;
+          await store.updateAcceptanceSummaryConclusion(task.id, extracted);
+        }
+        await ctx.sendPrivateMessage({
+          fromSlug: chairSlug,
+          toGlobalMetaId: ownerGmid,
+          content: report,
+        }).catch(() => undefined);
+      } catch (error) {
+        log(`[GroupTaskEngine] Owner report failed for task ${task.id}: `
+          + `${error instanceof Error ? error.message : String(error)}`);
       }
     }
+
+    const onChainRows = deliverables.filter((row) => extractDeliverablePinId(row.uri) || row.confirmation === 'confirmed');
+    const omittedProcessCount = deliverables.length - onChainRows.length;
+    const memberLine = members
+      .filter((member) => member.removedAt == null)
+      .map((member) => `${member.displayName ?? member.slug} (${member.role})`)
+      .join(', ');
+    const lines = [
+      '[GROUP_TASK_NOTICE:review_summary] Task entered review — owner acceptance requested.',
+      ...(conclusion ? [`${conclusion}`] : []),
+      `Goal: ${preview(task.goal, 160)}`,
+      `Acceptance criteria: ${preview(task.acceptanceCriteria, 160) || '(none specified)'}`,
+    ];
+    if (onChainRows.length > 0) {
+      lines.push(`Deliverables (${onChainRows.length}):`);
+      for (const row of onChainRows) {
+        lines.push(`- [${row.status} · ${deliverableVerificationLabel(row)}] ${row.kind ?? 'text'}${row.uri ? ` ${preview(row.uri, 100)}` : ''}`);
+      }
+      if (omittedProcessCount > 0) {
+        lines.push(`- (+${omittedProcessCount} process output(s) not on-chain, omitted from the checklist)`);
+      }
+    } else if (deliverables.length > 0) {
+      lines.push(`Deliverables: ${deliverables.length} process output(s), none verifiable on-chain.`);
+    }
+    if (memberLine) lines.push(`Members: ${preview(memberLine, 200)}`);
     if (planChanges.length > 0) {
       lines.push('Plan changes:');
-      for (const change of planChanges) lines.push(`- ${change.summary}`);
+      for (const change of planChanges.slice(0, 3)) lines.push(`- ${preview(change.summary, 160)}`);
     }
     await postHostNotice(task, chairSlug, lines.join('\n'));
     await store.kvSet(guardKey, String(now()));
+  }
+
+  /** Review straggler re-assert (IDBots parity): a non-chair message after
+   *  the closing line gets one compact re-close from the chair. */
+  async function maybeReassertReviewClosing(
+    store: GroupTaskStore,
+    task: GroupTaskRecord,
+    chairSlug: string,
+    lastMessage: GroupTaskMessage,
+    chairGmid: string | null,
+  ): Promise<void> {
+    if (!chairGmid || task.status !== 'review' || !lastMessage.pinId) return;
+    if (normalizeGmid(lastMessage.senderGlobalMetaId) === chairGmid) return;
+    if (isHostNotice(lastMessage.content)) return;
+    const guardKey = `group_task_review_reassert:${task.id}:${lastMessage.pinId}`;
+    if (await store.kvGet(guardKey)) return;
+    await store.kvSet(guardKey, String(now()));
+    await postHostNotice(task, chairSlug,
+      '[GROUP_TASK_NOTICE:review_still_open] Still in review — owner acceptance pending; further work paused.');
   }
 
   async function applyTagSideEffects(
@@ -473,6 +578,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     message: GroupTaskMessage,
     tags: ParsedGroupTaskTags,
     seats: SeatInfo[],
+    ownerGmid: string | null,
+    chairProfile: GroupTaskProfileRef,
   ): Promise<GroupTaskRecord> {
     if (message.senderSuspect) return task;
     const senderGmid = normalizeGmid(message.senderGlobalMetaId);
@@ -514,7 +621,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       }
 
       if (tags.status) {
-        current = await applyChairStatusTag(store, current, chairSlug, tags.status, message);
+        current = await applyChairStatusTag(store, current, chairSlug, tags.status, message, ownerGmid, chairProfile);
       }
     }
 
@@ -776,7 +883,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       const retryKey = `${GROUP_TASK_MSG_RETRY_KV_PREFIX}${current.id}:${message.index}`;
       try {
         const tags = parseGroupTaskTags(message.content);
-        current = await applyTagSideEffects(store, current, profile.slug, message, tags, seats);
+        current = await applyTagSideEffects(store, current, profile.slug, message, tags, seats, ownerGmid, profile);
         if (current.status === 'done' || current.status === 'cancelled') {
           await store.updateTaskCursor(current.id, message.index);
           break;
@@ -825,6 +932,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
               message,
               parseGroupTaskTags(message.content),
               seats,
+              ownerGmid,
+              profile,
             );
           } catch {
             // Tag reprocess is best-effort; the cursor advances regardless.
@@ -835,6 +944,13 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
         }
         break; // fail-stop: later messages wait for this one
       }
+    }
+
+    // Review straggler re-assert: one compact re-close per late non-chair
+    // message while the owner acceptance is still pending.
+    const lastMessage = page.messages[page.messages.length - 1] ?? null;
+    if (lastMessage) {
+      await maybeReassertReviewClosing(store, current, profile.slug, lastMessage, chair ? normalizeGmid(chair.globalMetaId) : null).catch(() => undefined);
     }
   }
 

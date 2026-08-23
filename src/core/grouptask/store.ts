@@ -244,6 +244,8 @@ export interface GroupTaskStore {
     ratingComment: string | null;
   }): Promise<void>;
   updateAcceptanceSummaryPublishedPin(taskId: number, pinId: string): Promise<void>;
+  /** Stamp the LLM owner-report conclusion onto the latest summary. */
+  updateAcceptanceSummaryConclusion(taskId: number, conclusion: string): Promise<void>;
 
   // Message cache
   appendMessages(groupId: string, messages: GroupTaskMessage[]): Promise<number>;
@@ -856,6 +858,18 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       summary.rating = input.rating;
       summary.ratingComment = input.ratingComment;
       await writeState(state);
+    }),
+
+    updateAcceptanceSummaryConclusion: (taskId, conclusion) => enqueue(async () => {
+      const state = await readState();
+      const summaries = state.acceptanceSummaries
+        .filter((entry) => entry.taskId === taskId)
+        .sort((left, right) => right.version - left.version);
+      const latest = summaries[0];
+      if (latest) {
+        latest.conclusion = conclusion;
+        await writeState(state);
+      }
     }),
 
     updateAcceptanceSummaryPublishedPin: (taskId, pinId) => enqueue(async () => {
