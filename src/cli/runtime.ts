@@ -138,6 +138,7 @@ import {
   createGroupTaskEngineLogWriter,
   resolveGroupTaskEngineLogPath,
 } from '../core/grouptask/engineLog';
+import { createMetasoPinVerifier } from '../core/grouptask/deliverableVerification';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import {
@@ -4997,6 +4998,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     logFile: resolveGroupTaskEngineLogPath(daemonPaths.logsRoot),
   });
   const groupTaskEngine = createGroupTaskEngine({
+    verifyPin: createMetasoPinVerifier(),
     ctx: createGroupTaskServiceContext({
       systemHomeDir,
       createSignerForProfileHome: (profileHomeDir) => (profileHomeDir === homeDir

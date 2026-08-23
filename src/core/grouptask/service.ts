@@ -728,6 +728,11 @@ export async function closeGroupTask(
   if (closed.status === 'done' && opts.rating != null) {
     await store.updateTaskRating(taskId, opts.rating, opts.ratingComment);
   }
+  if (closed.status === 'done') {
+    // T2 verdict: owner acceptance marks every non-rejected row accepted.
+    await store.updateDeliverablesStatusByTask(taskId, 'pending', 'accepted').catch(() => 0);
+    await store.updateDeliverablesStatusByTask(taskId, 'delivered', 'accepted').catch(() => 0);
+  }
   try {
     await store.finalizeAcceptanceSummary(taskId, {
       outcome: opts.status,

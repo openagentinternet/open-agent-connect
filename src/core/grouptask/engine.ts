@@ -38,6 +38,7 @@ import {
 import type { OpenTeamMembershipRecord, OpenTeamStore } from './openteamStore';
 import { fetchGroupInfo, fetchGroupMembers, joinGroupOnChain, sendGroupMessageOnChain } from './transport';
 import { syncGroupMessages } from './backfill';
+import { verifyTaskDeliverables } from './deliverableVerification';
 import { createPrivateChatStateStore } from '../chat/privateChatStateStore';
 import {
   decideGroupTaskResponders,
@@ -75,6 +76,9 @@ export const GROUP_TASK_MSG_RETRY_KV_PREFIX = 'group_task_msg_retry:';
 export const GROUP_TASK_DEP_WAIT_KV_PREFIX = 'group_task_dep_wait:';
 /** [DEPENDS_ON] holds a worker reply at most this long before proceeding. */
 const DEPENDENCY_WAIT_MAX_MS = 15 * 60_000;
+/** Deliverable re-verification cadence (indexer lag absorption). */
+export const GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = 'group_task_deliverable_verify:';
+const DELIVERABLE_REVERIFY_INTERVAL_MS = 10 * 60_000;
 export const GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = 'group_task_review_summary:';
 
 const DEFAULT_INTERVAL_MS = 5_000;
@@ -142,6 +146,11 @@ export interface GroupTaskEngineOptions {
   chairCooldownMs?: number;
   /** Lifetime reply budget per (task, seat) for this engine instance. */
   replyBudget?: number;
+  /**
+   * Deliverable pin existence check (metaso pin read in production). When
+   * absent, deliverables stay unconfirmed and the re-verify pass no-ops.
+   */
+  verifyPin?: (pinId: string) => Promise<'found' | 'not_found' | 'error'>;
   now?: () => number;
 }
 
@@ -556,6 +565,9 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           log(`[GroupTaskEngine] Deliverable candidates of message ${message.index} `
             + `on task ${task.id} were duplicates; nothing recorded`);
         }
+        if (recordedAny && options.verifyPin) {
+          await verifyTaskDeliverables(store, task.id, options.verifyPin, { now, log }).catch(() => undefined);
+        }
       }
       if (tags.working) {
         await store.setMemberStatus(task.id, senderSeat.slug, 'working', senderSeat.globalMetaId);
@@ -721,6 +733,17 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if (!(await claimDriverOrYield(store, task.id))) return;
     await store.touchTaskDriven(task.id, now());
     await syncGroupTaskMessages(ctx, store, task);
+
+    // Deliverable re-verification pass (10 min cadence per task): indexer
+    // lag should not leave confirmed-on-chain pins unconfirmed forever.
+    if (options.verifyPin && task.status !== 'done' && task.status !== 'cancelled') {
+      const reverifyKey = `${GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX}${task.id}`;
+      const lastCheck = Number((await store.kvGet(reverifyKey)) ?? '0') || 0;
+      if (now() - lastCheck >= DELIVERABLE_REVERIFY_INTERVAL_MS) {
+        await store.kvSet(reverifyKey, String(now()));
+        await verifyTaskDeliverables(store, task.id, options.verifyPin, { now, log }).catch(() => undefined);
+      }
+    }
 
     const members = await store.listMembers(task.id, { includeRemoved: true });
     const { seats, promptSeats, chair } = await buildSeats(task, members, profileBySlug);
