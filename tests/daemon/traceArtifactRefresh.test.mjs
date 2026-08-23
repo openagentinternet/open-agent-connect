@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const { createDefaultMetabotDaemonHandlers } = require('../../dist/daemon/defaultHandlers.js');
 const { createSessionStateStore } = require('../../dist/core/a2a/sessionStateStore.js');
 const { buildSessionTrace } = require('../../dist/core/chat/sessionTrace.js');
-const { setActiveMetabotHome, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
 
 async function writeUtf8(filePath, content) {
@@ -30,17 +30,12 @@ async function createStaleTerminalTraceFixture(t) {
   const taskRunId = 'run-stale-terminal-artifacts';
   const baseTime = 1_776_000_000_000;
   const replyText = 'Tomorrow will be bright with a light wind.';
-  const profile = await upsertIdentityProfile({
+  await upsertIdentityProfile({
     systemHomeDir,
     name: 'Caller Bot',
     homeDir,
     globalMetaId: 'idq1caller',
     mvcAddress: 'mvc-caller',
-    now: () => baseTime,
-  });
-  await setActiveMetabotHome({
-    systemHomeDir,
-    homeDir: profile.homeDir,
     now: () => baseTime,
   });
 

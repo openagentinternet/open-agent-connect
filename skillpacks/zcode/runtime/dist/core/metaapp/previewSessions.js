@@ -1,13 +1,55 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.metaAppPreviewHtmlPreparationAvailable = metaAppPreviewHtmlPreparationAvailable;
 exports.inferMetaAppPreviewMimeType = inferMetaAppPreviewMimeType;
 exports.createMetaAppPreviewSessionRegistry = createMetaAppPreviewSessionRegistry;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const agentBrowserCore = __importStar(require("@openagentinternet/agent-browser-core"));
+// Optional until @openagentinternet/agent-browser-core >= 0.5.3 is pinned:
+// with an older core the host keeps serving preview HTML unprepared (the
+// pre-0.5.3 behavior) instead of failing every MetaApp open.
+const preparePreviewHtml = agentBrowserCore.preparePreviewHtml;
+function metaAppPreviewHtmlPreparationAvailable() {
+    return preparePreviewHtml !== undefined;
+}
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -87,6 +129,7 @@ function inferMetaAppPreviewMimeType(filePath) {
 function createMetaAppPreviewSessionRegistry(input) {
     const now = input?.now ?? Date.now;
     const ttlMs = input?.ttlMs ?? DEFAULT_TTL_MS;
+    const resolveMetafileContentBaseUrl = input?.resolveMetafileContentBaseUrl;
     const sessions = new Map();
     return {
         create(sessionInput) {
@@ -122,11 +165,19 @@ function createMetaAppPreviewSessionRegistry(input) {
                 }
                 throw error;
             }
+            const contentType = inferMetaAppPreviewMimeType(filePath);
+            if (preparePreviewHtml && /^text\/html\b/iu.test(contentType)) {
+                const metafileContentBaseUrl = resolveMetafileContentBaseUrl
+                    ? await resolveMetafileContentBaseUrl()
+                    : '';
+                const prepared = preparePreviewHtml({ body, contentType, metafileContentBaseUrl });
+                body = typeof prepared === 'string' ? Buffer.from(prepared, 'utf8') : prepared;
+            }
             return {
                 previewId: session.previewId,
                 assetPath,
                 filePath,
-                contentType: inferMetaAppPreviewMimeType(filePath),
+                contentType,
                 body,
             };
         },

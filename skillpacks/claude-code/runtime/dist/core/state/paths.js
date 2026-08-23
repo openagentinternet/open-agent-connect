@@ -31,6 +31,7 @@ function normalizeProfileHomeDir(homeDir) {
 }
 function buildMetabotPaths(input) {
     const a2aRoot = node_path_1.default.join(input.runtimeRoot, 'A2A');
+    const memoryRoot = node_path_1.default.join(input.runtimeRoot, 'memory');
     return {
         systemHomeDir: input.systemHomeDir,
         metabotRoot: input.metabotRoot,
@@ -48,7 +49,6 @@ function buildMetabotPaths(input) {
         stateRoot: input.stateRoot,
         locksRoot: input.locksRoot,
         identityProfilesPath: node_path_1.default.join(input.managerRoot, 'identity-profiles.json'),
-        activeHomePath: node_path_1.default.join(input.managerRoot, 'active-home.json'),
         infrastructureConfigPath: node_path_1.default.join(input.managerRoot, 'infrastructure.json'),
         configPath: node_path_1.default.join(input.runtimeRoot, 'config.json'),
         identitySecretsPath: input.identitySecretsPath,
@@ -67,11 +67,25 @@ function buildMetabotPaths(input) {
         profilePublishStatePath: input.profilePublishStatePath,
         homepageStatePath: node_path_1.default.join(input.stateRoot, 'homepage.json'),
         dshLlmPath: input.dshLlmPath,
+        botRoleStatePath: input.botRoleStatePath,
         bioMdPath: input.bioMdPath,
         soulMdPath: input.soulMdPath,
         goalMdPath: input.goalMdPath,
         roleMdPath: input.roleMdPath,
         daemonLockPath: input.daemonLockPath,
+        // Memory / dream / twin-bot paths.
+        workspaceMemoryRoot: node_path_1.default.join(input.profileRoot, 'memory'),
+        memorySelfIdentityPath: node_path_1.default.join(input.profileRoot, 'memory', 'self-identity.md'),
+        memoryRoot,
+        memoryMemoriesPath: node_path_1.default.join(memoryRoot, 'memories.json'),
+        memoryKnowledgePath: node_path_1.default.join(memoryRoot, 'knowledge.json'),
+        memoryImpressionsPath: node_path_1.default.join(memoryRoot, 'impressions.json'),
+        memoryExperiencePath: node_path_1.default.join(memoryRoot, 'experience.json'),
+        memoryDreamRunsPath: node_path_1.default.join(memoryRoot, 'dream-runs.json'),
+        memoryDreamSummariesPath: node_path_1.default.join(memoryRoot, 'dream-summaries.json'),
+        memoryPolicyPath: node_path_1.default.join(memoryRoot, 'policy.json'),
+        memoryOrchestrationPath: node_path_1.default.join(memoryRoot, 'orchestration.json'),
+        memoryTranscriptsRoot: node_path_1.default.join(memoryRoot, 'transcripts'),
         // LLM paths.
         llmRoot: input.llmRoot,
         llmRuntimesPath: input.llmRuntimesPath,
@@ -122,6 +136,7 @@ function resolveMetabotPaths(homeDir) {
         chatSkillResolutionPath: node_path_1.default.join(stateRoot, 'chat-skill-resolution.json'),
         profilePublishStatePath: node_path_1.default.join(stateRoot, 'profile-publish-state.json'),
         dshLlmPath: node_path_1.default.join(stateRoot, 'dsh-llm.json'),
+        botRoleStatePath: node_path_1.default.join(stateRoot, 'bot-role.json'),
         bioMdPath: node_path_1.default.join(profileRoot, 'BIO.md'),
         soulMdPath: node_path_1.default.join(profileRoot, 'SOUL.md'),
         goalMdPath: node_path_1.default.join(profileRoot, 'GOAL.md'),

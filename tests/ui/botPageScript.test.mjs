@@ -247,7 +247,7 @@ test('bot page list marks only the default Bot with a Default badge', () => {
   context.renderMetabotList();
 
   assert.equal((list.innerHTML.match(/metabot-default-label/g) || []).length, 1);
-  assert.match(list.innerHTML, /data-slug="alice-bot"[\s\S]*metabot-default-label[\s\S]*>Default<\/span>[\s\S]*data-slug="bob-bot"/);
+  assert.match(list.innerHTML, /data-slug="alice-bot"[\s\S]*metabot-default-label[\s\S]*>Twin Bot<\/span>[\s\S]*data-slug="bob-bot"/);
 });
 
 test('bot page list hides the Default badge when only one Bot exists', () => {
@@ -301,7 +301,7 @@ test('bot page hero syncs the set-as-default toggle from the active profile', ()
   assert.equal(toggle.classList.contains('on'), false);
   assert.equal(toggle.disabled, false);
   assert.equal(toggle.getAttribute('aria-checked'), 'false');
-  assert.equal(toggle.getAttribute('title'), 'Set as default');
+  assert.equal(toggle.getAttribute('title'), 'Set as Twin Bot');
   assert.equal(toggle.textEl.textContent, 'Off');
   assert.equal(status.textContent, '');
   assert.equal(status.className, 'save-status');
@@ -311,7 +311,7 @@ test('bot page hero syncs the set-as-default toggle from the active profile', ()
   assert.equal(toggle.classList.contains('on'), true);
   assert.equal(toggle.disabled, true);
   assert.equal(toggle.getAttribute('aria-checked'), 'true');
-  assert.equal(toggle.getAttribute('title'), 'This is the default Bot');
+  assert.equal(toggle.getAttribute('title'), 'This is the Twin Bot');
   assert.equal(toggle.textEl.textContent, 'On');
 });
 
@@ -345,7 +345,7 @@ test('bot page hero hides the set-as-default toggle when only one Bot exists', (
   assert.equal(status.hidden, true);
 });
 
-test('bot page set-as-default toggle activates the profile through the daemon API', async () => {
+test('bot page set-as-default toggle promotes the profile to Twin Bot through the daemon API', async () => {
   const toggle = toggleElement();
   const status = { textContent: '', className: 'save-status' };
   const requests = [];
@@ -374,11 +374,12 @@ test('bot page set-as-default toggle activates the profile through the daemon AP
   await context.setSelectedBotDefault(toggle);
 
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, '/api/bot/profiles/bob-bot/activate');
-  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(requests[0].url, '/api/bot/profiles/bob-bot');
+  assert.equal(requests[0].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(requests[0].options.body), { botType: 'twin' });
   assert.equal(context.state.profiles[0].isActive, false);
   assert.equal(context.state.profiles[1].isActive, true);
-  assert.equal(status.textContent, 'Default Bot updated.');
+  assert.equal(status.textContent, 'Twin Bot updated.');
   assert.equal(status.className, 'save-status success');
 });
 

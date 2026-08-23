@@ -16,7 +16,9 @@ exports.listMetaAppForks = listMetaAppForks;
 exports.trimMetaAppSearchItems = trimMetaAppSearchItems;
 exports.DEFAULT_METAAPP_SEARCH_BASE_URL = 'https://so.metaid.io';
 const METASO_P2P_BASE_URL_ENV = 'METASO_P2P_BASE_URL';
-const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
+const SEARCH_RETRY_ATTEMPTS = 2;
+const SEARCH_RETRY_DELAY_MS = 400;
 const MAX_PAGE_SIZE = 100;
 class MetaAppSearchApiError extends Error {
     apiCode;
@@ -76,7 +78,30 @@ function normalizePage(raw) {
         hasMore: record.hasMore === true,
     };
 }
-async function fetchApiData(url, fetchFn, timeoutMs) {
+function isTransientSearchError(error) {
+    if (error instanceof MetaAppSearchApiError) {
+        return false;
+    }
+    const name = error && typeof error === 'object' ? String(error.name || '') : '';
+    if (name === 'AbortError' || name === 'TimeoutError') {
+        return true;
+    }
+    const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+    return message.includes('aborted')
+        || message.includes('fetch failed')
+        || message.includes('failed to fetch')
+        || message.includes('timed out')
+        || message.includes('timeout')
+        || message.includes('network')
+        || message.includes('econnreset')
+        || message.includes('etimedout');
+}
+function delay(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+async function fetchApiDataOnce(url, fetchFn, timeoutMs) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -98,9 +123,34 @@ async function fetchApiData(url, fetchFn, timeoutMs) {
         }
         throw new MetaAppSearchApiError(Number.isFinite(code) ? code : -1, message);
     }
+    catch (error) {
+        if (error instanceof MetaAppSearchApiError) {
+            throw error;
+        }
+        if (controller.signal.aborted || (error && typeof error === 'object' && error.name === 'AbortError')) {
+            throw new Error(`MetaApp search timed out after ${timeoutMs}ms.`);
+        }
+        throw error;
+    }
     finally {
         clearTimeout(timer);
     }
+}
+async function fetchApiData(url, fetchFn, timeoutMs) {
+    let lastError;
+    for (let attempt = 1; attempt <= SEARCH_RETRY_ATTEMPTS; attempt += 1) {
+        try {
+            return await fetchApiDataOnce(url, fetchFn, timeoutMs);
+        }
+        catch (error) {
+            lastError = error;
+            if (attempt >= SEARCH_RETRY_ATTEMPTS || !isTransientSearchError(error)) {
+                throw error;
+            }
+            await delay(SEARCH_RETRY_DELAY_MS);
+        }
+    }
+    throw lastError;
 }
 function normalizeBaseUrl(value) {
     const candidate = text(value);

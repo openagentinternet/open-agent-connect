@@ -298,7 +298,7 @@ test('Codex install runbook includes first-run handoff and response contract', a
   assert.match(runbook, /Open Agent Connect: Connect your local AI agent to an open agent network/i);
   assert.match(runbook, /what Open Agent Connect now enables/i);
   assert.match(runbook, /Do not return only raw command output/i);
-  assert.match(runbook, /key `metabot doctor` verification fields only when an active identity exists/i);
+  assert.match(runbook, /key `metabot doctor` verification fields only when a Twin Bot exists/i);
   assert.doesNotMatch(runbook, /metabot identity create --name "Alice"/);
   assert.doesNotMatch(runbook, /first MetaBot/i);
 });
@@ -381,5 +381,8 @@ test('active Codex host runbooks describe the v2 manager/profile layout and forb
   assert.match(devRunbook, /do not manually edit `\.runtime\/` files/i);
   assert.match(identityRunbook, /metabot identity create --name "\$TARGET_NAME"/);
   assert.match(identityRunbook, /CLI resolves the canonical profile home/i);
-  assert.match(identityRunbook, /metabot identity assign --name "\$TARGET_NAME"/);
+  assert.match(identityRunbook, /metabot bot update --from "\$TARGET_NAME" --payload-file twin-payload\.json/);
+  assert.match(identityRunbook, /\{"botType":"twin"\}/);
+  assert.match(identityRunbook, /no active profile\s+pointer file/i);
+  assert.doesNotMatch(identityRunbook, /metabot identity assign/);
 });

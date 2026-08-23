@@ -233,7 +233,6 @@ export interface MetabotDaemonHttpHandlers {
     getProfile?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     createProfile?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     retryProfileSetup?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    activateProfile?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     updateProfile?: (input: { slug: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     uploadHomepageFile?: (input: { slug: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     getConfig?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;

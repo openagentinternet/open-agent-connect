@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import {
@@ -8,7 +7,6 @@ import {
 
 const MANAGER_DIR = 'manager';
 const PROFILES_FILE = 'identity-profiles.json';
-const ACTIVE_HOME_FILE = 'active-home.json';
 const TRANSIENT_JSON_READ_RETRIES = 5;
 const TRANSIENT_JSON_READ_DELAY_MS = 10;
 
@@ -17,7 +15,6 @@ let atomicWriteSequence = 0;
 export interface IdentityManagerPaths {
   managerRoot: string;
   profilesPath: string;
-  activeHomePath: string;
 }
 
 export interface IdentityProfileRecord {
@@ -232,7 +229,6 @@ export function resolveIdentityManagerPaths(systemHomeDir: string): IdentityMana
   return {
     managerRoot,
     profilesPath: path.join(managerRoot, PROFILES_FILE),
-    activeHomePath: path.join(managerRoot, ACTIVE_HOME_FILE),
   };
 }
 
@@ -351,88 +347,5 @@ export async function deleteIdentityProfile(input: {
     profiles: current.profiles.filter((profile) => profile.slug !== slug),
   });
 
-  const paths = resolveIdentityManagerPaths(input.systemHomeDir);
-  const activeHome = parseActiveHomePayload(await readJsonFile<unknown>(paths.activeHomePath));
-  if (activeHome && path.resolve(activeHome) === path.resolve(deleted.homeDir)) {
-    await fsp.rm(paths.activeHomePath, { force: true });
-  }
-
   return deleted;
-}
-
-function parseActiveHomePayload(value: unknown): string | null {
-  const record = normalizeRecord(value);
-  if (!record) {
-    return null;
-  }
-  const homeDirRaw = normalizeText(record.homeDir);
-  if (!homeDirRaw) {
-    return null;
-  }
-  return path.resolve(homeDirRaw);
-}
-
-function readJsonFileSync<T>(filePath: string): T | null {
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || error instanceof SyntaxError) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-function validateActiveHome(systemHomeDir: string, homeDir: string | null, profilesState: IdentityProfilesState): string | null {
-  if (!homeDir || !isCanonicalProfileHome(systemHomeDir, homeDir)) {
-    return null;
-  }
-  return profilesState.profiles.some((profile) => profile.homeDir === homeDir) ? homeDir : null;
-}
-
-export function readActiveMetabotHomeSync(systemHomeDir: string): string | null {
-  const paths = resolveIdentityManagerPaths(systemHomeDir);
-  try {
-    const parsed = readJsonFileSync<unknown>(paths.activeHomePath);
-    const profilesState = normalizeProfilesState(systemHomeDir, readJsonFileSync<unknown>(paths.profilesPath));
-    return validateActiveHome(systemHomeDir, parseActiveHomePayload(parsed), profilesState);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || error instanceof SyntaxError) {
-      return null;
-    }
-    return null;
-  }
-}
-
-export async function readActiveMetabotHome(systemHomeDir: string): Promise<string | null> {
-  const paths = resolveIdentityManagerPaths(systemHomeDir);
-  await ensureManagerRoot(paths);
-  const [parsed, profilesState] = await Promise.all([
-    readJsonFile<unknown>(paths.activeHomePath),
-    readIdentityProfilesState(systemHomeDir),
-  ]);
-  return validateActiveHome(systemHomeDir, parseActiveHomePayload(parsed), profilesState);
-}
-
-export async function setActiveMetabotHome(input: {
-  systemHomeDir: string;
-  homeDir: string;
-  now?: () => number;
-}): Promise<string> {
-  const now = input.now ?? Date.now;
-  const homeDir = path.resolve(normalizeText(input.homeDir));
-  if (!homeDir) {
-    throw new Error('Active metabot home requires a non-empty homeDir.');
-  }
-
-  const paths = resolveIdentityManagerPaths(input.systemHomeDir);
-  await ensureManagerRoot(paths);
-  await writeFileAtomic(
-    paths.activeHomePath,
-    `${JSON.stringify({ homeDir, updatedAt: now() }, null, 2)}\n`,
-  );
-  return homeDir;
 }

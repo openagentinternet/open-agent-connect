@@ -384,8 +384,8 @@ function buildMessage(row: unknown): ConversationMessageViewModel {
 export function buildConversationsPageViewModel(input: ConversationsPageViewModelInput = {}): ConversationsPageViewModel {
   const selectedLocalInput = normalizeText(input.selectedLocalGlobalMetaId);
   const localBotRows = extractLocalBots(input);
-  // When no Bot is explicitly selected, prefer the system-configured default
-  // Bot (isActive) before falling back to the first listed Bot.
+  // When no Bot is explicitly selected, prefer the Twin Bot (isActive)
+  // before falling back to the first listed Bot.
   const defaultLocalBot = selectedLocalInput
     ? null
     : localBotRows.find((row) => readObject(row).isActive === true) ?? null;

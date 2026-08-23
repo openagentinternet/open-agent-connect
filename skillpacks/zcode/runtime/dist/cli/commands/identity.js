@@ -34,16 +34,5 @@ async function runIdentityCommand(args, context) {
         }
         return handler();
     }
-    if (subcommand === 'assign') {
-        const name = (0, helpers_1.readFlagValue)(args, '--name');
-        if (!name) {
-            return (0, helpers_1.commandMissingFlag)('--name');
-        }
-        const handler = context.dependencies.identity?.assign;
-        if (!handler) {
-            return (0, commandResult_1.commandFailed)('not_implemented', 'Identity assign handler is not configured.');
-        }
-        return handler({ name });
-    }
     return (0, helpers_1.commandUnknownSubcommand)(`identity ${args.join(' ')}`.trim());
 }

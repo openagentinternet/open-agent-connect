@@ -19,7 +19,7 @@ This runbook keeps the local development loops and reuses the shared install plu
 - fail fast on command errors
 - keep outputs machine-readable where available
 - do not manually edit `.runtime/` files
-- use identity profile commands (`who/list/assign`) instead of patching runtime files
+- use identity profile commands (`who/list`) instead of patching runtime files
 
 ## Preconditions
 
@@ -35,9 +35,10 @@ If any precondition fails, stop and return a concise blocked report.
 
 ## V2 Storage Reminder
 
-During local development and testing, keep the active storage contract in mind:
+During local development and testing, keep the current storage contract in mind:
 
-- `~/.metabot/manager/` stores the manager index and active profile pointer
+- `~/.metabot/manager/` stores the manager profile index
+- the Twin Bot (the machine-wide default Bot) is derived from each profile's `botRole.json`/`botType`; there is no active profile pointer file
 - `~/.metabot/profiles/<slug>/` stores one Bot workspace
 - `~/.metabot/profiles/<slug>/.runtime/` stores machine-managed runtime files
 
@@ -86,15 +87,18 @@ metabot identity who
 metabot identity list
 ```
 
-If you need to switch active local Bot:
+If you need to change the Twin Bot (the machine-wide default Bot used when `--from` is omitted):
 
 ```bash
-metabot identity assign --name "<bot-name>"
+printf '{"botType":"twin"}\n' > twin-payload.json
+metabot bot update --from "<bot-name>" --payload-file twin-payload.json
 metabot identity who
 ```
 
+This demotes the previous Twin Bot; at most one Twin Bot exists per machine.
+
 If `metabot identity create --name ...` returns `identity_name_conflict`, do not patch runtime files.
-Use `identity list` + `identity assign` first.
+Use `identity list` + `identity who` first.
 
 ## Loop D: Runtime Smoke Checks
 
@@ -150,5 +154,5 @@ At the end, return:
 - result: `success`, `failed`, or `blocked`
 - commands executed
 - test summary (pass/fail counts if available)
-- identity active profile summary (`who`)
+- Twin Bot summary (`who`)
 - follow-up action required (if any)

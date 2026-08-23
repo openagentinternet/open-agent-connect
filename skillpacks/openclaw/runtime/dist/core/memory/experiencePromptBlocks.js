@@ -1,0 +1,272 @@
+"use strict";
+// Experience prompt blocks — the hot layer of the tiered experience system,
+// ported from IDBots src/main/libs/experiencePromptBlocks.ts. Pure builders
+// for the always-on blocks injected next to a bot's prompt: the protected
+// self-identity entry, self-distilled value boundaries, work reviews, and the
+// last few days' daily summaries. Warm/cold layers are reached through the
+// recall path, whose query defaults and result formatting also live here.
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.RECALL_MAX_LIMIT = exports.RECALL_WARM_DAYS = exports.RECENT_SUMMARIES_MAX_CHARS = exports.RECENT_SUMMARIES_PROMPT_DAYS = void 0;
+exports.formatLocalDate = formatLocalDate;
+exports.buildSelfIdentityBlock = buildSelfIdentityBlock;
+exports.buildValueBoundariesBlock = buildValueBoundariesBlock;
+exports.buildWorkReviewsBlock = buildWorkReviewsBlock;
+exports.buildRecentDailySummariesBlock = buildRecentDailySummariesBlock;
+exports.buildExperiencePromptBlocksXml = buildExperiencePromptBlocksXml;
+exports.resolveExperienceRecallQuery = resolveExperienceRecallQuery;
+exports.formatExperienceRecallResults = formatExperienceRecallResults;
+exports.formatExperienceTimelineFallback = formatExperienceTimelineFallback;
+exports.RECENT_SUMMARIES_PROMPT_DAYS = 7;
+exports.RECENT_SUMMARIES_MAX_CHARS = 2000;
+exports.RECALL_WARM_DAYS = 30;
+exports.RECALL_MAX_LIMIT = 30;
+// Dream diaries scale with the day's activity, so recall must not clip a
+// rich day back to a fixed blurb. 1500 chars still keeps a 30-day recall bounded.
+const RECALL_ENTRY_MAX_CHARS = 1500;
+/** Local-calendar YYYY-MM-DD (dream dates are local-day anchored). */
+function formatLocalDate(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+const escapeXml = (value) => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+/**
+ * The bot's own dream-written "who am I" entry. Present in every context
+ * (local UI and A2A) — it describes the bot itself, not the user, so it does
+ * not fall under the external-channel owner-memory privacy block.
+ */
+function buildSelfIdentityBlock(identityText) {
+    const trimmed = identityText?.trim();
+    if (!trimmed)
+        return '';
+    return [
+        '<metabot_self_identity>',
+        escapeXml(trimmed),
+        '</metabot_self_identity>',
+        '<instruction>',
+        'The &lt;metabot_self_identity&gt; block above is your own self-cognition, written and refined by',
+        'yourself in your nightly dreams: its core is stable, its details evolve with your experiences.',
+        'Do not recite it to the user — ALIGN your behavior with it. Let what you say and do live up to',
+        'who you believe you are.',
+        '</instruction>',
+    ].join('\n');
+}
+/**
+ * The bot's self-grown code of conduct: abstract value boundaries distilled
+ * from its own experiences during nightly dreams. Injected so they actively
+ * constrain behavior, not just sit in storage.
+ */
+function buildValueBoundariesBlock(entries, maxItems = 5) {
+    const items = entries
+        .map((entry) => entry.text?.trim())
+        .filter((text) => Boolean(text))
+        .slice(0, Math.max(1, maxItems));
+    if (items.length === 0)
+        return '';
+    return [
+        '<value_boundaries>',
+        ...items.map((text) => `  <rule>${escapeXml(text)}</rule>`),
+        '</value_boundaries>',
+        '<instruction>',
+        'The &lt;value_boundaries&gt; block lists rules you distilled from your own past experiences.',
+        'They are your self-grown code of conduct: honor them in how you act and respond.',
+        '</instruction>',
+    ].join('\n');
+}
+/**
+ * Past work reviews written by the dream service — including the owner's
+ * acceptance ratings and review comments on group tasks — injected so prior
+ * feedback actively guides new work instead of sitting in storage.
+ */
+function buildWorkReviewsBlock(entries, maxItems = 5) {
+    const items = entries
+        .map((entry) => entry.text?.trim())
+        .filter((text) => Boolean(text))
+        .slice(0, Math.max(1, maxItems));
+    if (items.length === 0)
+        return '';
+    return [
+        '<work_reviews>',
+        ...items.map((text) => `  <review>${escapeXml(text)}</review>`),
+        '</work_reviews>',
+        '<instruction>',
+        'The &lt;work_reviews&gt; block lists reviews of your past work, distilled in your nightly dreams',
+        'and aligned with the human\'s acceptance ratings and comments. When a new task resembles one of',
+        'them, reuse the approaches the human rated highly and avoid the patterns they criticized.',
+        '</instruction>',
+    ].join('\n');
+}
+/**
+ * Hot layer: the bot's last few days of dream summaries, newest first,
+ * oldest dropped when over the char budget.
+ */
+function buildRecentDailySummariesBlock(summaries, maxChars = exports.RECENT_SUMMARIES_MAX_CHARS) {
+    if (!summaries.length)
+        return '';
+    const dayBlocks = [];
+    let used = 0;
+    for (const summary of summaries) {
+        const text = summary.summaryText?.trim();
+        if (!text)
+            continue;
+        const block = `  <day date="${escapeXml(summary.summaryDate)}">${escapeXml(text)}</day>`;
+        if (dayBlocks.length > 0 && used + block.length > maxChars)
+            break;
+        dayBlocks.push(block);
+        used += block.length;
+    }
+    if (dayBlocks.length === 0)
+        return '';
+    return [
+        '<recent_daily_summaries>',
+        ...dayBlocks,
+        '</recent_daily_summaries>',
+        '<instruction>',
+        'The &lt;recent_daily_summaries&gt; block lists what you did on each recent day — these summaries',
+        'ARE your dreams (做梦), written by yourself during the nightly dream consolidation. When the user',
+        'asks whether you dreamed, what you dreamed about, or whether you remember a certain day',
+        '(做梦/梦境/梦到/还记得), answer from these summaries, and call the experience_recall tool for',
+        'any earlier date range or a full-history search.',
+        '</instruction>',
+    ].join('\n');
+}
+function buildExperiencePromptBlocksXml(input) {
+    return [
+        input.identityText ? buildSelfIdentityBlock(input.identityText) : '',
+        buildValueBoundariesBlock(input.valueBoundaries ?? []),
+        buildWorkReviewsBlock(input.workReviews ?? []),
+        buildRecentDailySummariesBlock(input.summaries, input.maxChars),
+    ]
+        .filter((block) => block.trim())
+        .join('\n\n');
+}
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const normalizeDateArg = (value) => {
+    const trimmed = value?.trim();
+    return trimmed && DATE_RE.test(trimmed) ? trimmed : undefined;
+};
+const normalizeGranularity = (value) => {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return normalized === 'week' || normalized === 'month' ? normalized : 'day';
+};
+/** Monday-based YYYY-MM-DD key for the week containing the given YYYY-MM-DD date. */
+function weekKeyOf(dateStr) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (!match)
+        return dateStr;
+    const [, y, m, d] = match;
+    const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+    const dow = date.getUTCDay(); // 0=Sun..6=Sat
+    const diff = (dow === 0 ? -6 : 1) - dow; // shift to Monday
+    const monday = new Date(date);
+    monday.setUTCDate(date.getUTCDate() + diff);
+    return `${monday.getUTCFullYear()}-${String(monday.getUTCMonth() + 1).padStart(2, '0')}-${String(monday.getUTCDate()).padStart(2, '0')}`;
+}
+function groupKeyOf(dateStr, granularity) {
+    if (granularity === 'month')
+        return dateStr.slice(0, 7); // YYYY-MM
+    if (granularity === 'week')
+        return weekKeyOf(dateStr);
+    return dateStr;
+}
+/**
+ * Warm/cold defaults for the recall path: a bare call looks back
+ * RECALL_WARM_DAYS (warm); a keyword query searches the full history (cold),
+ * unless the caller pins explicit dates. Args use the tool schema's
+ * snake_case names; the result is normalized to camelCase.
+ */
+function resolveExperienceRecallQuery(args, today = new Date()) {
+    const limit = Math.max(1, Math.min(exports.RECALL_MAX_LIMIT, Math.floor(args.limit ?? 10)));
+    const query = args.query?.trim() || undefined;
+    let dateFrom = normalizeDateArg(args.date_from);
+    const dateTo = normalizeDateArg(args.date_to);
+    if (!query && !dateFrom) {
+        dateFrom = formatLocalDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - exports.RECALL_WARM_DAYS));
+    }
+    return { query, dateFrom, dateTo, granularity: normalizeGranularity(args.granularity), limit };
+}
+/** Plain-text rendering of recall results for the tool response. */
+function formatExperienceRecallResults(summaries, granularity = 'day') {
+    if (!summaries.length) {
+        return 'No experience summaries found for the given range or query. Days before your first dream run have no summary; recent days may not have been consolidated yet — try granularity=day, or widen the range.';
+    }
+    if (granularity === 'day') {
+        return formatDailyRecall(summaries);
+    }
+    return formatGroupedRecall(summaries, granularity);
+}
+function formatDailyRecall(summaries) {
+    const lines = [];
+    for (const summary of summaries) {
+        const text = summary.summaryText.replace(/\s+/g, ' ').trim();
+        const truncated = text.length > RECALL_ENTRY_MAX_CHARS ? `${text.slice(0, RECALL_ENTRY_MAX_CHARS)}…` : text;
+        lines.push(`${summary.summaryDate}: ${truncated}`);
+        for (const ref of summary.sessionRefs ?? []) {
+            const title = ref.title?.trim();
+            lines.push(`  - session:${ref.sessionId}${title ? ` ${title}` : ''}`);
+        }
+    }
+    return [
+        ...lines,
+        '',
+        'These daily summaries index your full experience records, and the session: references above point at the complete conversations behind them. When a task resembles something you did before, search the relevant conversation with conversation_search first: reuse the approaches that worked, and avoid the pitfalls you already stepped into.',
+    ].join('\n');
+}
+function formatGroupedRecall(summaries, granularity) {
+    // Preserve first-seen order of groups (summaries arrive newest-first).
+    const groupOrder = [];
+    const byGroup = new Map();
+    for (const summary of summaries) {
+        const key = groupKeyOf(summary.summaryDate, granularity);
+        if (!byGroup.has(key)) {
+            groupOrder.push(key);
+            byGroup.set(key, []);
+        }
+        byGroup.get(key).push(summary);
+    }
+    const label = granularity === 'week' ? 'Week of' : 'Month';
+    const lines = [];
+    for (const key of groupOrder) {
+        const group = byGroup.get(key);
+        const dates = group.map((item) => item.summaryDate).sort();
+        const span = dates.length > 1 ? `${dates[dates.length - 1]}..${dates[0]}` : dates[0];
+        lines.push(`${label} ${key} (${group.length} day${group.length > 1 ? 's' : ''}, ${span}):`);
+        for (const summary of group) {
+            const text = summary.summaryText.replace(/\s+/g, ' ').trim();
+            const truncated = text.length > RECALL_ENTRY_MAX_CHARS ? `${text.slice(0, RECALL_ENTRY_MAX_CHARS)}…` : text;
+            lines.push(`  - ${summary.summaryDate}: ${truncated}`);
+        }
+    }
+    return [
+        ...lines,
+        '',
+        `Summaries above are grouped by ${granularity} to compress a long range. For a specific day's full detail (and the session: references), re-call with granularity=day and a tight date_from/date_to. When a task resembles something you did before, search the relevant conversation with conversation_search.`,
+    ].join('\n');
+}
+/**
+ * Raw-episode fallback for date ranges that have no dream summary yet (the bot
+ * was off, or dreaming was enabled late). Rendered as a compact timeline of
+ * episode titles so the time-anchored recall is never blind for un-dreamed
+ * days. Episodes are the shared fact source, so this adds no duplication.
+ */
+function formatExperienceTimelineFallback(input) {
+    if (!input.episodes.length) {
+        return `No raw episodes found for ${input.dateFrom ?? 'the range'}${input.dateTo ? `..${input.dateTo}` : ''} either — there may genuinely be no activity in that window.`;
+    }
+    const lines = input.episodes.map((episode) => {
+        const when = new Date(episode.startedAt).toISOString().slice(0, 10);
+        const title = typeof episode.title === 'string' && episode.title.trim() ? episode.title.trim() : `${episode.sourceChannel}/${episode.episodeType}`;
+        return `- ${when} [${episode.episodeType}]: ${title}`;
+    });
+    return [
+        `No dream summaries were consolidated for ${input.dateFrom ?? 'this range'}${input.dateTo ? `..${input.dateTo}` : ''}, but the raw activity timeline shows ${input.episodes.length} episode(s):`,
+        ...lines,
+        'These episodes were not yet distilled into a daily summary; re-call later (after the nightly dream) or with granularity=day for a summarized view.',
+    ].join('\n');
+}

@@ -22,7 +22,7 @@ Separate read targets from write actors.
 - Do not infer that the target Bot and local publishing Bot are the same unless the human says so.
 - Confirm the MetaBot actor before every on-chain write.
 - Before upload batches or final on-chain writes, state the MetaBot actor, chain, and files or payload being written.
-- Do not omit `--from` unless the human explicitly confirms that the active identity is the intended owner.
+- Do not omit `--from` unless the human explicitly confirms that the Twin Bot is the intended owner.
 
 Commands that write chain data require explicit confirmation through the command contract, usually `--confirm`.
 

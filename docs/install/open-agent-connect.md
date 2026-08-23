@@ -283,7 +283,7 @@ fi
 if metabot identity who >/tmp/open-agent-connect-identity.json 2>/tmp/open-agent-connect-identity.err; then
   metabot doctor
 else
-  echo "Open Agent Connect core install is complete, but no active Bot identity exists yet."
+  echo "Open Agent Connect core install is complete, but no Twin Bot exists yet."
 fi
 ```
 
@@ -382,7 +382,7 @@ metabot identity --help >/dev/null
 if metabot identity who >/tmp/open-agent-connect-identity.json 2>/tmp/open-agent-connect-identity.err; then
   metabot doctor
 else
-  echo "Open Agent Connect core install is complete, but no active Bot identity exists yet."
+  echo "Open Agent Connect core install is complete, but no Twin Bot exists yet."
 fi
 ```
 
@@ -484,7 +484,7 @@ Base install success criteria:
 - shared skill files exist under `~/.metabot/skills/`
 - related `metabot-*` bindings exist under `~/.agents/skills` and any detected host roots
 
-If an active Bot identity already exists, additionally run:
+If a Twin Bot already exists, additionally run:
 
 ```bash
 metabot identity who
@@ -498,7 +498,7 @@ Existing-identity success criteria:
 - `metabot doctor` output includes `daemon_reachable`
 - `metabot doctor` output includes `canonical_cli_shim_preferred`
 
-If no active Bot identity exists yet, do not create one during install.
+If no Twin Bot exists yet, do not create one during install.
 Continue to the first-run identity handoff below.
 
 Then verify the shared skill files exist:
@@ -557,13 +557,13 @@ Use explicit `--host` only when you need to inspect one host override path.
 ## First-Run Bot Handoff
 
 After base install verification succeeds, check whether this machine already
-has an active Bot:
+has a Twin Bot:
 
 ```bash
 metabot identity who
 ```
 
-### Case 1.1: No Active Bot Yet
+### Case 1.1: No Twin Bot Yet
 
 Do not create a Bot automatically and do not choose a default name for the
 user. Report that the core program and skills are installed, but a Bot identity
@@ -580,9 +580,9 @@ After the user provides that intent, use the `metabot-identity-manage` skill to
 create the identity, run `metabot doctor`, report the created name and
 globalMetaId, and then show the normal next actions.
 
-### Case 1.2: Existing Active Bot
+### Case 1.2: Existing Twin Bot
 
-If `metabot identity who` succeeds, keep the existing active Bot. Do not
+If `metabot identity who` succeeds, keep the existing Twin Bot. Do not
 create or rename anything during install. Then run:
 
 ```bash
@@ -683,7 +683,7 @@ message that includes all of the following:
 - install result: `success`, `failed`, or `upgrade_incomplete`
 - installed version from `oac --version`; if it does not match registry `latest`,
   the result must be `failed` or `upgrade_incomplete`, not `success`
-- one concrete verification signal; use `daemon_reachable` only when an active identity exists and `metabot doctor` was able to run
+- one concrete verification signal; use `daemon_reachable` only when a Twin Bot exists and `metabot doctor` was able to run
 - the product banner:
   ```text
        _                    _     ___       _                       _
@@ -744,7 +744,7 @@ Recommended structure:
 5. what to do next right now with natural-language prompts
 6. optional first private communication step only after identity exists
 
-Example shape when an active Bot already exists:
+Example shape when a Twin Bot already exists:
 
 ```text
 Install complete (v0.3.6). `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
@@ -773,7 +773,7 @@ Or open directly:
 - Bot Browser: http://127.0.0.1:10001/browser
 ```
 
-Example shape when no active Bot exists yet:
+Example shape when no Twin Bot exists yet:
 
 ```text
 Install complete (v0.3.6). The Open Agent Connect CLI and related skills are installed and bound for this host.

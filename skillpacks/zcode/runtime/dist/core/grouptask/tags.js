@@ -1,0 +1,242 @@
+"use strict";
+/**
+ * Group Task tag grammar + turn-taking decisions — pure functions ported from
+ * the proven IDBots engine (groupTaskDeliverableParser / mention utils /
+ * decideGroupTaskResponders). No IO here: the engine module wires these to the
+ * store and the chain.
+ *
+ * Tag emitters: chair-only tags are [STATUS:...], [CHECKPOINT:...],
+ * [CHECKPOINT_RESOLVED...], [PLAN_CHANGE:...]; worker tags are [DELIVERABLE],
+ * [WORKING], [STANDBY]; [NO_REPLY] is an LLM-output escape hatch (never sent
+ * on-chain); [DEPENDS_ON:...] rides on chair dispatch messages.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.HOST_NOTICE_PREFIX = exports.CHECKPOINT_ANY_TAG = exports.DEPENDS_ON_TAG = exports.STANDBY_TAG = exports.WORKING_TAG = exports.NO_REPLY_TAG = exports.PLAN_CHANGE_TAG = exports.CHECKPOINT_RESOLVED_TAG = exports.CHECKPOINT_OPEN_TAG = exports.STATUS_TAG = exports.DELIVERABLE_TAG = void 0;
+exports.parseDeliverableCandidates = parseDeliverableCandidates;
+exports.parseWorkingAck = parseWorkingAck;
+exports.parseGroupTaskTags = parseGroupTaskTags;
+exports.isNoReplyResponse = isNoReplyResponse;
+exports.isHostNotice = isHostNotice;
+exports.isEnforceableDependencyToken = isEnforceableDependencyToken;
+exports.isMentioned = isMentioned;
+exports.decideGroupTaskResponders = decideGroupTaskResponders;
+// ---------------------------------------------------------------------------
+// Tag regexes (exact IDBots grammar)
+// ---------------------------------------------------------------------------
+exports.DELIVERABLE_TAG = /\[DELIVERABLE\]/i;
+exports.STATUS_TAG = /\[STATUS:\s*(EXECUTING|REVIEW)\s*\]/i;
+exports.CHECKPOINT_OPEN_TAG = /\[CHECKPOINT:\s*([^\]\n]+?)\s*\]/i;
+exports.CHECKPOINT_RESOLVED_TAG = /\[CHECKPOINT_RESOLVED(?::\s*([^\]\n]+?)\s*)?\]/i;
+exports.PLAN_CHANGE_TAG = /\[PLAN_CHANGE:\s*([^\]\n]+?)\s*\]/gi;
+/** Must START the LLM reply to suppress the on-chain send. */
+exports.NO_REPLY_TAG = /^\[NO_REPLY\]/i;
+exports.WORKING_TAG = /\[WORKING\]/i;
+exports.STANDBY_TAG = /\[STANDBY\]/i;
+exports.DEPENDS_ON_TAG = /\[DEPENDS_ON:\s*([^\]]+)\]/i;
+/** Strips every checkpoint-family tag for display summaries. */
+exports.CHECKPOINT_ANY_TAG = /\[CHECKPOINT(?:_[A-Z]+)?(?::[^\]]*)?\]/gi;
+/** Host-generated notice prefix (welcome / pause / resume / review lines). */
+exports.HOST_NOTICE_PREFIX = '[GROUP_TASK_NOTICE:';
+const PIN_ID_RE = /^[0-9a-f]{64}i\d+$/u;
+const TXID_RE = /^[0-9a-f]{64}$/u;
+const PLAN_CHANGE_MAX_CHARS = 240;
+const WORKING_NOTE_MAX_CHARS = 120;
+// ---------------------------------------------------------------------------
+// Deliverable parsing (line-scoped, strict URI rules)
+// ---------------------------------------------------------------------------
+const CORRECTION_RE = /更正|修正|纠正|勘误|correction|corrected|revise[ds]?\b/iu;
+const URI_TOKEN_RE = /(metaapp:\/\/\S+|metafile:\/\/\S+|https?:\/\/\S+|\b[0-9a-f]{64}i\d+\b)/giu;
+function trimTrailingPunctuation(token) {
+    return token.replace(/[)\].,;:!?、。》】]+$/u, '');
+}
+/**
+ * Validate one URI-like token. Returns the canonical {kind, uri} or null when
+ * the token is a fabrication (bad hex, placeholder, hostless URL).
+ */
+function classifyUriToken(raw) {
+    const token = trimTrailingPunctuation(raw.trim());
+    if (!token || token.includes('…') || token.includes('...'))
+        return null;
+    const lower = token.toLowerCase();
+    if (lower.startsWith('metaapp://')) {
+        const id = lower.slice('metaapp://'.length);
+        return PIN_ID_RE.test(id) ? { kind: 'metaapp', uri: `metaapp://${id}` } : null;
+    }
+    if (lower.startsWith('metafile://')) {
+        const id = lower.slice('metafile://'.length);
+        return PIN_ID_RE.test(id) ? { kind: 'metafile', uri: `metafile://${id}` } : null;
+    }
+    if (lower.startsWith('http://') || lower.startsWith('https://')) {
+        try {
+            const url = new URL(token);
+            return url.hostname ? { kind: 'link', uri: token } : null;
+        }
+        catch {
+            return null;
+        }
+    }
+    if (PIN_ID_RE.test(lower))
+        return { kind: 'pin', uri: lower };
+    return null;
+}
+/**
+ * Extract deliverable candidates from a message. Line-scoped: each line
+ * containing [DELIVERABLE] yields one candidate per tag occurrence, its
+ * payload being the text after that tag. Lines with a URI-shaped token that
+ * fails validation are dropped (fabrication guard); URI-free payloads become
+ * text deliverables.
+ */
+function parseDeliverableCandidates(content) {
+    const candidates = [];
+    for (const line of content.split(/\r?\n/u)) {
+        if (!exports.DELIVERABLE_TAG.test(line))
+            continue;
+        const segments = line.split(/\[DELIVERABLE\]/iu).slice(1);
+        for (const segment of segments) {
+            const payload = segment.trim();
+            if (!payload)
+                continue;
+            const correction = CORRECTION_RE.test(line);
+            URI_TOKEN_RE.lastIndex = 0;
+            const uriTokens = payload.match(URI_TOKEN_RE) ?? [];
+            if (uriTokens.length === 0) {
+                candidates.push({ kind: 'text', uri: null, payload, correction });
+                continue;
+            }
+            const classified = classifyUriToken(uriTokens[0]);
+            if (!classified)
+                continue;
+            candidates.push({ kind: classified.kind, uri: classified.uri, payload, correction });
+        }
+    }
+    return candidates;
+}
+/** Parse a [WORKING] acknowledgement: note after the tag + optional ETA. */
+function parseWorkingAck(content) {
+    const match = content.match(/\[WORKING\]\s*([^\n]*)/iu);
+    if (!match)
+        return null;
+    const note = (match[1] ?? '').trim().slice(0, WORKING_NOTE_MAX_CHARS);
+    const eta = note.match(/(\d{1,4})\s*(?:分钟|min(?:ute)?s?\b)/iu);
+    const etaMinutes = eta ? Math.max(1, Number.parseInt(eta[1], 10)) : null;
+    return { note, etaMinutes: Number.isFinite(etaMinutes) ? etaMinutes : null };
+}
+/** Parse every engine-relevant tag of one message body. */
+function parseGroupTaskTags(content) {
+    const statusMatch = content.match(exports.STATUS_TAG);
+    const checkpointMatch = content.match(exports.CHECKPOINT_OPEN_TAG);
+    const resolvedMatch = content.match(exports.CHECKPOINT_RESOLVED_TAG);
+    const dependsMatch = content.match(exports.DEPENDS_ON_TAG);
+    const planChanges = [];
+    exports.PLAN_CHANGE_TAG.lastIndex = 0;
+    for (const match of content.matchAll(exports.PLAN_CHANGE_TAG)) {
+        const line = (match[1] ?? '').trim().slice(0, PLAN_CHANGE_MAX_CHARS);
+        if (line && !planChanges.includes(line))
+            planChanges.push(line);
+    }
+    return {
+        deliverables: parseDeliverableCandidates(content),
+        status: statusMatch ? statusMatch[1].toLowerCase() : null,
+        checkpointTopic: checkpointMatch ? checkpointMatch[1].trim() : null,
+        checkpointResolved: resolvedMatch !== null,
+        checkpointDecision: resolvedMatch?.[1]?.trim() || null,
+        planChanges,
+        working: parseWorkingAck(content),
+        standby: exports.STANDBY_TAG.test(content),
+        dependsOn: dependsMatch ? dependsMatch[1].trim() : null,
+    };
+}
+/** True when an LLM reply opted out of speaking ([NO_REPLY] at line start). */
+function isNoReplyResponse(reply) {
+    return exports.NO_REPLY_TAG.test(reply.trim());
+}
+/** True for host-generated notice lines (never trigger engine replies). */
+function isHostNotice(content) {
+    return content.trimStart().startsWith(exports.HOST_NOTICE_PREFIX);
+}
+/** [DEPENDS_ON] token is enforceable only when it names a pin or txid. */
+function isEnforceableDependencyToken(token) {
+    const lower = token.trim().toLowerCase();
+    return PIN_ID_RE.test(lower) || TXID_RE.test(lower);
+}
+function normalizeId(value) {
+    return (value ?? '').trim().toLowerCase();
+}
+function escapeRegExp(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+/**
+ * A bot is mentioned when the message mention array carries its
+ * GlobalMetaID/MetaID, or the body contains an explicit `@Name` with word
+ * boundaries (a bare name without `@` does not count).
+ */
+function isMentioned(message, target) {
+    const gmid = normalizeId(target.globalMetaId);
+    const metaId = normalizeId(target.metaId);
+    for (const entry of message.mention ?? []) {
+        const id = normalizeId(entry);
+        if (id && (id === gmid || (metaId && id === metaId)))
+            return true;
+    }
+    const name = target.name.trim();
+    if (!name)
+        return false;
+    const pattern = new RegExp(`@${escapeRegExp(name)}(?![\\w\\p{Script=Han}])`, 'iu');
+    return pattern.test(message.content);
+}
+/**
+ * Decide which local seats reply to one inbound message (IDBots
+ * decideGroupTaskResponders semantics):
+ * - never: empty body, terminal task, suspect sender, self, host notices;
+ * - human-gate (review OR open checkpoint): workers silent even when
+ *   mentioned; chair answers the owner only;
+ * - normal: workers only when mentioned; chair by mention > owner message >
+ *   [DELIVERABLE] > floor control (only when nobody specific was addressed).
+ */
+function decideGroupTaskResponders(input) {
+    const content = input.message.content.trim();
+    if (!content || isHostNotice(content))
+        return [];
+    if (input.taskStatus === 'done' || input.taskStatus === 'cancelled')
+        return [];
+    if (input.message.senderSuspect)
+        return [];
+    const senderGmid = normalizeId(input.message.senderGlobalMetaId);
+    const ownerGmid = normalizeId(input.ownerGlobalMetaId);
+    const fromOwner = Boolean(ownerGmid) && senderGmid === ownerGmid;
+    const humanGate = input.taskStatus === 'review' || input.hasOpenCheckpoint;
+    const decisions = [];
+    const chair = input.seats.find((seat) => seat.role === 'chair') ?? null;
+    const chairIsSender = chair !== null && normalizeId(chair.globalMetaId) === senderGmid;
+    let anyoneAddressed = false;
+    for (const seat of input.seats) {
+        if (normalizeId(seat.globalMetaId) === senderGmid)
+            continue;
+        if (!isMentioned(input.message, seat))
+            continue;
+        anyoneAddressed = true;
+        if (seat.role === 'worker' && !humanGate) {
+            decisions.push({ slug: seat.slug, role: 'worker', reason: 'worker_mentioned' });
+        }
+    }
+    if (chair && !chairIsSender) {
+        const chairMentioned = isMentioned(input.message, chair);
+        if (humanGate) {
+            if (fromOwner)
+                decisions.push({ slug: chair.slug, role: 'chair', reason: 'chair_owner_message' });
+        }
+        else if (chairMentioned) {
+            decisions.push({ slug: chair.slug, role: 'chair', reason: 'chair_mentioned' });
+        }
+        else if (fromOwner) {
+            decisions.push({ slug: chair.slug, role: 'chair', reason: 'chair_owner_message' });
+        }
+        else if (exports.DELIVERABLE_TAG.test(content)) {
+            decisions.push({ slug: chair.slug, role: 'chair', reason: 'chair_deliverable' });
+        }
+        else if (!anyoneAddressed) {
+            decisions.push({ slug: chair.slug, role: 'chair', reason: 'chair_floor_control' });
+        }
+    }
+    return decisions;
+}

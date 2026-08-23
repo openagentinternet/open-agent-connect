@@ -54,6 +54,8 @@ export interface MetaAppArtifactCacheStore {
     artifactsRoot: string;
     pinsRoot: string;
     getArtifact(input: MetaAppArtifactDescriptor): Promise<MetaAppArtifactCacheEntry | null>;
+    /** Look up a previously extracted package by MetaApp pinId (pin record + artifact). */
+    getArtifactByPinId(pinId: string): Promise<MetaAppArtifactCacheEntry | null>;
     writeArtifact(input: MetaAppArtifactDescriptor & {
         archive: Buffer;
     }): Promise<MetaAppArtifactCacheEntry>;

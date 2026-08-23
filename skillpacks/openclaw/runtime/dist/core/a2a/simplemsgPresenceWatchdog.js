@@ -4,7 +4,7 @@ exports.createA2ASimplemsgPresenceWatchdog = createA2ASimplemsgPresenceWatchdog;
 const socketPresenceDirectory_1 = require("../discovery/socketPresenceDirectory");
 const DEFAULT_WATCHDOG_INTERVAL_MS = 30_000;
 const DEFAULT_WATCHDOG_GRACE_PERIOD_MS = 60_000;
-const DEFAULT_WATCHDOG_RESTART_COOLDOWN_MS = 180_000;
+const DEFAULT_WATCHDOG_RESTART_COOLDOWN_MS = 600_000;
 const DEFAULT_SOCKET_PRESENCE_LIMIT = 100;
 function normalizeText(value) {
     return typeof value === 'string' ? value.trim() : '';

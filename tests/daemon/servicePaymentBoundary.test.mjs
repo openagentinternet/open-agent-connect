@@ -31,7 +31,8 @@ const {
 const { parseDeliveryMessage, parseNeedsRatingMessage, buildOrderEndMessage } = require('../../dist/core/a2a/protocol/orderProtocol.js');
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { buildA2ASimplemsgInboundDispatcher } = require('../../dist/cli/runtime.js');
-const { upsertIdentityProfile, setActiveMetabotHome } = require('../../dist/core/identity/identityProfiles.js');
+const { upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
+const { writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
 const { createFileSecretStore } = require('../../dist/core/secrets/fileSecretStore.js');
 
 const DEFAULT_HANDLERS_MODULE_PATH = require.resolve('../../dist/daemon/defaultHandlers.js');
@@ -1186,7 +1187,7 @@ test('services call --from pays with the selected profile wallet instead of the 
     globalMetaId: selectedIdentity.globalMetaId,
     mvcAddress: selectedIdentity.mvcAddress,
   });
-  await setActiveMetabotHome({ systemHomeDir, homeDir: harness.homeDir });
+  await writeBotRoleInfo(resolveMetabotPaths(harness.homeDir).botRoleStatePath, { botType: 'twin' });
   await createFileSecretStore(selectedHomeDir).writeIdentitySecrets({
     mnemonic: 'selected buyer seed phrase',
     path: "m/44'/10001'/0'/0/0",

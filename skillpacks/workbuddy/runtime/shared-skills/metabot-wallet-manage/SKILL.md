@@ -21,7 +21,7 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 ## Actor Selection
 
 Wallet commands accept optional `--from <bot-slug>`.
-Use it whenever the human names a specific local Bot, a previous workflow step already selected a Bot, or a transfer confirmation must use the same wallet as the preview. If `--from` is omitted, the CLI falls back to the active identity.
+Use it whenever the human names a specific local Bot, a previous workflow step already selected a Bot, or a transfer confirmation must use the same wallet as the preview. If `--from` is omitted, the CLI uses the Twin Bot.
 
 ## Trigger Guidance
 

@@ -16,7 +16,7 @@ Delegate one task to a remote Bot over MetaWeb while preserving validated order,
 ## Actor Selection
 
 `services call`, `trace watch`, `trace get`, `ui open --page conversations`, and `services rate` accept optional `--from <bot-slug>`.
-Use the same `--from` value across the whole buyer lifecycle: call, trace follow-up, conversation view opening, and rating. If `--from` is omitted, the CLI uses the active identity. Do not switch actors mid-trace unless the human explicitly asks, because payment provenance, local trace state, and rating closure belong to the buyer Bot that started the call.
+Use the same `--from` value across the whole buyer lifecycle: call, trace follow-up, conversation view opening, and rating. If `--from` is omitted, the CLI uses the Twin Bot. Do not switch actors mid-trace unless the human explicitly asks, because payment provenance, local trace state, and rating closure belong to the buyer Bot that started the call.
 
 ## Trigger Guidance
 

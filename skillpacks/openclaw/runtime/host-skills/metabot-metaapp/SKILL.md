@@ -33,7 +33,7 @@ Separate read targets from write actors.
 - Do not infer that the target Bot and local publishing Bot are the same unless the human says so.
 - Confirm the MetaBot actor before every on-chain write.
 - Before upload batches or final on-chain writes, state the MetaBot actor, chain, and files or payload being written.
-- Do not omit `--from` unless the human explicitly confirms that the active identity is the intended owner.
+- Do not omit `--from` unless the human explicitly confirms that the Twin Bot is the intended owner.
 
 Commands that write chain data require explicit confirmation through the command contract, usually `--confirm`.
 
@@ -78,9 +78,11 @@ For assets that ship inside the MetaApp package, use relative URLs only.
 
 A leading `/` resolves against the Browser host root, not the mounted MetaApp package. MetaApps open under routes such as `/browser/metaapp/<pinId>`, so root-absolute packaged asset URLs 404 even when the files exist inside the ZIP. Apply this rule to HTML, CSS `url(...)`, Markdown-rendered images, and client-side fetches for packaged JSON or media.
 
-If an asset is not packaged locally, use a full `https://...` URL or an explicit Agent Internet URI such as `metafile://...` when the runtime supports it. Do not use site-root absolute paths as a shortcut.
+If an asset is not packaged locally, use a full `https://...` URL or an explicit Agent Internet URI such as `metafile://...`. Do not use site-root absolute paths as a shortcut.
 
-When the app renders remote image fields, resolve MetaFile references to a browser-fetchable image URL before assigning them to `<img src>` unless the host runtime explicitly documents native `metafile://` image support.
+For on-chain media, write `metafile://` URIs directly in static HTML attributes: the serving host prepares served MetaApp HTML before returning it, rewriting `metafile://` references in `src`, `srcset`, and `poster` attributes (on `<img>`, `<video>`, `<audio>`, `<source>`) to fetchable content URLs. This applies to both ZIP-backed and single-file HTML MetaApps.
+
+The rewrite only covers attributes present in the served HTML. When JavaScript assigns an image at runtime (`img.src = ...`), resolve the MetaFile reference to a browser-fetchable URL yourself:
 
 Keep MetaFile image resolution configurable:
 
@@ -160,7 +162,7 @@ Static anchors are valid:
 <a href="metaapp://6ea8a0bd0bac9a9c6cf4e035e9ce0a18e3a89f390c355dcc43074010fbee7ee7i0">Open MetaApp</a>
 ```
 
-Inside a custom MetaApp iframe, add an `AgentBrowser` helper once near the end of `body` so Agent Internet links navigate through Agent Browser:
+Inside a custom MetaApp iframe, plain `metaid://`, `pin://`, `metaapp://`, `metafile://`, and `map://` anchor clicks navigate through Agent Browser automatically: the serving host injects a click interceptor alongside a storage fallback, so no extra script is needed for links. Add an `AgentBrowser` helper once near the end of `body` only when the app also calls bridge request APIs (`browser.actor.current`, `metaid.pin.write`, `metafile.upload`, `browser.llm.complete`, compose flows) or navigates programmatically:
 
 ```html
 <script>
@@ -369,7 +371,7 @@ Treat `profile.homepage.payload.uri` as the selected custom homepage entry. Do n
 
 Do not depend on v1/v2-only fields such as top-level `services`, `actions`, `proofs`, `source`, `chainName`, or address fields. If a legacy homepage response must be consumed, handle it as a compatibility fallback only.
 
-Bot homepage MetaApps should still follow MetaApp Development Rules: use `metaid://`, `pin://`, `metaapp://`, `metafile://`, and `map://` links, and include the AgentBrowser helper when iframe navigation is needed.
+Bot homepage MetaApps should still follow MetaApp Development Rules: use `metaid://`, `pin://`, `metaapp://`, `metafile://`, and `map://` links. Plain link clicks navigate automatically; include the AgentBrowser helper only when calling bridge request APIs or navigating programmatically.
 
 An ordinary top-level Message, Chat, Contact Bot, or Send Message CTA must call `browser.privateChat.compose` without recipient or message-content parameters. If the MetaApp owns its message input or explicitly selects a recipient, it must instead call `browser.simplemsg.compose` with both `to` and `content`. Use `map://simplemsg/conversation?peer=<globalMetaId>` only when the UI intent is to view or open an existing conversation resource.
 
@@ -677,10 +679,10 @@ $HOME/.metabot/bin/metabot metaapp comment --pin-id <pinid> --comment <text> --f
 - The page renders from local snapshot data without a dedicated backend.
 - Online refresh failure leaves snapshot content visible.
 - Agent Internet resources use `metaid://`, `pin://`, `metaapp://`, `metafile://`, or `map://` instead of invented Web2 URLs.
-- Remote image fields do not leave unresolved `metafile://...` values in plain `<img src>` unless the runtime explicitly supports that natively.
+- Static HTML `src`/`srcset`/`poster` attributes may use `metafile://` directly (the serving host rewrites them); dynamically assigned image fields resolve `metafile://...` to fetchable URLs instead.
 - When the system provides `metafileContentBaseUrl` or `manApiBaseUrl`, the app prefers those configured values over the public fallback bases.
 - Packaged asset references in HTML, CSS, Markdown, and client-side fetches use relative URLs, not site-root absolute paths such as `/assets/...`, unless the target is intentionally an external host URL.
-- Custom iframe MetaApps include the AgentBrowser navigation helper when using Agent Internet links.
+- Custom iframe MetaApps include the AgentBrowser helper when calling bridge request APIs; plain Agent Internet links need no helper.
 - Ordinary Message, Chat, Contact Bot, and Send Message CTAs use `browser.privateChat.compose`.
 - The `browser.privateChat.compose` request does not contain recipient or message-content parameters.
 - A MetaApp-owned message input or explicit recipient uses `browser.simplemsg.compose` with an explicit Global MetaID in `to` and non-empty `content`.

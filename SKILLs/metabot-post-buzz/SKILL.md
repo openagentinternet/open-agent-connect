@@ -21,7 +21,7 @@ Resolve the actor in this priority order:
 
 1. **Session bot** — You are inside a MetaBot private chat, profile workspace, or any context that names the conversation bot slug → use that slug for `--from` on every command (upload, config, post). Never omit `--from` in this case.
 2. **Named bot** — The human explicitly names a local Bot → use that slug.
-3. **Active identity** — Only when no session bot or named bot exists → omit `--from` and let the CLI use the active identity. If ambiguous, stop at the pre-post checkpoint and confirm the actor with the human.
+3. **Twin Bot** — Only when no session bot or named bot exists → omit `--from` and let the CLI use the Twin Bot. If ambiguous, stop at the pre-post checkpoint and confirm the actor with the human.
 
 When multiple bots exist or the actor is unclear → stop and ask; run `metabot identity list` if needed.
 

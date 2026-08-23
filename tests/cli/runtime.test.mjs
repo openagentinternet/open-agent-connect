@@ -18,7 +18,9 @@ const {
   getDefaultDaemonPort,
   refreshA2ASimplemsgListenerForIdentityProfileRegistration,
 } = require('../../dist/cli/runtime.js');
+const { writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
 const { createMetabotProfile, updateMetabotProfile } = require('../../dist/core/bot/metabotProfileManager.js');
+const { applyTwinInvariant, resolveCurrentTwinSlug } = require('../../dist/core/bot/twinRole.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
 const { createLlmRuntimeResolver } = require('../../dist/core/llm/llmRuntimeResolver.js');
@@ -187,7 +189,6 @@ async function ensureIndexedProfileHome(homeDir) {
   const systemHome = deriveSystemHome(homeDir);
   const managerRoot = path.join(systemHome, '.metabot', 'manager');
   const profilesPath = path.join(managerRoot, 'identity-profiles.json');
-  const activeHomePath = path.join(managerRoot, 'active-home.json');
   await mkdir(managerRoot, { recursive: true });
 
   const profilesState = await readJsonFileWithTransientRetry(profilesPath, { profiles: [] });
@@ -205,11 +206,6 @@ async function ensureIndexedProfileHome(homeDir) {
     });
     await writeFileAtomic(profilesPath, `${JSON.stringify({ profiles: existingProfiles }, null, 2)}\n`);
   }
-
-  await writeFileAtomic(
-    activeHomePath,
-    `${JSON.stringify({ homeDir: normalizedHomeDir, updatedAt: Date.now() }, null, 2)}\n`,
-  );
 }
 
 async function runCommand(homeDir, args, envOverrides = {}) {
@@ -926,7 +922,7 @@ test('runtime home selection rejects a legacy-only .metabot hot layout', async (
   );
 });
 
-test('runtime home selection reports no active profile initialized instead of falling back to raw HOME', async () => {
+test('runtime home selection reports no twin bot initialized instead of falling back to raw HOME', async () => {
   const systemHome = await mkdtempTempRoot('metabot-system-home-');
 
   assert.throws(
@@ -936,7 +932,7 @@ test('runtime home selection reports no active profile initialized instead of fa
       },
       cwd: systemHome,
     }),
-    /no active profile initialized/i
+    /no twin bot initialized/i
   );
 });
 
@@ -1053,7 +1049,7 @@ test('identity create returns identity_name_conflict when an active identity wit
   assert.equal(state.identity.name, 'Bob');
 });
 
-test('identity list/assign/who supports switching active local bot home across registered profiles', async (t) => {
+test('identity list/who resolve the twin bot home as the default across registered profiles', async (t) => {
   const systemHome = await mkdtempTempRoot('metabot-system-home-');
   const bobHome = path.join(systemHome, '.metabot', 'profiles', 'bob');
   const charlesHome = path.join(systemHome, '.metabot', 'profiles', 'charles');
@@ -1075,108 +1071,47 @@ test('identity list/assign/who supports switching active local bot home across r
   assert.equal(createdCharles.payload.ok, true);
   assert.equal(createdCharles.payload.data.name, 'Charles');
 
+  // The first-created Bot carries the twin role and is the default home.
   const listed = await runCommandWithEnv(systemHome, ['identity', 'list'], commonEnv);
   assert.equal(listed.exitCode, 0);
   assert.equal(listed.payload.ok, true);
   assert.equal(Array.isArray(listed.payload.data.profiles), true);
   assert.equal(listed.payload.data.profiles.some((profile) => profile.name === 'Bob'), true);
   assert.equal(listed.payload.data.profiles.some((profile) => profile.name === 'Charles'), true);
-  assert.equal(listed.payload.data.activeHomeDir, charlesHome);
+  assert.equal(listed.payload.data.activeHomeDir, bobHome);
 
-  const assignedBob = await runCommandWithEnv(systemHome, ['identity', 'assign', '--name', 'Bob'], commonEnv);
-  assert.equal(assignedBob.exitCode, 0);
-  assert.equal(assignedBob.payload.ok, true);
-  assert.equal(assignedBob.payload.data.activeHomeDir, bobHome);
+  const whoBob = await runCommandWithEnv(systemHome, ['identity', 'who'], commonEnv);
+  assert.equal(whoBob.exitCode, 0);
+  assert.equal(whoBob.payload.ok, true);
+  assert.equal(whoBob.payload.data.identity.name, 'Bob');
+  assert.equal(whoBob.payload.data.activeHomeDir, bobHome);
 
-  const who = await runCommandWithEnv(systemHome, ['identity', 'who'], commonEnv);
-  assert.equal(who.exitCode, 0);
-  assert.equal(who.payload.ok, true);
-  assert.equal(who.payload.data.identity.name, 'Bob');
-  assert.equal(who.payload.data.activeHomeDir, bobHome);
+  // Promoting another Bot to twin moves the default home.
+  await applyTwinInvariant(systemHome, { preferredTwinSlug: 'charles' });
+
+  const listedAfterPromotion = await runCommandWithEnv(systemHome, ['identity', 'list'], commonEnv);
+  assert.equal(listedAfterPromotion.exitCode, 0);
+  assert.equal(listedAfterPromotion.payload.ok, true);
+  assert.equal(listedAfterPromotion.payload.data.activeHomeDir, charlesHome);
+
+  const whoCharles = await runCommandWithEnv(systemHome, ['identity', 'who'], commonEnv);
+  assert.equal(whoCharles.exitCode, 0);
+  assert.equal(whoCharles.payload.ok, true);
+  assert.equal(whoCharles.payload.data.identity.name, 'Charles');
+  assert.equal(whoCharles.payload.data.activeHomeDir, charlesHome);
 });
 
-test('identity assign resolves a slugged profile from a human display name', async () => {
+test('identity assign fails as an unknown subcommand', async () => {
   const systemHome = await mkdtempTempRoot('metabot-system-home-');
-  const managerRoot = path.join(systemHome, '.metabot', 'manager');
-  const canonicalHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhang');
-  await mkdir(canonicalHome, { recursive: true });
-  await mkdir(managerRoot, { recursive: true });
-
-  await writeFile(
-    path.join(managerRoot, 'identity-profiles.json'),
-    `${JSON.stringify({
-      profiles: [{
-        name: 'Charles Zhang',
-        slug: 'charles-zhang',
-        aliases: ['Charles Zhang', 'charles zhang', 'charles-zhang'],
-        homeDir: canonicalHome,
-        globalMetaId: '',
-        mvcAddress: '',
-        createdAt: 1,
-        updatedAt: 1,
-      }],
-    }, null, 2)}\n`,
-    'utf8',
-  );
 
   const assigned = await runCommandWithEnv(systemHome, ['identity', 'assign', '--name', 'Charles Zhang'], {
     HOME: systemHome,
   });
 
-  assert.equal(assigned.exitCode, 0);
-  assert.equal(assigned.payload.ok, true);
-  assert.equal(assigned.payload.data.activeHomeDir, canonicalHome);
-  assert.equal(assigned.payload.data.assignedProfile.slug, 'charles-zhang');
-});
-
-test('identity assign rejects ambiguous near-tied profile matches', async () => {
-  const systemHome = await mkdtempTempRoot('metabot-system-home-');
-  const managerRoot = path.join(systemHome, '.metabot', 'manager');
-  const zhangHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhang');
-  const zhaoHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhao');
-  await mkdir(zhangHome, { recursive: true });
-  await mkdir(zhaoHome, { recursive: true });
-  await mkdir(managerRoot, { recursive: true });
-
-  await writeFile(
-    path.join(managerRoot, 'identity-profiles.json'),
-    `${JSON.stringify({
-      profiles: [
-        {
-          name: 'Charles Zhang',
-          slug: 'charles-zhang',
-          aliases: ['Charles Zhang', 'charles zhang', 'charles-zhang'],
-          homeDir: zhangHome,
-          globalMetaId: '',
-          mvcAddress: '',
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        {
-          name: 'Charles Zhao',
-          slug: 'charles-zhao',
-          aliases: ['Charles Zhao', 'charles zhao', 'charles-zhao'],
-          homeDir: zhaoHome,
-          globalMetaId: '',
-          mvcAddress: '',
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      ],
-    }, null, 2)}\n`,
-    'utf8',
-  );
-
-  const assigned = await runCommandWithEnv(systemHome, ['identity', 'assign', '--name', 'Charles Zh'], {
-    HOME: systemHome,
-  });
-
   assert.equal(assigned.exitCode, 1);
   assert.equal(assigned.payload.ok, false);
-  assert.equal(assigned.payload.code, 'identity_profile_ambiguous');
-  assert.match(assigned.payload.message, /ambiguous/i);
-  assert.match(assigned.payload.message, /Charles Zhang/i);
-  assert.match(assigned.payload.message, /Charles Zhao/i);
+  assert.equal(assigned.payload.code, 'unknown_command');
+  assert.match(assigned.payload.message, /unknown command: identity assign/i);
 });
 
 test('identity create rejects duplicate names across different local homes on the same machine', async (t) => {
@@ -1268,10 +1203,7 @@ test('identity create ignores a fresh explicit noncanonical home and activates t
   assert.equal(who.payload.data.activeHomeDir, canonicalHome);
   assert.equal(who.payload.data.identity.name, 'Alice');
 
-  const activeHome = JSON.parse(
-    await readFile(path.join(systemHome, '.metabot', 'manager', 'active-home.json'), 'utf8')
-  );
-  assert.equal(activeHome.homeDir, canonicalHome);
+  assert.equal(await resolveCurrentTwinSlug(systemHome), 'alice');
 });
 
 test('identity list reads only from manager/identity-profiles.json and does not rewrite it from runtime state', async () => {
@@ -1282,7 +1214,6 @@ test('identity list reads only from manager/identity-profiles.json and does not 
   await mkdir(managerRoot, { recursive: true });
 
   const profilesPath = path.join(managerRoot, 'identity-profiles.json');
-  const activeHomePath = path.join(managerRoot, 'active-home.json');
   const originalState = {
     profiles: [{
       name: 'Bob',
@@ -1297,7 +1228,7 @@ test('identity list reads only from manager/identity-profiles.json and does not 
   };
 
   await writeFile(profilesPath, `${JSON.stringify(originalState, null, 2)}\n`, 'utf8');
-  await writeFile(activeHomePath, `${JSON.stringify({ homeDir: bobHome, updatedAt: 1 }, null, 2)}\n`, 'utf8');
+  await writeBotRoleInfo(resolveMetabotPaths(bobHome).botRoleStatePath, { botType: 'twin' });
   await writeFile(
     runtimePath(bobHome, 'runtime-state.json'),
     `${JSON.stringify({ identity: { name: 'Mallory', globalMetaId: 'gm-mallory', mvcAddress: 'mvc-mallory' }, services: [], traces: [] }, null, 2)}\n`,
@@ -1319,7 +1250,7 @@ test('identity list reads only from manager/identity-profiles.json and does not 
   assert.deepEqual(persisted, originalState);
 });
 
-test('identity who returns an explicit error when no active profile is initialized', async () => {
+test('identity who returns an explicit error when no twin bot is initialized', async () => {
   const systemHome = await mkdtempTempRoot('metabot-system-home-');
 
   const who = await runCommandWithEnv(systemHome, ['identity', 'who'], {
@@ -1329,7 +1260,7 @@ test('identity who returns an explicit error when no active profile is initializ
   assert.equal(who.exitCode, 1);
   assert.equal(who.payload.ok, false);
   assert.equal(who.payload.code, 'identity_profile_not_initialized');
-  assert.match(who.payload.message, /no active profile initialized/i);
+  assert.match(who.payload.message, /no twin bot initialized/i);
 });
 
 test('daemon config restarts keep the previous port so local inspector URLs stay stable', async (t) => {

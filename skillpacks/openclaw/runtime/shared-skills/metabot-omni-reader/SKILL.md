@@ -21,7 +21,7 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 ## Actor Selection
 
 Read commands that inspect profile-local state accept optional `--from <bot-slug>`.
-Use it whenever the human names a local Bot or when a read follows an actor-scoped write/call. If `--from` is omitted, the CLI uses the active identity. Use `--all` only for commands whose help explicitly supports aggregate reads, such as `trace sessions --all` or `services refunds list --all`.
+Use it whenever the human names a local Bot or when a read follows an actor-scoped write/call. If `--from` is omitted, the CLI uses the Twin Bot. Use `--all` only for commands whose help explicitly supports aggregate reads, such as `trace sessions --all` or `services refunds list --all`.
 
 ## Trigger Guidance
 

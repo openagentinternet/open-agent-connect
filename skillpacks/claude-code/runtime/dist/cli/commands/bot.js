@@ -48,6 +48,11 @@ async function runBotCommand(args, context) {
         const dshLlmModel = (0, helpers_1.readFlagValue)(args, '--dsh-llm-model');
         const dshLlmFallbackProvider = (0, helpers_1.readFlagValue)(args, '--dsh-llm-fallback-provider');
         const dshLlmFallbackModel = (0, helpers_1.readFlagValue)(args, '--dsh-llm-fallback-model');
+        const botType = (0, helpers_1.readFlagValue)(args, '--type');
+        if (botType !== null && botType !== 'twin' && botType !== 'worker') {
+            return (0, commandResult_1.commandFailed)('invalid_flag', '--type must be twin or worker.');
+        }
+        const ownerGlobalMetaId = (0, helpers_1.readFlagValue)(args, '--owner');
         return handler({
             name,
             ...(host ? { host } : {}),
@@ -55,6 +60,27 @@ async function runBotCommand(args, context) {
             ...(dshLlmModel ? { dshLlmModel } : {}),
             ...(dshLlmFallbackProvider ? { dshLlmFallbackProvider } : {}),
             ...(dshLlmFallbackModel ? { dshLlmFallbackModel } : {}),
+            ...(botType ? { botType } : {}),
+            ...(ownerGlobalMetaId ? { ownerGlobalMetaId } : {}),
+        });
+    }
+    if (subcommand === 'bind-owner') {
+        const slug = readFromSlug(args);
+        if (!slug)
+            return missingFrom();
+        const handler = context.dependencies.bot?.bindOwner;
+        if (!handler) {
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Bot bind-owner handler is not configured.');
+        }
+        const owner = (0, helpers_1.readFlagValue)(args, '--owner');
+        const unbind = (0, helpers_1.hasFlag)(args, '--unbind');
+        if (owner && unbind) {
+            return (0, commandResult_1.commandFailed)('invalid_flag', '--owner and --unbind cannot be combined.');
+        }
+        return handler({
+            slug,
+            ...(owner ? { ownerGlobalMetaId: owner } : {}),
+            ...(unbind ? { unbind: true } : {}),
         });
     }
     if (subcommand === 'update') {

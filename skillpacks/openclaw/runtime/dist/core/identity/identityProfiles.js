@@ -8,16 +8,11 @@ exports.readIdentityProfilesState = readIdentityProfilesState;
 exports.listIdentityProfiles = listIdentityProfiles;
 exports.upsertIdentityProfile = upsertIdentityProfile;
 exports.deleteIdentityProfile = deleteIdentityProfile;
-exports.readActiveMetabotHomeSync = readActiveMetabotHomeSync;
-exports.readActiveMetabotHome = readActiveMetabotHome;
-exports.setActiveMetabotHome = setActiveMetabotHome;
-const node_fs_1 = __importDefault(require("node:fs"));
-const node_fs_2 = require("node:fs");
+const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const profileNameResolution_1 = require("./profileNameResolution");
 const MANAGER_DIR = 'manager';
 const PROFILES_FILE = 'identity-profiles.json';
-const ACTIVE_HOME_FILE = 'active-home.json';
 const TRANSIENT_JSON_READ_RETRIES = 5;
 const TRANSIENT_JSON_READ_DELAY_MS = 10;
 let atomicWriteSequence = 0;
@@ -143,7 +138,7 @@ function normalizeProfilesState(systemHomeDir, value) {
 async function readJsonFile(filePath) {
     for (let attempt = 0; attempt <= TRANSIENT_JSON_READ_RETRIES; attempt += 1) {
         try {
-            const raw = await node_fs_2.promises.readFile(filePath, 'utf8');
+            const raw = await node_fs_1.promises.readFile(filePath, 'utf8');
             return JSON.parse(raw);
         }
         catch (error) {
@@ -161,7 +156,7 @@ async function readJsonFile(filePath) {
     return null;
 }
 async function ensureManagerRoot(paths) {
-    await node_fs_2.promises.mkdir(paths.managerRoot, { recursive: true });
+    await node_fs_1.promises.mkdir(paths.managerRoot, { recursive: true });
 }
 function serializeProfilesState(state) {
     return `${JSON.stringify(state, null, 2)}\n`;
@@ -173,11 +168,11 @@ function createAtomicWriteTempPath(filePath) {
 async function writeFileAtomic(filePath, content) {
     const tempPath = createAtomicWriteTempPath(filePath);
     try {
-        await node_fs_2.promises.writeFile(tempPath, content, 'utf8');
-        await node_fs_2.promises.rename(tempPath, filePath);
+        await node_fs_1.promises.writeFile(tempPath, content, 'utf8');
+        await node_fs_1.promises.rename(tempPath, filePath);
     }
     catch (error) {
-        await node_fs_2.promises.rm(tempPath, { force: true }).catch(() => undefined);
+        await node_fs_1.promises.rm(tempPath, { force: true }).catch(() => undefined);
         throw error;
     }
 }
@@ -190,7 +185,6 @@ function resolveIdentityManagerPaths(systemHomeDir) {
     return {
         managerRoot,
         profilesPath: node_path_1.default.join(managerRoot, PROFILES_FILE),
-        activeHomePath: node_path_1.default.join(managerRoot, ACTIVE_HOME_FILE),
     };
 }
 async function readIdentityProfilesState(systemHomeDir) {
@@ -281,75 +275,5 @@ async function deleteIdentityProfile(input) {
     await writeIdentityProfilesState(input.systemHomeDir, {
         profiles: current.profiles.filter((profile) => profile.slug !== slug),
     });
-    const paths = resolveIdentityManagerPaths(input.systemHomeDir);
-    const activeHome = parseActiveHomePayload(await readJsonFile(paths.activeHomePath));
-    if (activeHome && node_path_1.default.resolve(activeHome) === node_path_1.default.resolve(deleted.homeDir)) {
-        await node_fs_2.promises.rm(paths.activeHomePath, { force: true });
-    }
     return deleted;
-}
-function parseActiveHomePayload(value) {
-    const record = normalizeRecord(value);
-    if (!record) {
-        return null;
-    }
-    const homeDirRaw = normalizeText(record.homeDir);
-    if (!homeDirRaw) {
-        return null;
-    }
-    return node_path_1.default.resolve(homeDirRaw);
-}
-function readJsonFileSync(filePath) {
-    try {
-        const raw = node_fs_1.default.readFileSync(filePath, 'utf8');
-        return JSON.parse(raw);
-    }
-    catch (error) {
-        const code = error.code;
-        if (code === 'ENOENT' || error instanceof SyntaxError) {
-            return null;
-        }
-        throw error;
-    }
-}
-function validateActiveHome(systemHomeDir, homeDir, profilesState) {
-    if (!homeDir || !isCanonicalProfileHome(systemHomeDir, homeDir)) {
-        return null;
-    }
-    return profilesState.profiles.some((profile) => profile.homeDir === homeDir) ? homeDir : null;
-}
-function readActiveMetabotHomeSync(systemHomeDir) {
-    const paths = resolveIdentityManagerPaths(systemHomeDir);
-    try {
-        const parsed = readJsonFileSync(paths.activeHomePath);
-        const profilesState = normalizeProfilesState(systemHomeDir, readJsonFileSync(paths.profilesPath));
-        return validateActiveHome(systemHomeDir, parseActiveHomePayload(parsed), profilesState);
-    }
-    catch (error) {
-        const code = error.code;
-        if (code === 'ENOENT' || error instanceof SyntaxError) {
-            return null;
-        }
-        return null;
-    }
-}
-async function readActiveMetabotHome(systemHomeDir) {
-    const paths = resolveIdentityManagerPaths(systemHomeDir);
-    await ensureManagerRoot(paths);
-    const [parsed, profilesState] = await Promise.all([
-        readJsonFile(paths.activeHomePath),
-        readIdentityProfilesState(systemHomeDir),
-    ]);
-    return validateActiveHome(systemHomeDir, parseActiveHomePayload(parsed), profilesState);
-}
-async function setActiveMetabotHome(input) {
-    const now = input.now ?? Date.now;
-    const homeDir = node_path_1.default.resolve(normalizeText(input.homeDir));
-    if (!homeDir) {
-        throw new Error('Active metabot home requires a non-empty homeDir.');
-    }
-    const paths = resolveIdentityManagerPaths(input.systemHomeDir);
-    await ensureManagerRoot(paths);
-    await writeFileAtomic(paths.activeHomePath, `${JSON.stringify({ homeDir, updatedAt: now() }, null, 2)}\n`);
-    return homeDir;
 }

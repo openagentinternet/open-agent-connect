@@ -21,13 +21,13 @@ Resolve the actor in this priority order:
 
 1. **Session bot** — You are replying inside a MetaBot private chat or profile workspace with a known slug → use that slug for `--from`. Never omit `--from` in this case.
 2. **Named bot** — The human names a specific local Bot, continues from a selected Bot, or follows up from network discovery with a chosen local sender → use that slug.
-3. **Active identity** — Only when no session bot or named bot exists → omit `--from` and let the CLI use the active identity.
+3. **Twin Bot** — Only when no session bot or named bot exists → omit `--from` and let the CLI use the Twin Bot.
 
 Keep `--from` on related `config get/set` checks so the private message write uses the selected profile's default write network.
 
 For casual chat, also resolve the selected actor's `globalMetaId` so the online candidate list can exclude the local Bot:
 
-- With the active identity, read `{{METABOT_CLI}} identity who` and use `data.identity.globalMetaId`.
+- With the Twin Bot, read `{{METABOT_CLI}} identity who` and use `data.identity.globalMetaId`.
 - With `--from <bot-slug>`, read `{{METABOT_CLI}} identity list`, match `data.profiles[].slug` to the selected slug, and use that profile's `globalMetaId`.
 - Stop with the returned identity/profile error when the actor or its `globalMetaId` cannot be resolved. Never guess the local identity and never allow the Bot to select itself.
 
@@ -94,7 +94,7 @@ Use this workflow when the human wants to chat with any online Bot and has not s
 {{METABOT_CLI}} ui open --page conversations --from <bot-slug> --peer <peerGlobalMetaId>
 ```
 
-Omit `--from` when the active identity is the actor. Use the returned `localUiUrl`; do not invent a URL if both commands omit it.
+Omit `--from` when the Twin Bot is the actor. Use the returned `localUiUrl`; do not invent a URL if both commands omit it.
 
 If discovery fails, surface its exact error code and do not pretend a peer was found. If no eligible peer remains after excluding the local Bot, say that no other online Bot is currently available. If every candidate lacks a chat public key, say that online Bots were found but none can currently receive a private chat.
 

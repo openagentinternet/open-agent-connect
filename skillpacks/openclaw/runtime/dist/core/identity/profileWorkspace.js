@@ -40,7 +40,7 @@ function buildStarterFiles(name, slug) {
             '',
             `- This MetaBot profile slug is \`${slug}\`. Display name: ${name}.`,
             `- Any MetaWeb write (buzz, file upload, chain write, private chat) MUST include \`--from ${slug}\` on every metabot CLI command.`,
-            '- Never omit `--from` in this profile context; omission uses the host active identity and publishes under the wrong MetaBot.',
+            '- Never omit `--from` in this profile context; omission uses the host Twin Bot and publishes under the wrong MetaBot.',
             '- Keep profile-specific operating rules here.',
             '- Update this file intentionally when the profile behavior changes.',
             '',
@@ -74,7 +74,7 @@ function buildStarterFiles(name, slug) {
     };
 }
 function buildDuplicateNameMessage(requestedName, matchedProfile) {
-    return `Local MetaBot name "${requestedName}" already exists. Use metabot identity assign --name "${matchedProfile.name}".`;
+    return `Local MetaBot name "${requestedName}" already exists. Pass --from "${matchedProfile.name}" to act as that profile, or choose a different name.`;
 }
 function reserveAvailableSlug(baseSlug, profiles) {
     const usedSlugs = new Set(profiles

@@ -236,6 +236,36 @@ function createMetaAppArtifactCacheStore(pathsOrHomeDir, options = {}) {
         cacheRoot,
         artifactsRoot,
         pinsRoot,
+        async getArtifactByPinId(pinId) {
+            let recordPath;
+            try {
+                recordPath = pinCacheFilePath(pinsRoot, safePinId(pinId));
+            }
+            catch {
+                return null;
+            }
+            const record = readObject(await readJsonFile(recordPath));
+            if (!record) {
+                return null;
+            }
+            let cacheKey;
+            try {
+                cacheKey = safeCacheKey(record.cacheKey);
+            }
+            catch {
+                return null;
+            }
+            const artifactRoot = node_path_1.default.join(artifactsRoot, cacheKey);
+            const manifest = normalizeManifest(await readJsonFile(node_path_1.default.join(artifactRoot, 'manifest.json')));
+            if (!manifest || manifest.cacheKey !== cacheKey) {
+                return null;
+            }
+            const entry = toEntry({ artifactsRoot, cacheKey, manifest });
+            if (!await assertFileExists(node_path_1.default.join(entry.artifactDir, manifest.indexFile))) {
+                return null;
+            }
+            return entry;
+        },
         async getArtifact(input) {
             const descriptor = normalizeDescriptor(input);
             const cacheKey = buildMetaAppArtifactCacheKey(descriptor);

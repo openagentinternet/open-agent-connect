@@ -15,8 +15,6 @@ import {
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import {
   listIdentityProfiles,
-  readActiveMetabotHome,
-  setActiveMetabotHome,
   upsertIdentityProfile,
 } from '../core/identity/identityProfiles';
 import type { IdentityProfileRecord } from '../core/identity/identityProfiles';
@@ -78,7 +76,7 @@ import type {
 } from '../core/bot/metabotProfileManager';
 import { normalizeOptionalDshLlmId } from '../core/bot/dshLlm';
 import { normalizeBotType, normalizeOptionalGlobalMetaId } from '../core/bot/botRole';
-import { applyTwinInvariant } from '../core/bot/twinRole';
+import { applyTwinInvariant, resolveCurrentTwinSlug, resolveTwinHomeDir } from '../core/bot/twinRole';
 import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
 import {
   buildPublishedService,
@@ -5936,21 +5934,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
     ];
   }
 
-  async function registerActiveIdentityProfile(
+  async function registerIdentityProfile(
     identity: RuntimeIdentityRecord,
     profileHomeDir = input.homeDir,
   ): Promise<void> {
-    const profile = await upsertIdentityProfile({
+    await upsertIdentityProfile({
       systemHomeDir: normalizedSystemHomeDir,
       name: identity.name,
       homeDir: profileHomeDir,
       globalMetaId: identity.globalMetaId,
       mvcAddress: identity.mvcAddress,
     });
-    await setActiveMetabotHome({
-      systemHomeDir: normalizedSystemHomeDir,
-      homeDir: profile.homeDir,
-    });
+    // The Twin Bot is the machine's default Bot (no separate active-home
+    // pointer). Creation never displaces an existing twin; it only repairs a
+    // twin-less state, so the first Bot on a machine becomes the twin.
+    await applyTwinInvariant(normalizedSystemHomeDir, {}).catch(() => null);
   }
 
   async function notifyIdentityProfileRegistered(): Promise<void> {
@@ -6287,7 +6285,10 @@ export function createDefaultMetabotDaemonHandlers(input: {
     | { failure: MetabotCommandResult<never> }
   > {
     const requestedSlug = normalizeText(rawActor);
-    let profileHomeDir = await readActiveMetabotHome(normalizedSystemHomeDir) ?? input.homeDir;
+    // The Twin Bot is the machine-wide default: omitted actors resolve to it
+    // (derived live, so twin changes apply without a daemon restart). The
+    // daemon startup home is the backstop for a profile-less machine.
+    let profileHomeDir = await resolveTwinHomeDir(normalizedSystemHomeDir) ?? input.homeDir;
     if (requestedSlug) {
       const selectedProfile = await resolveMetabotProfileBySelector(requestedSlug);
       if (!selectedProfile) {
@@ -13275,7 +13276,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
             homeDir: profileHomeDir,
             name: existingIdentity.name,
           });
-          await registerActiveIdentityProfile(existingIdentity, profileHomeDir);
+          await registerIdentityProfile(existingIdentity, profileHomeDir);
           await notifyIdentityProfileRegistered();
           return commandSuccess(existingIdentity);
         }
@@ -13325,7 +13326,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         const nextState = await targetRuntimeStateStore.readState();
         if (nextState.identity && (bootstrap.success || bootstrap.canSkip)) {
-          await registerActiveIdentityProfile(nextState.identity, profileHomeDir);
+          await registerIdentityProfile(nextState.identity, profileHomeDir);
           await notifyIdentityProfileRegistered();
           await ensureEmptyPersonaFiles(targetRuntimeStateStore.paths, normalizedName);
 
@@ -16892,17 +16893,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
       },
       listProfiles: async () => {
         const profiles = await listMetabotProfiles(normalizedSystemHomeDir);
-        // Reflect the live CLI-managed default Bot (active home) instead of the
-        // home this daemon process was started with, so `metabot identity assign`
-        // and UI activation stay in sync while the daemon keeps running. Fall
-        // back to the startup home when no valid active home is recorded.
-        const liveActiveHome = await readActiveMetabotHome(normalizedSystemHomeDir).catch(() => null);
-        const activeHomeDir = path.resolve(liveActiveHome ?? input.homeDir);
+        // The default Bot is the machine twin: isActive is derived live from
+        // the twin role on every call, so twin changes are reflected while the
+        // daemon keeps running. When no Bot carries the twin role yet, fall
+        // back to the startup home so existing deployments still show their
+        // boot-time Bot as the default until the invariant repair runs.
+        const twinSlug = await resolveCurrentTwinSlug(normalizedSystemHomeDir).catch(() => null);
+        const fallbackHomeDir = path.resolve(input.homeDir);
         const profilesWithSetup = await Promise.all(profiles.map(async (profile) => {
           const runtimeState = await createRuntimeStateStore(profile.homeDir).readState().catch(() => null);
           return {
             ...profile,
-            isActive: path.resolve(profile.homeDir) === activeHomeDir,
+            isActive: twinSlug !== null
+              ? profile.slug === twinSlug
+              : path.resolve(profile.homeDir) === fallbackHomeDir,
             setup: buildMetabotSetupStatus(runtimeState?.identity ?? null),
           };
         }));
@@ -16916,22 +16920,6 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
         }
         return commandSuccess({ profile });
-      },
-      activateProfile: async ({ slug }) => {
-        const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
-        if (!profile) {
-          return commandFailed('profile_not_found', `MetaBot profile not found: ${normalizeText(slug) || '<missing>'}`);
-        }
-        // Same mechanism as `metabot identity assign`: the default Bot is the
-        // CLI-managed active home, so setting it here replaces the previous one.
-        await setActiveMetabotHome({
-          systemHomeDir: normalizedSystemHomeDir,
-          homeDir: profile.homeDir,
-        });
-        return commandSuccess({
-          activeHomeDir: profile.homeDir,
-          slug: profile.slug,
-        });
       },
       getConfig: async ({ slug }) => {
         const profile = await getMetabotProfile(normalizedSystemHomeDir, slug);
@@ -17111,12 +17099,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
             setup: buildMetabotSetupStatus(identity),
             llmBinding,
             ...(hostPersonaProjection ? { hostPersonaProjection } : {}),
-            ...(createInput.botType === 'twin'
-              ? {
-                twinInvariant: await applyTwinInvariant(normalizedSystemHomeDir, { preferredTwinSlug: profile.slug })
-                  .catch(() => null),
-              }
-              : {}),
+            // Every create repairs the one-twin invariant: the first Bot on a
+            // machine becomes the twin; creating without --type never
+            // displaces an existing twin.
+            twinInvariant: await applyTwinInvariant(
+              normalizedSystemHomeDir,
+              createInput.botType === 'twin' ? { preferredTwinSlug: profile.slug } : {},
+            ).catch(() => null),
           });
         } catch (error) {
           await deleteMetabotProfile(normalizedSystemHomeDir, resolvedHome.slug)

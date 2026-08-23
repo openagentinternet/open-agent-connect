@@ -16,6 +16,7 @@ const {
 } = require('../../dist/core/state/paths.js');
 const { createDaemonStateStore } = require('../../dist/core/state/daemonStateStore.js');
 const { createRuntimeStateStore } = require('../../dist/core/state/runtimeStateStore.js');
+const { writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
 
 const DAEMON_TEST_PATH = [
   path.dirname(process.execPath),
@@ -74,11 +75,7 @@ async function createIndexedProfileHome() {
     }, null, 2)}\n`,
     'utf8',
   );
-  await writeFile(
-    paths.activeHomePath,
-    `${JSON.stringify({ homeDir, updatedAt: 1 }, null, 2)}\n`,
-    'utf8',
-  );
+  await writeBotRoleInfo(paths.botRoleStatePath, { botType: 'twin' });
   return {
     systemHomeDir,
     homeDir,

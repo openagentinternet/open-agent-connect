@@ -9,11 +9,12 @@ const require = createRequire(import.meta.url);
 const {
   listIdentityProfiles,
   readIdentityProfilesState,
-  readActiveMetabotHome,
   resolveIdentityManagerPaths,
-  setActiveMetabotHome,
   upsertIdentityProfile,
 } = require('../../dist/core/identity/identityProfiles.js');
+const { writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
+const { resolveTwinHomeDir } = require('../../dist/core/bot/twinRole.js');
+const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 
 async function createSystemHome() {
   return mkdtempTempRoot('metabot-identity-profiles-');
@@ -225,8 +226,10 @@ test('legacy records with colliding normalized slugs are preserved with determin
   );
 });
 
-test('active-home pointer is ignored when it does not reference an indexed profile', async () => {
+test('twin home derivation resolves the marked twin profile home and null when no profiles exist', async () => {
   const systemHome = await createSystemHome();
+  assert.equal(await resolveTwinHomeDir(systemHome), null);
+
   const canonicalHome = path.join(systemHome, '.metabot', 'profiles', 'charles-zhang');
   await mkdir(path.dirname(canonicalHome), { recursive: true });
 
@@ -237,19 +240,7 @@ test('active-home pointer is ignored when it does not reference an indexed profi
     now: () => 1_770_000_000_000,
   });
 
-  await setActiveMetabotHome({
-    systemHomeDir: systemHome,
-    homeDir: canonicalHome,
-    now: () => 1_770_000_000_100,
-  });
-  assert.equal(await readActiveMetabotHome(systemHome), canonicalHome);
+  await writeBotRoleInfo(resolveMetabotPaths(canonicalHome).botRoleStatePath, { botType: 'twin' });
 
-  const managerPaths = resolveIdentityManagerPaths(systemHome);
-  await writeFile(
-    managerPaths.activeHomePath,
-    `${JSON.stringify({ homeDir: path.join(systemHome, '.metabot', 'profiles', 'orphan'), updatedAt: 1 }, null, 2)}\n`,
-    'utf8',
-  );
-
-  assert.equal(await readActiveMetabotHome(systemHome), null);
+  assert.equal(await resolveTwinHomeDir(systemHome), canonicalHome);
 });

@@ -38,18 +38,5 @@ export async function runIdentityCommand(args: string[], context: CliRuntimeCont
     return handler();
   }
 
-  if (subcommand === 'assign') {
-    const name = readFlagValue(args, '--name');
-    if (!name) {
-      return commandMissingFlag('--name');
-    }
-
-    const handler = context.dependencies.identity?.assign;
-    if (!handler) {
-      return commandFailed('not_implemented', 'Identity assign handler is not configured.');
-    }
-    return handler({ name });
-  }
-
   return commandUnknownSubcommand(`identity ${args.join(' ')}`.trim());
 }

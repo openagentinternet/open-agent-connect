@@ -6,7 +6,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeSystemHomeDir = normalizeSystemHomeDir;
 exports.resolveMetabotManagerLayout = resolveMetabotManagerLayout;
 exports.hasLegacyOnlyMetabotLayout = hasLegacyOnlyMetabotLayout;
-exports.readIndexedActiveMetabotHomeSync = readIndexedActiveMetabotHomeSync;
 exports.resolveMetabotHomeSelection = resolveMetabotHomeSelection;
 exports.resolveMetabotHomeSelectionSync = resolveMetabotHomeSelectionSync;
 const node_fs_1 = __importDefault(require("node:fs"));
@@ -58,11 +57,6 @@ function normalizeIndexedHomeDirs(value) {
     }
     return indexedHomeDirs;
 }
-function parseActiveHomePayload(value) {
-    const record = normalizeRecord(value);
-    const homeDir = normalizeText(record?.homeDir);
-    return homeDir ? node_path_1.default.resolve(homeDir) : null;
-}
 function normalizeSystemHomeDir(env, cwd) {
     const home = normalizeText(env.HOME)
         || normalizeWindowsProfileHome(env)
@@ -91,7 +85,6 @@ function resolveMetabotManagerLayout(systemHomeDir) {
         skillsRoot: node_path_1.default.join(metabotRoot, 'skills'),
         profilesRoot: node_path_1.default.join(metabotRoot, 'profiles'),
         identityProfilesPath: managerPaths.profilesPath,
-        activeHomePath: managerPaths.activeHomePath,
     };
 }
 function hasLegacyOnlyMetabotLayout(systemHomeDir) {
@@ -128,24 +121,42 @@ function validateExplicitMetabotHome(input) {
     }
     return normalizedHomeDir;
 }
-function resolveIndexedActiveHome(systemHomeDir) {
+/**
+ * The machine default Bot is the Twin Bot (see core/bot/twinRole.ts); there is
+ * no separate active-home pointer anymore. Resolved sync from the manager
+ * index plus each profile's bot-role.json: the twin's home, else the
+ * earliest-created profile's (the same pick the twin invariant's repair
+ * makes), else null when no indexed profiles exist. A stale manager-level
+ * active-home.json from older versions is deliberately not consulted.
+ */
+function resolveIndexedTwinHome(systemHomeDir) {
     const layout = resolveMetabotManagerLayout(systemHomeDir);
-    const activeHome = parseActiveHomePayload(readJsonFileSync(layout.activeHomePath));
-    if (!activeHome) {
-        return null;
+    const record = normalizeRecord(readJsonFileSync(layout.identityProfilesPath));
+    const rawProfiles = Array.isArray(record?.profiles) ? record.profiles : [];
+    let twinHome = null;
+    let earliest = null;
+    for (const rawEntry of rawProfiles) {
+        const entry = normalizeRecord(rawEntry);
+        const homeDirRaw = normalizeText(entry?.homeDir);
+        if (!homeDirRaw)
+            continue;
+        const homeDir = node_path_1.default.resolve(homeDirRaw);
+        if (!isDirectProfileHome(layout.profilesRoot, homeDir))
+            continue;
+        if (!twinHome) {
+            const role = normalizeRecord(readJsonFileSync((0, paths_1.resolveMetabotPaths)(homeDir).botRoleStatePath));
+            if (role?.botType === 'twin') {
+                twinHome = homeDir;
+            }
+        }
+        const createdAt = typeof entry?.createdAt === 'number' && Number.isFinite(entry.createdAt)
+            ? entry.createdAt
+            : Number.POSITIVE_INFINITY;
+        if (!earliest || createdAt < earliest.createdAt) {
+            earliest = { homeDir, createdAt };
+        }
     }
-    if (!isDirectProfileHome(layout.profilesRoot, activeHome)) {
-        return null;
-    }
-    const indexedHomeDirs = normalizeIndexedHomeDirs(readJsonFileSync(layout.identityProfilesPath));
-    if (!indexedHomeDirs.has(activeHome)) {
-        return null;
-    }
-    return activeHome;
-}
-function readIndexedActiveMetabotHomeSync(systemHomeDir) {
-    assertNoLegacyOnlyLayout(systemHomeDir);
-    return resolveIndexedActiveHome(systemHomeDir);
+    return twinHome ?? earliest?.homeDir ?? null;
 }
 function resolveMetabotHomeSelection(input) {
     const systemHomeDir = normalizeSystemHomeDir(input.env, input.cwd);
@@ -164,15 +175,15 @@ function resolveMetabotHomeSelection(input) {
             source: 'explicit',
         };
     }
-    const activeHomeDir = resolveIndexedActiveHome(systemHomeDir);
-    if (!activeHomeDir) {
-        throw new Error('No active profile initialized.');
+    const twinHomeDir = resolveIndexedTwinHome(systemHomeDir);
+    if (!twinHomeDir) {
+        throw new Error('No Twin Bot initialized.');
     }
     return {
         systemHomeDir,
-        homeDir: activeHomeDir,
-        paths: (0, paths_1.resolveMetabotPaths)(activeHomeDir),
-        source: 'active',
+        homeDir: twinHomeDir,
+        paths: (0, paths_1.resolveMetabotPaths)(twinHomeDir),
+        source: 'twin',
     };
 }
 function resolveMetabotHomeSelectionSync(input) {

@@ -31,10 +31,18 @@ function extractOrderPinId(value) {
     const match = normalizeText(value).match(ORDER_PIN_LINE_RE);
     return normalizeText(match?.[1]) || null;
 }
+const OPENTEAM_TAG_RE = /^\[(OPENTEAM_(?:INVITE|ACCEPT|DECLINE|KICK))[\]:]/;
 function classifySimplemsgContent(content) {
     const text = normalizeText(content);
     if (!text) {
         return { kind: 'private_chat' };
+    }
+    const openteamMatch = text.match(OPENTEAM_TAG_RE);
+    if (openteamMatch) {
+        return {
+            kind: 'openteam_envelope',
+            tag: openteamMatch[1],
+        };
     }
     const match = text.match(TAG_RE);
     if (match) {

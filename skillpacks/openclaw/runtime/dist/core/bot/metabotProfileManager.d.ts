@@ -5,6 +5,7 @@ import type { LlmProvider, LlmRuntime } from '../llm/llmTypes';
 import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
 import { type ProfilePublishPayloadInput } from './profilePublishState';
+import { type MetabotBotType } from './botRole';
 export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 export interface MetabotProfileFull extends IdentityProfileRecord {
     bio: string;
@@ -20,6 +21,8 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
     dshLlmModel?: string | null;
     dshLlmFallbackProvider?: string | null;
     dshLlmFallbackModel?: string | null;
+    botType?: MetabotBotType | null;
+    ownerGlobalMetaId?: string | null;
 }
 export interface CreateMetabotInput {
     name: string;
@@ -35,6 +38,8 @@ export interface CreateMetabotInput {
     dshLlmModel?: string | null;
     dshLlmFallbackProvider?: string | null;
     dshLlmFallbackModel?: string | null;
+    botType?: MetabotBotType | null;
+    ownerGlobalMetaId?: string | null;
 }
 export interface CreateMetabotFromIdentityInput extends CreateMetabotInput {
     homeDir: string;
@@ -58,6 +63,8 @@ export interface UpdateMetabotInfoInput {
     dshLlmModel?: string | null;
     dshLlmFallbackProvider?: string | null;
     dshLlmFallbackModel?: string | null;
+    botType?: MetabotBotType | null;
+    ownerGlobalMetaId?: string | null;
 }
 export interface SyncMetabotInfoToChainOptions {
     delayMs?: number;

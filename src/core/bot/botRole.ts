@@ -4,7 +4,7 @@
 // machine, enforced by twinRole.ts); `ownerGlobalMetaId` binds the Bot to its
 // owner's GlobalMetaID (local binding; the signed on-chain /info/owner pin is
 // a later round).
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 export type MetabotBotType = 'twin' | 'worker';
@@ -61,6 +61,18 @@ export function mergeBotRoleInfo(current: BotRoleInfo, patch: BotRoleInfo): BotR
 export async function readBotRoleInfo(filePath: string): Promise<BotRoleInfo> {
   try {
     return normalizeBotRoleInfo(JSON.parse(await fs.readFile(filePath, 'utf8')));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { botType: null, ownerGlobalMetaId: null };
+    }
+    throw error;
+  }
+}
+
+/** Sync variant of readBotRoleInfo for the sync home-selection path. */
+export function readBotRoleInfoSync(filePath: string): BotRoleInfo {
+  try {
+    return normalizeBotRoleInfo(JSON.parse(readFileSync(filePath, 'utf8')));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return { botType: null, ownerGlobalMetaId: null };
