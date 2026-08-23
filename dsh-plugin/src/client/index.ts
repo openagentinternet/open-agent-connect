@@ -179,6 +179,9 @@ export function apply(ctx: ClientContext): void {
         collabs: () => api.grouptaskCollabs(),
         collabMessages: (slug, groupId) => api.grouptaskCollabMessages(slug, groupId),
         health: () => api.grouptaskHealth(),
+        staffingList: () => api.grouptaskStaffingList(),
+        staffingDecide: (chair, proposalId, decision) => api.grouptaskStaffingDecide(chair, proposalId, decision),
+        staffingCreate: (proposalId) => api.grouptaskStaffingCreate(proposalId),
       },
     }),
   }, A2AConversation))

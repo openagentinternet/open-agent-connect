@@ -158,6 +158,41 @@ test('grouptask/health maps a read-only preflight with a read timeout', async ()
   assert.ok(calls[0].options.timeoutMs < 120_000, 'health is a local read, not a chain write')
 })
 
+test('grouptask staffing routes map to CLI staffing verbs', async () => {
+  const propose = await capture('grouptask/staffing/propose', {
+    title: 'T', goal: 'G', plan: { seats: [] }, triggeringWish: '不用确认直接开', chairSlug: 'twin',
+  })
+  const proposeArgs = propose.calls[0].args
+  assert.deepEqual(proposeArgs.slice(0, 3), ['grouptask', 'staffing', 'propose'])
+  assert.equal(proposeArgs[proposeArgs.indexOf('--plan') + 1], JSON.stringify({ seats: [] }))
+  assert.equal(proposeArgs[proposeArgs.indexOf('--wish') + 1], '不用确认直接开')
+  const missingPlan = await capture('grouptask/staffing/propose', { title: 'T', goal: 'G' })
+  assert.equal(missingPlan.result.code, 'missing_plan')
+
+  const list = await capture('grouptask/staffing/list', { chairSlug: 'twin' })
+  assert.deepEqual(list.calls[0].args, ['grouptask', 'staffing', 'list', '--chair', 'twin'])
+
+  const decide = await capture('grouptask/staffing/decide', { chairSlug: 'twin', proposalId: 3, decision: 'confirm' })
+  assert.deepEqual(
+    decide.calls[0].args,
+    ['grouptask', 'staffing', 'decide', '--chair', 'twin', '--proposal', '3', '--decision', 'confirm'],
+  )
+  const badDecision = await capture('grouptask/staffing/decide', { chairSlug: 'twin', proposalId: 3, decision: 'yes' })
+  assert.equal(badDecision.result.code, 'invalid_decision')
+
+  const create = await capture('grouptask/staffing/create', { proposalId: 3 })
+  assert.deepEqual(create.calls[0].args, ['grouptask', 'staffing', 'create', '--proposal', '3'])
+  assert.ok(create.calls[0].options.timeoutMs >= 120_000, 'create waits on chain writes')
+
+  const search = await capture('grouptask/staffing/search', { seat: 'design', skills: ['figma'], limit: 5 })
+  const searchArgs = search.calls[0].args
+  assert.equal(searchArgs[searchArgs.indexOf('--seat') + 1], 'design')
+  assert.equal(searchArgs[searchArgs.indexOf('--skills') + 1], 'figma')
+  assert.equal(searchArgs[searchArgs.indexOf('--limit') + 1], '5')
+  const noQuery = await capture('grouptask/staffing/search', {})
+  assert.equal(noQuery.result.code, 'missing_query')
+})
+
 test('unknown grouptask methods fail with not-found', async () => {
   const { result } = await capture('grouptask/bogus', {})
   assert.equal(result.ok, false)

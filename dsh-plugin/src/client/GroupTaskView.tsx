@@ -17,6 +17,7 @@ import {
   type GroupTaskListTab,
   type GroupTaskMemberRow,
   type GroupTaskMessageRow,
+  type GroupTaskStaffingProposalRow,
   type GroupTaskSummaryRow,
   type OpenTeamCollabRow,
   type OpenTeamCollabsPayload,
@@ -56,6 +57,9 @@ export interface GroupTaskInjectedApi {
   collabs: () => Promise<OpenTeamCollabsPayload>
   collabMessages: (slug: string, groupId: string) => Promise<{ collab: OpenTeamCollabRow; messages: GroupTaskMessageRow[] }>
   health: () => Promise<GroupTaskHealthPayload>
+  staffingList: () => Promise<GroupTaskStaffingProposalRow[]>
+  staffingDecide: (chair: string, proposalId: number, decision: 'confirm' | 'revise' | 'skip') => Promise<unknown>
+  staffingCreate: (proposalId: number) => Promise<{ taskId: number; pendingRemoteSeats: number }>
 }
 
 const DETAIL_POLL_MS = 15_000
@@ -214,6 +218,7 @@ export function GroupTaskView({
   // OpenTeam: guest-side collaborations (memberships + received invites)
   const [collabs, setCollabs] = useState<OpenTeamCollabsPayload>({ memberships: [], guestInvites: [] })
   const [health, setHealth] = useState<GroupTaskHealthPayload | null>(null)
+  const [staffing, setStaffing] = useState<GroupTaskStaffingProposalRow[] | null>(null)
   const [selectedCollab, setSelectedCollab] = useState<{ slug: string; groupId: string } | null>(null)
   const [collabDetail, setCollabDetail] = useState<{ collab: OpenTeamCollabRow; messages: GroupTaskMessageRow[] } | null>(null)
   const [collabStatus, setCollabStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -282,6 +287,17 @@ export function GroupTaskView({
     void gt.health().then(
       (payload) => { if (current) setHealth(payload) },
       () => { if (current) setHealth(null) },
+    )
+    return () => { current = false }
+  }, [gt, tick])
+
+  // Staffing slates awaiting the owner gate (propose comes from the
+  // twin/CLI; the card is the owner's confirm surface).
+  useEffect(() => {
+    let current = true
+    void gt.staffingList().then(
+      (rows) => { if (current) setStaffing(rows) },
+      () => { if (current) setStaffing(null) },
     )
     return () => { current = false }
   }, [gt, tick])
@@ -446,6 +462,23 @@ export function GroupTaskView({
     }
   }
 
+  const decideStaffing = useCallback(async (
+    proposal: GroupTaskStaffingProposalRow,
+    decision: 'confirm' | 'revise' | 'skip',
+  ): Promise<void> => {
+    const ok = await runAction(() => gt.staffingDecide(proposal.chairSlug, proposal.id, decision), true)
+    if (ok) {
+      setInfoNote(t(decision === 'confirm'
+        ? 'gtStaffingConfirmed'
+        : decision === 'skip' ? 'gtStaffingSkipped' : 'gtStaffingReopened'))
+    }
+  }, [gt, runAction, t])
+
+  const createFromStaffing = useCallback(async (proposal: GroupTaskStaffingProposalRow): Promise<void> => {
+    const created = await runAction(async () => gt.staffingCreate(proposal.id), true)
+    if (created) setInfoNote(t('gtStaffingCreated'))
+  }, [gt, runAction, t])
+
   const memberBots = detail
     ? detail.members.filter((member) => member.slug && bots.some((bot) => bot.slug === member.slug))
     : []
@@ -461,6 +494,9 @@ export function GroupTaskView({
   const healthDetail = health?.engineLogLines.length
     ? health.engineLogLines.join('\n')
     : null
+
+  const pendingSlate = staffing?.find((row) => row.createdTaskId === null
+    && (row.status === 'pending' || row.status === 'confirmed' || row.status === 'skip_authorized')) ?? null
 
   return (
     <div className="oac-a2a-body">
@@ -495,6 +531,48 @@ export function GroupTaskView({
                 ? healthWarnings.join(' · ')
                 : t('gtHealthOk', { chair: health.chairSlug ?? '', active: health.activeTasks })}
             </p>
+          )
+          : null}
+        {pendingSlate !== null
+          ? (
+            <div className="oac-gt-staffing">
+              <div className="oac-gt-staffing-title">
+                <span>{t('gtStaffingTitle')}</span>
+                <span className="oac-a2a-row-name">{pendingSlate.title}</span>
+                {pendingSlate.status !== 'pending'
+                  ? <span className="oac-gt-badge oac-gt-status-executing">{t('gtStaffingReady')}</span>
+                  : null}
+              </div>
+              {pendingSlate.seats.map((seat) => (
+                <div className="oac-gt-staffing-seat" key={`${seat.role}:${seat.candidateName}`}>
+                  <span className="oac-gt-badge">{seat.role}</span>
+                  <span className="oac-a2a-row-name">{seat.candidateName}</span>
+                  <span className="oac-a2a-row-text">{seat.source === 'remote' ? t('gtRemote') : t('gtLocalSeat')}</span>
+                  {seat.reason ? <span className="oac-a2a-row-text">· {seat.reason}</span> : null}
+                </div>
+              ))}
+              <div className="oac-gt-staffing-actions">
+                {pendingSlate.status === 'pending'
+                  ? (
+                    <>
+                      <Button type="button" variant="primary" size="sm" disabled={busy} onClick={() => { void decideStaffing(pendingSlate, 'confirm') }}>
+                        {t('gtStaffingConfirm')}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void decideStaffing(pendingSlate, 'revise') }}>
+                        {t('gtStaffingRevise')}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void decideStaffing(pendingSlate, 'skip') }}>
+                        {t('gtStaffingSkip')}
+                      </Button>
+                    </>
+                  )
+                  : (
+                    <Button type="button" variant="primary" size="sm" disabled={busy} onClick={() => { void createFromStaffing(pendingSlate) }}>
+                      {t('gtStaffingCreate')}
+                    </Button>
+                  )}
+              </div>
+            </div>
           )
           : null}
         {listError ? <p className="oac-note error">{listError}</p> : null}
