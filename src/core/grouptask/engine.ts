@@ -902,9 +902,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           // parity). Bare paths stay in the payload (uri null). Best-effort
           // — the raw path row survives on failure.
           const payloadPath = candidate.payload.replace(/^[a-z]+:\s*/i, '').trim();
-          const localPath = candidate.uri ?? (
-            looksLikeLocalFilePath(payloadPath) ? payloadPath : null
-          );
+          const localPath = (looksLikeLocalFilePath(candidate.uri) ? candidate.uri : null)
+            ?? (looksLikeLocalFilePath(payloadPath) ? payloadPath : null);
           if (localPath) {
             try {
               const uploaded = await uploadDeliverableFile({
@@ -1703,8 +1702,10 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
   async function tick(): Promise<void> {
     if (ticking) return;
     ticking = true;
+    const tickStartedAt = now();
     try {
       const profiles = await ctx.listProfiles();
+      log(`[GroupTaskEngine] Tick over ${profiles.length} profiles started`);
       const profileBySlug = new Map(profiles.map((entry) => [entry.slug, entry]));
       let ownerGmid: string | null = null;
       try {
@@ -1741,6 +1742,10 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       }
     } finally {
       ticking = false;
+      const elapsed = now() - tickStartedAt;
+      if (elapsed > 30_000) {
+        log(`[GroupTaskEngine] Tick took ${Math.round(elapsed / 1000)}s — investigate the slow phase`);
+      }
     }
   }
 

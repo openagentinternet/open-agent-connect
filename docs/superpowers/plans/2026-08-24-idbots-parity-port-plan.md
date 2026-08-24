@@ -209,6 +209,43 @@ ceremony, stall, driver mutex, cooldowns/budgets):
 **Exit**: engine behavior-matrix tests mirroring the IDBots daemon suites
 (gating, tags, budgets, ACK ordering, dependency gate, review silence).
 
+### Phase 2 — Engine behavior parity ✅ (2026-08-24)
+
+Guided by a function-level diff against the IDBots daemon (13 dimensions),
+rounds M–S landed the gap items in dependency order:
+
+- **M** (`18b2ef15`) dream `collaborationFacts` schema + snapshot merge;
+  `[DEPENDS_ON]` 15-min bounded hold; poison-message tag-only reprocess.
+- **N** (`d8dbc1ef`) per-(msgPin,uri,kind) deliverable dedupe + correction
+  supersede (reopen + verification reset).
+- **O** (`8dd47a15`) deliverable verification pipeline: metaso pin check,
+  ingest-time verify + 10-min re-verify, T2 accepted flip on close.
+- **P** (`6f649837`) review-entry package: verification labels
+  (on-chain ✓/pending sync/unverified), preview caps, checklist + omissions,
+  LLM owner private report with 【结论】 capture + stamped conclusion,
+  straggler closing re-assert.
+- **Q** (`cc09a97a`) assignment ACK watch (P5 exemptions, ack-seen,
+  expected-delivery ETA) + 3-min reminder + 30-min unreachable + 20/10-min
+  timeout escalation with the L3 owner brief.
+- **R** (`12a2c439`) checkpoint owner report + pause-line decision clause;
+  guest membership self-check (5-min probe, 15-min grace, 2-strike);
+  guest failure bound aligned to 3.
+- **S** (`e78726b8`) metafile upload seam (uploadLocalFileToChain default):
+  inviter-side local-path row upgrade to metafile://, guest file delivery
+  ([DELIVERABLE] metafile lines, max 3/turn).
+
+Live verification (task #27, real daemon + chain): worker pin-backed
+deliverable → verified delivered+confirmed → [WORKING] ACK → review entry
+with summary v1 + conclusion → close done rating 5 → deliverable accepted +
+impression fact sedimented. Two bugs found and fixed during verification:
+bare pin ids misread as local upload paths, and a live-debugging session
+exposed orphan-daemon restart storms (multiple unrecorded `daemon serve`
+processes holding driver claims with stale builds — killed; tick-duration
+instrumentation added so slow/hung ticks are visible in the engine log).
+Not ported by design: worker skill turns + orchestration bookkeeping
+(OAC keeps plain LLM turns), twin-chair suppression window, host auto-ACK
+before long turns.
+
 ### Phase 3 — MetaWeb search / read (M1)
 
 - `src/core/metaweb/`: search service + pin-read service (HTTPS to
