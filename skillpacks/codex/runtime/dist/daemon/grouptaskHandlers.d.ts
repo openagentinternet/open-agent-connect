@@ -27,6 +27,12 @@ export interface GroupTaskDaemonHandlers {
     invites: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     collabs: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     collabMessages: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    health: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    staffingPropose: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    staffingList: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    staffingDecide: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    staffingCreate: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    staffingSearch: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
 }
 export interface CreateGroupTaskDaemonHandlersInput {
     systemHomeDir: string;

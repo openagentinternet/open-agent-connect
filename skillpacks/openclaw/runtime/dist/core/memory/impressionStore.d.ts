@@ -22,10 +22,31 @@ export interface ImpressionObservation {
     status: ImpressionObservationStatus;
     createdAt: number;
 }
+/** Deterministic collaboration fact recorded by the group task engine. */
+export interface ImpressionCollaborationFact {
+    id: string;
+    observerGlobalMetaId: string;
+    subjectGlobalMetaId: string;
+    taskId: number;
+    title: string;
+    outcome: string;
+    seatRole?: string;
+    evidencePinIds: string[];
+    recordedAt: number;
+}
 export interface ImpressionSnapshot {
     observerGlobalMetaId: string;
     subjectGlobalMetaId: string;
     firstSeenAt: number;
+    capabilityTags: string[];
+    collaborationFacts: Array<{
+        taskId: number;
+        title: string;
+        outcome: string;
+        seatRole?: string;
+        evidencePinIds: string[];
+        recordedAt: number;
+    }>;
     lastSeenAt: number;
     interactionCount: number;
     directInteractionCount: number;
@@ -73,6 +94,15 @@ export interface ImpressionStore {
     getSnapshot(observerGlobalMetaId: string, subjectGlobalMetaId: string): Promise<ImpressionSnapshot | null>;
     listSnapshots(observerGlobalMetaId: string, limit?: number): Promise<ImpressionSnapshot[]>;
     rebuildSnapshot(observerGlobalMetaId: string, subjectGlobalMetaId: string): Promise<ImpressionSnapshot | null>;
+    appendCollaborationFact(input: {
+        observerGlobalMetaId: string;
+        subjectGlobalMetaId: string;
+        taskId: number;
+        title: string;
+        outcome: string;
+        seatRole?: string;
+        evidencePinIds?: string[];
+    }): Promise<ImpressionCollaborationFact>;
 }
 export declare function createImpressionStore(paths: MetabotPaths, deps?: {
     experienceStore?: ExperienceStore;

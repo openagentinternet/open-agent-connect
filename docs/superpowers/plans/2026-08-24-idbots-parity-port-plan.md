@@ -259,6 +259,30 @@ before long turns.
   MetaWeb URIs in chat (extend the existing `metaapp://` link handling).
 - Codex/other hosts: skillpack skill wrapping the CLI verbs.
 
+### Phase 3 — MetaWeb search / read (M1) ✅ (2026-08-24)
+
+- **U** (`a2569fe3`) core clients ported verbatim: searchMetaweb
+  (GET /api/metaweb/search, envelope-code errors, timeout→model-readable
+  retry text), readMetawebPin (GET /api/metaweb/pin/:pinId, any-version →
+  currentPinId, server-resolved attachments, MetawebPinNotFoundError), URI
+  lib (pin:// metaapp:// metafile:// metaid:// selection, markdownSelfLink,
+  METAWEB_CITATION_RULE).
+- **V** (`ba13ba7a`) `metabot metaweb search|read` CLI verbs wired
+  in-process (metaid-search pattern; METABETWEB_API_BASE_URL override —
+  METABOT_METAWEB_API_BASE_URL), shared format module (search bullets with
+  flattened untrusted fields + clickable pin:// links; pin sheet with the
+  <metaweb_pin_content> untrusted wrapper and per-protocol follow-up
+  hints); envelope carries trimmed rows plus a model-ready `formatted`
+  block with the cross-language retry guidance.
+- **W** (`af94bdc0`) DSH native tools search_metaweb / read_metaweb_pin on
+  the host global tool layer, executing the OAC core in-process; static
+  worldview prompt section (oac:metaweb-worldview) porting the IDBots
+  cacheable head verbatim; pin:// and metafile:// already clickable via the
+  existing link interception.
+- **X** (this round) `metabot-metaweb` skillpack skill (search-first
+  guidance, Chinese-corpus retry, pins-are-data guard, MetaWeb-URI
+  citation) registered for every host.
+
 ### Phase 4 — `post_simplenote` + chain-upload gate
 
 - `src/core/` SimpleNote pin builder (protocol `1.0.1` payload, verified

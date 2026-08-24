@@ -9,6 +9,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GROUP_TASK_MEMBER_STATUSES = exports.KICK_CONFIRM_MAX_ATTEMPTS = exports.KICK_CONFIRM_POLL_INTERVAL_MS = exports.GROUP_TASK_REVIEW_REASSERT_KV_PREFIX = exports.GROUP_TASK_OWNER_REPORTED_KV_PREFIX = exports.GROUP_TASK_REWORK_AT_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_WINDOW_MINUTES = exports.GROUP_TASK_WORKING_WINDOW_MINUTES = exports.GROUP_TASK_STALL_AFTER_MINUTES = exports.GroupTaskServiceError = void 0;
 exports.openteamStoreFor = openteamStoreFor;
+exports.staffingStoreFor = staffingStoreFor;
+exports.requireProfile = requireProfile;
 exports.computeGroupTaskStall = computeGroupTaskStall;
 exports.computeGroupTaskMemberWorkStatus = computeGroupTaskMemberWorkStatus;
 exports.buildKickoffMessage = buildKickoffMessage;
@@ -34,6 +36,8 @@ exports.unarchiveGroupTask = unarchiveGroupTask;
 const paths_1 = require("../state/paths");
 const store_1 = require("./store");
 const openteamStore_1 = require("./openteamStore");
+const staffingStore_1 = require("./staffingStore");
+const impressions_1 = require("./impressions");
 const openteam_1 = require("./openteam");
 const transport_1 = require("./transport");
 const backfill_1 = require("./backfill");
@@ -58,9 +62,16 @@ function openteamStoreFor(ctx, profile) {
         return ctx.openteamStoreForProfile(profile);
     return (0, openteamStore_1.createOpenTeamStore)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
 }
+/** Staffing proposal store for a profile (exported for the staffing service). */
+function staffingStoreFor(ctx, profile) {
+    if (ctx.staffingStoreForProfile)
+        return ctx.staffingStoreForProfile(profile);
+    return (0, staffingStore_1.createStaffingStore)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
+}
 function logOf(ctx) {
     return ctx.log ?? (() => undefined);
 }
+/** Resolve a profile by slug or fail (exported for the staffing service). */
 async function requireProfile(ctx, slug) {
     const profile = await ctx.getProfile(slug.trim());
     if (!profile) {
@@ -537,6 +548,11 @@ async function closeGroupTask(ctx, chairSlug, taskId, opts) {
     if (closed.status === 'done' && opts.rating != null) {
         await store.updateTaskRating(taskId, opts.rating, opts.ratingComment);
     }
+    if (closed.status === 'done') {
+        // T2 verdict: owner acceptance marks every non-rejected row accepted.
+        await store.updateDeliverablesStatusByTask(taskId, 'pending', 'accepted').catch(() => 0);
+        await store.updateDeliverablesStatusByTask(taskId, 'delivered', 'accepted').catch(() => 0);
+    }
     try {
         await store.finalizeAcceptanceSummary(taskId, {
             outcome: opts.status,
@@ -546,6 +562,15 @@ async function closeGroupTask(ctx, chairSlug, taskId, opts) {
     }
     catch {
         // No summary yet (task closed before review) — nothing to finalize.
+    }
+    // Chair→member impression sedimentation (staffing memory); best-effort.
+    try {
+        const members = await store.listMembers(taskId);
+        await (0, impressions_1.recordTaskCloseImpressions)(ctx, chairSlug, closed, members, opts.status);
+    }
+    catch (error) {
+        logOf(ctx)(`[GroupTask] Impression sedimentation failed on close of task ${taskId}: `
+            + `${error instanceof Error ? error.message : String(error)}`);
     }
     return getGroupTaskDetail(ctx, chairSlug, taskId, { sync: false });
 }
@@ -653,6 +678,8 @@ async function kickGroupTaskMember(ctx, chairSlug, taskId, input) {
         globalMetaId: member.slug == null ? member.globalMetaId : undefined,
         removePinId: pinId,
     });
+    // Kick sedimentation: the chair records a kicked fact for staffing memory.
+    await (0, impressions_1.recordKickImpression)(ctx, chairSlug, task, member).catch(() => undefined);
     // Deterministic moderation notice from the chair. A failed announcement
     // must not roll back the removal.
     try {

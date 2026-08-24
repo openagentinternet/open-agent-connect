@@ -13,6 +13,7 @@ This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skill
 - `metabot-chat-privatechat`
 - `metabot-omni-reader`
 - `metabot-post-buzz`
+- `metabot-metaweb`
 - `metabot-post-skillservice`
 - `metabot-create-wiki`
 - `metabot-metaapp`
