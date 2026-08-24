@@ -77,7 +77,7 @@ export declare function parseStudyRunReport(reply: string): {
     summary: string;
 };
 export interface StudyDrainDeps {
-    /** Runs one unattended study turn: prompt in, model reply out. */
+    /** Runs one unattended study turn: prompt in, final report out. */
     runStudyTurn(input: {
         slug: string;
         prompt: string;
@@ -93,3 +93,36 @@ export interface StudyDrainDeps {
  * fails the job. Returns the id of the job attempted, or null.
  */
 export declare function runStudyTick(store: StudyJobStore, deps: StudyDrainDeps): Promise<string | null>;
+export interface StudyToolSet {
+    searchMetaweb(args: {
+        query: string;
+    }): Promise<string>;
+    readMetawebPin(args: {
+        pinId: string;
+    }): Promise<string>;
+    addDocument(args: {
+        title: string;
+        content: string;
+        pinId?: string;
+    }): Promise<string>;
+    learnKnowledgeBase(): Promise<string>;
+}
+export interface StudyLoopDeps {
+    /** One LLM completion over the conversation so far; returns model text. */
+    runLlm(history: Array<{
+        role: 'user' | 'assistant';
+        content: string;
+    }>): Promise<string>;
+    tools: StudyToolSet;
+    maxSteps?: number;
+    /** Max chars of a tool result fed back into the conversation. */
+    maxResultChars?: number;
+}
+/**
+ * The study turn as a bounded tool loop with a HARD executor-side allowlist:
+ * the model proposes one json tool call per step, the executor runs it (or
+ * rejects it), and only allowlisted operations ever execute. Pin budget is
+ * enforced by a counting wrapper around addDocument — prompt guidance alone
+ * is not a budget. Returns the final report text.
+ */
+export declare function runStudyTurnWithTools(prompt: string, deps: StudyLoopDeps): Promise<string>;

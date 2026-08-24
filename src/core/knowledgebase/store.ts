@@ -202,10 +202,12 @@ export function createKnowledgeBaseStore(paths: MetabotPaths): KnowledgeBaseStor
       state.bases = state.bases.filter((entry) => entry.id !== id);
       if (state.bases.length === before) return false;
       await writeRegistry(state);
-      // Prune the raw corpus so a same-named KB cannot resurrect old documents.
+      // Prune the raw corpus AND the derived index so a same-named KB cannot
+      // resurrect old documents or serve stale chunks.
       if (target?.rawDir) {
         await fs.rm(target.rawDir, { recursive: true, force: true }).catch(() => undefined);
       }
+      await fs.rm(knowledgeBaseIndexPath(paths, id), { force: true }).catch(() => undefined);
       return true;
     }),
 

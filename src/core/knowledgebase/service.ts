@@ -88,6 +88,18 @@ export interface KnowledgeBaseService {
 export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseService {
   const store = createKnowledgeBaseStore(paths);
   const learnQueues = new Map<string, Promise<unknown>>();
+  // Index stores memoized per KB: the per-instance query cache (keyed by the
+  // index file's mtime:size generation) then survives across calls and
+  // self-invalidates when the file is rebuilt or deleted.
+  const indexStores = new Map<string, ReturnType<typeof createKnowledgeBaseIndexStore>>();
+  const indexFor = (kbId: string): ReturnType<typeof createKnowledgeBaseIndexStore> => {
+    let index = indexStores.get(kbId);
+    if (!index) {
+      index = createKnowledgeBaseIndexStore(knowledgeBaseIndexPath(paths, kbId));
+      indexStores.set(kbId, index);
+    }
+    return index;
+  };
 
   function enqueueLearn(kbId: string, work: () => Promise<void>): Promise<void> {
     const next = (learnQueues.get(kbId) ?? Promise.resolve()).then(work, work);
@@ -119,7 +131,7 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
     learnKnowledgeBase: async (metabotSlug, knowledgeBaseId, full) => {
       const kb = await requireKb(metabotSlug, knowledgeBaseId);
       await enqueueLearn(kb.id, async () => {
-        const index = createKnowledgeBaseIndexStore(knowledgeBaseIndexPath(paths, kb.id));
+        const index = indexFor(kb.id);
         // OAC index: incremental-by-file-mtime/hash would need a merge path;
         // the corpus is local and modest, so a full rebuild per learn keeps
         // semantics identical to learn(full) — stale docs always drop.
@@ -141,7 +153,7 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
         : mine;
       const results: KbQueryResult[] = [];
       for (const kb of targets) {
-        const index = createKnowledgeBaseIndexStore(knowledgeBaseIndexPath(paths, kb.id));
+        const index = indexFor(kb.id);
         const hits = await index.query(query, {
           ...(options?.topK != null ? { topK: options.topK } : {}),
           ...(options?.minScore != null ? { minScore: options.minScore } : {}),

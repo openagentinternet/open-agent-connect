@@ -56,6 +56,18 @@ function buildKbDocumentJson(input) {
 function createKnowledgeBaseService(paths) {
     const store = (0, store_1.createKnowledgeBaseStore)(paths);
     const learnQueues = new Map();
+    // Index stores memoized per KB: the per-instance query cache (keyed by the
+    // index file's mtime:size generation) then survives across calls and
+    // self-invalidates when the file is rebuilt or deleted.
+    const indexStores = new Map();
+    const indexFor = (kbId) => {
+        let index = indexStores.get(kbId);
+        if (!index) {
+            index = (0, indexStore_1.createKnowledgeBaseIndexStore)((0, store_1.knowledgeBaseIndexPath)(paths, kbId));
+            indexStores.set(kbId, index);
+        }
+        return index;
+    };
     function enqueueLearn(kbId, work) {
         const next = (learnQueues.get(kbId) ?? Promise.resolve()).then(work, work);
         learnQueues.set(kbId, next.catch(() => undefined));
@@ -83,7 +95,7 @@ function createKnowledgeBaseService(paths) {
         learnKnowledgeBase: async (metabotSlug, knowledgeBaseId, full) => {
             const kb = await requireKb(metabotSlug, knowledgeBaseId);
             await enqueueLearn(kb.id, async () => {
-                const index = (0, indexStore_1.createKnowledgeBaseIndexStore)((0, store_1.knowledgeBaseIndexPath)(paths, kb.id));
+                const index = indexFor(kb.id);
                 // OAC index: incremental-by-file-mtime/hash would need a merge path;
                 // the corpus is local and modest, so a full rebuild per learn keeps
                 // semantics identical to learn(full) — stale docs always drop.
@@ -105,7 +117,7 @@ function createKnowledgeBaseService(paths) {
                 : mine;
             const results = [];
             for (const kb of targets) {
-                const index = (0, indexStore_1.createKnowledgeBaseIndexStore)((0, store_1.knowledgeBaseIndexPath)(paths, kb.id));
+                const index = indexFor(kb.id);
                 const hits = await index.query(query, {
                     ...(options?.topK != null ? { topK: options.topK } : {}),
                     ...(options?.minScore != null ? { minScore: options.minScore } : {}),
@@ -117,8 +129,8 @@ function createKnowledgeBaseService(paths) {
             return results;
         },
         addDocument: async (metabotSlug, input) => {
-            const title = input.title.trim();
-            const content = (0, text_1.cleanKnowledgeBaseText)(input.content);
+            const title = input.title.trim().slice(0, 200);
+            const content = (0, text_1.cleanKnowledgeBaseText)(input.content).slice(0, 2_000_000);
             if (!title || !content) {
                 throw new KnowledgeBaseServiceError('fields_required', 'title and content are required.');
             }

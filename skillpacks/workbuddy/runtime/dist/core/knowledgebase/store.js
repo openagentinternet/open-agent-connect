@@ -157,10 +157,17 @@ function createKnowledgeBaseStore(paths) {
         removeKnowledgeBase: (id) => enqueue(async () => {
             const state = await readRegistry();
             const before = state.bases.length;
+            const target = state.bases.find((entry) => entry.id === id);
             state.bases = state.bases.filter((entry) => entry.id !== id);
             if (state.bases.length === before)
                 return false;
             await writeRegistry(state);
+            // Prune the raw corpus AND the derived index so a same-named KB cannot
+            // resurrect old documents or serve stale chunks.
+            if (target?.rawDir) {
+                await node_fs_1.promises.rm(target.rawDir, { recursive: true, force: true }).catch(() => undefined);
+            }
+            await node_fs_1.promises.rm(knowledgeBaseIndexPath(paths, id), { force: true }).catch(() => undefined);
             return true;
         }),
         setCounts: (id, docCount, chunkCount, learnedAt) => enqueue(async () => {
