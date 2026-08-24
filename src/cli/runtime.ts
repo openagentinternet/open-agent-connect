@@ -3001,6 +3001,14 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         input,
       ),
     },
+    simplenote: {
+      post: async (input) => requestJsonForSelectedActor(
+        'POST',
+        '/api/simplenote/post',
+        typeof input.from === 'string' ? input.from : undefined,
+        input,
+      ),
+    },
     browser: {
       open: async (input) => openLocalBrowserPage(input),
       tabOpen: async (input) => openBrowserTab(input),
@@ -4421,6 +4429,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     metaapp: { ...defaults.metaapp, ...provided.metaapp },
     metaid: { ...defaults.metaid, ...provided.metaid },
     metaweb: { ...defaults.metaweb, ...provided.metaweb },
+    simplenote: { ...defaults.simplenote, ...provided.simplenote },
     chain: { ...defaults.chain, ...provided.chain },
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
