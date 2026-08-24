@@ -226,6 +226,11 @@ import {
   type SimpleNoteNetwork,
 } from '../core/simplenote/publish';
 import { createProfileScopedUpload } from '../core/files/profileUploadGate';
+import { ChainBroadcastUnknownError } from '../core/signing/localMnemonicSigner';
+import {
+  createChainWriteAttemptStore,
+  stableChainWriteHash,
+} from '../core/chain/writeAttempts';
 import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
 import { createMetaAppLocalCacheStore } from '../core/metaapp/localCache';
 import {
@@ -5026,6 +5031,38 @@ export function createDefaultMetabotDaemonHandlers(input: {
   stopAppSessionRuntime: () => Promise<void>;
 } {
   const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
+
+/** Map a ChainBroadcastUnknownError (or a recorded prior unknown attempt for
+ *  identical content) to manual_action_required with the candidate txids and
+ *  an explicit do-not-retry message. Records the attempt for dedup. */
+  async function commandFailedOrBroadcastUnknown(
+    error: unknown,
+    kind: string,
+    contentHash: string,
+    fallbackCode: string,
+  ): Promise<MetabotCommandResult<never>> {
+    const attempts = createChainWriteAttemptStore(normalizedSystemHomeDir);
+    if (error instanceof ChainBroadcastUnknownError) {
+      await attempts.record({
+        contentHash,
+        kind,
+        candidateTxids: [...new Set([...error.confirmedTxids, ...error.candidateTxids])],
+        message: error.message,
+      }).catch(() => undefined);
+      return commandManualActionRequired('chain_broadcast_unknown', error.message);
+    }
+    const prior = await attempts.findRecent(contentHash).catch(() => null);
+    if (prior) {
+      return commandManualActionRequired(
+        'chain_write_attempt_pending',
+        `A previous ${kind} attempt with identical content hit an UNKNOWN broadcast state at `
+        + `${new Date(prior.at).toISOString()} (candidates: ${prior.candidateTxids.join(', ') || 'unavailable'}). `
+        + `The content may already be on-chain — verify those txids before publishing again.`,
+      );
+    }
+    return commandFailed(fallbackCode, error instanceof Error ? error.message : String(error));
+  }
+
   const secretStore = input.secretStore ?? createFileSecretStore(input.homeDir);
   // Create default adapter registry if none provided (backward compat)
   const adapters = input.adapters ?? createChainAdapterRegistry([
@@ -13174,6 +13211,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const buzzContentHash = stableChainWriteHash('buzz', [
+            normalizeText(rawInput.content),
+            network,
+            ...readStringArray(rawInput.attachments),
+          ]);
+          const priorBuzzAttempt = await createChainWriteAttemptStore(normalizedSystemHomeDir)
+            .findRecent(buzzContentHash).catch(() => null);
+          if (priorBuzzAttempt) {
+            return commandManualActionRequired(
+              'chain_write_attempt_pending',
+              `A previous buzz attempt with identical content hit an UNKNOWN broadcast state at `
+              + `${new Date(priorBuzzAttempt.at).toISOString()} (candidates: ${priorBuzzAttempt.candidateTxids.join(', ') || 'unavailable'}). `
+              + `It may already be on-chain — verify before posting again.`,
+            );
+          }
           const result = await postBuzzToChain({
             content: normalizeText(rawInput.content),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
@@ -13191,9 +13243,15 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ) ?? '/ui/buzz/app/index.html',
           });
         } catch (error) {
-          return commandFailed(
+          return await commandFailedOrBroadcastUnknown(
+            error,
+            'buzz',
+            stableChainWriteHash('buzz', [
+              normalizeText(rawInput.content),
+              await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+              ...readStringArray(rawInput.attachments),
+            ]),
             'buzz_post_failed',
-            error instanceof Error ? error.message : String(error)
           );
         }
       },
@@ -13219,6 +13277,23 @@ export function createDefaultMetabotDaemonHandlers(input: {
             signerForSlug: async () => actor.signer,
             confirmExternalUpload: rawInput.confirmExternalUpload === true,
           });
+          const noteContentHash = stableChainWriteHash('simplenote', [
+            normalizeText(rawInput.title),
+            normalizeText(rawInput.content),
+            network,
+            ...readStringArray(rawInput.attachments).sort(),
+            normalizeText(typeof rawInput.cover === 'string' ? rawInput.cover : undefined),
+          ]);
+          const priorNoteAttempt = await createChainWriteAttemptStore(normalizedSystemHomeDir)
+            .findRecent(noteContentHash).catch(() => null);
+          if (priorNoteAttempt) {
+            return commandManualActionRequired(
+              'chain_write_attempt_pending',
+              `A previous simplenote attempt with identical content hit an UNKNOWN broadcast state at `
+              + `${new Date(priorNoteAttempt.at).toISOString()} (candidates: ${priorNoteAttempt.candidateTxids.join(', ') || 'unavailable'}). `
+              + `The note may already be on-chain — verify before publishing again.`,
+            );
+          }
           const result = await publishSimpleNote(
             actor.signer,
             async ({ filePath, network: uploadNetwork }) => gatedUpload({
@@ -13246,10 +13321,20 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ) ?? `/browser/pin/${encodeURIComponent(result.pinId)}`,
           });
         } catch (error) {
-          const code = (error as { code?: unknown }).code;
-          return commandFailed(
-            typeof code === 'string' ? code : 'simplenote_post_failed',
-            error instanceof Error ? error.message : String(error),
+          return await commandFailedOrBroadcastUnknown(
+            error,
+            'simplenote',
+            stableChainWriteHash('simplenote', [
+              normalizeText(rawInput.title),
+              normalizeText(rawInput.content),
+              await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+              ...readStringArray(rawInput.attachments).sort(),
+              normalizeText(typeof rawInput.cover === 'string' ? rawInput.cover : undefined),
+            ]),
+            (() => {
+              const code = (error as { code?: unknown }).code;
+              return typeof code === 'string' ? code : 'simplenote_post_failed';
+            })(),
           );
         }
       },

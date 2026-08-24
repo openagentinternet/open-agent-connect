@@ -158,7 +158,7 @@ test('search_metaapps retries once on abort then returns candidates', async () =
   assert.match(text, new RegExp(`\\[半糖牌局\\]\\(metaapp://${PIN}\\)`))
 })
 
-test('bot_browser_publish_app skips the native dialog when approval policy is never', async () => {
+test('bot_browser_publish_app under policy never requires a same-session preview', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-publish-never-'))
   await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')
   await writeFile(join(dir, 'index.html'), '<html></html>\n', 'utf8')
@@ -184,14 +184,29 @@ test('bot_browser_publish_app skips the native dialog when approval policy is ne
   })) {
     agent.ctx.tools.register(definition)
   }
-  const text = await tools.find((tool) => tool.name === 'bot_browser_publish_app').execute(
-    { dir, title: 'Test App' },
-    { agent },
-  )
+  const publish = tools.find((tool) => tool.name === 'bot_browser_publish_app')
+
+  // Without a preview record in this session: refused, no CLI spawn.
+  const refused = await publish.execute({ dir, title: 'Test App' }, { agent })
+  assert.match(refused, /was not previewed here/)
+  assert.equal(calls.length, 0)
+
+  // Preview in the same session unlocks the publish (policy never: no dialog).
+  const preview = tools.find((tool) => tool.name === 'bot_browser_preview_local')
+  await preview.execute({ path: dir }, { agent })
+  const text = await publish.execute({ dir, title: 'Test App' }, { agent })
   assert.equal(asked.length, 0)
   assert.equal(calls.length, 1)
   assert.match(calls[0].join(' '), /publish-project/)
   assert.match(text, new RegExp(`metaapp://${PIN}`))
+
+  // A DIFFERENT directory still needs its own preview.
+  const otherDir = await mkdtemp(join(tmpdir(), 'oac-dsh-publish-never2-'))
+  await writeFile(join(otherDir, 'APP.md'), 'Other.\n', 'utf8')
+  await writeFile(join(otherDir, 'index.html'), '<html></html>\n', 'utf8')
+  const refused2 = await publish.execute({ dir: otherDir, title: 'Other' }, { agent })
+  assert.match(refused2, /was not previewed here/)
+  assert.equal(calls.length, 1)
 })
 
 test('bot_browser_publish_app asks DSH approval and skips CLI when cancelled', async () => {

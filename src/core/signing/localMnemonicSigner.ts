@@ -1,4 +1,5 @@
 import { derivePrivateKeyHex, parseAddressIndexFromPath, type DerivedIdentity } from '../identity/deriveIdentity';
+import { createHash } from 'node:crypto';
 import { loadIdentity } from '../identity/loadIdentity';
 import {
   normalizeChainWriteRequest,
@@ -48,6 +49,43 @@ async function buildPrivateChatIdentity(secretStore: SecretStore): Promise<Priva
 }
 
 /**
+ * A broadcast-phase failure with UNKNOWN finality: the signed transactions
+ * left the wallet but the node never confirmed acceptance (timeout, network
+ * drop, ambiguous node error). Retrying blindly mints duplicates — the
+ * transaction may already be on-chain. Handlers must surface this as
+ * manual_action_required with the candidate txids, never as a plain failure.
+ */
+export class ChainBroadcastUnknownError extends Error {
+  /** Candidate txids derived from the signed raw transactions (verify on-chain). */
+  readonly candidateTxids: string[];
+  /** Txids that DID broadcast successfully before the failure. */
+  readonly confirmedTxids: string[];
+
+  constructor(input: { candidateTxids: string[]; confirmedTxids: string[]; cause: unknown }) {
+    const message = input.cause instanceof Error ? input.cause.message : String(input.cause);
+    super(
+      `Chain broadcast status UNKNOWN: ${message}. Signed transactions may already be on-chain — `
+      + `do NOT retry the same publish blindly. Candidate txids (verify on an explorer): `
+      + `${[...new Set([...input.confirmedTxids, ...input.candidateTxids])].join(', ') || '(unavailable)'}`,
+    );
+    this.name = 'ChainBroadcastUnknownError';
+    this.candidateTxids = input.candidateTxids;
+    this.confirmedTxids = input.confirmedTxids;
+  }
+}
+
+/** Bitcoin-style txid of a serialized raw tx: double SHA-256, little-endian. */
+function computeCandidateTxid(rawTxHex: string): string | null {
+  try {
+    const first = createHash('sha256').update(Buffer.from(rawTxHex, 'hex')).digest();
+    const second = createHash('sha256').update(first).digest();
+    return [...second].reverse().map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Create a local mnemonic signer backed by a ChainAdapterRegistry.
  *
  * The Signer delegates all chain-specific operations (inscription building, broadcasting)
@@ -89,10 +127,22 @@ export function createLocalMnemonicSigner(input: {
           feeRate,
         });
 
-        // Broadcast all signed transactions in order.
+        // Broadcast all signed transactions in order. A failure here leaves
+        // finality UNKNOWN (earlier txs of the batch may be on-chain): surface
+        // ChainBroadcastUnknownError instead of a plain retryable error.
         const broadcastTxids: string[] = [];
-        for (const rawTx of inscriptionResult.signedRawTxs) {
-          broadcastTxids.push(await adapter.broadcastTx(rawTx));
+        try {
+          for (const rawTx of inscriptionResult.signedRawTxs) {
+            broadcastTxids.push(await adapter.broadcastTx(rawTx));
+          }
+        } catch (error) {
+          throw new ChainBroadcastUnknownError({
+            confirmedTxids: [...broadcastTxids],
+            candidateTxids: inscriptionResult.signedRawTxs
+              .map((rawTx: string) => computeCandidateTxid(rawTx))
+              .filter((txid: string | null): txid is string => txid !== null),
+            cause: error,
+          });
         }
 
         const firstRevealTxid = broadcastTxids[inscriptionResult.revealIndices[0]];

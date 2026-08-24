@@ -271,6 +271,28 @@ async function mergeManifest(
   await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
 }
 
+/**
+ * Preview-then-publish gate for sessions with approval prompts disabled:
+ * `approval/policy: never` must not mean "publish anything" — the same
+ * session must have PREVIEWED the directory before publish proceeds.
+ */
+const previewedDirsByAgent = new WeakMap<object, Set<string>>()
+
+function rememberPreviewedDir(agent: unknown, dir: string): void {
+  if (!agent || typeof agent !== 'object') return
+  let set = previewedDirsByAgent.get(agent)
+  if (!set) {
+    set = new Set<string>()
+    previewedDirsByAgent.set(agent, set)
+  }
+  set.add(dir)
+}
+
+function hasPreviewedDir(agent: unknown, dir: string): boolean {
+  if (!agent || typeof agent !== 'object') return false
+  return previewedDirsByAgent.get(agent)?.has(dir) === true
+}
+
 export function buildBrowserToolDefinitions(input: {
   slug: string
   hub: BrowserEventHub
@@ -383,7 +405,7 @@ export function buildBrowserToolDefinitions(input: {
       },
       output: TEXT_OUTPUT,
       timeoutMs: 20_000,
-      async execute(args) {
+      async execute(args, exec) {
         const localPath = textArg(args, 'path')
         if (!localPath.startsWith('/')) {
           throw new Error(`bot_browser_preview_local requires an absolute path, got: ${localPath}`)
@@ -391,6 +413,7 @@ export function buildBrowserToolDefinitions(input: {
         if (!(await pathExists(localPath))) {
           throw new Error(`Local path not found: ${localPath}`)
         }
+        rememberPreviewedDir(exec?.agent, localPath)
         return openUri(`preview-metaapp://localhost${localPath}`)
       },
     },
@@ -620,6 +643,13 @@ export function buildBrowserToolDefinitions(input: {
         }
         const agent = exec.agent ?? hostAgent
         const policy = approvalPolicyOf(gate, agent)
+        if (policy === 'never') {
+          // Prompts disabled in this session: the preview record is the
+          // gate — publish only what this session actually previewed.
+          if (!hasPreviewedDir(agent, dir)) {
+            return 'Publish refused: approval prompts are disabled in this session and this directory was not previewed here. Run bot_browser_preview_local on the directory first, or have the user re-enable approval prompts.'
+          }
+        }
         if (policy !== 'never') {
           const outcome: HostApprovalOutcome = await gate.request({
             agent,
