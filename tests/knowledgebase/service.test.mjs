@@ -141,3 +141,26 @@ test('addDocument rejects empty fields; provenance bounds hold', async () => {
   assert.equal(json['x-kb-source'].tags.length, 10);
   assert.equal(json['x-kb-source'].tags[0].length, 3);
 });
+
+test('removeKnowledgeBase prunes raw corpus AND derived index (no stale chunks)', async () => {
+  const { paths } = makeProfile('metabot-kb-svc-remove-');
+  const service = createKnowledgeBaseService(paths);
+  const kb = await service.store.createKnowledgeBase({ metabotSlug: 'bot-1', name: 'Law' });
+  await service.addDocument('bot-1', { title: '民法典总则', content: '民法调整平等主体之间的人身关系和财产关系。', knowledgeBaseId: kb.id });
+  await service.learnKnowledgeBase('bot-1', kb.id);
+  const hitsBefore = await service.queryKnowledgeBase('bot-1', '民法');
+  assert.equal(hitsBefore.length, 1);
+
+  assert.equal(await service.store.removeKnowledgeBase(kb.id), true);
+  const fs = await import('node:fs');
+  const indexFile = require('../../dist/core/knowledgebase/store.js').knowledgeBaseIndexPath(paths, kb.id);
+  assert.equal(fs.existsSync(indexFile), false, 'derived index deleted');
+  assert.equal(fs.existsSync(path.join(kb.rawDir, 'metabot-inbox')), false, 'raw corpus deleted');
+
+  // Same-name KB recreated (same slug-derived id is fine — everything was
+  // pruned): no stale chunks until new content is learned.
+  const reborn = await service.store.createKnowledgeBase({ metabotSlug: 'bot-1', name: 'Law' });
+  assert.ok(reborn.id);
+  const stale = await service.queryKnowledgeBase('bot-1', '民法');
+  assert.deepEqual(stale, []);
+});
