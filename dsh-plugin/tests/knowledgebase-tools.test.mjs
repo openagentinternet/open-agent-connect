@@ -34,6 +34,8 @@ test('bindKnowledgeBaseToolInstall registers all four tools', () => {
       'knowledge_base_learn',
       'knowledge_base_list',
       'knowledge_base_query',
+      'metaweb_study_enqueue',
+      'metaweb_study_status',
       'procedure_archive',
       'procedure_recall',
       'procedure_save',
@@ -112,4 +114,26 @@ test('procedure_save -> recall -> archive roundtrip with colloquial matching', a
   assert.match(archived, /Archived/)
   const afterArchive = await byName.get('procedure_recall').execute({ query: '发文章' }, exec)
   assert.match(String(afterArchive), /No saved procedure/)
+})
+
+test('metaweb_study_enqueue dedupes and status reports', async () => {
+  const base = mkdtempSync(path.join(tmpdir(), 'kb-study-'))
+  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
+  mkdirSync(homeDir, { recursive: true })
+  const bound = fakeHost()
+  plugin.bindKnowledgeBaseToolInstall(bound.ctx, 'test-bot')
+  const byName = new Map(bound.tools.map((tool) => [tool.name, tool]))
+  const exec = execFor('test-bot', homeDir)
+
+  const empty = await byName.get('metaweb_study_status').execute({}, exec)
+  assert.match(String(empty), /No study jobs yet/)
+
+  const queued = await byName.get('metaweb_study_enqueue').execute({ topic: '前端框架趋势', budgetPins: 5 }, exec)
+  assert.match(queued, /Queued study job/)
+  const dup = await byName.get('metaweb_study_enqueue').execute({ topic: '前端框架趋势' }, exec)
+  assert.match(dup, /Already queued/)
+
+  const status = await byName.get('metaweb_study_status').execute({}, exec)
+  assert.match(String(status), /前端框架趋势/)
+  assert.match(String(status), /\[pending\]/)
 })

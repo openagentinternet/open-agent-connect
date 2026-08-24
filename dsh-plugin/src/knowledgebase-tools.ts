@@ -383,6 +383,98 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
   ]
 }
 
+
+// ---------------------------------------------------------------------------
+// Study jobs (M4): metaweb_study_enqueue / metaweb_study_status
+// ---------------------------------------------------------------------------
+
+type StudyModule = {
+  createStudyJobStore(paths: unknown): {
+    enqueueStudyJob(input: Record<string, unknown>): Promise<{ job: Record<string, unknown>; created: boolean }>
+    listStudyJobs(slug?: string): Promise<Array<Record<string, unknown>>>
+  }
+}
+
+function studyStoreFor(paths: unknown) {
+  const module = core('core/knowledgebase/studyJobs.js') as StudyModule
+  return module.createStudyJobStore(paths)
+}
+
+function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostContext }): HostToolDefinition[] {
+  const { host } = input
+  const render = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [
+    { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
+  ]
+  const sessionOf = (exec: HostToolExec) => {
+    const agent = exec.agent as (HostAgentLike & { ctx?: { options?: { cwd?: string } } }) | undefined
+    const homeDir = agent?.ctx?.options?.cwd
+    const slug = (agent ? oacSlugOf(host, agent) : undefined) ?? input.fallbackSlug ?? ''
+    if (!slug || typeof homeDir !== 'string') return null
+    return { slug, homeDir }
+  }
+
+  return [
+    {
+      name: 'metaweb_study_enqueue',
+      description:
+        'Queue an autonomous nightly study job: the daemon drains this topic into your knowledge base during '
+        + 'the nightly window (00:00-06:00), saving up to budgetPins metaweb documents per night and distilling '
+        + 'reusable procedures. NOT for tasks the user wants right now — say you will study it over coming '
+        + 'nights and answer from what accumulated. Use for long-horizon learning the user assigns.',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: 'What to study (max 200 chars).' },
+          budgetPins: { type: 'number', description: 'Max metaweb documents saved per night (1-50, default 20).' },
+        },
+        required: ['topic'],
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 15_000,
+      execute: async (args, exec) => {
+        const session = sessionOf(exec)
+        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const topic = textArg(args, 'topic')
+        if (!topic) return { error: 'topic is required.' }
+        try {
+          const result = await studyStoreFor(pathsFor(session.slug, session.homeDir)).enqueueStudyJob({
+            metabotSlug: session.slug,
+            topic,
+            ...(numberArg(args, 'budgetPins') ? { budgetPins: numberArg(args, 'budgetPins') } : {}),
+          })
+          return `${result.created ? 'Queued' : 'Already queued'} study job "${topic}" (${result.job.budgetPins} pins/night). `
+            + 'It runs nightly 00:00-06:00; check metaweb_study_status later. Answer the user from current knowledge now.'
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) }
+        }
+      },
+    },
+    {
+      name: 'metaweb_study_status',
+      description: 'List your study jobs with status, runs, failures, and summaries (the morning report).',
+      parameters: { type: 'object', properties: {} },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 15_000,
+      execute: async (_args, exec) => {
+        const session = sessionOf(exec)
+        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        try {
+          const rows = await studyStoreFor(pathsFor(session.slug, session.homeDir)).listStudyJobs(session.slug)
+          if (!rows.length) return 'No study jobs yet.'
+          return rows.map((job) => [
+            `- "${job.topic}" [${job.status}] runs: ${job.runCount}, failures: ${job.consecutiveFailures}`,
+            `  pins: ${Array.isArray(job.processedPinIds) ? job.processedPinIds.length : 0}/${job.budgetPins} per night`,
+            job.summary ? `  last: ${String(job.summary).slice(0, 200)}` : '',
+            job.error ? `  error: ${job.error}` : '',
+          ].filter(Boolean).join('\n')).join('\n')
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) }
+        }
+      },
+    },
+  ]
+}
+
 function isDuplicateToolError(error: unknown): boolean {
   return error instanceof Error && /already.*(registered|exists)|duplicate/i.test(error.message)
 }
@@ -393,6 +485,7 @@ export function bindKnowledgeBaseToolInstall(ctx: HostContext, fallbackSlug?: st
   for (const definition of [
     ...buildKnowledgeBaseToolDefinitions({ host: ctx, fallbackSlug }),
     ...buildProcedureToolDefinitions({ host: ctx, fallbackSlug }),
+    ...buildStudyToolDefinitions({ host: ctx, fallbackSlug }),
   ]) {
     try {
       ctx.tools?.register(definition)
