@@ -41,6 +41,12 @@ Engine failures land in `~/.metabot/runtime/logs/grouptask-engine.log`
 (size-capped, written on failures only). Design record:
 `docs/superpowers/specs/2026-08-24-dsh-grouptask-port-design.md`.
 
+> **Upgrade note (multi-Bot machines).** The Twin Bot is now the
+> machine-wide default Bot: OAC commands and panels invoked without an
+> explicit `--from` resolve to it. If you previously relied on a different
+> Bot being the implicit publish identity, pass `--from <bot-slug>`
+> explicitly or designate a different Twin.
+
 ## Memory, dreams, and the Twin Bot
 
 The plugin ports the IDBots memory system onto file storage (no SQLite; all

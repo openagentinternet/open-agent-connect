@@ -76,16 +76,20 @@ export function runMetawebCommand(
     const untilDays = readFlagValue(args, '--until-days');
     const cursor = readFlagValue(args, '--cursor');
     const nowSeconds = Math.floor(Date.now() / 1000);
-    const dayValue = (raw: string | undefined): number | undefined => {
+    const dayValue = (raw: string | undefined, flag: string): number | undefined => {
+      if (raw == null) return undefined;
       const parsed = Number(raw);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new Error(`${flag} must be a positive integer.`);
+      }
+      return parsed;
     };
     return Promise.resolve(handler({
       query,
       ...(protocols ? { protocols } : {}),
       ...(publisher ? { publisher } : {}),
-      ...(dayValue(sinceDays) ? { since: nowSeconds - dayValue(sinceDays)! * 86_400 } : {}),
-      ...(dayValue(untilDays) ? { until: nowSeconds - dayValue(untilDays)! * 86_400 } : {}),
+      ...(dayValue(sinceDays, '--since-days') ? { since: nowSeconds - dayValue(sinceDays, '--since-days')! * 86_400 } : {}),
+      ...(dayValue(untilDays, '--until-days') ? { until: nowSeconds - dayValue(untilDays, '--until-days')! * 86_400 } : {}),
       ...(hasFlag(args, '--newest') ? { sort: 'newest' } : {}),
       ...(size.value ? { size: size.value } : {}),
       ...(cursor ? { cursor } : {}),

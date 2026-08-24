@@ -123,12 +123,18 @@ export function buildSimpleNoteToolDefinitions(input: {
         }
       }
 
+      if (args.network != null && args.network !== 'mvc' && args.network !== 'doge' && args.network !== 'btc') {
+        return `Invalid network "${args.network}" — must be one of mvc, doge, btc.`
+      }
       const slug = actorSlug(exec)
+      // The native approval above (or workspace containment) covered the
+      // external-file decision, so the daemon-side gate gets the consent flag.
       const result = await runMetabotWithPayloadFile(
         ['simplenote', 'post', ...(slug ? ['--from', slug] : [])],
         {
           title,
           content,
+          confirmExternalUpload: true,
           ...(textArg(args, 'subtitle') ? { subtitle: textArg(args, 'subtitle') } : {}),
           ...(textArg(args, 'cover') ? { cover: textArg(args, 'cover') } : {}),
           ...(stringListArg(args, 'attachments') ? { attachments: stringListArg(args, 'attachments') } : {}),
@@ -170,6 +176,10 @@ export function bindSimpleNoteToolInstall(ctx: HostContext): void {
     host: ctx,
     hostAgent,
     approval: approvalOf(ctx),
+    getWorkspaceDir: (exec) => {
+      const cwd = (exec.agent as { ctx?: { options?: { cwd?: string } } } | undefined)?.ctx?.options?.cwd
+      return typeof cwd === 'string' && cwd.trim() ? cwd : undefined
+    },
   })) {
     try {
       ctx.tools?.register(definition)

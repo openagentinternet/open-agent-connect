@@ -74,7 +74,12 @@ export function normalizeBotBrowserUri(href: string): string | null {
       const match = PUBLIC_BROWSER_PATH_RE.exec(path)
       if (match) {
         const scheme = match[1].toLowerCase() === 'pinid' ? 'pin' : match[1].toLowerCase()
-        const rest = decodeURIComponent(match[2])
+        let rest = match[2]
+        try {
+          rest = decodeURIComponent(match[2])
+        } catch {
+          // Malformed percent-encoding: keep the raw segment.
+        }
         if (scheme === 'preview-metaapp') return `preview-metaapp://${rest}`
         return `${scheme}://${rest}`
       }

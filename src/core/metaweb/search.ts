@@ -97,13 +97,13 @@ function normalizePublisher(raw: unknown): MetawebSearchPublisher {
 function normalizeItem(raw: unknown): MetawebSearchItem {
   const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   return {
-    protocol: text(record.protocol),
+    protocol: text(record.protocol).slice(0, 40),
     pinId: text(record.pinId),
     currentPinId: text(record.currentPinId) || text(record.pinId),
-    chainName: text(record.chainName),
-    title: text(record.title),
-    summary: text(record.summary),
-    tags: textList(record.tags),
+    chainName: text(record.chainName).slice(0, 20),
+    title: text(record.title).slice(0, 200),
+    summary: text(record.summary).slice(0, 500),
+    tags: textList(record.tags).slice(0, 10).map((tag) => tag.slice(0, 40)),
     publisher: normalizePublisher(record.publisher),
     createdAt: Number(record.createdAt) || 0,
     score: Number(record.score) || 0,

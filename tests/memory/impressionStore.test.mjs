@@ -364,3 +364,39 @@ test('collaboration facts sediment into snapshots and survive rebuilds', async (
   // Other subjects are untouched.
   assert.equal(await store.getSnapshot(OBSERVER, 'gm-someone-else'), null);
 });
+
+test('identity casing is normalized across dream observations and ledger facts', async () => {
+  const paths = await createTempProfileHome();
+  const store = createImpressionStore(paths);
+  // Dream path writes with mixed case; the ledger fact path lowercases.
+  await store.appendObservation({
+    observerGlobalMetaId: 'GM-Self-Bot',
+    subjectGlobalMetaId: 'GM-Peer-Bot',
+    episodeId: null,
+    evidenceIds: [],
+    observationText: 'worked together',
+    interpretationText: 'reliable',
+    dimensions: {},
+    communicationGuidance: null,
+    confidence: {},
+    dreamDate: '2026-08-24',
+    dreamVersion: 1,
+    modelId: null,
+    sourceHash: 'hash-case-1',
+  });
+  await store.appendCollaborationFact({
+    observerGlobalMetaId: 'gm-self-bot',
+    subjectGlobalMetaId: 'gm-peer-bot',
+    taskId: 3,
+    title: 'Cased',
+    outcome: 'done',
+    seatRole: 'content',
+  });
+  // Rebuild (as the dream commit path does), then query in any casing.
+  await store.rebuildSnapshot('gm-self-bot', 'gm-peer-bot');
+  const snapshot = await store.getSnapshot('GM-SELF-BOT'.toUpperCase(), 'gm-peer-bot');
+  assert.ok(snapshot, 'snapshot exists under the normalized key');
+  assert.equal(snapshot.collaborationFacts.length, 1);
+  assert.equal(snapshot.collaborationFacts[0].seatRole, 'content');
+  assert.ok(snapshot.summaryText.includes('reliable'));
+});
