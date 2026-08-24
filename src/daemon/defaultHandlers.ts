@@ -225,6 +225,7 @@ import {
   publishSimpleNote,
   type SimpleNoteNetwork,
 } from '../core/simplenote/publish';
+import { createProfileScopedUpload } from '../core/files/profileUploadGate';
 import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
 import { createMetaAppLocalCacheStore } from '../core/metaapp/localCache';
 import {
@@ -13209,16 +13210,22 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         try {
           const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          // Workspace-scoped gate: in-workspace files publish freely; anything
+          // else requires the explicit owner-consent flag in the request
+          // (interactive hosts like the DSH tool set it after their approval
+          // dialog; the loopback fence cannot gate local processes).
+          const gatedUpload = createProfileScopedUpload({
+            profileHomeDir: async () => actor.homeDir,
+            signerForSlug: async () => actor.signer,
+            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+          });
           const result = await publishSimpleNote(
             actor.signer,
-            async ({ filePath, network: uploadNetwork }) => {
-              const uploaded = await uploadLocalFileToChain({
-                filePath,
-                network: uploadNetwork,
-                signer: actor.signer,
-              });
-              return { metafileUri: uploaded.metafileUri };
-            },
+            async ({ filePath, network: uploadNetwork }) => gatedUpload({
+              slug: normalizeText(rawInput.from) || 'actor',
+              filePath,
+              network: uploadNetwork,
+            }),
             {
               title: normalizeText(rawInput.title),
               content: normalizeText(rawInput.content),

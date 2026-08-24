@@ -146,6 +146,7 @@ import {
   resolveGroupTaskEngineLogPath,
 } from '../core/grouptask/engineLog';
 import { createMetasoPinVerifier } from '../core/grouptask/deliverableVerification';
+import { createProfileScopedUpload } from '../core/files/profileUploadGate';
 import { getMetabotProfile, listMetabotProfiles } from '../core/bot/metabotProfileManager';
 import {
   createStudyJobStore,
@@ -5117,8 +5118,29 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   const groupTaskEngineLog = createGroupTaskEngineLogWriter({
     logFile: resolveGroupTaskEngineLogPath(daemonPaths.logsRoot),
   });
+  // Deliverable uploads are workspace-scoped and fail-closed: a local file
+  // reaches the chain only from inside the acting Bot's profile home. Paths
+  // injected into guest replies by remote members are refused here.
+  const gatedDeliverableUpload = createProfileScopedUpload({
+    profileHomeDir: async (slug) => {
+      const profile = await getMetabotProfile(systemHomeDir, slug).catch(() => null);
+      return profile?.homeDir ?? null;
+    },
+    signerForSlug: (slug) => (async () => {
+      const profile = await getMetabotProfile(systemHomeDir, slug).catch(() => null);
+      if (!profile) throw new Error(`MetaBot profile not found: ${slug}`);
+      return profile.homeDir === homeDir
+        ? signer
+        : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profile.homeDir), adapters });
+    })(),
+    log: (message) => {
+      console.warn(message);
+      groupTaskEngineLog(message);
+    },
+  });
   const groupTaskEngine = createGroupTaskEngine({
     verifyPin: createMetasoPinVerifier(),
+    uploadDeliverableFile: gatedDeliverableUpload,
     ctx: createGroupTaskServiceContext({
       systemHomeDir,
       createSignerForProfileHome: (profileHomeDir) => (profileHomeDir === homeDir
