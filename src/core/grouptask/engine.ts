@@ -102,6 +102,14 @@ const DEFAULT_WORKER_COOLDOWN_MS = 20_000;
 const DEFAULT_CHAIR_COOLDOWN_MS = 10_000;
 const DEFAULT_REPLY_BUDGET = 40;
 const MSG_RETRY_MAX_FAILURES = 5;
+/** IDBots guest daemon bound: 3 consecutive failures per guest message. */
+const GUEST_MSG_RETRY_MAX_FAILURES = 3;
+// Guest membership self-check (IDBots cadence): 5-min probe, 15-min
+// activation grace, 2 consecutive absences before marking left.
+const GUEST_SELF_CHECK_INTERVAL_MS = 5 * 60_000;
+const GUEST_ACTIVATION_GRACE_MS = 15 * 60_000;
+const GUEST_SELF_CHECK_ABSENCE_LIMIT = 2;
+export const GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = 'openteam_self_check:';
 const PLAN_ATTEMPTS_MAX = 3;
 const REVIEW_REENTRY_DEBOUNCE_MS = 30_000;
 const MESSAGE_FETCH_LIMIT = 500;
@@ -422,6 +430,14 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if (row.confirmation === 'confirmed') return 'on-chain ✓';
     if (row.verification && row.verification.includes('"not_found"')) return 'pending sync';
     return 'unverified';
+  }
+
+  /** Checkpoint pause-line clause: the decision asked of the owner. */
+  function checkpointDecisionSummary(topic: string): string | null {
+    const value = topic.replace(/\s+/gu, ' ').trim();
+    if (!value) return null;
+    const clause = /(?:decision|决定)[:：]\s*([^;；]+)$/i.exec(value);
+    return (clause ? clause[1]! : value).slice(0, 80) || null;
   }
 
   function preview(text: string | null | undefined, cap: number): string {
@@ -806,9 +822,24 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
         && current.status !== 'review'
         && !(await hasOpenCheckpoint(store, task.id))
       ) {
-        await store.openCheckpoint(task.id, tags.checkpointTopic, message.pinId);
+        const opened = await store.openCheckpoint(task.id, tags.checkpointTopic, message.pinId);
+        // Pause line carries the decision summary clause (IDBots parity).
+        const summary = checkpointDecisionSummary(tags.checkpointTopic);
         await postHostNotice(current, chairSlug,
-          `[GROUP_TASK_NOTICE:checkpoint_open] Task paused — waiting for the owner: ${tags.checkpointTopic}`);
+          `[GROUP_TASK_NOTICE:checkpoint_open] Task paused — waiting for the owner: ${tags.checkpointTopic}`
+          + (summary ? ` (decision needed: ${summary})` : ''));
+        // One private owner report per checkpoint (IDBots parity).
+        if (ownerGmid && ctx.sendPrivateMessage && opened) {
+          await ctx.sendPrivateMessage({
+            fromSlug: chairSlug,
+            toGlobalMetaId: ownerGmid,
+            content:
+              `[GroupTask] Task "${current.title}" paused by a checkpoint and needs your decision:\n`
+              + `Question: ${tags.checkpointTopic}\n`
+              + (summary ? `Decision needed: ${summary}\n` : '')
+              + 'Reply in the group to resolve it; work resumes automatically.',
+          }).catch(() => undefined);
+        }
       }
 
       if (tags.status) {
@@ -1525,8 +1556,8 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
         const failures = (Number((await openteam.kvGet(retryKey)) ?? '0') || 0) + 1;
         await openteam.kvSet(retryKey, String(failures));
         log(`[OpenTeam] Guest reply at index ${message.index} of ${membership.groupId} failed `
-          + `(${failures}/${MSG_RETRY_MAX_FAILURES}): ${error instanceof Error ? error.message : String(error)}`);
-        if (failures >= MSG_RETRY_MAX_FAILURES) {
+          + `(${failures}/${GUEST_MSG_RETRY_MAX_FAILURES}): ${error instanceof Error ? error.message : String(error)}`);
+        if (failures >= GUEST_MSG_RETRY_MAX_FAILURES) {
           await openteam.updateMembershipCursor(membership.groupId, profile.slug, message.index);
           await openteam.kvDelete(retryKey);
           continue;
@@ -1536,6 +1567,48 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     }
   }
 
+  /**
+   * Guest membership self-check (IDBots cadence): the kick envelope may
+   * never arrive, so the guest periodically verifies it is still on the
+   * on-chain member list; two consecutive absences (after the activation
+   * grace) mark the membership left.
+   */
+  async function runMembershipSelfCheck(
+    profile: GroupTaskProfileRef,
+    openteam: OpenTeamStore,
+    membership: OpenTeamMembershipRecord,
+  ): Promise<void> {
+    const selfMetaId = (profile.metaId ?? '').trim().toLowerCase();
+    if (!selfMetaId) return;
+    const checkKey = `${GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX}${membership.groupId}`;
+    const last = Number((await openteam.kvGet(checkKey)) ?? '0') || 0;
+    if (last && now() - last < GUEST_SELF_CHECK_INTERVAL_MS) return;
+    await openteam.kvSet(checkKey, String(now()));
+    if (membership.activatedAt == null
+      || now() - membership.activatedAt < GUEST_ACTIVATION_GRACE_MS) {
+      return;
+    }
+    const members = await fetchGroupMembers(membership.groupId, ctx.transport).catch(() => null);
+    if (members == null) return; // indexer unreachable: not an absence
+    const present = members.some((entry) => String(entry ?? '').trim().toLowerCase() === selfMetaId);
+    if (present) {
+      await openteam.kvDelete(`${checkKey}:absent`).catch(() => undefined);
+      return;
+    }
+    const absentKey = `${checkKey}:absent`;
+    const absences = (Number((await openteam.kvGet(absentKey)) ?? '0') || 0) + 1;
+    if (absences < GUEST_SELF_CHECK_ABSENCE_LIMIT) {
+      await openteam.kvSet(absentKey, String(absences));
+      log(`[OpenTeam] Self-check: ${profile.slug} absent from group ${membership.groupId} `
+        + `(${absences}/${GUEST_SELF_CHECK_ABSENCE_LIMIT})`);
+      return;
+    }
+    await openteam.leaveMembership(membership.groupId, profile.slug, 'self_check',
+      'absent from the on-chain member list twice').catch(() => undefined);
+    log(`[OpenTeam] Self-check: ${profile.slug} marked membership ${membership.groupId} left `
+      + '(2-strike absence)');
+  }
+
   async function processOpenTeamForProfile(profile: GroupTaskProfileRef): Promise<void> {
     const openteam = openteamStoreFor(ctx, profile);
     await scanOpenTeamEnvelopes(profile, openteam);
@@ -1543,6 +1616,12 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     const memberships = await openteam.listMemberships({ activeOnly: true });
     for (const membership of memberships) {
       if (membership.slug !== profile.slug) continue;
+      try {
+        await runMembershipSelfCheck(profile, openteam, membership);
+      } catch (error) {
+        log(`[OpenTeam] Self-check failed for group ${membership.groupId}: `
+          + `${error instanceof Error ? error.message : String(error)}`);
+      }
       try {
         await runGuestReplies(profile, openteam, membership);
       } catch (error) {
