@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -84,6 +117,7 @@ const engineLog_1 = require("../core/grouptask/engineLog");
 const deliverableVerification_1 = require("../core/grouptask/deliverableVerification");
 const profileUploadGate_1 = require("../core/files/profileUploadGate");
 const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
+const service_1 = require("../core/knowledgebase/service");
 const studyJobs_1 = require("../core/knowledgebase/studyJobs");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const simplemsgPresenceWatchdog_1 = require("../core/a2a/simplemsgPresenceWatchdog");
@@ -4346,14 +4380,37 @@ async function serveCliDaemonProcess(context) {
         }
         return store;
     };
+    // Overlap guard: one study tick (up to a 30-minute LLM turn) must finish
+    // before the next interval fire starts — otherwise the next tick's crash
+    // recovery flips the in-flight `running` row back to pending and the same
+    // job runs twice (double pin budget, duplicate KB writes).
+    let studyTickInFlight = false;
     const studyTimer = setInterval(() => {
+        if (studyTickInFlight) {
+            groupTaskEngineLog('[Study] tick skipped: previous tick still running');
+            return;
+        }
+        studyTickInFlight = true;
         void (async () => {
             try {
                 const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
                 for (const profile of profiles) {
+                    // Nightly KB auto-learn (imported/raw files indexed once per local
+                    // day in the window) rides the same tick as the study drain.
+                    try {
+                        const kbService = (0, service_1.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
+                        for (const kb of await kbService.store.listDueForAutoLearn(new Date())) {
+                            await kbService.learnKnowledgeBase(profile.slug, kb.id).catch(() => undefined);
+                            await kbService.store.markAutoLearned(kb.id, new Date().toISOString().slice(0, 10));
+                        }
+                    }
+                    catch {
+                        // Auto-learn failures never block the study drain.
+                    }
                     await (0, studyJobs_1.runStudyTick)(studyStoreFor(profile.homeDir), {
-                        runStudyTurn: async ({ slug, prompt }) => {
-                            const profilePaths = (0, paths_1.resolveMetabotPaths)((await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, slug))?.homeDir ?? '');
+                        runStudyTurn: async ({ slug, prompt, budgetPins }) => {
+                            const homeDir = (await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, slug))?.homeDir ?? '';
+                            const profilePaths = (0, paths_1.resolveMetabotPaths)(homeDir);
                             const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
                                 runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths),
                                 bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(profilePaths),
@@ -4368,19 +4425,62 @@ async function serveCliDaemonProcess(context) {
                                     }
                                 },
                             });
-                            const result = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
-                                runtimeResolver,
-                                llmExecutor,
-                                metaBotSlug: slug,
-                                prompt,
-                                systemPrompt: 'You are a MetaBot running an unattended nightly study session.',
-                                timeoutMs: 30 * 60_000,
-                                pollIntervalMs: 5_000,
+                            const llm = async (history) => {
+                                const result = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                                    runtimeResolver,
+                                    llmExecutor,
+                                    metaBotSlug: slug,
+                                    prompt: history
+                                        .map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}:\n${entry.content}`)
+                                        .join('\n\n---\n\n'),
+                                    systemPrompt: 'You are a MetaBot running an unattended nightly study session. Reply with exactly one ```json fence per turn.',
+                                    timeoutMs: 30 * 60_000,
+                                    pollIntervalMs: 5_000,
+                                });
+                                if (result.status !== 'completed') {
+                                    throw new Error(result.error || `Study turn ended with status ${result.status}`);
+                                }
+                                return result.output;
+                            };
+                            // Real tools with the pin budget enforced at the executor seam.
+                            let savedDocs = 0;
+                            const kbService = (0, service_1.createKnowledgeBaseService)(profilePaths);
+                            return await (0, studyJobs_1.runStudyTurnWithTools)(prompt, {
+                                runLlm: llm,
+                                tools: {
+                                    searchMetaweb: async ({ query }) => {
+                                        const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                                        const page = await (0, search_1.searchMetaweb)({ q: query }, baseUrl ? { baseUrl } : undefined);
+                                        const { formatMetawebSearchBullets } = await Promise.resolve().then(() => __importStar(require('../core/metaweb/format.js')));
+                                        return formatMetawebSearchBullets(page.items)
+                                            || 'No results. Retry with other keywords (bilingual).';
+                                    },
+                                    readMetawebPin: async ({ pinId }) => {
+                                        const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                                        const pin = await (0, pinRead_1.readMetawebPin)(pinId, baseUrl ? { baseUrl } : undefined);
+                                        const { formatMetawebPinDetail } = await Promise.resolve().then(() => __importStar(require('../core/metaweb/format.js')));
+                                        return formatMetawebPinDetail(pin);
+                                    },
+                                    addDocument: async ({ title, content, pinId }) => {
+                                        if (savedDocs >= budgetPins) {
+                                            return `Pin budget reached (${budgetPins}). Stop saving; emit the final report.`;
+                                        }
+                                        const saved = await kbService.addDocument(slug, {
+                                            title,
+                                            content,
+                                            sourceType: 'metaweb',
+                                            ...(pinId ? { pinId } : {}),
+                                        });
+                                        savedDocs += 1;
+                                        await kbService.learnKnowledgeBase(slug).catch(() => undefined);
+                                        return `Saved as ${saved.relPath} (budget ${savedDocs}/${budgetPins}).`;
+                                    },
+                                    learnKnowledgeBase: async () => {
+                                        const learned = await kbService.learnKnowledgeBase(slug);
+                                        return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`;
+                                    },
+                                },
                             });
-                            if (result.status !== 'completed') {
-                                throw new Error(result.error || `Study turn ended with status ${result.status}`);
-                            }
-                            return result.output;
                         },
                         log: (message) => {
                             console.warn(message);
@@ -4391,6 +4491,9 @@ async function serveCliDaemonProcess(context) {
             }
             catch {
                 // Scheduler failures never take down the daemon.
+            }
+            finally {
+                studyTickInFlight = false;
             }
         })();
     }, studyJobs_1.STUDY_TICK_INTERVAL_MINUTES * 60_000);

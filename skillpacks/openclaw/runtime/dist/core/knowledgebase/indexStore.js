@@ -120,6 +120,24 @@ function bm25Score(tf, docLen, avgLen, df, totalDocs) {
     return idf * ((tf * norm) / (tf + BM25_K1 * lenPart));
 }
 function createKnowledgeBaseIndexStore(filePath) {
+    // Query-path cache: tokenize each chunk once per index-file generation
+    // (mtime+size) instead of on every query — the corpus grows nightly and
+    // per-query retokenization becomes a multi-second event-loop block.
+    let cache = null;
+    function indexGenerationKey() {
+        return node_fs_1.promises.stat(filePath).then((stat) => `${Math.floor(stat.mtimeMs)}:${stat.size}`, () => 'missing');
+    }
+    function chunkTokensOf(index) {
+        return index.chunks.map((chunk) => (0, text_1.tokenizeKnowledgeBaseText)(chunk.text));
+    }
+    async function readIndexCached() {
+        const key = await indexGenerationKey();
+        if (cache && cache.key === key)
+            return cache;
+        const index = await readIndex();
+        cache = { key, index, chunkTokens: chunkTokensOf(index) };
+        return cache;
+    }
     async function readIndex() {
         try {
             const raw = await node_fs_1.promises.readFile(filePath, 'utf8');
@@ -151,17 +169,18 @@ function createKnowledgeBaseIndexStore(filePath) {
         rebuild: async (rawDir, now) => {
             const index = await buildIndexFromRawDir(rawDir, now);
             await writeIndex(index);
+            cache = null;
             return { docCount: index.docs.length, chunkCount: index.chunks.length };
         },
         query: async (query, options = {}) => {
-            const index = await readIndex();
+            const { index, chunkTokens } = await readIndexCached();
             if (index.chunks.length === 0 || !query.trim())
                 return [];
             const tokens = indexTokens(query);
             if (!tokens.length)
                 return [];
-            const avgLen = index.chunks.reduce((sum, chunk) => sum + (0, text_1.tokenizeKnowledgeBaseText)(chunk.text).length, 0)
-                / Math.max(1, index.chunks.length);
+            const avgLen = chunkTokens.reduce((sum, tokens2) => sum + tokens2.length, 0)
+                / Math.max(1, chunkTokens.length);
             const scores = new Map();
             const hits = [];
             for (const token of tokens) {
@@ -172,11 +191,11 @@ function createKnowledgeBaseIndexStore(filePath) {
                 const df = new Set(postings).size;
                 for (const chunkIndex of postings) {
                     const chunk = index.chunks[chunkIndex];
-                    if (!chunk)
+                    const chunkTokenList = chunkTokens[chunkIndex];
+                    if (!chunk || !chunkTokenList)
                         continue;
-                    const chunkTokens = (0, text_1.tokenizeKnowledgeBaseText)(chunk.text);
-                    const tf = chunkTokens.filter((item) => item === token).length;
-                    const raw = bm25Score(tf, chunkTokens.length, avgLen, df, index.chunks.length);
+                    const tf = chunkTokenList.filter((item) => item === token).length;
+                    const raw = bm25Score(tf, chunkTokenList.length, avgLen, df, index.chunks.length);
                     scores.set(chunkIndex, (scores.get(chunkIndex) ?? 0) + raw);
                 }
             }
@@ -204,6 +223,7 @@ function createKnowledgeBaseIndexStore(filePath) {
         },
         clear: async () => {
             await node_fs_1.promises.rm(filePath, { force: true }).catch(() => undefined);
+            cache = null;
         },
     };
 }

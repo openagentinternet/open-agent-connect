@@ -439,7 +439,6 @@ export async function runStudyTurnWithTools(
 ): Promise<string> {
   const maxSteps = deps.maxSteps ?? 12;
   const maxResultChars = deps.maxResultChars ?? 12_000;
-  let savedDocs = 0;
   const budget = { savedDocs: 0 };
 
   const tools: StudyToolSet = {

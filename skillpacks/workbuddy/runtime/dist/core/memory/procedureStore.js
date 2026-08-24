@@ -155,7 +155,7 @@ function createProcedureStore(paths) {
             const title = input.title.trim();
             if (!title)
                 throw new ProcedureStoreError('title_required', 'Procedure title is required.');
-            const steps = (input.steps ?? []).map((step) => String(step ?? '').trim()).filter(Boolean);
+            const steps = (input.steps ?? []).map((step) => String(step ?? '').trim().slice(0, 500)).filter(Boolean);
             if (!steps.length)
                 throw new ProcedureStoreError('steps_required', 'At least one step is required.');
             const state = await readFile();
@@ -165,7 +165,7 @@ function createProcedureStore(paths) {
             if (existing) {
                 // Same title rewrites with a version bump (IDBots semantics).
                 existing.title = title;
-                existing.steps = steps.slice(0, 40);
+                existing.steps = steps.slice(0, 40).map((step) => step.slice(0, 500));
                 existing.pitfalls = (input.pitfalls ?? []).map((item) => String(item ?? '').trim()).filter(Boolean).slice(0, 40);
                 existing.triggerText = (input.triggerText ?? existing.triggerText).slice(0, 400);
                 existing.sourcePinIds = (input.sourcePinIds ?? existing.sourcePinIds).slice(0, 20);
@@ -184,7 +184,7 @@ function createProcedureStore(paths) {
                 id: `proc-${state.seq + 1}-${Math.random().toString(36).slice(2, 8)}`,
                 title,
                 titleFingerprint: fingerprint,
-                steps: steps.slice(0, 40),
+                steps: steps.slice(0, 40).map((step) => step.slice(0, 500)),
                 pitfalls: (input.pitfalls ?? []).map((item) => String(item ?? '').trim()).filter(Boolean).slice(0, 40),
                 triggerText: (input.triggerText ?? '').slice(0, 400),
                 sourcePinIds: (input.sourcePinIds ?? []).slice(0, 20),
