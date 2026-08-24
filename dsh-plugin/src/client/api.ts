@@ -294,6 +294,40 @@ export type GroupTaskDetailPayload = {
   openCheckpointSummary: string | null
 }
 
+/** Read-only `metabot grouptask health` snapshot shown as the panel banner. */
+export type GroupTaskHealthPayload = {
+  chairSlug: string | null
+  chairReason: string | null
+  ownerPresent: boolean
+  ownerGlobalMetaId: string | null
+  simplemsgListenerEnabled: boolean
+  activeTasks: number
+  totalTasks: number
+  engineLogLines: string[]
+}
+
+/** Staffing proposal row (`metabot grouptask staffing list`). */
+export type GroupTaskStaffingProposalRow = {
+  id: number
+  chairSlug: string
+  title: string
+  goal: string
+  status: 'pending' | 'confirmed' | 'skip_authorized' | 'consumed' | 'cancelled'
+  skipAuthorized: boolean
+  ownerDecision: string | null
+  createdTaskId: number | null
+  createdAt: number
+  seats: Array<{
+    role: string
+    candidateName: string
+    candidateSlug: string | null
+    candidateGlobalMetaId: string | null
+    source: 'local' | 'remote'
+    reason: string
+  }>
+  stages: Array<{ id: string; title: string }>
+}
+
 /** Guest-side OpenTeam membership (a local Bot joined someone else's task). */
 export type OpenTeamCollabRow = {
   groupId: string
@@ -588,6 +622,29 @@ export const api = {
       messages: rows.map((row) => normalizeGroupTaskMessage(row)),
     }
   },
+  grouptaskHealth: async (): Promise<GroupTaskHealthPayload> =>
+    normalizeGroupTaskHealth(await post('grouptask/health', {})),
+  grouptaskStaffingList: async (): Promise<GroupTaskStaffingProposalRow[]> => {
+    const data = await post<{ proposals?: unknown }>('grouptask/staffing/list', {})
+    const rows = Array.isArray(data.proposals) ? data.proposals : []
+    return rows.map((row) => normalizeStaffingProposal(row))
+  },
+  grouptaskStaffingDecide: async (
+    chair: string,
+    proposalId: number,
+    decision: 'confirm' | 'revise' | 'skip',
+  ): Promise<CommandEnvelope> => postEnvelope('grouptask/staffing/decide', { chairSlug: chair, proposalId, decision }),
+  grouptaskStaffingCreate: async (proposalId: number): Promise<{ taskId: number; pendingRemoteSeats: number }> => {
+    const data = await post<{ taskId?: unknown; pendingRemoteSeats?: unknown }>(
+      'grouptask/staffing/create',
+      { proposalId },
+    )
+    const seats = Array.isArray(data.pendingRemoteSeats) ? data.pendingRemoteSeats : []
+    return {
+      taskId: Math.trunc(toNumber(data.taskId)),
+      pendingRemoteSeats: seats.length,
+    }
+  },
   chatPrivate: async (from: string, to: string, content: string): Promise<CommandEnvelope> =>
     postEnvelope('chat/private', { from, to, content }),
   servicesOwned: async (from: string): Promise<unknown> => post('services/owned/list', { from }),
@@ -864,6 +921,68 @@ function normalizeGroupTaskMemberPreview(value: unknown): GroupTaskMemberPreview
     role: textOf(record.role) === 'chair' ? 'chair' : 'worker',
     slug: textOf(record.slug) || null,
     remote: record.remote === true || record.slug == null,
+  }
+}
+
+function normalizeStaffingProposal(value: unknown): GroupTaskStaffingProposalRow {
+  const record = recordOf(value)
+  const plan = recordOf(record.plan)
+  const statusText = textOf(record.status)
+  const status = statusText === 'confirmed'
+    || statusText === 'skip_authorized'
+    || statusText === 'consumed'
+    || statusText === 'cancelled'
+    ? statusText
+    : 'pending'
+  return {
+    id: Math.trunc(toNumber(record.id)),
+    chairSlug: textOf(record.chairSlug),
+    title: textOf(record.title),
+    goal: textOf(record.goal),
+    status,
+    skipAuthorized: record.skipAuthorized === true,
+    ownerDecision: textOf(record.ownerDecision) || null,
+    createdTaskId: record.createdTaskId == null ? null : Math.trunc(toNumber(record.createdTaskId)) || null,
+    createdAt: toNumber(record.createdAt),
+    seats: Array.isArray(plan.seats)
+      ? plan.seats.map((seat) => {
+        const row = recordOf(seat)
+        return {
+          role: textOf(row.role) || 'content',
+          candidateName: textOf(row.candidateName) || textOf(row.name),
+          candidateSlug: textOf(row.candidateSlug) || null,
+          candidateGlobalMetaId: textOf(row.candidateGlobalMetaId) || null,
+          source: row.source === 'remote' ? 'remote' as const : 'local' as const,
+          reason: textOf(row.reason),
+        }
+      })
+      : [],
+    stages: Array.isArray(plan.stages)
+      ? plan.stages.map((stage) => {
+        const row = recordOf(stage)
+        return { id: textOf(row.id), title: textOf(row.title) }
+      })
+      : [],
+  }
+}
+
+function normalizeGroupTaskHealth(value: unknown): GroupTaskHealthPayload {
+  const record = recordOf(value)
+  const chair = recordOf(record.chair)
+  const owner = recordOf(record.ownerIdentity)
+  const tasks = recordOf(record.tasks)
+  const engine = recordOf(record.engine)
+  return {
+    chairSlug: chair.resolvable === true ? textOf(chair.slug) || null : null,
+    chairReason: chair.resolvable === false ? textOf(chair.reason) || null : null,
+    ownerPresent: owner.present === true,
+    ownerGlobalMetaId: owner.present === true ? textOf(owner.globalMetaId) || null : null,
+    simplemsgListenerEnabled: record.simplemsgListenerEnabled !== false,
+    activeTasks: Math.max(0, Math.trunc(toNumber(tasks.active))),
+    totalTasks: Math.max(0, Math.trunc(toNumber(tasks.total))),
+    engineLogLines: Array.isArray(engine.recentLines)
+      ? engine.recentLines.map((line) => textOf(line)).filter((line) => line !== '')
+      : [],
   }
 }
 

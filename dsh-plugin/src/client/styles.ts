@@ -307,6 +307,10 @@ export const GROUPTASK_CSS = `
 .oac-gt-pin-mark { flex: none; color: var(--dsw-alias-state-warn-label); font-size: 11px; }
 .oac-gt-row-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .oac-gt-collabs { display: flex; flex-direction: column; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-gt-staffing { display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-fill-floating-secondary, transparent); }
+.oac-gt-staffing-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+.oac-gt-staffing-seat { display: flex; align-items: center; gap: 6px; font-size: 12px; padding-left: 4px; }
+.oac-gt-staffing-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .oac-gt-collabs-title { padding: 4px 12px 6px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .02em; color: var(--dsw-alias-label-tertiary); text-transform: uppercase; }
 .oac-gt-guest-invite { cursor: default; opacity: .75; }
 .oac-gt-invite-toggle { margin-left: 10px; text-transform: none; letter-spacing: normal; }

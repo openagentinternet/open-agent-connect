@@ -4,6 +4,12 @@
  * undefined for non-grouptask methods so index.ts can chain dispatchers.
  */
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import {
+  localGrouptaskCollabs,
+  localGrouptaskDetail,
+  localGrouptaskList,
+  localGrouptaskMessages,
+} from './local-read.js'
 
 type RunMetabot = typeof runMetabot
 
@@ -92,6 +98,9 @@ export async function dispatchGroupTaskRoutes(
     const tab = readTrimmed(body, 'tab')
     if (tab) args.push('--tab', tab)
     if (body.includeArchived === true) args.push('--include-archived')
+    // Store-only read; the daemon engine's 5s tick keeps the stores synced.
+    const local = await localGrouptaskList(tab, body.includeArchived === true)
+    if (local) return local
     return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
@@ -102,6 +111,11 @@ export async function dispatchGroupTaskRoutes(
     const view = readTrimmed(body, 'view')
     if (view) args.push('--view', view)
     if (body.sync === false) args.push('--no-sync')
+    if (body.sync !== true) {
+      // Store-only read; the daemon engine's 5s tick keeps the stores synced.
+      const local = await localGrouptaskDetail(ref.chair, ref.taskId, view)
+      if (local) return local
+    }
     return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
@@ -114,6 +128,10 @@ export async function dispatchGroupTaskRoutes(
     const beforeIndex = readInt(body, 'beforeIndex')
     if (beforeIndex !== undefined) args.push('--before-index', String(beforeIndex))
     if (body.sync === false) args.push('--no-sync')
+    if (body.sync !== true) {
+      const local = await localGrouptaskMessages(ref.chair, ref.taskId, limit, beforeIndex)
+      if (local) return local
+    }
     return run(args, { timeoutMs: READ_TIMEOUT_MS })
   }
 
@@ -252,6 +270,8 @@ export async function dispatchGroupTaskRoutes(
   }
 
   if (method === 'grouptask/collabs') {
+    const local = await localGrouptaskCollabs()
+    if (local) return local
     return run(['grouptask', 'collabs'], { timeoutMs: READ_TIMEOUT_MS })
   }
 
@@ -261,6 +281,82 @@ export async function dispatchGroupTaskRoutes(
     const groupId = readTrimmed(body, 'groupId')
     if (!groupId) return failed('missing_group_id', 'groupId is required')
     const args = ['grouptask', 'collab-messages', '--bot', slug, '--group', groupId]
+    const limit = readInt(body, 'limit')
+    if (limit !== undefined) args.push('--limit', String(limit))
+    return run(args, { timeoutMs: READ_TIMEOUT_MS })
+  }
+
+  if (method === 'grouptask/health') {
+    return run(['grouptask', 'health'], { timeoutMs: READ_TIMEOUT_MS })
+  }
+
+  if (method === 'grouptask/staffing/propose') {
+    const title = readTrimmed(body, 'title')
+    if (!title) return failed('missing_title', 'title is required')
+    const goal = readTrimmed(body, 'goal')
+    if (!goal) return failed('missing_goal', 'goal is required')
+    const planSource = typeof body.plan === 'string' ? body.plan : JSON.stringify(body.plan ?? {})
+    if (!planSource || planSource === '{}') return failed('missing_plan', 'plan is required')
+    const args = ['grouptask', 'staffing', 'propose', '--title', title, '--goal', goal, '--plan', planSource]
+    const acceptance = readTrimmed(body, 'acceptanceCriteria')
+    if (acceptance) args.push('--acceptance', acceptance)
+    const wish = readTrimmed(body, 'triggeringWish')
+    if (wish) args.push('--wish', wish)
+    const session = readTrimmed(body, 'sourceSessionId')
+    if (session) args.push('--session', session)
+    const chair = readTrimmed(body, 'chairSlug')
+    if (chair) args.push('--chair', chair)
+    const language = readTrimmed(body, 'language')
+    if (language) args.push('--lang', language)
+    return run(args, { timeoutMs: READ_TIMEOUT_MS })
+  }
+
+  if (method === 'grouptask/staffing/list') {
+    const args = ['grouptask', 'staffing', 'list']
+    const chair = readTrimmed(body, 'chairSlug')
+    if (chair) args.push('--chair', chair)
+    return run(args, { timeoutMs: READ_TIMEOUT_MS })
+  }
+
+  if (method === 'grouptask/staffing/decide') {
+    const chair = readTrimmed(body, 'chairSlug')
+    if (!chair) return failed('missing_chair', 'chair is required')
+    const proposalId = readInt(body, 'proposalId')
+    if (proposalId === undefined || proposalId <= 0) {
+      return failed('missing_proposal', 'proposalId must be a positive integer')
+    }
+    const decision = readTrimmed(body, 'decision')
+    if (!['confirm', 'revise', 'skip'].includes(decision)) {
+      return failed('invalid_decision', "decision must be 'confirm', 'revise', or 'skip'")
+    }
+    return run(
+      ['grouptask', 'staffing', 'decide', '--chair', chair, '--proposal', String(proposalId), '--decision', decision],
+      { timeoutMs: READ_TIMEOUT_MS },
+    )
+  }
+
+  if (method === 'grouptask/staffing/create') {
+    const proposalId = readInt(body, 'proposalId')
+    if (proposalId === undefined || proposalId <= 0) {
+      return failed('missing_proposal', 'proposalId must be a positive integer')
+    }
+    const args = ['grouptask', 'staffing', 'create', '--proposal', String(proposalId)]
+    const chair = readTrimmed(body, 'chairSlug')
+    if (chair) args.push('--chair', chair)
+    return run(args, { timeoutMs: WRITE_TIMEOUT_MS })
+  }
+
+  if (method === 'grouptask/staffing/search') {
+    const seat = readTrimmed(body, 'seat')
+    const query = readTrimmed(body, 'query')
+    if (!seat && !query) return failed('missing_query', 'seat or query is required')
+    const args = ['grouptask', 'staffing', 'search']
+    if (seat) args.push('--seat', seat)
+    if (query) args.push('--query', query)
+    const domain = readTrimmed(body, 'domainLabel')
+    if (domain) args.push('--domain', domain)
+    const skills = readStringList(body, 'skills')
+    if (skills.length > 0) args.push('--skills', skills.join(','))
     const limit = readInt(body, 'limit')
     if (limit !== undefined) args.push('--limit', String(limit))
     return run(args, { timeoutMs: READ_TIMEOUT_MS })

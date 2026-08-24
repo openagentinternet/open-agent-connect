@@ -177,6 +177,16 @@ export interface GroupTaskStore {
   addDeliverable(input: AddGroupTaskDeliverableInput): Promise<GroupTaskDeliverable>;
   listDeliverables(taskId: number): Promise<GroupTaskDeliverable[]>;
   hasDeliverableWithMsgPin(taskId: number, msgPinId: string): Promise<boolean>;
+  findDeliverableByMsgPinAndUri(
+    taskId: number,
+    msgPinId: string,
+    uri: string | null,
+    kind: string | null,
+  ): Promise<GroupTaskDeliverable | null>;
+  /** Correction supersede: reopen a rejected/stale row for re-verification. */
+  reopenDeliverable(deliverableId: number): Promise<GroupTaskDeliverable | null>;
+  /** Inviter-side local-file → metafile upgrade rewrites the row's URI. */
+  updateDeliverableUri(deliverableId: number, uri: string, kind?: string): Promise<GroupTaskDeliverable | null>;
   deleteDeliverable(deliverableId: number): Promise<boolean>;
   updateDeliverableVerification(
     deliverableId: number,
@@ -236,6 +246,8 @@ export interface GroupTaskStore {
     ratingComment: string | null;
   }): Promise<void>;
   updateAcceptanceSummaryPublishedPin(taskId: number, pinId: string): Promise<void>;
+  /** Stamp the LLM owner-report conclusion onto the latest summary. */
+  updateAcceptanceSummaryConclusion(taskId: number, conclusion: string): Promise<void>;
 
   // Message cache
   appendMessages(groupId: string, messages: GroupTaskMessage[]): Promise<number>;
@@ -628,6 +640,35 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       return state.deliverables.some((entry) => entry.taskId === taskId && entry.msgPinId === msgPinId);
     },
 
+    findDeliverableByMsgPinAndUri: async (taskId, msgPinId, uri, kind) => {
+      const state = await readState();
+      return state.deliverables.find((entry) => entry.taskId === taskId
+        && entry.msgPinId === msgPinId
+        && (entry.uri ?? null) === (uri ?? null)
+        && (entry.kind ?? null) === (kind ?? null)) ?? null;
+    },
+
+    updateDeliverableUri: (deliverableId, uri, kind) => enqueue(async () => {
+      const state = await readState();
+      const deliverable = state.deliverables.find((entry) => entry.id === deliverableId);
+      if (!deliverable) return null;
+      deliverable.uri = uri.trim();
+      if (kind) deliverable.kind = kind.trim();
+      await writeState(state);
+      return deliverable;
+    }),
+
+    reopenDeliverable: (deliverableId) => enqueue(async () => {
+      const state = await readState();
+      const deliverable = state.deliverables.find((entry) => entry.id === deliverableId);
+      if (!deliverable) return null;
+      deliverable.status = 'pending';
+      deliverable.verification = null;
+      deliverable.confirmation = 'unconfirmed';
+      await writeState(state);
+      return deliverable;
+    }),
+
     deleteDeliverable: (deliverableId) => enqueue(async () => {
       const state = await readState();
       const before = state.deliverables.length;
@@ -829,6 +870,18 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       summary.rating = input.rating;
       summary.ratingComment = input.ratingComment;
       await writeState(state);
+    }),
+
+    updateAcceptanceSummaryConclusion: (taskId, conclusion) => enqueue(async () => {
+      const state = await readState();
+      const summaries = state.acceptanceSummaries
+        .filter((entry) => entry.taskId === taskId)
+        .sort((left, right) => right.version - left.version);
+      const latest = summaries[0];
+      if (latest) {
+        latest.conclusion = conclusion;
+        await writeState(state);
+      }
     }),
 
     updateAcceptanceSummaryPublishedPin: (taskId, pinId) => enqueue(async () => {
