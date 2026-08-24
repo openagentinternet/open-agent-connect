@@ -106,10 +106,21 @@ export function openteamStoreFor(ctx: GroupTaskServiceContext, profile: GroupTas
   return createOpenTeamStore(resolveMetabotPaths(profile.homeDir));
 }
 
-/** Staffing proposal store for a profile (exported for the staffing service). */
+const staffingStoreCache = new Map<string, StaffingStore>();
+
+/** Staffing proposal store for a profile (exported for the staffing service).
+ *  Memoized per store file: the CAS claim/release only serializes within one
+ *  instance's in-process queue, so every request must share the instance. */
 export function staffingStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): StaffingStore {
   if (ctx.staffingStoreForProfile) return ctx.staffingStoreForProfile(profile);
-  return createStaffingStore(resolveMetabotPaths(profile.homeDir));
+  const paths = resolveMetabotPaths(profile.homeDir);
+  const key = paths.runtimeRoot;
+  let store = staffingStoreCache.get(key);
+  if (!store) {
+    store = createStaffingStore(paths);
+    staffingStoreCache.set(key, store);
+  }
+  return store;
 }
 
 function logOf(ctx: GroupTaskServiceContext): (message: string) => void {

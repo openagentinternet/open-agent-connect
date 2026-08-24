@@ -927,10 +927,16 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
               return match ? match[1]!.toLowerCase() : null;
             };
             const targetPin = pinOf(candidate.uri);
-            const mine = rows.filter((row) => row.authorGlobalMetaId === message.senderGlobalMetaId
+            // Supersede targets PRIOR rows by this author: never the
+            // correction row just recorded, and rejected rows first (a
+            // delivered row is live work, not a superseded one).
+            const mine = rows.filter((row) => row.id !== recorded.id
+              && row.authorGlobalMetaId === message.senderGlobalMetaId
               && row.status !== 'accepted');
-            const superseded = (targetPin && mine.find((row) => pinOf(row.uri) === targetPin))
-              ?? mine[mine.length - 1]
+            const superseded = (targetPin && mine.find((row) => pinOf(row.uri) === targetPin && row.status === 'rejected'))
+              ?? (targetPin && mine.find((row) => pinOf(row.uri) === targetPin))
+              ?? mine.find((row) => row.status === 'rejected')
+              ?? mine[0]
               ?? null;
             if (superseded) {
               await store.reopenDeliverable(superseded.id);

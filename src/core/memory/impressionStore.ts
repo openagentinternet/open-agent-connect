@@ -160,8 +160,8 @@ function normalizeObservation(value: unknown): ImpressionObservation | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const id = asText(record.id);
-  const observer = asText(record.observerGlobalMetaId);
-  const subject = asText(record.subjectGlobalMetaId);
+  const observer = asText(record.observerGlobalMetaId).toLowerCase();
+  const subject = asText(record.subjectGlobalMetaId).toLowerCase();
   if (!id || !observer || !subject) return null;
   const status = record.status;
   return {
@@ -215,9 +215,11 @@ function factsForSnapshot(
   observerGlobalMetaId: string,
   subjectGlobalMetaId: string,
 ): ImpressionSnapshot['collaborationFacts'] {
+  const observer = observerGlobalMetaId.trim().toLowerCase();
+  const subject = subjectGlobalMetaId.trim().toLowerCase();
   return facts
-    .filter((fact) => fact.observerGlobalMetaId === observerGlobalMetaId
-      && fact.subjectGlobalMetaId === subjectGlobalMetaId)
+    .filter((fact) => fact.observerGlobalMetaId === observer
+      && fact.subjectGlobalMetaId === subject)
     .sort((left, right) => left.recordedAt - right.recordedAt)
     .slice(-10)
     .map((fact) => ({
@@ -233,8 +235,8 @@ function factsForSnapshot(
 function normalizeSnapshot(value: unknown): ImpressionSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  const observer = asText(record.observerGlobalMetaId);
-  const subject = asText(record.subjectGlobalMetaId);
+  const observer = asText(record.observerGlobalMetaId).toLowerCase();
+  const subject = asText(record.subjectGlobalMetaId).toLowerCase();
   if (!observer || !subject) return null;
   return {
     observerGlobalMetaId: observer,
@@ -429,8 +431,10 @@ export function createImpressionStore(
 
     async appendObservation(input) {
       return enqueue(async () => {
-        const observer = asText(input.observerGlobalMetaId);
-        const subject = asText(input.subjectGlobalMetaId);
+        // Normalize case at the store boundary: dream paths, ledger facts,
+        // and queries must all land under one key per identity pair.
+        const observer = asText(input.observerGlobalMetaId).toLowerCase();
+        const subject = asText(input.subjectGlobalMetaId).toLowerCase();
         if (!observer || !subject) throw new Error('observerGlobalMetaId and subjectGlobalMetaId are required');
         if (observer === subject) throw new Error('Self-impressions are not accepted');
         const episodeId = asText(input.episodeId) || null;
@@ -514,16 +518,19 @@ export function createImpressionStore(
 
     async getSnapshot(observerGlobalMetaId, subjectGlobalMetaId) {
       const file = await readFile();
+      const observer = observerGlobalMetaId.trim().toLowerCase();
+      const subject = subjectGlobalMetaId.trim().toLowerCase();
       return file.snapshots.find((snapshot) => (
-        snapshot.observerGlobalMetaId === observerGlobalMetaId
-        && snapshot.subjectGlobalMetaId === subjectGlobalMetaId
+        snapshot.observerGlobalMetaId === observer
+        && snapshot.subjectGlobalMetaId === subject
       )) ?? null;
     },
 
     async listSnapshots(observerGlobalMetaId, limit = 100) {
       const file = await readFile();
+      const observer = observerGlobalMetaId.trim().toLowerCase();
       return file.snapshots
-        .filter((snapshot) => snapshot.observerGlobalMetaId === observerGlobalMetaId)
+        .filter((snapshot) => snapshot.observerGlobalMetaId === observer)
         .sort((left, right) => right.updatedAt - left.updatedAt
           || left.subjectGlobalMetaId.localeCompare(right.subjectGlobalMetaId))
         .slice(0, Math.min(500, Math.max(1, Math.floor(limit))));
@@ -592,7 +599,9 @@ export function createImpressionStore(
       });
     },
 
-    async rebuildSnapshot(observerGlobalMetaId, subjectGlobalMetaId) {
+    async rebuildSnapshot(observerRaw, subjectRaw) {
+      const observerGlobalMetaId = observerRaw.trim().toLowerCase();
+      const subjectGlobalMetaId = subjectRaw.trim().toLowerCase();
       return enqueue(async () => {
         const file = await readFile();
         const observations = file.observations
