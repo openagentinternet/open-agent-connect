@@ -17,6 +17,9 @@ export interface CliDependencies {
     buzz?: {
         post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    simplenote?: {
+        post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
     browser?: {
         open?: (input: {
             uri?: string;

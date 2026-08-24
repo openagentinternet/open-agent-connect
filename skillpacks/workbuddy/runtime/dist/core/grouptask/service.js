@@ -62,11 +62,21 @@ function openteamStoreFor(ctx, profile) {
         return ctx.openteamStoreForProfile(profile);
     return (0, openteamStore_1.createOpenTeamStore)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
 }
-/** Staffing proposal store for a profile (exported for the staffing service). */
+const staffingStoreCache = new Map();
+/** Staffing proposal store for a profile (exported for the staffing service).
+ *  Memoized per store file: the CAS claim/release only serializes within one
+ *  instance's in-process queue, so every request must share the instance. */
 function staffingStoreFor(ctx, profile) {
     if (ctx.staffingStoreForProfile)
         return ctx.staffingStoreForProfile(profile);
-    return (0, staffingStore_1.createStaffingStore)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
+    const paths = (0, paths_1.resolveMetabotPaths)(profile.homeDir);
+    const key = paths.runtimeRoot;
+    let store = staffingStoreCache.get(key);
+    if (!store) {
+        store = (0, staffingStore_1.createStaffingStore)(paths);
+        staffingStoreCache.set(key, store);
+    }
+    return store;
 }
 function logOf(ctx) {
     return ctx.log ?? (() => undefined);

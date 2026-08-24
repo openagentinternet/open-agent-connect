@@ -20,6 +20,7 @@ export type GatedUploadFn = (input: {
   slug: string;
   filePath: string;
   network?: string;
+  contentType?: string;
 }) => Promise<{ metafileUri: string; pinId: string }>;
 
 export type ProfileHomeResolver = (slug: string) => Promise<string | null>;
@@ -31,7 +32,12 @@ export interface ProfileUploadGateOptions {
    *  or a plain boolean (hosts that already asked set `true`). */
   confirmExternalUpload?: boolean | ((input: { slug: string; filePath: string }) => Promise<boolean> | boolean);
   /** Test seam; defaults to the real chain upload. */
-  upload?: (input: { filePath: string; network?: string; signer: Signer }) => Promise<{ metafileUri: string; pinId: string }>;
+  upload?: (input: {
+    filePath: string;
+    network?: string;
+    contentType?: string;
+    signer: Signer;
+  }) => Promise<{ metafileUri: string; pinId: string }>;
   /** Signer factory; required unless `upload` is overridden. */
   signerForSlug?: (slug: string) => Promise<Signer>;
   log?: (message: string) => void;
@@ -61,21 +67,26 @@ export function createProfileScopedUpload(
     const homeDir = await options.profileHomeDir(input.slug);
     if (homeDir && isPathInsideDir(input.filePath, homeDir)) {
       const signer = options.signerForSlug ? await options.signerForSlug(input.slug) : null;
-      const upload = options.upload ?? (async ({ filePath, network }) => {
+      const upload = options.upload ?? (async ({ filePath, network, contentType }) => {
         if (!signer) throw new Error('signerForSlug is required for the default upload.');
-        const uploaded = await uploadLocalFileToChain({ filePath, network, signer });
+        const uploaded = await uploadLocalFileToChain({ filePath, network, contentType, signer });
         return { metafileUri: uploaded.metafileUri, pinId: uploaded.pinId };
       });
-      return upload({ filePath: input.filePath, network: input.network, ...(signer ? { signer } : {}) } as { filePath: string; network?: string; signer: Signer });
+      return upload({
+        filePath: input.filePath,
+        network: input.network,
+        contentType: input.contentType,
+        ...(signer ? { signer } : {}),
+      } as { filePath: string; network?: string; contentType?: string; signer: Signer });
     }
     const allowed = typeof options.confirmExternalUpload === 'function'
       ? await options.confirmExternalUpload({ slug: input.slug, filePath: input.filePath })
       : options.confirmExternalUpload === true;
     if (allowed) {
       const signer = options.signerForSlug ? await options.signerForSlug(input.slug) : null;
-      const upload = options.upload ?? (async ({ filePath, network }) => {
+      const upload = options.upload ?? (async ({ filePath, network, contentType }) => {
         if (!signer) throw new Error('signerForSlug is required for the default upload.');
-        const uploaded = await uploadLocalFileToChain({ filePath, network, signer });
+        const uploaded = await uploadLocalFileToChain({ filePath, network, contentType, signer });
         return { metafileUri: uploaded.metafileUri, pinId: uploaded.pinId };
       });
       log(`[UploadGate] External upload approved for ${input.slug}: ${input.filePath}`);

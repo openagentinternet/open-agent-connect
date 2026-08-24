@@ -36,7 +36,7 @@ function normalizeCreator(raw) {
     return {
         globalMetaId: text(record.globalMetaId),
         metaid: text(record.metaid ?? record.metaId),
-        name: text(record.name),
+        name: text(record.name).slice(0, 80),
         address: text(record.address),
     };
 }
@@ -53,9 +53,9 @@ function normalizeAttachment(raw) {
 function normalizeMeta(raw) {
     const record = (raw && typeof raw === 'object' ? raw : {});
     return {
-        title: text(record.title),
-        summary: text(record.summary),
-        tags: textList(record.tags),
+        title: text(record.title).slice(0, 200),
+        summary: text(record.summary).slice(0, 500),
+        tags: textList(record.tags).slice(0, 10).map((tag) => tag.slice(0, 40)),
     };
 }
 function normalizePin(raw) {

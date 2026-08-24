@@ -20,7 +20,7 @@ Route natural-language intent through `$HOME/.metabot/bin/metabot`, then reason 
 
 ## Actor Selection
 
-`file upload-large` and compatibility `file upload` accept optional `--from <bot-slug>`.
+`file upload-large` and compatibility `file upload` accept optional `--from <bot-slug>`. Files outside the Bot workspace additionally require `--confirm-external-upload` (on-chain publishing is irreversible; only pass it when the user explicitly asked to publish that file).
 
 Resolve the actor in this priority order:
 
@@ -54,7 +54,7 @@ Never read large local files into model context. Do not paste, summarize, base64
 Use the path-first large-upload command by default for all local file uploads. For this command, the runtime chooses direct upload for files at or below the 5 MiB direct threshold and large/chunked upload for supported files above that threshold. MVC sponsor, when enabled, follows the same direct-upload window for this command.
 
 ```bash
-$HOME/.metabot/bin/metabot file upload-large --from <bot-slug> --file /absolute/path/to/archive.zip --content-type application/zip --verify
+$HOME/.metabot/bin/metabot file upload-large --from <bot-slug> --file /absolute/path/to/archive.zip --content-type application/zip --verify --confirm-external-upload
 ```
 
 Required flag:
@@ -69,7 +69,7 @@ Optional flags:
 When `--chain` is omitted, the daemon uses the selected profile's configured `chain.defaultWriteNetwork` (initially `mvc`). Only pass `--chain mvc`, `--chain btc`, or `--chain opcat` when the human explicitly requests that chain:
 
 ```bash
-$HOME/.metabot/bin/metabot file upload-large --from <bot-slug> --file /absolute/path/to/photo.png --content-type image/png --chain mvc --verify
+$HOME/.metabot/bin/metabot file upload-large --from <bot-slug> --file /absolute/path/to/photo.png --content-type image/png --chain mvc --verify --confirm-external-upload
 $HOME/.metabot/bin/metabot file upload-large --from <bot-slug> --file /absolute/path/to/photo.png --content-type image/png --chain btc --verify
 $HOME/.metabot/bin/metabot file upload-large --from <bot-slug> --file /absolute/path/to/photo.png --content-type image/png --chain opcat --verify
 ```

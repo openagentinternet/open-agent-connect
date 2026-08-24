@@ -72,11 +72,15 @@ const uploadLargeFile_1 = require("../core/files/uploadLargeFile");
 const metaFsLargeUploader_1 = require("../core/files/metaFsLargeUploader");
 const uploadFile_1 = require("../core/files/uploadFile");
 const postBuzz_1 = require("../core/buzz/postBuzz");
+const publish_1 = require("../core/simplenote/publish");
+const profileUploadGate_1 = require("../core/files/profileUploadGate");
+const localMnemonicSigner_2 = require("../core/signing/localMnemonicSigner");
+const writeAttempts_1 = require("../core/chain/writeAttempts");
 const previewSessions_1 = require("../core/metaapp/previewSessions");
 const localCache_1 = require("../core/metaapp/localCache");
 const ownerService_1 = require("../core/metaapp/ownerService");
 const manOwnerList_1 = require("../core/metaapp/manOwnerList");
-const publish_1 = require("../core/metaapp/publish");
+const publish_2 = require("../core/metaapp/publish");
 const share_1 = require("../core/metaapp/share");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
 const chainDirectoryReader_1 = require("../core/discovery/chainDirectoryReader");
@@ -3801,6 +3805,28 @@ function startBackgroundLlmDiscoverySweep(homeDir, providers, discover) {
 }
 function createDefaultMetabotDaemonHandlers(input) {
     const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
+    /** Map a ChainBroadcastUnknownError (or a recorded prior unknown attempt for
+     *  identical content) to manual_action_required with the candidate txids and
+     *  an explicit do-not-retry message. Records the attempt for dedup. */
+    async function commandFailedOrBroadcastUnknown(error, kind, contentHash, fallbackCode) {
+        const attempts = (0, writeAttempts_1.createChainWriteAttemptStore)(normalizedSystemHomeDir);
+        if (error instanceof localMnemonicSigner_2.ChainBroadcastUnknownError) {
+            await attempts.record({
+                contentHash,
+                kind,
+                candidateTxids: [...new Set([...error.confirmedTxids, ...error.candidateTxids])],
+                message: error.message,
+            }).catch(() => undefined);
+            return (0, commandResult_1.commandManualActionRequired)('chain_broadcast_unknown', error.message);
+        }
+        const prior = await attempts.findRecent(contentHash).catch(() => null);
+        if (prior) {
+            return (0, commandResult_1.commandManualActionRequired)('chain_write_attempt_pending', `A previous ${kind} attempt with identical content hit an UNKNOWN broadcast state at `
+                + `${new Date(prior.at).toISOString()} (candidates: ${prior.candidateTxids.join(', ') || 'unavailable'}). `
+                + `The content may already be on-chain — verify those txids before publishing again.`);
+        }
+        return (0, commandResult_1.commandFailed)(fallbackCode, error instanceof Error ? error.message : String(error));
+    }
     const secretStore = input.secretStore ?? (0, fileSecretStore_1.createFileSecretStore)(input.homeDir);
     // Create default adapter registry if none provided (backward compat)
     const adapters = input.adapters ?? (0, registry_1.createChainAdapterRegistry)([
@@ -10667,7 +10693,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         metaapp: {
             preview: async (rawInput) => {
                 try {
-                    const result = await (0, publish_1.previewMetaAppProject)({
+                    const result = await (0, publish_2.previewMetaAppProject)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         open: rawInput.open === true,
@@ -10715,7 +10741,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actor.homeDir);
                 try {
-                    const result = await (0, publish_1.publishMetaApp)({
+                    const result = await (0, publish_2.publishMetaApp)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         confirm: rawInput.confirm === true,
@@ -10788,7 +10814,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actor.homeDir);
                 try {
-                    const result = await (0, publish_1.updateMetaApp)({
+                    const result = await (0, publish_2.updateMetaApp)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         confirm: rawInput.confirm === true,
@@ -10893,7 +10919,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
             share: async (rawInput) => {
                 try {
-                    const share = await (0, publish_1.shareMetaApp)({
+                    const share = await (0, publish_2.shareMetaApp)({
                         pinId: typeof rawInput.pinId === 'string' ? rawInput.pinId : '',
                     });
                     if (rawInput.announce !== true) {
@@ -10940,7 +10966,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before writing comments.');
                 }
                 try {
-                    const result = await (0, publish_1.commentMetaApp)({
+                    const result = await (0, publish_2.commentMetaApp)({
                         pinId: typeof rawInput.pinId === 'string' ? rawInput.pinId : '',
                         comment: typeof rawInput.comment === 'string' ? rawInput.comment : '',
                         network: await resolveWriteNetworkForHome(rawInput.network, actor.homeDir),
@@ -10999,6 +11025,18 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 try {
                     const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+                    const buzzContentHash = (0, writeAttempts_1.stableChainWriteHash)('buzz', [
+                        normalizeText(rawInput.content),
+                        network,
+                        ...readStringArray(rawInput.attachments),
+                    ]);
+                    const priorBuzzAttempt = await (0, writeAttempts_1.createChainWriteAttemptStore)(normalizedSystemHomeDir)
+                        .findRecent(buzzContentHash).catch(() => null);
+                    if (priorBuzzAttempt) {
+                        return (0, commandResult_1.commandManualActionRequired)('chain_write_attempt_pending', `A previous buzz attempt with identical content hit an UNKNOWN broadcast state at `
+                            + `${new Date(priorBuzzAttempt.at).toISOString()} (candidates: ${priorBuzzAttempt.candidateTxids.join(', ') || 'unavailable'}). `
+                            + `It may already be on-chain — verify before posting again.`);
+                    }
                     const result = await (0, postBuzz_1.postBuzzToChain)({
                         content: normalizeText(rawInput.content),
                         contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
@@ -11013,7 +11051,80 @@ function createDefaultMetabotDaemonHandlers(input) {
                     });
                 }
                 catch (error) {
-                    return (0, commandResult_1.commandFailed)('buzz_post_failed', error instanceof Error ? error.message : String(error));
+                    return await commandFailedOrBroadcastUnknown(error, 'buzz', (0, writeAttempts_1.stableChainWriteHash)('buzz', [
+                        normalizeText(rawInput.content),
+                        await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+                        ...readStringArray(rawInput.attachments),
+                    ]), 'buzz_post_failed');
+                }
+            },
+        },
+        simplenote: {
+            post: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before publishing a note.');
+                }
+                try {
+                    const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+                    // Workspace-scoped gate: in-workspace files publish freely; anything
+                    // else requires the explicit owner-consent flag in the request
+                    // (interactive hosts like the DSH tool set it after their approval
+                    // dialog; the loopback fence cannot gate local processes).
+                    const gatedUpload = (0, profileUploadGate_1.createProfileScopedUpload)({
+                        profileHomeDir: async () => actor.homeDir,
+                        signerForSlug: async () => actor.signer,
+                        confirmExternalUpload: rawInput.confirmExternalUpload === true,
+                    });
+                    const noteContentHash = (0, writeAttempts_1.stableChainWriteHash)('simplenote', [
+                        normalizeText(rawInput.title),
+                        normalizeText(rawInput.content),
+                        network,
+                        ...readStringArray(rawInput.attachments).sort(),
+                        normalizeText(typeof rawInput.cover === 'string' ? rawInput.cover : undefined),
+                    ]);
+                    const priorNoteAttempt = await (0, writeAttempts_1.createChainWriteAttemptStore)(normalizedSystemHomeDir)
+                        .findRecent(noteContentHash).catch(() => null);
+                    if (priorNoteAttempt) {
+                        return (0, commandResult_1.commandManualActionRequired)('chain_write_attempt_pending', `A previous simplenote attempt with identical content hit an UNKNOWN broadcast state at `
+                            + `${new Date(priorNoteAttempt.at).toISOString()} (candidates: ${priorNoteAttempt.candidateTxids.join(', ') || 'unavailable'}). `
+                            + `The note may already be on-chain — verify before publishing again.`);
+                    }
+                    const result = await (0, publish_1.publishSimpleNote)(actor.signer, async ({ filePath, network: uploadNetwork }) => gatedUpload({
+                        slug: normalizeText(rawInput.from) || 'actor',
+                        filePath,
+                        network: uploadNetwork,
+                    }), {
+                        title: normalizeText(rawInput.title),
+                        content: normalizeText(rawInput.content),
+                        subtitle: typeof rawInput.subtitle === 'string' ? rawInput.subtitle : undefined,
+                        cover: typeof rawInput.cover === 'string' ? rawInput.cover : undefined,
+                        attachments: readStringArray(rawInput.attachments),
+                        contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
+                        tags: readStringArray(rawInput.tags),
+                        network: network,
+                    });
+                    return (0, commandResult_1.commandSuccess)({
+                        ...result,
+                        formatted: (0, publish_1.formatSimpleNoteResult)(result),
+                        localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), `/browser/pin/${encodeURIComponent(result.pinId)}`) ?? `/browser/pin/${encodeURIComponent(result.pinId)}`,
+                    });
+                }
+                catch (error) {
+                    return await commandFailedOrBroadcastUnknown(error, 'simplenote', (0, writeAttempts_1.stableChainWriteHash)('simplenote', [
+                        normalizeText(rawInput.title),
+                        normalizeText(rawInput.content),
+                        await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+                        ...readStringArray(rawInput.attachments).sort(),
+                        normalizeText(typeof rawInput.cover === 'string' ? rawInput.cover : undefined),
+                    ]), (() => {
+                        const code = error.code;
+                        return typeof code === 'string' ? code : 'simplenote_post_failed';
+                    })());
                 }
             },
         },
@@ -13919,11 +14030,20 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 try {
                     const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
-                    const result = await (0, uploadFile_1.uploadLocalFileToChain)({
+                    // Same workspace gate as the other chain-write routes: in-workspace
+                    // files upload freely, anything else needs the explicit consent flag.
+                    const gatedUpload = (0, profileUploadGate_1.createProfileScopedUpload)({
+                        profileHomeDir: async () => actor.homeDir,
+                        signerForSlug: async () => actor.signer,
+                        confirmExternalUpload: rawInput.confirmExternalUpload === true,
+                    });
+                    const result = await gatedUpload({
+                        slug: normalizeText(rawInput.from) || 'actor',
                         filePath: normalizeText(rawInput.filePath),
-                        contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
                         network,
-                        signer: actor.signer,
+                        ...(typeof rawInput.contentType === 'string' && rawInput.contentType.trim()
+                            ? { contentType: rawInput.contentType.trim() }
+                            : {}),
                     });
                     return (0, commandResult_1.commandSuccess)(result);
                 }
@@ -13942,6 +14062,16 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 try {
                     const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
+                    // Workspace gate first; the large uploader runs only for in-workspace
+                    // (or consented) files, same rule as the direct route.
+                    const gateCheck = await (0, profileUploadGate_1.createProfileScopedUpload)({
+                        profileHomeDir: async () => actor.homeDir,
+                        confirmExternalUpload: rawInput.confirmExternalUpload === true,
+                        // Probe-only invocation: refuses out-of-workspace paths before the
+                        // heavy upload machinery starts.
+                        upload: async () => ({ metafileUri: '', pinId: '' }),
+                    })({ slug: 'actor', filePath: normalizeText(rawInput.filePath), network });
+                    void gateCheck;
                     const result = await uploadLargeFile({
                         filePath: normalizeText(rawInput.filePath),
                         contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,

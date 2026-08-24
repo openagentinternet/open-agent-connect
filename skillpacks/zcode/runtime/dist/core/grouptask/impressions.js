@@ -82,17 +82,22 @@ async function recordTaskCloseImpressions(ctx, chairSlug, task, members, outcome
         });
     }
 }
-/** Kick: the removed member gets a kicked fact immediately. */
+/** Kick: the removed member gets a kicked fact immediately. The seat role
+ *  comes from the staffing proposal so the search-side block branch (a kicked
+ *  member on the same seat) stays reachable; without a proposal the fact is
+ *  recorded unseated and only the generic demote applies. */
 async function recordKickImpression(ctx, chairSlug, task, member) {
     const chair = await (0, service_1.requireProfile)(ctx, chairSlug);
     const chairGmid = normalizeGmid(chair.globalMetaId);
     const subject = normalizeGmid(member.globalMetaId);
     if (!chairGmid || !subject || subject === chairGmid)
         return;
+    const seatRoles = await seatRoleBySlug(ctx, chairSlug, task.id);
+    const seatRole = member.slug ? seatRoles.get(member.slug) : undefined;
     await recordFact(ctx, chair.homeDir, chairGmid, {
         subjectGlobalMetaId: subject,
         task,
         outcome: 'kicked',
-        ...(member.role === 'worker' ? { seatRole: 'worker' } : {}),
+        ...(seatRole ? { seatRole } : {}),
     });
 }

@@ -228,6 +228,9 @@ async function serveRawFileUploadRoute(context: Parameters<RouteHandler>[0], isL
       filePath,
       fileName,
       contentType,
+      // The staged temp file holds bytes the user just submitted through this
+      // very request: the workspace gate treats them as owner-consented.
+      confirmExternalUpload: true,
     };
     if (from) {
       input.from = from;

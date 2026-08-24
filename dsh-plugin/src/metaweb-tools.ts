@@ -57,7 +57,7 @@ function toNumber(value: unknown): number | undefined {
 function dayWindow(value: unknown, field: string): number | undefined {
   if (value == null) return undefined
   const parsed = Number(value)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`${field} must be a positive integer.`)
   }
   return parsed

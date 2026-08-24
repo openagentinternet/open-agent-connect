@@ -61,7 +61,9 @@ export declare class GroupTaskServiceError extends Error {
 }
 /** OpenTeam handshake store for a profile (exported for the engine). */
 export declare function openteamStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): OpenTeamStore;
-/** Staffing proposal store for a profile (exported for the staffing service). */
+/** Staffing proposal store for a profile (exported for the staffing service).
+ *  Memoized per store file: the CAS claim/release only serializes within one
+ *  instance's in-process queue, so every request must share the instance. */
 export declare function staffingStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): StaffingStore;
 /** Resolve a profile by slug or fail (exported for the staffing service). */
 export declare function requireProfile(ctx: GroupTaskServiceContext, slug: string): Promise<GroupTaskProfileRef>;

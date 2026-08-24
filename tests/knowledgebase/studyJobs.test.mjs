@@ -93,9 +93,9 @@ test('crash recovery resets stale running rows; window and prompt/report shapes'
 
   const prompt = buildStudySessionPrompt({ topic: '前端框架', budgetPins: DEFAULT_STUDY_PIN_BUDGET_PER_NIGHT });
   assert.match(prompt, /unattended nightly study session/);
-  assert.match(prompt, /bilingual: Chinese AND English/);
-  assert.match(prompt, /ONLY use: search_metaweb/);
-  assert.match(prompt, /at most 20 metaweb-source documents/);
+  assert.match(prompt, /bilingual keywords/);
+  assert.match(prompt, /ONE ```json fence/);
+  assert.match(prompt, /at most 20 documents saved/);
 
   const report = parseStudyRunReport([
     'I studied things.',
@@ -147,4 +147,71 @@ test('runStudyTick: window gate, success re-pends on new pins, failure counted',
   assert.equal(failed.consecutiveFailures, 1);
   assert.equal(failed.status, 'pending');
   assert.match(failed.error, /no json report fence/);
+});
+
+test('executor tool loop: allowlist enforced, budget enforced, happy path reports', async () => {
+  const store2 = require('../../dist/core/knowledgebase/studyJobs.js');
+  const calls = [];
+  const tools = {
+    searchMetaweb: async ({ query }) => { calls.push(['search', query]); return '- [结果一](pin://p1)'; },
+    readMetawebPin: async ({ pinId }) => { calls.push(['read', pinId]); return 'body of ' + pinId; },
+    addDocument: async ({ title }) => { calls.push(['add', title]); return 'saved'; },
+    learnKnowledgeBase: async () => { calls.push(['learn']); return 'learned'; },
+  };
+  const script = [
+    // Step 1: a non-allowlisted tool is refused by the executor.
+    '```json\n{"tool":"post_simplenote","args":{"title":"x"}}\n```',
+    // Step 2: search.
+    '```json\n{"tool":"search_metaweb","args":{"query":"民法"}}\n```',
+    // Step 3: read.
+    '```json\n{"tool":"read_metaweb_pin","args":{"pinId":"p1"}}\n```',
+    // Step 4: save.
+    '```json\n{"tool":"knowledge_base_add_document","args":{"title":"民法典","content":"正文","pinId":"p1"}}\n```',
+    // Step 5: report.
+    '```json\n{"processedPinIds":["p1"],"summary":"学到了民法典"}\n```',
+  ];
+  let step = 0;
+  const history = [];
+  const report = await store2.runStudyTurnWithTools('study prompt', {
+    runLlm: async (h) => {
+      history.push(JSON.parse(JSON.stringify(h)));
+      return script[step++] ?? '```json\n{"processedPinIds":[],"summary":"done"}\n```';
+    },
+    tools,
+  });
+  const parsed = JSON.parse(report);
+  assert.deepEqual(parsed.processedPinIds, ['p1']);
+  assert.match(parsed.summary, /民法典/);
+  // The refusal reached the model as a user message.
+  assert.ok(history[1].some((entry) => /not available in this session/.test(entry.content)));
+  assert.deepEqual(calls.map((entry) => entry[0]), ['search', 'read', 'add']);
+});
+
+test('executor tool loop: no-fence replies are nudged; step exhaustion fails', async () => {
+  const store2 = require('../../dist/core/knowledgebase/studyJobs.js');
+  const tools = {
+    searchMetaweb: async () => 'x',
+    readMetawebPin: async () => 'x',
+    addDocument: async () => 'x',
+    learnKnowledgeBase: async () => 'x',
+  };
+  let turns = 0;
+  const nudged = await store2.runStudyTurnWithTools('p', {
+    runLlm: async () => {
+      turns += 1;
+      return turns === 1 ? 'prose without fence' : '```json\n{"processedPinIds":[],"summary":"ok"}\n```';
+    },
+    tools,
+  });
+  assert.match(nudged, /ok/);
+  assert.equal(turns, 2);
+
+  await assert.rejects(
+    store2.runStudyTurnWithTools('p', {
+      runLlm: async () => 'no fence ever',
+      tools,
+      maxSteps: 3,
+    }),
+    (error) => error instanceof Error && error.code === 'study_steps_exhausted'
+  );
 });

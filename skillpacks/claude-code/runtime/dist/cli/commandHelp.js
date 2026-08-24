@@ -786,6 +786,18 @@ const COMMAND_HELP_SPECS = [
         ],
     },
     {
+        commandPath: ['simplenote'],
+        summary: 'Publish a long-form note/article on-chain via the simplenote protocol (v1.0.1).',
+        usage: 'metabot simplenote post --request-file <json> [--chain mvc|btc|doge] [--from <bot-slug>]',
+        subcommands: [
+            {
+                name: 'post',
+                summary: 'Publish from a JSON request file: { title, content, subtitle?, cover?, attachments?, content_type?, tags? }. Cover/attachments accept absolute local paths (uploaded as metafile://) or existing metafile:// URIs; relative paths resolve against the request file. Returns pinId, txids, cost, and a pin:// view link.',
+            },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+    },
+    {
         commandPath: ['buzz'],
         summary: 'Buzz commands for posting simplebuzz content on MetaWeb.',
         usage: 'metabot buzz <subcommand>',
