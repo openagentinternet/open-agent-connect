@@ -15,6 +15,7 @@ import {
   resolveMetaAppSource,
 } from './browser-tools.js'
 import { bindMetawebToolInstall } from './metaweb-tools.js'
+import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
@@ -415,6 +416,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   }
   bindBrowserToolInstall(ctx, browserHub, sourceCache)
   bindMetawebToolInstall(ctx)
+  bindSimpleNoteToolInstall(ctx)
 
   // Nightly dream scheduler: ticks on a timer while the DSH host is alive;
   // the CLI's due-date arithmetic owns window/catch-up/backoff decisions.

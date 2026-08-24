@@ -220,6 +220,11 @@ import {
 import { createMetaFsLargeUploader } from '../core/files/metaFsLargeUploader';
 import { uploadFileBufferToChain, uploadLocalFileToChain } from '../core/files/uploadFile';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
+import {
+  formatSimpleNoteResult,
+  publishSimpleNote,
+  type SimpleNoteNetwork,
+} from '../core/simplenote/publish';
 import { createMetaAppPreviewSessionRegistry } from '../core/metaapp/previewSessions';
 import { createMetaAppLocalCacheStore } from '../core/metaapp/localCache';
 import {
@@ -13188,6 +13193,56 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed(
             'buzz_post_failed',
             error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+    },
+    simplenote: {
+      post: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing a note.');
+        }
+        try {
+          const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+          const result = await publishSimpleNote(
+            actor.signer,
+            async ({ filePath, network: uploadNetwork }) => {
+              const uploaded = await uploadLocalFileToChain({
+                filePath,
+                network: uploadNetwork,
+                signer: actor.signer,
+              });
+              return { metafileUri: uploaded.metafileUri };
+            },
+            {
+              title: normalizeText(rawInput.title),
+              content: normalizeText(rawInput.content),
+              subtitle: typeof rawInput.subtitle === 'string' ? rawInput.subtitle : undefined,
+              cover: typeof rawInput.cover === 'string' ? rawInput.cover : undefined,
+              attachments: readStringArray(rawInput.attachments),
+              contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
+              tags: readStringArray(rawInput.tags),
+              network: network as SimpleNoteNetwork,
+            },
+          );
+          return commandSuccess({
+            ...result,
+            formatted: formatSimpleNoteResult(result),
+            localUiUrl: buildDaemonLocalUiUrl(
+              input.getDaemonRecord(),
+              `/browser/pin/${encodeURIComponent(result.pinId)}`,
+            ) ?? `/browser/pin/${encodeURIComponent(result.pinId)}`,
+          });
+        } catch (error) {
+          const code = (error as { code?: unknown }).code;
+          return commandFailed(
+            typeof code === 'string' ? code : 'simplenote_post_failed',
+            error instanceof Error ? error.message : String(error),
           );
         }
       },

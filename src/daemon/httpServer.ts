@@ -6,6 +6,7 @@ import { rm } from 'node:fs/promises';
 import { commandFailed } from '../core/contracts/commandResult';
 import { handleConfigRoutes } from './routes/config';
 import { handleBuzzRoutes } from './routes/buzz';
+import { handleSimpleNoteRoutes } from './routes/simplenote';
 import { handleChainRoutes } from './routes/chain';
 import { handleDaemonRoutes } from './routes/daemon';
 import { handleChatRoutes } from './routes/chat';
@@ -30,6 +31,7 @@ const LOCAL_DAEMON_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const ROUTES: RouteHandler[] = [
   handleConfigRoutes,
   handleBuzzRoutes,
+  handleSimpleNoteRoutes,
   handleChainRoutes,
   handleDaemonRoutes,
   handleChatRoutes,

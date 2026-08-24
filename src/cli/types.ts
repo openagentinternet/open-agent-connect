@@ -13,6 +13,9 @@ export interface CliDependencies {
   buzz?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  simplenote?: {
+    post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   browser?: {
     open?: (input: { uri?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     /** Ask every currently-open Browser page to open a URI in a new tab. */
