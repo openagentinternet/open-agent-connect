@@ -53,6 +53,16 @@ function toNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
 }
 
+/** Strict day-window validation: an invalid value is an error, not a silent drop. */
+function dayWindow(value: unknown, field: string): number | undefined {
+  if (value == null) return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${field} must be a positive integer.`)
+  }
+  return parsed
+}
+
 /** Tool error convention: a readable message the model can act on. */
 function toolError(message: string): { error: string } {
   return { error: message }
@@ -114,8 +124,8 @@ export function buildMetawebToolDefinitions(): HostToolDefinition[] {
               ? { protocols: input.protocols.map((key) => String(key).trim()).filter(Boolean) }
               : {}),
             ...(textOf(input.publisher) ? { publisher: textOf(input.publisher) } : {}),
-            ...(toNumber(input.sinceDays) ? { since: nowSeconds - toNumber(input.sinceDays)! * 86_400 } : {}),
-            ...(toNumber(input.untilDays) ? { until: nowSeconds - toNumber(input.untilDays)! * 86_400 } : {}),
+            ...(dayWindow(input.sinceDays, 'sinceDays') ? { since: nowSeconds - dayWindow(input.sinceDays, 'sinceDays')! * 86_400 } : {}),
+            ...(dayWindow(input.untilDays, 'untilDays') ? { until: nowSeconds - dayWindow(input.untilDays, 'untilDays')! * 86_400 } : {}),
             ...(input.sort === 'newest' ? { sort: 'newest' } : {}),
             ...(toNumber(input.size) ? { size: Math.min(50, toNumber(input.size)!) } : {}),
             ...(textOf(input.cursor) ? { cursor: textOf(input.cursor) } : {}),
