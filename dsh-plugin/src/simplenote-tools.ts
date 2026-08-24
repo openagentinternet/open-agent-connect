@@ -123,6 +123,9 @@ export function buildSimpleNoteToolDefinitions(input: {
         }
       }
 
+      if (args.network != null && args.network !== 'mvc' && args.network !== 'doge' && args.network !== 'btc') {
+        return `Invalid network "${args.network}" — must be one of mvc, doge, btc.`
+      }
       const slug = actorSlug(exec)
       // The native approval above (or workspace containment) covered the
       // external-file decision, so the daemon-side gate gets the consent flag.

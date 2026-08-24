@@ -551,6 +551,11 @@ export function createImpressionStore(
           recordedAt: Date.now(),
         };
         file.collaborationFacts.push(fact);
+        // Ledger cap: keep the newest 2000 facts (snapshots surface the last
+        // 10 per pair; the tail is what matters).
+        if (file.collaborationFacts.length > 2000) {
+          file.collaborationFacts = file.collaborationFacts.slice(-2000);
+        }
         // Refresh the snapshot view in the same write so readers (staffing
         // search) see the fact without waiting for a dream rebuild.
         const snapshotIndex = file.snapshots.findIndex((snapshot) => (
