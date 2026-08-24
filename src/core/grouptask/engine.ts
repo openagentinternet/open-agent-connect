@@ -79,6 +79,19 @@ const DEPENDENCY_WAIT_MAX_MS = 15 * 60_000;
 /** Deliverable re-verification cadence (indexer lag absorption). */
 export const GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = 'group_task_deliverable_verify:';
 const DELIVERABLE_REVERIFY_INTERVAL_MS = 10 * 60_000;
+
+// Assignment ACK watch + member monitors (IDBots P0-3/R6 parity).
+export const GROUP_TASK_ACK_PENDING_KV_PREFIX = 'group_task_ack_pending:';
+export const GROUP_TASK_ACK_REMINDED_KV_PREFIX = 'group_task_ack_reminded:';
+export const GROUP_TASK_ACK_SEEN_KV_PREFIX = 'group_task_ack_seen:';
+export const GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX = 'group_task_expected_delivery:';
+export const GROUP_TASK_TIMEOUT_HINT_KV_PREFIX = 'group_task_timeout_hint:';
+export const GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = 'group_task_timeout_owner:';
+const ACK_TIMEOUT_MS = 3 * 60_000;
+const MEMBER_UNREACHABLE_AFTER_MS = 30 * 60_000;
+const MEMBER_TIMEOUT_AFTER_MS = 20 * 60_000;
+const MEMBER_ESCALATE_AFTER_MS = 10 * 60_000;
+const ROLL_CALL_RE = /确认在线|请[^\n]{0,12}在线|roll.?call|presence check/i;
 export const GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = 'group_task_review_summary:';
 
 const DEFAULT_INTERVAL_MS = 5_000;
@@ -571,6 +584,184 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       '[GROUP_TASK_NOTICE:review_still_open] Still in review — owner acceptance pending; further work paused.');
   }
 
+  // -------------------------------------------------------------------------
+  // Assignment ACK watch + member monitors (IDBots P0-3 / R6 parity)
+  // -------------------------------------------------------------------------
+
+  /** Chair mention of a worker arms the 3-min no-ACK watch; worker speech
+   *  (explicit [WORKING] or any) clears it and records ack-seen. */
+  async function trackAssignmentAcks(
+    store: GroupTaskStore,
+    task: GroupTaskRecord,
+    message: GroupTaskMessage,
+    members: GroupTaskMember[],
+    tags: ParsedGroupTaskTags,
+  ): Promise<void> {
+    const senderGmid = normalizeGmid(message.senderGlobalMetaId);
+    const chairMember = members.find((member) => member.role === 'chair' && member.removedAt == null);
+    const fromChair = chairMember != null && normalizeGmid(chairMember.globalMetaId) === senderGmid;
+    const workers = members.filter((member) => member.role === 'worker'
+      && member.removedAt == null && member.slug != null);
+
+    if (fromChair) {
+      const mentioned = new Set((message.mention ?? []).map((gmid) => normalizeGmid(gmid)).filter(Boolean));
+      for (const member of workers) {
+        if (!mentioned.has(normalizeGmid(member.globalMetaId))) continue;
+        // P5: legal silent states never arm the watch.
+        if (ROLL_CALL_RE.test(message.content)) continue;
+        if (member.status === 'standby') continue;
+        if (tags.dependsOn && isEnforceableDependencyToken(tags.dependsOn)) continue;
+        const seenKey = `${GROUP_TASK_ACK_SEEN_KV_PREFIX}${task.id}:${message.index}`;
+        if (await store.kvGet(seenKey)) continue;
+        const pendingKey = `${GROUP_TASK_ACK_PENDING_KV_PREFIX}${task.id}:${member.slug}`;
+        const remindedKey = `${GROUP_TASK_ACK_REMINDED_KV_PREFIX}${task.id}:${member.slug}`;
+        if ((await store.kvGet(pendingKey)) == null && await store.kvGet(remindedKey) !== '1') {
+          await store.kvSet(pendingKey, JSON.stringify({ assignedAt: now(), msgIndex: message.index }));
+          log(`[GroupTaskEngine] Task ${task.id}: assignment to ${member.slug} `
+            + `(message ${message.index}); waiting for [WORKING] ACK`);
+        }
+      }
+      return;
+    }
+
+    const member = workers.find((candidate) => normalizeGmid(candidate.globalMetaId) === senderGmid);
+    if (!member) return;
+    const pendingKey = `${GROUP_TASK_ACK_PENDING_KV_PREFIX}${task.id}:${member.slug}`;
+    const remindedKey = `${GROUP_TASK_ACK_REMINDED_KV_PREFIX}${task.id}:${member.slug}`;
+    const clearPendingAck = async (): Promise<void> => {
+      const raw = await store.kvGet(pendingKey);
+      if (raw != null) {
+        try {
+          const entry = JSON.parse(raw) as { msgIndex?: number };
+          if (entry && typeof entry.msgIndex === 'number') {
+            await store.kvSet(`${GROUP_TASK_ACK_SEEN_KV_PREFIX}${task.id}:${entry.msgIndex}`, '1');
+          }
+        } catch {
+          // unparsable pending entry: drop it without ack-seen
+        }
+      }
+      await store.kvDelete(pendingKey);
+      await store.kvDelete(remindedKey);
+    };
+    if (tags.working) {
+      await store.setMemberStatus(task.id, member.slug!, 'working', member.globalMetaId);
+      await clearPendingAck();
+      if (tags.working.etaMinutes != null && tags.working.etaMinutes > 0) {
+        await store.kvSet(`${GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX}${task.id}:${member.slug}`, JSON.stringify({
+          dueAt: now() + tags.working.etaMinutes * 60_000,
+          ackedAt: now(),
+        }));
+      }
+      return;
+    }
+    if (tags.standby) {
+      await store.setMemberStatus(task.id, member.slug!, 'standby', member.globalMetaId);
+      return;
+    }
+    // Implicit ACK: any worker speech counts as engaged.
+    if (member.status === 'assigned') {
+      await store.setMemberStatus(task.id, member.slug!, 'working', member.globalMetaId);
+    }
+    await clearPendingAck();
+  }
+
+  /** One reminder per assignment past the 3-min ACK window; unreachable and
+   *  timeout escalation for silent workers; L3 owner brief past +10 min. */
+  async function monitorAssignmentsAndMembers(
+    store: GroupTaskStore,
+    task: GroupTaskRecord,
+    members: GroupTaskMember[],
+    seats: SeatInfo[],
+    ownerGmid: string | null,
+    chairSlug: string,
+    chairGmid: string | null,
+  ): Promise<void> {
+    if (task.status !== 'planning' && task.status !== 'executing') return;
+    if (!task.groupId) return;
+    const chairSeat = seats.find((seat) => seat.role === 'chair') ?? null;
+    const workers = members.filter((member) => member.role === 'worker'
+      && member.removedAt == null && member.slug != null);
+
+    // ACK reminders (once per pending assignment; never auto-fails).
+    for (const member of workers) {
+      if (member.status === 'standby') continue;
+      const pendingKey = `${GROUP_TASK_ACK_PENDING_KV_PREFIX}${task.id}:${member.slug}`;
+      const raw = await store.kvGet(pendingKey);
+      if (!raw) continue;
+      let entry: { assignedAt?: number };
+      try {
+        entry = JSON.parse(raw) as { assignedAt?: number };
+      } catch {
+        continue;
+      }
+      const assignedAt = typeof entry.assignedAt === 'number' ? entry.assignedAt : 0;
+      if (now() - assignedAt < ACK_TIMEOUT_MS) continue;
+      const remindedKey = `${GROUP_TASK_ACK_REMINDED_KV_PREFIX}${task.id}:${member.slug}`;
+      if (await store.kvGet(remindedKey) === '1') continue;
+      await store.kvSet(remindedKey, '1');
+      await postHostNotice(task, chairSlug,
+        `[GROUP_TASK_NOTICE:ack_reminder] @${member.displayName ?? member.slug} assignment awaiting [WORKING] ACK `
+        + `(${Math.round((now() - assignedAt) / 60_000)} min) — please confirm you have taken the work.`);
+    }
+
+    if (task.status !== 'executing') return;
+    const active = workers.filter((member) => member.status === 'assigned' || member.status === 'working');
+    if (active.length === 0) return;
+    const gmids = active.map((member) => member.globalMetaId);
+    const [speakMap, workingMap] = await Promise.all([
+      store.getMembersLastSpeakAt(task.groupId, gmids).catch(() => new Map<string, number>()),
+      store.getMembersWorkingAt(task.groupId, gmids).catch(() => new Map<string, number>()),
+    ]);
+
+    for (const member of active) {
+      const gmid = normalizeGmid(member.globalMetaId);
+      // Unreachable: no speech for 30+ min (baseline: join time).
+      const lastSpeakMs = (speakMap.get(gmid) ?? 0) * 1000 || member.createdAt;
+      if (lastSpeakMs && now() - lastSpeakMs > MEMBER_UNREACHABLE_AFTER_MS) {
+        if (member.status !== 'unreachable') {
+          await store.setMemberStatus(task.id, member.slug!, 'unreachable', member.globalMetaId);
+          log(`[GroupTaskEngine] Task ${task.id}: member ${member.slug} marked unreachable `
+            + '(no speech for 30+ min)');
+        }
+      }
+      // Timeout L2: [WORKING] signal stale past 20 min → authoritative
+      // timeout + one chair re-assign hint notice per streak.
+      const lastWorkingMs = (workingMap.get(gmid) ?? 0) * 1000;
+      if (!lastWorkingMs) continue;
+      const staleMs = now() - lastWorkingMs;
+      if (staleMs <= MEMBER_TIMEOUT_AFTER_MS) continue;
+      await store.setMemberStatus(task.id, member.slug!, 'unreachable', member.globalMetaId).catch(() => undefined);
+      const hintKey = `${GROUP_TASK_TIMEOUT_HINT_KV_PREFIX}${task.id}:${member.slug}`;
+      if (await store.kvGet(hintKey) !== '1') {
+        await store.kvSet(hintKey, '1');
+        const standbyNames = workers
+          .filter((row) => row.status === 'standby')
+          .map((row) => row.displayName ?? row.slug);
+        const reAssign = standbyNames.length > 0
+          ? `Re-assign to a standby member (${standbyNames.join(', ')}) or mark the step suspended.`
+          : 'Mark the step suspended and tell the owner it is blocked on an unresponsive member.';
+        await postHostNotice(task, chairSlug,
+          `[GROUP_TASK_NOTICE:member_timeout] ${member.displayName ?? member.slug} has been silent past the `
+          + `20-min [WORKING] window. ${reAssign} Do NOT auto-fail them.`);
+        log(`[GroupTaskEngine] Task ${task.id}: ${member.slug} [WORKING] stale 20+ min; re-assign hint posted`);
+      }
+      // L3: still silent past +10 min → brief the owner once per streak.
+      if (staleMs <= MEMBER_TIMEOUT_AFTER_MS + MEMBER_ESCALATE_AFTER_MS) continue;
+      const ownerKey = `${GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX}${task.id}:${member.slug}`;
+      if (await store.kvGet(ownerKey) === '1') continue;
+      if (!ownerGmid || !chairSeat || !ctx.sendPrivateMessage) continue;
+      await store.kvSet(ownerKey, '1');
+      await ctx.sendPrivateMessage({
+        fromSlug: chairSlug,
+        toGlobalMetaId: ownerGmid,
+        content:
+          `[GroupTask] Task "${task.title}": member "${member.displayName ?? member.slug}" has been silent for `
+          + `${Math.round(staleMs / 60_000)}+ min (past the [WORKING] window). The chair has a re-assign hint; `
+          + 'please decide whether to wait, reassign, or close the task.',
+      }).catch(() => undefined);
+    }
+  }
+
   async function applyTagSideEffects(
     store: GroupTaskStore,
     task: GroupTaskRecord,
@@ -884,6 +1075,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       try {
         const tags = parseGroupTaskTags(message.content);
         current = await applyTagSideEffects(store, current, profile.slug, message, tags, seats, ownerGmid, profile);
+        await trackAssignmentAcks(store, current, message, members, tags).catch(() => undefined);
         if (current.status === 'done' || current.status === 'cancelled') {
           await store.updateTaskCursor(current.id, message.index);
           break;
@@ -952,6 +1144,18 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if (lastMessage) {
       await maybeReassertReviewClosing(store, current, profile.slug, lastMessage, chair ? normalizeGmid(chair.globalMetaId) : null).catch(() => undefined);
     }
+
+    // Assignment ACK watch + member monitors (reminders, unreachable,
+    // timeout escalation with the L3 owner brief).
+    await monitorAssignmentsAndMembers(
+      store,
+      current,
+      members,
+      seats,
+      ownerGmid,
+      profile.slug,
+      chair ? normalizeGmid(chair.globalMetaId) : null,
+    ).catch(() => undefined);
   }
 
   // -------------------------------------------------------------------------

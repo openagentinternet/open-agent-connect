@@ -135,7 +135,7 @@ function createHarness(prefix) {
       content,
       contentType: 'text/plain',
       encryption: '0',
-      timestamp: 1_700_000_000 + index,
+      timestamp: Math.floor(Date.now() / 1000) - 600 + index,
       userInfo: { name: gmid.toLowerCase() },
       ...(opts.mention ? { mention: opts.mention } : {}),
     });
@@ -382,4 +382,25 @@ test('engine: [DEPENDS_ON] holds the worker reply until the upstream deliverable
   await h2.engine.tick();
   await h2.engine.tick();
   assert.ok(h2.pins.some((pin) => pin.label === 'worker-1'), 'worker replied once upstream landed');
+});
+
+test('engine: stale pending ACK triggers exactly one chair reminder', async () => {
+  const h = createHarness('metabot-gt-engine-ack-');
+  const task = await h.seedTask('executing');
+  // Worker took work (working status) but the assignment ACK went stale.
+  await h.chairStore.setMemberStatus(task.id, 'worker-1', 'working', 'IDWORKER1');
+  const pendingKey = `group_task_ack_pending:${task.id}:worker-1`;
+  await h.chairStore.kvSet(pendingKey, JSON.stringify({ assignedAt: Date.now() - 4 * 60_000, msgIndex: 0 }));
+
+  await h.engine.tick();
+  await h.engine.tick();
+  const reminders = h.pins.filter((pin) => pin.label === 'twin-bot'
+    && pinPlaintext(pin).includes('ack_reminder'));
+  assert.equal(reminders.length, 1, 'chair posted the ACK reminder exactly once');
+
+  // A roll-call mention never arms the watch (P5 exemption).
+  h.pushHistory('IDTWIN', '@worker 1 请确认在线', { mention: ['IDWORKER1'] });
+  await h.engine.tick();
+  const rollPending = await h.chairStore.kvGet(`group_task_ack_pending:${task.id}:worker-1`);
+  assert.ok(!String(rollPending ?? '').includes('请确认在线'));
 });
