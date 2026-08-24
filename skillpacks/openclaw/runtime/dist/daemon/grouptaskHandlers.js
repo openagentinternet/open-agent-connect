@@ -16,6 +16,13 @@ const node_path_1 = __importDefault(require("node:path"));
 const commandResult_1 = require("../core/contracts/commandResult");
 const service_1 = require("../core/grouptask/service");
 const openteamService_1 = require("../core/grouptask/openteamService");
+const health_1 = require("../core/grouptask/health");
+const engineLog_1 = require("../core/grouptask/engineLog");
+const staffingService_1 = require("../core/grouptask/staffingService");
+const candidateSearch_1 = require("../core/grouptask/candidateSearch");
+const staffing_1 = require("../core/grouptask/staffing");
+const impressionStore_1 = require("../core/memory/impressionStore");
+const configStore_1 = require("../core/config/configStore");
 const store_1 = require("../core/grouptask/store");
 const privateChat_1 = require("../core/chat/privateChat");
 const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
@@ -186,7 +193,9 @@ function createGroupTaskDaemonHandlers(input) {
             return (0, commandResult_1.commandSuccess)(await work());
         }
         catch (error) {
-            if (error instanceof service_1.GroupTaskServiceError || error instanceof store_1.GroupTaskStoreError) {
+            if (error instanceof service_1.GroupTaskServiceError
+                || error instanceof store_1.GroupTaskStoreError
+                || error instanceof staffing_1.GroupTaskStaffingError) {
                 return (0, commandResult_1.commandFailed)(error.code, error.message);
             }
             return (0, commandResult_1.commandFailed)('grouptask_failed', error instanceof Error ? error.message : String(error));
@@ -357,5 +366,120 @@ function createGroupTaskDaemonHandlers(input) {
                 limit: readInt(body.limit) ?? undefined,
             }));
         },
+        health: async () => run(async () => {
+            const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(input.systemHomeDir);
+            return (0, health_1.getGroupTaskHealth)(ctx, {
+                readSimplemsgListenerEnabled: async () => {
+                    try {
+                        const config = await (0, configStore_1.createConfigStore)((0, paths_1.resolveMetabotPaths)(input.systemHomeDir)).read();
+                        return config.a2a.simplemsgListenerEnabled;
+                    }
+                    catch {
+                        return true;
+                    }
+                },
+                engineLogFile: (0, engineLog_1.resolveGroupTaskEngineLogPath)(daemonPaths.logsRoot),
+            });
+        }),
+        staffingPropose: async (body) => run(async () => {
+            const title = normalizeText(body.title);
+            const goal = normalizeText(body.goal);
+            if (!title || !goal) {
+                throw new service_1.GroupTaskServiceError('missing_input', 'title and goal are required');
+            }
+            let plan = body.plan;
+            const planRaw = normalizeText(body.planJson);
+            if (!plan && planRaw) {
+                plan = JSON.parse(planRaw);
+            }
+            return (0, staffingService_1.proposeGroupTaskStaffing)(ctx, {
+                chairSlug: normalizeText(body.chairSlug) || undefined,
+                title,
+                goal,
+                acceptanceCriteria: normalizeText(body.acceptanceCriteria) || null,
+                plan,
+                triggeringWish: normalizeText(body.triggeringWish) || undefined,
+                sourceSessionId: normalizeText(body.sourceSessionId) || null,
+                language: normalizeText(body.language) === 'en' ? 'en' : 'zh',
+            });
+        }),
+        staffingList: async (body) => run(async () => {
+            const proposals = await (0, staffingService_1.listStaffingProposals)(ctx, normalizeText(body.chairSlug) || undefined);
+            return { proposals };
+        }),
+        staffingDecide: async (body) => run(async () => {
+            const chair = normalizeText(body.chairSlug);
+            if (!chair)
+                throw new service_1.GroupTaskServiceError('missing_chair', 'chairSlug is required');
+            const proposalId = readInt(body.proposalId);
+            if (!proposalId || proposalId <= 0) {
+                throw new service_1.GroupTaskServiceError('missing_proposal', 'proposalId must be a positive integer');
+            }
+            const decision = normalizeText(body.decision);
+            if (decision !== 'confirm' && decision !== 'revise' && decision !== 'skip') {
+                throw new service_1.GroupTaskServiceError('invalid_decision', "decision must be 'confirm', 'revise', or 'skip'");
+            }
+            return {
+                proposal: await (0, staffingService_1.recordStaffingOwnerDecision)(ctx, chair, proposalId, decision),
+            };
+        }),
+        staffingCreate: async (body) => run(async () => {
+            const proposalId = readInt(body.proposalId);
+            if (!proposalId || proposalId <= 0) {
+                throw new service_1.GroupTaskServiceError('missing_proposal', 'proposalId must be a positive integer');
+            }
+            const sessionMessages = Array.isArray(body.sessionMessages)
+                ? body.sessionMessages
+                : undefined;
+            const created = await (0, staffingService_1.createGroupTaskFromProposal)(ctx, {
+                chairSlug: normalizeText(body.chairSlug) || undefined,
+                proposalId,
+                sessionMessages,
+            });
+            return {
+                chairSlug: created.chairSlug,
+                task: created.task.task,
+                taskId: created.task.task.id,
+                pendingRemoteSeats: created.pendingRemoteSeats,
+                decision: created.decision,
+            };
+        }),
+        staffingSearch: async (body) => run(async () => {
+            const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(input.systemHomeDir).catch(() => []);
+            const twin = profiles.find((profile) => profile.botType === 'twin') ?? null;
+            const impressionStore = twin
+                ? (0, impressionStore_1.createImpressionStore)((0, paths_1.resolveMetabotPaths)(twin.homeDir))
+                : null;
+            const twinGmid = twin?.globalMetaId?.trim() || null;
+            return (0, candidateSearch_1.searchGroupTaskSeatCandidates)({
+                listLocalWorkers: async () => profiles
+                    .filter((profile) => profile.botType !== 'twin')
+                    .map((profile) => ({
+                    slug: profile.slug,
+                    name: profile.name,
+                    enabled: true,
+                    botType: profile.botType ?? null,
+                    globalMetaId: profile.globalMetaId || null,
+                    bio: profile.bio || null,
+                    role: profile.role || null,
+                    goal: profile.goal || null,
+                    chatSkills: Array.isArray(profile.allowChatSkills) ? profile.allowChatSkills : [],
+                })),
+                getObserverGlobalMetaId: async () => twinGmid,
+                ...(impressionStore && twinGmid
+                    ? {
+                        // Structural view: capabilityTags/collaborationFacts land with the
+                        // Round L sedimentation; absent fields read as verdict 'unknown'.
+                        getImpressionSnapshot: async (observer, subject) => (await impressionStore.getSnapshot(observer, subject)),
+                    }
+                    : {}),
+            }, {
+                query: normalizeText(body.query) || undefined,
+                roleHint: normalizeText(body.seat) || normalizeText(body.roleHint) || undefined,
+                domainLabel: normalizeText(body.domainLabel) || undefined,
+                skills: readStringArray(body.skills),
+                limit: readInt(body.limit) ?? undefined,
+            });
+        }),
     };
 }

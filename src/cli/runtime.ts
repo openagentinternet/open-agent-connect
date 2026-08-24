@@ -116,6 +116,13 @@ import {
   type TrimmedMetaIdSearchItem,
 } from '../core/metaid/metaIdSearchApi';
 import { materializeMetaAppSource } from '../core/metaapp/metaAppSource';
+import {
+  searchMetaweb,
+  type MetawebSearchProtocol,
+} from '../core/metaweb/search';
+import { readMetawebPin, MetawebPinNotFoundError } from '../core/metaweb/pinRead';
+import { formatMetawebPinDetail, formatMetawebSearchBullets } from '../core/metaweb/format';
+import { METAWEB_CITATION_RULE } from '../core/metaweb/uri';
 import { createFileSecretStore } from '../core/secrets/fileSecretStore';
 import type { LocalIdentitySecrets } from '../core/secrets/secretStore';
 import {
@@ -2657,6 +2664,99 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     return commandFailed('metaid_search_failed', message);
   }
 
+  function metawebServiceOptions(): { baseUrl?: string } {
+    const override = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL);
+    return override ? { baseUrl: override } : {};
+  }
+
+  /**
+   * `metabot metaweb search` — unified cross-protocol knowledge search. The
+   * data envelope carries the trimmed rows plus a model-ready `formatted`
+   * block (clickable MetaWeb URI bullets + guidance) so skill hosts can pipe
+   * it straight into the model context.
+   */
+  async function runMetawebSearch(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const q = normalizeEnvText(typeof input.query === 'string' ? input.query : undefined);
+      if (!q) return commandFailed('missing_query', '--query is required.');
+      const protocolsRaw = normalizeEnvText(typeof input.protocols === 'string' ? input.protocols : undefined);
+      const page = await searchMetaweb({
+        q,
+        ...(protocolsRaw
+          ? { protocols: protocolsRaw.split(',').map((key) => key.trim()).filter(Boolean) as MetawebSearchProtocol[] }
+          : {}),
+        publisher: normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) || undefined,
+        since: readPositiveField(input.since),
+        until: readPositiveField(input.until),
+        sort: input.sort === 'newest' ? 'newest' : undefined,
+        size: readPositiveField(input.size),
+        cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
+      }, metawebServiceOptions());
+      const bullets = formatMetawebSearchBullets(page.items);
+      const asciiOnly = /^[\x00-\x7F]*$/.test(q);
+      const guidance = [
+        'Open 1-3 of the most relevant pins with `metabot metaweb read --pin <pinId>` before answering; cite the pins you actually read.',
+        'If the results look thin, retry with broader or synonym keywords — the corpus is Chinese-heavy, so also try Chinese terms.'
+          + (asciiOnly ? ' (Your query was pure ASCII — a Chinese retry is especially likely to help.)' : ''),
+        'Never invent pin ids or content.',
+      ].join('\n');
+      return commandSuccess({
+        items: page.items.map((item) => ({
+          protocol: item.protocol,
+          pinId: item.pinId,
+          currentPinId: item.currentPinId,
+          title: item.title,
+          summary: item.summary,
+          tags: item.tags,
+          publisher: item.publisher,
+          createdAt: item.createdAt,
+          score: item.score,
+        })),
+        hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+        formatted: bullets ? `${bullets}\n${guidance}` : `${guidance}\n(No results. ${asciiOnly ? 'Try Chinese keywords — ' : ''}try broader or synonym terms.)`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('metaweb_search_failed', message);
+    }
+  }
+
+  /** `metabot metaweb read --pin <pinId>` — generic pin read with citation-shaped output. */
+  async function runMetawebRead(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    try {
+      const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+      if (!pinId) return commandFailed('missing_pin', '--pin is required.');
+      const pin = await readMetawebPin(pinId, metawebServiceOptions());
+      return commandSuccess({
+        pin: {
+          pinId: pin.pinId,
+          currentPinId: pin.currentPinId,
+          protocol: pin.protocol,
+          path: pin.path,
+          chainName: pin.chainName,
+          operation: pin.operation,
+          creator: pin.creator,
+          createdAt: pin.createdAt,
+          contentType: pin.contentType,
+          meta: pin.meta,
+          attachments: pin.attachments,
+          source: pin.source,
+          truncated: pin.truncated,
+          totalLength: pin.totalLength,
+          text: pin.text,
+        },
+        formatted: `${formatMetawebPinDetail(pin)}\n${METAWEB_CITATION_RULE}`,
+      });
+    } catch (error) {
+      if (error instanceof MetawebPinNotFoundError) {
+        return commandFailed('pin_not_found', error.message);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return commandFailed('metaweb_read_failed', message);
+    }
+  }
+
   async function runMetaIdSearch(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
     try {
       const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
@@ -2888,6 +2988,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     metaid: {
       search: async (input) => runMetaIdSearch(input),
       detail: async (input) => runMetaIdDetail(input),
+    },
+    metaweb: {
+      search: async (input) => runMetawebSearch(input),
+      read: async (input) => runMetawebRead(input),
     },
     buzz: {
       post: async (input) => requestJsonForSelectedActor(
@@ -4316,6 +4420,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     browser: { ...defaults.browser, ...provided.browser },
     metaapp: { ...defaults.metaapp, ...provided.metaapp },
     metaid: { ...defaults.metaid, ...provided.metaid },
+    metaweb: { ...defaults.metaweb, ...provided.metaweb },
     chain: { ...defaults.chain, ...provided.chain },
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },

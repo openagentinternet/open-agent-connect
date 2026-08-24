@@ -212,6 +212,12 @@ export interface MetabotDaemonHttpHandlers {
         invites?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         collabs?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         collabMessages?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        health?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        staffingPropose?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        staffingList?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        staffingDecide?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        staffingCreate?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        staffingSearch?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     conversations?: {
         list?: (input: {

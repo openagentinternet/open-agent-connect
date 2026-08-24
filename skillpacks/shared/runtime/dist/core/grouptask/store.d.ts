@@ -99,6 +99,11 @@ export interface GroupTaskStore {
     addDeliverable(input: AddGroupTaskDeliverableInput): Promise<GroupTaskDeliverable>;
     listDeliverables(taskId: number): Promise<GroupTaskDeliverable[]>;
     hasDeliverableWithMsgPin(taskId: number, msgPinId: string): Promise<boolean>;
+    findDeliverableByMsgPinAndUri(taskId: number, msgPinId: string, uri: string | null, kind: string | null): Promise<GroupTaskDeliverable | null>;
+    /** Correction supersede: reopen a rejected/stale row for re-verification. */
+    reopenDeliverable(deliverableId: number): Promise<GroupTaskDeliverable | null>;
+    /** Inviter-side local-file → metafile upgrade rewrites the row's URI. */
+    updateDeliverableUri(deliverableId: number, uri: string, kind?: string): Promise<GroupTaskDeliverable | null>;
     deleteDeliverable(deliverableId: number): Promise<boolean>;
     updateDeliverableVerification(deliverableId: number, verification: string | null, confirmation: 'unconfirmed' | 'confirmed', status?: GroupTaskDeliverableStatus): Promise<void>;
     updateDeliverablesStatusByTask(taskId: number, fromStatus: GroupTaskDeliverableStatus, toStatus: GroupTaskDeliverableStatus): Promise<number>;
@@ -141,6 +146,8 @@ export interface GroupTaskStore {
         ratingComment: string | null;
     }): Promise<void>;
     updateAcceptanceSummaryPublishedPin(taskId: number, pinId: string): Promise<void>;
+    /** Stamp the LLM owner-report conclusion onto the latest summary. */
+    updateAcceptanceSummaryConclusion(taskId: number, conclusion: string): Promise<void>;
     appendMessages(groupId: string, messages: GroupTaskMessage[]): Promise<number>;
     listMessages(groupId: string, opts?: {
         limit?: number;

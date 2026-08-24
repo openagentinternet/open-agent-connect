@@ -8,6 +8,7 @@
 import type { Signer } from '../signing/signer';
 import { type GroupTaskStore } from './store';
 import { type OpenTeamStore } from './openteamStore';
+import { type StaffingStore } from './staffingStore';
 import { type GroupTaskTransportOptions } from './transport';
 import { type CreateGroupTaskInput, type GroupTaskDetail, type GroupTaskListTab, type GroupTaskMember, type GroupTaskMemberStatus, type GroupTaskMemberSummary, type GroupTaskMemberWorkStatus, type GroupTaskMessage, type GroupTaskRecord, type GroupTaskStatusEventActor, type GroupTaskSummary } from './types';
 export interface GroupTaskProfileRef {
@@ -36,6 +37,8 @@ export interface GroupTaskServiceContext {
     storeForProfile?(profile: GroupTaskProfileRef): GroupTaskStore;
     /** OpenTeam store seam (tests); default resolves the profile runtime root. */
     openteamStoreForProfile?(profile: GroupTaskProfileRef): OpenTeamStore;
+    /** Staffing store seam (tests); default resolves the profile runtime root. */
+    staffingStoreForProfile?(profile: GroupTaskProfileRef): StaffingStore;
     /**
      * Send an ECDH private message (/protocols/simplemsg) from a local profile.
      * Wired by the daemon (peer chat pubkey resolver + profile signer); absent
@@ -58,6 +61,10 @@ export declare class GroupTaskServiceError extends Error {
 }
 /** OpenTeam handshake store for a profile (exported for the engine). */
 export declare function openteamStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): OpenTeamStore;
+/** Staffing proposal store for a profile (exported for the staffing service). */
+export declare function staffingStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): StaffingStore;
+/** Resolve a profile by slug or fail (exported for the staffing service). */
+export declare function requireProfile(ctx: GroupTaskServiceContext, slug: string): Promise<GroupTaskProfileRef>;
 /** Minutes of engine inactivity before a non-terminal task reads as stalled. */
 export declare const GROUP_TASK_STALL_AFTER_MINUTES = 30;
 /** Minutes a [WORKING] tag stays "working" after its last occurrence. */

@@ -67,6 +67,10 @@ const metasoInfrastructure_1 = require("../core/network/metasoInfrastructure");
 const metaAppSearchApi_1 = require("../core/metaapp/metaAppSearchApi");
 const metaIdSearchApi_1 = require("../core/metaid/metaIdSearchApi");
 const metaAppSource_1 = require("../core/metaapp/metaAppSource");
+const search_1 = require("../core/metaweb/search");
+const pinRead_1 = require("../core/metaweb/pinRead");
+const format_1 = require("../core/metaweb/format");
+const uri_1 = require("../core/metaweb/uri");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
@@ -76,6 +80,8 @@ const daemon_1 = require("../daemon");
 const defaultHandlers_1 = require("../daemon/defaultHandlers");
 const grouptaskHandlers_1 = require("../daemon/grouptaskHandlers");
 const engine_1 = require("../core/grouptask/engine");
+const engineLog_1 = require("../core/grouptask/engineLog");
+const deliverableVerification_1 = require("../core/grouptask/deliverableVerification");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const simplemsgPresenceWatchdog_1 = require("../core/a2a/simplemsgPresenceWatchdog");
 const simplemsgClassifier_1 = require("../core/a2a/simplemsgClassifier");
@@ -2014,6 +2020,100 @@ function createDefaultCliDependencies(context) {
         const message = error instanceof Error ? error.message : String(error);
         return (0, commandResult_1.commandFailed)('metaid_search_failed', message);
     }
+    function metawebServiceOptions() {
+        const override = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL);
+        return override ? { baseUrl: override } : {};
+    }
+    /**
+     * `metabot metaweb search` — unified cross-protocol knowledge search. The
+     * data envelope carries the trimmed rows plus a model-ready `formatted`
+     * block (clickable MetaWeb URI bullets + guidance) so skill hosts can pipe
+     * it straight into the model context.
+     */
+    async function runMetawebSearch(input) {
+        try {
+            const q = normalizeEnvText(typeof input.query === 'string' ? input.query : undefined);
+            if (!q)
+                return (0, commandResult_1.commandFailed)('missing_query', '--query is required.');
+            const protocolsRaw = normalizeEnvText(typeof input.protocols === 'string' ? input.protocols : undefined);
+            const page = await (0, search_1.searchMetaweb)({
+                q,
+                ...(protocolsRaw
+                    ? { protocols: protocolsRaw.split(',').map((key) => key.trim()).filter(Boolean) }
+                    : {}),
+                publisher: normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) || undefined,
+                since: readPositiveField(input.since),
+                until: readPositiveField(input.until),
+                sort: input.sort === 'newest' ? 'newest' : undefined,
+                size: readPositiveField(input.size),
+                cursor: normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) || undefined,
+            }, metawebServiceOptions());
+            const bullets = (0, format_1.formatMetawebSearchBullets)(page.items);
+            const asciiOnly = /^[\x00-\x7F]*$/.test(q);
+            const guidance = [
+                'Open 1-3 of the most relevant pins with `metabot metaweb read --pin <pinId>` before answering; cite the pins you actually read.',
+                'If the results look thin, retry with broader or synonym keywords — the corpus is Chinese-heavy, so also try Chinese terms.'
+                    + (asciiOnly ? ' (Your query was pure ASCII — a Chinese retry is especially likely to help.)' : ''),
+                'Never invent pin ids or content.',
+            ].join('\n');
+            return (0, commandResult_1.commandSuccess)({
+                items: page.items.map((item) => ({
+                    protocol: item.protocol,
+                    pinId: item.pinId,
+                    currentPinId: item.currentPinId,
+                    title: item.title,
+                    summary: item.summary,
+                    tags: item.tags,
+                    publisher: item.publisher,
+                    createdAt: item.createdAt,
+                    score: item.score,
+                })),
+                hasMore: page.hasMore,
+                nextCursor: page.nextCursor,
+                formatted: bullets ? `${bullets}\n${guidance}` : `${guidance}\n(No results. ${asciiOnly ? 'Try Chinese keywords — ' : ''}try broader or synonym terms.)`,
+            });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return (0, commandResult_1.commandFailed)('metaweb_search_failed', message);
+        }
+    }
+    /** `metabot metaweb read --pin <pinId>` — generic pin read with citation-shaped output. */
+    async function runMetawebRead(input) {
+        try {
+            const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+            if (!pinId)
+                return (0, commandResult_1.commandFailed)('missing_pin', '--pin is required.');
+            const pin = await (0, pinRead_1.readMetawebPin)(pinId, metawebServiceOptions());
+            return (0, commandResult_1.commandSuccess)({
+                pin: {
+                    pinId: pin.pinId,
+                    currentPinId: pin.currentPinId,
+                    protocol: pin.protocol,
+                    path: pin.path,
+                    chainName: pin.chainName,
+                    operation: pin.operation,
+                    creator: pin.creator,
+                    createdAt: pin.createdAt,
+                    contentType: pin.contentType,
+                    meta: pin.meta,
+                    attachments: pin.attachments,
+                    source: pin.source,
+                    truncated: pin.truncated,
+                    totalLength: pin.totalLength,
+                    text: pin.text,
+                },
+                formatted: `${(0, format_1.formatMetawebPinDetail)(pin)}\n${uri_1.METAWEB_CITATION_RULE}`,
+            });
+        }
+        catch (error) {
+            if (error instanceof pinRead_1.MetawebPinNotFoundError) {
+                return (0, commandResult_1.commandFailed)('pin_not_found', error.message);
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            return (0, commandResult_1.commandFailed)('metaweb_read_failed', message);
+        }
+    }
     async function runMetaIdSearch(input) {
         try {
             const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
@@ -2180,6 +2280,10 @@ function createDefaultCliDependencies(context) {
         metaid: {
             search: async (input) => runMetaIdSearch(input),
             detail: async (input) => runMetaIdDetail(input),
+        },
+        metaweb: {
+            search: async (input) => runMetawebSearch(input),
+            read: async (input) => runMetawebRead(input),
         },
         buzz: {
             post: async (input) => requestJsonForSelectedActor('POST', '/api/buzz/post', typeof input.from === 'string' ? input.from : undefined, input),
@@ -2538,6 +2642,12 @@ function createDefaultCliDependencies(context) {
                 invites: get('/api/grouptask/invites'),
                 collabs: get('/api/grouptask/collabs'),
                 collabMessages: get('/api/grouptask/collab-messages'),
+                health: get('/api/grouptask/health'),
+                staffingPropose: post('/api/grouptask/staffing/propose'),
+                staffingList: get('/api/grouptask/staffing/list'),
+                staffingDecide: post('/api/grouptask/staffing/decide'),
+                staffingCreate: post('/api/grouptask/staffing/create'),
+                staffingSearch: post('/api/grouptask/staffing/search'),
             };
         })(),
         conversations: {
@@ -3511,6 +3621,7 @@ function mergeCliDependencies(context) {
         browser: { ...defaults.browser, ...provided.browser },
         metaapp: { ...defaults.metaapp, ...provided.metaapp },
         metaid: { ...defaults.metaid, ...provided.metaid },
+        metaweb: { ...defaults.metaweb, ...provided.metaweb },
         chain: { ...defaults.chain, ...provided.chain },
         daemon: { ...defaults.daemon, ...provided.daemon },
         doctor: { ...defaults.doctor, ...provided.doctor },
@@ -4140,8 +4251,14 @@ async function serveCliDaemonProcess(context) {
     // Group Task engine: 5s ticker that drives every non-terminal group task
     // chaired by a local profile (message sync, tag side effects, chair/worker
     // LLM turns, stall heartbeat). Cheap when no tasks exist — the tick only
-    // reads local profile state files.
+    // reads local profile state files. Engine failures land in the size-capped
+    // engine log (the detached daemon's stdio is ignored, console.warn alone
+    // would evaporate).
+    const groupTaskEngineLog = (0, engineLog_1.createGroupTaskEngineLogWriter)({
+        logFile: (0, engineLog_1.resolveGroupTaskEngineLogPath)(daemonPaths.logsRoot),
+    });
     const groupTaskEngine = (0, engine_1.createGroupTaskEngine)({
+        verifyPin: (0, deliverableVerification_1.createMetasoPinVerifier)(),
         ctx: (0, grouptaskHandlers_1.createGroupTaskServiceContext)({
             systemHomeDir,
             createSignerForProfileHome: (profileHomeDir) => (profileHomeDir === homeDir
@@ -4149,7 +4266,10 @@ async function serveCliDaemonProcess(context) {
                 : (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore: (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir), adapters })),
             adapters,
             resolvePeerChatPublicKey,
-            log: (message) => console.warn(message),
+            log: (message) => {
+                console.warn(message);
+                groupTaskEngineLog(message);
+            },
         }),
         runLlmTurn: async (turn) => {
             const profilePaths = (0, paths_1.resolveMetabotPaths)(turn.profile.homeDir);

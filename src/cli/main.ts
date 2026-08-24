@@ -30,6 +30,7 @@ import { runSystemCommand } from './commands/system';
 import { runLlmCommand } from './commands/llm';
 import { runMetaAppCommand } from './commands/metaapp';
 import { runMetaIdCommand } from './commands/metaid';
+import { runMetawebCommand } from './commands/metaweb';
 import { commandUnknownSubcommand } from './commands/helpers';
 import { helpRequested, writeResolvedHelp } from './commandHelp';
 import { createCliRuntimeContext, type CliContext } from './types';
@@ -161,6 +162,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'metaid':
           result = await runMetaIdCommand(rest, context);
+          break;
+        case 'metaweb':
+          result = await runMetawebCommand(rest, context);
           break;
         case undefined:
           result = commandFailed('missing_command', 'No command provided.');

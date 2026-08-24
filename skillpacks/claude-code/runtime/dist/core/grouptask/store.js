@@ -397,6 +397,35 @@ function createGroupTaskStore(paths) {
             const state = await readState();
             return state.deliverables.some((entry) => entry.taskId === taskId && entry.msgPinId === msgPinId);
         },
+        findDeliverableByMsgPinAndUri: async (taskId, msgPinId, uri, kind) => {
+            const state = await readState();
+            return state.deliverables.find((entry) => entry.taskId === taskId
+                && entry.msgPinId === msgPinId
+                && (entry.uri ?? null) === (uri ?? null)
+                && (entry.kind ?? null) === (kind ?? null)) ?? null;
+        },
+        updateDeliverableUri: (deliverableId, uri, kind) => enqueue(async () => {
+            const state = await readState();
+            const deliverable = state.deliverables.find((entry) => entry.id === deliverableId);
+            if (!deliverable)
+                return null;
+            deliverable.uri = uri.trim();
+            if (kind)
+                deliverable.kind = kind.trim();
+            await writeState(state);
+            return deliverable;
+        }),
+        reopenDeliverable: (deliverableId) => enqueue(async () => {
+            const state = await readState();
+            const deliverable = state.deliverables.find((entry) => entry.id === deliverableId);
+            if (!deliverable)
+                return null;
+            deliverable.status = 'pending';
+            deliverable.verification = null;
+            deliverable.confirmation = 'unconfirmed';
+            await writeState(state);
+            return deliverable;
+        }),
         deleteDeliverable: (deliverableId) => enqueue(async () => {
             const state = await readState();
             const before = state.deliverables.length;
@@ -583,6 +612,17 @@ function createGroupTaskStore(paths) {
             summary.rating = input.rating;
             summary.ratingComment = input.ratingComment;
             await writeState(state);
+        }),
+        updateAcceptanceSummaryConclusion: (taskId, conclusion) => enqueue(async () => {
+            const state = await readState();
+            const summaries = state.acceptanceSummaries
+                .filter((entry) => entry.taskId === taskId)
+                .sort((left, right) => right.version - left.version);
+            const latest = summaries[0];
+            if (latest) {
+                latest.conclusion = conclusion;
+                await writeState(state);
+            }
         }),
         updateAcceptanceSummaryPublishedPin: (taskId, pinId) => enqueue(async () => {
             const state = await readState();

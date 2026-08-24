@@ -37,7 +37,7 @@ function resolveDistRoot(): string | null {
 const moduleCache = new Map<string, Record<string, unknown>>()
 
 /** Require one OAC core module from the resolved dist root. Throws on failure. */
-function core(moduleRelPath: string): Record<string, unknown> {
+export function core(moduleRelPath: string): Record<string, unknown> {
   const cached = moduleCache.get(moduleRelPath)
   if (cached) return cached
   const distRoot = resolveDistRoot()

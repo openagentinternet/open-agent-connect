@@ -39,6 +39,10 @@ export interface CliDependencies {
     search?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     detail?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  metaweb?: {
+    search?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    read?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };

@@ -287,5 +287,104 @@ async function runGroupTaskCommand(args, context) {
             return (0, commandResult_1.commandFailed)('invalid_flag', '--limit must be an integer.');
         return handler({ slug, groupId, limit });
     }
+    if (action === 'health') {
+        const handler = requireHandler(context, 'health');
+        if (!handler)
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Group task health handler is not configured.');
+        return handler({});
+    }
+    if (action === 'staffing') {
+        const sub = normalizeText(args[1]);
+        if (sub === 'propose') {
+            const handler = requireHandler(context, 'staffingPropose');
+            if (!handler)
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Staffing propose handler is not configured.');
+            const title = normalizeText((0, helpers_1.readFlagValue)(args, '--title'));
+            if (!title)
+                return (0, helpers_1.commandMissingFlag)('--title');
+            const goal = normalizeText((0, helpers_1.readFlagValue)(args, '--goal'));
+            if (!goal)
+                return (0, helpers_1.commandMissingFlag)('--goal');
+            const planJson = normalizeText((0, helpers_1.readFlagValue)(args, '--plan'));
+            if (!planJson)
+                return (0, helpers_1.commandMissingFlag)('--plan');
+            let plan;
+            try {
+                plan = JSON.parse(planJson);
+            }
+            catch {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--plan must be a JSON object: {"stages":[…],"seats":[…]}');
+            }
+            return handler({
+                title,
+                goal,
+                acceptanceCriteria: normalizeText((0, helpers_1.readFlagValue)(args, '--acceptance')) || undefined,
+                plan,
+                triggeringWish: normalizeText((0, helpers_1.readFlagValue)(args, '--wish')) || undefined,
+                sourceSessionId: normalizeText((0, helpers_1.readFlagValue)(args, '--session')) || undefined,
+                chairSlug: normalizeText((0, helpers_1.readFlagValue)(args, '--chair')) || undefined,
+                language: normalizeText((0, helpers_1.readFlagValue)(args, '--lang')) || undefined,
+            });
+        }
+        if (sub === 'list') {
+            const handler = requireHandler(context, 'staffingList');
+            if (!handler)
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Staffing list handler is not configured.');
+            return handler({
+                chairSlug: normalizeText((0, helpers_1.readFlagValue)(args, '--chair')) || undefined,
+            });
+        }
+        if (sub === 'decide') {
+            const handler = requireHandler(context, 'staffingDecide');
+            if (!handler)
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Staffing decide handler is not configured.');
+            const chair = normalizeText((0, helpers_1.readFlagValue)(args, '--chair'));
+            if (!chair)
+                return (0, helpers_1.commandMissingFlag)('--chair');
+            const proposalId = readIntFlag(args, '--proposal');
+            if (proposalId === 'invalid' || typeof proposalId !== 'number' || proposalId <= 0) {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--proposal must be a positive integer.');
+            }
+            const decision = normalizeText((0, helpers_1.readFlagValue)(args, '--decision'));
+            if (!['confirm', 'revise', 'skip'].includes(decision)) {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--decision must be one of: confirm, revise, skip.');
+            }
+            return handler({ chairSlug: chair, proposalId, decision });
+        }
+        if (sub === 'create') {
+            const handler = requireHandler(context, 'staffingCreate');
+            if (!handler)
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Staffing create handler is not configured.');
+            const proposalId = readIntFlag(args, '--proposal');
+            if (proposalId === 'invalid' || typeof proposalId !== 'number' || proposalId <= 0) {
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--proposal must be a positive integer.');
+            }
+            return handler({
+                proposalId,
+                chairSlug: normalizeText((0, helpers_1.readFlagValue)(args, '--chair')) || undefined,
+            });
+        }
+        if (sub === 'search') {
+            const handler = requireHandler(context, 'staffingSearch');
+            if (!handler)
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Staffing search handler is not configured.');
+            const seat = normalizeText((0, helpers_1.readFlagValue)(args, '--seat'));
+            const query = normalizeText((0, helpers_1.readFlagValue)(args, '--query'));
+            if (!seat && !query) {
+                return (0, commandResult_1.commandFailed)('invalid_flag', 'either --seat <role> or --query <text> is required.');
+            }
+            const limit = readIntFlag(args, '--limit');
+            if (limit === 'invalid')
+                return (0, commandResult_1.commandFailed)('invalid_flag', '--limit must be an integer.');
+            return handler({
+                seat: seat || undefined,
+                query: query || undefined,
+                domainLabel: normalizeText((0, helpers_1.readFlagValue)(args, '--domain')) || undefined,
+                skills: readCsvFlag(args, '--skills'),
+                limit: typeof limit === 'number' ? limit : undefined,
+            });
+        }
+        return (0, helpers_1.commandUnknownSubcommand)(`grouptask staffing ${args.slice(1).join(' ')}`.trim());
+    }
     return (0, helpers_1.commandUnknownSubcommand)(`grouptask ${args.join(' ')}`.trim());
 }

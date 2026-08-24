@@ -17,6 +17,10 @@ const POST_VERBS = {
     '/api/grouptask/pin': 'setPinned',
     '/api/grouptask/archive': 'setArchived',
     '/api/grouptask/invite': 'invite',
+    '/api/grouptask/staffing/propose': 'staffingPropose',
+    '/api/grouptask/staffing/decide': 'staffingDecide',
+    '/api/grouptask/staffing/create': 'staffingCreate',
+    '/api/grouptask/staffing/search': 'staffingSearch',
 };
 const GET_VERBS = {
     '/api/grouptask/list': 'list',
@@ -25,6 +29,8 @@ const GET_VERBS = {
     '/api/grouptask/invites': 'invites',
     '/api/grouptask/collabs': 'collabs',
     '/api/grouptask/collab-messages': 'collabMessages',
+    '/api/grouptask/health': 'health',
+    '/api/grouptask/staffing/list': 'staffingList',
 };
 function queryToInput(url) {
     const input = {};

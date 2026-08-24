@@ -32,6 +32,7 @@ const system_1 = require("./commands/system");
 const llm_1 = require("./commands/llm");
 const metaapp_1 = require("./commands/metaapp");
 const metaid_1 = require("./commands/metaid");
+const metaweb_1 = require("./commands/metaweb");
 const helpers_1 = require("./commands/helpers");
 const commandHelp_1 = require("./commandHelp");
 const types_1 = require("./types");
@@ -155,6 +156,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'metaid':
                     result = await (0, metaid_1.runMetaIdCommand)(rest, context);
+                    break;
+                case 'metaweb':
+                    result = await (0, metaweb_1.runMetawebCommand)(rest, context);
                     break;
                 case undefined:
                     result = (0, commandResult_1.commandFailed)('missing_command', 'No command provided.');
