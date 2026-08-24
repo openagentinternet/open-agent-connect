@@ -16487,6 +16487,9 @@ export function createDefaultMetabotDaemonHandlers(input: {
             slug: normalizeText(rawInput.from) || 'actor',
             filePath: normalizeText(rawInput.filePath),
             network,
+            ...(typeof rawInput.contentType === 'string' && rawInput.contentType.trim()
+              ? { contentType: rawInput.contentType.trim() }
+              : {}),
           });
           return commandSuccess(result);
         } catch (error) {

@@ -198,9 +198,14 @@ export function createKnowledgeBaseStore(paths: MetabotPaths): KnowledgeBaseStor
     removeKnowledgeBase: (id) => enqueue(async () => {
       const state = await readRegistry();
       const before = state.bases.length;
+      const target = state.bases.find((entry) => entry.id === id);
       state.bases = state.bases.filter((entry) => entry.id !== id);
       if (state.bases.length === before) return false;
       await writeRegistry(state);
+      // Prune the raw corpus so a same-named KB cannot resurrect old documents.
+      if (target?.rawDir) {
+        await fs.rm(target.rawDir, { recursive: true, force: true }).catch(() => undefined);
+      }
       return true;
     }),
 

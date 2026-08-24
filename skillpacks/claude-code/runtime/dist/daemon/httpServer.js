@@ -12,6 +12,7 @@ const promises_1 = require("node:fs/promises");
 const commandResult_1 = require("../core/contracts/commandResult");
 const config_1 = require("./routes/config");
 const buzz_1 = require("./routes/buzz");
+const simplenote_1 = require("./routes/simplenote");
 const chain_1 = require("./routes/chain");
 const daemon_1 = require("./routes/daemon");
 const chat_1 = require("./routes/chat");
@@ -33,6 +34,7 @@ const LOCAL_DAEMON_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const ROUTES = [
     config_1.handleConfigRoutes,
     buzz_1.handleBuzzRoutes,
+    simplenote_1.handleSimpleNoteRoutes,
     chain_1.handleChainRoutes,
     daemon_1.handleDaemonRoutes,
     chat_1.handleChatRoutes,

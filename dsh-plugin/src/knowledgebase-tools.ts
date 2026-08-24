@@ -46,14 +46,26 @@ type ServiceModule = {
   }
 }
 
-function serviceFor(paths: unknown) {
-  const module = core('core/knowledgebase/service.js') as ServiceModule
-  return module.createKnowledgeBaseService(paths)
-}
+// Store/service instances are memoized per profile home: the per-instance
+// write queues only serialize within one instance, so per-exec construction
+// would race concurrent tool calls (same class of fix as the staffing CAS).
+const serviceCache = new Map<string, ReturnType<ServiceModule['createKnowledgeBaseService']>>()
+const procedureStoreCache = new Map<string, unknown>()
+const studyStoreCache = new Map<string, unknown>()
 
 function pathsFor(slug: string, homeDir: string): unknown {
   const pathsModule = core('core/state/paths.js') as { resolveMetabotPaths(homeDir: string): unknown }
   return pathsModule.resolveMetabotPaths(homeDir)
+}
+
+function serviceFor(homeDir: string) {
+  const module = core('core/knowledgebase/service.js') as ServiceModule
+  let service = serviceCache.get(homeDir)
+  if (!service) {
+    service = module.createKnowledgeBaseService(pathsFor('', homeDir))
+    serviceCache.set(homeDir, service)
+  }
+  return service
 }
 
 export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps & {
@@ -92,7 +104,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
         const session = sessionOf(exec)
         if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
         try {
-          const rows = await serviceFor(pathsFor(session.slug, session.homeDir)).store.listKnowledgeBases()
+          const rows = await serviceFor(session.homeDir).store.listKnowledgeBases()
           if (!rows.length) return 'No knowledge bases yet. knowledge_base_add_document creates the default one on first save.'
           return rows.map((row) => {
             const bits = [
@@ -110,14 +122,14 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
     {
       name: 'knowledge_base_query',
       description:
-        'Search your knowledge bases for passages relevant to a query. Returns scored snippets with the '
-        + 'source document and KB id. When nothing clears the evidence threshold it says so — do not guess '
+        'Search your knowledge bases for passages relevant to a query. Returns scored snippets grouped '
+        + 'by knowledge base (ranked within each), with the source document and KB id. When nothing clears the evidence threshold it says so — do not guess '
         + 'from thin air; widen the query or check another KB.',
       parameters: {
         type: 'object',
         properties: {
           query: { type: 'string', description: 'Free-text query; Chinese works natively.' },
-          knowledgeBaseId: { type: 'string', description: 'Restrict to one KB id; default searches all of your KBs merged by score.' },
+          knowledgeBaseId: { type: 'string', description: 'Restrict to one KB id; default searches all of your KBs, grouped per KB.' },
           topK: { type: 'number', description: 'Max hits per KB (1-50, default 8).' },
           minScore: { type: 'number', description: 'Evidence threshold 0-1 (default 0.18).' },
         },
@@ -131,7 +143,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
         const query = textArg(args, 'query')
         if (!query) return { error: 'query is required.' }
         try {
-          const results = await serviceFor(pathsFor(session.slug, session.homeDir)).queryKnowledgeBase(
+          const results = await serviceFor(session.homeDir).queryKnowledgeBase(
             session.slug,
             query,
             {
@@ -181,7 +193,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
         const content = typeof args.content === 'string' ? args.content : ''
         if (!title || !content.trim()) return { error: 'title and content are required.' }
         try {
-          const saved = await serviceFor(pathsFor(session.slug, session.homeDir)).addDocument(session.slug, {
+          const saved = await serviceFor(session.homeDir).addDocument(session.slug, {
             title,
             content,
             ...(textArg(args, 'knowledgeBaseId') ? { knowledgeBaseId: textArg(args, 'knowledgeBaseId') } : {}),
@@ -217,7 +229,7 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
         const session = sessionOf(exec)
         if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
         try {
-          const learned = await serviceFor(pathsFor(session.slug, session.homeDir)).learnKnowledgeBase(
+          const learned = await serviceFor(session.homeDir).learnKnowledgeBase(
             session.slug,
             textArg(args, 'knowledgeBaseId') || undefined,
             args.full === true,
@@ -249,9 +261,14 @@ type ProcedureModule = {
   ): Array<{ procedure: Record<string, unknown>; score: number }>
 }
 
-function procedureStoreFor(paths: unknown) {
+function procedureStoreFor(homeDir: string) {
   const module = core('core/memory/procedureStore.js') as ProcedureModule
-  return module.createProcedureStore(paths)
+  let store = procedureStoreCache.get(homeDir)
+  if (!store) {
+    store = module.createProcedureStore(pathsFor('', homeDir))
+    procedureStoreCache.set(homeDir, store)
+  }
+  return store as ReturnType<ProcedureModule['createProcedureStore']>
 }
 
 function formatProcedureRow(row: Record<string, unknown>): string {
@@ -301,7 +318,7 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
         const query = textArg(args, 'query')
         if (!query) return { error: 'query is required.' }
         try {
-          const store = procedureStoreFor(pathsFor(session.slug, session.homeDir))
+          const store = procedureStoreFor(session.homeDir)
           const rows = await store.listProcedures({ status: 'active' })
           const module = core('core/memory/procedureStore.js') as ProcedureModule
           const scored = module.scoreProceduresForQuery(rows as Array<Record<string, unknown>>, query)
@@ -342,7 +359,7 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
         const steps = stringListArg(args, 'steps')
         if (!title || !steps?.length) return { error: 'title and at least one step are required.' }
         try {
-          const saved = await procedureStoreFor(pathsFor(session.slug, session.homeDir)).upsertProcedure({
+          const saved = await procedureStoreFor(session.homeDir).upsertProcedure({
             title,
             steps,
             ...(stringListArg(args, 'pitfalls') ? { pitfalls: stringListArg(args, 'pitfalls') } : {}),
@@ -373,7 +390,7 @@ function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: Ho
         const title = textArg(args, 'title')
         if (!title) return { error: 'title is required.' }
         try {
-          const archived = await procedureStoreFor(pathsFor(session.slug, session.homeDir)).archiveProcedureByTitle(title)
+          const archived = await procedureStoreFor(session.homeDir).archiveProcedureByTitle(title)
           return archived ? `Archived "${title}".` : `No procedure titled "${title}" found.`
         } catch (error) {
           return { error: error instanceof Error ? error.message : String(error) }
@@ -395,9 +412,14 @@ type StudyModule = {
   }
 }
 
-function studyStoreFor(paths: unknown) {
+function studyStoreFor(homeDir: string) {
   const module = core('core/knowledgebase/studyJobs.js') as StudyModule
-  return module.createStudyJobStore(paths)
+  let store = studyStoreCache.get(homeDir)
+  if (!store) {
+    store = module.createStudyJobStore(pathsFor('', homeDir))
+    studyStoreCache.set(homeDir, store)
+  }
+  return store as ReturnType<StudyModule['createStudyJobStore']>
 }
 
 function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostContext }): HostToolDefinition[] {
@@ -437,7 +459,7 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
         const topic = textArg(args, 'topic')
         if (!topic) return { error: 'topic is required.' }
         try {
-          const result = await studyStoreFor(pathsFor(session.slug, session.homeDir)).enqueueStudyJob({
+          const result = await studyStoreFor(session.homeDir).enqueueStudyJob({
             metabotSlug: session.slug,
             topic,
             ...(numberArg(args, 'budgetPins') ? { budgetPins: numberArg(args, 'budgetPins') } : {}),
@@ -459,7 +481,7 @@ function buildStudyToolDefinitions(input: KnowledgebaseToolDeps & { host: HostCo
         const session = sessionOf(exec)
         if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
         try {
-          const rows = await studyStoreFor(pathsFor(session.slug, session.homeDir)).listStudyJobs(session.slug)
+          const rows = await studyStoreFor(session.homeDir).listStudyJobs(session.slug)
           if (!rows.length) return 'No study jobs yet.'
           return rows.map((job) => [
             `- "${job.topic}" [${job.status}] runs: ${job.runCount}, failures: ${job.consecutiveFailures}`,

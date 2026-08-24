@@ -723,17 +723,23 @@ function createGroupTaskEngine(options) {
                     }
                     if (candidate.correction) {
                         // Correction supersede: reopen this author's superseded row
-                        // (same URI pin, else the newest rejected row) for re-check.
+                        // (same URI pin, else the NEWEST rejected row) for re-check.
                         const rows = await store.listDeliverables(task.id);
                         const pinOf = (uri) => {
                             const match = /([0-9a-f]{64}i\d+)/i.exec(uri ?? '');
                             return match ? match[1].toLowerCase() : null;
                         };
                         const targetPin = pinOf(candidate.uri);
-                        const mine = rows.filter((row) => row.authorGlobalMetaId === message.senderGlobalMetaId
+                        // Supersede targets PRIOR rows by this author: never the
+                        // correction row just recorded, and rejected rows first (a
+                        // delivered row is live work, not a superseded one).
+                        const mine = rows.filter((row) => row.id !== recorded.id
+                            && row.authorGlobalMetaId === message.senderGlobalMetaId
                             && row.status !== 'accepted');
-                        const superseded = (targetPin && mine.find((row) => pinOf(row.uri) === targetPin))
-                            ?? mine[mine.length - 1]
+                        const superseded = (targetPin && mine.find((row) => pinOf(row.uri) === targetPin && row.status === 'rejected'))
+                            ?? (targetPin && mine.find((row) => pinOf(row.uri) === targetPin))
+                            ?? [...mine].reverse().find((row) => row.status === 'rejected')
+                            ?? mine[0]
                             ?? null;
                         if (superseded) {
                             await store.reopenDeliverable(superseded.id);

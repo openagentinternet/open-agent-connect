@@ -154,8 +154,8 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
     },
 
     addDocument: async (metabotSlug, input) => {
-      const title = input.title.trim();
-      const content = cleanKnowledgeBaseText(input.content);
+      const title = input.title.trim().slice(0, 200);
+      const content = cleanKnowledgeBaseText(input.content).slice(0, 2_000_000);
       if (!title || !content) {
         throw new KnowledgeBaseServiceError('fields_required', 'title and content are required.');
       }

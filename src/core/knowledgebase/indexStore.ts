@@ -144,6 +144,30 @@ function bm25Score(
 }
 
 export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
+  // Query-path cache: tokenize each chunk once per index-file generation
+  // (mtime+size) instead of on every query — the corpus grows nightly and
+  // per-query retokenization becomes a multi-second event-loop block.
+  let cache: { key: string; index: IndexFileV1; chunkTokens: string[][] } | null = null;
+
+  function indexGenerationKey(): Promise<string> {
+    return fs.stat(filePath).then(
+      (stat) => `${Math.floor(stat.mtimeMs)}:${stat.size}`,
+      () => 'missing',
+    );
+  }
+
+  function chunkTokensOf(index: IndexFileV1): string[][] {
+    return index.chunks.map((chunk) => tokenizeKnowledgeBaseText(chunk.text));
+  }
+
+  async function readIndexCached(): Promise<{ index: IndexFileV1; chunkTokens: string[][] }> {
+    const key = await indexGenerationKey();
+    if (cache && cache.key === key) return cache;
+    const index = await readIndex();
+    cache = { key, index, chunkTokens: chunkTokensOf(index) };
+    return cache;
+  }
+
   async function readIndex(): Promise<IndexFileV1> {
     try {
       const raw = await fs.readFile(filePath, 'utf8');
@@ -177,17 +201,18 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
     rebuild: async (rawDir, now) => {
       const index = await buildIndexFromRawDir(rawDir, now);
       await writeIndex(index);
+      cache = null;
       return { docCount: index.docs.length, chunkCount: index.chunks.length };
     },
 
     query: async (query, options: { topK?: number; minScore?: number } = {}) => {
-      const index = await readIndex();
+      const { index, chunkTokens } = await readIndexCached();
       if (index.chunks.length === 0 || !query.trim()) return [];
       const tokens = indexTokens(query);
       if (!tokens.length) return [];
 
-      const avgLen = index.chunks.reduce((sum, chunk) => sum + tokenizeKnowledgeBaseText(chunk.text).length, 0)
-        / Math.max(1, index.chunks.length);
+      const avgLen = chunkTokens.reduce((sum, tokens2) => sum + tokens2.length, 0)
+        / Math.max(1, chunkTokens.length);
       const scores = new Map<number, number>();
       const hits: Array<{ token: string; chunkIndexes: number[] }> = [];
 
@@ -198,10 +223,10 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
         const df = new Set(postings).size;
         for (const chunkIndex of postings) {
           const chunk = index.chunks[chunkIndex];
-          if (!chunk) continue;
-          const chunkTokens = tokenizeKnowledgeBaseText(chunk.text);
-          const tf = chunkTokens.filter((item) => item === token).length;
-          const raw = bm25Score(tf, chunkTokens.length, avgLen, df, index.chunks.length);
+          const chunkTokenList = chunkTokens[chunkIndex];
+          if (!chunk || !chunkTokenList) continue;
+          const tf = chunkTokenList.filter((item) => item === token).length;
+          const raw = bm25Score(tf, chunkTokenList.length, avgLen, df, index.chunks.length);
           scores.set(chunkIndex, (scores.get(chunkIndex) ?? 0) + raw);
         }
       }
@@ -232,6 +257,7 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
 
     clear: async () => {
       await fs.rm(filePath, { force: true }).catch(() => undefined);
+      cache = null;
     },
   };
 }

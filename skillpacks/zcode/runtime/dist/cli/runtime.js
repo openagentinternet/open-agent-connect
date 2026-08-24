@@ -82,6 +82,9 @@ const grouptaskHandlers_1 = require("../daemon/grouptaskHandlers");
 const engine_1 = require("../core/grouptask/engine");
 const engineLog_1 = require("../core/grouptask/engineLog");
 const deliverableVerification_1 = require("../core/grouptask/deliverableVerification");
+const profileUploadGate_1 = require("../core/files/profileUploadGate");
+const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
+const studyJobs_1 = require("../core/knowledgebase/studyJobs");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const simplemsgPresenceWatchdog_1 = require("../core/a2a/simplemsgPresenceWatchdog");
 const simplemsgClassifier_1 = require("../core/a2a/simplemsgClassifier");
@@ -2288,6 +2291,9 @@ function createDefaultCliDependencies(context) {
         buzz: {
             post: async (input) => requestJsonForSelectedActor('POST', '/api/buzz/post', typeof input.from === 'string' ? input.from : undefined, input),
         },
+        simplenote: {
+            post: async (input) => requestJsonForSelectedActor('POST', '/api/simplenote/post', typeof input.from === 'string' ? input.from : undefined, input),
+        },
         browser: {
             open: async (input) => openLocalBrowserPage(input),
             tabOpen: async (input) => openBrowserTab(input),
@@ -3622,6 +3628,7 @@ function mergeCliDependencies(context) {
         metaapp: { ...defaults.metaapp, ...provided.metaapp },
         metaid: { ...defaults.metaid, ...provided.metaid },
         metaweb: { ...defaults.metaweb, ...provided.metaweb },
+        simplenote: { ...defaults.simplenote, ...provided.simplenote },
         chain: { ...defaults.chain, ...provided.chain },
         daemon: { ...defaults.daemon, ...provided.daemon },
         doctor: { ...defaults.doctor, ...provided.doctor },
@@ -4257,8 +4264,30 @@ async function serveCliDaemonProcess(context) {
     const groupTaskEngineLog = (0, engineLog_1.createGroupTaskEngineLogWriter)({
         logFile: (0, engineLog_1.resolveGroupTaskEngineLogPath)(daemonPaths.logsRoot),
     });
+    // Deliverable uploads are workspace-scoped and fail-closed: a local file
+    // reaches the chain only from inside the acting Bot's profile home. Paths
+    // injected into guest replies by remote members are refused here.
+    const gatedDeliverableUpload = (0, profileUploadGate_1.createProfileScopedUpload)({
+        profileHomeDir: async (slug) => {
+            const profile = await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, slug).catch(() => null);
+            return profile?.homeDir ?? null;
+        },
+        signerForSlug: (slug) => (async () => {
+            const profile = await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, slug).catch(() => null);
+            if (!profile)
+                throw new Error(`MetaBot profile not found: ${slug}`);
+            return profile.homeDir === homeDir
+                ? signer
+                : (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore: (0, fileSecretStore_1.createFileSecretStore)(profile.homeDir), adapters });
+        })(),
+        log: (message) => {
+            console.warn(message);
+            groupTaskEngineLog(message);
+        },
+    });
     const groupTaskEngine = (0, engine_1.createGroupTaskEngine)({
         verifyPin: (0, deliverableVerification_1.createMetasoPinVerifier)(),
+        uploadDeliverableFile: gatedDeliverableUpload,
         ctx: (0, grouptaskHandlers_1.createGroupTaskServiceContext)({
             systemHomeDir,
             createSignerForProfileHome: (profileHomeDir) => (profileHomeDir === homeDir
@@ -4303,6 +4332,69 @@ async function serveCliDaemonProcess(context) {
         },
     });
     groupTaskEngine.start();
+    // Study scheduler (IDBots M4 parity): drains owner-assigned MetaWeb study
+    // jobs into knowledge bases during the nightly window. One job per tick,
+    // 30-minute cadence; the study turn is a plain LLM turn whose prompt
+    // carries the tool allowlist (the allowlisted tools run as DSH native
+    // tools / skillpack CLIs on the caller side).
+    const studyJobStores = new Map();
+    const studyStoreFor = (homeDir) => {
+        let store = studyJobStores.get(homeDir);
+        if (!store) {
+            store = (0, studyJobs_1.createStudyJobStore)((0, paths_1.resolveMetabotPaths)(homeDir));
+            studyJobStores.set(homeDir, store);
+        }
+        return store;
+    };
+    const studyTimer = setInterval(() => {
+        void (async () => {
+            try {
+                const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
+                for (const profile of profiles) {
+                    await (0, studyJobs_1.runStudyTick)(studyStoreFor(profile.homeDir), {
+                        runStudyTurn: async ({ slug, prompt }) => {
+                            const profilePaths = (0, paths_1.resolveMetabotPaths)((await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, slug))?.homeDir ?? '');
+                            const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+                                runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths),
+                                bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(profilePaths),
+                                getPreferredRuntimeId: async () => {
+                                    try {
+                                        const raw = await node_fs_1.default.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                                        const data = JSON.parse(raw);
+                                        return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+                                    }
+                                    catch {
+                                        return null;
+                                    }
+                                },
+                            });
+                            const result = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                                runtimeResolver,
+                                llmExecutor,
+                                metaBotSlug: slug,
+                                prompt,
+                                systemPrompt: 'You are a MetaBot running an unattended nightly study session.',
+                                timeoutMs: 30 * 60_000,
+                                pollIntervalMs: 5_000,
+                            });
+                            if (result.status !== 'completed') {
+                                throw new Error(result.error || `Study turn ended with status ${result.status}`);
+                            }
+                            return result.output;
+                        },
+                        log: (message) => {
+                            console.warn(message);
+                            groupTaskEngineLog(message);
+                        },
+                    }).catch(() => undefined);
+                }
+            }
+            catch {
+                // Scheduler failures never take down the daemon.
+            }
+        })();
+    }, studyJobs_1.STUDY_TICK_INTERVAL_MINUTES * 60_000);
+    studyTimer.unref?.();
     // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
     // them (with their remaining budget) or settle expired waits into the
     // timeout + refund path. Runs even when the simplemsg listener is disabled —
