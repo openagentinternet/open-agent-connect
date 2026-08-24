@@ -29,7 +29,15 @@ test('bindKnowledgeBaseToolInstall registers all four tools', () => {
   plugin.bindKnowledgeBaseToolInstall(host.ctx)
   assert.deepEqual(
     host.tools.map((tool) => tool.name).sort(),
-    ['knowledge_base_add_document', 'knowledge_base_learn', 'knowledge_base_list', 'knowledge_base_query'],
+    [
+      'knowledge_base_add_document',
+      'knowledge_base_learn',
+      'knowledge_base_list',
+      'knowledge_base_query',
+      'procedure_archive',
+      'procedure_recall',
+      'procedure_save',
+    ],
   )
 })
 
@@ -69,4 +77,39 @@ test('missing session context returns a readable error', async () => {
   const [query] = plugin.buildKnowledgeBaseToolDefinitions({ host: host.ctx })
   const result = await query.execute({ query: 'x' }, {})
   assert.match(String(result.error), /acting Bot profile/)
+})
+
+test('procedure_save -> recall -> archive roundtrip with colloquial matching', async () => {
+  const base = mkdtempSync(path.join(tmpdir(), 'kb-proc-'))
+  const homeDir = path.join(base, '.metabot', 'profiles', 'test-bot')
+  mkdirSync(homeDir, { recursive: true })
+  const host = fakeHost()
+  const tools = plugin.buildKnowledgeBaseToolDefinitions({ host: host.ctx, fallbackSlug: 'test-bot' })
+  // The procedure tools are reached through the bound install.
+  const bound = fakeHost()
+  plugin.bindKnowledgeBaseToolInstall(bound.ctx, 'test-bot')
+  const byName = new Map(bound.tools.map((tool) => [tool.name, tool]))
+  const exec = execFor('test-bot', homeDir)
+
+  const saved = await byName.get('procedure_save').execute({
+    title: '发布链上文章',
+    steps: ['写 markdown', '上传封面 metafile', 'post_simplenote 发布'],
+    pitfalls: ['别用 Web2 图床'],
+    triggerText: '要发教程或文章到链上时',
+  }, exec)
+  assert.match(saved, /Saved procedure/)
+
+  const recall = await byName.get('procedure_recall').execute({ query: '怎么发文章到链上' }, exec)
+  assert.match(String(recall), /发布链上文章/)
+  assert.match(String(recall), /<avoid>别用 Web2 图床</)
+
+  const rewrite = await byName.get('procedure_save').execute({
+    title: '发布链上文章', steps: ['写 markdown', 'post_simplenote 发布'],
+  }, exec)
+  assert.match(rewrite, /Updated \(v2\)/)
+
+  const archived = await byName.get('procedure_archive').execute({ title: '发布链上文章' }, exec)
+  assert.match(archived, /Archived/)
+  const afterArchive = await byName.get('procedure_recall').execute({ query: '发文章' }, exec)
+  assert.match(String(afterArchive), /No saved procedure/)
 })

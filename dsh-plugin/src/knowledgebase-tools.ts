@@ -231,14 +231,169 @@ export function buildKnowledgeBaseToolDefinitions(input: KnowledgebaseToolDeps &
   ]
 }
 
+
+// ---------------------------------------------------------------------------
+// Procedure memory (M3): procedure_recall / procedure_save / procedure_archive
+// ---------------------------------------------------------------------------
+
+type ProcedureModule = {
+  createProcedureStore(paths: unknown): {
+    upsertProcedure(input: Record<string, unknown>): Promise<{ procedure: Record<string, unknown>; created: boolean }>
+    listProcedures(options?: { status?: string }): Promise<Array<Record<string, unknown>>>
+    archiveProcedureByTitle(title: string): Promise<Record<string, unknown> | null>
+    touchUsed(id: string): Promise<void>
+  }
+  scoreProceduresForQuery(
+    procedures: Array<Record<string, unknown>>,
+    query: string,
+  ): Array<{ procedure: Record<string, unknown>; score: number }>
+}
+
+function procedureStoreFor(paths: unknown) {
+  const module = core('core/memory/procedureStore.js') as ProcedureModule
+  return module.createProcedureStore(paths)
+}
+
+function formatProcedureRow(row: Record<string, unknown>): string {
+  const steps = Array.isArray(row.steps) ? row.steps.map(String) : []
+  const pitfalls = Array.isArray(row.pitfalls) ? row.pitfalls.map(String) : []
+  const lines = [
+    `## ${row.title} (id: ${row.id}, v${row.version}, used ${row.useCount}x)`,
+    ...steps.map((step, idx) => `${idx + 1}. ${step}`),
+  ]
+  if (pitfalls.length) lines.push(`<avoid>${pitfalls.join('；')}</avoid>`)
+  if (typeof row.triggerText === 'string' && row.triggerText) lines.push(`触发场景: ${row.triggerText}`)
+  return lines.join('\n')
+}
+
+function buildProcedureToolDefinitions(input: KnowledgebaseToolDeps & { host: HostContext }): HostToolDefinition[] {
+  const { host } = input
+  const render = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [
+    { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
+  ]
+  const sessionOf = (exec: HostToolExec) => {
+    const agent = exec.agent as (HostAgentLike & { ctx?: { options?: { cwd?: string } } }) | undefined
+    const homeDir = agent?.ctx?.options?.cwd
+    const slug = (agent ? oacSlugOf(host, agent) : undefined) ?? input.fallbackSlug ?? ''
+    if (!slug || typeof homeDir !== 'string') return null
+    return { slug, homeDir }
+  }
+
+  return [
+    {
+      name: 'procedure_recall',
+      description:
+        'Recall saved repeatable workflows (procedures) matching a task description — scored steps + pitfalls '
+        + 'you distilled before. Check it before re-deriving a multi-step process; single facts belong to '
+        + 'knowledge_upsert, full documents to the knowledge base.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'What you are about to do — colloquial wording works.' },
+        },
+        required: ['query'],
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 15_000,
+      execute: async (args, exec) => {
+        const session = sessionOf(exec)
+        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const query = textArg(args, 'query')
+        if (!query) return { error: 'query is required.' }
+        try {
+          const store = procedureStoreFor(pathsFor(session.slug, session.homeDir))
+          const rows = await store.listProcedures({ status: 'active' })
+          const module = core('core/memory/procedureStore.js') as ProcedureModule
+          const scored = module.scoreProceduresForQuery(rows as Array<Record<string, unknown>>, query)
+          if (!scored.length) {
+            return 'No saved procedure matches this task. If you complete a new repeatable workflow, save it with procedure_save.'
+          }
+          const top = scored.slice(0, 3)
+          for (const hit of top) await store.touchUsed(String(hit.procedure.id))
+          return top.map((hit) => formatProcedureRow(hit.procedure)).join('\n\n')
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) }
+        }
+      },
+    },
+    {
+      name: 'procedure_save',
+      description:
+        'Save or rewrite a repeatable workflow (title + ordered steps + pitfalls). Same title rewrites with a '
+        + 'version bump. Use after you worked out a process worth repeating; keep steps concrete and imperative.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short imperative title, e.g. "发布链上文章的标准流程".' },
+          steps: { type: 'array', items: { type: 'string' }, description: 'Ordered concrete steps.' },
+          pitfalls: { type: 'array', items: { type: 'string' }, description: 'Mistakes to avoid next time.' },
+          triggerText: { type: 'string', description: 'When to use this procedure (colloquial).' },
+          sourcePinIds: { type: 'array', items: { type: 'string' }, description: 'MetaWeb pinIds that taught it.' },
+          tags: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['title', 'steps'],
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 15_000,
+      execute: async (args, exec) => {
+        const session = sessionOf(exec)
+        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const title = textArg(args, 'title')
+        const steps = stringListArg(args, 'steps')
+        if (!title || !steps?.length) return { error: 'title and at least one step are required.' }
+        try {
+          const saved = await procedureStoreFor(pathsFor(session.slug, session.homeDir)).upsertProcedure({
+            title,
+            steps,
+            ...(stringListArg(args, 'pitfalls') ? { pitfalls: stringListArg(args, 'pitfalls') } : {}),
+            ...(textArg(args, 'triggerText') ? { triggerText: textArg(args, 'triggerText') } : {}),
+            ...(stringListArg(args, 'sourcePinIds') ? { sourcePinIds: stringListArg(args, 'sourcePinIds') } : {}),
+            ...(stringListArg(args, 'tags') ? { tags: stringListArg(args, 'tags') } : {}),
+            origin: 'agent',
+          })
+          return `${saved.created ? 'Saved' : 'Updated (v' + saved.procedure.version + ')'} procedure "${title}".`
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) }
+        }
+      },
+    },
+    {
+      name: 'procedure_archive',
+      description: 'Archive a procedure by exact title when it is obsolete or wrong.',
+      parameters: {
+        type: 'object',
+        properties: { title: { type: 'string', description: 'Exact title of the procedure to archive.' } },
+        required: ['title'],
+      },
+      output: { schema: { type: 'string' }, render },
+      timeoutMs: 15_000,
+      execute: async (args, exec) => {
+        const session = sessionOf(exec)
+        if (!session) return { error: 'Could not determine the acting Bot profile for this session.' }
+        const title = textArg(args, 'title')
+        if (!title) return { error: 'title is required.' }
+        try {
+          const archived = await procedureStoreFor(pathsFor(session.slug, session.homeDir)).archiveProcedureByTitle(title)
+          return archived ? `Archived "${title}".` : `No procedure titled "${title}" found.`
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) }
+        }
+      },
+    },
+  ]
+}
+
 function isDuplicateToolError(error: unknown): boolean {
   return error instanceof Error && /already.*(registered|exists)|duplicate/i.test(error.message)
 }
 
-/** Register the KB tools on the host global layer during plugin apply. */
+/** Register the KB + procedure tools on the host global layer during plugin apply. */
 export function bindKnowledgeBaseToolInstall(ctx: HostContext, fallbackSlug?: string): void {
   const hostAgent: HostAgentLike = { ctx }
-  for (const definition of buildKnowledgeBaseToolDefinitions({ host: ctx, fallbackSlug })) {
+  for (const definition of [
+    ...buildKnowledgeBaseToolDefinitions({ host: ctx, fallbackSlug }),
+    ...buildProcedureToolDefinitions({ host: ctx, fallbackSlug }),
+  ]) {
     try {
       ctx.tools?.register(definition)
     } catch (error) {
