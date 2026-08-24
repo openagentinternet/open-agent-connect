@@ -672,7 +672,7 @@ function isDuplicateToolError(error: unknown): boolean {
   return error instanceof Error && /already registered/.test(error.message)
 }
 
-function oacSlugOf(ctx: HostContext, agent: HostAgentLike): string | undefined {
+export function oacSlugOf(ctx: HostContext, agent: HostAgentLike): string | undefined {
   const preset = agent.ctx ? ctx.agentPresets?.composedPreset?.(agent.ctx) : undefined
   return preset ? slugFromPresetId(preset) : undefined
 }

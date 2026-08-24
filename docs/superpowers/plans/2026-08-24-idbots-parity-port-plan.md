@@ -293,6 +293,25 @@ before long turns.
   `metafile://` pass-through) with DSH `ctx.approval` as the confirm surface;
   timeout/decline = not approved.
 
+### Phase 4 — `post_simplenote` + chain-upload gate ✅ (2026-08-24)
+
+- **Y** (`8282c3e2`) core: publishSimpleNote (cover/attachment resolution
+  with metafile:// passthrough, DOGE-notes-upload-on-MVC, the verified
+  on-chain 1.0.1 payload, signer write of /protocols/simplenote,
+  pin:// view sheet) + the shared chainUploadGate ported verbatim
+  (symlink-aware containment, ask-once owner confirmation,
+  decline-blocks-before-upload).
+- **Z** (`a1016651`) `metabot simplenote post --request-file` (buzz-post
+  pattern: relative paths resolve against the request file, content_type
+  mapping, --chain/--from) over POST /api/simplenote/post with actor
+  write-context resolution; Browser localUiUrl for the published pin.
+- **AA** (this round) DSH native `post_simplenote` tool: the external-file
+  gate rides the native DSH approval dialog (batch ask, decline never
+  spawns the write; no workspace resolver = every local file asks),
+  in-workspace files and metafile URIs publish directly; publish runs the
+  CLI request-file path; result carries the formatted sheet plus the
+  bot_browser_open_uri hint.
+
 ### Phase 5 — Knowledge base + learning (M2–M4)
 
 - **Storage**: raw corpus in the workspace layer
