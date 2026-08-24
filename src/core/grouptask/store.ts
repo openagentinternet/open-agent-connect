@@ -185,6 +185,8 @@ export interface GroupTaskStore {
   ): Promise<GroupTaskDeliverable | null>;
   /** Correction supersede: reopen a rejected/stale row for re-verification. */
   reopenDeliverable(deliverableId: number): Promise<GroupTaskDeliverable | null>;
+  /** Inviter-side local-file → metafile upgrade rewrites the row's URI. */
+  updateDeliverableUri(deliverableId: number, uri: string, kind?: string): Promise<GroupTaskDeliverable | null>;
   deleteDeliverable(deliverableId: number): Promise<boolean>;
   updateDeliverableVerification(
     deliverableId: number,
@@ -645,6 +647,16 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
         && (entry.uri ?? null) === (uri ?? null)
         && (entry.kind ?? null) === (kind ?? null)) ?? null;
     },
+
+    updateDeliverableUri: (deliverableId, uri, kind) => enqueue(async () => {
+      const state = await readState();
+      const deliverable = state.deliverables.find((entry) => entry.id === deliverableId);
+      if (!deliverable) return null;
+      deliverable.uri = uri.trim();
+      if (kind) deliverable.kind = kind.trim();
+      await writeState(state);
+      return deliverable;
+    }),
 
     reopenDeliverable: (deliverableId) => enqueue(async () => {
       const state = await readState();

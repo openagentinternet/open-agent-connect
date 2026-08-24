@@ -404,3 +404,31 @@ test('engine: stale pending ACK triggers exactly one chair reminder', async () =
   const rollPending = await h.chairStore.kvGet(`group_task_ack_pending:${task.id}:worker-1`);
   assert.ok(!String(rollPending ?? '').includes('请确认在线'));
 });
+
+test('engine: local-file deliverables upgrade to metafile URIs through the upload seam', async () => {
+  const h = createHarness('metabot-gt-engine-upload-');
+  const uploads = [];
+  h.engineOptions = h.engineOptions || {};
+  const task = await h.seedTask('executing');
+  // Recreate the engine with the upload seam is awkward post-hoc; instead
+  // exercise the seam through a fresh engine instance sharing the store.
+  const { createGroupTaskEngine } = require('../../dist/core/grouptask/engine.js');
+  const engine = createGroupTaskEngine({
+    ctx: h.ctx,
+    runLlmTurn: async () => '',
+    loadPersona: async () => ({}),
+    uploadDeliverableFile: async ({ slug, filePath }) => {
+      uploads.push({ slug, filePath });
+      return { metafileUri: `metafile://up-${uploads.length}.png`, pinId: `up-${uploads.length}` };
+    },
+  });
+  h.pushHistory('IDWORKER1', '[DELIVERABLE] file: /tmp/poster-draft.png');
+  await engine.tick();
+  assert.equal(uploads.length, 1, 'local path went through the upload seam');
+  assert.equal(uploads[0].filePath, '/tmp/poster-draft.png');
+  assert.equal(uploads[0].slug, 'worker-1');
+  const rows = await h.chairStore.listDeliverables(task.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].uri, 'metafile://up-1.png');
+  assert.equal(rows[0].kind, 'metafile');
+});

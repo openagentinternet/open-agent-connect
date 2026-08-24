@@ -39,6 +39,7 @@ import type { OpenTeamMembershipRecord, OpenTeamStore } from './openteamStore';
 import { fetchGroupInfo, fetchGroupMembers, joinGroupOnChain, sendGroupMessageOnChain } from './transport';
 import { syncGroupMessages } from './backfill';
 import { extractDeliverablePinId, verifyTaskDeliverables } from './deliverableVerification';
+import { uploadLocalFileToChain } from '../files/uploadFile';
 import { createPrivateChatStateStore } from '../chat/privateChatStateStore';
 import {
   decideGroupTaskResponders,
@@ -172,6 +173,14 @@ export interface GroupTaskEngineOptions {
    * absent, deliverables stay unconfirmed and the re-verify pass no-ops.
    */
   verifyPin?: (pinId: string) => Promise<'found' | 'not_found' | 'error'>;
+  /**
+   * Local-file → metafile upload seam (guest deliverables and inviter-side
+   * row upgrades). Defaults to uploadLocalFileToChain with the seat signer.
+   */
+  uploadDeliverableFile?: (input: {
+    slug: string;
+    filePath: string;
+  }) => Promise<{ metafileUri: string; pinId: string }>;
   now?: () => number;
 }
 
@@ -251,6 +260,12 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
   const ctx = options.ctx;
   const log = logOf(ctx);
   const now = options.now ?? (() => Date.now());
+  const uploadDeliverableFile = options.uploadDeliverableFile
+    ?? (async (input: { slug: string; filePath: string }) => {
+      const signer = await ctx.signerForSlug(input.slug);
+      const uploaded = await uploadLocalFileToChain({ filePath: input.filePath, signer });
+      return { metafileUri: uploaded.metafileUri, pinId: uploaded.pinId };
+    });
   const loadPersona = options.loadPersona ?? defaultPersonaLoader;
   const intervalMs = Math.max(MIN_INTERVAL_MS, options.intervalMs ?? DEFAULT_INTERVAL_MS);
   const driverGraceMs = options.driverGraceMs ?? DEFAULT_DRIVER_GRACE_MS;
@@ -430,6 +445,19 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
     if (row.confirmation === 'confirmed') return 'on-chain ✓';
     if (row.verification && row.verification.includes('"not_found"')) return 'pending sync';
     return 'unverified';
+  }
+
+/** Absolute local paths mentioned in a reply (guest file delivery). */
+  function extractLocalFilePaths(text: string): string[] {
+    const matches = text.match(/(?:^|[\s('"])(\/[^\s'")]+\.[A-Za-z0-9]{1,8})/gu) ?? [];
+    return [...new Set(matches.map((match) => match.trim().replace(/^[('"]/, '')))];
+  }
+
+  /** Bare local path (no URI scheme) that the upload seam can upgrade. */
+  function looksLikeLocalFilePath(uri: string | null | undefined): boolean {
+    const value = (uri ?? '').trim();
+    if (!value || /^[a-z][a-z0-9+.-]*:/i.test(value)) return false;
+    return value.startsWith('/') || value.startsWith('./') || value.startsWith('~/');
   }
 
   /** Checkpoint pause-line clause: the decision asked of the owner. */
@@ -861,7 +889,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
             candidate.kind,
           );
           if (existing) continue;
-          await store.addDeliverable({
+          const recorded = await store.addDeliverable({
             taskId: task.id,
             msgPinId: message.pinId,
             authorGlobalMetaId: message.senderGlobalMetaId,
@@ -869,6 +897,28 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
             uri: candidate.uri,
           });
           recordedAny = true;
+          // Inviter-side upgrade: a local-file deliverable is uploaded as a
+          // metafile and the row rewritten to the on-chain URI (IDBots
+          // parity). Bare paths stay in the payload (uri null). Best-effort
+          // — the raw path row survives on failure.
+          const payloadPath = candidate.payload.replace(/^[a-z]+:\s*/i, '').trim();
+          const localPath = candidate.uri ?? (
+            looksLikeLocalFilePath(payloadPath) ? payloadPath : null
+          );
+          if (localPath) {
+            try {
+              const uploaded = await uploadDeliverableFile({
+                slug: senderSeat.slug!,
+                filePath: localPath,
+              });
+              await store.updateDeliverableUri(recorded.id, uploaded.metafileUri, 'metafile');
+              log(`[GroupTaskEngine] Deliverable ${recorded.id} of task ${task.id} upgraded to `
+                + `${uploaded.metafileUri}`);
+            } catch (error) {
+              log(`[GroupTaskEngine] Deliverable upload failed for task ${task.id}: `
+                + `${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
           if (candidate.correction) {
             // Correction supersede: reopen this author's superseded row
             // (same URI pin, else the newest rejected row) for re-check.
@@ -1543,9 +1593,24 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
         lastReplyAt.set(budgetKey, now());
 
         if (reply && !isNoReplyResponse(reply)) {
+          // Guest file delivery (IDBots parity): local paths mentioned in
+          // the reply are uploaded as metafiles (max 3 per turn, paid by the
+          // guest) and appended as [DELIVERABLE] lines to the same message.
+          const deliverableLines: string[] = [];
+          for (const filePath of extractLocalFilePaths(reply).slice(0, 3)) {
+            try {
+              const uploaded = await uploadDeliverableFile({ slug: profile.slug, filePath });
+              deliverableLines.push(`[DELIVERABLE] metafile: ${uploaded.metafileUri}`);
+            } catch (error) {
+              log(`[OpenTeam] Guest deliverable upload failed for ${membership.groupId}: `
+                + `${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
           const signer = await ctx.signerForSlug(profile.slug);
           await sendGroupMessageOnChain(signer, membership.groupId, {
-            content: reply,
+            content: deliverableLines.length > 0
+              ? `${reply}\n${deliverableLines.join('\n')}`
+              : reply,
             nickName: profile.name,
             replyPin: message.pinId ?? undefined,
           });
