@@ -146,6 +146,12 @@ import {
   resolveGroupTaskEngineLogPath,
 } from '../core/grouptask/engineLog';
 import { createMetasoPinVerifier } from '../core/grouptask/deliverableVerification';
+import { getMetabotProfile, listMetabotProfiles } from '../core/bot/metabotProfileManager';
+import {
+  createStudyJobStore,
+  runStudyTick,
+  STUDY_TICK_INTERVAL_MINUTES,
+} from '../core/knowledgebase/studyJobs';
 import type { RequestMvcGasSubsidyOptions, RequestMvcGasSubsidyResult } from '../core/subsidy/requestMvcGasSubsidy';
 import type { MetaWebServiceReplyWaiter } from '../core/a2a/metawebReplyWaiter';
 import {
@@ -5156,6 +5162,70 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     },
   });
   groupTaskEngine.start();
+
+  // Study scheduler (IDBots M4 parity): drains owner-assigned MetaWeb study
+  // jobs into knowledge bases during the nightly window. One job per tick,
+  // 30-minute cadence; the study turn is a plain LLM turn whose prompt
+  // carries the tool allowlist (the allowlisted tools run as DSH native
+  // tools / skillpack CLIs on the caller side).
+  const studyJobStores = new Map<string, ReturnType<typeof createStudyJobStore>>();
+  const studyStoreFor = (homeDir: string): ReturnType<typeof createStudyJobStore> => {
+    let store = studyJobStores.get(homeDir);
+    if (!store) {
+      store = createStudyJobStore(resolveMetabotPaths(homeDir));
+      studyJobStores.set(homeDir, store);
+    }
+    return store;
+  };
+  const studyTimer = setInterval(() => {
+    void (async () => {
+      try {
+        const profiles = await listMetabotProfiles(systemHomeDir).catch(() => []);
+        for (const profile of profiles) {
+          await runStudyTick(studyStoreFor(profile.homeDir), {
+            runStudyTurn: async ({ slug, prompt }) => {
+              const profilePaths = resolveMetabotPaths(
+                (await getMetabotProfile(systemHomeDir, slug))?.homeDir ?? '',
+              );
+              const runtimeResolver = createLlmRuntimeResolver({
+                runtimeStore: createLlmRuntimeStore(profilePaths),
+                bindingStore: createLlmBindingStore(profilePaths),
+                getPreferredRuntimeId: async () => {
+                  try {
+                    const raw = await fs.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                    const data = JSON.parse(raw) as { runtimeId?: string | null };
+                    return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+                  } catch {
+                    return null;
+                  }
+                },
+              });
+              const result = await runLlmPromptWithRuntimeFallback({
+                runtimeResolver,
+                llmExecutor,
+                metaBotSlug: slug,
+                prompt,
+                systemPrompt: 'You are a MetaBot running an unattended nightly study session.',
+                timeoutMs: 30 * 60_000,
+                pollIntervalMs: 5_000,
+              });
+              if (result.status !== 'completed') {
+                throw new Error(result.error || `Study turn ended with status ${result.status}`);
+              }
+              return result.output;
+            },
+            log: (message) => {
+              console.warn(message);
+              groupTaskEngineLog(message);
+            },
+          }).catch(() => undefined);
+        }
+      } catch {
+        // Scheduler failures never take down the daemon.
+      }
+    })();
+  }, STUDY_TICK_INTERVAL_MINUTES * 60_000);
+  studyTimer.unref?.();
   // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
   // them (with their remaining budget) or settle expired waits into the
   // timeout + refund path. Runs even when the simplemsg listener is disabled —

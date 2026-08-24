@@ -312,7 +312,36 @@ before long turns.
   CLI request-file path; result carries the formatted sheet plus the
   bot_browser_open_uri hint.
 
-### Phase 5 — Knowledge base + learning (M2–M4)
+### Phase 5 — Knowledge base + learning ✅ (2026-08-24)
+
+- **AB** (`e8c39c76`) text lib verbatim (CJK-unigram+bigram tokenizer,
+  bigram-only query precision, paragraph-preferring chunker,
+  SimpleNote-JSON unwrap, pdftotext/textutil with async variants,
+  phraseScore), registry store on storage-v2 layout (workspace memory
+  layer; first-KB-default; local-day 00:00–06:00 auto-learn window), and
+  the derived per-KB index as a portable pure-JS inverted index
+  (bm25-style tf/idf + 15% phraseScore, minScore 0.18; no sqlite — OAC
+  targets Node 20+).
+- **AC** (`4879383c`, `cf7d7c5f`) learn/query/addDocument/importFiles
+  service (serialized per-KB, full-rebuild semantics, cross-KB merged
+  ranking, bounded provenance, idempotent slug+hash filenames) and the
+  four DSH native tools executing the core in-process.
+- **AD** (`8052b96d`) procedure memory (M3): procedures.json store with
+  title-fingerprint rewrite/version bump, archive lifecycle, use counts,
+  term-coverage recall (colloquial CJK bigram matching, single chars
+  title-only) + procedure_recall/save/archive tools.
+- **AE** (`7e63e06a`) study jobs (M4): queue store (dedupe, budget clamp,
+  run cap, 3-failure cutoff, crash recovery), unattended study prompt with
+  the tool allowlist and pin budget, last-json-fence report parser,
+  runStudyTick drain engine, daemon 30-minute scheduler with per-profile
+  LLM runtime turns, metaweb_study_enqueue/status tools.
+
+Deliberate OAC adaptations: FTS5 replaced by the portable JS index;
+study turns are plain LLM turns (no skill-turn substrate) with the
+allowlist stated in-prompt; the DSH Settings corpus tab is deferred (the
+tools + CLI cover management; UI can ride a later round).
+
+### Original Phase 5 scope notes
 
 - **Storage**: raw corpus in the workspace layer
   (`knowledge-bases/<kbId>/raw/…`), derived per-KB FTS5 index in the runtime
