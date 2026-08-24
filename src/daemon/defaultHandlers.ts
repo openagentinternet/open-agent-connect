@@ -16476,11 +16476,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
-          const result = await uploadLocalFileToChain({
+          // Same workspace gate as the other chain-write routes: in-workspace
+          // files upload freely, anything else needs the explicit consent flag.
+          const gatedUpload = createProfileScopedUpload({
+            profileHomeDir: async () => actor.homeDir,
+            signerForSlug: async () => actor.signer,
+            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+          });
+          const result = await gatedUpload({
+            slug: normalizeText(rawInput.from) || 'actor',
             filePath: normalizeText(rawInput.filePath),
-            contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,
             network,
-            signer: actor.signer,
           });
           return commandSuccess(result);
         } catch (error) {
@@ -16502,6 +16508,16 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
         try {
           const network = await resolveFileUploadNetworkForHome(rawInput.network, actor.homeDir);
+          // Workspace gate first; the large uploader runs only for in-workspace
+          // (or consented) files, same rule as the direct route.
+          const gateCheck = await createProfileScopedUpload({
+            profileHomeDir: async () => actor.homeDir,
+            confirmExternalUpload: rawInput.confirmExternalUpload === true,
+            // Probe-only invocation: refuses out-of-workspace paths before the
+            // heavy upload machinery starts.
+            upload: async () => ({ metafileUri: '', pinId: '' }),
+          })({ slug: 'actor', filePath: normalizeText(rawInput.filePath), network });
+          void gateCheck;
           const result = await uploadLargeFile({
             filePath: normalizeText(rawInput.filePath),
             contentType: typeof rawInput.contentType === 'string' ? rawInput.contentType : undefined,

@@ -400,3 +400,48 @@ test('identity casing is normalized across dream observations and ledger facts',
   assert.equal(snapshot.collaborationFacts[0].seatRole, 'content');
   assert.ok(snapshot.summaryText.includes('reliable'));
 });
+
+test('listObservations and legacy mixed-case facts normalize on read', async () => {
+  const paths = await createTempProfileHome();
+  const store = createImpressionStore(paths);
+  await store.appendObservation({
+    observerGlobalMetaId: 'gm-self-bot',
+    subjectGlobalMetaId: 'gm-peer-bot',
+    episodeId: null,
+    evidenceIds: [],
+    observationText: 'observed',
+    interpretationText: 'fine',
+    dimensions: {},
+    communicationGuidance: null,
+    confidence: {},
+    dreamDate: '2026-08-24',
+    dreamVersion: 1,
+    modelId: null,
+    sourceHash: 'hash-obs-case',
+  });
+  // Mixed-case query finds them (CLI path uses persona case verbatim).
+  const rows = await store.listObservations({
+    observerGlobalMetaId: 'GM-SELF-BOT',
+    subjectGlobalMetaId: 'GM-PEER-BOT',
+  });
+  assert.equal(rows.length, 1);
+
+  // Legacy mixed-case fact row: visible to snapshots after read normalization.
+  const fs = await import('node:fs');
+  const raw = JSON.parse(fs.readFileSync(paths.memoryImpressionsPath ?? paths.memoryRoot + '/impressions.json', 'utf8'));
+  raw.collaborationFacts.push({
+    id: 'legacy-1',
+    observerGlobalMetaId: 'GM-SELF-BOT',
+    subjectGlobalMetaId: 'GM-PEER-BOT',
+    taskId: 9,
+    title: 'Legacy',
+    outcome: 'done',
+    seatRole: 'design',
+    evidencePinIds: [],
+    recordedAt: 1,
+  });
+  fs.writeFileSync(paths.memoryImpressionsPath ?? paths.memoryRoot + '/impressions.json', JSON.stringify(raw));
+  const rebuilt = await store.rebuildSnapshot('gm-self-bot', 'gm-peer-bot');
+  assert.equal(rebuilt.collaborationFacts.some((fact) => fact.title === 'Legacy'), true,
+    'legacy mixed-case fact row is visible after read normalization');
+});

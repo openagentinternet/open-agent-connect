@@ -189,8 +189,8 @@ function normalizeObservation(value: unknown): ImpressionObservation | null {
 function normalizeCollaborationFact(value: unknown): ImpressionCollaborationFact | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  const observer = asText(record.observerGlobalMetaId);
-  const subject = asText(record.subjectGlobalMetaId);
+  const observer = asText(record.observerGlobalMetaId).toLowerCase();
+  const subject = asText(record.subjectGlobalMetaId).toLowerCase();
   const id = asText(record.id);
   if (!observer || !subject || !id) return null;
   const seatRole = asText(record.seatRole);
@@ -419,10 +419,12 @@ export function createImpressionStore(
     async listObservations(input) {
       const file = await readFile();
       const limit = Math.min(500, Math.max(1, Math.floor(input.limit ?? 100)));
+      const observerKey = input.observerGlobalMetaId.trim().toLowerCase();
+      const subjectKey = input.subjectGlobalMetaId.trim().toLowerCase();
       return file.observations
         .filter((observation) => (
-          observation.observerGlobalMetaId === input.observerGlobalMetaId
-          && observation.subjectGlobalMetaId === input.subjectGlobalMetaId
+          observation.observerGlobalMetaId === observerKey
+          && observation.subjectGlobalMetaId === subjectKey
           && (input.includeSuperseded || observation.status === 'active')
         ))
         .sort((left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id))

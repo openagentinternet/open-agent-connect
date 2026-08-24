@@ -61,6 +61,7 @@ import {
 import {
   GROUP_TASK_LEGAL_TRANSITIONS,
   type GroupTaskMember,
+  type GroupTaskDeliverable,
   type GroupTaskMessage,
   type GroupTaskRecord,
   type GroupTaskStatus,
@@ -920,7 +921,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
           }
           if (candidate.correction) {
             // Correction supersede: reopen this author's superseded row
-            // (same URI pin, else the newest rejected row) for re-check.
+            // (same URI pin, else the NEWEST rejected row) for re-check.
             const rows = await store.listDeliverables(task.id);
             const pinOf = (uri: string | null): string | null => {
               const match = /([0-9a-f]{64}i\d+)/i.exec(uri ?? '');
@@ -935,7 +936,7 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
               && row.status !== 'accepted');
             const superseded = (targetPin && mine.find((row) => pinOf(row.uri) === targetPin && row.status === 'rejected'))
               ?? (targetPin && mine.find((row) => pinOf(row.uri) === targetPin))
-              ?? mine.find((row) => row.status === 'rejected')
+              ?? [...mine].reverse().find((row: GroupTaskDeliverable) => row.status === 'rejected')
               ?? mine[0]
               ?? null;
             if (superseded) {
