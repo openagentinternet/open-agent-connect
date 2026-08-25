@@ -246,6 +246,10 @@ export interface CliDependencies {
   };
   skills?: {
     resolve?: (input: { skill: string; host?: ConcreteSkillHost; format: SkillRenderFormat }) => Awaitable<MetabotCommandResult<unknown>>;
+    install?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    read?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    uninstall?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   host?: {
     bindSkills?: (input: { host: ConcreteSkillHost }) => Awaitable<MetabotCommandResult<unknown>>;

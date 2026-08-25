@@ -79,6 +79,19 @@ Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
 `memory.injection`, `memory.extraction`, `memory.tools`, `dream.enabled`,
 `dream.tickMinutes`, `twin.enabled`, `twin.stepTimeoutMs`.
 
+## MetaWeb learning: search, install, demo
+
+`oac-*` agents can learn from the AI internet end-to-end. `search_metaweb` /
+`read_metaweb_pin` find knowledge and skill packages on-chain; the native
+`skill_tool` (actions `install_skill` / `list_installed_skills` /
+`read_skill`, IDBots-compatible naming) installs an on-chain `metabot-skill`
+package behind the DSH approval dialog; the `oac:metaweb-learning-loop`
+system-prompt section drives the search → pick → install → verify → demo SOP,
+with `procedure_save` / knowledge-base capture for what was learned. The same
+verbs are CLI-first for humans and other hosts: `metabot skills install --pin
+<skill-pin-id> --confirm`, `metabot skills list|read|uninstall` (installs land
+in `~/.metabot/skills/<name>/` and rebind installed host skill roots).
+
 ## Developer mount
 
 The live DSH environment (`dsh web` at `http://127.0.0.1:3080/`) is already

@@ -1131,8 +1131,9 @@ test('runCli prints skills group help for `metabot skills --help`', async () => 
   assert.match(output, /^Usage:\s+metabot skills <subcommand>/m);
   assert.match(output, /^Commands:/m);
   assert.match(output, /^\s+resolve\s+/m);
-  assert.match(output, /shared-default resolution/i);
+  assert.match(output, /on-chain skill package install\/list\/read\/uninstall/i);
   assert.match(output, /metabot skills resolve --skill metabot-network-manage --format markdown/);
+  assert.match(output, /metabot skills install --pin <skill-pin-id> --confirm/);
 });
 
 test('runCli prints skills resolve help for `metabot skills resolve --help`', async () => {

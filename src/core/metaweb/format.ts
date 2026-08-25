@@ -53,8 +53,8 @@ export function formatMetawebSearchBullets(items: MetawebSearchItem[]): string {
  * read → deep-read chain closed without hardcoding it into the prompt.
  */
 const PROTOCOL_FOLLOWUP_HINTS: Record<string, string> = {
-  metaapp: 'this is an on-chain MetaApp package and the content above is only its intro — read its full agent-facing documentation (APP.md) with skill_tool extract_metaapp using this pinId.',
-  'metabot-skill': 'this is an on-chain skill package — install it with skill_tool install_skill (pass the package metafile:// URI from the payload, e.g. the skill-file field, as the zip source), then verify with list_installed_skills / read_skill.',
+  metaapp: 'this is an on-chain MetaApp package and the content above is only its intro — materialize its full source (including the agent-facing APP.md) with `metabot metaapp source --pin <pinId>` (DSH hosts: the bot_browser tools), then read APP.md from the extracted directory.',
+  'metabot-skill': 'this is an on-chain skill package — install it with `metabot skills install --pin <this pinId> --confirm` (DSH hosts: the skill_tool install_skill action); the package zip URI comes from the payload `skill-file` field. After installing, verify with `metabot skills list` and read the instructions with `metabot skills read --name <skill>`, then apply the new capability to the task.',
 };
 
 export function metawebProtocolFollowupHint(protocol: string): string | null {

@@ -8,6 +8,7 @@ import {
 } from '../platform/platformRegistry';
 import type { InstallSkillRoot, PlatformId } from '../platform/platformRegistry';
 import type { ConcreteSkillHost } from '../skills/skillContractTypes';
+import { normalizeSkillName, readInstalledSkillsRegistry } from '../skills/skillInstall';
 
 export interface BindHostSkillsInput {
   systemHomeDir: string;
@@ -108,27 +109,37 @@ async function ensureHostSkillRoot(input: {
 }
 
 async function listMetabotSkills(skillRoot: string): Promise<string[]> {
+  let names: string[];
   try {
     const entries = await fs.readdir(skillRoot, { withFileTypes: true });
-    return entries
+    names = entries
       .filter((entry) => entry.isDirectory() && entry.name.startsWith('metabot-'))
-      .map((entry) => entry.name)
-      .sort();
+      .map((entry) => entry.name);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
-      return [];
+      names = [];
+    } else {
+      throw new HostSkillBindingError(
+        'host_skill_bind_failed',
+        `Unable to list MetaBot skills under ${skillRoot}.`,
+        {
+          sharedSkillRoot: skillRoot,
+          failedPath: skillRoot,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      );
     }
-    throw new HostSkillBindingError(
-      'host_skill_bind_failed',
-      `Unable to list MetaBot skills under ${skillRoot}.`,
-      {
-        sharedSkillRoot: skillRoot,
-        failedPath: skillRoot,
-        reason: error instanceof Error ? error.message : String(error),
-      },
-    );
   }
+  // Skills installed from MetaWeb carry arbitrary names (only built-ins are
+  // metabot-*): the install registry vouches for them, so they bind too.
+  const registry = await readInstalledSkillsRegistry(skillRoot).catch(() => null);
+  const installedNames = registry
+    ? Object.keys(registry.skills)
+      .map((name) => normalizeSkillName(name))
+      .filter(Boolean)
+    : [];
+  return [...new Set([...names, ...installedNames])].sort();
 }
 
 export function resolveHostSpecificSkillRoot(systemHomeDir: string, host: PlatformId): string {

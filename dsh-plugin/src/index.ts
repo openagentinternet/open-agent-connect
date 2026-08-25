@@ -15,6 +15,7 @@ import {
   resolveMetaAppSource,
 } from './browser-tools.js'
 import { bindMetawebToolInstall } from './metaweb-tools.js'
+import { bindSkillToolInstall } from './skill-tools.js'
 import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
@@ -417,6 +418,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   }
   bindBrowserToolInstall(ctx, browserHub, sourceCache)
   bindMetawebToolInstall(ctx)
+  bindSkillToolInstall(ctx)
   bindSimpleNoteToolInstall(ctx)
   bindKnowledgeBaseToolInstall(ctx)
 
