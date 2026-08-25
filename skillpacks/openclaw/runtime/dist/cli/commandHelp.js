@@ -493,15 +493,21 @@ const COMMAND_HELP_SPECS = [
     },
     {
         commandPath: ['skills'],
-        summary: 'Skill contract commands for shared-default resolution and explicit host compatibility rendering.',
+        summary: 'Skill contract resolution plus on-chain skill package install/list/read/uninstall.',
         usage: 'metabot skills <subcommand>',
         subcommands: [
             { name: 'resolve', summary: 'Render one resolved skill contract in markdown or JSON.' },
+            { name: 'install', summary: 'Install an on-chain metabot-skill package into the shared skills root.' },
+            { name: 'list', summary: 'List skills installed from MetaWeb with provenance.' },
+            { name: 'read', summary: 'Load one installed skill\'s SKILL.md and file tree.' },
+            { name: 'uninstall', summary: 'Remove one chain-installed skill and its host symlinks.' },
         ],
         optionalFlags: [HELP_JSON_FLAG],
         examples: [
             'metabot skills resolve --skill metabot-network-manage --format markdown',
-            'metabot skills resolve --skill metabot-network-manage --host codex --format json',
+            'metabot skills install --pin <skill-pin-id> --confirm',
+            'metabot skills list',
+            'metabot skills read --name metabot-example',
         ],
     },
     {
@@ -529,6 +535,85 @@ const COMMAND_HELP_SPECS = [
             'metabot skills resolve --skill metabot-network-manage --format json',
             'metabot skills resolve --skill metabot-network-manage --host codex --format markdown',
             'metabot skills resolve --skill metabot-network-manage --host codex --format json',
+        ],
+    },
+    {
+        commandPath: ['skills', 'install'],
+        summary: 'Install an on-chain metabot-skill package: read the pin payload, download the metafile zip, extract it safely, and register it.',
+        usage: 'metabot skills install (--pin <skill-pin-id> | --uri <metafile://…|https://…>) [--name <name>] [--confirm] [--force] [--no-rebind]',
+        requiredFlags: [
+            { flag: '--pin', value: '<skill-pin-id>', description: 'metabot-skill protocol pin id; its payload supplies the package URI, name, and provenance. One of --pin / --uri is required.' },
+            { flag: '--uri', value: '<package-uri>', description: 'Direct package zip reference (metafile://<pinId> or https URL) when installing without a protocol pin. One of --pin / --uri is required.' },
+        ],
+        optionalFlags: [
+            { flag: '--name', value: '<name>', description: 'Override the skill name when the package SKILL.md lacks frontmatter.' },
+            { flag: '--confirm', value: '', description: 'Actually install. Without it the command previews the install plan (confirm_required).' },
+            { flag: '--force', value: '', description: 'Replace an existing installation even when the publisher differs.' },
+            { flag: '--no-rebind', value: '', description: 'Skip rebinding host skill roots after install.' },
+            HELP_JSON_FLAG,
+        ],
+        successFields: [
+            'skill — name, version, description, skillDir, skillMdPath, replaced, previousVersion, files.',
+            'rebind — per-root bind results (or skipped).',
+            'formatted — model-ready next-step text.',
+        ],
+        failureSemantics: [
+            'confirm_required when --confirm is omitted (plan preview).',
+            'skill_name_conflict when the name is owned by another publisher or a non-MetaWeb local skill (use --force to override).',
+            'invalid_package when the archive has no SKILL.md, exceeds the 4 MB cap, or fails safe extraction.',
+        ],
+        examples: [
+            'metabot skills install --pin 8845…i0 --confirm',
+            'metabot skills install --uri metafile://8845…i0.zip --name metabot-example --confirm',
+        ],
+    },
+    {
+        commandPath: ['skills', 'list'],
+        summary: 'List skills installed from MetaWeb, with publisher, source pin, version, and on-disk presence.',
+        usage: 'metabot skills list',
+        optionalFlags: [HELP_JSON_FLAG],
+        successFields: [
+            'skills — registry entries enriched with present (on-disk SKILL.md check).',
+            'formatted — scannable bullet list.',
+        ],
+        examples: [
+            'metabot skills list',
+        ],
+    },
+    {
+        commandPath: ['skills', 'read'],
+        summary: 'Load one installed skill\'s SKILL.md and file tree so the model can follow it.',
+        usage: 'metabot skills read --name <skill-name>',
+        requiredFlags: [
+            { flag: '--name', value: '<skill-name>', description: 'Installed skill name (see skills list).' },
+        ],
+        optionalFlags: [HELP_JSON_FLAG],
+        successFields: [
+            'name, skillDir, skillMdPath, skillMd, files.',
+        ],
+        failureSemantics: [
+            'invalid_package when the name is malformed or no SKILL.md exists for it.',
+        ],
+        examples: [
+            'metabot skills read --name metabot-example',
+        ],
+    },
+    {
+        commandPath: ['skills', 'uninstall'],
+        summary: 'Remove one chain-installed skill: registry entry, skill directory, and host symlinks.',
+        usage: 'metabot skills uninstall --name <skill-name> [--confirm]',
+        requiredFlags: [
+            { flag: '--name', value: '<skill-name>', description: 'Installed skill name to remove.' },
+        ],
+        optionalFlags: [
+            { flag: '--confirm', value: '', description: 'Actually uninstall. Without it the command explains the removal scope (confirm_required).' },
+            HELP_JSON_FLAG,
+        ],
+        failureSemantics: [
+            'skill_name_conflict for skills not installed from MetaWeb (remove local skills manually).',
+        ],
+        examples: [
+            'metabot skills uninstall --name metabot-example --confirm',
         ],
     },
     {

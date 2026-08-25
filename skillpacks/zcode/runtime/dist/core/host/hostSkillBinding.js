@@ -13,6 +13,7 @@ exports.bindHostSkills = bindHostSkills;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const platformRegistry_1 = require("../platform/platformRegistry");
+const skillInstall_1 = require("../skills/skillInstall");
 class HostSkillBindingError extends Error {
     code;
     data;
@@ -56,24 +57,35 @@ async function ensureHostSkillRoot(input) {
     }
 }
 async function listMetabotSkills(skillRoot) {
+    let names;
     try {
         const entries = await node_fs_1.promises.readdir(skillRoot, { withFileTypes: true });
-        return entries
+        names = entries
             .filter((entry) => entry.isDirectory() && entry.name.startsWith('metabot-'))
-            .map((entry) => entry.name)
-            .sort();
+            .map((entry) => entry.name);
     }
     catch (error) {
         const code = error.code;
         if (code === 'ENOENT') {
-            return [];
+            names = [];
         }
-        throw new HostSkillBindingError('host_skill_bind_failed', `Unable to list MetaBot skills under ${skillRoot}.`, {
-            sharedSkillRoot: skillRoot,
-            failedPath: skillRoot,
-            reason: error instanceof Error ? error.message : String(error),
-        });
+        else {
+            throw new HostSkillBindingError('host_skill_bind_failed', `Unable to list MetaBot skills under ${skillRoot}.`, {
+                sharedSkillRoot: skillRoot,
+                failedPath: skillRoot,
+                reason: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
+    // Skills installed from MetaWeb carry arbitrary names (only built-ins are
+    // metabot-*): the install registry vouches for them, so they bind too.
+    const registry = await (0, skillInstall_1.readInstalledSkillsRegistry)(skillRoot).catch(() => null);
+    const installedNames = registry
+        ? Object.keys(registry.skills)
+            .map((name) => (0, skillInstall_1.normalizeSkillName)(name))
+            .filter(Boolean)
+        : [];
+    return [...new Set([...names, ...installedNames])].sort();
 }
 function resolveHostSpecificSkillRoot(systemHomeDir, host) {
     return node_path_1.default.join(node_path_1.default.resolve(systemHomeDir), '.metabot', 'host-skills', host);

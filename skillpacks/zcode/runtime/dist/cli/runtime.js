@@ -104,6 +104,8 @@ const search_1 = require("../core/metaweb/search");
 const pinRead_1 = require("../core/metaweb/pinRead");
 const format_1 = require("../core/metaweb/format");
 const uri_1 = require("../core/metaweb/uri");
+const skillInstall_1 = require("../core/skills/skillInstall");
+const platformRegistry_1 = require("../core/platform/platformRegistry");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const writePin_1 = require("../core/chain/writePin");
@@ -2151,6 +2153,192 @@ function createDefaultCliDependencies(context) {
             return (0, commandResult_1.commandFailed)('metaweb_read_failed', message);
         }
     }
+    function sharedSkillsRoot() {
+        return node_path_1.default.join(normalizeSystemHomeDir(context.env, context.cwd), '.metabot', 'skills');
+    }
+    function mapSkillInstallError(error) {
+        if (error instanceof skillInstall_1.SkillInstallError) {
+            return (0, commandResult_1.commandFailed)(error.code === 'name_conflict' ? 'skill_name_conflict' : 'skill_install_failed', error.message);
+        }
+        if (error instanceof pinRead_1.MetawebPinNotFoundError) {
+            return (0, commandResult_1.commandFailed)('pin_not_found', error.message);
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return (0, commandResult_1.commandFailed)('skill_install_failed', message);
+    }
+    /** Best-effort rebind of every auto-bind host root after the skills root changed. */
+    async function rebindHostSkillRoots() {
+        try {
+            return await (0, hostSkillBinding_1.bindPlatformSkills)({
+                systemHomeDir: normalizeSystemHomeDir(context.env, context.cwd),
+                env: context.env,
+                mode: 'auto',
+            });
+        }
+        catch (error) {
+            return { error: error instanceof Error ? error.message : String(error) };
+        }
+    }
+    /** Remove a skill's symlinks from every auto-bind host root (post-uninstall cleanup). */
+    async function unbindSkillFromHostRoots(name) {
+        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+        const results = [];
+        for (const root of (0, platformRegistry_1.getInstallSkillRoots)()) {
+            if (root.autoBind === 'manual')
+                continue;
+            let hostSkillRoot;
+            try {
+                hostSkillRoot = (0, platformRegistry_1.resolvePlatformSkillRootPath)(root, systemHomeDir, context.env);
+            }
+            catch {
+                continue;
+            }
+            const linkPath = node_path_1.default.join(hostSkillRoot, name);
+            try {
+                const stat = await node_fs_1.default.promises.lstat(linkPath);
+                if (stat.isSymbolicLink()) {
+                    await node_fs_1.default.promises.unlink(linkPath);
+                    results.push({ hostSkillRoot, removed: true });
+                }
+            }
+            catch {
+                // Missing or not a symlink — nothing to clean.
+            }
+        }
+        return results;
+    }
+    /**
+     * `metabot skills install` — install an on-chain metabot-skill package.
+     * `--pin` reads the protocol pin for the package URI and provenance; `--uri`
+     * installs a package zip directly. The `--confirm` gate mirrors the other
+     * local-write flows: without it the command previews the install plan.
+     */
+    async function runSkillsInstall(input) {
+        try {
+            const pinId = normalizeEnvText(typeof input.pin === 'string' ? input.pin : undefined);
+            const directUri = normalizeEnvText(typeof input.uri === 'string' ? input.uri : undefined);
+            if (!pinId && !directUri) {
+                return (0, commandResult_1.commandFailed)('invalid_argument', 'Pass --pin <skill pinId> or --uri <package metafile:// or https URI>.');
+            }
+            let descriptor = null;
+            let creator;
+            if (pinId) {
+                const pin = await (0, pinRead_1.readMetawebPin)(pinId, metawebServiceOptions());
+                descriptor = (0, skillInstall_1.extractSkillPinDescriptor)(pin);
+                if (!descriptor && !directUri) {
+                    return (0, commandResult_1.commandFailed)('invalid_skill_pin', `Pin ${pinId} (protocol ${pin.protocol || 'unknown'}) does not carry a skill package payload (needs \`name\` + \`skill-file\`). Read it with \`metabot metaweb read --pin ${pinId}\` first.`);
+                }
+                creator = {
+                    globalMetaId: pin.creator.globalMetaId,
+                    name: pin.creator.name,
+                };
+            }
+            const contentReference = directUri || descriptor.skillFileUri;
+            const payloadName = normalizeEnvText(typeof input.name === 'string' ? input.name : undefined) || descriptor?.name;
+            const confirm = input.confirm === true;
+            if (!confirm) {
+                const plan = [
+                    `Skill install plan:`,
+                    `- skill: ${payloadName || '(name from package SKILL.md)'}`,
+                    descriptor ? `- version: ${descriptor.version}` : null,
+                    descriptor?.description ? `- description: ${descriptor.description}` : null,
+                    creator?.globalMetaId ? `- publisher: ${creator.name || creator.globalMetaId} (${creator.globalMetaId})` : null,
+                    pinId ? `- source pin: ${pinId}` : null,
+                    `- package: ${contentReference}`,
+                    `- target: ${sharedSkillsRoot()}/<name>/ (local disk only; rebinds installed hosts afterwards)`,
+                    '',
+                    'Re-run with --confirm to install.',
+                ].filter((line) => line !== null).join('\n');
+                return (0, commandResult_1.commandFailed)('confirm_required', plan);
+            }
+            const installed = await (0, skillInstall_1.installSkillFromReference)({
+                skillsRoot: sharedSkillsRoot(),
+                contentReference,
+                fetchImpl: globalThis.fetch,
+                force: input.force === true,
+                source: {
+                    ...(creator ? { creatorMetaId: creator.globalMetaId, creatorName: creator.name } : {}),
+                    ...(pinId ? { sourcePinId: pinId } : {}),
+                    skillFileUri: contentReference,
+                    ...(payloadName ? { payloadName } : {}),
+                    ...(descriptor?.version ? { payloadVersion: descriptor.version } : {}),
+                    ...(descriptor?.description ? { payloadDescription: descriptor.description } : {}),
+                },
+            });
+            const rebind = input.noRebind === true ? 'skipped (--no-rebind)' : await rebindHostSkillRoots();
+            const boundRoots = Array.isArray(rebind?.boundRoots)
+                ? rebind.boundRoots
+                    .map((entry) => `${entry.platformId}: ${entry.hostSkillRoot}`)
+                : [];
+            const formatted = [
+                `Installed skill "${installed.name}"${installed.version ? ` (v${installed.version})` : ''} → ${installed.skillDir}`,
+                installed.replaced ? `(replaced previous installation${installed.previousVersion ? ` v${installed.previousVersion}` : ''})` : null,
+                '',
+                'Next steps:',
+                `- Read its instructions: metabot skills read --name ${installed.name}`,
+                '- Apply the new capability to the task at hand; cite the source pin when you report what you learned.',
+                boundRoots.length ? `- Rebound host skill roots: ${boundRoots.join(', ')}` : null,
+            ].filter((line) => line !== null).join('\n');
+            return (0, commandResult_1.commandSuccess)({ skill: installed, rebind, formatted });
+        }
+        catch (error) {
+            return mapSkillInstallError(error);
+        }
+    }
+    /** `metabot skills list` — chain-installed skills from the install registry. */
+    async function runSkillsList() {
+        try {
+            const skills = await (0, skillInstall_1.listInstalledSkills)(sharedSkillsRoot());
+            const formatted = skills.length
+                ? skills.map((skill) => [
+                    `- **${skill.name}**${skill.version ? ` (${skill.version})` : ''}`,
+                    skill.description ? ` — ${skill.description}` : '',
+                    skill.creatorMetaId ? ` | by ${skill.creatorName || skill.creatorMetaId}` : '',
+                    skill.sourcePinId ? ` | pin: ${skill.sourcePinId}` : '',
+                    skill.present ? '' : ' | MISSING ON DISK',
+                ].join('')).join('\n')
+                    + '\nRead one with `metabot skills read --name <name>`.'
+                : 'No skills installed from MetaWeb yet. Find one with `metabot metaweb search --query <topic> --protocols metabot-skill`, then `metabot skills install --pin <pinId> --confirm`.';
+            return (0, commandResult_1.commandSuccess)({ skills, formatted });
+        }
+        catch (error) {
+            return mapSkillInstallError(error);
+        }
+    }
+    /** `metabot skills read --name` — load one installed skill's SKILL.md and file tree. */
+    async function runSkillsRead(input) {
+        try {
+            const name = normalizeEnvText(typeof input.name === 'string' ? input.name : undefined);
+            if (!name)
+                return (0, commandResult_1.commandFailed)('invalid_argument', '--name is required.');
+            const skill = await (0, skillInstall_1.readInstalledSkill)({ skillsRoot: sharedSkillsRoot(), name });
+            return (0, commandResult_1.commandSuccess)({ ...skill, formatted: skill.skillMd });
+        }
+        catch (error) {
+            return mapSkillInstallError(error);
+        }
+    }
+    /** `metabot skills uninstall --name` — remove one chain-installed skill (local dirs only). */
+    async function runSkillsUninstall(input) {
+        try {
+            const name = normalizeEnvText(typeof input.name === 'string' ? input.name : undefined);
+            if (!name)
+                return (0, commandResult_1.commandFailed)('invalid_argument', '--name is required.');
+            if (input.confirm !== true) {
+                return (0, commandResult_1.commandFailed)('confirm_required', `Uninstalling skill "${name}" removes its directory under ${sharedSkillsRoot()} and its host symlinks. Re-run with --confirm to uninstall.`);
+            }
+            const removed = await (0, skillInstall_1.uninstallInstalledSkill)({ skillsRoot: sharedSkillsRoot(), name });
+            const unbound = await unbindSkillFromHostRoots(name);
+            return (0, commandResult_1.commandSuccess)({
+                ...removed,
+                unboundRoots: unbound,
+                formatted: `Uninstalled skill "${name}" (directory removed: ${removed.removedDir}; host symlinks cleaned: ${unbound.length}).`,
+            });
+        }
+        catch (error) {
+            return mapSkillInstallError(error);
+        }
+    }
     async function runMetaIdSearch(input) {
         try {
             const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
@@ -3311,6 +3499,10 @@ function createDefaultCliDependencies(context) {
                 }
                 return (0, commandResult_1.commandSuccess)(rendered);
             },
+            install: async (input) => runSkillsInstall(input),
+            list: async () => runSkillsList(),
+            read: async (input) => runSkillsRead(input),
+            uninstall: async (input) => runSkillsUninstall(input),
         },
         host: {
             bindSkills: async (input) => {
