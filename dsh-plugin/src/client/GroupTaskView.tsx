@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Button,
   IconPlusOutline16,
@@ -9,6 +9,7 @@ import {
   MarkdownText,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   timestampLabel,
   type BotRow,
@@ -25,8 +26,9 @@ import {
 } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
+import { markdownLabels } from './markdown-labels.ts'
 
-type Translate = (key: ConversationsLocaleKey, vars?: Record<string, string | number>) => string
+type Translate = (key: ConversationsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
 export interface GroupTaskInjectedApi {
   list: (tab: GroupTaskListTab, includeArchived: boolean) => Promise<GroupTaskSummaryRow[]>
@@ -187,6 +189,7 @@ export function GroupTaskView({
   const [infoNote, setInfoNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
+  const mdLabels = useMemo(() => markdownLabels(t), [t])
 
   // Composer
   const [draft, setDraft] = useState('')
@@ -718,7 +721,7 @@ export function GroupTaskView({
                               </div>
                               <div className="oac-a2a-bubble oac-a2a-bubble-peer">
                                 {isMarkdown
-                                  ? <MarkdownText text={message.content} />
+                                  ? <MarkdownText text={message.content} labels={mdLabels} />
                                   : <span className="oac-a2a-msg-text">{message.content}</span>}
                               </div>
                             </div>
@@ -945,7 +948,7 @@ export function GroupTaskView({
                         </div>
                         <div className="oac-a2a-bubble oac-a2a-bubble-peer">
                           {isMarkdown
-                            ? <MarkdownText text={message.content} />
+                            ? <MarkdownText text={message.content} labels={mdLabels} />
                             : <span className="oac-a2a-msg-text">{message.content}</span>}
                         </div>
                       </div>
@@ -1003,6 +1006,7 @@ export function GroupTaskView({
       </div>
 
       <Modal
+        closeLabel={t('close')}
         open={createOpen}
         onClose={() => { if (!createBusy) setCreateOpen(false) }}
         title={t('gtCreateTitle')}
@@ -1101,6 +1105,7 @@ export function GroupTaskView({
       </Modal>
 
       <Modal
+        closeLabel={t('close')}
         open={closeOpen}
         onClose={() => { if (!busy) setCloseOpen(false) }}
         title={closeOutcome === 'done' ? t('gtAccept') : t('gtCancelTask')}
@@ -1137,6 +1142,7 @@ export function GroupTaskView({
       </Modal>
 
       <Modal
+        closeLabel={t('close')}
         open={kickTarget !== null}
         onClose={() => { if (!busy) setKickTarget(null) }}
         title={t('gtKick')}
@@ -1166,6 +1172,7 @@ export function GroupTaskView({
       </Modal>
 
       <Modal
+        closeLabel={t('close')}
         open={inviteOpen}
         onClose={() => { if (!inviteBusy) setInviteOpen(false) }}
         title={t('gtInviteRemote')}
@@ -1217,6 +1224,7 @@ export function GroupTaskView({
       </Modal>
 
       <Modal
+        closeLabel={t('close')}
         open={renameOpen}
         onClose={() => { if (!busy) setRenameOpen(false) }}
         title={t('gtRename')}

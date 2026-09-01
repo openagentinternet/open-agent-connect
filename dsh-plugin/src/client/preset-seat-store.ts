@@ -7,7 +7,7 @@
  * (preset) or are swallowed (model); the composer picker stays unlocked.
  */
 
-import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ChipBot, ChipPresetOption } from '../chip-logic.ts'
 import {
   botsBySlugFromList,
@@ -18,26 +18,32 @@ import {
 } from '../chip-logic.ts'
 import { messageOf } from './preset-display.ts'
 
-type RpcOk<T> = { result: { ok: true; value: T } }
-type RpcErr = { result: { ok: false; error: { message: string } } }
-type RpcResponse<T> = RpcOk<T> | RpcErr
+/**
+ * Structural mirrors of the generated Remote faces the seat drives
+ * (`ctx.remote.agentPresets` / `ctx.remote.session`): failures arrive as
+ * result objects, never throws. Kept local — the plugin resolves outside
+ * DSH's cordis instance and types host services structurally.
+ */
+export type SeatRpcResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: { readonly message: string; readonly details?: unknown } }
+
+/** Roster row as `agentPresets.list` returns it. */
+export type SeatPresetRow = ChipPresetOption & { readonly isDefault: boolean }
+
+/** `session.modelCatalog` value, cut down to the advertised provider groups. */
+export type SeatModelCatalog = {
+  readonly groups: ReadonlyArray<{ readonly id: string; readonly models: ReadonlyArray<{ readonly id: string }> }>
+}
 
 export type SeatApi = {
   agentPresets: {
-    list: (input: Record<string, never>) => Promise<RpcResponse<{
-      presets: Array<ChipPresetOption & { isDefault?: boolean; broken?: string }>
-    }>>
-    select: (input: { sessionId: string; agentPreset: string }) => Promise<RpcResponse<{ agentPreset: string }>>
+    list: () => Promise<SeatRpcResult<{ readonly presets: readonly SeatPresetRow[] }>>
+    select: (sessionId: string, agentPreset: string) => Promise<SeatRpcResult<string>>
   }
   sessions: {
-    models: (input: { sessionId: string }) => Promise<RpcResponse<{
-      groups: Array<{ id: string; models: Array<{ id: string }> }>
-    }>>
-    selectModel: (input: {
-      sessionId: string
-      provider: string
-      model: string
-    }) => Promise<RpcResponse<unknown>>
+    modelCatalog: () => Promise<SeatRpcResult<SeatModelCatalog>>
+    selectModel: (input: { sessionId: string; provider: string; model: string }) => Promise<SeatRpcResult<unknown>>
   }
 }
 
@@ -75,7 +81,6 @@ export class BotPresetSeatController {
     private readonly api: SeatApi,
     private readonly listBots: () => Promise<ChipBot[]>,
     private readonly currentSession: () => SeatSessionSummary | undefined,
-    private readonly onApplied?: (sessionId: string, agentPreset: string) => void,
   ) {}
 
   private set(patch: Partial<BotPresetSeatState>): void {
@@ -84,16 +89,16 @@ export class BotPresetSeatController {
 
   async load(): Promise<void> {
     try {
-      const [response, bots] = await Promise.all([
-        this.api.agentPresets.list({}),
+      const [roster, bots] = await Promise.all([
+        this.api.agentPresets.list(),
         this.listBots().catch(() => [] as ChipBot[]),
       ])
       const botsBySlug = botsBySlugFromList(bots)
-      if (!response.result.ok) {
-        this.set({ error: response.result.error.message, botsBySlug })
+      if (!roster.ok) {
+        this.set({ error: roster.error.message, botsBySlug })
         return
       }
-      const { presets } = response.result.value
+      const { presets } = roster.value
       this.fallback = presets.find((preset) => preset.isDefault)?.id ?? presets[0]?.id ?? ''
       this.set({
         options: filterSelectablePresets(presets),
@@ -144,15 +149,14 @@ export class BotPresetSeatController {
     }
     this.set({ busy: true, error: null })
     try {
-      const response = await this.api.agentPresets.select({ sessionId: session.id, agentPreset: staged })
+      const result = await this.api.agentPresets.select(session.id, staged)
       this.staged = undefined
-      if (!response.result.ok) {
-        this.set({ busy: false, error: response.result.error.message, current: this.fallback })
+      if (!result.ok) {
+        this.set({ busy: false, error: refusalText(result.error), current: this.fallback })
         return
       }
-      const agentPreset = response.result.value.agentPreset
+      const agentPreset = result.value
       this.set({ busy: false, current: agentPreset })
-      this.onApplied?.(session.id, agentPreset)
       await this.applyStoredModel(session.id, agentPreset)
     } catch (error) {
       this.staged = undefined
@@ -162,21 +166,28 @@ export class BotPresetSeatController {
 
   private async applyStoredModel(sessionId: string, presetId: string): Promise<void> {
     try {
-      const catalog = await this.api.sessions.models({ sessionId })
-      if (!catalog.result.ok) return
+      const catalog = await this.api.sessions.modelCatalog()
+      if (!catalog.ok) return
       const selection = modelSelectionToApply(
         presetId,
         this.store.getSnapshot().botsBySlug,
-        catalog.result.value.groups,
+        catalog.value.groups,
       )
       if (selection === undefined) return
-      await this.api.sessions.selectModel({
+      const applied = await this.api.sessions.selectModel({
         sessionId,
         provider: selection.provider,
         model: selection.model,
       })
+      if (!applied.ok) return
     } catch {
       // Soft fail: the composer model picker remains available.
     }
   }
+}
+
+/** A refusal carries its cause twice: wrapped in `message`, bare in `details.reason`. */
+function refusalText(error: { message: string; details?: unknown }): string {
+  const reason = (error.details as { reason?: unknown } | undefined)?.reason
+  return typeof reason === 'string' ? reason : error.message
 }

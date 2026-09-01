@@ -1,10 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BotRow, CommandEnvelope } from './api.ts'
 import type { ServicesLocaleKey } from './locale-services.ts'
 import { asRecordArray, interpolate, textOf } from './parse.ts'
 
-type Translate = (key: ServicesLocaleKey, vars?: Record<string, string | number>) => string
+type Translate = (key: ServicesLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
 export interface ServicesPanelInjected {
   bots: () => Promise<BotRow[]>
@@ -222,7 +223,7 @@ export function ServicesPanel({
           </div>
         </form>
       )}
-      <Modal open={publishing} onClose={() => setPublishing(false)} title={t('publishTitle')}>
+      <Modal open={publishing} onClose={() => setPublishing(false)} title={t('publishTitle')} closeLabel={t('close')}>
         <form className="oac-form" onSubmit={(event) => { event.preventDefault(); void onPublish() }}>
           <p>{interpolate(t('publishConfirm'), { from })}</p>
           <label>{t('fieldDisplayName')}<Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
@@ -240,7 +241,7 @@ export function ServicesPanel({
           </div>
         </form>
       </Modal>
-      <Modal open={revoking !== null} onClose={() => setRevoking(null)} title={t('revokeTitle')}>
+      <Modal open={revoking !== null} onClose={() => setRevoking(null)} title={t('revokeTitle')} closeLabel={t('close')}>
         <p>{interpolate(t('revokeConfirm'), {
           name: revoking ? textOf(revoking, ['title', 'displayName', 'serviceName'], 'service') : '',
           id: revoking ? textOf(revoking, ['currentPinId', 'serviceId', 'id']) : '',
@@ -250,7 +251,7 @@ export function ServicesPanel({
           <Button type="button" disabled={busy} onClick={() => { void onRevoke() }}>{busy ? t('revoking') : t('confirmRevoke')}</Button>
         </div>
       </Modal>
-      <Modal open={pendingCall !== null} onClose={() => setPendingCall(null)} title={t('confirmPaid')}>
+      <Modal open={pendingCall !== null} onClose={() => setPendingCall(null)} title={t('confirmPaid')} closeLabel={t('close')}>
         <p>{t('paidConfirm')}</p>
         <pre className="oac-mono">{JSON.stringify(pendingCall?.data ?? {}, null, 2)}</pre>
         <div className="oac-actions">

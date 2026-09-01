@@ -231,15 +231,19 @@ export function createTwinOrchestrator(
           content: [{ type: 'text', text: buildDelegationMessage({ ...input, taskId, stepId }) }],
           source: { kind: 'plugin', plugin: 'oac-dsh', form: 'delegation' },
         })
+        let timeoutTimer: ReturnType<typeof setTimeout> | undefined
         const timeout = new Promise<'timed_out'>((resolve) => {
-          const timer = setTimeout(() => resolve('timed_out'), stepTimeoutMs)
+          timeoutTimer = setTimeout(() => resolve('timed_out'), stepTimeoutMs)
           controller.signal.addEventListener('abort', () => {
-            clearTimeout(timer)
+            clearTimeout(timeoutTimer)
             resolve('timed_out')
           }, { once: true })
         })
         const idle = Promise.resolve(worker.whenIdle?.()).then(() => 'idle' as const)
         const outcome = await Promise.race([idle, timeout])
+        // The losing arm's timer must not outlive the race: an idle win leaves
+        // an armed step-timeout that keeps the process alive for its full span.
+        clearTimeout(timeoutTimer)
         if (outcome === 'timed_out') {
           timedOut = true
           try {

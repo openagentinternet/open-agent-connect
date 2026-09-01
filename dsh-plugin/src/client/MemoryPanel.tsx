@@ -7,6 +7,7 @@ import {
   IconRefreshOutline16,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   BotRow,
   DreamRunRow,
@@ -19,7 +20,7 @@ import type {
 } from './api.ts'
 import type { MemoryLocaleKey } from './locale-memory.ts'
 
-type Translate = (key: MemoryLocaleKey, vars?: Record<string, string | number>) => string
+type Translate = (key: MemoryLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
 export interface MemoryPanelInjected {
   bots: () => Promise<BotRow[]>
@@ -420,6 +421,7 @@ function KnowledgeTab({ from, t, injected }: {
         </div>
       ))}
       <Modal
+        closeLabel={t('close')}
         open={editing !== null}
         onClose={() => setEditing(null)}
         title={t('knowledgeEdit')}
@@ -630,6 +632,7 @@ function FactsTab({ from, t, injected }: {
         </div>
       ))}
       <Modal
+        closeLabel={t('close')}
         open={adding}
         onClose={() => setAdding(false)}
         title={t('factsAdd')}
@@ -665,6 +668,7 @@ function FactsTab({ from, t, injected }: {
         </div>
       </Modal>
       <Modal
+        closeLabel={t('close')}
         open={editing !== null}
         onClose={() => setEditing(null)}
         title={t('factsEdit')}

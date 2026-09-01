@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Button, Input, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { OwnerIdentityRow, OwnerWhoPayload, OwnerWritePayload } from './api.ts'
 import type { UserLocaleKey } from './locale-user.ts'
 
-type Translate = (key: UserLocaleKey, vars?: Record<string, string | number>) => string
+type Translate = (key: UserLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 type View = 'loading' | 'empty' | 'create' | 'import' | 'backup' | 'profile'
 
 export interface UserPanelInjected {
@@ -320,6 +321,7 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
       ) : null}
 
       <Modal
+        closeLabel={t('close')}
         open={revealOpen}
         onClose={() => setRevealOpen(false)}
         title={t('revealTitle')}
@@ -336,6 +338,7 @@ export function UserPanel(injected: UserPanelInjected & { close: () => void; t: 
       </Modal>
 
       <Modal
+        closeLabel={t('close')}
         open={logoutOpen}
         onClose={() => setLogoutOpen(false)}
         title={t('logoutTitle')}

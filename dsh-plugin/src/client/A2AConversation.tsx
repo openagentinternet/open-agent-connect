@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Button,
   IconCloseOutline16,
@@ -9,6 +9,7 @@ import {
   MarkdownText,
   writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   timestampLabel,
   txidPreview,
@@ -20,8 +21,9 @@ import {
 import { BotAvatar } from './BotAvatar.tsx'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
+import { markdownLabels } from './markdown-labels.ts'
 
-type Translate = (key: ConversationsLocaleKey, vars?: Record<string, string | number>) => string
+type Translate = (key: ConversationsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
 export interface A2AConversationInjected {
   bots: () => Promise<BotRow[]>
@@ -70,6 +72,7 @@ function MessageRow({
   const senderAvatar = message.sender.avatar ?? (isLocal ? localAvatar : peerAvatar)
   const isImage = (message.contentType ?? '').toLowerCase().startsWith('image/')
   const isMarkdown = message.contentType === 'text/markdown'
+  const mdLabels = useMemo(() => markdownLabels(t), [t])
   return (
     <div className={isLocal ? 'oac-a2a-msg oac-a2a-msg-local' : 'oac-a2a-msg oac-a2a-msg-peer'}>
       <BotAvatar name={senderName} src={senderAvatar} className="oac-a2a-msg-avatar" />
@@ -101,7 +104,7 @@ function MessageRow({
           {isImage
             ? <img className="oac-a2a-msg-image" src={message.content} alt="" />
             : isMarkdown
-              ? <MarkdownText text={message.content} />
+              ? <MarkdownText text={message.content} labels={mdLabels} />
               : <span className="oac-a2a-msg-text">{message.content}</span>}
         </div>
       </div>
