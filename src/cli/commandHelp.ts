@@ -547,11 +547,12 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
   },
   {
     commandPath: ['skills'],
-    summary: 'Skill contract resolution plus on-chain skill package install/list/read/uninstall.',
+    summary: 'Skill contract resolution plus on-chain skill package publish/install/list/read/uninstall.',
     usage: 'metabot skills <subcommand>',
     subcommands: [
       { name: 'resolve', summary: 'Render one resolved skill contract in markdown or JSON.' },
       { name: 'install', summary: 'Install an on-chain metabot-skill package into the shared skills root.' },
+      { name: 'publish', summary: 'Package a local skill directory and publish it on-chain for others to install.' },
       { name: 'list', summary: 'List skills installed from MetaWeb with provenance.' },
       { name: 'read', summary: 'Load one installed skill\'s SKILL.md and file tree.' },
       { name: 'uninstall', summary: 'Remove one chain-installed skill and its host symlinks.' },
@@ -560,6 +561,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot skills resolve --skill metabot-network-manage --format markdown',
       'metabot skills install --pin <skill-pin-id> --confirm',
+      'metabot skills publish --dir ~/.metabot/skills/my-skill --confirm',
       'metabot skills list',
       'metabot skills read --name metabot-example',
     ],
@@ -619,6 +621,39 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     examples: [
       'metabot skills install --pin 8845…i0 --confirm',
       'metabot skills install --uri metafile://8845…i0.zip --name metabot-example --confirm',
+    ],
+  },
+  {
+    commandPath: ['skills', 'publish'],
+    summary: 'Package a local skill directory as a metabot-skill zip and publish it on-chain (/protocols/metabot-skill) for others to install.',
+    usage: 'metabot skills publish --dir <skill-directory> [--name <name>] [--skill-version <version>] [--description <text>] [--network mvc] [--from <bot-slug>] [--confirm]',
+    requiredFlags: [
+      { flag: '--dir', value: '<skill-directory>', description: 'Skill directory to package; its root (or single subdirectory) must carry SKILL.md.' },
+    ],
+    optionalFlags: [
+      { flag: '--name', value: '<name>', description: 'Override the skill name (SKILL.md frontmatter is the default source).' },
+      { flag: '--skill-version', value: '<version>', description: 'Override the version; required when frontmatter has none (--version is reserved for the CLI version). Consumers keep the highest version per name.' },
+      { flag: '--description', value: '<text>', description: 'Override the description written to the protocol pin.' },
+      { flag: '--network', value: 'mvc', description: 'Chain for the file upload and protocol pin (default mvc).' },
+      { flag: '--from', value: '<bot-slug>', description: 'Publishing bot; defaults to the selected actor.' },
+      { flag: '--confirm', value: '', description: 'Actually publish. Without it the command previews the package (awaiting_confirmation).' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: [
+      'pinId — the metabot-skill protocol pin advertising the package.',
+      'skillFileUri — the uploaded package zip (metafile://…).',
+      'payload — the exact pin payload (name, version, description?, skill-file).',
+      'archive — package bytes, sha256, file count.',
+      'formatted — model-ready text including the install command for others.',
+    ],
+    failureSemantics: [
+      'awaiting_confirmation when --confirm is omitted (package preview with real bytes and checksum).',
+      'invalid_project when the directory or its SKILL.md cannot be found (or the wrapping is ambiguous).',
+      'package_too_large beyond the 4 MB cap; invalid_metadata for a bad name or missing version.',
+    ],
+    examples: [
+      'metabot skills publish --dir ./my-skill --confirm',
+      'metabot skills publish --dir ./my-skill --from alice --version 1.1.0 --confirm',
     ],
   },
   {
