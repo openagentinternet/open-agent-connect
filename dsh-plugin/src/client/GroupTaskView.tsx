@@ -178,7 +178,9 @@ export function GroupTaskView({
   t: Translate
   createSignal: number
 }): ReactNode {
-  const [filter, setFilter] = useState<GroupTaskListTab>('active')
+  // Default to the full list (all statuses, like the IDBots sidebar group
+  // tab); the active/done/cancelled tabs remain available in the filter.
+  const [filter, setFilter] = useState<GroupTaskListTab>('all')
   const [tasks, setTasks] = useState<GroupTaskSummaryRow[] | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ chair: string; taskId: number } | null>(null)
