@@ -10,9 +10,10 @@ End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md
 
 Host kernel requirement: plugin 0.4.0 is built against the DSH **0.1.2-alpha.2**
 client surface (npm `alpha` dist-tag) — the `@Remote` gateway faces, the split
-client packages, and the 0.1.2 locale keys. It will not load on 0.1.0-rc-era
-kernels; hosts still there should stay on plugin 0.3.x until their kernel is
-upgraded.
+client packages, and the 0.1.2 locale keys — and verified in lockstep through
+**0.1.2-alpha.3** (no plugin API changes in that patch release). It will not
+load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
+until their kernel is upgraded.
 
 After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, and **Apps** (the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
 
