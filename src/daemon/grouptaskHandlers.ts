@@ -6,7 +6,6 @@
  * core/grouptask/service; this file is wiring + input normalization only.
  */
 
-import path from 'node:path';
 import {
   commandFailed,
   commandSuccess,
@@ -59,13 +58,13 @@ import {
   listMetabotProfiles,
   type MetabotProfileFull,
 } from '../core/bot/metabotProfileManager';
-import { readOwnerIdentity, type OwnerIdentityRecord } from '../core/owner/ownerIdentity';
+import { readOwnerIdentity, resolveOwnerIdfilePath, type OwnerIdentityRecord } from '../core/owner/ownerIdentity';
 import { createLocalMnemonicSigner } from '../core/signing/localMnemonicSigner';
 import type { ChainAdapterRegistry } from '../core/chain/adapters/types';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { createRuntimeStateStore } from '../core/state/runtimeStateStore';
-import { resolveMetabotDaemonPaths, resolveMetabotPaths } from '../core/state/paths';
+import { resolveMetabotDaemonPaths, resolveMetabotPaths, type MetabotPaths } from '../core/state/paths';
 
 export interface GroupTaskDaemonHandlers {
   create: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
@@ -164,10 +163,14 @@ async function readProfileMetaId(homeDir: string): Promise<string | null> {
 
 /**
  * Read-only SecretStore view over the owner identity record; the signer only
- * ever calls readIdentitySecrets.
+ * ever calls readIdentitySecrets. The owner home (~/.metabot/owner) is NOT a
+ * profile home, so resolveMetabotPaths rejects it — the paths stub below
+ * exists solely to satisfy the SecretStore interface.
  */
 function createOwnerSecretStore(systemHomeDir: string, owner: OwnerIdentityRecord): SecretStore {
-  const paths = resolveMetabotPaths(path.join(systemHomeDir, '.metabot', 'owner'));
+  const paths = {
+    identitySecretsPath: resolveOwnerIdfilePath(systemHomeDir),
+  } as unknown as MetabotPaths;
   return {
     paths,
     ensureLayout: async () => paths,
@@ -183,6 +186,8 @@ function createOwnerSecretStore(systemHomeDir: string, owner: OwnerIdentityRecor
 
 export interface CreateGroupTaskDaemonHandlersInput {
   systemHomeDir: string;
+  /** The daemon's own profile home; its config holds the a2a listener switch. */
+  daemonHomeDir?: string;
   createSignerForProfileHome: (homeDir: string) => Signer;
   adapters: ChainAdapterRegistry;
   /** Peer chat pubkey resolver; enables OpenTeam private-message envelopes. */
@@ -467,8 +472,12 @@ export function createGroupTaskDaemonHandlers(
       const daemonPaths = resolveMetabotDaemonPaths(input.systemHomeDir);
       return getGroupTaskHealth(ctx, {
         readSimplemsgListenerEnabled: async () => {
+          // The listener switch is per-profile config; the daemon serves its
+          // own home, so read that home's config (mirrors the daemon boot
+          // read in cli/runtime). Unknown/unreadable defaults to enabled.
+          if (!input.daemonHomeDir) return true;
           try {
-            const config = await createConfigStore(resolveMetabotPaths(input.systemHomeDir)).read();
+            const config = await createConfigStore(input.daemonHomeDir).read();
             return config.a2a.simplemsgListenerEnabled;
           } catch {
             return true;

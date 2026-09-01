@@ -16107,6 +16107,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     },
     grouptask: createGroupTaskDaemonHandlers({
       systemHomeDir: normalizedSystemHomeDir,
+      daemonHomeDir: input.homeDir,
       createSignerForProfileHome,
       adapters,
       resolvePeerChatPublicKey,
