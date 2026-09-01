@@ -7,6 +7,7 @@ import {
   Input,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   AUTO_REPLY_COOLDOWN_MS_OPTIONS,
   AUTO_REPLY_MAX_TURNS_OPTIONS,
@@ -20,7 +21,7 @@ import {
 import { BotAvatar } from './BotAvatar.tsx'
 import type { BotsLocaleKey } from './locale.ts'
 
-type Translate = (key: BotsLocaleKey, vars?: Record<string, string | number>) => string
+type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 type TabKey = 'basic' | 'behavior' | 'chat' | 'advanced'
 type NoteTone = 'saving' | 'success' | 'warn' | 'error'
 
@@ -574,6 +575,7 @@ export function BotEditor({
         </div>
       ) : null}
       <Modal
+        closeLabel={t('close')}
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
         title={t('removeTitle')}
@@ -600,6 +602,7 @@ export function BotEditor({
         </p>
       </Modal>
       <Modal
+        closeLabel={t('close')}
         open={twinAction !== null}
         onClose={() => setTwinAction(null)}
         title={twinAction === 'demote' ? t('twinDemoteTitle') : t('twinPromoteTitle')}

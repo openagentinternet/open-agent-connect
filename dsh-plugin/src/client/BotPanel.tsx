@@ -8,13 +8,14 @@ import {
   IconRightUpOutline16,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BotRow, LlmDirectory, AutoReplyConfig, ChatSkillsPayload } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
 import { CreateBotForm, type CreateBotInput } from './CreateBotForm.tsx'
 import type { BotsLocaleKey } from './locale.ts'
 
-type Translate = (key: BotsLocaleKey, vars?: Record<string, string | number>) => string
+type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
 export interface BotPanelInjected {
   list: () => Promise<BotRow[]>
@@ -203,6 +204,7 @@ export function BotPanel({
         </>
       ) : null}
       <Modal
+        closeLabel={t('close')}
         open={creating}
         onClose={() => setCreating(false)}
         title={t('createTitle')}

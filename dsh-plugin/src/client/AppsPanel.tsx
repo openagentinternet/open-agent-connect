@@ -14,6 +14,7 @@ import {
   IconWarningOutline16,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BotRow, CommandEnvelope } from './api.ts'
 import type { MetaAppListPayload, MetaAppRecord } from '../apps.ts'
 import {
@@ -36,7 +37,7 @@ import type { AppsLocaleKey } from './locale-apps.ts'
 import { interpolate } from './parse.ts'
 import { MetaAppForm } from './MetaAppForm.tsx'
 
-type Translate = (key: AppsLocaleKey, vars?: Record<string, string | number>) => string
+type Translate = (key: AppsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 
 export interface AppsPanelInjected {
   bots: () => Promise<BotRow[]>
@@ -381,6 +382,7 @@ export function AppsPanel({
     const description = recordText(record, ['prompt']) || recordText(record, ['intro'])
     return (
       <Modal
+        closeLabel={t('close')}
         open
         onClose={() => setModal(null)}
         title={t('detailTitle')}
@@ -467,6 +469,7 @@ export function AppsPanel({
     ]
     return (
       <Modal
+        closeLabel={t('close')}
         open
         onClose={() => setModal(null)}
         title={t('shareTitle')}
@@ -500,6 +503,7 @@ export function AppsPanel({
     const name = recordName(record, t('untitled'))
     return (
       <Modal
+        closeLabel={t('close')}
         open
         onClose={() => setModal(null)}
         title={t('deleteTitle')}
@@ -533,6 +537,7 @@ export function AppsPanel({
     const name = isEdit && record ? recordName(record, t('untitled')) : ''
     return (
       <Modal
+        closeLabel={t('close')}
         open
         onClose={() => setModal(null)}
         title={isEdit ? t('editTitle') : t('publishTitle')}
@@ -588,6 +593,7 @@ export function AppsPanel({
         : chain.errorText ?? ''
     return (
       <Modal
+        closeLabel={t('close')}
         open
         onClose={closeChain}
         title={title}

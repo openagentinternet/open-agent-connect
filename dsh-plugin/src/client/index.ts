@@ -5,8 +5,11 @@
  */
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -30,7 +33,7 @@ import { userEn, USER_NS, userZh, type UserLocaleKey } from './locale-user.ts'
 import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.ts'
 import { MemoryPanel } from './MemoryPanel.tsx'
 import { UserPanel } from './UserPanel.tsx'
-import type { SeatApi, SeatSessionSummary } from './preset-seat-store.ts'
+import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
 import { APPS_CSS, BOTS_CSS, BROWSER_CSS, GROUPTASK_CSS, MEMORY_CSS, PRESETS_CSS, USER_CSS } from './styles.ts'
@@ -51,7 +54,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-export const inject = ['slots', 'locale', 'connection']
+export const inject = ['slots', 'locale', 'remote', 'remote.agentPresets', 'remote.session']
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
@@ -249,9 +252,23 @@ export function apply(ctx: ClientContext): void {
   }, AppsPanel))
 
   ctx.inject(['slots', 'conversation', 'sessions'], (scope: ClientContext) => {
-    const connection = ctx.get('connection') as { api: SeatApi }
+    const remote = ctx.remote
     const seat = new BotPresetSeatController(
-      connection.api,
+      {
+        agentPresets: {
+          list: () => remote.agentPresets.list(),
+          select: (sessionId, agentPreset) => remote.agentPresets.select(
+            sessionId as Parameters<typeof remote.agentPresets.select>[0],
+            agentPreset,
+          ),
+        },
+        sessions: {
+          modelCatalog: () => remote.session.modelCatalog(),
+          selectModel: (input) => remote.session.selectModel(
+            input as Parameters<typeof remote.session.selectModel>[0],
+          ),
+        },
+      },
       async () => (await api.list()).map((bot) => ({
         name: bot.name,
         slug: bot.slug,
@@ -263,16 +280,13 @@ export function apply(ctx: ClientContext): void {
       (): SeatSessionSummary | undefined => {
         const state = scope.sessions.list.getSnapshot()
         const summary = state.current === undefined ? undefined : state.byId[state.current]
-        return summary === undefined
-          ? undefined
-          : {
-            id: summary.id,
-            blank: summary.blank,
-            ...(summary.agentPreset === undefined ? {} : { agentPreset: summary.agentPreset }),
-          }
-      },
-      (sessionId, agentPreset) => {
-        scope.sessions.noteAgentPreset(sessionId as never, agentPreset)
+        if (summary === undefined) return undefined
+        const agentPreset = summary.projectionValues?.agentPreset
+        return {
+          id: summary.id,
+          blank: summary.blank,
+          ...(typeof agentPreset === 'string' ? { agentPreset } : {}),
+        }
       },
     )
 
