@@ -41,6 +41,7 @@ export interface MemoryBlocksResult {
 
 const OWNER_SCOPE_FETCH_MIN_ITEMS = 12;
 const VALUE_BOUNDARIES_MAX_ITEMS = 5;
+const WORK_REVIEWS_MAX_ITEMS = 5;
 
 async function readSelfIdentityText(store: MemoryStore): Promise<string> {
   const entries = await store.list({
@@ -53,9 +54,9 @@ async function readSelfIdentityText(store: MemoryStore): Promise<string> {
 
 /**
  * Build the full memory injection for one turn: scoped fact blocks plus the
- * experience hot layer (self-identity, value boundaries). Dream summaries and
- * knowledge blocks join in their own phases — the builders already tolerate
- * their absence.
+ * experience hot layer (self-identity, value boundaries, work reviews, recent
+ * dream diaries). Knowledge blocks join in their own phase — the builders
+ * already tolerate their absence.
  */
 export async function buildMemoryBlocksForRequest(
   paths: MetabotPaths,
@@ -121,13 +122,19 @@ export async function buildMemoryBlocksForRequest(
   });
 
   // The experience hot layer describes the bot itself (self-identity, its
-  // self-distilled conduct rules, its recent dream diaries) — never owner
-  // facts — so it is injected for every channel, matching the IDBots A2A path.
+  // self-distilled conduct rules, its dream-written work reviews, its recent
+  // dream diaries) — never owner facts — so it is injected for every channel,
+  // matching the IDBots A2A path.
   const selfIdentityText = await readSelfIdentityText(memory);
   const valueBoundaries = await memory.list({
     usageClass: 'value_boundary',
     status: 'created',
     limit: VALUE_BOUNDARIES_MAX_ITEMS,
+  });
+  const workReviews = await memory.list({
+    usageClass: 'work_review',
+    status: 'created',
+    limit: WORK_REVIEWS_MAX_ITEMS,
   });
   const recentSummaries = await dream.listDailySummaries({ limit: RECENT_SUMMARIES_PROMPT_DAYS });
   const experienceXml = buildExperiencePromptBlocksXml({
@@ -138,6 +145,7 @@ export async function buildMemoryBlocksForRequest(
       sessionRefs: summary.sessionRefs,
     })),
     valueBoundaries,
+    workReviews,
   });
 
   // Knowledge hot layer: local (owner) sessions only, matching the IDBots

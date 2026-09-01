@@ -16,6 +16,7 @@ export async function runMetabotWithPayloadFile(
   flag: '--payload-file' | '--request-file' = '--payload-file',
   argsAfterFile: string[] = [],
   run: RunFn = runMetabot,
+  options?: { timeoutMs?: number },
 ): Promise<MetabotCommandResult> {
   const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-payload-'))
   const path = join(dir, 'payload.json')
@@ -23,7 +24,7 @@ export async function runMetabotWithPayloadFile(
   try {
     return await run(
       [...argsBeforeFile, flag, path, ...argsAfterFile],
-      { timeoutMs: CHAIN_TIMEOUT_MS },
+      { timeoutMs: options?.timeoutMs ?? CHAIN_TIMEOUT_MS },
     )
   } finally {
     await unlink(path).catch(() => undefined)

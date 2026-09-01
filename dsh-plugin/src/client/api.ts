@@ -137,6 +137,14 @@ export type DreamRunRow = {
   completedAt?: number | null
 }
 
+/** dream/status payload: run ledger plus the diary/self-identity snapshot. */
+export type DreamStatusPayload = {
+  runs?: DreamRunRow[]
+  summaryCount?: number
+  latestSummaryDate?: string | null
+  hasSelfIdentity?: boolean
+}
+
 export type OwnerIdentityRow = {
   name: string
   path?: string
@@ -505,7 +513,7 @@ export const api = {
     subject: string,
   ): Promise<{ snapshot?: ImpressionSnapshotRow | null; observations?: ImpressionObservationRow[] }> =>
     post('memory/impressions/show', { from, subject }),
-  dreamStatus: async (from: string): Promise<{ runs?: DreamRunRow[] }> => post('dream/status', { from }),
+  dreamStatus: async (from: string): Promise<DreamStatusPayload> => post('dream/status', { from }),
   dreamSummaries: async (from: string, limit = 30): Promise<{ summaries?: DreamSummaryRow[] }> =>
     post('dream/summaries', { from, limit }),
   dreamSelfIdentity: async (from: string): Promise<{ text?: string }> =>

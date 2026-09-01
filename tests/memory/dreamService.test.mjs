@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
 const { createMemoryStore } = require('../../dist/core/memory/memoryStore.js');
 const { createDreamStore } = require('../../dist/core/memory/dreamStore.js');
+const { createExperienceStore } = require('../../dist/core/memory/experienceStore.js');
 const { appendTranscriptTurn } = require('../../dist/core/memory/transcriptStore.js');
 const {
   commitDream,
@@ -254,4 +255,99 @@ test('plan returns prompt for a seeded day; commit without plan still writes', a
   assert.equal(after.runs[0].status, 'completed');
   assert.equal(after.summaryCount, 1);
   assert.equal(after.hasSelfIdentity, true);
+});
+
+async function writeJson(filePath, value) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+// Seed the identity (gates the experience harvest + impression subjects), one
+// in-day seller order, and one rated group task with an in-day chat stream.
+async function seedGroupTaskDay(paths, date) {
+  const { startMs } = getDayBoundsMs(date);
+  const sec = (ms) => Math.floor(ms / 1000);
+  const at = startMs + 3600_000;
+  await writeJson(paths.runtimeStatePath, {
+    identity: { name: 'TestBot', globalMetaId: 'gm-self-bot' },
+    services: [],
+    traces: [],
+    sellerOrders: [{
+      id: 'ord-1',
+      state: 'completed',
+      providerGlobalMetaId: 'gm-self-bot',
+      buyerGlobalMetaId: 'gm-buyer',
+      serviceName: '天气服务',
+      createdAt: at,
+      updatedAt: at + 1000,
+    }],
+  });
+  const grouptaskRoot = path.join(paths.runtimeRoot, 'grouptask');
+  await writeJson(path.join(grouptaskRoot, 'state.json'), {
+    seq: 2,
+    tasks: [{
+      id: 1,
+      groupId: 'grp-task',
+      title: '官网落地页',
+      goal: '做出落地页',
+      status: 'done',
+      chairSlug: 'test-slug',
+      chairGlobalMetaId: 'gm-self-bot',
+      createdBy: 'user',
+      lastProcessedIndex: 2,
+      lastDrivenAt: at,
+      createPinId: null,
+      createdAt: at - 86400_000,
+      updatedAt: at,
+      closedAt: at,
+      rating: 5,
+      ratingComment: '做得漂亮，文案很稳',
+      ratedAt: at,
+      displayName: null,
+      pinned: false,
+      archivedAt: null,
+    }],
+    members: [
+      { id: 1, taskId: 1, slug: 'test-slug', globalMetaId: 'gm-self-bot', role: 'chair', joinedPinId: null, createdAt: at - 86400_000, displayName: null, removedAt: null, removePinId: null, status: 'assigned', statusChangedAt: null },
+      { id: 2, taskId: 1, slug: null, globalMetaId: 'gm-peer-worker', role: 'worker', joinedPinId: null, createdAt: at - 86400_000, displayName: '协作工', removedAt: null, removePinId: null, status: 'done', statusChangedAt: null },
+    ],
+    deliverables: [],
+    transitions: [],
+    statusEvents: [],
+    checkpoints: [],
+    integrityEvents: [],
+    planChanges: [],
+    acceptanceSummaries: [],
+    kv: {},
+  });
+  await writeJson(path.join(grouptaskRoot, 'messages', 'grp-task.json'), {
+    messages: [
+      { index: 0, pinId: 'pin-w0', txId: 'tx-0', senderMetaId: 'meta-boss', senderGlobalMetaId: null, senderName: '主人', senderAvatar: null, content: '开工吧', contentType: 'text', chainTimestamp: sec(at - 86400_000), replyPin: null, mention: [], senderSuspect: false },
+      { index: 1, pinId: 'pin-w1', txId: 'tx-1', senderMetaId: 'meta-peer', senderGlobalMetaId: 'gm-peer-worker', senderName: '协作工', senderAvatar: null, content: '初版落地页完成了', contentType: 'text', chainTimestamp: sec(at), replyPin: null, mention: [], senderSuspect: false },
+      { index: 2, pinId: 'pin-w2', txId: 'tx-2', senderMetaId: 'meta-self', senderGlobalMetaId: 'gm-self-bot', senderName: 'TestBot', senderAvatar: null, content: '收到，我来验收准备', contentType: 'text', chainTimestamp: sec(at + 60_000), replyPin: null, mention: [], senderSuspect: false },
+    ],
+    updatedAt: at,
+  });
+}
+
+test('group-task and order activity feeds the prompt and impression subjects', async () => {
+  const paths = await createTempProfileHome();
+  const date = yesterday();
+  await seedGroupTaskDay(paths, date);
+
+  const plan = await planDream(paths, { date, llm: 'test-llm' });
+  assert.equal(plan.kind, 'prompt');
+  assert.match(plan.user, /## 群任务验收评价/);
+  assert.match(plan.user, /做得漂亮，文案很稳/);
+  assert.match(plan.user, /## 群任务链上群聊/);
+  assert.match(plan.user, /初版落地页完成了/);
+  assert.match(plan.user, /服务订单共 1 笔/);
+
+  // The harvest ran inside planDream: episodes exist and the worker bot shows
+  // up as an impression subject in the prompt.
+  const episodes = await createExperienceStore(paths).listEpisodes({ ownerGlobalMetaId: 'gm-self-bot' });
+  assert.ok(episodes.some((episode) => episode.sourceKey === `grouptask-chat:grp-task:${date}`));
+  assert.ok(episodes.some((episode) => episode.sourceKey === 'order:ord-1'));
+  assert.match(plan.user, /## 以 GlobalMetaID 为锚点的印象候选/);
+  assert.match(plan.user, /subjectGlobalMetaId=gm-peer-worker/);
 });

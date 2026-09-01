@@ -14,12 +14,21 @@ import { runDreamWithLlm } from './memory-routes.js'
 const DEFAULT_TICK_MINUTES = 10
 const LIST_TIMEOUT_MS = 30_000
 
+/** Per-Bot result of one scheduler pass: dreamed dates, a failure, or a skip reason. */
+export interface DreamBotOutcome {
+  slug: string
+  dreamed: string[]
+  error?: string
+  /** Set when the Bot was passed over without attempting a dream. */
+  skipped?: string
+}
+
 export interface DreamSchedulerOptions {
   run?: RunFn
   llm?: LlmStreamLike
   tickMinutes?: number
   /** Test hook: called after each tick with per-bot outcomes. */
-  onTick?: (outcomes: Array<{ slug: string; dreamed: string[]; error?: string }>) => void
+  onTick?: (outcomes: DreamBotOutcome[]) => void
 }
 
 function readPolicyEnabled(data: unknown): boolean {
@@ -31,8 +40,8 @@ function readPolicyEnabled(data: unknown): boolean {
 /** One scheduler pass over every dream-enabled Bot with a configured DSH LLM. */
 export async function runDreamSchedulerTick(
   options: DreamSchedulerOptions & { run: RunFn; llm: LlmStreamLike },
-): Promise<Array<{ slug: string; dreamed: string[]; error?: string }>> {
-  const outcomes: Array<{ slug: string; dreamed: string[]; error?: string }> = []
+): Promise<DreamBotOutcome[]> {
+  const outcomes: DreamBotOutcome[] = []
   const list = await options.run(['bot', 'list'], { timeoutMs: LIST_TIMEOUT_MS })
   const profiles = list.ok && list.data && typeof list.data === 'object'
     ? ((list.data as { profiles?: Array<Record<string, unknown>> }).profiles ?? [])
@@ -40,29 +49,45 @@ export async function runDreamSchedulerTick(
   for (const profile of profiles) {
     const slug = typeof profile.slug === 'string' ? profile.slug : ''
     if (!slug) continue
-    const outcome: { slug: string; dreamed: string[]; error?: string } = { slug, dreamed: [] }
+    const outcome: DreamBotOutcome = { slug, dreamed: [] }
     outcomes.push(outcome)
     try {
       const policy = await options.run(['memory', 'policy', 'get', '--from', slug], { timeoutMs: LIST_TIMEOUT_MS })
-      if (policy.ok && !readPolicyEnabled(policy.data)) continue
+      if (policy.ok && !readPolicyEnabled(policy.data)) {
+        outcome.skipped = 'dream disabled by policy'
+        continue
+      }
       const provider = typeof profile.dshLlmProvider === 'string' ? profile.dshLlmProvider.trim() : ''
       const model = typeof profile.dshLlmModel === 'string' ? profile.dshLlmModel.trim() : ''
-      if (!provider || !model) continue
+      if (!provider || !model) {
+        outcome.skipped = 'no DSH LLM configured on Bot'
+        continue
+      }
+      const fallbackProvider = typeof profile.dshLlmFallbackProvider === 'string' ? profile.dshLlmFallbackProvider.trim() : ''
+      const fallbackModel = typeof profile.dshLlmFallbackModel === 'string' ? profile.dshLlmFallbackModel.trim() : ''
+      const llmConfig = { provider, model, fallbackProvider, fallbackModel }
       const due = await options.run(['dream', 'due', '--from', slug], { timeoutMs: LIST_TIMEOUT_MS })
-      if (!due.ok) continue
+      if (!due.ok) {
+        outcome.error = due.message ?? due.code ?? 'dream due failed'
+        continue
+      }
       const dueData = due.data as { dueDates?: string[]; repairDates?: string[] }
       const dueDates = Array.isArray(dueData.dueDates) ? dueData.dueDates : []
       const repairDates = Array.isArray(dueData.repairDates) ? dueData.repairDates : []
+      // At most one version-repair per pass (IDBots nightly cap).
+      const repairDate = repairDates[0]
+      if (dueDates.length === 0 && !repairDate) {
+        outcome.skipped = 'no due dates'
+        continue
+      }
       for (const date of dueDates) {
-        const result = await runDreamWithLlm({ from: slug, date, provider, model }, options.run, options.llm)
+        const result = await runDreamWithLlm({ from: slug, date, ...llmConfig }, options.run, options.llm)
         if (result.ok) outcome.dreamed.push(date)
         else outcome.error = result.message ?? result.code
       }
-      // At most one version-repair per pass (IDBots nightly cap).
-      const repairDate = repairDates[0]
       if (repairDate) {
         const result = await runDreamWithLlm(
-          { from: slug, date: repairDate, provider, model, isRepair: true },
+          { from: slug, date: repairDate, ...llmConfig, isRepair: true },
           options.run,
           options.llm,
         )
@@ -74,6 +99,19 @@ export async function runDreamSchedulerTick(
     }
   }
   return outcomes
+}
+
+/** Surface one tick's outcomes on the host logger (silent by default otherwise). */
+export function reportDreamSchedulerOutcomes(ctx: HostContext, outcomes: DreamBotOutcome[]): void {
+  for (const outcome of outcomes) {
+    if (outcome.error) {
+      ctx.logger?.warn?.(`[oac-dsh] dream scheduler: ${outcome.slug}: ${outcome.error}`)
+    } else if (outcome.skipped) {
+      ctx.logger?.info?.(`[oac-dsh] dream scheduler: ${outcome.slug} skipped: ${outcome.skipped}`)
+    } else if (outcome.dreamed.length > 0) {
+      ctx.logger?.info?.(`[oac-dsh] dream scheduler: ${outcome.slug} dreamed ${outcome.dreamed.join(', ')}`)
+    }
+  }
 }
 
 /** Mount the scheduler; disposed with the plugin effect. */
@@ -88,7 +126,10 @@ export function applyDreamScheduler(ctx: HostContext, options: DreamSchedulerOpt
     if (running) return
     running = true
     void runDreamSchedulerTick({ run, llm })
-      .then((outcomes) => options.onTick?.(outcomes))
+      .then((outcomes) => {
+        reportDreamSchedulerOutcomes(ctx, outcomes)
+        options.onTick?.(outcomes)
+      })
       .catch((error) => {
         ctx.logger?.warn?.(`[oac-dsh] dream scheduler tick failed: ${error instanceof Error ? error.message : String(error)}`)
       })

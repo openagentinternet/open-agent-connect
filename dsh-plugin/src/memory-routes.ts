@@ -60,7 +60,12 @@ function withFrom(args: string[], payload: unknown): string[] | MetabotCommandRe
   return [...args, '--from', from]
 }
 
-/** dream plan → LLM → (fragments) → commit, with one identity-expansion retry. */
+/**
+ * dream plan → LLM → (fragments) → commit, with one identity-expansion retry.
+ * When the primary provider/model attempt fails and the Bot profile carries a
+ * DSH fallback pair, the whole attempt is retried once on the fallback
+ * (IDBots `runWithLlmFallback` parity; `dream commit` is idempotent per date).
+ */
 export async function runDreamWithLlm(
   payload: unknown,
   run: RunFn,
@@ -75,103 +80,147 @@ export async function runDreamWithLlm(
   }
   let provider = readTrimmed(payload, 'provider')
   let model = readTrimmed(payload, 'model')
-  if (!provider || !model) {
+  let fallbackProvider = readTrimmed(payload, 'fallbackProvider')
+  let fallbackModel = readTrimmed(payload, 'fallbackModel')
+  // One profile fetch covers both pairs: the fallback pair decides whether a
+  // retry is even possible, so it must be known before the first attempt runs.
+  if (!provider || !model || !fallbackProvider || !fallbackModel) {
     const show = await run(['bot', 'show', '--from', from], { timeoutMs: LIST_TIMEOUT_MS })
     const profile = show.ok && show.data && typeof show.data === 'object'
       ? (show.data as { profile?: Record<string, unknown> }).profile
       : undefined
     provider = provider || readTrimmed({ dshLlmProvider: profile?.dshLlmProvider }, 'dshLlmProvider')
     model = model || readTrimmed({ dshLlmModel: profile?.dshLlmModel }, 'dshLlmModel')
+    fallbackProvider = fallbackProvider
+      || readTrimmed({ dshLlmFallbackProvider: profile?.dshLlmFallbackProvider }, 'dshLlmFallbackProvider')
+    fallbackModel = fallbackModel
+      || readTrimmed({ dshLlmFallbackModel: profile?.dshLlmFallbackModel }, 'dshLlmFallbackModel')
   }
   if (!provider || !model) {
     return failure('missing_llm', 'No DSH LLM provider/model on this Bot; pass provider+model or set them on the Bot profile.')
   }
-  const limits = body.limits && typeof body.limits === 'object' && !Array.isArray(body.limits)
-    ? body.limits as Record<string, unknown>
-    : undefined
-  const llmTag = `${provider}/${model}`
+  const attempt = await dreamAttempt(body, from, date, provider, model, run, llm)
+  if (attempt.ok) return attempt
+  if (!fallbackProvider || !fallbackModel || (fallbackProvider === provider && fallbackModel === model)) {
+    return attempt
+  }
+  const retried = await dreamAttempt(body, from, date, fallbackProvider, fallbackModel, run, llm)
+  if (retried.ok) {
+    return {
+      ...retried,
+      data: {
+        ...payloadObject(retried.data),
+        fallbackUsed: true,
+        llm: `${fallbackProvider}/${fallbackModel}`,
+      },
+    }
+  }
+  return retried
+}
 
-  const plan = await runMetabotWithPayloadFile(
-    ['dream', 'plan', '--from', from, '--date', date],
-    { llm: llmTag, ...(limits ? { limits } : {}) },
-    '--payload-file',
-    [],
-    run,
-  )
-  if (!plan.ok) return plan
-  const planData = plan.data as {
-    kind?: string
-    system?: string
-    user?: string
-    maxOutputTokens?: number
-    fragments?: Array<{
-      fragmentKey: string
-      system: string
-      user: string
+/** One full plan → LLM → commit pass; LLM stream throws become failure results. */
+async function dreamAttempt(
+  body: Record<string, unknown>,
+  from: string,
+  date: string,
+  provider: string,
+  model: string,
+  run: RunFn,
+  llm: LlmStreamLike,
+): Promise<MetabotCommandResult> {
+  try {
+    const limits = body.limits && typeof body.limits === 'object' && !Array.isArray(body.limits)
+      ? body.limits as Record<string, unknown>
+      : undefined
+    const llmTag = `${provider}/${model}`
+
+    const plan = await runMetabotWithPayloadFile(
+      ['dream', 'plan', '--from', from, '--date', date],
+      { llm: llmTag, ...(limits ? { limits } : {}) },
+      '--payload-file',
+      [],
+      run,
+      { timeoutMs: DREAM_CLI_TIMEOUT_MS },
+    )
+    if (!plan.ok) return plan
+    const planData = plan.data as {
+      kind?: string
+      system?: string
+      user?: string
       maxOutputTokens?: number
-    }>
-  }
-  if (planData.kind === 'empty') {
-    return { ok: true, state: 'success', data: { kind: 'empty', date } }
-  }
+      fragments?: Array<{
+        fragmentKey: string
+        system: string
+        user: string
+        maxOutputTokens?: number
+      }>
+    }
+    if (planData.kind === 'empty') {
+      return { ok: true, state: 'success', data: { kind: 'empty', date } }
+    }
 
-  let prompt: { system: string; user: string; maxOutputTokens?: number }
-  if (planData.kind === 'fragments') {
-    const fragmentOutputs: Record<string, string> = {}
-    for (const fragment of planData.fragments ?? []) {
-      fragmentOutputs[fragment.fragmentKey] = await generateLlmText(llm, {
+    let prompt: { system: string; user: string; maxOutputTokens?: number }
+    if (planData.kind === 'fragments') {
+      const fragmentOutputs: Record<string, string> = {}
+      for (const fragment of planData.fragments ?? []) {
+        fragmentOutputs[fragment.fragmentKey] = await generateLlmText(llm, {
+          provider,
+          model,
+          system: fragment.system,
+          user: fragment.user,
+          ...(fragment.maxOutputTokens !== undefined ? { maxTokens: fragment.maxOutputTokens } : {}),
+        })
+      }
+      const synthesis = await runMetabotWithPayloadFile(
+        ['dream', 'synthesize', '--from', from],
+        { date, llm: llmTag, fragmentOutputs, ...(limits ? { limits } : {}) },
+        '--payload-file',
+        [],
+        run,
+        { timeoutMs: DREAM_CLI_TIMEOUT_MS },
+      )
+      if (!synthesis.ok) return synthesis
+      prompt = synthesis.data as { system: string; user: string; maxOutputTokens?: number }
+    } else if (planData.kind === 'prompt' && planData.system && planData.user) {
+      prompt = { system: planData.system, user: planData.user, maxOutputTokens: planData.maxOutputTokens }
+    } else {
+      return failure('dream_plan_invalid', 'dream plan returned an unexpected shape')
+    }
+
+    const commitOnce = async (userText: string): Promise<MetabotCommandResult> => {
+      const outputText = await generateLlmText(llm, {
         provider,
         model,
-        system: fragment.system,
-        user: fragment.user,
-        ...(fragment.maxOutputTokens !== undefined ? { maxTokens: fragment.maxOutputTokens } : {}),
+        system: prompt.system,
+        user: userText,
+        ...(prompt.maxOutputTokens !== undefined ? { maxTokens: prompt.maxOutputTokens } : {}),
       })
+      return runMetabotWithPayloadFile(
+        ['dream', 'commit', '--from', from],
+        { date, outputText, llm: llmTag, ...(body.isRepair === true ? { isRepair: true } : {}) },
+        '--payload-file',
+        [],
+        run,
+        { timeoutMs: DREAM_CLI_TIMEOUT_MS },
+      )
     }
-    const synthesis = await runMetabotWithPayloadFile(
-      ['dream', 'synthesize', '--from', from],
-      { date, llm: llmTag, fragmentOutputs, ...(limits ? { limits } : {}) },
-      '--payload-file',
-      [],
-      run,
-    )
-    if (!synthesis.ok) return synthesis
-    prompt = synthesis.data as { system: string; user: string; maxOutputTokens?: number }
-  } else if (planData.kind === 'prompt' && planData.system && planData.user) {
-    prompt = { system: planData.system, user: planData.user, maxOutputTokens: planData.maxOutputTokens }
-  } else {
-    return failure('dream_plan_invalid', 'dream plan returned an unexpected shape')
-  }
 
-  const commitOnce = async (userText: string): Promise<MetabotCommandResult> => {
-    const outputText = await generateLlmText(llm, {
-      provider,
-      model,
-      system: prompt.system,
-      user: userText,
-      ...(prompt.maxOutputTokens !== undefined ? { maxTokens: prompt.maxOutputTokens } : {}),
-    })
-    return runMetabotWithPayloadFile(
-      ['dream', 'commit', '--from', from],
-      { date, outputText, llm: llmTag, ...(body.isRepair === true ? { isRepair: true } : {}) },
-      '--payload-file',
-      [],
-      run,
-    )
-  }
-
-  let commit = await commitOnce(prompt.user)
-  if (!commit.ok) return commit
-  let commitData = commit.data as { identityRetryHint?: string }
-  if (typeof commitData.identityRetryHint === 'string' && commitData.identityRetryHint) {
-    // Self-identity expansion retry: commit is idempotent per date.
-    commit = await commitOnce(`${prompt.user}\n\n${commitData.identityRetryHint}`)
+    let commit = await commitOnce(prompt.user)
     if (!commit.ok) return commit
-    commitData = commit.data as { identityRetryHint?: string }
-  }
-  return {
-    ok: true,
-    state: 'success',
-    data: { kind: 'completed', date, commit: commitData },
+    let commitData = commit.data as { identityRetryHint?: string }
+    if (typeof commitData.identityRetryHint === 'string' && commitData.identityRetryHint) {
+      // Self-identity expansion retry: commit is idempotent per date.
+      commit = await commitOnce(`${prompt.user}\n\n${commitData.identityRetryHint}`)
+      if (!commit.ok) return commit
+      commitData = commit.data as { identityRetryHint?: string }
+    }
+    return {
+      ok: true,
+      state: 'success',
+      data: { kind: 'completed', date, commit: commitData },
+    }
+  } catch (error) {
+    return failure('llm_error', error instanceof Error ? error.message : String(error))
   }
 }
 

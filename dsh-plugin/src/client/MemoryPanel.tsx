@@ -10,7 +10,7 @@ import {
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   BotRow,
-  DreamRunRow,
+  DreamStatusPayload,
   DreamSummaryRow,
   ImpressionObservationRow,
   ImpressionSnapshotRow,
@@ -43,7 +43,7 @@ export interface MemoryPanelInjected {
     subject: string,
   ) => Promise<{ snapshot?: ImpressionSnapshotRow | null; observations?: ImpressionObservationRow[] }>
   dreamSummaries: (from: string, limit?: number) => Promise<{ summaries?: DreamSummaryRow[] }>
-  dreamStatus: (from: string) => Promise<{ runs?: DreamRunRow[] }>
+  dreamStatus: (from: string) => Promise<DreamStatusPayload>
   dreamSelfIdentity: (from: string) => Promise<{ text?: string }>
   dreamRun: (from: string, date: string) => Promise<unknown>
 }
@@ -69,6 +69,17 @@ const USAGE_CLASS_LABEL_KEY: Record<string, MemoryLocaleKey> = {
 function usageClassLabel(t: Translate, usageClass: string): string {
   const key = USAGE_CLASS_LABEL_KEY[usageClass]
   return key ? t(key) : usageClass
+}
+
+const DREAM_RUN_STATUS_LABEL_KEY: Record<string, MemoryLocaleKey> = {
+  completed: 'dreamRunStatusCompleted',
+  failed: 'dreamRunStatusFailed',
+  running: 'dreamRunStatusRunning',
+}
+
+function dreamRunStatusLabel(t: Translate, status: string): string {
+  const key = DREAM_RUN_STATUS_LABEL_KEY[status]
+  return key ? t(key) : status
 }
 
 function yesterdayLocal(): string {
@@ -161,7 +172,14 @@ export function MemoryPanel(injected: MemoryPanelInjected & { close: () => void;
               <FactsTab key={`f-${slug}-${tick}`} from={slug} t={t} injected={injected} />
             ) : null}
             {tab === 'dream' ? (
-              <DreamTab key={`d-${slug}-${tick}`} from={slug} t={t} injected={injected} onDone={reload} />
+              <DreamTab
+                key={`d-${slug}-${tick}`}
+                from={slug}
+                t={t}
+                injected={injected}
+                onDone={reload}
+                bot={(bots ?? []).find((bot) => bot.slug === slug)}
+              />
             ) : null}
           </div>
         </>
@@ -707,14 +725,15 @@ function FactsTab({ from, t, injected }: {
   )
 }
 
-function DreamTab({ from, t, injected, onDone }: {
+function DreamTab({ from, t, injected, onDone, bot }: {
   from: string
   t: Translate
   injected: MemoryPanelInjected
   onDone: () => void
+  bot?: BotRow
 }): ReactNode {
   const [summaries, setSummaries] = useState<DreamSummaryRow[] | null>(null)
-  const [runs, setRuns] = useState<DreamRunRow[]>([])
+  const [status, setStatus] = useState<DreamStatusPayload | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [runDate, setRunDate] = useState(yesterdayLocal())
   const [running, setRunning] = useState(false)
@@ -729,15 +748,33 @@ function DreamTab({ from, t, injected, onDone }: {
     ]).then(([summariesResult, statusResult]) => {
       if (!current) return
       setSummaries(summariesResult.summaries ?? [])
-      setRuns(statusResult.runs ?? [])
+      setStatus(statusResult)
     })
     return () => { current = false }
   }, [from, tick, injected])
 
-  const failedRuns = useMemo(() => runs.filter((run) => run.status === 'failed'), [runs])
+  const runs = useMemo(() => status?.runs ?? [], [status])
+  const summaryDates = useMemo(
+    () => new Set((summaries ?? []).map((summary) => summary.summaryDate)),
+    [summaries],
+  )
+  const statusLine = useMemo(() => {
+    if (!status) return ''
+    const summaryCount = status.summaryCount ?? 0
+    return [
+      t('dreamStatusSummary', { count: summaryCount }).replace('{count}', String(summaryCount)),
+      status.latestSummaryDate
+        ? t('dreamStatusLatest', { date: status.latestSummaryDate }).replace('{date}', status.latestSummaryDate)
+        : null,
+      status.hasSelfIdentity ? t('dreamStatusIdentity') : t('dreamStatusNoIdentity'),
+    ].filter((part): part is string => Boolean(part)).join(' · ')
+  }, [status, t])
 
   return (
     <div className="oac-card-list">
+      {bot && !(bot.dshLlmProvider && bot.dshLlmModel) ? (
+        <p className="oac-note warn">{t('dreamNoLlmHint')}</p>
+      ) : null}
       <div className="oac-row">
         <label className="oac-field oac-memory-dream-date">
           <span className="oac-field-label">{t('dreamRunDate')}</span>
@@ -770,12 +807,16 @@ function DreamTab({ from, t, injected, onDone }: {
       </div>
       {runNote === 'done' ? <span className="oac-note success">{t('dreamRunDone')}</span> : null}
       {runNote === 'failed' ? <span className="oac-note error">{t('dreamRunFailed')}</span> : null}
-      {failedRuns.length > 0 ? (
+      {statusLine ? <p className="oac-hint">{statusLine}</p> : null}
+      {runs.length > 0 ? (
         <div className="oac-card">
           <span className="oac-section-title">{t('dreamRuns')}</span>
-          {failedRuns.slice(0, 5).map((run) => (
-            <p className="oac-note error" key={run.dreamDate}>
-              {run.dreamDate} · {t('dreamRunStatus')}: {run.status}{run.error ? ` · ${run.error}` : ''}
+          {runs.slice(0, 10).map((run) => (
+            <p className={`oac-note${run.status === 'failed' ? ' error' : ''}`} key={run.dreamDate}>
+              {run.dreamDate} · {dreamRunStatusLabel(t, run.status)}
+              {` · ${t('dreamRunAttempts', { count: run.attemptCount }).replace('{count}', String(run.attemptCount))}`}
+              {run.status === 'completed' && !summaryDates.has(run.dreamDate) ? ` · ${t('dreamQuietDay')}` : ''}
+              {run.status === 'failed' && run.error ? ` · ${run.error}` : ''}
             </p>
           ))}
         </div>

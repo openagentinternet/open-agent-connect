@@ -160,3 +160,158 @@ test('unknown methods fall through', async () => {
   const result = await plugin.dispatchMemoryRoutes('bots/list', {})
   assert.equal(result, undefined)
 })
+
+test('dream/run retries a failed attempt on the fallback LLM pair', async () => {
+  const calls = []
+  const llmCalls = []
+  const run = async (args) => {
+    calls.push(args)
+    const verb = args[1]
+    if (verb === 'plan') return { ok: true, state: 'success', data: { kind: 'prompt', system: 'sys', user: 'usr' } }
+    return { ok: true, state: 'success', data: { ok: true } }
+  }
+  const llm = {
+    stream: (options) => {
+      llmCalls.push(options)
+      if (options.provider === 'deepseek') {
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield { type: 'finish', reason: { kind: 'error', failure: { message: 'primary down' } } }
+          },
+        }
+      }
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'text-delta', index: 0, text: '{"daily_summary":"ok"}' }
+        },
+      }
+    },
+  }
+  const result = await plugin.dispatchMemoryRoutes('dream/run', {
+    from: 'alice',
+    date: '2026-08-19',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    fallbackProvider: 'ollama',
+    fallbackModel: 'qwen3',
+  }, { run, llm })
+  assert.equal(result.ok, true)
+  assert.equal(result.data.kind, 'completed')
+  assert.equal(result.data.fallbackUsed, true)
+  assert.equal(result.data.llm, 'ollama/qwen3')
+  assert.equal(llmCalls.length, 2)
+  assert.equal(llmCalls[0].provider, 'deepseek')
+  assert.equal(llmCalls[1].provider, 'ollama')
+  // Both pairs came from the payload, so no profile fetch was needed.
+  assert.ok(calls.every((args) => args[1] !== 'show'))
+})
+
+test('dream/run learns the fallback pair from one bot show fetch', async () => {
+  let botShowCalls = 0
+  const llmCalls = []
+  const run = async (args) => {
+    const verb = args[1]
+    if (verb === 'show') {
+      botShowCalls += 1
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          profile: {
+            dshLlmProvider: 'deepseek',
+            dshLlmModel: 'deepseek-v4-flash',
+            dshLlmFallbackProvider: 'ollama',
+            dshLlmFallbackModel: 'qwen3',
+          },
+        },
+      }
+    }
+    if (verb === 'plan') return { ok: true, state: 'success', data: { kind: 'prompt', system: 'sys', user: 'usr' } }
+    return { ok: true, state: 'success', data: { ok: true } }
+  }
+  const llm = {
+    stream: (options) => {
+      llmCalls.push(options)
+      if (options.provider === 'deepseek') {
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield { type: 'finish', reason: { kind: 'error', failure: { message: 'primary down' } } }
+          },
+        }
+      }
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'text-delta', index: 0, text: '{"daily_summary":"ok"}' }
+        },
+      }
+    },
+  }
+  const result = await plugin.dispatchMemoryRoutes('dream/run', { from: 'alice', date: '2026-08-19' }, { run, llm })
+  assert.equal(result.ok, true)
+  assert.equal(result.data.fallbackUsed, true)
+  assert.equal(botShowCalls, 1)
+  assert.deepEqual(llmCalls.map((call) => call.provider), ['deepseek', 'ollama'])
+})
+
+test('dream/run surfaces the primary failure when no fallback pair exists', async () => {
+  const run = async (args) => {
+    const verb = args[1]
+    if (verb === 'show') {
+      return { ok: true, state: 'success', data: { profile: { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-v4-flash' } } }
+    }
+    if (verb === 'plan') return { ok: true, state: 'success', data: { kind: 'prompt', system: 'sys', user: 'usr' } }
+    return { ok: true, state: 'success', data: { ok: true } }
+  }
+  const llm = {
+    stream: () => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'finish', reason: { kind: 'error', failure: { message: 'primary down' } } }
+      },
+    }),
+  }
+  const result = await plugin.dispatchMemoryRoutes('dream/run', { from: 'alice', date: '2026-08-19' }, { run, llm })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'llm_error')
+  assert.equal(result.message, 'primary down')
+})
+
+test('dream/run passes the 120s dream timeout to plan, synthesize, and commit', async () => {
+  const seen = []
+  const run = async (args, options) => {
+    seen.push({ args, options })
+    const verb = args[1]
+    if (verb === 'plan') {
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          kind: 'fragments',
+          fragments: [{ fragmentKey: 'session:s1:0', system: 's', user: 'u' }],
+        },
+      }
+    }
+    if (verb === 'synthesize') return { ok: true, state: 'success', data: { kind: 'prompt', system: 'sys', user: 'usr' } }
+    return { ok: true, state: 'success', data: { ok: true } }
+  }
+  const llm = {
+    stream: () => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'text-delta', index: 0, text: '{"daily_summary":"x"}' }
+      },
+    }),
+  }
+  const result = await plugin.dispatchMemoryRoutes('dream/run', {
+    from: 'alice',
+    date: '2026-08-19',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    fallbackProvider: 'ollama',
+    fallbackModel: 'qwen3',
+  }, { run, llm })
+  assert.equal(result.ok, true)
+  for (const verb of ['plan', 'synthesize', 'commit']) {
+    const call = seen.find((entry) => entry.args[1] === verb)
+    assert.ok(call, `expected a ${verb} call`)
+    assert.equal(call.options.timeoutMs, 120_000)
+  }
+})
