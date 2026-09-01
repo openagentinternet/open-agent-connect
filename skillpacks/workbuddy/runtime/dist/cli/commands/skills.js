@@ -56,6 +56,25 @@ async function runSkillsCommand(args, context) {
             noRebind: hasFlag(args, '--no-rebind'),
         });
     }
+    if (subcommand === 'publish') {
+        const handler = context.dependencies.skills?.publish;
+        if (!handler) {
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Skills publish handler is not configured.');
+        }
+        const dir = (0, helpers_1.readFlagValue)(args, '--dir');
+        if (!dir) {
+            return (0, commandResult_1.commandFailed)('invalid_argument', 'Pass --dir <skill directory> — the directory whose root (or single subdirectory) carries SKILL.md.');
+        }
+        return handler({
+            skillDir: dir,
+            ...((0, helpers_1.readFlagValue)(args, '--name') ? { name: (0, helpers_1.readFlagValue)(args, '--name') } : {}),
+            ...((0, helpers_1.readFlagValue)(args, '--skill-version') ? { version: (0, helpers_1.readFlagValue)(args, '--skill-version') } : {}),
+            ...((0, helpers_1.readFlagValue)(args, '--description') ? { description: (0, helpers_1.readFlagValue)(args, '--description') } : {}),
+            ...((0, helpers_1.readFlagValue)(args, '--network') ? { network: (0, helpers_1.readFlagValue)(args, '--network') } : {}),
+            ...((0, helpers_1.readFlagValue)(args, '--from') ? { from: (0, helpers_1.readFlagValue)(args, '--from') } : {}),
+            confirm: hasFlag(args, '--confirm'),
+        });
+    }
     if (subcommand === 'list') {
         const handler = context.dependencies.skills?.list;
         if (!handler) {

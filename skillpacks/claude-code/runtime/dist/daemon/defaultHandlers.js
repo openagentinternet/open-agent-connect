@@ -81,6 +81,7 @@ const localCache_1 = require("../core/metaapp/localCache");
 const ownerService_1 = require("../core/metaapp/ownerService");
 const manOwnerList_1 = require("../core/metaapp/manOwnerList");
 const publish_2 = require("../core/metaapp/publish");
+const skillPublish_1 = require("../core/skills/skillPublish");
 const share_1 = require("../core/metaapp/share");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
 const chainDirectoryReader_1 = require("../core/discovery/chainDirectoryReader");
@@ -10687,6 +10688,59 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 catch (error) {
                     return (0, commandResult_1.commandFailed)('chain_write_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+        },
+        skills: {
+            publish: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before publishing skills.');
+                }
+                try {
+                    return await (0, skillPublish_1.publishSkill)({
+                        skillDir: typeof rawInput.skillDir === 'string' ? rawInput.skillDir : '',
+                        ...(typeof rawInput.name === 'string' && rawInput.name ? { name: rawInput.name } : {}),
+                        ...(typeof rawInput.version === 'string' && rawInput.version ? { version: rawInput.version } : {}),
+                        ...(typeof rawInput.description === 'string' && rawInput.description ? { description: rawInput.description } : {}),
+                        ...(typeof rawInput.network === 'string' && rawInput.network ? { network: rawInput.network } : {}),
+                        confirm: rawInput.confirm === true,
+                    }, {
+                        uploadFile: async (uploadInput) => {
+                            const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
+                            const uploaded = await uploadLargeFile({
+                                filePath: uploadInput.filePath,
+                                contentType: uploadInput.contentType,
+                                network,
+                                signer: actor.signer,
+                                largeUploader: providerLargeFileUploader,
+                                mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(actor.homeDir, network),
+                            });
+                            return uploaded;
+                        },
+                        writeChain: async (writeInput) => {
+                            const network = await resolveFileUploadNetworkForHome(writeInput.network, actor.homeDir);
+                            const written = await actor.signer.writePin({
+                                operation: typeof writeInput.operation === 'string' ? writeInput.operation : undefined,
+                                path: typeof writeInput.path === 'string' ? writeInput.path : undefined,
+                                contentType: typeof writeInput.contentType === 'string' ? writeInput.contentType : undefined,
+                                payload: typeof writeInput.payload === 'string' ? writeInput.payload : undefined,
+                                network,
+                            });
+                            return written;
+                        },
+                    });
+                }
+                catch (error) {
+                    if (error instanceof skillPublish_1.SkillPublishError) {
+                        return (0, commandResult_1.commandFailed)(error.code, error.message);
+                    }
+                    const data = readLargeFileUploadFailureData(error);
+                    return (0, commandResult_1.commandFailed)('skill_publish_failed', error instanceof Error ? error.message : String(error), data ? { data } : undefined);
                 }
             },
         },

@@ -36,6 +36,9 @@ export interface MetabotDaemonHttpHandlers {
     simplenote?: {
         post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    skills?: {
+        publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    };
     metaapp?: {
         preview?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         publish?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

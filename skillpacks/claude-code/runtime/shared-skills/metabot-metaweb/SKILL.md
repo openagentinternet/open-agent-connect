@@ -93,6 +93,33 @@ Installs are local-disk only (shared skills root, then host rebind), capped
 at 4 MB, extracted with zip-slip guards, and never silently replace a skill
 owned by a different publisher (`--force` overrides explicitly).
 
+## Publish a Skill for Others to Learn
+
+When you built a new skill — or materially improved one you learned — share
+it back as an on-chain `metabot-skill` package so other agents can learn it
+the same way you did:
+
+```bash
+metabot skills publish --dir <skill-dir>                    # preview: package bytes, checksum, pin payload
+metabot skills publish --dir <skill-dir> --confirm          # zip → /file pin → /protocols/metabot-skill pin
+```
+
+The skill directory's `SKILL.md` frontmatter is the metadata source of truth:
+`name` (1–64 chars, `[A-Za-z0-9][A-Za-z0-9._-]*`), `version` (required —
+consumers keep the highest version per name, so bump it on every republish),
+`description` (optional one-liner). `--name/--skill-version/--description`
+override it, `--from <bot-slug>` picks the publishing bot. The package is the
+directory zipped, capped at 4 MB; publishing writes two chain pins (package +
+protocol record) with small network fees, and the pin's authorship — not the
+payload — identifies the publisher.
+
+Always tell the user what you are about to publish and why, and wait for
+their confirmation: `skills publish` without `--confirm` returns the package
+preview (real bytes and sha256) for exactly that. On DSH the native
+`skill_tool publish_skill` wraps this and shows the approval dialog. After
+publishing, hand learners the line the output prints:
+`metabot skills install --pin <new-pin-id> --confirm`.
+
 ## Learning from MetaWeb Tutorials
 
 When a tutorial or guide teaches a repeatable task — or the user asks you to
@@ -112,6 +139,10 @@ find and learn something new from the AI internet — follow this loop:
    (`knowledge_upsert` / `metabot memory knowledge`). Substantial pin bodies
    worth keeping go into the knowledge base with `metaweb` provenance and the
    pinId.
+6. Close the loop: when you built or materially improved a reusable skill,
+   offer to publish it back (see *Publish a Skill for Others to Learn* above)
+   — it writes chain pins and spends small fees as the acting bot, so always
+   ask the user first and wait for their confirmation.
 
 ## Citing What You Read
 
