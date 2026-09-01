@@ -17,6 +17,7 @@ import { handleIdentityRoutes } from './routes/identity';
 import { handleNetworkRoutes } from './routes/network';
 import { handleProviderRoutes } from './routes/provider';
 import { handleMetaAppRoutes } from './routes/metaapp';
+import { handleSkillRoutes } from './routes/skills';
 import { handleServicesRoutes } from './routes/services';
 import { handleTraceRoutes } from './routes/trace';
 import { handleUiRoutes } from './routes/ui';
@@ -42,6 +43,7 @@ const ROUTES: RouteHandler[] = [
   handleNetworkRoutes,
   handleProviderRoutes,
   handleMetaAppRoutes,
+  handleSkillRoutes,
   handleServicesRoutes,
   handleTraceRoutes,
   handleBrowserRoutes,

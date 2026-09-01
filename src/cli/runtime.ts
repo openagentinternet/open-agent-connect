@@ -2975,6 +2975,28 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     }
   }
 
+  /**
+   * `metabot skills publish` — package a local skill directory as a
+   * metabot-skill zip and publish it on-chain. The wallet lives in the daemon,
+   * so both the preview and the confirmed publish ride
+   * `POST /api/skills/publish` with the selected actor's `from` slug.
+   */
+  async function runSkillsPublish(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
+    const skillDir = normalizeEnvText(typeof input.skillDir === 'string' ? input.skillDir : undefined);
+    if (!skillDir) {
+      return commandFailed('invalid_argument', 'Pass --dir <skill directory> (its root, or its single subdirectory, must carry SKILL.md).');
+    }
+    return requestJsonForSelectedActor(
+      'POST',
+      '/api/skills/publish',
+      typeof input.from === 'string' ? input.from : undefined,
+      {
+        ...input,
+        skillDir: resolveRuntimeInputPath(context, skillDir),
+      },
+    );
+  }
+
   async function runMetaIdSearch(input: Record<string, unknown>): Promise<MetabotCommandResult<unknown>> {
     try {
       const [page, ownGlobalMetaIds, daemonBaseUrl] = await Promise.all([
@@ -4281,6 +4303,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return commandSuccess(rendered);
       },
       install: async (input) => runSkillsInstall(input),
+      publish: async (input) => runSkillsPublish(input),
       list: async () => runSkillsList(),
       read: async (input) => runSkillsRead(input),
       uninstall: async (input) => runSkillsUninstall(input),

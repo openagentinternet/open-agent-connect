@@ -250,6 +250,12 @@ import {
   type ChainLikeResult,
   type UploadLikeResult,
 } from '../core/metaapp/publish';
+import {
+  publishSkill,
+  SkillPublishError,
+  type SkillPublishChainResult,
+  type SkillPublishUploadResult,
+} from '../core/skills/skillPublish';
 import { buildMetaAppCanonicalUrl } from '../core/metaapp/share';
 import type { MetaAppGalleryRecord } from '../core/metaapp/types';
 import { runBootstrapFlow } from '../core/bootstrap/bootstrapFlow';
@@ -12813,6 +12819,66 @@ export function createDefaultMetabotDaemonHandlers(input: {
           return commandFailed(
             'chain_write_failed',
             error instanceof Error ? error.message : String(error)
+          );
+        }
+      },
+    },
+    skills: {
+      publish: async (rawInput) => {
+        const actor = await resolveActorWriteContext(rawInput.from);
+        if ('failure' in actor) {
+          return actor.failure;
+        }
+        const state = await actor.runtimeStateStore.readState();
+        if (!state.identity) {
+          return commandFailed('identity_missing', 'Create a local MetaBot identity before publishing skills.');
+        }
+
+        try {
+          return await publishSkill(
+            {
+              skillDir: typeof rawInput.skillDir === 'string' ? rawInput.skillDir : '',
+              ...(typeof rawInput.name === 'string' && rawInput.name ? { name: rawInput.name } : {}),
+              ...(typeof rawInput.version === 'string' && rawInput.version ? { version: rawInput.version } : {}),
+              ...(typeof rawInput.description === 'string' && rawInput.description ? { description: rawInput.description } : {}),
+              ...(typeof rawInput.network === 'string' && rawInput.network ? { network: rawInput.network } : {}),
+              confirm: rawInput.confirm === true,
+            },
+            {
+              uploadFile: async (uploadInput) => {
+                const network = await resolveFileUploadNetworkForHome(uploadInput.network, actor.homeDir);
+                const uploaded = await uploadLargeFile({
+                  filePath: uploadInput.filePath,
+                  contentType: uploadInput.contentType,
+                  network,
+                  signer: actor.signer,
+                  largeUploader: providerLargeFileUploader,
+                  mvcSponsorClient: await resolveMvcSponsorUploadClientForHome(actor.homeDir, network),
+                });
+                return uploaded as unknown as SkillPublishUploadResult;
+              },
+              writeChain: async (writeInput) => {
+                const network = await resolveFileUploadNetworkForHome(writeInput.network, actor.homeDir);
+                const written = await actor.signer.writePin({
+                  operation: typeof writeInput.operation === 'string' ? writeInput.operation : undefined,
+                  path: typeof writeInput.path === 'string' ? writeInput.path : undefined,
+                  contentType: typeof writeInput.contentType === 'string' ? writeInput.contentType : undefined,
+                  payload: typeof writeInput.payload === 'string' ? writeInput.payload : undefined,
+                  network,
+                });
+                return written as unknown as SkillPublishChainResult;
+              },
+            },
+          );
+        } catch (error) {
+          if (error instanceof SkillPublishError) {
+            return commandFailed(error.code, error.message);
+          }
+          const data = readLargeFileUploadFailureData(error);
+          return commandFailed(
+            'skill_publish_failed',
+            error instanceof Error ? error.message : String(error),
+            data ? { data } : undefined,
           );
         }
       },

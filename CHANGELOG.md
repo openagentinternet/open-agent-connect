@@ -9,6 +9,18 @@ tags for releases.
 
 ### Added
 
+- Added on-chain skill publishing, completing the learn/publish loop: core
+  `skillPublish` packages a local skill directory (SKILL.md frontmatter is the
+  metadata source of truth; `normalizeSkillName` enforced, `version` required,
+  4 MB cap), uploads it as a `/file` pin, and writes the
+  `/protocols/metabot-skill` protocol pin — stricter than the IDBots
+  `metabot-post-skill` reference wherever the install side depends on it.
+  New `metabot skills publish --dir <skill-dir> [--name --skill-version
+  --description --network] [--from <bot-slug>] [--confirm]` rides the new
+  `POST /api/skills/publish` daemon route (wallet stays in the daemon); on DSH
+  `skill_tool` gains an approval-gated `publish_skill` action and the
+  learning-loop prompt closes the loop by offering to publish built or
+  improved skills back. Skillpacks regenerated for all hosts.
 - Added `metabot metaid search` and `metabot metaid detail` backed by the
   metaso-p2p MetaID aggregation API, with trimmed results, local `isOwn`
   marking, and clickable `localUiUrl`/`avatarLocalUiUrl` (plus

@@ -74,6 +74,29 @@ export async function runSkillsCommand(args: string[], context: CliRuntimeContex
     });
   }
 
+  if (subcommand === 'publish') {
+    const handler = context.dependencies.skills?.publish;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Skills publish handler is not configured.');
+    }
+    const dir = readFlagValue(args, '--dir');
+    if (!dir) {
+      return commandFailed(
+        'invalid_argument',
+        'Pass --dir <skill directory> — the directory whose root (or single subdirectory) carries SKILL.md.',
+      );
+    }
+    return handler({
+      skillDir: dir,
+      ...(readFlagValue(args, '--name') ? { name: readFlagValue(args, '--name') } : {}),
+      ...(readFlagValue(args, '--skill-version') ? { version: readFlagValue(args, '--skill-version') } : {}),
+      ...(readFlagValue(args, '--description') ? { description: readFlagValue(args, '--description') } : {}),
+      ...(readFlagValue(args, '--network') ? { network: readFlagValue(args, '--network') } : {}),
+      ...(readFlagValue(args, '--from') ? { from: readFlagValue(args, '--from') } : {}),
+      confirm: hasFlag(args, '--confirm'),
+    });
+  }
+
   if (subcommand === 'list') {
     const handler = context.dependencies.skills?.list;
     if (!handler) {

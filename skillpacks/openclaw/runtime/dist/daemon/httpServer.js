@@ -23,6 +23,7 @@ const identity_1 = require("./routes/identity");
 const network_1 = require("./routes/network");
 const provider_1 = require("./routes/provider");
 const metaapp_1 = require("./routes/metaapp");
+const skills_1 = require("./routes/skills");
 const services_1 = require("./routes/services");
 const trace_1 = require("./routes/trace");
 const ui_1 = require("./routes/ui");
@@ -45,6 +46,7 @@ const ROUTES = [
     network_1.handleNetworkRoutes,
     provider_1.handleProviderRoutes,
     metaapp_1.handleMetaAppRoutes,
+    skills_1.handleSkillRoutes,
     services_1.handleServicesRoutes,
     trace_1.handleTraceRoutes,
     browser_1.handleBrowserRoutes,

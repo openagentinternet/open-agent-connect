@@ -203,3 +203,116 @@ test('skills install rejects malformed invocations and non-skill pins', async ()
     await restoreFetch();
   }
 });
+
+const DAEMON_BASE_URL = 'http://127.0.0.1:10099';
+const PUBLISH_PIN_ID = 'c'.repeat(64) + 'i0';
+
+/** Fake daemon: records /api/skills/publish requests, returns envelopes. */
+function installFakeDaemonFetch() {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    if (!target.startsWith(DAEMON_BASE_URL)) {
+      return originalFetch(url, init);
+    }
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    requests.push({ url: target, method: init?.method, body });
+    if (target.endsWith('/api/skills/publish') && body?.confirm === true) {
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({
+          ok: true,
+          state: 'success',
+          data: {
+            name: body.name ?? 'publish-e2e-skill',
+            version: body.version ?? '0.9.0',
+            pinId: PUBLISH_PIN_ID,
+            skillFileUri: 'metafile://' + 'd'.repeat(64) + 'i0.zip',
+            formatted: `Skill published; others install with: metabot skills install --pin ${PUBLISH_PIN_ID} --confirm`,
+          },
+        }),
+      };
+    }
+    return {
+      status: 200,
+      ok: true,
+      json: async () => ({
+        ok: true,
+        state: 'awaiting_confirmation',
+        data: {
+          plan: { name: body?.name ?? 'publish-e2e-skill', archive: { bytes: 512, sha256: 'f'.repeat(64), fileCount: 2 } },
+          formatted: 'preview — re-run with --confirm',
+        },
+      }),
+    };
+  };
+  return async () => {
+    globalThis.fetch = originalFetch;
+    return requests;
+  };
+}
+
+test('skills publish requires --dir and previews through the daemon without --confirm', async () => {
+  const { homeDir, systemHome } = await createProfileHome('metabot-cli-skills-pub-');
+  const missing = await runSkillsCli(homeDir, ['publish'], { METABOT_DAEMON_BASE_URL: DAEMON_BASE_URL });
+  assert.equal(missing.result.ok, false);
+  assert.equal(missing.result.code, 'invalid_argument');
+
+  const skillDir = path.join(systemHome, 'publish-src');
+  await fs.mkdir(skillDir, { recursive: true });
+  await fs.writeFile(path.join(skillDir, 'SKILL.md'), '---\nname: publish-e2e-skill\nversion: 0.9.0\ndescription: E2E\n---\n\n# Demo\n', 'utf8');
+
+  const restoreDaemon = installFakeDaemonFetch();
+  try {
+    const preview = await runSkillsCli(
+      homeDir,
+      ['publish', '--dir', skillDir, '--from', 'test-profile'],
+      { METABOT_DAEMON_BASE_URL: DAEMON_BASE_URL },
+    );
+    assert.equal(preview.exitCode, 0);
+    assert.equal(preview.result.ok, true);
+    assert.equal(preview.result.state, 'awaiting_confirmation');
+    assert.equal(preview.result.data.plan.name, 'publish-e2e-skill');
+  } finally {
+    await restoreDaemon();
+  }
+});
+
+test('skills publish --confirm forwards the resolved dir and flags to the daemon', async () => {
+  const { homeDir, systemHome } = await createProfileHome('metabot-cli-skills-pub2-');
+  const skillDir = path.join(systemHome, 'publish-src');
+  await fs.mkdir(skillDir, { recursive: true });
+  await fs.writeFile(path.join(skillDir, 'SKILL.md'), '---\nname: publish-e2e-skill\nversion: 0.9.0\n---\n\n# Demo\n', 'utf8');
+
+  const restoreDaemon = installFakeDaemonFetch();
+  try {
+    const published = await runSkillsCli(
+      homeDir,
+      [
+        'publish', '--dir', skillDir,
+        '--name', 'publish-e2e-skill', '--skill-version', '1.0.0', '--description', 'Bumped',
+        '--from', 'test-profile', '--confirm',
+      ],
+      { METABOT_DAEMON_BASE_URL: DAEMON_BASE_URL },
+    );
+    assert.equal(published.exitCode, 0);
+    assert.equal(published.result.state, 'success');
+    assert.equal(published.result.data.pinId, PUBLISH_PIN_ID);
+    assert.match(published.result.data.formatted, /skills install --pin/);
+
+    const seen = await restoreDaemon();
+    const publishRequests = seen.filter((request) => request.url.endsWith('/api/skills/publish'));
+    assert.equal(publishRequests.length, 1);
+    assert.equal(publishRequests[0].method, 'POST');
+    assert.equal(publishRequests[0].body.confirm, true);
+    assert.equal(publishRequests[0].body.from, 'test-profile');
+    assert.equal(publishRequests[0].body.name, 'publish-e2e-skill');
+    assert.equal(publishRequests[0].body.version, '1.0.0');
+    assert.equal(publishRequests[0].body.description, 'Bumped');
+    assert.equal(publishRequests[0].body.skillDir, skillDir);
+  } finally {
+    await restoreDaemon();
+  }
+});

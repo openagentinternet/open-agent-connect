@@ -30,6 +30,7 @@ test('bindSkillToolInstall registers the learning-loop section and skill_tool', 
   assert.equal(host.sections[0].order, 143)
   assert.match(host.sections[0].text, /## Learning from MetaWeb tutorials/)
   assert.match(host.sections[0].text, /skill_tool install_skill/)
+  assert.match(host.sections[0].text, /skill_tool publish_skill/)
   assert.deepEqual(host.tools.map((tool) => tool.name), ['skill_tool'])
 })
 
@@ -121,4 +122,55 @@ test('list and read actions wrap the CLI payloads', async () => {
 
   const noName = await tool.execute({ action: 'read_skill' }, {})
   assert.match(noName, /requires the installed skill name/)
+})
+
+test('publish_skill asks approval then runs the CLI with --dir --confirm and metadata flags', async () => {
+  const requests = []
+  const host = fakeHostContext({
+    approval: { request: async (req) => { requests.push(req); return 'allowed-once' } },
+  })
+  const calls = []
+  const run = async (args, options) => {
+    calls.push({ args, options })
+    return successEnvelope({
+      formatted: 'Skill "demo" v1.0.0 published (pin c…i0).',
+      pinId: 'c'.repeat(64) + 'i0',
+    })
+  }
+  const tool = plugin.buildSkillToolDefinitions({ ctx: host.ctx, run }).find((d) => d.name === 'skill_tool')
+
+  const result = await tool.execute(
+    { action: 'publish_skill', dir: '/tmp/demo-skill', name: 'demo', version: '1.0.0', description: 'Demo skill' },
+    { callId: 'pub-1' },
+  )
+
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].toolName, 'skill_tool')
+  assert.equal(requests[0].callId, 'pub-1')
+  assert.match(requests[0].reason, /Publish skill package on-chain/)
+  assert.match(requests[0].reason, /\/tmp\/demo-skill/)
+  assert.match(requests[0].reason, /two on-chain writes/)
+  assert.deepEqual(calls[0].args, [
+    'skills', 'publish', '--dir', '/tmp/demo-skill', '--confirm',
+    '--name', 'demo', '--skill-version', '1.0.0', '--description', 'Demo skill',
+  ])
+  assert.match(result, /published \(pin/)
+  assert.match(result, /advertised by pin c{64}i0/)
+})
+
+test('publish_skill is refused without approval, cancelled on decline, and validates dir', async () => {
+  const noGate = await skillToolWith({})
+  const refused = await noGate.tool.execute({ action: 'publish_skill', dir: '/tmp/x' }, {})
+  assert.match(refused, /Publish refused: DSH approval is not available/)
+
+  let ran = 0
+  const host = fakeHostContext({ approval: { request: async () => 'rejected' } })
+  const run = async () => { ran += 1; return successEnvelope({}) }
+  const tool = plugin.buildSkillToolDefinitions({ ctx: host.ctx, run }).find((d) => d.name === 'skill_tool')
+  const declined = await tool.execute({ action: 'publish_skill', dir: '/tmp/x' }, {})
+  assert.match(declined, /Publish cancelled by the user/)
+  assert.equal(ran, 0)
+
+  const missing = await tool.execute({ action: 'publish_skill' }, {})
+  assert.match(missing, /requires the local skill directory/)
 })
