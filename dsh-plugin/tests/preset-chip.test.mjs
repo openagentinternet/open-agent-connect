@@ -11,6 +11,35 @@ test('dsh.client inject loads conversation so the hero chip slot exists', async 
   assert.ok(pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-conversation'))
 })
 
+test('client manifest targets the 0.1.2 kernel surface', async () => {
+  const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  assert.ok(!pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime'))
+  for (const row of [
+    '@deepseek-ai/dsh-client-locale',
+    '@deepseek-ai/dsh-client-ui-slots',
+    '@deepseek-ai/dsh-client-ui-settings',
+    '@deepseek-ai/dsh-client-ui-conversation',
+  ]) {
+    assert.ok(pkg.dsh.client.inject.includes(row), `missing inject row ${row}`)
+  }
+  assert.deepEqual(pkg.dsh.client.external, [
+    '@deepseek-ai/dsh-client-ui-primitives',
+    '@deepseek-ai/dsh-client-store',
+  ])
+})
+
+test('client plugin drives the Remote faces, not the removed connection api', async () => {
+  const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
+  assert.match(text, /export const inject = \['slots', 'locale', 'remote', 'remote\.agentPresets', 'remote\.session'\]/)
+  assert.doesNotMatch(text, /get\('connection'\)/)
+})
+
+test('built-in preset display follows the 0.1.2 locale keys', async () => {
+  const display = await readFile(join(root, 'src/client/preset-display.ts'), 'utf8')
+  assert.match(display, /presetPtcName/)
+  assert.doesNotMatch(display, /presetCodeName/)
+})
+
 test('client shadows the hero chip at priority -1 and does not duplicate Agent presets nav', async () => {
   const text = await readFile(join(root, 'src/client/index.ts'), 'utf8')
   assert.match(text, /name: 'conversation\.hero\.agentPreset'/)
