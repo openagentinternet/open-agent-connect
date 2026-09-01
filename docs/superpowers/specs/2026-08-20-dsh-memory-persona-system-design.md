@@ -807,3 +807,31 @@ supported Node 20–24 for verification (the default shell node is v26).
   retry 30 min→6 h, window 00:00–06:00.
 - `DREAM_VERSION` starts at 1 for the port (IDBots is at 8); version bumps
   follow the same repair-run semantics when our algorithms evolve.
+
+## 13. Parity addendum (2026-09-01, branch `dsh-dream-memory`)
+
+The remaining dream/memory gaps called out in §11 and the deferred group-task
+feeding landed:
+
+- `gatherActivity` now reads the group-task state/message caches
+  (chair-side `state.json`, guest `openteam.json`, `messages/<groupId>.json`)
+  and the seller-order list in `runtime-state.json`, so the prompt's
+  group-task / group-chat / orders sections receive real data. Scheduled
+  tasks stay unfed (no such OAC feature).
+- New dream-time experience harvest (`src/core/memory/experienceHarvest.ts`,
+  the file-port counterpart of IDBots' experience backfill) folds the day's
+  group-task chats, accepted tasks, and seller orders into the experience
+  ledger before impression subjects are built — contact impressions now form
+  for group-task/order counterparties, not just A2A chat peers.
+- The per-turn experience hot layer injects `work_reviews` again (IDBots
+  cowork parity; the block builder existed but was never fed).
+- The DSH dream scheduler logs per-bot skips/errors/successes on the host
+  logger, retries a failed dream once on the Bot's fallback DSH LLM pair,
+  and applies the 120 s CLI timeout to plan/synthesize/commit.
+- The Dream tab lists all recent runs (completed/failed/running, quiet days
+  labeled), a diary/self-identity status line, and a no-LLM hint.
+
+Still deferred: the memory-hygiene service (04:00 decay + 30-day deep
+consolidation), an LLM judge for DSH per-turn extraction (rule-only today),
+message-feedback ratings (DSH has no 👍/👎), and hard boss/twin
+relationships in the A2A cognition block.

@@ -27,6 +27,7 @@ import {
   type DreamOutput,
 } from './dreamPrompt';
 import { createDreamStore, hashDreamFragmentContent, type DreamRun, type DreamStore } from './dreamStore';
+import { harvestDreamDayExperiences } from './experienceHarvest';
 import { createExperienceStore, type ExperienceStore } from './experienceStore';
 import { createImpressionStore, type ImpressionStore } from './impressionStore';
 import { applyDreamImpressionUpdates, buildDreamImpressionSubjects } from './impressionService';
@@ -218,6 +219,23 @@ export async function planDream(
   const activity = await dreamStore.gatherActivity({ startMs, endMs });
   const persona = await loadDreamPersona(paths);
   const budgets = resolveDreamBudgets(input.limits);
+  // Fold the day's group-task chats / accepted tasks / seller orders into the
+  // experience ledger before building impression subjects, so the dream has
+  // episodes to consolidate. Best effort: a harvest failure never fails a run.
+  if (persona.globalMetaId) {
+    try {
+      await harvestDreamDayExperiences({
+        paths,
+        experienceStore: stores.experienceStore,
+        observerGlobalMetaId: persona.globalMetaId,
+        date,
+        startMs,
+        endMs,
+      });
+    } catch {
+      // The dream pipeline continues with whatever the ledger already holds.
+    }
+  }
   const impressionSubjects = persona.globalMetaId
     ? await buildDreamImpressionSubjects({
       experienceStore: stores.experienceStore,

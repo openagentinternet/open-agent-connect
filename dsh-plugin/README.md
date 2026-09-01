@@ -69,11 +69,21 @@ data under `~/.metabot/profiles/<slug>/`):
   `knowledge_recall`/`knowledge_upsert`, `recent_chats`,
   `conversation_search` on `oac-*` agents.
 - **Nightly dream** — the plugin scheduler (`dream.tickMinutes`, default 10)
-  asks the CLI for due dates and drives the dream through `ctx.llm`:
+  asks the CLI for due dates and drives the dream through `ctx.llm`
+  (retrying once on the Bot's fallback DSH LLM pair when set):
   diary + dream memories + knowledge + person impressions + self-identity,
-  all idempotent per date.
+  all idempotent per date. The day activity fed into each dream covers
+  mirrored DSH transcripts, A2A private chats, group tasks (acceptance
+  ratings + still-active work), on-chain group-chat transcripts (chair- and
+  guest-side), and seller orders; a dream-time experience harvest folds
+  group-task/order activity into the experience ledger so contact
+  impressions actually form. Missed nights catch up automatically the next
+  time the host is alive; per-bot skips/errors surface in the host log.
 - **Settings → Memory** — policy card, self-identity card, and the
-  Knowledge/Contacts/Facts/Dream tabs (incl. manual run-dream).
+  Knowledge/Contacts/Facts/Dream tabs (incl. manual run-dream). The Dream
+  tab lists all recent runs (completed/failed/running, incl. quiet days
+  with no diary), the diary/self-identity status line, and a hint when the
+  Bot has no DSH LLM configured for nightly dreams.
 - **Settings → User** — Twin Bot identity + per-Bot owner bindings.
 - **Twin/Worker** — one Bot marked `botType: twin` gets the local
   orchestration toolset and delegates to Workers as DSH sub-sessions

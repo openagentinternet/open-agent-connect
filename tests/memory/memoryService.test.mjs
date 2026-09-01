@@ -167,3 +167,21 @@ test('extract: memory policy gates implicit writes', async () => {
   assert.equal(result.created, 0);
   assert.equal((await store.list()).length, 0);
 });
+
+test('blocks: dream-written work reviews join the experience hot layer', async () => {
+  const paths = await createTempProfileHome();
+  const store = createMemoryStore(paths);
+  await store.create({
+    text: '工作:官网落地页;对象:主人;评价:升温;依据:5 星好评，文案质量高',
+    usageClass: 'work_review',
+    origin: 'dream',
+  });
+
+  const result = await buildMemoryBlocksForRequest(paths, {
+    channel: 'dsh',
+    userText: '再帮我做一版落地页',
+  });
+  assert.match(result.xml, /<work_reviews>/);
+  assert.match(result.xml, /官网落地页/);
+  assert.match(result.xml, /5 星好评/);
+});
