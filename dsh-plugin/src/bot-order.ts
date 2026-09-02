@@ -20,3 +20,16 @@ export function sortBotsTwinFirst<T extends BotOrderFields>(rows: readonly T[]):
     return (left.createdAt ?? 0) - (right.createdAt ?? 0)
   })
 }
+
+/**
+ * Default Bot for pickers (A2A Chat, …): the Twin Bot wins, then the active
+ * Bot, then the first row. Returns '' for an empty list.
+ */
+export function pickDefaultBotSlug(
+  rows: readonly { slug: string; botType?: 'twin' | 'worker' | null; isActive?: boolean }[],
+): string {
+  const twin = rows.find((row) => row.botType === 'twin')
+  if (twin) return twin.slug
+  const active = rows.find((row) => row.isActive === true)
+  return (active ?? rows[0])?.slug ?? ''
+}

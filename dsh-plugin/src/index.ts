@@ -20,6 +20,12 @@ import { bindSimpleNoteToolInstall } from './simplenote-tools.js'
 import { bindKnowledgeBaseToolInstall } from './knowledgebase-tools.js'
 import { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 import { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
+import {
+  daemonConversationsList,
+  daemonConversationsMessages,
+  proxyDaemonAvatar,
+  streamDaemonConversationEvents,
+} from './conversation-bridge.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import {
   localBotList,
@@ -172,7 +178,12 @@ async function dispatchPost(
       : ''
     if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
     const limitRaw = (payload as { limit?: unknown })?.limit
-    const local = await localConversationsList(from, typeof limitRaw === 'number' ? limitRaw : undefined)
+    const limit = typeof limitRaw === 'number' ? limitRaw : undefined
+    // Daemon first: its /api/conversations handler enriches peer names/avatars
+    // (profile index + chain-profile cache); local read / CLI are the fallback.
+    const daemon = await daemonConversationsList(from, limit)
+    if (daemon) return daemon
+    const local = await localConversationsList(from, limit)
     if (local) return local
     return listConversations(from)
   }
@@ -182,6 +193,8 @@ async function dispatchPost(
     const peer = typeof body.peer === 'string' ? body.peer.trim() : ''
     if (!from) return { ok: false, state: 'failed', code: 'missing_from', message: 'from is required' }
     if (!peer) return { ok: false, state: 'failed', code: 'missing_peer', message: 'peer is required' }
+    const daemon = await daemonConversationsMessages(from, peer)
+    if (daemon) return daemon
     const local = await localConversationsMessages(from, peer)
     if (local) return local
     return getConversationMessages(from, peer)
@@ -280,6 +293,32 @@ function registerApi(
           return
         }
         streamBrowserEvents(req, res, browserHub)
+        return
+      }
+      if (method === 'chat/events') {
+        if (req.method !== 'GET') {
+          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
+          return
+        }
+        const from = new URL(req.url ?? '/', 'http://dsh.internal').searchParams.get('from')?.trim() ?? ''
+        if (!from) {
+          writeJson(res, 400, { ok: false, error: { code: 'missing_from', message: 'from is required' } })
+          return
+        }
+        await streamDaemonConversationEvents(req, res, from)
+        return
+      }
+      if (method === 'file/avatar') {
+        if (req.method !== 'GET') {
+          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
+          return
+        }
+        const ref = new URL(req.url ?? '/', 'http://dsh.internal').searchParams.get('ref')?.trim() ?? ''
+        if (!ref) {
+          writeJson(res, 400, { ok: false, error: { code: 'missing_ref', message: 'ref is required' } })
+          return
+        }
+        await proxyDaemonAvatar(ref, res)
         return
       }
       if (method === 'health') {
@@ -464,7 +503,9 @@ export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
 export { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 export { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 export { validateCreatePayload } from './bots-input.js'
-export { sortBotsTwinFirst, type BotOrderFields } from './bot-order.js'
+export { sortBotsTwinFirst, pickDefaultBotSlug, type BotOrderFields } from './bot-order.js'
+export { resolveAvatarUrl, extractAvatarPinReference, isAvatarContentReference } from './avatar-url.js'
+export { daemonConversationsList, daemonConversationsMessages } from './conversation-bridge.js'
 export { buildPersonaPrompt, parseBotListData } from './persona.js'
 export {
   advertisedModelForBot,

@@ -19,6 +19,7 @@ import {
   type ConversationThread,
 } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
+import { pickDefaultBotSlug } from '../bot-order.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
@@ -150,8 +151,14 @@ export function A2AConversation({
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const guidanceTokenRef = useRef(0)
+  const lastFromRef = useRef('')
+  const selectedPeerRef = useRef('')
 
   const reloadList = useCallback((): void => setTick((value) => value + 1), [])
+
+  useEffect(() => {
+    selectedPeerRef.current = selectedPeer
+  }, [selectedPeer])
 
   useEffect(() => {
     if (!open) return
@@ -162,8 +169,7 @@ export function A2AConversation({
       setProfiles(rows)
       setFrom((currentFrom) => {
         if (currentFrom && rows.some((row) => row.slug === currentFrom)) return currentFrom
-        const active = rows.find((row) => row.isActive === true)
-        return (active ?? rows[0])?.slug ?? ''
+        return pickDefaultBotSlug(rows)
       })
     }).catch((cause: unknown) => {
       if (current) setListError(errorText(cause))
@@ -172,32 +178,40 @@ export function A2AConversation({
   }, [open, bots])
 
   // Conversation list follows the selected local Bot; newest first comes from
-  // the api normalization. Reloads keep the previous list on screen.
+  // the api normalization. Switching Bots resets the selection; plain reloads
+  // (refresh tick, live conversation events) keep it.
   useEffect(() => {
     if (!open || !from) return
     let current = true
-    setSelectedPeer('')
-    setThreadData(null)
+    if (lastFromRef.current !== from) {
+      lastFromRef.current = from
+      setSelectedPeer('')
+      setThreadData(null)
+    }
     void list(from).then(
       (rows) => {
         if (!current) return
         setSummaries(rows)
         setListError(null)
-        const first = rows[0]
-        if (first) setSelectedPeer(first.peerGlobalMetaId)
+        setSelectedPeer((peer) => {
+          if (peer && rows.some((row) => row.peerGlobalMetaId === peer)) return peer
+          return rows[0]?.peerGlobalMetaId ?? ''
+        })
       },
       (cause: unknown) => {
         if (!current) return
         setListError(errorText(cause))
         setSummaries([])
+        setSelectedPeer('')
+        setThreadData(null)
       },
     )
     return () => { current = false }
   }, [open, from, list, tick])
 
-  const loadThread = useCallback(async (peer: string): Promise<ConversationThread | null> => {
+  const loadThread = useCallback(async (peer: string, options?: { quiet?: boolean }): Promise<ConversationThread | null> => {
     if (!from || !peer) return null
-    setThreadStatus('loading')
+    if (options?.quiet !== true) setThreadStatus('loading')
     setThreadError(null)
     try {
       const data = await thread(from, peer)
@@ -214,6 +228,36 @@ export function A2AConversation({
   useEffect(() => {
     if (open && selectedPeer) void loadThread(selectedPeer)
   }, [open, selectedPeer, loadThread])
+
+  // Live updates: the host pipes the daemon's per-Bot conversation SSE
+  // (stored-row changes + chain-profile warm-up completions) into
+  // /oac/api/chat/events. One debounced reload per burst refreshes the list
+  // and the open thread, so enriched names/avatars and new messages land
+  // without reopening the panel.
+  useEffect(() => {
+    if (!open || !from) return undefined
+    let source: EventSource | null = null
+    try {
+      source = new EventSource(`/oac/api/chat/events?from=${encodeURIComponent(from)}`)
+    } catch {
+      return undefined
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const onUpdate = (): void => {
+      if (timer !== null) return
+      timer = setTimeout(() => {
+        timer = null
+        reloadList()
+        const peer = selectedPeerRef.current
+        if (peer) void loadThread(peer, { quiet: true })
+      }, 400)
+    }
+    source.addEventListener('conversation-update', onUpdate)
+    return () => {
+      if (timer !== null) clearTimeout(timer)
+      source?.close()
+    }
+  }, [open, from, reloadList, loadThread])
 
   useEffect(() => {
     if (!open) return

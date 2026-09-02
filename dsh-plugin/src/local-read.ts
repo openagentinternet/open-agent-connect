@@ -458,9 +458,11 @@ export function localGrouptaskCollabs(): Promise<MetabotCommandResult | null> {
 }
 
 // ---- A2A conversations ----------------------------------------------------
-// The daemon's `/api/conversations` enrichment only refreshes peer names from
-// the profile index; the stored A2A data already carries names/avatars, so we
-// serve the projection directly and skip the CLI + daemon round-trip.
+// Fallback reads for `conversations/list` / `conversations/messages`. The
+// primary path is the daemon's `/api/conversations*` HTTP API (see
+// conversation-bridge.ts), which enriches peer names/avatars through the
+// profile index + chain-profile cache. These raw projections serve only when
+// the daemon is unreachable, ahead of the CLI fallback.
 
 async function resolveProfileRecord(from: string): Promise<{ homeDir: string; globalMetaId: string } | null> {
   const identityProfiles = core('core/identity/identityProfiles.js')
