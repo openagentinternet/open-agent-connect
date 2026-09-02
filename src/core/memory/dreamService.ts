@@ -182,6 +182,25 @@ async function resetStaleRunningRun(store: DreamStore, date: string): Promise<vo
   }
 }
 
+/**
+ * Mark the live run for one date as failed. The DSH plugin drives dreams
+ * across a process boundary (plan/commit in the CLI, LLM in the host), so
+ * transport and LLM failures above the store layer would otherwise leave the
+ * run `running` forever. No-op unless a run is currently `running` — terminal
+ * states are never overwritten.
+ */
+export async function failDream(
+  paths: MetabotPaths,
+  input: { date: string; error?: string | null },
+  deps: DreamServiceDeps = {},
+): Promise<{ failed: boolean }> {
+  const dreamStore = deps.dreamStore ?? createDreamStore(paths);
+  const run = await dreamStore.getRun(input.date);
+  if (!run || run.status !== 'running') return { failed: false };
+  await dreamStore.finishRun(input.date, 'failed', input.error ?? 'dream run failed');
+  return { failed: true };
+}
+
 /** Which past dates still need dream attention for this bot. */
 export async function dueDreamDates(
   paths: MetabotPaths,
@@ -189,6 +208,10 @@ export async function dueDreamDates(
   deps: DreamServiceDeps = {},
 ): Promise<DreamDueResult> {
   const dreamStore = deps.dreamStore ?? createDreamStore(paths);
+  // Sweep first: the due algorithm skips `running` dates, so runs orphaned by
+  // a restart (the plugin process dies mid-dream) must be failed here or they
+  // never become due again.
+  await dreamStore.resetStaleRunningRuns({ staleMs: STALE_RUNNING_RESET_MS });
   const runStates = await dreamStore.getRunStates();
   const slug = path.basename(paths.profileRoot);
   return computeDueDreamDates({
@@ -823,6 +846,9 @@ export async function dreamStatus(
 }> {
   const dreamStore = deps.dreamStore ?? createDreamStore(paths);
   const memoryStore = deps.memoryStore ?? createMemoryStore(paths);
+  // Same sweep as dueDreamDates: the UI must not show a phantom "running"
+  // for a run orphaned by a restart days ago.
+  await dreamStore.resetStaleRunningRuns({ staleMs: STALE_RUNNING_RESET_MS });
   const runStates = await dreamStore.getRunStates();
   const summaries = await dreamStore.listDailySummaries({ limit: 90 });
   const identityEntries = await memoryStore.list({

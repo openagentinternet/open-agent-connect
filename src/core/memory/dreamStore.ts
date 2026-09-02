@@ -508,6 +508,14 @@ export interface DreamStore {
   /** Upsert a run as running; resets stale `running` records left by a crash. */
   beginRun(dreamDate: string, llm: string | null, dreamVersion: number): Promise<DreamRun>;
   finishRun(dreamDate: string, status: 'completed' | 'failed', error?: string | null): Promise<void>;
+  /**
+   * Mark every run left `running` longer than `staleMs` as failed — the
+   * crash/restart recovery sweep (IDBots `resetStaleRunningRuns` parity). The
+   * due-date algorithm skips `running` dates, so without this sweep a run
+   * orphaned by a process restart would stay `running` forever. Returns the
+   * number of runs reset.
+   */
+  resetStaleRunningRuns(options: { staleMs: number; now?: number }): Promise<number>;
   getFragment(dreamDate: string, fragmentKey: string): Promise<DreamFragment | null>;
   upsertFragment(fragment: DreamFragment): Promise<void>;
   upsertDailySummary(input: {
@@ -636,6 +644,24 @@ export function createDreamStore(paths: MetabotPaths, deps: {
         run.error = status === 'failed' ? (error ?? 'unknown error') : null;
         run.completedAt = Date.now();
         await writeJsonAtomic(runsPath, file);
+      });
+    },
+
+    async resetStaleRunningRuns({ staleMs, now }) {
+      return enqueue(async () => {
+        const file = await readRuns();
+        const effectiveNow = now ?? Date.now();
+        const cutoff = effectiveNow - Math.max(0, staleMs);
+        let reset = 0;
+        for (const run of file.runs) {
+          if (run.status !== 'running' || run.startedAt > cutoff) continue;
+          run.status = 'failed';
+          run.error = 'stale running run reset';
+          run.completedAt = effectiveNow;
+          reset += 1;
+        }
+        if (reset > 0) await writeJsonAtomic(runsPath, file);
+        return reset;
       });
     },
 

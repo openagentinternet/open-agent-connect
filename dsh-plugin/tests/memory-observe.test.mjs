@@ -135,3 +135,41 @@ test('memory tools bridge to the CLI with the expected names and formatting', as
   assert.match(plugin.MEMORY_STRATEGY_TEXT, /conversation_search/)
   assert.match(plugin.MEMORY_STRATEGY_TEXT, /experience_recall/)
 })
+
+test('post-turn extraction reads the live session log through snapshotEvents', async () => {
+  // Regression: DSH 0.1.2-alpha.4 removed the Session `events` getter
+  // (deepseek-harness 5660f44d29); the live class only has snapshotEvents().
+  const calls = []
+  const { ctx, listeners } = fakeCtx(null)
+  plugin.applyMemoryExtraction(ctx, {
+    run: async (args) => {
+      const fileFlag = args.indexOf('--payload-file')
+      const file = fileFlag >= 0 ? JSON.parse(await readFile(args[fileFlag + 1], 'utf8')) : null
+      calls.push({ args, file })
+      return { ok: true, state: 'success', data: {} }
+    },
+  })
+  const listener = listeners.find((entry) => entry.event === 'session/event').listener
+  const log = [
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'user/message', data: USER_MESSAGE },
+    { type: 'assistant/message', data: { turn: 1, step: 0, message: { content: [{ type: 'text', text: '好的' }] } } },
+    { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]
+  const session = {
+    id: 'sess-snapshot',
+    header: { agentPreset: 'oac-alice' },
+    snapshotEvents: () => [...log],
+  }
+  listener(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+  const deadline = Date.now() + 3000
+  while (Date.now() < deadline && calls.filter((call) => call.args[1] === 'extract').length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  const transcripts = calls.filter((call) => call.args[1] === 'transcript')
+  const extracts = calls.filter((call) => call.args[1] === 'extract')
+  assert.equal(transcripts.length, 2)
+  assert.equal(extracts.length, 1)
+  assert.equal(extracts[0].file.sessionId, 'sess-snapshot')
+  assert.equal(extracts[0].file.userText, '帮我想想上次说的咖啡')
+})

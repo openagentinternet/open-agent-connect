@@ -29,6 +29,7 @@ test('runCli dispatches dream subcommands to the dream dependency group', async 
       run: record('run'),
       synthesize: record('synthesize'),
       commit: record('commit'),
+      fail: record('fail'),
       summaries: record('summaries'),
       selfIdentity: record('selfIdentity'),
     },
@@ -37,6 +38,7 @@ test('runCli dispatches dream subcommands to the dream dependency group', async 
     date: '2026-08-19',
     fragmentOutputs: { 'session:s1:0': '{}' },
     outputText: '{"daily_summary":"x"}',
+    error: 'llm down',
   };
   const run = (args) => runCli(args, makeContext(dependencies, payload));
 
@@ -46,14 +48,16 @@ test('runCli dispatches dream subcommands to the dream dependency group', async 
   assert.equal(await run(['dream', 'run', '--from', 'alice']), 0);
   assert.equal(await run(['dream', 'synthesize', '--from', 'alice', '--payload-file', 'p.json']), 0);
   assert.equal(await run(['dream', 'commit', '--from', 'alice', '--payload-file', 'p.json']), 0);
+  assert.equal(await run(['dream', 'fail', '--from', 'alice', '--payload-file', 'p.json']), 0);
   assert.equal(await run(['dream', 'summaries', '--from', 'alice', '--limit', '7']), 0);
   assert.equal(await run(['dream', 'self-identity', '--from', 'alice']), 0);
 
   assert.deepEqual(calls.map(([name]) => name), [
-    'due', 'status', 'plan', 'run', 'synthesize', 'commit', 'summaries', 'selfIdentity',
+    'due', 'status', 'plan', 'run', 'synthesize', 'commit', 'fail', 'summaries', 'selfIdentity',
   ]);
   assert.equal(calls[2][1].date, '2026-08-19');
-  assert.equal(calls[6][1].limit, 7);
+  assert.equal(calls[6][1].payload.error, 'llm down');
+  assert.equal(calls[7][1].limit, 7);
 });
 
 test('runCli rejects malformed dream invocations', async () => {
@@ -61,6 +65,7 @@ test('runCli rejects malformed dream invocations', async () => {
     dream: {
       plan: async () => commandSuccess({}),
       commit: async () => commandSuccess({}),
+      fail: async () => commandSuccess({}),
     },
   };
   const run = (args) => runCli(args, makeContext(dependencies, {}));
@@ -71,6 +76,10 @@ test('runCli rejects malformed dream invocations', async () => {
   assert.equal(await run(['dream', 'synthesize']), 1);
   // commit payload missing date/outputText
   assert.equal(await run(['dream', 'commit', '--payload-file', 'p.json']), 1);
+  // fail payload missing date
+  assert.equal(await run(['dream', 'fail', '--payload-file', 'p.json']), 1);
+  // fail without payload file
+  assert.equal(await run(['dream', 'fail']), 1);
   // unknown subcommand
   assert.equal(await run(['dream', 'frobnicate']), 1);
 });

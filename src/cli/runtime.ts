@@ -54,6 +54,7 @@ import {
   commitDream,
   dreamStatus,
   dueDreamDates,
+  failDream,
   planDream,
   runDream,
   synthesizeDream,
@@ -4140,6 +4141,15 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (!result.ok) {
           return commandFailed('dream_commit_failed', result.error ?? 'dream commit failed');
         }
+        return commandSuccess(result as unknown as Record<string, unknown>);
+      },
+      fail: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const result = await failDream(resolveMetabotPaths(actor.homeDir), {
+          date: String(input.payload.date),
+          error: typeof input.payload.error === 'string' ? input.payload.error : null,
+        });
         return commandSuccess(result as unknown as Record<string, unknown>);
       },
       run: async (input) => {

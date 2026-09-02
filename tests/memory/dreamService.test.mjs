@@ -16,6 +16,7 @@ const {
   commitDream,
   dreamStatus,
   dueDreamDates,
+  failDream,
   planDream,
   runDream,
 } = require('../../dist/core/memory/dreamService.js');
@@ -350,4 +351,67 @@ test('group-task and order activity feeds the prompt and impression subjects', a
   assert.ok(episodes.some((episode) => episode.sourceKey === 'order:ord-1'));
   assert.match(plan.user, /## 以 GlobalMetaID 为锚点的印象候选/);
   assert.match(plan.user, /subjectGlobalMetaId=gm-peer-worker/);
+});
+
+test('dueDreamDates sweeps a stale running run back into the due set', async () => {
+  const paths = await createTempProfileHome();
+  const date = yesterday();
+  const dreamStore = createDreamStore(paths);
+  await dreamStore.beginRun(date, 'test/llm', 1);
+  // Backdate the orphaned run beyond the stale threshold (process died mid-run).
+  const runsPath = paths.memoryDreamRunsPath;
+  const file = JSON.parse(await fs.readFile(runsPath, 'utf8'));
+  file.runs[0].startedAt = Date.now() - 31 * 60_000;
+  await fs.writeFile(runsPath, JSON.stringify(file), 'utf8');
+
+  const due = await dueDreamDates(paths, {}, { dreamStore });
+  assert.ok(due.dueDates.includes(date));
+  const run = await dreamStore.getRun(date);
+  assert.equal(run.status, 'failed');
+  assert.equal(run.error, 'stale running run reset');
+});
+
+test('dueDreamDates leaves a fresh running run untouched and not due', async () => {
+  const paths = await createTempProfileHome();
+  const date = yesterday();
+  const dreamStore = createDreamStore(paths);
+  await dreamStore.beginRun(date, 'test/llm', 1);
+  const due = await dueDreamDates(paths, {}, { dreamStore });
+  assert.ok(!due.dueDates.includes(date));
+  assert.equal((await dreamStore.getRun(date)).status, 'running');
+});
+
+test('dreamStatus sweeps stale running runs so the UI never shows phantom runs', async () => {
+  const paths = await createTempProfileHome();
+  const date = yesterday();
+  const dreamStore = createDreamStore(paths);
+  await dreamStore.beginRun(date, 'test/llm', 1);
+  const runsPath = paths.memoryDreamRunsPath;
+  const file = JSON.parse(await fs.readFile(runsPath, 'utf8'));
+  file.runs[0].startedAt = Date.now() - 31 * 60_000;
+  await fs.writeFile(runsPath, JSON.stringify(file), 'utf8');
+
+  const status = await dreamStatus(paths, { dreamStore });
+  const run = status.runs.find((entry) => entry.dreamDate === date);
+  assert.equal(run.status, 'failed');
+  assert.equal(run.error, 'stale running run reset');
+});
+
+test('failDream fails the live run and never overwrites terminal states', async () => {
+  const paths = await createTempProfileHome();
+  const date = yesterday();
+  const dreamStore = createDreamStore(paths);
+  // No run at all: no-op.
+  assert.deepEqual(await failDream(paths, { date, error: 'x' }, { dreamStore }), { failed: false });
+  await dreamStore.beginRun(date, 'test/llm', 1);
+  assert.deepEqual(await failDream(paths, { date, error: 'llm down' }, { dreamStore }), { failed: true });
+  const failed = await dreamStore.getRun(date);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error, 'llm down');
+  assert.ok(failed.completedAt);
+  // A late fail call must not clobber a run that already completed.
+  await dreamStore.beginRun(date, 'test/llm', 1);
+  await dreamStore.finishRun(date, 'completed');
+  assert.deepEqual(await failDream(paths, { date, error: 'late' }, { dreamStore }), { failed: false });
+  assert.equal((await dreamStore.getRun(date)).status, 'completed');
 });

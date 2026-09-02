@@ -139,7 +139,12 @@ export function applyMemoryExtraction(ctx: HostContext, options: MemoryObserveOp
       const turn = (event.data as { turn?: unknown } | undefined)?.turn
 
       // Slice the just-completed turn's user/assistant texts from the log.
-      const events = Array.isArray(session.events) ? session.events : []
+      // DSH removed the `events` getter (5660f44d29, dsh 0.1.2-alpha.4):
+      // `snapshotEvents()` is the only log read on the live Session class;
+      // the `events` fallback only exists for test doubles.
+      const events = typeof session.snapshotEvents === 'function'
+        ? session.snapshotEvents()
+        : (Array.isArray(session.events) ? session.events : [])
       let turnStart = -1
       for (let index = events.length - 1; index >= 0; index -= 1) {
         const candidate = events[index]
