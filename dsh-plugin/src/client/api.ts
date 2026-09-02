@@ -268,6 +268,8 @@ export type GroupTaskDeliverableRow = {
 export type GroupTaskMessageRow = {
   index: number
   pinId: string | null
+  /** Chain txid derived from the pin id (empty when the row carries no pin). */
+  txid: string | null
   senderGlobalMetaId: string | null
   senderName: string | null
   senderAvatar: string | null
@@ -1039,6 +1041,7 @@ function normalizeGroupTaskMessage(value: unknown): GroupTaskMessageRow {
   return {
     index: Math.trunc(toNumber(record.index)),
     pinId: textOf(record.pinId) || null,
+    txid: txidOf(record) || null,
     senderGlobalMetaId: textOf(record.senderGlobalMetaId) || null,
     senderName: textOf(record.senderName) || null,
     senderAvatar: textOf(record.senderAvatar) || null,
