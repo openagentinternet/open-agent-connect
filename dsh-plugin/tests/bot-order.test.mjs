@@ -27,6 +27,18 @@ test('sortBotsTwinFirst orders workers oldest-first and treats a missing botType
   )
 })
 
+test('pickDefaultBotSlug prefers the Twin Bot, then the active Bot, then the first row', () => {
+  const rows = [
+    { slug: 'worker-old', createdAt: 100, botType: 'worker' },
+    { slug: 'worker-active', createdAt: 200, botType: 'worker', isActive: true },
+    { slug: 'twin', createdAt: 300, botType: 'twin' },
+  ]
+  assert.equal(plugin.pickDefaultBotSlug(rows), 'twin')
+  assert.equal(plugin.pickDefaultBotSlug(rows.filter((row) => row.botType !== 'twin')), 'worker-active')
+  assert.equal(plugin.pickDefaultBotSlug([{ slug: 'only' }]), 'only')
+  assert.equal(plugin.pickDefaultBotSlug([]), '')
+})
+
 test('sortBotsTwinFirst does not mutate the input array', () => {
   const rows = [
     { slug: 'worker', createdAt: 10, botType: 'worker' },

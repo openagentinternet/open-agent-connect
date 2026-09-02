@@ -156,6 +156,8 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | GET or POST | `/oac/api/health` | `{ cliPath, daemon, skillBind }` |
 | POST | `/oac/api/who` | `metabot identity who` JSON envelope |
 | POST | `/oac/api/chat/*` | `metabot chat conversations`, `messages`, `private` |
+| GET | `/oac/api/chat/events?from=<slug>` | SSE proxy of the daemon's `/api/conversations/events` (`conversation-update` on stored-row changes and chain-profile warm-up completions) |
+| GET | `/oac/api/file/avatar?ref=<pin>` | same-origin proxy of the daemon's `/api/file/avatar`, so chain avatar pin references render in the panels |
 | POST | `/oac/api/services/*` | `metabot services owned`, `publish`, `call` |
 | POST | `/oac/api/metaapp/*` | `metabot metaapp list`, `publish`, `delete` |
 | POST | `/oac/api/memory/*` | `metabot memory` verbs (list/add/update/delete/scopes/stats/policy/*, knowledge/*, impressions/*, recall, chats, search, transcript/append) |
@@ -168,6 +170,8 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | GET | `/oac/api/browser/events` | SSE: `browser-open` (daemon or host) plus `browser-command` (tab control for native tools) |
 
 The host process is the only process that talks to `metabot`. The client half does not spawn CLI.
+
+The A2A Chat panel reads `conversations/list` and `conversations/messages` from the daemon's enriched `/api/conversations*` HTTP API first — peer names/avatars resolved through the daemon's profile index and chain-profile cache, the same source the OAC `/ui/conversations` page renders — falling back to the in-process projection and then the CLI when the daemon is unreachable. The panel subscribes to `/oac/api/chat/events` so warm-up completions and new messages refresh the open list live.
 
 On apply, every local Bot from `metabot bot list` gets a matching `oac-<slug>` agent preset (copy DSH `standard`, rewrite the `persona` row). Delete removes that preset. Non-`oac-*` presets are left alone.
 
