@@ -86,11 +86,15 @@ data under `~/.metabot/profiles/<slug>/`):
   Bot has no DSH LLM configured for nightly dreams.
 - **Settings → User** — Twin Bot identity + per-Bot owner bindings.
 - **Twin/Worker** — one Bot marked `botType: twin` gets the local
-  orchestration toolset and delegates to Workers as DSH sub-sessions
-  (`agents.create` + preset mount), with ORCH-NOTIFY wake-ups back into the
-  twin session. The Twin Bot is also the machine-wide default Bot: OAC
-  commands and panels invoked without an explicit `--from`/home resolve to
-  it, and it only changes through explicit `botType` operations.
+  orchestration toolset (the IDBots seven, slug-addressed: `local_workers_list`,
+  `local_worker_delegate`, `twin_task_status`, `twin_task_reassign`,
+  `twin_task_cancel`, `worker_session_stop` — by task/step ids or a
+  live-session target — and `oac_session_insert_user_message` for pushing one
+  instruction into a live Worker session) and delegates to Workers as DSH
+  sub-sessions (`agents.create` + preset mount), with ORCH-NOTIFY wake-ups
+  back into the twin session. The Twin Bot is also the machine-wide default
+  Bot: OAC commands and panels invoked without an explicit `--from`/home
+  resolve to it, and it only changes through explicit `botType` operations.
 
 Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
 `memory.injection`, `memory.extraction`, `memory.tools`, `dream.enabled`,
