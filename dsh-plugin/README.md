@@ -92,9 +92,15 @@ data under `~/.metabot/profiles/<slug>/`):
   live-session target — and `oac_session_insert_user_message` for pushing one
   instruction into a live Worker session) and delegates to Workers as DSH
   sub-sessions (`agents.create` + preset mount), with ORCH-NOTIFY wake-ups
-  back into the twin session. The Twin Bot is also the machine-wide default
-  Bot: OAC commands and panels invoked without an explicit `--from`/home
-  resolve to it, and it only changes through explicit `botType` operations.
+  back into the twin session. Delegated sessions run with the Worker Bot's
+  own DSH LLM pair (falling back to the host default model), carry the host
+  workspace cwd so they appear in the DSH conversation list and stay readable
+  there after the step ends, and report honest outcomes — a turn that dies
+  without a handoff fails the step (WORKER_EMPTY_HANDOFF with the turn's own
+  error) instead of faking a completion. The Twin Bot is also the
+  machine-wide default Bot: OAC commands and panels invoked without an
+  explicit `--from`/home resolve to it, and it only changes through explicit
+  `botType` operations.
 
 Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
 `memory.injection`, `memory.extraction`, `memory.tools`, `dream.enabled`,
