@@ -4,9 +4,14 @@ import path from 'node:path';
 export interface DshLlmBinding {
   dshLlmProvider?: string | null;
   dshLlmModel?: string | null;
+  dshLlmReasoningEffort?: string | null;
   dshLlmFallbackProvider?: string | null;
   dshLlmFallbackModel?: string | null;
+  dshLlmFallbackReasoningEffort?: string | null;
 }
+
+/** Reasoning efforts the DSH adapters own (llm-deepseek ships off/low/high/max). */
+export const DSH_LLM_REASONING_EFFORTS = ['off', 'low', 'high', 'max'] as const;
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -18,6 +23,20 @@ export function normalizeOptionalDshLlmId(value: unknown): string | null {
   return normalized || null;
 }
 
+/**
+ * Normalize an optional reasoning effort: null/blank clears it (the provider
+ * default applies), and anything outside the adapter vocabulary is rejected.
+ */
+export function normalizeOptionalDshLlmReasoningEffort(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = normalizeText(value);
+  if (!normalized) return null;
+  if (!(DSH_LLM_REASONING_EFFORTS as readonly string[]).includes(normalized)) {
+    throw new Error(`dshLlm reasoning effort must be one of: ${DSH_LLM_REASONING_EFFORTS.join(', ')}.`);
+  }
+  return normalized;
+}
+
 export function normalizeDshLlmBinding(value: unknown): DshLlmBinding {
   const record = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -25,8 +44,10 @@ export function normalizeDshLlmBinding(value: unknown): DshLlmBinding {
   return {
     dshLlmProvider: normalizeOptionalDshLlmId(record.dshLlmProvider),
     dshLlmModel: normalizeOptionalDshLlmId(record.dshLlmModel),
+    dshLlmReasoningEffort: normalizeOptionalDshLlmId(record.dshLlmReasoningEffort),
     dshLlmFallbackProvider: normalizeOptionalDshLlmId(record.dshLlmFallbackProvider),
     dshLlmFallbackModel: normalizeOptionalDshLlmId(record.dshLlmFallbackModel),
+    dshLlmFallbackReasoningEffort: normalizeOptionalDshLlmId(record.dshLlmFallbackReasoningEffort),
   };
 }
 
@@ -34,8 +55,10 @@ function hasAnyDshLlmValue(binding: DshLlmBinding): boolean {
   return Boolean(
     binding.dshLlmProvider
     || binding.dshLlmModel
+    || binding.dshLlmReasoningEffort
     || binding.dshLlmFallbackProvider
-    || binding.dshLlmFallbackModel,
+    || binding.dshLlmFallbackModel
+    || binding.dshLlmFallbackReasoningEffort,
   );
 }
 
@@ -47,8 +70,10 @@ export async function readDshLlmBinding(filePath: string): Promise<DshLlmBinding
       return {
         dshLlmProvider: null,
         dshLlmModel: null,
+        dshLlmReasoningEffort: null,
         dshLlmFallbackProvider: null,
         dshLlmFallbackModel: null,
+        dshLlmFallbackReasoningEffort: null,
       };
     }
     throw error;
@@ -81,11 +106,17 @@ export function mergeDshLlmBinding(
   return {
     dshLlmProvider: patch.dshLlmProvider !== undefined ? patch.dshLlmProvider : (current.dshLlmProvider ?? null),
     dshLlmModel: patch.dshLlmModel !== undefined ? patch.dshLlmModel : (current.dshLlmModel ?? null),
+    dshLlmReasoningEffort: patch.dshLlmReasoningEffort !== undefined
+      ? patch.dshLlmReasoningEffort
+      : (current.dshLlmReasoningEffort ?? null),
     dshLlmFallbackProvider: patch.dshLlmFallbackProvider !== undefined
       ? patch.dshLlmFallbackProvider
       : (current.dshLlmFallbackProvider ?? null),
     dshLlmFallbackModel: patch.dshLlmFallbackModel !== undefined
       ? patch.dshLlmFallbackModel
       : (current.dshLlmFallbackModel ?? null),
+    dshLlmFallbackReasoningEffort: patch.dshLlmFallbackReasoningEffort !== undefined
+      ? patch.dshLlmFallbackReasoningEffort
+      : (current.dshLlmFallbackReasoningEffort ?? null),
   };
 }

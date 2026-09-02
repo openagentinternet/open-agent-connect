@@ -37,6 +37,41 @@ test('validateCreatePayload requires fallback provider and model together', () =
   if (!half.ok) assert.equal(half.code, 'invalid_dsh_llm_fallback')
 })
 
+test('validateCreatePayload validates reasoning effort values', () => {
+  const ok = plugin.validateCreatePayload({
+    name: 'Alice',
+    dshLlmProvider: 'deepseek',
+    dshLlmModel: 'v3',
+    dshLlmReasoningEffort: 'high',
+    dshLlmFallbackProvider: 'other',
+    dshLlmFallbackModel: 'v4',
+    dshLlmFallbackReasoningEffort: 'low',
+  })
+  assert.equal(ok.ok, true)
+  if (ok.ok) {
+    assert.equal(ok.value.dshLlmReasoningEffort, 'high')
+    assert.equal(ok.value.dshLlmFallbackReasoningEffort, 'low')
+  }
+
+  const bad = plugin.validateCreatePayload({
+    name: 'Alice',
+    dshLlmProvider: 'deepseek',
+    dshLlmModel: 'v3',
+    dshLlmReasoningEffort: 'extreme',
+  })
+  assert.equal(bad.ok, false)
+  if (!bad.ok) assert.equal(bad.code, 'invalid_dsh_llm_reasoning_effort')
+
+  const orphan = plugin.validateCreatePayload({
+    name: 'Alice',
+    dshLlmProvider: 'deepseek',
+    dshLlmModel: 'v3',
+    dshLlmFallbackReasoningEffort: 'low',
+  })
+  assert.equal(orphan.ok, false)
+  if (!orphan.ok) assert.equal(orphan.code, 'invalid_dsh_llm_fallback')
+})
+
 test('createBot does not spawn CLI when name or provider is missing', async () => {
   const calls = []
   const result = await plugin.createBot(
@@ -73,7 +108,7 @@ test('createBot passes --host dsh and DSH LLM flags then generates preset', asyn
   try {
     const result = await plugin.createBot(
       ctx,
-      { name: 'Alice', dshLlmProvider: 'deepseek', dshLlmModel: 'v3' },
+      { name: 'Alice', dshLlmProvider: 'deepseek', dshLlmModel: 'v3', dshLlmReasoningEffort: 'high' },
       async (args) => {
         calls.push(args)
         return {
@@ -90,6 +125,7 @@ test('createBot passes --host dsh and DSH LLM flags then generates preset', asyn
       '--host', 'dsh',
       '--dsh-llm-provider', 'deepseek',
       '--dsh-llm-model', 'v3',
+      '--dsh-llm-reasoning-effort', 'high',
     ])
     assert.equal(copies.length, 1)
     assert.equal(copies[0].id, 'oac-alice')

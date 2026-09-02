@@ -85,8 +85,10 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
   homepage?: MetabotHomepage;
   dshLlmProvider?: string | null;
   dshLlmModel?: string | null;
+  dshLlmReasoningEffort?: string | null;
   dshLlmFallbackProvider?: string | null;
   dshLlmFallbackModel?: string | null;
+  dshLlmFallbackReasoningEffort?: string | null;
   botType?: MetabotBotType | null;
   ownerGlobalMetaId?: string | null;
 }
@@ -103,8 +105,10 @@ export interface CreateMetabotInput {
   allowChatSkills?: string[];
   dshLlmProvider?: string | null;
   dshLlmModel?: string | null;
+  dshLlmReasoningEffort?: string | null;
   dshLlmFallbackProvider?: string | null;
   dshLlmFallbackModel?: string | null;
+  dshLlmFallbackReasoningEffort?: string | null;
   botType?: MetabotBotType | null;
   ownerGlobalMetaId?: string | null;
 }
@@ -130,8 +134,10 @@ export interface UpdateMetabotInfoInput {
   homepage?: MetabotHomepage | null;
   dshLlmProvider?: string | null;
   dshLlmModel?: string | null;
+  dshLlmReasoningEffort?: string | null;
   dshLlmFallbackProvider?: string | null;
   dshLlmFallbackModel?: string | null;
+  dshLlmFallbackReasoningEffort?: string | null;
   botType?: MetabotBotType | null;
   ownerGlobalMetaId?: string | null;
 }
@@ -238,16 +244,20 @@ function dshLlmPatchFromInput(input: DshLlmBinding): DshLlmBinding {
   const patch: DshLlmBinding = {};
   if (input.dshLlmProvider !== undefined) patch.dshLlmProvider = input.dshLlmProvider;
   if (input.dshLlmModel !== undefined) patch.dshLlmModel = input.dshLlmModel;
+  if (input.dshLlmReasoningEffort !== undefined) patch.dshLlmReasoningEffort = input.dshLlmReasoningEffort;
   if (input.dshLlmFallbackProvider !== undefined) patch.dshLlmFallbackProvider = input.dshLlmFallbackProvider;
   if (input.dshLlmFallbackModel !== undefined) patch.dshLlmFallbackModel = input.dshLlmFallbackModel;
+  if (input.dshLlmFallbackReasoningEffort !== undefined) patch.dshLlmFallbackReasoningEffort = input.dshLlmFallbackReasoningEffort;
   return patch;
 }
 
 function hasDshLlmPatch(patch: DshLlmBinding): boolean {
   return Object.prototype.hasOwnProperty.call(patch, 'dshLlmProvider')
     || Object.prototype.hasOwnProperty.call(patch, 'dshLlmModel')
+    || Object.prototype.hasOwnProperty.call(patch, 'dshLlmReasoningEffort')
     || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackProvider')
-    || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackModel');
+    || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackModel')
+    || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackReasoningEffort');
 }
 
 function validateProvider(value: unknown): LlmProvider | null {
@@ -474,8 +484,10 @@ async function buildMetabotProfileFull(profile: IdentityProfileRecord): Promise<
     ...(homepage ? { homepage } : {}),
     dshLlmProvider: dshLlm.dshLlmProvider ?? null,
     dshLlmModel: dshLlm.dshLlmModel ?? null,
+    dshLlmReasoningEffort: dshLlm.dshLlmReasoningEffort ?? null,
     dshLlmFallbackProvider: dshLlm.dshLlmFallbackProvider ?? null,
     dshLlmFallbackModel: dshLlm.dshLlmFallbackModel ?? null,
+    dshLlmFallbackReasoningEffort: dshLlm.dshLlmFallbackReasoningEffort ?? null,
     // Unset reads as 'worker' (IDBots normalizes any non-twin bot to worker).
     botType: botRole.botType ?? 'worker',
     ownerGlobalMetaId: botRole.ownerGlobalMetaId ?? null,
@@ -622,8 +634,10 @@ export function buildMetabotProfileDraftFromIdentity(input: CreateMetabotFromIde
     allowChatSkills: input.allowChatSkills === undefined ? [] : normalizeAllowChatSkills(input.allowChatSkills),
     dshLlmProvider: input.dshLlmProvider === undefined ? null : input.dshLlmProvider,
     dshLlmModel: input.dshLlmModel === undefined ? null : input.dshLlmModel,
+    dshLlmReasoningEffort: input.dshLlmReasoningEffort === undefined ? null : input.dshLlmReasoningEffort,
     dshLlmFallbackProvider: input.dshLlmFallbackProvider === undefined ? null : input.dshLlmFallbackProvider,
     dshLlmFallbackModel: input.dshLlmFallbackModel === undefined ? null : input.dshLlmFallbackModel,
+    dshLlmFallbackReasoningEffort: input.dshLlmFallbackReasoningEffort === undefined ? null : input.dshLlmFallbackReasoningEffort,
   };
 }
 

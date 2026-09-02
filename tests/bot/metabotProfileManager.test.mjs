@@ -99,37 +99,48 @@ test('createMetabotProfile and updateMetabotProfile persist DSH LLM fields local
     name: 'DSH Bot',
     dshLlmProvider: 'deepseek',
     dshLlmModel: 'deepseek-chat',
+    dshLlmReasoningEffort: 'high',
     dshLlmFallbackProvider: 'openai',
     dshLlmFallbackModel: 'gpt-4.1',
+    dshLlmFallbackReasoningEffort: 'low',
   });
   const paths = resolveMetabotPaths(created.homeDir);
 
   assert.equal(created.dshLlmProvider, 'deepseek');
   assert.equal(created.dshLlmModel, 'deepseek-chat');
+  assert.equal(created.dshLlmReasoningEffort, 'high');
   assert.equal(created.dshLlmFallbackProvider, 'openai');
   assert.equal(created.dshLlmFallbackModel, 'gpt-4.1');
+  assert.equal(created.dshLlmFallbackReasoningEffort, 'low');
   assert.equal(created.primaryProvider, null);
 
   const persisted = JSON.parse(await readFile(paths.dshLlmPath, 'utf8'));
   assert.equal(persisted.dshLlmProvider, 'deepseek');
   assert.equal(persisted.dshLlmModel, 'deepseek-chat');
+  assert.equal(persisted.dshLlmReasoningEffort, 'high');
 
   const updated = await updateMetabotProfile(systemHomeDir, created.slug, {
     dshLlmProvider: 'openai',
     dshLlmModel: 'gpt-4.1',
+    dshLlmReasoningEffort: null,
     dshLlmFallbackProvider: null,
     dshLlmFallbackModel: null,
+    dshLlmFallbackReasoningEffort: null,
   });
   assert.equal(updated.dshLlmProvider, 'openai');
   assert.equal(updated.dshLlmModel, 'gpt-4.1');
+  assert.equal(updated.dshLlmReasoningEffort, null);
   assert.equal(updated.dshLlmFallbackProvider, null);
   assert.equal(updated.dshLlmFallbackModel, null);
+  assert.equal(updated.dshLlmFallbackReasoningEffort, null);
 
   const shown = await getMetabotProfile(systemHomeDir, created.slug);
   assert.equal(shown.dshLlmProvider, 'openai');
   assert.equal(shown.dshLlmModel, 'gpt-4.1');
+  assert.equal(shown.dshLlmReasoningEffort, null);
   assert.equal(shown.dshLlmFallbackProvider, null);
   assert.equal(shown.dshLlmFallbackModel, null);
+  assert.equal(shown.dshLlmFallbackReasoningEffort, null);
 });
 
 test('createMetabotProfileFromIdentity and updateMetabotProfile persist public bio locally', async () => {

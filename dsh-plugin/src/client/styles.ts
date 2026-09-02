@@ -57,6 +57,41 @@ export const BOTS_CSS = `
 textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-input-select { appearance: none; width: auto; max-width: 100%; padding-right: 32px; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 12px; }
 .oac-hint { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+/* LLM picker (the DSH composer ModelSelect port): a full-width trigger chip
+   plus a two-level menu — Model / Effort root cells drilling into the
+   provider-grouped model list and the reasoning-effort levels. */
+.oac-llm-picker { position: relative; min-width: 0; }
+.oac-llm-trigger { box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 38px; padding: 8px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }
+.oac-llm-trigger:hover:not(:disabled) { border-color: var(--dsw-alias-label-dimmed); }
+.oac-llm-trigger:disabled { opacity: 0.6; cursor: default; }
+.oac-llm-trigger-invalid { border-color: var(--dsw-alias-state-error-primary); }
+.oac-llm-trigger-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-llm-trigger-effort { flex: none; color: var(--dsw-alias-label-caption, var(--dsw-alias-label-tertiary)); }
+.oac-llm-chevron { flex: none; color: var(--dsw-alias-label-tertiary); transition: transform .12s ease; }
+.oac-llm-chevron-open { transform: rotate(180deg); }
+.oac-llm-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; display: flex; flex-direction: column; width: max-content; min-width: 100%; max-width: min(420px, calc(100vw - 32px)); max-height: 320px; overflow-y: auto; padding: 4px; border-radius: 12px; background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2)); box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3)); color: var(--dsw-alias-label-primary); }
+.oac-llm-status { padding: 10px; color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 20px; }
+.oac-llm-group + .oac-llm-group { margin-top: 4px; }
+.oac-llm-group-title { position: sticky; top: 0; z-index: 1; padding: 5px 8px 3px; background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2)); color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; font-weight: 500; }
+.oac-llm-cell { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; height: 40px; padding: 0 10px; border: none; border-radius: 10px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }
+.oac-llm-cell:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-llm-cell-label { flex: none; }
+.oac-llm-cell-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--dsw-alias-label-tertiary); }
+.oac-llm-cell-chevron { flex: none; color: var(--dsw-alias-label-tertiary); }
+.oac-llm-option { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 6px 8px; border: none; border-radius: 10px; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }
+.oac-llm-option:hover, .oac-llm-option:focus-visible { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-llm-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.oac-llm-check { flex: none; display: grid; place-items: center; width: 18px; color: var(--dsw-alias-label-primary); }
+.oac-llm-fallback-row { display: flex; align-items: center; gap: 8px; }
+.oac-llm-fallback-row .oac-llm-picker { flex: 1; min-width: 0; }
+.oac-llm-clear { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 14px; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.oac-llm-clear:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+/* "?" help button with hover/focus tooltip (the IDBots LLM-brain hint port). */
+.oac-help { position: relative; display: inline-flex; margin-left: 4px; vertical-align: middle; }
+.oac-help-button { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--dsw-alias-border-l2); border-radius: 50%; background: none; color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 1; cursor: help; }
+.oac-help:hover .oac-help-button, .oac-help:focus-within .oac-help-button { color: var(--dsw-alias-label-primary); border-color: var(--dsw-alias-label-dimmed); }
+.oac-help-tooltip { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 50; width: 224px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2)); box-shadow: var(--dsw-elevation-prominent, var(--dsw-shadow-lv3)); color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; font-weight: 400; white-space: normal; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.oac-help:hover .oac-help-tooltip, .oac-help:focus-within .oac-help-tooltip { opacity: 1; }
 .oac-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .oac-info { display: flex; flex-direction: column; gap: 8px; }
 .oac-info-row { display: flex; align-items: baseline; gap: 10px; font-size: 12px; line-height: 18px; }

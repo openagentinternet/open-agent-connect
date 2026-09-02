@@ -145,6 +145,8 @@ function errorFromTurnEvents(events: ReadonlyArray<{ type: string; data?: unknow
 interface DshModelPair {
   provider: string
   model: string
+  /** Adapter-owned reasoning effort (off/low/high/max); absent keeps the provider default. */
+  reasoningEffort?: string
 }
 
 /** The host default model (same source UI-created conversations use), via the optional-service seam. */
@@ -162,13 +164,19 @@ function hostDefaultModelPair(ctx: HostContext): DshModelPair | null {
 
 /**
  * Model route for one delegated worker session: the Worker Bot's own DSH LLM
- * pair first, the host default model otherwise (mirroring how UI-created
- * conversations get theirs). Without either the agent loop cannot run a turn.
+ * pair (plus its reasoning effort) first, the host default model otherwise
+ * (mirroring how UI-created conversations get theirs). Without either the
+ * agent loop cannot run a turn.
  */
 function workerModelPair(ctx: HostContext, profile: Record<string, unknown> | undefined): DshModelPair | null {
   const provider = typeof profile?.dshLlmProvider === 'string' ? (profile.dshLlmProvider as string).trim() : ''
   const model = typeof profile?.dshLlmModel === 'string' ? (profile.dshLlmModel as string).trim() : ''
-  if (provider && model) return { provider, model }
+  if (provider && model) {
+    const reasoningEffort = typeof profile?.dshLlmReasoningEffort === 'string'
+      ? (profile.dshLlmReasoningEffort as string).trim()
+      : ''
+    return { provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) }
+  }
   return hostDefaultModelPair(ctx)
 }
 
@@ -391,7 +399,11 @@ export function createTwinOrchestrator(
           // cwd keeps the session in the host workspace bucket: the DSH
           // conversation list drops cold sessions without one.
           meta: { agentPreset: presetIdForSlug(workerSlug), cwd: process.cwd() },
-          agentOptions: { provider: modelPair.provider, model: modelPair.model },
+          agentOptions: {
+            provider: modelPair.provider,
+            model: modelPair.model,
+            ...(modelPair.reasoningEffort ? { reasoningEffort: modelPair.reasoningEffort } : {}),
+          },
           setup: async (agentCtx: unknown) => {
             await ctx.agentPresets?.mount?.(agentCtx, presetIdForSlug(workerSlug))
           },

@@ -153,7 +153,7 @@ export interface HostAgentsRegistryLike {
     sessionId?: string
     meta?: Record<string, unknown>
     /** Per-agent LLM route; the agent loop throws "no provider/model" without it. */
-    agentOptions?: { provider?: string; model?: string }
+    agentOptions?: { provider?: string; model?: string; reasoningEffort?: string }
     setup?: (agentCtx: unknown) => Promise<void> | void
     signal?: AbortSignal
   }): Promise<{ agent: HostAgentLike; dispose(): Promise<void> | void }>
