@@ -425,3 +425,31 @@ test('stopLiveSession points at taskId+stepId for in-flight delegated sessions',
   await orchestrator.stopAttempt('task_1', 'step_1')
   await pending
 })
+
+test('delegate resolves the agents registry through ctx.get when the Cordis inject fence guards the property', async () => {
+  const { run } = runScript()
+  const dsh = fakeDsh('围栏后也能交付')
+  // live-host shape: the property read throws, ctx.get returns the service
+  const fencedCtx = {
+    get agents() { throw new Error('cannot get property "agents" without inject') },
+    get: (key) => key === 'agents' ? dsh.ctx.agents : undefined,
+    agentPresets: dsh.ctx.agentPresets,
+  }
+  const orchestrator = plugin.createTwinOrchestrator(fencedCtx, 'alice', { run })
+  const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
+  assert.equal(result.ok, true, result.message)
+  assert.equal(result.data.handoff, '围栏后也能交付')
+})
+
+test('delegate fails clean when the agents registry is genuinely unavailable', async () => {
+  const { run } = runScript()
+  const fencedCtx = {
+    get agents() { throw new Error('cannot get property "agents" without inject') },
+    get: () => undefined,
+    agentPresets: { mount: async () => {} },
+  }
+  const orchestrator = plugin.createTwinOrchestrator(fencedCtx, 'alice', { run })
+  const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'delegation_unavailable')
+})
