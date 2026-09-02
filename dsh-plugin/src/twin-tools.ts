@@ -12,6 +12,15 @@
  * coworkRunner.ts:4489-4508; delegation wrapper + worker system prompt:
  * twinOrchestrationService.ts:115-136,283); the overlay carries one
  * OAC-specific line for the cross-session tool.
+ *
+ * Session lifecycle mirrors IDBots (orchestratorCoworkBridge.ts:166-170):
+ * a delegated Worker session is created per attempt, runs to completion, and
+ * is KEPT ALIVE afterwards — the DSH conversation list shows it, the owner
+ * can open it, and the Twin can follow up through
+ * oac_session_insert_user_message. Disposing would delete the session from
+ * the host store and drop its sidebar row mid-flow. Settled attempts are
+ * recorded in the task ledger; the twin's pending-notify catch-up
+ * (deliverPendingNotifications) covers restarts.
  */
 import { randomUUID } from 'node:crypto'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
@@ -191,9 +200,9 @@ interface InFlightAttempt {
   /** Set once `agents.create` resolves; used by the cross-session tools. */
   agent: HostAgentLike | null
   /**
-   * Reassign sets this before aborting: the delegate settle then records the
-   * attempt with this terminal status/error and skips step/task updates and
-   * the ORCH-NOTIFY, so the superseding delegation owns all later bookkeeping.
+   * Reassign and stopAttempt set this before cancelling the run: the delegate
+   * settle then records the attempt with this terminal status/error and skips
+   * the step/task updates, so the caller owns all later bookkeeping.
    */
   settleOverride: { attemptStatus: string; error: string } | null
   /** Resolves after the delegate's bookkeeping has fully settled. */
@@ -234,20 +243,6 @@ export function createTwinOrchestrator(
   const tasksUpdate = (payload: Record<string, unknown>) =>
     runMetabotWithPayloadFile(['twin', 'tasks', 'update', '--from', twinSlug], payload, '--payload-file', [], run)
 
-  const notifyTwin = (text: string): void => {
-    const twinAgent = liveOacAgents.get(twinSlug)
-    if (!twinAgent?.followup) return
-    try {
-      twinAgent.followup({
-        role: 'user',
-        content: [{ type: 'text', text }],
-        source: { kind: 'plugin', plugin: 'oac-dsh', form: 'notification' },
-      })
-    } catch {
-      // the twin session may have been disposed between lookup and followup
-    }
-  }
-
   /** Host-side authorization shared by every twin tool: caller's Bot must be the current twin. */
   const ensureTwinAuthorized = async (toolName: string): Promise<MetabotCommandResult | null> => {
     const twinShow = await run(['bot', 'show', '--from', twinSlug], { timeoutMs: 30_000 })
@@ -287,16 +282,28 @@ export function createTwinOrchestrator(
   const resolveLiveTarget = (rawTarget: string): LiveTarget | null => {
     const target = rawTarget.trim()
     if (!target) return null
+    const registry = agentsRegistryOf(ctx)
+    // Map-held agents may outlive their DSH registration (liveOacAgents is
+    // pruned on agent/disposed, but a stale entry must never be messaged —
+    // followup on a detached agent runs an invisible zombie turn). Where the
+    // registry seam exists it is the liveness authority.
+    const isLive = (agent: HostAgentLike): boolean => {
+      if (!registry?.get || agent.id === undefined) return true
+      try {
+        return registry.get(agent.id) === agent
+      } catch {
+        return false
+      }
+    }
     for (const [key, flight] of inFlight) {
-      if ((flight.workerSlug === target || flight.sessionId === target) && flight.agent) {
+      if ((flight.workerSlug === target || flight.sessionId === target) && flight.agent && isLive(flight.agent)) {
         return { agent: flight.agent, slug: flight.workerSlug, sessionId: flight.sessionId, inFlightKey: key }
       }
     }
     const interactive = liveOacAgents.get(target)
-    if (interactive) {
+    if (interactive && isLive(interactive)) {
       return { agent: interactive, slug: target, sessionId: interactive.session?.id ?? null, inFlightKey: null }
     }
-    const registry = agentsRegistryOf(ctx)
     const direct = registry?.get?.(target)
     if (direct) {
       return { agent: direct, slug: composedSlugOf(direct), sessionId: direct.session?.id ?? null, inFlightKey: null }
@@ -442,10 +449,14 @@ export function createTwinOrchestrator(
             // worker may already be gone
           }
         } else {
-          sessionEvents = worker.session?.events ?? []
+          // The live DSH Session exposes its log through snapshotEvents();
+          // there is no `events` property on it.
+          sessionEvents = worker.session?.snapshotEvents?.() ?? worker.session?.events ?? []
           handoff = textFromAssistantEvents(sessionEvents)
         }
-        await handle.dispose?.()
+        // Keep the Worker session alive after the attempt (IDBots parity):
+        // disposing deletes the session from the host store, which drops its
+        // sidebar row and strands any follow-up. The ledger owns the outcome.
       } catch (error) {
         failureText = error instanceof Error ? error.message : String(error)
       }
@@ -462,7 +473,8 @@ export function createTwinOrchestrator(
           ? `worker step timed out after ${Math.round(stepTimeoutMs / 1000)}s`
           : handoff
             ? null
-            : errorFromTurnEvents(sessionEvents) || 'WORKER_EMPTY_HANDOFF: the worker session produced no handoff text')
+            : errorFromTurnEvents(sessionEvents)
+              || `WORKER_EMPTY_HANDOFF: the worker session produced no handoff text (dshSessionId ${workerSessionId}; the session stays live — inspect it or drive it with oac_session_insert_user_message)`)
       try {
         await tasksUpdate({
           taskId,
@@ -475,13 +487,12 @@ export function createTwinOrchestrator(
         if (!settleOverride) {
           await tasksUpdate({ taskId, stepId, stepStatus: attemptStatus === 'completed' ? 'completed' : 'failed' })
           await tasksUpdate({ taskId, taskStatus: attemptStatus === 'completed' ? 'review' : 'running' })
-
-          const workerName = typeof workerProfile?.name === 'string' ? workerProfile.name : workerSlug
-          notifyTwin(
-            attemptStatus === 'completed'
-              ? `[ORCH-NOTIFY] worker ${workerName} 已完成 task ${taskTitle || taskId} → review，请验收`
-              : `[ORCH-NOTIFY] worker ${workerName} 未能完成 task ${taskTitle || taskId}（${attemptStatus}${errorText ? `：${errorText}` : ''}），请决定重试、改派或取消`,
-          )
+          // No ORCH-NOTIFY follow-up here: local_worker_delegate blocks until
+          // the attempt settles and returns the handoff (or the failure) as
+          // the tool result, so an extra notification would only wake the
+          // Twin for a second turn on facts it already holds. The pending-
+          // notify catch-up (deliverPendingNotifications) still covers results
+          // the caller never observed (e.g. the Twin session died mid-call).
         }
       } finally {
         // The flight stays resolvable until bookkeeping is done so a concurrent
@@ -508,13 +519,24 @@ export function createTwinOrchestrator(
 
     async stopAttempt(taskId, stepId) {
       const flight = inFlight.get(`${taskId}:${stepId}`)
-      if (flight) {
-        flight.controller.abort()
-        inFlight.delete(`${taskId}:${stepId}`)
-        await tasksUpdate({ taskId, stepId, stepStatus: 'cancelled' })
-        return { ok: true, state: 'success', data: { stopped: true } }
+      if (!flight) {
+        return failure('not_found', 'No running delegated step with that taskId/stepId.')
       }
-      return failure('not_found', 'No running delegated step with that taskId/stepId.')
+      // The creation signal is detached once agents.create resolves, so
+      // aborting it alone cannot stop a running turn — cancel the agent. The
+      // settleOverride makes the delegate's settle record the attempt as this
+      // cancellation; the Worker session itself stays live (stop ≠ delete).
+      flight.settleOverride = { attemptStatus: 'cancelled', error: 'STOPPED_BY_TWIN' }
+      try {
+        flight.agent?.cancel?.({ kind: 'orchestrator_stop', reason: 'Twin requested stop via worker_session_stop' })
+      } catch {
+        // worker may already be gone
+      }
+      flight.controller.abort()
+      await flight.settled
+      inFlight.delete(`${taskId}:${stepId}`)
+      await tasksUpdate({ taskId, stepId, stepStatus: 'cancelled' })
+      return { ok: true, state: 'success', data: { stopped: true } }
     },
 
     async reassign(input) {
@@ -582,6 +604,13 @@ export function createTwinOrchestrator(
       const flight = inFlight.get(flightKey)
       if (flight) {
         flight.settleOverride = { attemptStatus: 'cancelled', error: 'REASSIGNED_TO_ANOTHER_WORKER' }
+        // The creation signal alone cannot stop an already-created run; cancel
+        // the agent's turn. The Worker session stays live (stop ≠ delete).
+        try {
+          flight.agent?.cancel?.({ kind: 'orchestrator_stop', reason: 'reassigned to another worker' })
+        } catch {
+          // worker may already be gone
+        }
         flight.controller.abort()
         let settleCapTimer: ReturnType<typeof setTimeout> | undefined
         await Promise.race([
@@ -750,7 +779,7 @@ export function buildTwinToolDefinitions(
     },
     {
       name: 'local_worker_delegate',
-      description: 'Delegate one bounded step to a local Worker Bot. Runs asynchronously to completion and returns the worker handoff.',
+      description: 'Delegate one bounded step to a local Worker Bot. Runs the Worker session to completion and returns its handoff; the session stays live in the conversation list afterwards, so you can follow up there or with oac_session_insert_user_message.',
       parameters: {
         type: 'object',
         properties: {

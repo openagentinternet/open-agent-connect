@@ -454,6 +454,16 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
         }
       })()
     })
+    // Drop disposed agents from the live map: a stale entry would let the
+    // cross-session tools message a detached agent and silently run a zombie
+    // turn (the DSH registry no longer holds it, but the map still does).
+    ctx.on('agent/disposed', (payload: { agent: HostAgentLike }) => {
+      const agent = payload?.agent
+      if (!agent) return
+      for (const [slug, entry] of liveOacAgents) {
+        if (entry === agent) liveOacAgents.delete(slug)
+      }
+    })
   }
   bindBrowserToolInstall(ctx, browserHub, sourceCache)
   bindMetawebToolInstall(ctx)
