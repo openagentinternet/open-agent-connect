@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react'
 import {
   Button,
   IconChevronLeftOutline14,
@@ -90,6 +90,9 @@ export function BotEditor({
   const [twinAction, setTwinAction] = useState<'promote' | 'demote' | null>(null)
   const [name, setName] = useState(bot.name)
   const [bio, setBio] = useState(bot.bio ?? '')
+  const [avatarDraft, setAvatarDraft] = useState(bot.avatarDataUrl ?? '')
+  const [avatarNote, setAvatarNote] = useState<{ tone: NoteTone; text: string } | null>(null)
+  const avatarInputRef = useRef<HTMLInputElement | null>(null)
   const [provider, setProvider] = useState(bot.dshLlmProvider ?? '')
   const [model, setModel] = useState(bot.dshLlmModel ?? '')
   const [reasoningEffort, setReasoningEffort] = useState(bot.dshLlmReasoningEffort ?? '')
@@ -119,9 +122,30 @@ export function BotEditor({
   const tabsId = useId()
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
 
+  // Avatar picker (OAC /ui/bot parity): the image becomes a data URL draft
+  // (200KB cap, matching the daemon's avatar validation) saved with the form;
+  // an empty draft clears the stored avatar.
+  const onAvatarFile = (event: ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.size > 200 * 1024) {
+      setAvatarNote({ tone: 'error', text: t('avatarTooLarge') })
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      setAvatarDraft(typeof reader.result === 'string' ? reader.result : '')
+      setAvatarNote({ tone: 'success', text: t('avatarReadyToSave') })
+    }
+    reader.onerror = () => setAvatarNote({ tone: 'error', text: t('avatarUploadFailed') })
+    reader.readAsDataURL(file)
+  }
+
   const saveBasic = (): Promise<void> => onSave({
     name,
     bio,
+    avatarDataUrl: avatarDraft,
     dshLlmProvider: provider || null,
     dshLlmModel: model || null,
     dshLlmReasoningEffort: reasoningEffort || null,
@@ -303,6 +327,46 @@ export function BotEditor({
       {tab === 'basic' ? (
         <div id={tabPanelId('basic')} role="tabpanel" aria-labelledby={tabId('basic')} className="oac-tab-panel">
           <div className="oac-form">
+            <div className="oac-avatar-section">
+              <BotAvatar name={name || bot.name} src={avatarDraft || undefined} className="oac-bot-avatar-lg" />
+              <div className="oac-avatar-actions">
+                <span className="oac-field-label">{t('avatarLabel')}</span>
+                <div className="oac-avatar-buttons">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => avatarInputRef.current?.click()}
+                  >
+                    {t('avatarUpload')}
+                  </Button>
+                  {avatarDraft ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="oac-danger-outline"
+                      disabled={busy}
+                      onClick={() => {
+                        setAvatarDraft('')
+                        setAvatarNote(null)
+                      }}
+                    >
+                      {t('avatarRemove')}
+                    </Button>
+                  ) : null}
+                </div>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  hidden
+                  onChange={onAvatarFile}
+                />
+                {avatarNote ? <p className={`oac-note ${avatarNote.tone}`}>{avatarNote.text}</p> : null}
+              </div>
+            </div>
             <label className="oac-field">
               <span className="oac-field-label">{t('fieldName')}</span>
               <Input value={name} onChange={(event) => setName(event.target.value)} />

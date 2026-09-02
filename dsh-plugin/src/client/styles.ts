@@ -30,6 +30,12 @@ export const BOTS_CSS = `
 .oac-bot-main { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 14px 16px 12px; }
 .oac-bot-avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
 .oac-bot-avatar-sm { width: 28px; height: 28px; }
+.oac-bot-avatar-lg { width: 64px; height: 64px; font-size: 20px; }
+/* Avatar editor in the Basic tab (OAC /ui/bot layout): preview left,
+   Upload/Replace + Remove actions right, note line underneath. */
+.oac-avatar-section { display: flex; align-items: center; gap: 14px; }
+.oac-avatar-actions { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.oac-avatar-buttons { display: flex; gap: 8px; }
 .oac-bot-avatar-fallback { display: inline-flex; align-items: center; justify-content: center; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); font-size: 14px; font-weight: 600; }
 /* Clickable avatar (opens the Bot's page in the right-sidebar Bot Browser). */
 .oac-avatar-btn { flex: none; display: inline-flex; padding: 0; border: none; border-radius: 50%; background: none; cursor: pointer; }
