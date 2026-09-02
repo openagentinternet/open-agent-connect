@@ -429,6 +429,11 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
       return () => undefined
     }, 'oac-dsh: memory extraction')
   }
+  // One backlog drain per twin slug per host run: older plugin versions left
+  // un-notified ledger rows that the old agent/created flush used to inject
+  // into whichever session appeared. Fresh settles mark themselves notified,
+  // so this is only an upgrade-time cleanup.
+  const notifiedBacklogs = new Set<string>()
   if (memoryEnabled && config.memory?.tools !== false && ctx.on) {
     ctx.on('agent/created', (payload: { agent: HostAgentLike }) => {
       void (async () => {
@@ -448,7 +453,10 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
           const orchestrator = installTwinOnAgent(ctx, agent, slug, {
             stepTimeoutMs: config.twin?.stepTimeoutMs,
           })
-          await orchestrator.deliverPendingNotifications(slug, agent)
+          if (!notifiedBacklogs.has(slug)) {
+            notifiedBacklogs.add(slug)
+            await orchestrator.clearPendingNotifications(slug)
+          }
         } catch {
           // tool installation is best-effort per agent
         }

@@ -162,7 +162,7 @@ async function waitFor(condition) {
 }
 
 test('delegate runs a worker sub-session, returns the handoff, and keeps the session alive', async () => {
-  const { run } = runScript()
+  const { run, calls } = runScript()
   const dsh = fakeDsh('清单已整理好，证据如下…')
   const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
   const result = await orchestrator.delegate({
@@ -181,6 +181,11 @@ test('delegate runs a worker sub-session, returns the handoff, and keeps the ses
   // the handoff comes from the session log snapshot (snapshotEvents), and the
   // tool result is the delivery channel — no extra ORCH-NOTIFY wake-up turn
   assert.equal(dsh.disposed.length, 0, 'worker session must stay live after the attempt')
+  // settle marks the attempt notified so no pending-notify backlog can form
+  const marked = calls
+    .filter((entry) => Array.isArray(entry) && entry[0] === 'payload' && entry[1]?.markNotified === true)
+  assert.equal(marked.length, 1)
+  assert.equal(marked[0][1].attemptId, 'att_1')
 })
 
 test('delegate falls back to the host default model when the worker Bot has no DSH LLM pair', async () => {
@@ -247,17 +252,12 @@ test('delegate times out a wedged worker and marks the attempt timed_out', async
   assert.equal(attemptUpdates[0].attemptStatus, 'timed_out')
 })
 
-test('pending notifications are delivered and marked when the twin appears', async () => {
+test('backlog pending notifications are silenced, never injected into whichever session appears', async () => {
   const { run, calls } = runScript()
-  const dsh = fakeDsh('x')
-  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
-  const notices = []
-  await orchestrator.deliverPendingNotifications('alice', {
-    ctx: {},
-    followup: (message) => notices.push(message),
-  })
-  assert.equal(notices.length, 1)
-  assert.match(notices[0].content[0].text, /旧任务/)
+  const orchestrator = plugin.createTwinOrchestrator({}, 'alice', { run })
+  await orchestrator.clearPendingNotifications('alice')
+  // the backlog row is marked notified; nothing is injected anywhere —
+  // the host has no single "twin session" to safely receive a wake-up
   const marked = calls
     .filter((entry) => Array.isArray(entry) && entry[0] === 'payload' && entry[1]?.markNotified === true)
   assert.equal(marked.length, 1)
