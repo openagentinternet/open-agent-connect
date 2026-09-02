@@ -10,6 +10,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BotRow, LlmDirectory, AutoReplyConfig, ChatSkillsPayload } from './api.ts'
+import { sortBotsTwinFirst } from '../bot-order.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
 import { CreateBotForm, type CreateBotInput } from './CreateBotForm.tsx'
@@ -31,11 +32,6 @@ export interface BotPanelInjected {
   ) => Promise<AutoReplyConfig>
   /** Open the right-sidebar Bot Browser; no URI opens its home. Resolves once the sidebar has visibly reacted; never rejects. */
   browserOpen: (uri?: string) => Promise<void>
-}
-
-/** Newest first, by profile creation time. */
-function sortNewestFirst(rows: BotRow[]): BotRow[] {
-  return [...rows].sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))
 }
 
 export function BotPanel({
@@ -63,7 +59,7 @@ export function BotPanel({
   useEffect(() => {
     let current = true
     void list().then(
-      (rows) => { if (current) { setBots(sortNewestFirst(rows)); setError(null) } },
+      (rows) => { if (current) { setBots(sortBotsTwinFirst(rows)); setError(null) } },
       (cause: unknown) => { if (current) setError(cause instanceof Error ? cause.message : String(cause)) },
     )
     return () => { current = false }

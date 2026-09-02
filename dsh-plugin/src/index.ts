@@ -464,6 +464,7 @@ export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
 export { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 export { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 export { validateCreatePayload } from './bots-input.js'
+export { sortBotsTwinFirst, type BotOrderFields } from './bot-order.js'
 export { buildPersonaPrompt, parseBotListData } from './persona.js'
 export {
   advertisedModelForBot,
