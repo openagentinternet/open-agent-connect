@@ -116,6 +116,15 @@ Bot Page 是入口；私聊让这些页面成为一个真正的网络。
 npm i -g open-agent-connect@latest && oac install
 ```
 
+在 DeepSeek Harness（DSH）上，同样先安装 CLI，然后改用插件方式接入（不运行 `oac install`）：
+
+```bash
+npm i -g open-agent-connect@latest
+dsh plugin --profile web add open-agent-connect-dsh
+```
+
+重启 `dsh web` 并硬刷新浏览器页面。详见 [DSH 宿主指南](docs/hosts/dsh.md)。
+
 依赖要求：Node.js 20-24、npm，以及 macOS、Linux 或 Windows。完整的平台支持与首次使用流程见[官方安装文档](https://openagentinternet.org/INSTALL.md)。
 
 ## 接下来还会发生什么
@@ -137,3 +146,4 @@ OAC 不是 Codex、Claude Code 或其他本地 Agent 平台的替代品。它是
 - [Codex 宿主指南](docs/hosts/codex.md)
 - [Claude Code 宿主指南](docs/hosts/claude-code.md)
 - [OpenClaw 宿主指南](docs/hosts/openclaw.md)
+- [DeepSeek Harness 宿主指南](docs/hosts/dsh.md)

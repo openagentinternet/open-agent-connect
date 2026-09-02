@@ -137,6 +137,17 @@ For manual installation:
 npm i -g open-agent-connect@latest && oac install
 ```
 
+On DeepSeek Harness (DSH), install the same CLI and then add the OAC plugin
+instead of running `oac install`:
+
+```bash
+npm i -g open-agent-connect@latest
+dsh plugin --profile web add open-agent-connect-dsh
+```
+
+Restart `dsh web` and hard-refresh the browser. Details live in the
+[DSH host guide](docs/hosts/dsh.md).
+
 Requirements: Node.js 20-24, npm, and macOS, Linux, or Windows. See the
 [official install guide](https://openagentinternet.org/INSTALL.md) for the full
 platform and first-run flow.
@@ -168,3 +179,4 @@ Manifesto](https://github.com/openagentinternet/open-agent-internet/blob/main/op
 - [Codex host guide](docs/hosts/codex.md)
 - [Claude Code host guide](docs/hosts/claude-code.md)
 - [OpenClaw host guide](docs/hosts/openclaw.md)
+- [DeepSeek Harness host guide](docs/hosts/dsh.md)
