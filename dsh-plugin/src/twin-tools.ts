@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { presetIdForSlug, slugFromPresetId } from './chip-logic.js'
-import type { HostAgentLike, HostContext, HostToolDefinition, HostUserMessage } from './context-types.js'
+import type { HostAgentLike, HostAgentsRegistryLike, HostContext, HostToolDefinition, HostUserMessage } from './context-types.js'
 
 /** Twin orchestration overlay, ported verbatim from IDBots coworkRunner.ts. */
 export const TWIN_OVERLAY_TEXT = `## Twin Bot Orchestration Role
@@ -85,6 +85,24 @@ export function buildDelegationMessage(input: DelegationInput & { taskId: string
 
 function failure(code: string, message: string): MetabotCommandResult {
   return { ok: false, state: 'failed', code, message }
+}
+
+/**
+ * Read the DSH agent registry as an OPTIONAL service. Cordis throws
+ * "cannot get property without inject" on a direct `ctx.agents` read when the
+ * plugin never declared `agents` in its inject list, so the safe read is
+ * `ctx.get('agents')` (DSH convention for optional services; it reads the
+ * global service store and never throws). The direct property read survives
+ * only as a fallback for plain-object test contexts.
+ */
+function agentsRegistryOf(ctx: HostContext): HostAgentsRegistryLike | undefined {
+  const viaGet = ctx.get?.('agents') as HostAgentsRegistryLike | undefined
+  if (viaGet) return viaGet
+  try {
+    return ctx.agents
+  } catch {
+    return undefined
+  }
 }
 
 function dataOf(result: MetabotCommandResult): Record<string, unknown> {
@@ -229,7 +247,7 @@ export function createTwinOrchestrator(
     if (interactive) {
       return { agent: interactive, slug: target, sessionId: interactive.session?.id ?? null, inFlightKey: null }
     }
-    const registry = ctx.agents ?? ctx.get?.('agents') as typeof ctx.agents
+    const registry = agentsRegistryOf(ctx)
     const direct = registry?.get?.(target)
     if (direct) {
       return { agent: direct, slug: composedSlugOf(direct), sessionId: direct.session?.id ?? null, inFlightKey: null }
@@ -257,7 +275,7 @@ export function createTwinOrchestrator(
       if (!workerShow.ok) {
         return failure('worker_not_found', `Worker Bot not found: ${workerSlug}`)
       }
-      const agentsRegistry = ctx.agents ?? ctx.get?.('agents') as typeof ctx.agents
+      const agentsRegistry = agentsRegistryOf(ctx)
       if (!agentsRegistry?.create || !ctx.agentPresets?.mount) {
         return failure('delegation_unavailable', 'The DSH agent registry or preset service is unavailable.')
       }
