@@ -31,6 +31,9 @@ export const BOTS_CSS = `
 .oac-bot-avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
 .oac-bot-avatar-sm { width: 28px; height: 28px; }
 .oac-bot-avatar-fallback { display: inline-flex; align-items: center; justify-content: center; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); font-size: 14px; font-weight: 600; }
+/* Clickable avatar (opens the Bot's page in the right-sidebar Bot Browser). */
+.oac-avatar-btn { flex: none; display: inline-flex; padding: 0; border: none; border-radius: 50%; background: none; cursor: pointer; }
+.oac-avatar-btn:hover { filter: brightness(1.08); }
 .oac-bot-name { flex: 1; min-width: 0; font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-bot-bio { margin: 0 16px 12px; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-secondary); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .oac-bot-model { margin: 0 16px 12px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -122,7 +125,7 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-a2a-list { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-3); }
 .oac-a2a-list-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-bot-avatar { flex: none; width: 32px; height: 32px; }
-.oac-a2a-list-head .oac-input { flex: 0 1 auto; min-width: 0; height: 32px; }
+.oac-a2a-list-head .oac-input { flex: 0 1 auto; min-width: 0; height: auto; padding-top: 5px; padding-bottom: 5px; }
 .oac-a2a-list-rows { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
 .oac-a2a-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 8px; box-sizing: border-box; border: none; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .oac-a2a-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
@@ -293,14 +296,28 @@ export const GROUPTASK_CSS = `
 .oac-gt-mode-tabs { border-bottom: none; margin-top: 0; align-self: stretch; align-items: center; }
 .oac-gt-mode-tabs .oac-tab { font-size: 14px; }
 .oac-gt-badge { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 7px; border-radius: 9px; font-size: 11px; line-height: 18px; white-space: nowrap; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); }
-.oac-gt-status-planning { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); }
-.oac-gt-status-executing { background: var(--dsw-alias-state-business-secondary, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-state-business-primary); }
-.oac-gt-status-review { background: var(--dsw-alias-state-warn-secondary, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-state-warn-label); }
-.oac-gt-status-done { background: var(--dsw-alias-state-success-secondary, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-state-success-primary); }
-.oac-gt-status-cancelled { background: var(--dsw-alias-state-error-secondary, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-state-error-primary); }
+/* Status badges mirror the IDBots group-task palette (Tailwind colors, light
+   + body[data-ds-dark-theme] variants); the DSH --dsw-alias-state-*-secondary
+   tokens are saturated mid-tones that made badge text unreadable. */
+.oac-gt-status-planning { background: #dbeafe; color: #1d4ed8; }
+.oac-gt-status-executing { background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 55%, #3b82f6 100%); color: #1e3a8a; animation: oac-gt-badge-breathe 2.4s ease-in-out infinite; }
+.oac-gt-status-review { background: #fef3c7; color: #b45309; }
+.oac-gt-status-done { background: #d1fae5; color: #047857; }
+.oac-gt-status-cancelled { background: #e5e7eb; color: #4b5563; }
+.oac-gt-stall { background: #fef3c7; color: #b45309; }
+.oac-gt-deliverable-accepted { background: #d1fae5; color: #047857; }
+.oac-gt-deliverable-rejected { background: #fee2e2; color: #b91c1c; }
+@keyframes oac-gt-badge-breathe { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.09); } }
+@media (prefers-reduced-motion: reduce) { .oac-gt-status-executing { animation: none; } }
+body[data-ds-dark-theme] .oac-gt-status-planning { background: rgba(30, 58, 138, .4); color: #93c5fd; }
+body[data-ds-dark-theme] .oac-gt-status-executing { background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 55%, #60a5fa 100%); color: #dbeafe; }
+body[data-ds-dark-theme] .oac-gt-status-review, body[data-ds-dark-theme] .oac-gt-stall { background: rgba(120, 53, 15, .4); color: #fcd34d; }
+body[data-ds-dark-theme] .oac-gt-status-done { background: rgba(6, 78, 59, .4); color: #6ee7b7; }
+body[data-ds-dark-theme] .oac-gt-status-cancelled { background: rgba(55, 65, 81, .5); color: #d1d5db; }
+body[data-ds-dark-theme] .oac-gt-deliverable-accepted { background: rgba(6, 78, 59, .4); color: #6ee7b7; }
+body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29, 29, .4); color: #fca5a5; }
 .oac-gt-openteam { background: var(--dsw-alias-brand-primary); color: var(--dsw-alias-bg-layer-3); font-weight: 600; }
 .oac-gt-chair { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); }
-.oac-gt-stall { background: var(--dsw-alias-state-warn-secondary, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-state-warn-label); }
 .oac-gt-row { align-items: flex-start; }
 .oac-gt-row-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .oac-gt-row-title .oac-a2a-row-name { flex: 0 1 auto; }
@@ -342,8 +359,6 @@ export const GROUPTASK_CSS = `
 .oac-gt-deliverable { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 .oac-gt-deliverable-kind { flex: none; }
 .oac-gt-deliverable-uri { flex: 1; min-width: 0; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oac-gt-deliverable-accepted { background: var(--dsw-alias-state-success-secondary, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-state-success-primary); }
-.oac-gt-deliverable-rejected { background: var(--dsw-alias-state-error-secondary, var(--dsw-alias-bg-layer-1)); color: var(--dsw-alias-state-error-primary); }
 .oac-gt-checkpoint { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--dsw-alias-state-warn-label); border-radius: 12px; background: var(--dsw-alias-state-warn-secondary, var(--dsw-alias-bg-layer-1)); }
 .oac-gt-checkpoint-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--dsw-alias-state-warn-label); }
 .oac-gt-checkpoint-hint { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }

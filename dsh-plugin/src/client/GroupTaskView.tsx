@@ -24,7 +24,8 @@ import {
   type OpenTeamCollabsPayload,
   type OpenTeamGuestInviteRow,
 } from './api.ts'
-import { BotAvatar } from './BotAvatar.tsx'
+import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
+import { relativeTimeLabel } from '../relative-time.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
 
@@ -137,7 +138,9 @@ function TaskListRow({
           <span className="oac-a2a-row-text">{t('gtMemberCount', { count: task.memberCount })}</span>
         </span>
       </span>
-      <span className="oac-a2a-row-time">{timestampLabel(task.updatedAt)}</span>
+      <span className="oac-a2a-row-time" title={timestampLabel(task.updatedAt)}>
+        {relativeTimeLabel(task.updatedAt)}
+      </span>
     </button>
   )
 }
@@ -172,11 +175,14 @@ export function GroupTaskView({
   gt,
   t,
   createSignal,
+  onOpenBotPage,
 }: {
   bots: BotRow[]
   gt: GroupTaskInjectedApi
   t: Translate
   createSignal: number
+  /** Open one participant's Bot page in the right-sidebar Bot Browser. */
+  onOpenBotPage?: (globalMetaId: string) => void
 }): ReactNode {
   // Default to the full list (all statuses, like the IDBots sidebar group
   // tab); the active/done/cancelled tabs remain available in the filter.
@@ -623,7 +629,9 @@ export function GroupTaskView({
                     </span>
                   </span>
                   {collab.activatedAt !== null ? (
-                    <span className="oac-a2a-row-time">{timestampLabel(collab.activatedAt)}</span>
+                    <span className="oac-a2a-row-time" title={timestampLabel(collab.activatedAt)}>
+                      {relativeTimeLabel(collab.activatedAt)}
+                    </span>
                   ) : null}
                 </button>
               ))}
@@ -643,7 +651,9 @@ export function GroupTaskView({
                         <span className="oac-a2a-row-text">{invite.botName}</span>
                       </span>
                     </span>
-                    <span className="oac-a2a-row-time">{timestampLabel(invite.createdAt)}</span>
+                    <span className="oac-a2a-row-time" title={timestampLabel(invite.createdAt)}>
+                      {relativeTimeLabel(invite.createdAt)}
+                    </span>
                   </div>
                 ))}
             </div>
@@ -706,11 +716,23 @@ export function GroupTaskView({
                             key={message.pinId ?? `idx-${message.index}`}
                             className="oac-a2a-msg oac-a2a-msg-peer oac-gt-msg"
                           >
-                            <BotAvatar
-                              name={senderName}
-                              src={message.senderAvatar ?? undefined}
-                              className="oac-a2a-msg-avatar"
-                            />
+                            {message.senderGlobalMetaId && onOpenBotPage
+                              ? (
+                                <BotAvatarButton
+                                  name={senderName}
+                                  src={message.senderAvatar ?? undefined}
+                                  className="oac-a2a-msg-avatar"
+                                  label={`${t('openBotPage')}: ${senderName}`}
+                                  onClick={() => onOpenBotPage(message.senderGlobalMetaId ?? '')}
+                                />
+                              )
+                              : (
+                                <BotAvatar
+                                  name={senderName}
+                                  src={message.senderAvatar ?? undefined}
+                                  className="oac-a2a-msg-avatar"
+                                />
+                              )}
                             <div className="oac-a2a-msg-body">
                               <div className="oac-a2a-msg-head">
                                 <span className="oac-a2a-msg-name">
@@ -718,7 +740,9 @@ export function GroupTaskView({
                                   {ownMessage ? <span className="oac-gt-badge oac-gt-chair">{t('gtYourBot')}</span> : null}
                                 </span>
                                 <span className="oac-a2a-msg-meta">
-                                  <span className="oac-a2a-msg-time">{timestampLabel(message.timestamp)}</span>
+                                  <span className="oac-a2a-msg-time" title={timestampLabel(message.timestamp)}>
+                                    {relativeTimeLabel(message.timestamp)}
+                                  </span>
                                 </span>
                               </div>
                               <div className="oac-a2a-bubble oac-a2a-bubble-peer">
@@ -908,7 +932,9 @@ export function GroupTaskView({
                         <span className={`oac-gt-badge oac-gt-deliverable-${row.status}`}>{row.status}</span>
                         {row.kind ? <span className="oac-gt-deliverable-kind">{row.kind}</span> : null}
                         {row.uri ? <code className="oac-gt-deliverable-uri">{row.uri}</code> : null}
-                        <span className="oac-a2a-row-time">{timestampLabel(row.createdAt)}</span>
+                        <span className="oac-a2a-row-time" title={timestampLabel(row.createdAt)}>
+                          {relativeTimeLabel(row.createdAt)}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -934,18 +960,32 @@ export function GroupTaskView({
                     : (message.senderName ?? message.senderGlobalMetaId ?? '?')
                   return (
                     <div key={message.pinId ?? `idx-${message.index}`} className="oac-a2a-msg oac-a2a-msg-peer oac-gt-msg">
-                      <BotAvatar
-                        name={senderName}
-                        src={message.senderSuspect ? undefined : (message.senderAvatar ?? undefined)}
-                        className="oac-a2a-msg-avatar"
-                      />
+                      {!message.senderSuspect && message.senderGlobalMetaId && onOpenBotPage
+                        ? (
+                          <BotAvatarButton
+                            name={senderName}
+                            src={message.senderAvatar ?? undefined}
+                            className="oac-a2a-msg-avatar"
+                            label={`${t('openBotPage')}: ${senderName}`}
+                            onClick={() => onOpenBotPage(message.senderGlobalMetaId ?? '')}
+                          />
+                        )
+                        : (
+                          <BotAvatar
+                            name={senderName}
+                            src={message.senderSuspect ? undefined : (message.senderAvatar ?? undefined)}
+                            className="oac-a2a-msg-avatar"
+                          />
+                        )}
                       <div className="oac-a2a-msg-body">
                         <div className="oac-a2a-msg-head">
                           <span className={message.senderSuspect ? 'oac-a2a-msg-name oac-gt-suspect' : 'oac-a2a-msg-name'}>
                             {senderName}
                           </span>
                           <span className="oac-a2a-msg-meta">
-                            <span className="oac-a2a-msg-time">{timestampLabel(message.timestamp)}</span>
+                            <span className="oac-a2a-msg-time" title={timestampLabel(message.timestamp)}>
+                              {relativeTimeLabel(message.timestamp)}
+                            </span>
                           </span>
                         </div>
                         <div className="oac-a2a-bubble oac-a2a-bubble-peer">

@@ -505,6 +505,7 @@ export { getConversationMessages, listConversations, runConversationGuidance } f
 export { validateCreatePayload } from './bots-input.js'
 export { sortBotsTwinFirst, pickDefaultBotSlug, type BotOrderFields } from './bot-order.js'
 export { resolveAvatarUrl, extractAvatarPinReference, isAvatarContentReference } from './avatar-url.js'
+export { relativeTimeLabel } from './relative-time.js'
 export { daemonConversationsList, daemonConversationsMessages } from './conversation-bridge.js'
 export { buildPersonaPrompt, parseBotListData } from './persona.js'
 export {

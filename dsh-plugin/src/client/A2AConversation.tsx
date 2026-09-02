@@ -18,8 +18,9 @@ import {
   type ConversationSummary,
   type ConversationThread,
 } from './api.ts'
-import { BotAvatar } from './BotAvatar.tsx'
+import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
 import { pickDefaultBotSlug } from '../bot-order.ts'
+import { relativeTimeLabel } from '../relative-time.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
@@ -33,6 +34,8 @@ export interface A2AConversationInjected {
   send: (from: string, to: string, content: string) => Promise<unknown>
   guidance: (from: string, peer: string, guidance: string) => Promise<unknown>
   grouptask: GroupTaskInjectedApi
+  /** Open the right-sidebar Bot Browser on a resource URI (e.g. `metaid://<globalMetaId>`). */
+  browserOpen: (uri?: string) => Promise<void>
 }
 
 const GUIDANCE_POLL_MS = 1500
@@ -53,30 +56,47 @@ function MessageRow({
   isLocal,
   peerLabel,
   peerAvatar,
+  peerGlobalMetaId,
   localLabel,
   localAvatar,
+  localGlobalMetaId,
   copiedTxid,
   onCopyTxid,
+  onOpenBotPage,
   t,
 }: {
   message: ConversationMessage
   isLocal: boolean
   peerLabel: string
   peerAvatar: string | undefined
+  peerGlobalMetaId: string
   localLabel: string
   localAvatar: string | undefined
+  localGlobalMetaId: string
   copiedTxid: string | null
   onCopyTxid: (txid: string) => void
+  onOpenBotPage: (globalMetaId: string) => void
   t: Translate
 }): ReactNode {
   const senderName = message.sender.name ?? (isLocal ? localLabel : peerLabel)
   const senderAvatar = message.sender.avatar ?? (isLocal ? localAvatar : peerAvatar)
+  const senderGlobalMetaId = message.sender.globalMetaId ?? (isLocal ? localGlobalMetaId : peerGlobalMetaId)
   const isImage = (message.contentType ?? '').toLowerCase().startsWith('image/')
   const isMarkdown = message.contentType === 'text/markdown'
   const mdLabels = useMemo(() => markdownLabels(t), [t])
   return (
     <div className={isLocal ? 'oac-a2a-msg oac-a2a-msg-local' : 'oac-a2a-msg oac-a2a-msg-peer'}>
-      <BotAvatar name={senderName} src={senderAvatar} className="oac-a2a-msg-avatar" />
+      {senderGlobalMetaId
+        ? (
+          <BotAvatarButton
+            name={senderName}
+            src={senderAvatar}
+            className="oac-a2a-msg-avatar"
+            label={`${t('openBotPage')}: ${senderName}`}
+            onClick={() => onOpenBotPage(senderGlobalMetaId)}
+          />
+        )
+        : <BotAvatar name={senderName} src={senderAvatar} className="oac-a2a-msg-avatar" />}
       <div className="oac-a2a-msg-body">
         <div className="oac-a2a-msg-head">
           <span className="oac-a2a-msg-name">{senderName}</span>
@@ -98,7 +118,9 @@ function MessageRow({
                 <span className="oac-a2a-msg-txid-empty">txid: -</span>
               )}
             </span>
-            <span className="oac-a2a-msg-time">{timestampLabel(message.timestamp)}</span>
+            <span className="oac-a2a-msg-time" title={timestampLabel(message.timestamp)}>
+              {relativeTimeLabel(message.timestamp)}
+            </span>
           </span>
         </div>
         <div className={isLocal ? 'oac-a2a-bubble oac-a2a-bubble-local' : 'oac-a2a-bubble oac-a2a-bubble-peer'}>
@@ -127,6 +149,7 @@ export function A2AConversation({
   send,
   guidance,
   grouptask,
+  browserOpen,
   t,
 }: A2AConversationInjected & { wide: boolean; t: Translate }): ReactNode {
   const [open, setOpen] = useState(false)
@@ -279,6 +302,14 @@ export function A2AConversation({
     setGuidanceOpen(false)
   }
 
+  // Avatar click: open the sender's Bot page in the right-sidebar Bot Browser;
+  // the modal closes so the Browser is visible (same flow as the Bot cards).
+  const openBotPage = useCallback((globalMetaId: string): void => {
+    const gmid = globalMetaId.trim()
+    if (!gmid) return
+    void browserOpen(`metaid://${gmid}`).then(() => setOpen(false))
+  }, [browserOpen])
+
   const onSend = async (): Promise<void> => {
     const peer = selectedPeer || peerDraft.trim()
     const content = draft.trim()
@@ -411,7 +442,7 @@ export function A2AConversation({
               </div>
             </div>
             {mode === 'grouptask' ? (
-              <GroupTaskView bots={profiles} gt={grouptask} t={t} createSignal={gtCreateSignal} />
+              <GroupTaskView bots={profiles} gt={grouptask} t={t} createSignal={gtCreateSignal} onOpenBotPage={openBotPage} />
             ) : null}
             <div className="oac-a2a-body" style={mode === 'grouptask' ? { display: 'none' } : undefined}>
               <div className="oac-a2a-list">
@@ -451,7 +482,9 @@ export function A2AConversation({
                         <span className="oac-a2a-row-name">{row.peerName ?? row.peerGlobalMetaId}</span>
                         <span className="oac-a2a-row-text">{row.latestText}</span>
                       </span>
-                      <span className="oac-a2a-row-time">{timestampLabel(row.latestAt)}</span>
+                      <span className="oac-a2a-row-time" title={timestampLabel(row.latestAt)}>
+                        {relativeTimeLabel(row.latestAt)}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -460,7 +493,13 @@ export function A2AConversation({
                 <div className="oac-a2a-thread-head">
                   {selectedSummary ? (
                     <>
-                      <BotAvatar name={peerLabel} src={peerAvatar} className="oac-a2a-thread-avatar" />
+                      <BotAvatarButton
+                        name={peerLabel}
+                        src={peerAvatar}
+                        className="oac-a2a-thread-avatar"
+                        label={`${t('openBotPage')}: ${peerLabel}`}
+                        onClick={() => openBotPage(selectedPeer)}
+                      />
                       <div className="oac-a2a-thread-peer">
                         <strong>{peerLabel}</strong>
                         <span>{t('remoteBot')}
@@ -478,7 +517,17 @@ export function A2AConversation({
                         <code>id: {selectedSummary.conversationId.slice(0, 8)}…</code>
                         <span>{copiedTxid === selectedSummary.conversationId ? t('copied') : t('copy')}</span>
                       </button>
-                      <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-thread-avatar" />
+                      {currentBot?.globalMetaId
+                        ? (
+                          <BotAvatarButton
+                            name={localLabel}
+                            src={localAvatar}
+                            className="oac-a2a-thread-avatar"
+                            label={`${t('openBotPage')}: ${localLabel}`}
+                            onClick={() => openBotPage(currentBot.globalMetaId ?? '')}
+                          />
+                        )
+                        : <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-thread-avatar" />}
                     </>
                   ) : (
                     <span className="oac-note">{t('selectConversation')}</span>
@@ -497,10 +546,13 @@ export function A2AConversation({
                       isLocal={isLocalMessage(message)}
                       peerLabel={peerLabel}
                       peerAvatar={peerAvatar}
+                      peerGlobalMetaId={selectedPeer}
                       localLabel={localLabel}
                       localAvatar={localAvatar}
+                      localGlobalMetaId={currentBot?.globalMetaId ?? ''}
                       copiedTxid={copiedTxid}
                       onCopyTxid={copyTxid}
+                      onOpenBotPage={openBotPage}
                       t={t}
                     />
                   ))}
