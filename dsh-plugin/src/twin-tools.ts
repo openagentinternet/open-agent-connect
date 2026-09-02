@@ -2,8 +2,7 @@
  * Twin/Worker orchestration for the DSH host: twin-only tools (registered
  * only when the session's Bot is the current twin, re-validated at execution),
  * local delegation execution through DSH sub-sessions (`agents.create` +
- * `agentPresets.mount`), and ORCH-NOTIFY wake-ups back into the twin's live
- * session. The toolset mirrors the IDBots seven: local_workers_list,
+ * `agentPresets.mount`). The toolset mirrors the IDBots seven: local_workers_list,
  * local_worker_delegate, twin_task_status, twin_task_reassign,
  * twin_task_cancel, worker_session_stop, and oac_session_insert_user_message
  * (the IDBots `idbots_session_insert_user_message`, renamed for this host and
@@ -18,9 +17,15 @@
  * is KEPT ALIVE afterwards — the DSH conversation list shows it, the owner
  * can open it, and the Twin can follow up through
  * oac_session_insert_user_message. Disposing would delete the session from
- * the host store and drop its sidebar row mid-flow. Settled attempts are
- * recorded in the task ledger; the twin's pending-notify catch-up
- * (deliverPendingNotifications) covers restarts.
+ * the host store and drop its sidebar row mid-flow.
+ *
+ * Notification policy: the blocking tool result IS the delivery channel —
+ * every settle marks its attempt `notified` in the task ledger, and nothing
+ * injects ORCH-NOTIFY wake-ups into sessions. This host has no single "the
+ * twin session" (the owner can hold many Bob conversations), so any
+ * created-agent flush lands stale notifications in unrelated conversations.
+ * clearPendingNotifications only silences backlog rows older plugin versions
+ * left behind. The ledger (twin_task_status) remains the state of record.
  */
 import { randomUUID } from 'node:crypto'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
@@ -228,7 +233,8 @@ export interface TwinOrchestrator {
   stopLiveSession(target: string): Promise<MetabotCommandResult>
   /** Insert one user message into a live local session (by Worker slug or session id). */
   insertSessionMessage(target: string, message: string): Promise<MetabotCommandResult>
-  deliverPendingNotifications(twinSlug: string, agent: HostAgentLike): Promise<void>
+  /** Mark any backlog pending-notify rows notified WITHOUT injecting them. */
+  clearPendingNotifications(twinSlug: string): Promise<void>
 }
 
 export function createTwinOrchestrator(
@@ -484,15 +490,16 @@ export function createTwinOrchestrator(
           ...(handoff ? { handoff } : {}),
           ...(errorText ? { error: errorText } : {}),
         })
+        // The blocking tool result IS the delivery channel, so settle the
+        // attempt as already notified. Un-notified terminal attempts become
+        // pending-notify rows, and this host has no single "twin session" to
+        // flush them into — any created-agent flush lands them in unrelated
+        // conversations (the bug this replaces). The CLI treats markNotified
+        // as its own branch, so it cannot fold into the status update above.
+        await tasksUpdate({ taskId, stepId, attemptId: attempt.id, markNotified: true })
         if (!settleOverride) {
           await tasksUpdate({ taskId, stepId, stepStatus: attemptStatus === 'completed' ? 'completed' : 'failed' })
           await tasksUpdate({ taskId, taskStatus: attemptStatus === 'completed' ? 'review' : 'running' })
-          // No ORCH-NOTIFY follow-up here: local_worker_delegate blocks until
-          // the attempt settles and returns the handoff (or the failure) as
-          // the tool result, so an extra notification would only wake the
-          // Twin for a second turn on facts it already holds. The pending-
-          // notify catch-up (deliverPendingNotifications) still covers results
-          // the caller never observed (e.g. the Twin session died mid-call).
         }
       } finally {
         // The flight stays resolvable until bookkeeping is done so a concurrent
@@ -722,25 +729,18 @@ export function createTwinOrchestrator(
       }
     },
 
-    async deliverPendingNotifications(twin, agent) {
+    async clearPendingNotifications(twin) {
+      // The blocking delegate tool result is the delivery channel, so settle
+      // already marks fresh attempts notified; this only drains backlog rows
+      // that older plugin versions left un-notified. They are marked notified
+      // WITHOUT being injected anywhere: this host has no single "twin
+      // session", so flushing them on agent/created landed stale
+      // notifications in unrelated (often old, resumed) conversations.
       const pending = await run(['twin', 'tasks', 'pending-notify', '--from', twin], { timeoutMs: 30_000 })
       if (!pending.ok) return
       const rows = (pending.data as { pending?: Array<Record<string, unknown>> } | undefined)?.pending ?? []
       for (const row of rows) {
-        const status = String(row.attemptStatus ?? '')
-        const title = String(row.taskTitle ?? row.taskId ?? '')
-        const worker = String(row.workerSlug ?? '')
         try {
-          agent.followup?.({
-            role: 'user',
-            content: [{
-              type: 'text',
-              text: status === 'completed'
-                ? `[ORCH-NOTIFY] worker ${worker} 已完成 task ${title} → review，请验收`
-                : `[ORCH-NOTIFY] worker ${worker} 未能完成 task ${title}（${status}），请决定重试、改派或取消`,
-            }],
-            source: { kind: 'plugin', plugin: 'oac-dsh', form: 'notification' },
-          })
           await tasksUpdate({
             taskId: String(row.taskId),
             stepId: String(row.stepId),
@@ -748,7 +748,7 @@ export function createTwinOrchestrator(
             markNotified: true,
           })
         } catch {
-          // delivered next time the twin appears
+          // best-effort; retried next time the twin appears
         }
       }
     },
