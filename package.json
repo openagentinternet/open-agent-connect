@@ -97,6 +97,6 @@
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^26.0.1",
     "playwright": "^1.60.0",
-    "typescript": "^5.7.3"
+    "typescript": "^7.0.2"
   }
 }
