@@ -27,3 +27,25 @@ export function BotAvatar({
   const initials = name.trim().slice(0, 2).toUpperCase() || 'MB'
   return <span className={`${classes} oac-bot-avatar-fallback`} aria-hidden="true">{initials}</span>
 }
+
+/** Avatar that opens the owner's Bot page (`metaid://…`) when clicked. */
+export function BotAvatarButton({
+  name,
+  src,
+  className,
+  label,
+  onClick,
+}: {
+  name: string
+  src: string | undefined
+  className?: string
+  /** Accessible label / tooltip, e.g. `Open Bot page: Alice`. */
+  label: string
+  onClick: () => void
+}): ReactNode {
+  return (
+    <button type="button" className="oac-avatar-btn" title={label} aria-label={label} onClick={onClick}>
+      <BotAvatar name={name} src={src} className={className} />
+    </button>
+  )
+}

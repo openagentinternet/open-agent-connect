@@ -225,6 +225,9 @@ Entry points:
 - **Settings → Bots** header gains a **Bot Browser** button (closes Settings as the Browser home opens).
 - Each Bot card gains a **Bot Page** button that closes Settings as that Bot's
   page (`metaid://<globalMetaId>`) opens in the right sidebar.
+- In **A2A Chat** and **Group Tasks** transcripts, clicking any sender avatar
+  (or the thread-header participant avatars) opens that Bot's page the same
+  way and closes the panel.
 - The Browser panel has a close button and a width drag handle (default
   `min(50vw, 1280px)`).
 
