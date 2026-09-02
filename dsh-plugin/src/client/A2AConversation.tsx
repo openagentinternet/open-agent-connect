@@ -606,40 +606,40 @@ export function A2AConversation({
                       )}
                     </div>
                   ) : null}
+                  {/* OAC /ui/conversations parity: a selected conversation is
+                      Steer-only — no free message composer. The plain composer
+                      exists solely to start a brand-new conversation. */}
                   {!selectedPeer ? (
-                    <Input
-                      value={peerDraft}
-                      onChange={(event) => setPeerDraft(event.target.value)}
-                      placeholder={t('peerPlaceholder')}
-                    />
-                  ) : null}
-                  {/* The Steer form and the plain composer are mutually
-                      exclusive — while Steer is expanded, the composer row
-                      below folds away (OAC /ui/conversations swap). */}
-                  {guidanceOpen ? null : (
-                    <div className="oac-a2a-composer-row">
+                    <>
                       <Input
-                        value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
-                        placeholder={t('messagePlaceholder')}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' && !event.shiftKey) {
-                            event.preventDefault()
-                            if (!busy) void onSend()
-                          }
-                        }}
+                        value={peerDraft}
+                        onChange={(event) => setPeerDraft(event.target.value)}
+                        placeholder={t('peerPlaceholder')}
                       />
-                      <Button
-                        type="button"
-                        variant="primary"
-                        icon={<IconSendOutline16 />}
-                        disabled={busy || !from || !draft.trim() || (!selectedPeer && !peerDraft.trim())}
-                        onClick={() => { void onSend() }}
-                      >
-                        {busy ? t('sending') : t('send')}
-                      </Button>
-                    </div>
-                  )}
+                      <div className="oac-a2a-composer-row">
+                        <Input
+                          value={draft}
+                          onChange={(event) => setDraft(event.target.value)}
+                          placeholder={t('messagePlaceholder')}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                              event.preventDefault()
+                              if (!busy) void onSend()
+                            }
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="primary"
+                          icon={<IconSendOutline16 />}
+                          disabled={busy || !from || !draft.trim() || !peerDraft.trim()}
+                          onClick={() => { void onSend() }}
+                        >
+                          {busy ? t('sending') : t('send')}
+                        </Button>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               </div>
             </div>
