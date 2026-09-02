@@ -92,7 +92,10 @@ export interface HostSessionEventLike {
 
 export interface HostSessionLike {
   id?: string
-  events: ReadonlyArray<HostSessionEventLike>
+  /** DSH Session event-log snapshot API (the live class has no `events` property). */
+  snapshotEvents?(): ReadonlyArray<HostSessionEventLike>
+  /** Test-fallback shape only; DSH sessions do not expose it. */
+  events?: ReadonlyArray<HostSessionEventLike>
   header?: { agentPreset?: string }
 }
 

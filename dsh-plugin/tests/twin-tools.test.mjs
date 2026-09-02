@@ -105,11 +105,13 @@ function fakeDsh(handoffText, options = {}) {
   const followedUp = []
   const cancelled = []
   const created = []
+  const disposed = []
   return {
     mounted,
     followedUp,
     cancelled,
     created,
+    disposed,
     ctx: {
       agentPresets: {
         mount: async (agentCtx, id) => mounted.push(id),
@@ -126,22 +128,25 @@ function fakeDsh(handoffText, options = {}) {
           await createOptions.setup?.({})
           const preset = createOptions.meta?.agentPreset
           const text = handoffText !== null && typeof handoffText === 'object' ? handoffText[preset] : handoffText
+          const events = text === 'turn_error'
+            ? [{ type: 'turn/end', data: { reason: { kind: 'error', error: { message: 'agent "x" has no provider/model: set AgentOptions.provider and AgentOptions.model' } } } }]
+            : text && text !== 'never'
+              ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]
+              : []
           return {
             agent: {
+              id: createOptions.sessionId,
               ctx: {},
               followup: (message) => followedUp.push(message),
               whenIdle: () => text === 'never' ? new Promise(() => {}) : Promise.resolve(),
               cancel: (reason) => cancelled.push(reason),
               session: {
                 id: createOptions.sessionId,
-                events: text === 'turn_error'
-                  ? [{ type: 'turn/end', data: { reason: { kind: 'error', error: { message: 'agent "x" has no provider/model: set AgentOptions.provider and AgentOptions.model' } } } }]
-                  : text && text !== 'never'
-                    ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]
-                    : [],
+                // the live DSH Session exposes its log through snapshotEvents()
+                snapshotEvents: () => events,
               },
             },
-            dispose: async () => {},
+            dispose: async () => { disposed.push(createOptions.sessionId) },
           }
         },
       },
@@ -156,14 +161,9 @@ async function waitFor(condition) {
   assert.ok(condition(), 'waitFor condition never became true')
 }
 
-test('delegate runs a worker sub-session and posts ORCH-NOTIFY to the twin', async () => {
+test('delegate runs a worker sub-session, returns the handoff, and keeps the session alive', async () => {
   const { run } = runScript()
   const dsh = fakeDsh('清单已整理好，证据如下…')
-  const notices = []
-  plugin.liveOacAgents.set('alice', {
-    ctx: {},
-    followup: (message) => notices.push(message),
-  })
   const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
   const result = await orchestrator.delegate({
     workerSlug: 'bob',
@@ -178,9 +178,9 @@ test('delegate runs a worker sub-session and posts ORCH-NOTIFY to the twin', asy
   assert.equal(dsh.created[0].meta.cwd, process.cwd())
   assert.match(dsh.followedUp[0].content[0].text, /<twin_delegation>/)
   assert.match(dsh.followedUp[0].content[0].text, /整理发布清单/)
-  assert.match(notices[0].content[0].text, /ORCH-NOTIFY/)
-  assert.match(notices[0].content[0].text, /已完成/)
-  plugin.liveOacAgents.delete('alice')
+  // the handoff comes from the session log snapshot (snapshotEvents), and the
+  // tool result is the delivery channel — no extra ORCH-NOTIFY wake-up turn
+  assert.equal(dsh.disposed.length, 0, 'worker session must stay live after the attempt')
 })
 
 test('delegate falls back to the host default model when the worker Bot has no DSH LLM pair', async () => {
@@ -205,15 +205,14 @@ test('delegate refuses when neither the Bot pair nor a host default model exists
 test('an empty handoff fails the step instead of completing it', async () => {
   const { run } = runScript()
   const dsh = fakeDsh('')
-  const notices = []
-  plugin.liveOacAgents.set('alice', { ctx: {}, followup: (message) => notices.push(message) })
   const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
   const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
   assert.equal(result.ok, false)
   assert.equal(result.code, 'worker_failed')
   assert.match(result.message, /WORKER_EMPTY_HANDOFF/)
-  assert.match(notices[0].content[0].text, /未能完成/)
-  plugin.liveOacAgents.delete('alice')
+  // the error carries the live session id so the Twin can still drive it
+  assert.match(result.message, /dshSessionId/)
+  assert.equal(dsh.disposed.length, 0, 'failed worker session must stay live too')
 })
 
 test('a dead worker turn surfaces its own error text', async () => {
@@ -350,7 +349,7 @@ test('reassign record-cancels a stale active attempt before re-delegating', asyn
   assert.equal(tasks[0].steps[0].attempts[0].status, 'cancelled')
 })
 
-test('reassign aborts the in-flight attempt; its settle records the cancellation and skips the notify', async () => {
+test('reassign cancels the in-flight attempt; its settle records the cancellation', async () => {
   const tasks = [{
     id: 'task_1',
     title: '发布清单',
@@ -367,8 +366,6 @@ test('reassign aborts the in-flight attempt; its settle records the cancellation
   const dsh = fakeDsh({ 'oac-bob': 'never', 'oac-carol': '改派后完成' })
   // bounded step timeout: even if the abort path misfires the run cannot hang
   const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run, stepTimeoutMs: 10_000 })
-  const notices = []
-  plugin.liveOacAgents.set('alice', { ctx: {}, followup: (message) => notices.push(message) })
   const first = orchestrator.delegate({ workerSlug: 'bob', objective: '整理发布清单', taskId: 'task_1', stepId: 'step_1' })
   // wait until the delegation message is out: at that point the flight is
   // registered, the worker agent is live, and its abort listener is armed
@@ -388,10 +385,10 @@ test('reassign aborts the in-flight attempt; its settle records the cancellation
   assert.ok(step.attempts.some((attempt) => attempt.id === 'att_2' && attempt.status === 'completed'))
   assert.equal(step.status, 'completed')
   assert.equal(tasks[0].status, 'review')
-  // exactly one notify (the successful new delegation); the superseded attempt stays silent
-  assert.equal(notices.length, 1)
-  assert.match(notices[0].content[0].text, /已完成/)
-  plugin.liveOacAgents.delete('alice')
+  // both worker sessions stay live (superseded one included): stop ≠ delete
+  assert.equal(dsh.disposed.length, 0)
+  // the superseded run was cancelled through the agent, not just the creation signal
+  assert.ok(dsh.cancelled.some((reason) => reason?.reason === 'reassigned to another worker'))
 })
 
 test('reassign validates caller, worker, and step state', async () => {
@@ -488,6 +485,59 @@ test('stopLiveSession points at taskId+stepId for in-flight delegated sessions',
   assert.match(result.message, /step_1/)
   await orchestrator.stopAttempt('task_1', 'step_1')
   await pending
+})
+
+test('stopAttempt cancels the in-flight attempt through the agent and keeps the session alive', async () => {
+  const tasks = [{
+    id: 'task_1',
+    title: '发布清单',
+    status: 'running',
+    steps: [{
+      id: 'step_1',
+      workerSlug: 'bob',
+      objective: '整理发布清单',
+      status: 'running',
+      attempts: [],
+    }],
+  }]
+  const { run } = runScript({ tasks })
+  const dsh = fakeDsh('never')
+  // bounded step timeout: even if the abort path misfires the run cannot hang
+  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run, stepTimeoutMs: 10_000 })
+  const pending = orchestrator.delegate({ workerSlug: 'bob', objective: 'x', taskId: 'task_1', stepId: 'step_1' })
+  await waitFor(() => dsh.followedUp.length > 0)
+  const stop = await orchestrator.stopAttempt('task_1', 'step_1')
+  assert.equal(stop.ok, true)
+  const settled = await pending
+  assert.equal(settled.ok, false)
+  assert.equal(settled.code, 'attempt_superseded')
+  const step = tasks[0].steps[0]
+  assert.equal(step.status, 'cancelled')
+  const attempt = step.attempts.find((entry) => entry.id === 'att_1')
+  assert.equal(attempt.status, 'cancelled')
+  assert.equal(attempt.error, 'STOPPED_BY_TWIN')
+  // the running turn was cancelled through the agent (creation signal alone is detached)
+  assert.ok(dsh.cancelled.some((reason) => reason?.kind === 'orchestrator_stop'))
+  assert.equal(dsh.disposed.length, 0)
+})
+
+test('cross-session tools skip stale liveOacAgents entries the host registry no longer holds', async () => {
+  const { run } = runScript()
+  const registry = { get: () => undefined, list: () => [] }
+  const orchestrator = plugin.createTwinOrchestrator({ agents: registry }, 'alice', { run })
+  const delivered = []
+  const ghost = { id: 'sess-ghost', ctx: {}, followup: (message) => delivered.push(message) }
+  plugin.liveOacAgents.set('ghost', ghost)
+  // registry seam says the agent is gone: no delivery into a detached zombie
+  const stale = await orchestrator.insertSessionMessage('ghost', '在吗')
+  assert.equal(stale.code, 'session_not_live')
+  assert.equal(delivered.length, 0)
+  // once the registry confirms liveness the same entry resolves again
+  registry.get = (id) => id === 'sess-ghost' ? ghost : undefined
+  const live = await orchestrator.insertSessionMessage('ghost', '在吗')
+  assert.equal(live.ok, true)
+  assert.equal(delivered.length, 1)
+  plugin.liveOacAgents.delete('ghost')
 })
 
 test('delegate resolves the agents registry through ctx.get when the Cordis inject fence guards the property', async () => {
