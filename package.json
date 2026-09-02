@@ -75,7 +75,7 @@
     "@openagentinternet/agent-browser-name-resolvers": "0.5.3",
     "@openagentinternet/agent-browser-ui": "0.5.3",
     "@scure/bip39": "^1.6.0",
-    "bitcoinjs-lib": "^6.1.6",
+    "bitcoinjs-lib": "^7.0.1",
     "crypto-js": "^4.2.0",
     "meta-contract": "^0.4.16",
     "rimraf": "^6.1.3",
