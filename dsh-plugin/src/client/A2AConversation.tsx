@@ -613,28 +613,33 @@ export function A2AConversation({
                       placeholder={t('peerPlaceholder')}
                     />
                   ) : null}
-                  <div className="oac-a2a-composer-row">
-                    <Input
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      placeholder={t('messagePlaceholder')}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          event.preventDefault()
-                          if (!busy) void onSend()
-                        }
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="primary"
-                      icon={<IconSendOutline16 />}
-                      disabled={busy || !from || !draft.trim() || (!selectedPeer && !peerDraft.trim())}
-                      onClick={() => { void onSend() }}
-                    >
-                      {busy ? t('sending') : t('send')}
-                    </Button>
-                  </div>
+                  {/* The Steer form and the plain composer are mutually
+                      exclusive — while Steer is expanded, the composer row
+                      below folds away (OAC /ui/conversations swap). */}
+                  {guidanceOpen ? null : (
+                    <div className="oac-a2a-composer-row">
+                      <Input
+                        value={draft}
+                        onChange={(event) => setDraft(event.target.value)}
+                        placeholder={t('messagePlaceholder')}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault()
+                            if (!busy) void onSend()
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="primary"
+                        icon={<IconSendOutline16 />}
+                        disabled={busy || !from || !draft.trim() || (!selectedPeer && !peerDraft.trim())}
+                        onClick={() => { void onSend() }}
+                      >
+                        {busy ? t('sending') : t('send')}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
