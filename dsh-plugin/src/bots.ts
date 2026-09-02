@@ -60,11 +60,17 @@ export async function createBot(
     '--dsh-llm-provider', parsed.value.dshLlmProvider,
     '--dsh-llm-model', parsed.value.dshLlmModel,
   ]
+  if (parsed.value.dshLlmReasoningEffort) {
+    args.push('--dsh-llm-reasoning-effort', parsed.value.dshLlmReasoningEffort)
+  }
   if (parsed.value.dshLlmFallbackProvider && parsed.value.dshLlmFallbackModel) {
     args.push(
       '--dsh-llm-fallback-provider', parsed.value.dshLlmFallbackProvider,
       '--dsh-llm-fallback-model', parsed.value.dshLlmFallbackModel,
     )
+    if (parsed.value.dshLlmFallbackReasoningEffort) {
+      args.push('--dsh-llm-fallback-reasoning-effort', parsed.value.dshLlmFallbackReasoningEffort)
+    }
   }
   const result = await run(args)
   if (result.ok && result.state === 'success') {

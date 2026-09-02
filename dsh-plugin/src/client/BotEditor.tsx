@@ -19,6 +19,7 @@ import {
   type LlmDirectory,
 } from './api.ts'
 import { BotAvatar } from './BotAvatar.tsx'
+import { LlmPicker } from './LlmPicker.tsx'
 import type { BotsLocaleKey } from './locale.ts'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
@@ -91,14 +92,14 @@ export function BotEditor({
   const [bio, setBio] = useState(bot.bio ?? '')
   const [provider, setProvider] = useState(bot.dshLlmProvider ?? '')
   const [model, setModel] = useState(bot.dshLlmModel ?? '')
+  const [reasoningEffort, setReasoningEffort] = useState(bot.dshLlmReasoningEffort ?? '')
   const [fallbackProvider, setFallbackProvider] = useState(bot.dshLlmFallbackProvider ?? '')
   const [fallbackModel, setFallbackModel] = useState(bot.dshLlmFallbackModel ?? '')
+  const [fallbackReasoningEffort, setFallbackReasoningEffort] = useState(bot.dshLlmFallbackReasoningEffort ?? '')
   const [role, setRole] = useState(bot.role ?? '')
   const [soul, setSoul] = useState(bot.soul ?? '')
   const [goal, setGoal] = useState(bot.goal ?? '')
-  const providers = directory?.providers ?? []
-  const models = directory?.modelsByProvider[provider] ?? []
-  const fallbackModels = fallbackProvider ? directory?.modelsByProvider[fallbackProvider] ?? [] : []
+  const fallbackSet = Boolean(fallbackProvider && fallbackModel)
 
   // Chat settings: the auto-reply state lives server-side and is written on
   // every toggle/param change; the allowed-skill list is a local draft that
@@ -123,8 +124,10 @@ export function BotEditor({
     bio,
     dshLlmProvider: provider || null,
     dshLlmModel: model || null,
+    dshLlmReasoningEffort: reasoningEffort || null,
     dshLlmFallbackProvider: fallbackProvider || null,
     dshLlmFallbackModel: fallbackModel || null,
+    dshLlmFallbackReasoningEffort: fallbackReasoningEffort || null,
   })
   const saveBehavior = (): Promise<void> => onSave({ role, soul, goal })
 
@@ -308,53 +311,77 @@ export function BotEditor({
               <span className="oac-field-label">{t('fieldBio')}</span>
               <textarea className="oac-input" value={bio} onChange={(event) => setBio(event.target.value)} rows={4} />
             </label>
-            <label className="oac-field">
-              <span className="oac-field-label">{t('fieldProvider')}</span>
-              <select
-                className="oac-input oac-input-select"
-                value={provider}
-                onChange={(event) => { setProvider(event.target.value); setModel('') }}
-              >
-                <option value=""></option>
-                {providers.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-              </select>
-            </label>
-            <label className="oac-field">
-              <span className="oac-field-label">{t('fieldModel')}</span>
-              <select
-                className="oac-input oac-input-select"
-                value={model}
-                disabled={!provider}
-                onChange={(event) => setModel(event.target.value)}
-              >
-                <option value=""></option>
-                {models.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-              </select>
-            </label>
-            <label className="oac-field">
-              <span className="oac-field-label">{t('fieldFallbackProvider')}</span>
-              <select
-                className="oac-input oac-input-select"
-                value={fallbackProvider}
-                onChange={(event) => { setFallbackProvider(event.target.value); setFallbackModel('') }}
-              >
-                <option value=""></option>
-                {providers.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-              </select>
-            </label>
-            <label className="oac-field">
-              <span className="oac-field-label">{t('fieldFallbackModel')}</span>
-              <select
-                className="oac-input oac-input-select"
-                value={fallbackModel}
-                disabled={!fallbackProvider}
-                onChange={(event) => setFallbackModel(event.target.value)}
-              >
-                <option value=""></option>
-                {fallbackModels.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
-              </select>
-            </label>
-            <p className="oac-hint">{t('fieldLlmHint')}</p>
+            <div className="oac-field">
+              <span className="oac-field-label">
+                {t('llmBrain')}
+                <span className="oac-help">
+                  <button type="button" className="oac-help-button" aria-label={t('llmBrainHint')}>?</button>
+                  <span role="tooltip" className="oac-help-tooltip">{t('llmBrainHint')}</span>
+                </span>
+              </span>
+              <LlmPicker
+                value={{ provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) }}
+                directory={directory}
+                locked={busy}
+                invalid={!provider || !model}
+                onChange={(next) => {
+                  setProvider(next.provider)
+                  setModel(next.model)
+                  setReasoningEffort(next.reasoningEffort ?? '')
+                }}
+                t={t}
+              />
+            </div>
+            <div className="oac-field">
+              <span className="oac-field-label">{t('llmFallback')}</span>
+              {fallbackSet ? (
+                <div className="oac-llm-fallback-row">
+                  <LlmPicker
+                    value={{
+                      provider: fallbackProvider,
+                      model: fallbackModel,
+                      ...(fallbackReasoningEffort ? { reasoningEffort: fallbackReasoningEffort } : {}),
+                    }}
+                    directory={directory}
+                    locked={busy}
+                    onChange={(next) => {
+                      setFallbackProvider(next.provider)
+                      setFallbackModel(next.model)
+                      setFallbackReasoningEffort(next.reasoningEffort ?? '')
+                    }}
+                    t={t}
+                  />
+                  <button
+                    type="button"
+                    className="oac-llm-clear"
+                    aria-label={t('llmClearFallback')}
+                    title={t('llmClearFallback')}
+                    disabled={busy}
+                    onClick={() => {
+                      setFallbackProvider('')
+                      setFallbackModel('')
+                      setFallbackReasoningEffort('')
+                    }}
+                  >
+                    <IconCloseOutline16 size={12} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="oac-a2a-guidance-toggle"
+                  disabled={busy || !provider || !model}
+                  onClick={() => {
+                    setFallbackProvider(provider)
+                    setFallbackModel(model)
+                    setFallbackReasoningEffort(reasoningEffort)
+                  }}
+                >
+                  {t('llmSetFallback')}
+                </button>
+              )}
+              <span className="oac-hint">{t('llmFallbackHint')}</span>
+            </div>
             <div className="oac-info-row">
               <span className="oac-info-label">{t('globalMetaId')}</span>
               <code className="oac-info-value">{bot.globalMetaId ?? ''}</code>

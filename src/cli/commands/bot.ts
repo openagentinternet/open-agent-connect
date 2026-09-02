@@ -48,8 +48,10 @@ export async function runBotCommand(args: string[], context: CliRuntimeContext):
     }
     const dshLlmProvider = readFlagValue(args, '--dsh-llm-provider');
     const dshLlmModel = readFlagValue(args, '--dsh-llm-model');
+    const dshLlmReasoningEffort = readFlagValue(args, '--dsh-llm-reasoning-effort');
     const dshLlmFallbackProvider = readFlagValue(args, '--dsh-llm-fallback-provider');
     const dshLlmFallbackModel = readFlagValue(args, '--dsh-llm-fallback-model');
+    const dshLlmFallbackReasoningEffort = readFlagValue(args, '--dsh-llm-fallback-reasoning-effort');
     const botType = readFlagValue(args, '--type');
     if (botType !== null && botType !== 'twin' && botType !== 'worker') {
       return commandFailed('invalid_flag', '--type must be twin or worker.');
@@ -60,8 +62,10 @@ export async function runBotCommand(args: string[], context: CliRuntimeContext):
       ...(host ? { host } : {}),
       ...(dshLlmProvider ? { dshLlmProvider } : {}),
       ...(dshLlmModel ? { dshLlmModel } : {}),
+      ...(dshLlmReasoningEffort ? { dshLlmReasoningEffort } : {}),
       ...(dshLlmFallbackProvider ? { dshLlmFallbackProvider } : {}),
       ...(dshLlmFallbackModel ? { dshLlmFallbackModel } : {}),
+      ...(dshLlmFallbackReasoningEffort ? { dshLlmFallbackReasoningEffort } : {}),
       ...(botType ? { botType } : {}),
       ...(ownerGlobalMetaId ? { ownerGlobalMetaId } : {}),
     });

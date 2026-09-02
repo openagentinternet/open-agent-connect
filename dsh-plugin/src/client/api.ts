@@ -25,8 +25,10 @@ export type BotRow = {
   allowChatSkills?: string[]
   dshLlmProvider?: string | null
   dshLlmModel?: string | null
+  dshLlmReasoningEffort?: string | null
   dshLlmFallbackProvider?: string | null
   dshLlmFallbackModel?: string | null
+  dshLlmFallbackReasoningEffort?: string | null
   botType?: 'twin' | 'worker' | null
   ownerGlobalMetaId?: string | null
 }
@@ -429,8 +431,10 @@ export const api = {
     name: string
     dshLlmProvider: string
     dshLlmModel: string
+    dshLlmReasoningEffort?: string
     dshLlmFallbackProvider?: string
     dshLlmFallbackModel?: string
+    dshLlmFallbackReasoningEffort?: string
   }): Promise<BotRow> => profileOf(await post('bots/create', input)),
   update: async (slug: string, patch: Record<string, unknown>): Promise<BotRow> =>
     profileOf(await post('bots/update', { slug, patch })),

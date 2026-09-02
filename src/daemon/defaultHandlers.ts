@@ -74,7 +74,7 @@ import type {
   MetabotProfileFull,
   UpdateMetabotInfoInput,
 } from '../core/bot/metabotProfileManager';
-import { normalizeOptionalDshLlmId } from '../core/bot/dshLlm';
+import { normalizeOptionalDshLlmId, normalizeOptionalDshLlmReasoningEffort } from '../core/bot/dshLlm';
 import { normalizeBotType, normalizeOptionalGlobalMetaId } from '../core/bot/botRole';
 import { applyTwinInvariant, resolveCurrentTwinSlug, resolveTwinHomeDir } from '../core/bot/twinRole';
 import type { MetabotDaemonHttpHandlers, ServiceRefundSyncResponse } from './routes/types';
@@ -1070,6 +1070,12 @@ function buildMetabotUpdateInput(input: Record<string, unknown>): UpdateMetabotI
   if (hasOwnField(input, 'dshLlmFallbackModel')) {
     update.dshLlmFallbackModel = normalizeOptionalDshLlmId(input.dshLlmFallbackModel);
   }
+  if (hasOwnField(input, 'dshLlmReasoningEffort')) {
+    update.dshLlmReasoningEffort = normalizeOptionalDshLlmReasoningEffort(input.dshLlmReasoningEffort);
+  }
+  if (hasOwnField(input, 'dshLlmFallbackReasoningEffort')) {
+    update.dshLlmFallbackReasoningEffort = normalizeOptionalDshLlmReasoningEffort(input.dshLlmFallbackReasoningEffort);
+  }
   if (hasOwnField(input, 'botType')) {
     const botType = normalizeBotType(input.botType);
     if (input.botType !== null && input.botType !== undefined && !botType) {
@@ -1132,6 +1138,12 @@ function buildMetabotCreateInput(input: Record<string, unknown>): CreateMetabotI
   }
   if (hasOwnField(input, 'dshLlmFallbackModel')) {
     createInput.dshLlmFallbackModel = normalizeOptionalDshLlmId(input.dshLlmFallbackModel);
+  }
+  if (hasOwnField(input, 'dshLlmReasoningEffort')) {
+    createInput.dshLlmReasoningEffort = normalizeOptionalDshLlmReasoningEffort(input.dshLlmReasoningEffort);
+  }
+  if (hasOwnField(input, 'dshLlmFallbackReasoningEffort')) {
+    createInput.dshLlmFallbackReasoningEffort = normalizeOptionalDshLlmReasoningEffort(input.dshLlmFallbackReasoningEffort);
   }
   if (hasOwnField(input, 'botType')) {
     const botType = normalizeBotType(input.botType);

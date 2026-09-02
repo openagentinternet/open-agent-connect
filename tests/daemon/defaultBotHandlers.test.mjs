@@ -1407,10 +1407,12 @@ test('default bot createProfile and updateProfile persist DSH LLM fields without
     host: 'dsh',
     dshLlmProvider: 'deepseek',
     dshLlmModel: 'deepseek-chat',
+    dshLlmReasoningEffort: 'high',
   });
   assert.equal(created.ok, true);
   assert.equal(created.data.profile.dshLlmProvider, 'deepseek');
   assert.equal(created.data.profile.dshLlmModel, 'deepseek-chat');
+  assert.equal(created.data.profile.dshLlmReasoningEffort, 'high');
   assert.equal(created.data.profile.dshLlmFallbackProvider, null);
   assert.equal(writeCalls.some((call) => String(call.path || '').includes('dsh')), false);
 
@@ -1418,16 +1420,25 @@ test('default bot createProfile and updateProfile persist DSH LLM fields without
   assert.equal(shown.ok, true);
   assert.equal(shown.data.profile.dshLlmProvider, 'deepseek');
   assert.equal(shown.data.profile.dshLlmModel, 'deepseek-chat');
+  assert.equal(shown.data.profile.dshLlmReasoningEffort, 'high');
 
   const updated = await handlers.bot.updateProfile({
     slug: created.data.profile.slug,
     dshLlmFallbackProvider: 'openai',
     dshLlmFallbackModel: 'gpt-4.1',
+    dshLlmFallbackReasoningEffort: 'low',
   });
   assert.equal(updated.ok, true);
   assert.equal(updated.data.profile.dshLlmProvider, 'deepseek');
   assert.equal(updated.data.profile.dshLlmFallbackProvider, 'openai');
   assert.equal(updated.data.profile.dshLlmFallbackModel, 'gpt-4.1');
+  assert.equal(updated.data.profile.dshLlmFallbackReasoningEffort, 'low');
+
+  const invalidEffort = await handlers.bot.updateProfile({
+    slug: created.data.profile.slug,
+    dshLlmReasoningEffort: 'extreme',
+  });
+  assert.equal(invalidEffort.ok, false);
 });
 
 test('default bot createProfile bootstraps a chained identity before indexing the local profile', async (t) => {

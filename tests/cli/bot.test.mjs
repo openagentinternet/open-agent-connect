@@ -104,8 +104,10 @@ test('runCli forwards DSH LLM fields on bot create and update', async () => {
   await writeFile(payloadFile, JSON.stringify({
     dshLlmProvider: 'openai',
     dshLlmModel: 'gpt-4.1',
+    dshLlmReasoningEffort: 'max',
     dshLlmFallbackProvider: null,
     dshLlmFallbackModel: null,
+    dshLlmFallbackReasoningEffort: null,
   }), 'utf8');
 
   const calls = [];
@@ -113,8 +115,10 @@ test('runCli forwards DSH LLM fields on bot create and update', async () => {
     'bot', 'create', '--name', 'Alice', '--host', 'dsh',
     '--dsh-llm-provider', 'deepseek',
     '--dsh-llm-model', 'deepseek-chat',
+    '--dsh-llm-reasoning-effort', 'high',
     '--dsh-llm-fallback-provider', 'openai',
     '--dsh-llm-fallback-model', 'gpt-4.1',
+    '--dsh-llm-fallback-reasoning-effort', 'low',
   ], {
     stdout: { write: () => true },
     stderr: { write: () => true },
@@ -148,15 +152,19 @@ test('runCli forwards DSH LLM fields on bot create and update', async () => {
       host: 'dsh',
       dshLlmProvider: 'deepseek',
       dshLlmModel: 'deepseek-chat',
+      dshLlmReasoningEffort: 'high',
       dshLlmFallbackProvider: 'openai',
       dshLlmFallbackModel: 'gpt-4.1',
+      dshLlmFallbackReasoningEffort: 'low',
     }],
     ['update', {
       slug: 'alice',
       dshLlmProvider: 'openai',
       dshLlmModel: 'gpt-4.1',
+      dshLlmReasoningEffort: 'max',
       dshLlmFallbackProvider: null,
       dshLlmFallbackModel: null,
+      dshLlmFallbackReasoningEffort: null,
     }],
   ]);
 });
