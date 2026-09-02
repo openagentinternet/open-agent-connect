@@ -41,6 +41,29 @@ function failure(code: string, message: string): MetabotCommandResult {
   return { ok: false, state: 'failed', code, message }
 }
 
+/**
+ * Best-effort fail marking for the cross-process dream runner: plan/commit
+ * run in short-lived CLI processes while the LLM call happens here, so an
+ * LLM/transport failure would otherwise leave the run `running` in the store
+ * forever (the due algorithm skips `running` dates). `dream fail` itself is a
+ * no-op unless the date's run is still live, and this helper never throws.
+ */
+async function markDreamRunFailed(
+  run: RunFn,
+  from: string,
+  date: string,
+  error: string,
+): Promise<void> {
+  await runMetabotWithPayloadFile(
+    ['dream', 'fail', '--from', from],
+    { date, error },
+    '--payload-file',
+    [],
+    run,
+    { timeoutMs: LIST_TIMEOUT_MS },
+  ).catch(() => undefined)
+}
+
 function payloadObject(payload: unknown): Record<string, unknown> {
   return payload !== null && typeof payload === 'object' && !Array.isArray(payload)
     ? payload as Record<string, unknown>
@@ -142,7 +165,10 @@ async function dreamAttempt(
       run,
       { timeoutMs: DREAM_CLI_TIMEOUT_MS },
     )
-    if (!plan.ok) return plan
+    if (!plan.ok) {
+      await markDreamRunFailed(run, from, date, plan.message ?? plan.code ?? 'dream plan failed')
+      return plan
+    }
     const planData = plan.data as {
       kind?: string
       system?: string
@@ -179,11 +205,15 @@ async function dreamAttempt(
         run,
         { timeoutMs: DREAM_CLI_TIMEOUT_MS },
       )
-      if (!synthesis.ok) return synthesis
+      if (!synthesis.ok) {
+        await markDreamRunFailed(run, from, date, synthesis.message ?? synthesis.code ?? 'dream synthesize failed')
+        return synthesis
+      }
       prompt = synthesis.data as { system: string; user: string; maxOutputTokens?: number }
     } else if (planData.kind === 'prompt' && planData.system && planData.user) {
       prompt = { system: planData.system, user: planData.user, maxOutputTokens: planData.maxOutputTokens }
     } else {
+      await markDreamRunFailed(run, from, date, 'dream plan returned an unexpected shape')
       return failure('dream_plan_invalid', 'dream plan returned an unexpected shape')
     }
 
@@ -206,12 +236,18 @@ async function dreamAttempt(
     }
 
     let commit = await commitOnce(prompt.user)
-    if (!commit.ok) return commit
+    if (!commit.ok) {
+      await markDreamRunFailed(run, from, date, commit.message ?? commit.code ?? 'dream commit failed')
+      return commit
+    }
     let commitData = commit.data as { identityRetryHint?: string }
     if (typeof commitData.identityRetryHint === 'string' && commitData.identityRetryHint) {
       // Self-identity expansion retry: commit is idempotent per date.
       commit = await commitOnce(`${prompt.user}\n\n${commitData.identityRetryHint}`)
-      if (!commit.ok) return commit
+      if (!commit.ok) {
+        await markDreamRunFailed(run, from, date, commit.message ?? commit.code ?? 'dream commit failed')
+        return commit
+      }
       commitData = commit.data as { identityRetryHint?: string }
     }
     return {
@@ -220,7 +256,9 @@ async function dreamAttempt(
       data: { kind: 'completed', date, commit: commitData },
     }
   } catch (error) {
-    return failure('llm_error', error instanceof Error ? error.message : String(error))
+    const message = error instanceof Error ? error.message : String(error)
+    await markDreamRunFailed(run, from, date, message)
+    return failure('llm_error', message)
   }
 }
 

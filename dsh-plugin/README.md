@@ -79,6 +79,10 @@ data under `~/.metabot/profiles/<slug>/`):
   group-task/order activity into the experience ledger so contact
   impressions actually form. Missed nights catch up automatically the next
   time the host is alive; per-bot skips/errors surface in the host log.
+  Runs orphaned `running` by a host restart are swept to `failed` after a
+  30-minute stale threshold (on `dream due`/`dream status`), and host-side
+  LLM/transport failures mark the live run failed through `dream fail`, so
+  no date can wedge in "running" forever.
 - **Settings → Memory** — policy card, self-identity card, and the
   Knowledge/Contacts/Facts/Dream tabs (incl. manual run-dream). The Dream
   tab lists all recent runs (completed/failed/running, incl. quiet days

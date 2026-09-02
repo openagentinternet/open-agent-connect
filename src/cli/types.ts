@@ -214,6 +214,7 @@ export interface CliDependencies {
     run?: (input: { from?: string; date?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     synthesize?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     commit?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    fail?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     summaries?: (input: { from?: string; limit?: number; before?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     selfIdentity?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };

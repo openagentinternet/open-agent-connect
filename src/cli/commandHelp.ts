@@ -2786,6 +2786,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'plan', summary: 'Gather one day and return the dream prompt(s) to run through an LLM.' },
       { name: 'synthesize', summary: 'Fold raw fragment outputs into the final synthesis prompt.' },
       { name: 'commit', summary: 'Parse one dream LLM output and write results (idempotent per date).' },
+      { name: 'fail', summary: 'Mark the live run for one date as failed (host-side LLM/transport failures).' },
       { name: 'run', summary: 'Plan + LLM + commit in one shot using the Bot\'s LLM runtime binding.' },
       { name: 'summaries', summary: 'List daily dream diaries.' },
       { name: 'self-identity', summary: 'Show the Bot\'s current dream-written self-identity.' },

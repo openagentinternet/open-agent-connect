@@ -89,6 +89,17 @@ export async function runDreamCommand(
     return handler({ from, payload });
   }
 
+  if (subcommand === 'fail') {
+    const handler = requireDreamHandler(context, 'fail');
+    if (isFailure(handler)) return handler;
+    const payload = await readPayload(context, args, { required: true });
+    if (isFailure(payload)) return payload;
+    if (typeof payload.date !== 'string' || !DATE_RE.test(payload.date)) {
+      return commandFailed('invalid_payload', 'payload.date (YYYY-MM-DD) is required.');
+    }
+    return handler({ from, payload });
+  }
+
   if (subcommand === 'summaries') {
     const handler = requireDreamHandler(context, 'summaries');
     if (isFailure(handler)) return handler;

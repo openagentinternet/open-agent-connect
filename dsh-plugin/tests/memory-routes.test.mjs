@@ -315,3 +315,59 @@ test('dream/run passes the 120s dream timeout to plan, synthesize, and commit', 
     assert.equal(call.options.timeoutMs, 120_000)
   }
 })
+
+test('dream/run marks the store run failed when the attempt dies', async () => {
+  const failCalls = []
+  const run = async (args) => {
+    const verb = args[1]
+    if (verb === 'fail') {
+      const fileFlag = args.indexOf('--payload-file')
+      failCalls.push(JSON.parse(await readFile(args[fileFlag + 1], 'utf8')))
+      return { ok: true, state: 'success', data: { failed: true } }
+    }
+    if (verb === 'plan') return { ok: true, state: 'success', data: { kind: 'prompt', system: 'sys', user: 'usr' } }
+    return { ok: true, state: 'success', data: { ok: true } }
+  }
+  const llm = {
+    stream: () => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'finish', reason: { kind: 'error', failure: { message: 'primary down' } } }
+      },
+    }),
+  }
+  const result = await plugin.dispatchMemoryRoutes('dream/run', {
+    from: 'alice',
+    date: '2026-08-19',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+  }, { run, llm })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'llm_error')
+  assert.equal(failCalls.length, 1)
+  assert.equal(failCalls[0].date, '2026-08-19')
+  assert.equal(failCalls[0].error, 'primary down')
+})
+
+test('dream/run never touches the fail route on success or on empty days', async () => {
+  const verbs = []
+  const run = async (args) => {
+    verbs.push(args[1])
+    if (args[1] === 'plan') return { ok: true, state: 'success', data: { kind: 'prompt', system: 's', user: 'u' } }
+    return { ok: true, state: 'success', data: { ok: true } }
+  }
+  const llm = {
+    stream: () => ({
+      async *[Symbol.asyncIterator]() {
+        yield { type: 'text-delta', index: 0, text: '{"daily_summary":"ok"}' }
+      },
+    }),
+  }
+  const result = await plugin.dispatchMemoryRoutes('dream/run', {
+    from: 'alice',
+    date: '2026-08-19',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+  }, { run, llm })
+  assert.equal(result.ok, true)
+  assert.ok(!verbs.includes('fail'))
+})

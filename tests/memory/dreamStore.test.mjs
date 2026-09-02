@@ -328,3 +328,30 @@ test('gatherActivity: in-day chat messages are capped at the first 200', async (
   assert.equal(activity.groupTasks[0].phase, 'active');
   assert.equal(activity.groupTasks[0].dayMessageCount, 200);
 });
+
+test('resetStaleRunningRuns resets only runs past the stale cutoff', async () => {
+  const paths = await createTempProfileHome();
+  const store = createDreamStore(paths);
+  await store.beginRun('2026-08-18', 'llm', 1);
+  await store.beginRun('2026-08-19', 'llm', 1);
+  await store.beginRun('2026-08-20', 'llm', 1);
+  await store.finishRun('2026-08-20', 'completed');
+  const now = Date.now();
+  // Backdate 08-18 past the cutoff; 08-19 stays fresh.
+  const runsPath = paths.memoryDreamRunsPath;
+  const file = JSON.parse(await fs.readFile(runsPath, 'utf8'));
+  file.runs.find((run) => run.dreamDate === '2026-08-18').startedAt = now - 3600_000;
+  file.runs.find((run) => run.dreamDate === '2026-08-19').startedAt = now - 60_000;
+  await fs.writeFile(runsPath, JSON.stringify(file), 'utf8');
+
+  const reset = await store.resetStaleRunningRuns({ staleMs: 30 * 60_000, now });
+  assert.equal(reset, 1);
+  const stale = await store.getRun('2026-08-18');
+  assert.equal(stale.status, 'failed');
+  assert.equal(stale.error, 'stale running run reset');
+  assert.equal(stale.completedAt, now);
+  assert.equal((await store.getRun('2026-08-19')).status, 'running');
+  assert.equal((await store.getRun('2026-08-20')).status, 'completed');
+  // Idempotent: nothing left to reset.
+  assert.equal(await store.resetStaleRunningRuns({ staleMs: 30 * 60_000, now }), 0);
+});
