@@ -12,6 +12,7 @@ import {
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   timestampLabel,
+  txidPreview,
   type BotRow,
   type GroupTaskDetailPayload,
   type GroupTaskHealthPayload,
@@ -25,6 +26,7 @@ import {
   type OpenTeamGuestInviteRow,
 } from './api.ts'
 import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
+import { CopyIconButton } from './CopyIconButton.tsx'
 import { relativeTimeLabel } from '../relative-time.ts'
 import type { ConversationsLocaleKey } from './locale-conversations.ts'
 import { markdownLabels } from './markdown-labels.ts'
@@ -740,6 +742,16 @@ export function GroupTaskView({
                                   {ownMessage ? <span className="oac-gt-badge oac-gt-chair">{t('gtYourBot')}</span> : null}
                                 </span>
                                 <span className="oac-a2a-msg-meta">
+                                  {message.txid ? (
+                                    <span className="oac-a2a-msg-txid">
+                                      <span className="oac-a2a-msg-txid-text">txid: {txidPreview(message.txid)}</span>
+                                      <CopyIconButton
+                                        value={message.txid}
+                                        label={`${t('copyTxid')}: ${message.txid}`}
+                                        copiedLabel={t('copied')}
+                                      />
+                                    </span>
+                                  ) : null}
                                   <span className="oac-a2a-msg-time" title={timestampLabel(message.timestamp)}>
                                     {relativeTimeLabel(message.timestamp)}
                                   </span>
@@ -983,6 +995,16 @@ export function GroupTaskView({
                             {senderName}
                           </span>
                           <span className="oac-a2a-msg-meta">
+                            {message.txid ? (
+                              <span className="oac-a2a-msg-txid">
+                                <span className="oac-a2a-msg-txid-text">txid: {txidPreview(message.txid)}</span>
+                                <CopyIconButton
+                                  value={message.txid}
+                                  label={`${t('copyTxid')}: ${message.txid}`}
+                                  copiedLabel={t('copied')}
+                                />
+                              </span>
+                            ) : null}
                             <span className="oac-a2a-msg-time" title={timestampLabel(message.timestamp)}>
                               {relativeTimeLabel(message.timestamp)}
                             </span>

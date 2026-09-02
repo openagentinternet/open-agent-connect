@@ -7,7 +7,6 @@ import {
   IconSendOutline16,
   Input,
   MarkdownText,
-  writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
 import {
@@ -19,6 +18,7 @@ import {
   type ConversationThread,
 } from './api.ts'
 import { BotAvatar, BotAvatarButton } from './BotAvatar.tsx'
+import { CopyIconButton } from './CopyIconButton.tsx'
 import { pickDefaultBotSlug } from '../bot-order.ts'
 import { relativeTimeLabel } from '../relative-time.ts'
 import { GroupTaskView, type GroupTaskInjectedApi } from './GroupTaskView.tsx'
@@ -60,8 +60,6 @@ function MessageRow({
   localLabel,
   localAvatar,
   localGlobalMetaId,
-  copiedTxid,
-  onCopyTxid,
   onOpenBotPage,
   t,
 }: {
@@ -73,8 +71,6 @@ function MessageRow({
   localLabel: string
   localAvatar: string | undefined
   localGlobalMetaId: string
-  copiedTxid: string | null
-  onCopyTxid: (txid: string) => void
   onOpenBotPage: (globalMetaId: string) => void
   t: Translate
 }): ReactNode {
@@ -105,14 +101,11 @@ function MessageRow({
               {message.txid ? (
                 <>
                   <span className="oac-a2a-msg-txid-text">txid: {txidPreview(message.txid)}</span>
-                  <button
-                    type="button"
-                    className="oac-a2a-copy"
-                    aria-label={`${t('copyTxid')}: ${message.txid}`}
-                    onClick={() => onCopyTxid(message.txid ?? '')}
-                  >
-                    {copiedTxid === message.txid ? t('copied') : t('copy')}
-                  </button>
+                  <CopyIconButton
+                    value={message.txid}
+                    label={`${t('copyTxid')}: ${message.txid}`}
+                    copiedLabel={t('copied')}
+                  />
                 </>
               ) : (
                 <span className="oac-a2a-msg-txid-empty">txid: -</span>
@@ -167,7 +160,6 @@ export function A2AConversation({
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
-  const [copiedTxid, setCopiedTxid] = useState<string | null>(null)
   const [guidanceOpen, setGuidanceOpen] = useState(false)
   const [guidanceDraft, setGuidanceDraft] = useState('')
   const [guidanceStatus, setGuidanceStatus] = useState<string | null>(null)
@@ -328,16 +320,6 @@ export function A2AConversation({
     }
   }
 
-  const copyTxid = (txid: string): void => {
-    void writeClipboard(txid).then(
-      () => {
-        setCopiedTxid(txid)
-        setTimeout(() => setCopiedTxid((current) => (current === txid ? null : current)), 1600)
-      },
-      () => undefined,
-    )
-  }
-
   // Guidance: post the instruction, then poll the thread until the local Bot's
   // reply message lands (or the poll budget runs out).
   const submitGuidance = async (): Promise<void> => {
@@ -381,6 +363,7 @@ export function A2AConversation({
   const currentBot = profiles.find((row) => row.slug === from) ?? null
   const localLabel = currentBot?.name ?? t('localBot')
   const localAvatar = currentBot?.avatarDataUrl
+  const localGlobalMetaId = selectedSummary?.localGlobalMetaId || currentBot?.globalMetaId || ''
   const peerLabel = selectedSummary?.peerName ?? selectedPeer
   const peerAvatar = selectedSummary?.peerAvatar ?? undefined
 
@@ -492,43 +475,58 @@ export function A2AConversation({
               <div className="oac-a2a-thread">
                 <div className="oac-a2a-thread-head">
                   {selectedSummary ? (
-                    <>
-                      <BotAvatarButton
-                        name={peerLabel}
-                        src={peerAvatar}
-                        className="oac-a2a-thread-avatar"
-                        label={`${t('openBotPage')}: ${peerLabel}`}
-                        onClick={() => openBotPage(selectedPeer)}
-                      />
-                      <div className="oac-a2a-thread-peer">
-                        <strong>{peerLabel}</strong>
-                        <span>{t('remoteBot')}
-                          {selectedSummary.peerLlmPrimaryProvider
-                            ? ` · ${selectedSummary.peerLlmPrimaryProvider}`
-                            : ''}
+                    <div className="oac-a2a-participants">
+                      <div className="oac-a2a-participant">
+                        <BotAvatarButton
+                          name={peerLabel}
+                          src={peerAvatar}
+                          className="oac-a2a-thread-avatar"
+                          label={`${t('openBotPage')}: ${peerLabel}`}
+                          onClick={() => openBotPage(selectedPeer)}
+                        />
+                        <strong className="oac-a2a-participant-name">{peerLabel}</strong>
+                        <span className="oac-a2a-gmid">
+                          <code title={selectedPeer}>{txidPreview(selectedPeer)}</code>
+                          <CopyIconButton
+                            value={selectedPeer}
+                            label={`${t('copyGmid')}: ${selectedPeer}`}
+                            copiedLabel={t('copied')}
+                          />
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        className="oac-a2a-id"
-                        title={selectedSummary.conversationId}
-                        onClick={() => copyTxid(selectedSummary.conversationId)}
-                      >
+                      <span className="oac-a2a-id" title={selectedSummary.conversationId}>
                         <code>id: {selectedSummary.conversationId.slice(0, 8)}…</code>
-                        <span>{copiedTxid === selectedSummary.conversationId ? t('copied') : t('copy')}</span>
-                      </button>
-                      {currentBot?.globalMetaId
-                        ? (
-                          <BotAvatarButton
-                            name={localLabel}
-                            src={localAvatar}
-                            className="oac-a2a-thread-avatar"
-                            label={`${t('openBotPage')}: ${localLabel}`}
-                            onClick={() => openBotPage(currentBot.globalMetaId ?? '')}
-                          />
-                        )
-                        : <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-thread-avatar" />}
-                    </>
+                        <CopyIconButton
+                          value={selectedSummary.conversationId}
+                          label={`${t('copyConversationId')}: ${selectedSummary.conversationId}`}
+                          copiedLabel={t('copied')}
+                        />
+                      </span>
+                      <div className="oac-a2a-participant oac-a2a-participant-local">
+                        {localGlobalMetaId
+                          ? (
+                            <BotAvatarButton
+                              name={localLabel}
+                              src={localAvatar}
+                              className="oac-a2a-thread-avatar"
+                              label={`${t('openBotPage')}: ${localLabel}`}
+                              onClick={() => openBotPage(localGlobalMetaId)}
+                            />
+                          )
+                          : <BotAvatar name={localLabel} src={localAvatar} className="oac-a2a-thread-avatar" />}
+                        <strong className="oac-a2a-participant-name">{localLabel}</strong>
+                        {localGlobalMetaId ? (
+                          <span className="oac-a2a-gmid">
+                            <code title={localGlobalMetaId}>{txidPreview(localGlobalMetaId)}</code>
+                            <CopyIconButton
+                              value={localGlobalMetaId}
+                              label={`${t('copyGmid')}: ${localGlobalMetaId}`}
+                              copiedLabel={t('copied')}
+                            />
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
                   ) : (
                     <span className="oac-note">{t('selectConversation')}</span>
                   )}
@@ -549,9 +547,7 @@ export function A2AConversation({
                       peerGlobalMetaId={selectedPeer}
                       localLabel={localLabel}
                       localAvatar={localAvatar}
-                      localGlobalMetaId={currentBot?.globalMetaId ?? ''}
-                      copiedTxid={copiedTxid}
-                      onCopyTxid={copyTxid}
+                      localGlobalMetaId={localGlobalMetaId}
                       onOpenBotPage={openBotPage}
                       t={t}
                     />
@@ -565,24 +561,39 @@ export function A2AConversation({
                       ) : guidanceOpen ? (
                         <div className="oac-a2a-guidance-form">
                           <Input
+                            className="oac-a2a-guidance-input"
                             value={guidanceDraft}
                             onChange={(event) => setGuidanceDraft(event.target.value)}
                             placeholder={t('guidancePlaceholder')}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' && !event.shiftKey) {
+                                event.preventDefault()
+                                void submitGuidance()
+                              }
+                            }}
                           />
-                          <div className="oac-a2a-guidance-actions">
-                            <Button type="button" variant="outline" size="sm" onClick={() => setGuidanceOpen(false)}>
-                              {t('guidanceCancel')}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="primary"
-                              size="sm"
-                              disabled={!guidanceDraft.trim()}
-                              onClick={() => { void submitGuidance() }}
-                            >
-                              {t('guidanceSend')}
-                            </Button>
-                          </div>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            icon={<IconSendOutline16 />}
+                            disabled={!guidanceDraft.trim()}
+                            onClick={() => { void submitGuidance() }}
+                          >
+                            {t('guidanceSend')}
+                          </Button>
+                          <button
+                            type="button"
+                            className="oac-a2a-guidance-close"
+                            aria-label={t('guidanceCancel')}
+                            title={t('guidanceCancel')}
+                            onClick={() => {
+                              setGuidanceOpen(false)
+                              setGuidanceDraft('')
+                            }}
+                          >
+                            <IconCloseOutline16 size={12} />
+                          </button>
                         </div>
                       ) : (
                         <button
