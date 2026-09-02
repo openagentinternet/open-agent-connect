@@ -1,3 +1,6 @@
+import { type GroupTaskMember, type GroupTaskRecord } from '../grouptask/types';
+import type { OpenTeamMembershipRecord } from '../grouptask/openteamStore';
+import type { SellerOrderRecord } from '../orders/sellerOrderState';
 import type { MetabotPaths } from '../state/paths';
 export type DreamRunStatus = 'running' | 'completed' | 'failed';
 export type DreamFragmentStatus = 'running' | 'completed' | 'failed';
@@ -105,6 +108,55 @@ export interface DreamDayActivity {
 }
 /** Render the human-readable diary mirror at `memory/YYYY-MM-DD.md`. */
 export declare function renderDreamDiaryMarkdown(summary: DailySummary): string;
+/** Per-chat cap on in-day messages handed to the dream pipeline (IDBots caps
+ * the same excerpt at 400; the file port stays tighter). */
+export declare const DREAM_GROUP_CHAT_MAX_MESSAGES = 200;
+/** One in-day group-chat message at full fidelity — the prompt activity shape
+ * drops pin/sender ids, but the dream-time experience harvest needs them. */
+export interface DreamDayGroupChatSourceMessage {
+    index: number;
+    pinId: string | null;
+    txId: string | null;
+    senderName: string | null;
+    senderGlobalMetaId: string | null;
+    content: string;
+    /** Epoch ms (on-disk `chainTimestamp` is epoch seconds, indexer convention). */
+    occurredAt: number;
+}
+/** One group's in-day chat stream joined with its local task or guest membership. */
+export interface DreamDayGroupChatSource {
+    groupId: string;
+    /** Chair-side task row when the group lives in this profile's state.json. */
+    task: GroupTaskRecord | null;
+    /** OpenTeam membership when this profile joined the group as a guest worker. */
+    membership: OpenTeamMembershipRecord | null;
+    /** In-day, non-suspect, non-empty messages, chronological. */
+    messages: DreamDayGroupChatSourceMessage[];
+}
+/** Raw day-windowed group-task source rows shared by gatherActivity and the
+ * dream-time experience harvest (single implementation of the file reads). */
+export interface DreamDayGroupTaskSource {
+    tasks: GroupTaskRecord[];
+    members: GroupTaskMember[];
+    chats: DreamDayGroupChatSource[];
+}
+/**
+ * Best-effort read of the group-task day source: the chair-side state.json,
+ * guest OpenTeam memberships, and the decrypted per-group message caches.
+ * Read-only and never throws — missing/corrupt files yield empty collections.
+ */
+export declare function readDreamDayGroupTaskSource(paths: MetabotPaths, input: {
+    startMs: number;
+    endMs: number;
+}): Promise<DreamDayGroupTaskSource>;
+/**
+ * Best-effort read of the seller orders active inside the day (created or
+ * updated in [startMs, endMs)), straight from runtime-state.json. Read-only.
+ */
+export declare function readDreamDaySellerOrders(paths: MetabotPaths, input: {
+    startMs: number;
+    endMs: number;
+}): Promise<SellerOrderRecord[]>;
 export interface DreamStore {
     getRun(dreamDate: string): Promise<DreamRun | null>;
     /** Run states keyed by date, the input the due-date algorithm expects. */

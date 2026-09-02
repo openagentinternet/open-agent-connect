@@ -788,12 +788,17 @@ test('OAC browser host adapter previews a local directory live via preview-metaa
   assert.match(resolved.data.renderer.url, /^\/api\/metaapp\/preview-assets\/metaapp-preview-[^/]+\/index\.html$/);
 
   // Serving is live: the preview session reads the entry file from disk per request.
+  // Served HTML is prepared with the preview bridge/storage shims injected.
   const previewId = previewIdFromRendererUrl(resolved.data.renderer.url);
   const first = await metaAppPreviewSessions.resolveAsset({ previewId, assetPath: 'index.html' });
-  assert.equal(first.body.toString('utf8'), '<!doctype html><title>v1</title>');
+  const firstHtml = first.body.toString('utf8');
+  assert.ok(firstHtml.includes('<title>v1</title>'), 'first serve should include the v1 entry markup');
+  assert.match(firstHtml, /__agentBrowserPreviewBridge/);
   await writeFile(path.join(workspaceDir, 'index.html'), '<!doctype html><title>v2</title>', 'utf8');
   const second = await metaAppPreviewSessions.resolveAsset({ previewId, assetPath: 'index.html' });
-  assert.equal(second.body.toString('utf8'), '<!doctype html><title>v2</title>');
+  const secondHtml = second.body.toString('utf8');
+  assert.ok(secondHtml.includes('<title>v2</title>'), 'second serve should include the v2 entry markup');
+  assert.match(secondHtml, /__agentBrowserPreviewBridge/);
 });
 
 test('OAC browser host adapter falls back to index.htm for local preview directories', async (t) => {

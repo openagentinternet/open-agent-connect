@@ -20,9 +20,9 @@ export interface MemoryBlocksResult {
 }
 /**
  * Build the full memory injection for one turn: scoped fact blocks plus the
- * experience hot layer (self-identity, value boundaries). Dream summaries and
- * knowledge blocks join in their own phases — the builders already tolerate
- * their absence.
+ * experience hot layer (self-identity, value boundaries, work reviews, recent
+ * dream diaries). Knowledge blocks join in their own phase — the builders
+ * already tolerate their absence.
  */
 export declare function buildMemoryBlocksForRequest(paths: MetabotPaths, input: MemoryBlocksRequest, stores?: {
     memory?: MemoryStore;

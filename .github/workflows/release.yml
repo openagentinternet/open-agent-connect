@@ -65,3 +65,24 @@ jobs:
           else
             npm publish --access public
           fi
+
+      - name: Build DSH plugin
+        run: |
+          npm ci --prefix dsh-plugin
+          npm run build --prefix dsh-plugin
+
+      # The DSH plugin rides an independent version line (dsh-plugin/package.json,
+      # currently 0.4.x tied to the DSH kernel surface, not the core version).
+      # The duplicate-version guard makes this a no-op on tags where the plugin
+      # version did not change. Requires the npm Trusted Publisher for
+      # open-agent-connect-dsh (repo openagentinternet/open-agent-connect,
+      # workflow release.yml) — configured after the one-time manual first
+      # publish, since npm cannot trust-publish a package that does not exist.
+      - name: Publish DSH plugin package
+        run: |
+          PLUGIN_VERSION="$(node -p "require('./dsh-plugin/package.json').version")"
+          if npm view "open-agent-connect-dsh@$PLUGIN_VERSION" version >/dev/null 2>&1; then
+            echo "open-agent-connect-dsh@$PLUGIN_VERSION is already published; skipping npm publish."
+          else
+            cd dsh-plugin && npm publish --access public
+          fi

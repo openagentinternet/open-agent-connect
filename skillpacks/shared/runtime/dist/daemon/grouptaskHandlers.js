@@ -6,13 +6,9 @@
  * the /api/grouptask/* routes dispatch to. All business rules live in
  * core/grouptask/service; this file is wiring + input normalization only.
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGroupTaskServiceContext = createGroupTaskServiceContext;
 exports.createGroupTaskDaemonHandlers = createGroupTaskDaemonHandlers;
-const node_path_1 = __importDefault(require("node:path"));
 const commandResult_1 = require("../core/contracts/commandResult");
 const service_1 = require("../core/grouptask/service");
 const openteamService_1 = require("../core/grouptask/openteamService");
@@ -94,10 +90,14 @@ async function readProfileMetaId(homeDir) {
 }
 /**
  * Read-only SecretStore view over the owner identity record; the signer only
- * ever calls readIdentitySecrets.
+ * ever calls readIdentitySecrets. The owner home (~/.metabot/owner) is NOT a
+ * profile home, so resolveMetabotPaths rejects it — the paths stub below
+ * exists solely to satisfy the SecretStore interface.
  */
 function createOwnerSecretStore(systemHomeDir, owner) {
-    const paths = (0, paths_1.resolveMetabotPaths)(node_path_1.default.join(systemHomeDir, '.metabot', 'owner'));
+    const paths = {
+        identitySecretsPath: (0, ownerIdentity_1.resolveOwnerIdfilePath)(systemHomeDir),
+    };
     return {
         paths,
         ensureLayout: async () => paths,
@@ -370,8 +370,13 @@ function createGroupTaskDaemonHandlers(input) {
             const daemonPaths = (0, paths_1.resolveMetabotDaemonPaths)(input.systemHomeDir);
             return (0, health_1.getGroupTaskHealth)(ctx, {
                 readSimplemsgListenerEnabled: async () => {
+                    // The listener switch is per-profile config; the daemon serves its
+                    // own home, so read that home's config (mirrors the daemon boot
+                    // read in cli/runtime). Unknown/unreadable defaults to enabled.
+                    if (!input.daemonHomeDir)
+                        return true;
                     try {
-                        const config = await (0, configStore_1.createConfigStore)((0, paths_1.resolveMetabotPaths)(input.systemHomeDir)).read();
+                        const config = await (0, configStore_1.createConfigStore)(input.daemonHomeDir).read();
                         return config.a2a.simplemsgListenerEnabled;
                     }
                     catch {

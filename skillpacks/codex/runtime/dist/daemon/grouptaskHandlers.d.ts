@@ -36,6 +36,8 @@ export interface GroupTaskDaemonHandlers {
 }
 export interface CreateGroupTaskDaemonHandlersInput {
     systemHomeDir: string;
+    /** The daemon's own profile home; its config holds the a2a listener switch. */
+    daemonHomeDir?: string;
     createSignerForProfileHome: (homeDir: string) => Signer;
     adapters: ChainAdapterRegistry;
     /** Peer chat pubkey resolver; enables OpenTeam private-message envelopes. */

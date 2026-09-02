@@ -67,6 +67,28 @@ tags for releases.
   http links, and understanding an app is explicitly source-first through the
   local artifact cache (never screenshots or page snapshots).
   `metabot-browser-open` remains for one release as a deprecated stub.
+- Completed the DSH dream/memory IDBots parity: `gatherActivity` now feeds
+  group tasks (acceptance ratings + still-active work), on-chain group-chat
+  transcripts (chair- and guest-side), and seller orders into every nightly
+  dream; a new dream-time experience harvest
+  (`src/core/memory/experienceHarvest.ts`) folds group-task/order activity
+  into the experience ledger so contact impressions form for those
+  counterparties; dream-written work reviews are injected per turn again. In
+  the DSH plugin the dream scheduler logs per-bot skips/errors/successes,
+  retries a failed dream once on the Bot's fallback DSH LLM pair, and the
+  Settings → Memory → Dream tab lists all recent runs (completed/failed/
+  running, quiet days labeled) plus a diary/self-identity status line and a
+  hint when the Bot has no DSH LLM configured.
+- DSH plugin UI polish: the Twin Bot pins first in Settings → Bots and is the
+  default A2A panel identity, workers sort oldest-first, the A2A peer list
+  shows daemon-enriched names/avatars with live updates and wider selects,
+  relative timestamps and status badges match IDBots, clicking an avatar opens
+  the Bot page, and select dropdown text no longer clips.
+
+### Fixed
+
+- Group tasks: owner identity resolution + group-task panel default tab
+  parity with IDBots.
 
 ### Security
 

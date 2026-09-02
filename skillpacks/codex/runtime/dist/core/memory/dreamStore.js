@@ -3,7 +3,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.DREAM_GROUP_CHAT_MAX_MESSAGES = void 0;
 exports.renderDreamDiaryMarkdown = renderDreamDiaryMarkdown;
+exports.readDreamDayGroupTaskSource = readDreamDayGroupTaskSource;
+exports.readDreamDaySellerOrders = readDreamDaySellerOrders;
 exports.createDreamStore = createDreamStore;
 exports.hashDreamFragmentContent = hashDreamFragmentContent;
 // Dream consolidation storage layer, ported from IDBots src/main/dreamStore.ts
@@ -13,10 +16,12 @@ exports.hashDreamFragmentContent = hashDreamFragmentContent;
 // - `.runtime/memory/dream-summaries.json`: structured daily summaries.
 // - `memory/YYYY-MM-DD.md`: the human-readable diary mirror.
 // Also owns the "what did this bot do on date D" activity query, gathered from
-// mirrored DSH transcripts and the on-chain A2A conversation stores.
+// mirrored DSH transcripts, the on-chain A2A conversation stores, the group-task
+// state/message caches, and the seller-order list in the runtime state.
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const types_1 = require("../grouptask/types");
 const transcriptStore_1 = require("./transcriptStore");
 let atomicWriteSequence = 0;
 function normalizeText(value) {
@@ -172,6 +177,150 @@ function renderDreamDiaryMarkdown(summary) {
         parts.push('', '## 统计', '', ...statLines);
     }
     return `${parts.join('\n')}\n`;
+}
+/** Per-chat cap on in-day messages handed to the dream pipeline (IDBots caps
+ * the same excerpt at 400; the file port stays tighter). */
+exports.DREAM_GROUP_CHAT_MAX_MESSAGES = 200;
+/** Epoch-ms field or null; grouptask timestamps are ms, junk/missing → null. */
+function timestampMs(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+function inDayMs(value, startMs, endMs) {
+    const ms = timestampMs(value);
+    return ms !== null && ms >= startMs && ms < endMs;
+}
+/** Best-effort JSON read: missing or corrupt files yield null, never throw. */
+async function readJsonOrNull(filePath) {
+    try {
+        return JSON.parse(await node_fs_1.promises.readFile(filePath, 'utf8'));
+    }
+    catch {
+        return null;
+    }
+}
+function asRecordArray(value) {
+    return Array.isArray(value)
+        ? value.filter((entry) => (Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)))
+        : [];
+}
+/** Match the grouptask store's message-file name sanitization. */
+function sanitizeGroupIdForMessagesFile(groupId) {
+    return groupId.replace(/[^0-9a-zA-Z_-]/gu, '_');
+}
+/** Owner acceptance ratings are 1-5 stars; anything else is junk data. */
+function normalizeDreamRating(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value))
+        return null;
+    const rating = Math.trunc(value);
+    return rating >= 1 && rating <= 5 ? rating : null;
+}
+/** This profile's role in one task: the chair row wins, else the member row. */
+function dreamGroupTaskMemberRole(task, members, slug) {
+    if (task.chairSlug === slug)
+        return 'chair';
+    const member = members.find((entry) => (entry.taskId === task.id && entry.slug === slug && entry.removedAt == null));
+    return member?.role === 'chair' ? 'chair' : 'worker';
+}
+/**
+ * Best-effort read of the group-task day source: the chair-side state.json,
+ * guest OpenTeam memberships, and the decrypted per-group message caches.
+ * Read-only and never throws — missing/corrupt files yield empty collections.
+ */
+async function readDreamDayGroupTaskSource(paths, input) {
+    const root = node_path_1.default.join(paths.runtimeRoot, 'grouptask');
+    const { startMs, endMs } = input;
+    const state = await readJsonOrNull(node_path_1.default.join(root, 'state.json'));
+    const stateRecord = state && typeof state === 'object' && !Array.isArray(state)
+        ? state
+        : null;
+    const tasks = asRecordArray(stateRecord?.tasks)
+        .filter((entry) => typeof entry.id === 'number' && typeof entry.title === 'string');
+    const members = asRecordArray(stateRecord?.members)
+        .filter((entry) => typeof entry.taskId === 'number');
+    const openteam = await readJsonOrNull(node_path_1.default.join(root, 'openteam.json'));
+    const openteamRecord = openteam && typeof openteam === 'object' && !Array.isArray(openteam)
+        ? openteam
+        : null;
+    const memberships = asRecordArray(openteamRecord?.memberships)
+        .filter((entry) => typeof entry.groupId === 'string' && entry.groupId.trim());
+    // Message files are named by the sanitized groupId; map back through every
+    // locally known group (chair-side tasks first, then guest memberships).
+    const groupsByFileKey = new Map();
+    for (const task of tasks) {
+        const groupId = typeof task.groupId === 'string' ? task.groupId.trim() : '';
+        if (!groupId)
+            continue;
+        const key = sanitizeGroupIdForMessagesFile(groupId);
+        if (!groupsByFileKey.has(key))
+            groupsByFileKey.set(key, { groupId, task, membership: null });
+    }
+    for (const membership of memberships) {
+        const groupId = membership.groupId.trim();
+        const key = sanitizeGroupIdForMessagesFile(groupId);
+        if (!groupsByFileKey.has(key))
+            groupsByFileKey.set(key, { groupId, task: null, membership });
+    }
+    let messageFiles = [];
+    try {
+        messageFiles = (await node_fs_1.promises.readdir(node_path_1.default.join(root, 'messages')))
+            .filter((entry) => entry.endsWith('.json'));
+    }
+    catch {
+        messageFiles = [];
+    }
+    const chats = [];
+    for (const fileName of messageFiles) {
+        const group = groupsByFileKey.get(fileName.slice(0, -'.json'.length));
+        if (!group)
+            continue; // Orphan cache: the group is unknown locally.
+        const value = await readJsonOrNull(node_path_1.default.join(root, 'messages', fileName));
+        const record = value && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : null;
+        const messages = asRecordArray(record?.messages).flatMap((entry) => {
+            const occurredSec = timestampMs(entry.chainTimestamp);
+            if (occurredSec === null)
+                return [];
+            const occurredAt = occurredSec * 1000;
+            if (occurredAt < startMs || occurredAt >= endMs)
+                return [];
+            // Suspect rows failed attribution checks upstream; never attribute them.
+            if (entry.senderSuspect === true)
+                return [];
+            const content = typeof entry.content === 'string' ? entry.content : '';
+            if (!content.trim())
+                return [];
+            return [{
+                    index: timestampMs(entry.index) ?? 0,
+                    pinId: normalizeText(entry.pinId) || null,
+                    txId: normalizeText(entry.txId) || null,
+                    senderName: normalizeText(entry.senderName) || null,
+                    senderGlobalMetaId: normalizeText(entry.senderGlobalMetaId) || null,
+                    content,
+                    occurredAt,
+                }];
+        });
+        if (messages.length === 0)
+            continue;
+        messages.sort((left, right) => left.occurredAt - right.occurredAt || left.index - right.index);
+        chats.push({ groupId: group.groupId, task: group.task, membership: group.membership, messages });
+    }
+    chats.sort((left, right) => ((left.messages[0]?.occurredAt ?? 0) - (right.messages[0]?.occurredAt ?? 0)));
+    return { tasks, members, chats };
+}
+/**
+ * Best-effort read of the seller orders active inside the day (created or
+ * updated in [startMs, endMs)), straight from runtime-state.json. Read-only.
+ */
+async function readDreamDaySellerOrders(paths, input) {
+    const value = await readJsonOrNull(paths.runtimeStatePath);
+    const record = value && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : null;
+    return asRecordArray(record?.sellerOrders)
+        .filter((entry) => typeof entry.id === 'string' && entry.id.trim())
+        .filter((entry) => (inDayMs(entry.createdAt, input.startMs, input.endMs)
+        || inDayMs(entry.updatedAt, input.startMs, input.endMs)));
 }
 function createDreamStore(paths, deps = {}) {
     const runsPath = paths.memoryDreamRunsPath;
@@ -421,12 +570,74 @@ function createDreamStore(paths, deps = {}) {
                 });
             }
             sessions.sort((left, right) => ((left.messages[0]?.createdAt ?? 0) - (right.messages[0]?.createdAt ?? 0)));
+            // Group tasks + on-chain group chats + seller orders (IDBots
+            // getActivityForDate parity), all best-effort reads of local mirrors.
+            const slug = node_path_1.default.basename(paths.profileRoot);
+            const groupTaskSource = await readDreamDayGroupTaskSource(paths, { startMs, endMs });
+            const dayOrders = await readDreamDaySellerOrders(paths, { startMs, endMs });
+            // Same-day message counts per group feed both the chat excerpts and the
+            // "still active" task phase (IDBots derives them from the capped chat).
+            const dayMessageCountByGroupId = new Map(groupTaskSource.chats.map((chat) => [
+                chat.groupId,
+                Math.min(chat.messages.length, exports.DREAM_GROUP_CHAT_MAX_MESSAGES),
+            ]));
+            const groupChats = groupTaskSource.chats.map((chat) => ({
+                // Guest groups have no local task row: taskId 0, the membership's
+                // title/status, and the guest/worker role.
+                taskId: chat.task?.id ?? 0,
+                title: chat.task?.title ?? chat.membership?.taskTitle ?? chat.groupId,
+                taskStatus: chat.task?.status ?? chat.membership?.status ?? 'executing',
+                memberRole: chat.task
+                    ? dreamGroupTaskMemberRole(chat.task, groupTaskSource.members, slug)
+                    : 'worker',
+                messages: chat.messages.slice(0, exports.DREAM_GROUP_CHAT_MAX_MESSAGES).map((message) => ({
+                    senderName: message.senderName ?? 'unknown',
+                    content: message.content,
+                    occurredAt: message.occurredAt,
+                })),
+            }));
+            // Accepted phase: rated or closed inside the day. Active phase: still
+            // non-terminal with same-day activity (chat messages or an engine drive).
+            const acceptedGroupTasks = [];
+            const activeGroupTasks = [];
+            for (const task of groupTaskSource.tasks) {
+                const groupId = typeof task.groupId === 'string' ? task.groupId.trim() : '';
+                const dayMessageCount = groupId ? dayMessageCountByGroupId.get(groupId) : undefined;
+                const base = {
+                    taskId: task.id,
+                    title: task.title,
+                    goal: typeof task.goal === 'string' ? task.goal : '',
+                    memberRole: dreamGroupTaskMemberRole(task, groupTaskSource.members, slug),
+                    status: typeof task.status === 'string' ? task.status : undefined,
+                    ...(dayMessageCount !== undefined ? { dayMessageCount } : {}),
+                };
+                if (inDayMs(task.ratedAt, startMs, endMs) || inDayMs(task.closedAt, startMs, endMs)) {
+                    acceptedGroupTasks.push({
+                        ...base,
+                        rating: normalizeDreamRating(task.rating),
+                        ratingComment: normalizeText(task.ratingComment) || null,
+                        phase: 'accepted',
+                    });
+                    continue;
+                }
+                if (types_1.GROUP_TASK_TERMINAL_STATUSES.has(task.status))
+                    continue;
+                if ((dayMessageCount ?? 0) === 0 && !inDayMs(task.lastDrivenAt, startMs, endMs))
+                    continue;
+                activeGroupTasks.push({
+                    ...base,
+                    rating: null,
+                    ratingComment: null,
+                    phase: 'active',
+                });
+            }
             return {
                 sessions,
+                // OAC has no scheduled-task feature; the prompt section stays empty.
                 taskRuns: [],
-                orderCount: 0,
-                groupTasks: [],
-                groupChats: [],
+                orderCount: dayOrders.length,
+                groupTasks: [...acceptedGroupTasks, ...activeGroupTasks],
+                groupChats,
             };
         },
     };
