@@ -131,6 +131,47 @@ function textFromAssistantEvents(events: ReadonlyArray<{ type: string; data?: un
   return ''
 }
 
+/** The last turn's error reason, when the worker turn died before answering (e.g. no model). */
+function errorFromTurnEvents(events: ReadonlyArray<{ type: string; data?: unknown }>): string {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'turn/end') continue
+    const reason = (event.data as { reason?: { kind?: string; error?: { message?: string } } } | undefined)?.reason
+    if (reason?.kind === 'error' && typeof reason.error?.message === 'string') return reason.error.message
+  }
+  return ''
+}
+
+interface DshModelPair {
+  provider: string
+  model: string
+}
+
+/** The host default model (same source UI-created conversations use), via the optional-service seam. */
+function hostDefaultModelPair(ctx: HostContext): DshModelPair | null {
+  const service = ctx.get?.('agentDefaultModel') as { currentSelection?: () => { provider?: unknown; model?: unknown } } | undefined
+  try {
+    const selection = service?.currentSelection?.()
+    const provider = typeof selection?.provider === 'string' ? selection.provider.trim() : ''
+    const model = typeof selection?.model === 'string' ? selection.model.trim() : ''
+    return provider && model ? { provider, model } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Model route for one delegated worker session: the Worker Bot's own DSH LLM
+ * pair first, the host default model otherwise (mirroring how UI-created
+ * conversations get theirs). Without either the agent loop cannot run a turn.
+ */
+function workerModelPair(ctx: HostContext, profile: Record<string, unknown> | undefined): DshModelPair | null {
+  const provider = typeof profile?.dshLlmProvider === 'string' ? (profile.dshLlmProvider as string).trim() : ''
+  const model = typeof profile?.dshLlmModel === 'string' ? (profile.dshLlmModel as string).trim() : ''
+  if (provider && model) return { provider, model }
+  return hostDefaultModelPair(ctx)
+}
+
 /** Live oac-* agents, shared with the index.ts agent/created listener. */
 export const liveOacAgents = new Map<string, HostAgentLike>()
 
@@ -275,9 +316,17 @@ export function createTwinOrchestrator(
       if (!workerShow.ok) {
         return failure('worker_not_found', `Worker Bot not found: ${workerSlug}`)
       }
+      const workerProfile = (workerShow.data as { profile?: Record<string, unknown> } | undefined)?.profile
       const agentsRegistry = agentsRegistryOf(ctx)
       if (!agentsRegistry?.create || !ctx.agentPresets?.mount) {
         return failure('delegation_unavailable', 'The DSH agent registry or preset service is unavailable.')
+      }
+      // The agent loop enters every step with an empty route unless AgentOptions
+      // carries provider+model — a delegated session has no UI model selection,
+      // so resolve the pair here (worker Bot pair, then the host default).
+      const modelPair = workerModelPair(ctx, workerProfile)
+      if (!modelPair) {
+        return failure('delegation_unavailable', 'No LLM model for the worker session: configure the Worker Bot DSH LLM pair (Settings → Bots) or a host default model.')
       }
 
       // Resolve or create the task + step.
@@ -333,12 +382,16 @@ export function createTwinOrchestrator(
       inFlight.set(flightKey, flight)
 
       let handoff = ''
+      let sessionEvents: ReadonlyArray<{ type: string; data?: unknown }> = []
       let failureText: string | null = null
       let timedOut = false
       try {
         const handle = await agentsRegistry.create({
           sessionId: workerSessionId,
-          meta: { agentPreset: presetIdForSlug(workerSlug) },
+          // cwd keeps the session in the host workspace bucket: the DSH
+          // conversation list drops cold sessions without one.
+          meta: { agentPreset: presetIdForSlug(workerSlug), cwd: process.cwd() },
+          agentOptions: { provider: modelPair.provider, model: modelPair.model },
           setup: async (agentCtx: unknown) => {
             await ctx.agentPresets?.mount?.(agentCtx, presetIdForSlug(workerSlug))
           },
@@ -377,7 +430,8 @@ export function createTwinOrchestrator(
             // worker may already be gone
           }
         } else {
-          handoff = textFromAssistantEvents(worker.session?.events ?? [])
+          sessionEvents = worker.session?.events ?? []
+          handoff = textFromAssistantEvents(sessionEvents)
         }
         await handle.dispose?.()
       } catch (error) {
@@ -385,11 +439,18 @@ export function createTwinOrchestrator(
       }
 
       const settleOverride = flight.settleOverride
+      // An idle win without any handoff text is a FAILED step (the worker turn
+      // errored out or closed silently), never a completion — the IDBots
+      // WORKER_EMPTY_HANDOFF rule.
       const attemptStatus = settleOverride?.attemptStatus
-        ?? (timedOut ? 'timed_out' : failureText ? 'failed' : 'completed')
+        ?? (timedOut ? 'timed_out' : failureText ? 'failed' : handoff ? 'completed' : 'failed')
       const errorText = settleOverride?.error
         ?? failureText
-        ?? (timedOut ? `worker step timed out after ${Math.round(stepTimeoutMs / 1000)}s` : null)
+        ?? (timedOut
+          ? `worker step timed out after ${Math.round(stepTimeoutMs / 1000)}s`
+          : handoff
+            ? null
+            : errorFromTurnEvents(sessionEvents) || 'WORKER_EMPTY_HANDOFF: the worker session produced no handoff text')
       try {
         await tasksUpdate({
           taskId,
@@ -403,11 +464,11 @@ export function createTwinOrchestrator(
           await tasksUpdate({ taskId, stepId, stepStatus: attemptStatus === 'completed' ? 'completed' : 'failed' })
           await tasksUpdate({ taskId, taskStatus: attemptStatus === 'completed' ? 'review' : 'running' })
 
-          const workerName = (workerShow.data as { profile?: { name?: string } } | undefined)?.profile?.name ?? workerSlug
+          const workerName = typeof workerProfile?.name === 'string' ? workerProfile.name : workerSlug
           notifyTwin(
             attemptStatus === 'completed'
               ? `[ORCH-NOTIFY] worker ${workerName} 已完成 task ${taskTitle || taskId} → review，请验收`
-              : `[ORCH-NOTIFY] worker ${workerName} 未能完成 task ${taskTitle || taskId}（${attemptStatus}${failureText ? `：${failureText}` : ''}），请决定重试、改派或取消`,
+              : `[ORCH-NOTIFY] worker ${workerName} 未能完成 task ${taskTitle || taskId}（${attemptStatus}${errorText ? `：${errorText}` : ''}），请决定重试、改派或取消`,
           )
         }
       } finally {
@@ -423,7 +484,7 @@ export function createTwinOrchestrator(
       if (attemptStatus !== 'completed') {
         return failure(
           timedOut ? 'worker_timed_out' : 'worker_failed',
-          failureText ?? `worker step ${attemptStatus}`,
+          errorText ?? `worker step ${attemptStatus}`,
         )
       }
       return {

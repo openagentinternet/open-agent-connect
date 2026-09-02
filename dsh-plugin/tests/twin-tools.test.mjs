@@ -18,7 +18,14 @@ function runScript(options = {}) {
         return {
           ok: true,
           state: 'success',
-          data: { profile: { slug, name: slug, botType: slug === 'alice' ? 'twin' : 'worker' } },
+          data: {
+            profile: {
+              slug,
+              name: slug,
+              botType: slug === 'alice' ? 'twin' : 'worker',
+              ...(options.noModel ? {} : { dshLlmProvider: 'deepseek', dshLlmModel: 'deepseek-chat' }),
+            },
+          },
         }
       }
       if (verb === 'twin tasks') {
@@ -93,22 +100,31 @@ function runScript(options = {}) {
   }
 }
 
-function fakeDsh(handoffText) {
+function fakeDsh(handoffText, options = {}) {
   const mounted = []
   const followedUp = []
   const cancelled = []
+  const created = []
   return {
     mounted,
     followedUp,
     cancelled,
+    created,
     ctx: {
       agentPresets: {
         mount: async (agentCtx, id) => mounted.push(id),
       },
+      get: (key) => {
+        if (key === 'agentDefaultModel' && options.hostModel) {
+          return { currentSelection: () => options.hostModel }
+        }
+        return undefined
+      },
       agents: {
-        create: async (options) => {
-          await options.setup?.({})
-          const preset = options.meta?.agentPreset
+        create: async (createOptions) => {
+          created.push(createOptions)
+          await createOptions.setup?.({})
+          const preset = createOptions.meta?.agentPreset
           const text = handoffText !== null && typeof handoffText === 'object' ? handoffText[preset] : handoffText
           return {
             agent: {
@@ -117,10 +133,12 @@ function fakeDsh(handoffText) {
               whenIdle: () => text === 'never' ? new Promise(() => {}) : Promise.resolve(),
               cancel: (reason) => cancelled.push(reason),
               session: {
-                id: options.sessionId,
-                events: text && text !== 'never'
-                  ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]
-                  : [],
+                id: createOptions.sessionId,
+                events: text === 'turn_error'
+                  ? [{ type: 'turn/end', data: { reason: { kind: 'error', error: { message: 'agent "x" has no provider/model: set AgentOptions.provider and AgentOptions.model' } } } }]
+                  : text && text !== 'never'
+                    ? [{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]
+                    : [],
               },
             },
             dispose: async () => {},
@@ -155,11 +173,57 @@ test('delegate runs a worker sub-session and posts ORCH-NOTIFY to the twin', asy
   assert.equal(result.ok, true)
   assert.equal(result.data.handoff, '清单已整理好，证据如下…')
   assert.deepEqual(dsh.mounted, ['oac-bob'])
+  // the worker session gets the Bot's DSH LLM pair and the host workspace cwd
+  assert.deepEqual(dsh.created[0].agentOptions, { provider: 'deepseek', model: 'deepseek-chat' })
+  assert.equal(dsh.created[0].meta.cwd, process.cwd())
   assert.match(dsh.followedUp[0].content[0].text, /<twin_delegation>/)
   assert.match(dsh.followedUp[0].content[0].text, /整理发布清单/)
   assert.match(notices[0].content[0].text, /ORCH-NOTIFY/)
   assert.match(notices[0].content[0].text, /已完成/)
   plugin.liveOacAgents.delete('alice')
+})
+
+test('delegate falls back to the host default model when the worker Bot has no DSH LLM pair', async () => {
+  const { run } = runScript({ noModel: true })
+  const dsh = fakeDsh('done', { hostModel: { provider: 'host-provider', model: 'host-model' } })
+  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
+  const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
+  assert.equal(result.ok, true, result.message)
+  assert.deepEqual(dsh.created[0].agentOptions, { provider: 'host-provider', model: 'host-model' })
+})
+
+test('delegate refuses when neither the Bot pair nor a host default model exists', async () => {
+  const { run } = runScript({ noModel: true })
+  const dsh = fakeDsh('done')
+  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
+  const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'delegation_unavailable')
+  assert.equal(dsh.created.length, 0)
+})
+
+test('an empty handoff fails the step instead of completing it', async () => {
+  const { run } = runScript()
+  const dsh = fakeDsh('')
+  const notices = []
+  plugin.liveOacAgents.set('alice', { ctx: {}, followup: (message) => notices.push(message) })
+  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
+  const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'worker_failed')
+  assert.match(result.message, /WORKER_EMPTY_HANDOFF/)
+  assert.match(notices[0].content[0].text, /未能完成/)
+  plugin.liveOacAgents.delete('alice')
+})
+
+test('a dead worker turn surfaces its own error text', async () => {
+  const { run } = runScript()
+  const dsh = fakeDsh('turn_error')
+  const orchestrator = plugin.createTwinOrchestrator(dsh.ctx, 'alice', { run })
+  const result = await orchestrator.delegate({ workerSlug: 'bob', objective: 'x' })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'worker_failed')
+  assert.match(result.message, /no provider\/model/)
 })
 
 test('delegate refuses non-twin callers', async () => {
