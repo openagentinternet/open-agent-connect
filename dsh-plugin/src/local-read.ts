@@ -252,8 +252,17 @@ export function localImpressionsList(from: string): Promise<MetabotCommandResult
     const { createImpressionStore } = core('core/memory/impressionStore.js') as {
       createImpressionStore: (paths: unknown) => { listSnapshots: (observer: string) => Promise<unknown[]> }
     }
-    const snapshots = await createImpressionStore(paths).listSnapshots(observerGlobalMetaId)
-    return success({ observerGlobalMetaId, snapshots })
+    const snapshots = await createImpressionStore(paths).listSnapshots(observerGlobalMetaId) as Array<{
+      subjectGlobalMetaId: string
+    }>
+    const { resolveContactNames } = core('core/memory/contactNames.js') as {
+      resolveContactNames: (paths: unknown, ids: string[]) => Promise<Map<string, string>>
+    }
+    const names = await resolveContactNames(paths, snapshots.map((s) => s.subjectGlobalMetaId))
+    return success({
+      observerGlobalMetaId,
+      snapshots: snapshots.map((s) => ({ ...s, subjectName: names.get(s.subjectGlobalMetaId) ?? null })),
+    })
   })
 }
 
@@ -278,13 +287,20 @@ export function localImpressionsShow(
       }
     }
     const store = createImpressionStore(paths)
-    const snapshot = await store.getSnapshot(observerGlobalMetaId, subject)
+    const snapshot = await store.getSnapshot(observerGlobalMetaId, subject) as { subjectGlobalMetaId?: string } | null
     const observations = await store.listObservations({
       observerGlobalMetaId,
       subjectGlobalMetaId: subject,
       includeSuperseded: true,
     })
-    return success({ observerGlobalMetaId, subject, snapshot, observations })
+    const { resolveContactNames } = core('core/memory/contactNames.js') as {
+      resolveContactNames: (paths: unknown, ids: string[]) => Promise<Map<string, string>>
+    }
+    const names = await resolveContactNames(paths, [subject])
+    const namedSnapshot = snapshot
+      ? { ...snapshot, subjectName: names.get(subject) ?? null }
+      : snapshot
+    return success({ observerGlobalMetaId, subject, snapshot: namedSnapshot, observations })
   })
 }
 

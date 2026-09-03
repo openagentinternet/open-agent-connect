@@ -50,6 +50,13 @@ export interface MemoryPanelInjected {
 
 type TabKey = 'knowledge' | 'contacts' | 'facts' | 'dream'
 
+/** Shorten a GlobalMetaID for compact display (IDBots parity): full id stays in the title tooltip. */
+function abbreviateGlobalMetaId(id: string): string {
+  const trimmed = id.trim()
+  if (trimmed.length <= 16) return trimmed
+  return `${trimmed.slice(0, 8)}…${trimmed.slice(-6)}`
+}
+
 const USAGE_CLASSES = [
   'profile_fact',
   'preference',
@@ -512,6 +519,10 @@ function ContactsTab({ from, t, injected }: {
         </div>
         {snapshot ? (
           <div className="oac-card">
+            <span className="oac-contact-name">{snapshot.subjectName?.trim() || abbreviateGlobalMetaId(snapshot.subjectGlobalMetaId)}</span>
+            <span className="oac-contact-id" title={snapshot.subjectGlobalMetaId}>
+              {abbreviateGlobalMetaId(snapshot.subjectGlobalMetaId)}
+            </span>
             <span className="oac-section-title">{t('contactsSnapshot')}</span>
             <p className="oac-note">{snapshot.summaryText}</p>
             {snapshot.styleDescriptors.length > 0 ? (
@@ -558,7 +569,12 @@ function ContactsTab({ from, t, injected }: {
             })
           }}
         >
-          <span className="oac-mono">{snapshot.subjectGlobalMetaId}</span>
+          <span className="oac-contact-name">{snapshot.subjectName?.trim() || abbreviateGlobalMetaId(snapshot.subjectGlobalMetaId)}</span>
+          {snapshot.subjectName?.trim() ? (
+            <span className="oac-contact-id" title={snapshot.subjectGlobalMetaId}>
+              {abbreviateGlobalMetaId(snapshot.subjectGlobalMetaId)}
+            </span>
+          ) : null}
           <span className="oac-hint">
             {snapshot.interactionCount} {t('contactsInteractions')}
           </span>
@@ -607,7 +623,7 @@ function FactsTab({ from, t, injected }: {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <Button type="button" variant="primary" icon={<IconPlusOutline16 />} onClick={() => setAdding(true)}>
+        <Button type="button" variant="primary" className="oac-memory-add-btn" icon={<IconPlusOutline16 />} onClick={() => setAdding(true)}>
           {t('factsAdd')}
         </Button>
       </div>

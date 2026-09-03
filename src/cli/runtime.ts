@@ -69,6 +69,7 @@ import {
 import { getDayBoundsMs } from '../core/memory/dreamPrompt';
 import { createExperienceStore } from '../core/memory/experienceStore';
 import { createImpressionStore } from '../core/memory/impressionStore';
+import { resolveContactNames } from '../core/memory/contactNames';
 import { createKnowledgeStore } from '../core/memory/knowledgeStore';
 import { formatKnowledgeUpsertResult } from '../core/memory/knowledgePromptBlocks';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
@@ -4066,7 +4067,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         }
         const store = createImpressionStore(paths);
         const snapshots = await store.listSnapshots(observerGlobalMetaId);
-        return commandSuccess({ observerGlobalMetaId, snapshots });
+        const names = await resolveContactNames(paths, snapshots.map((s) => s.subjectGlobalMetaId));
+        const rows = snapshots.map((s) => ({
+          ...s,
+          subjectName: names.get(s.subjectGlobalMetaId) ?? null,
+        }));
+        return commandSuccess({ observerGlobalMetaId, snapshots: rows });
       },
       impressionsShow: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -4084,7 +4090,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           subjectGlobalMetaId: input.subject,
           includeSuperseded: true,
         });
-        return commandSuccess({ observerGlobalMetaId, subject: input.subject, snapshot, observations });
+        const names = await resolveContactNames(paths, [input.subject]);
+        const namedSnapshot = snapshot
+          ? { ...snapshot, subjectName: names.get(input.subject) ?? null }
+          : snapshot;
+        return commandSuccess({ observerGlobalMetaId, subject: input.subject, snapshot: namedSnapshot, observations });
       },
     },
     dream: {

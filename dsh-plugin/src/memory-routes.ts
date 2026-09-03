@@ -31,6 +31,10 @@ import {
 
 const LIST_TIMEOUT_MS = 30_000
 const DREAM_CLI_TIMEOUT_MS = 120_000
+// Per-chunk idle budget for dream LLM streams. Daytime provider stalls used
+// to hang the run in `running` until the 30-minute stale sweeper fired; fail
+// fast instead so the retry/backoff path sees the real error.
+const DREAM_LLM_IDLE_TIMEOUT_MS = 300_000
 
 export interface MemoryRouteDeps {
   run?: RunFn
@@ -195,6 +199,7 @@ async function dreamAttempt(
           system: fragment.system,
           user: fragment.user,
           ...(fragment.maxOutputTokens !== undefined ? { maxTokens: fragment.maxOutputTokens } : {}),
+          timeoutMs: DREAM_LLM_IDLE_TIMEOUT_MS,
         })
       }
       const synthesis = await runMetabotWithPayloadFile(
@@ -224,6 +229,7 @@ async function dreamAttempt(
         system: prompt.system,
         user: userText,
         ...(prompt.maxOutputTokens !== undefined ? { maxTokens: prompt.maxOutputTokens } : {}),
+        timeoutMs: DREAM_LLM_IDLE_TIMEOUT_MS,
       })
       return runMetabotWithPayloadFile(
         ['dream', 'commit', '--from', from],
