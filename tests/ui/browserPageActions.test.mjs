@@ -508,9 +508,23 @@ test('sandboxed iframe renderer does not expose side-effect helpers to content',
     actions: [],
   });
 
-  assert.match(html, /<iframe class="browser-html-frame" sandbox="allow-scripts" src=/);
-  assert.doesNotMatch(html, /allow-same-origin/);
+  assert.match(html, /<iframe class="browser-html-frame" sandbox="allow-scripts allow-same-origin allow-downloads" src=/);
   assert.doesNotMatch(html, /allow-top-navigation/);
   assert.doesNotMatch(html, /api\/chat\/private/);
   assert.doesNotMatch(html, /api\/services\/call/);
+});
+
+test('sandboxed iframe renderer keeps same-origin frames opaque', () => {
+  const { context } = createContext();
+  const html = context.renderRenderer({
+    renderer: { type: 'html-iframe', contentType: 'text/html', url: 'http://127.0.0.1:3000/app' },
+    owner: {},
+    status: {},
+    source: {},
+    actions: [],
+  });
+
+  assert.match(html, /<iframe class="browser-html-frame" sandbox="allow-scripts allow-downloads" src=/);
+  assert.doesNotMatch(html, /allow-same-origin/);
+  assert.doesNotMatch(html, /allow-top-navigation/);
 });
