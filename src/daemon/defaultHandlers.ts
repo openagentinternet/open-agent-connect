@@ -193,6 +193,7 @@ import type {
   PrivateChatConversation,
 } from '../core/chat/privateChatTypes';
 import type { ChainWriteRequest, ChainWriteResult } from '../core/chain/writePin';
+import { wrapSignerWithChainHistory } from '../core/chainhistory/writeLedger';
 import {
   buildPrivateConversationResponse,
   normalizeConversationAfterIndex,
@@ -5089,10 +5090,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
     dogeChainAdapter,
     opcatChainAdapter,
   ]);
-  const signer = input.signer ?? createLocalMnemonicSigner({
-    secretStore,
-    adapters,
-  });
+  // Mirror every successful chain write into the acting bot's chain history
+  // store (best-effort, idempotent per pinId). Injected signers are wrapped
+  // too: nested scoped handler factories pass an already-wrapped signer, and
+  // the store's pinId idempotency keeps that double coverage harmless.
+  const signer = wrapSignerWithChainHistory(
+    input.signer ?? createLocalMnemonicSigner({
+      secretStore,
+      adapters,
+    }),
+    resolveMetabotPaths(input.homeDir),
+  );
   const uploadLargeFile = input.uploadLargeFile ?? uploadLargeFileToChain;
   const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFileToChain;
   const providerLargeFileUploader = input.providerLargeFileUploader === null
@@ -6025,17 +6033,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
 
   function createSignerForProfileHome(profileHomeDir: string): Signer {
     const normalizedProfileHomeDir = path.resolve(profileHomeDir);
+    let baseSigner: Signer;
     if (normalizedProfileHomeDir === path.resolve(input.homeDir)) {
-      return signer;
+      baseSigner = signer;
+    } else if (input.createSignerForHome) {
+      baseSigner = input.createSignerForHome(normalizedProfileHomeDir);
+    } else {
+      const profileAdapters = adapters ?? new Map();
+      baseSigner = createLocalMnemonicSigner({
+        secretStore: createFileSecretStore(normalizedProfileHomeDir),
+        adapters: profileAdapters,
+      });
     }
-    if (input.createSignerForHome) {
-      return input.createSignerForHome(normalizedProfileHomeDir);
-    }
-    const profileAdapters = adapters ?? new Map();
-    return createLocalMnemonicSigner({
-      secretStore: createFileSecretStore(normalizedProfileHomeDir),
-      adapters: profileAdapters,
-    });
+    // Chain history ledger on every profile signer. The main-home signer is
+    // already wrapped above; store idempotency keeps that to one record.
+    return wrapSignerWithChainHistory(baseSigner, resolveMetabotPaths(normalizedProfileHomeDir));
   }
 
   async function resolveBotProfileIdentity(slug: string): Promise<
