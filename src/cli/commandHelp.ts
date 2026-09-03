@@ -2783,6 +2783,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot chainhistory <subcommand>',
     subcommands: [
       { name: 'read', summary: 'Read-side ledger entries.' },
+      { name: 'recall', summary: 'Search the Bot\'s own on-chain write/read history (the chain_history_recall backend).' },
       { name: 'summary', summary: 'Async summary drain: pending candidates and outcome application.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
@@ -2804,6 +2805,22 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     },
     successFields: ['recorded'],
     examples: ['metabot chainhistory read record --from alice --payload-file /tmp/chain-read.json'],
+  },
+  {
+    commandPath: ['chainhistory', 'recall'],
+    summary: 'Search the Bot\'s own chain history: pins it published (writes) and pins it fully read (reads), newest first.',
+    usage: 'metabot chainhistory recall [--from <bot-slug>] [--query <text>] [--kind write|read] [--from-date <YYYY-MM-DD>] [--to-date <YYYY-MM-DD>] [--limit <n>]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--query', value: '<text>', description: 'Keyword filter over content, summary, path, and title; omit to browse the window.' },
+      { flag: '--kind', value: 'write|read', description: 'Restrict to published pins or read pins; default both.' },
+      { flag: '--from-date', value: '<YYYY-MM-DD>', description: 'Local-day start (inclusive). Without dates the store searches its default 90-day window.' },
+      { flag: '--to-date', value: '<YYYY-MM-DD>', description: 'Local-day end (covers the whole day). Must not be before --from-date.' },
+      { flag: '--limit', value: '<n>', description: 'Maximum records per kind. Store default 20, capped at 50.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['writes', 'reads'],
+    examples: ['metabot chainhistory recall --from alice --query "metaweb" --kind read --from-date 2026-09-01 --to-date 2026-09-03 --limit 10'],
   },
   {
     commandPath: ['chainhistory', 'summary', 'pending'],

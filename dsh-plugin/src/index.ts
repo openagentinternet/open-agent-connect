@@ -43,6 +43,7 @@ import { dispatchMemoryRoutes } from './memory-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
+import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
 import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
 import { slugFromPresetId } from './chip-logic.js'
 import { reconcilePresets } from './preset.js'
@@ -445,6 +446,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
           if (!slug) return
           liveOacAgents.set(slug, agent)
           installMemoryToolsOnAgent(agent, slug)
+          installChainHistoryRecallOnAgent(ctx, agent)
           if (config.twin?.enabled === false) return
           const shown = await runMetabot(['bot', 'show', '--from', slug], { timeoutMs: 30_000 })
           const profile = shown.ok
@@ -573,6 +575,19 @@ export {
   WORKER_DELEGATION_SYSTEM_PROMPT,
 } from './twin-tools.js'
 export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
+export {
+  buildChainHistoryRecallToolDefinitions,
+  DEFAULT_CHAIN_HISTORY_RECALL_LIMIT,
+  formatChainHistoryRecallResults,
+  installChainHistoryRecallOnAgent,
+  MAX_CHAIN_HISTORY_RECALL_LIMIT,
+  resolveChainHistoryRecallQuery,
+  type ChainHistoryRecallArgs,
+  type ChainHistoryRecallKind,
+  type ChainHistoryRecallRead,
+  type ChainHistoryRecallWrite,
+  type ResolvedChainHistoryRecallQuery,
+} from './chain-history-recall.js'
 export { generateLlmText } from './llm-generate.js'
 export { uploadFileBytes } from './file-upload.js'
 export {

@@ -37,7 +37,7 @@ import {
   resolveMetabotPaths,
   type MetabotPaths,
 } from '../core/state/paths';
-import { createChainHistoryStore } from '../core/chainhistory/store';
+import { createChainHistoryStore, type ChainHistorySearchOptions } from '../core/chainhistory/store';
 import { recordMetawebPinRead } from '../core/chainhistory/readLedger';
 import { createMemoryStore } from '../core/memory/memoryStore';
 import { createMemoryPolicyStore } from '../core/memory/memoryPolicy';
@@ -4105,6 +4105,44 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         if (!('homeDir' in actor)) return actor;
         await createChainHistoryStore(resolveMetabotPaths(actor.homeDir)).recordRead(input.input);
         return commandSuccess({ recorded: true });
+      },
+      recall: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createChainHistoryStore(resolveMetabotPaths(actor.homeDir));
+        // No date flags: the store applies its 90-day default search window.
+        const options: ChainHistorySearchOptions = {
+          ...(input.query ? { query: input.query } : {}),
+          ...(input.fromDate ? { fromMs: getDayBoundsMs(input.fromDate).startMs } : {}),
+          ...(input.toDate ? { toMs: getDayBoundsMs(input.toDate).endMs } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        };
+        const [writes, reads] = await Promise.all([
+          input.kind === 'read' ? [] : store.searchWrites(options),
+          input.kind === 'write' ? [] : store.searchReads(options),
+        ]);
+        return commandSuccess({
+          writes: writes.map((record) => ({
+            pinId: record.pinId,
+            path: record.path,
+            operation: record.operation,
+            occurredAtMs: record.occurredAtMs,
+            summary: record.summary,
+            contentText: record.contentText,
+          })),
+          reads: reads.map((record) => ({
+            pinId: record.pinId,
+            path: record.path,
+            protocol: record.protocol,
+            title: record.title,
+            authorGlobalMetaId: record.authorGlobalMetaId,
+            savedToKb: record.savedToKb,
+            readCount: record.readCount,
+            lastReadAtMs: record.lastReadAtMs,
+            summary: record.summary,
+            contentExcerpt: record.contentExcerpt,
+          })),
+        });
       },
       summaryPending: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
