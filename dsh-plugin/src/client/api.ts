@@ -102,6 +102,7 @@ export type KnowledgeRow = {
 
 export type ImpressionSnapshotRow = {
   subjectGlobalMetaId: string
+  subjectName?: string | null
   summaryText: string
   styleDescriptors: string[]
   cooperationContext?: string | null

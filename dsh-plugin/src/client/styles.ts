@@ -328,6 +328,9 @@ export const MEMORY_CSS = `
 .oac-memory-identity { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); white-space: pre-wrap; }
 .oac-memory-contact { text-align: left; cursor: pointer; border: 1px solid var(--dsw-alias-border-l2); transition: border-color .16s; }
 .oac-memory-contact:hover { border-color: var(--dsw-alias-label-dimmed); }
+.oac-contact-name { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-contact-id { display: block; font-family: var(--dsw-font-mono, monospace); font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-memory-add-btn { flex-shrink: 0; white-space: nowrap; }
 .oac-memory-diary-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .oac-memory-diary-head strong { font-size: 13px; color: var(--dsw-alias-label-primary); }
 .oac-memory-diary-text { margin: 0; font-size: 13px; line-height: 21px; color: var(--dsw-alias-label-primary); white-space: pre-wrap; }
