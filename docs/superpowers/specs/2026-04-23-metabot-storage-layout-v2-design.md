@@ -889,3 +889,32 @@ purpose and the `active-home.json` entry in the allowed-contents list above.
   list` keep the `activeHomeDir` field name with the twin-derived value.
 - The `METABOT_HOME` environment variable remains the explicit per-invocation
   override and is unaffected by this amendment.
+
+## Amendment 2026-09-03: Per-Bot Chain History Store
+
+This amendment standardizes one machine-managed, per-bot store for the bot's
+own chain history. It adds one runtime subdirectory to the profile layout and
+exposes it on the central path model as `chainHistoryRoot`.
+
+### Runtime layer addition: `.runtime/chain-history/`
+
+The store keeps one JSON object per chain pin, month-sharded by the record's
+occurrence month (local timezone):
+
+- `writes/YYYY-MM/<pinId>.json` — one record per chain pin this bot
+  published, sharded by the record's `occurredAtMs`
+- `reads/YYYY-MM/<pinId>.json` — one record per chain pin this bot read,
+  sharded by the record's `firstReadAtMs`
+
+Rules:
+
+- all writes are atomic (write-then-rename), matching `.runtime/state/`
+  conventions
+- all paths are resolved through the central `MetabotPaths` model
+  (`chainHistoryRoot`)
+- the directory tree is lazily materialized on first write
+- reads are tolerant: a corrupt record file is skipped, never fatal
+- `pinId` is the only file-name component and must match `[A-Za-z0-9._-]+`
+- no index files; queries are time-windowed scans over month shards only
+  (dream day queries, last-2-months pending-summary scans, and the
+  default-90-day recall search)
