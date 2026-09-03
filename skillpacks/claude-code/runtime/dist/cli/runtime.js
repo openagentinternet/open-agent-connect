@@ -72,6 +72,8 @@ const profileNameResolution_1 = require("../core/identity/profileNameResolution"
 const ownerIdentity_1 = require("../core/owner/ownerIdentity");
 const skillResolver_1 = require("../core/skills/skillResolver");
 const paths_1 = require("../core/state/paths");
+const store_1 = require("../core/chainhistory/store");
+const readLedger_1 = require("../core/chainhistory/readLedger");
 const memoryStore_1 = require("../core/memory/memoryStore");
 const memoryPolicy_1 = require("../core/memory/memoryPolicy");
 const memoryService_1 = require("../core/memory/memoryService");
@@ -82,6 +84,7 @@ const experiencePromptBlocks_1 = require("../core/memory/experiencePromptBlocks"
 const dreamPrompt_1 = require("../core/memory/dreamPrompt");
 const experienceStore_1 = require("../core/memory/experienceStore");
 const impressionStore_1 = require("../core/memory/impressionStore");
+const contactNames_1 = require("../core/memory/contactNames");
 const knowledgeStore_1 = require("../core/memory/knowledgeStore");
 const knowledgePromptBlocks_1 = require("../core/memory/knowledgePromptBlocks");
 const chatPersonaLoader_1 = require("../core/chat/chatPersonaLoader");
@@ -3280,7 +3283,12 @@ function createDefaultCliDependencies(context) {
                 }
                 const store = (0, impressionStore_1.createImpressionStore)(paths);
                 const snapshots = await store.listSnapshots(observerGlobalMetaId);
-                return (0, commandResult_1.commandSuccess)({ observerGlobalMetaId, snapshots });
+                const names = await (0, contactNames_1.resolveContactNames)(paths, snapshots.map((s) => s.subjectGlobalMetaId));
+                const rows = snapshots.map((s) => ({
+                    ...s,
+                    subjectName: names.get(s.subjectGlobalMetaId) ?? null,
+                }));
+                return (0, commandResult_1.commandSuccess)({ observerGlobalMetaId, snapshots: rows });
             },
             impressionsShow: async (input) => {
                 const actor = await resolveActorHomeDir(context, input.from);
@@ -3299,7 +3307,104 @@ function createDefaultCliDependencies(context) {
                     subjectGlobalMetaId: input.subject,
                     includeSuperseded: true,
                 });
-                return (0, commandResult_1.commandSuccess)({ observerGlobalMetaId, subject: input.subject, snapshot, observations });
+                const names = await (0, contactNames_1.resolveContactNames)(paths, [input.subject]);
+                const namedSnapshot = snapshot
+                    ? { ...snapshot, subjectName: names.get(input.subject) ?? null }
+                    : snapshot;
+                return (0, commandResult_1.commandSuccess)({ observerGlobalMetaId, subject: input.subject, snapshot: namedSnapshot, observations });
+            },
+        },
+        chainhistory: {
+            recordRead: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                await (0, store_1.createChainHistoryStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir)).recordRead(input.input);
+                return (0, commandResult_1.commandSuccess)({ recorded: true });
+            },
+            recall: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_1.createChainHistoryStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                // No date flags: the store applies its 90-day default search window.
+                const options = {
+                    ...(input.query ? { query: input.query } : {}),
+                    ...(input.fromDate ? { fromMs: (0, dreamPrompt_1.getDayBoundsMs)(input.fromDate).startMs } : {}),
+                    ...(input.toDate ? { toMs: (0, dreamPrompt_1.getDayBoundsMs)(input.toDate).endMs } : {}),
+                    ...(input.limit !== undefined ? { limit: input.limit } : {}),
+                };
+                const [writes, reads] = await Promise.all([
+                    input.kind === 'read' ? [] : store.searchWrites(options),
+                    input.kind === 'write' ? [] : store.searchReads(options),
+                ]);
+                return (0, commandResult_1.commandSuccess)({
+                    writes: writes.map((record) => ({
+                        pinId: record.pinId,
+                        path: record.path,
+                        operation: record.operation,
+                        occurredAtMs: record.occurredAtMs,
+                        summary: record.summary,
+                        contentText: record.contentText,
+                    })),
+                    reads: reads.map((record) => ({
+                        pinId: record.pinId,
+                        path: record.path,
+                        protocol: record.protocol,
+                        title: record.title,
+                        authorGlobalMetaId: record.authorGlobalMetaId,
+                        savedToKb: record.savedToKb,
+                        readCount: record.readCount,
+                        lastReadAtMs: record.lastReadAtMs,
+                        summary: record.summary,
+                        contentExcerpt: record.contentExcerpt,
+                    })),
+                });
+            },
+            summaryPending: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_1.createChainHistoryStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const rawLimit = typeof input.limit === 'number' && Number.isFinite(input.limit) ? Math.floor(input.limit) : 50;
+                const limit = Math.min(200, Math.max(1, rawLimit));
+                const [writes, reads] = await Promise.all([
+                    store.listPendingSummaries('write', limit),
+                    store.listPendingSummaries('read', limit),
+                ]);
+                // Writes first, then reads; each kind arrives oldest-first from the store.
+                const items = [
+                    ...writes.map(({ record }) => ({
+                        kind: 'write',
+                        pinId: record.pinId,
+                        path: record.path,
+                        contentText: record.contentText,
+                        occurredAtMs: record.occurredAtMs,
+                    })),
+                    ...reads.map(({ record }) => ({
+                        kind: 'read',
+                        pinId: record.pinId,
+                        path: record.path,
+                        protocol: record.protocol,
+                        title: record.title,
+                        contentText: record.contentExcerpt,
+                        occurredAtMs: record.firstReadAtMs,
+                    })),
+                ].slice(0, limit);
+                const now = new Date();
+                const localMidnightMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+                const summarizedToday = await store.countSummariesSince(null, localMidnightMs);
+                return (0, commandResult_1.commandSuccess)({ items, summarizedToday });
+            },
+            summaryApply: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_1.createChainHistoryStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const applied = await store.applySummaryOutcome(input.kind, input.pinId, input.outcome === 'done'
+                    ? { status: 'done', summary: input.summary ?? '' }
+                    : { status: 'failed' });
+                return (0, commandResult_1.commandSuccess)({ applied });
             },
         },
         dream: {
@@ -3362,6 +3467,16 @@ function createDefaultCliDependencies(context) {
                 if (!result.ok) {
                     return (0, commandResult_1.commandFailed)('dream_commit_failed', result.error ?? 'dream commit failed');
                 }
+                return (0, commandResult_1.commandSuccess)(result);
+            },
+            fail: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const result = await (0, dreamService_1.failDream)((0, paths_1.resolveMetabotPaths)(actor.homeDir), {
+                    date: String(input.payload.date),
+                    error: typeof input.payload.error === 'string' ? input.payload.error : null,
+                });
                 return (0, commandResult_1.commandSuccess)(result);
             },
             run: async (input) => {
@@ -3883,6 +3998,7 @@ function mergeCliDependencies(context) {
         grouptask: { ...defaults.grouptask, ...provided.grouptask },
         conversations: { ...defaults.conversations, ...provided.conversations },
         memory: { ...defaults.memory, ...provided.memory },
+        chainhistory: { ...defaults.chainhistory, ...provided.chainhistory },
         dream: { ...defaults.dream, ...provided.dream },
         twin: { ...defaults.twin, ...provided.twin },
         file: { ...defaults.file, ...provided.file },
@@ -4667,6 +4783,9 @@ async function serveCliDaemonProcess(context) {
                                     readMetawebPin: async ({ pinId }) => {
                                         const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
                                         const pin = await (0, pinRead_1.readMetawebPin)(pinId, baseUrl ? { baseUrl } : undefined);
+                                        // Best-effort chain-history read record; never delays or
+                                        // fails the study turn (recordMetawebPinRead also swallows).
+                                        void (0, readLedger_1.recordMetawebPinRead)(profilePaths, pin, 'study_job').catch(() => undefined);
                                         const { formatMetawebPinDetail } = await Promise.resolve().then(() => __importStar(require('../core/metaweb/format.js')));
                                         return formatMetawebPinDetail(pin);
                                     },

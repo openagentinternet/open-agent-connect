@@ -64,6 +64,7 @@ const privateChatAllowedSkills_1 = require("../core/chat/privateChatAllowedSkill
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
 const privateChatSendFailureLog_1 = require("../core/chat/privateChatSendFailureLog");
+const writeLedger_1 = require("../core/chainhistory/writeLedger");
 const privateConversation_1 = require("../core/chat/privateConversation");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const grouptaskHandlers_1 = require("./grouptaskHandlers");
@@ -712,6 +713,12 @@ function buildMetabotUpdateInput(input) {
     if (hasOwnField(input, 'dshLlmFallbackModel')) {
         update.dshLlmFallbackModel = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmFallbackModel);
     }
+    if (hasOwnField(input, 'dshLlmReasoningEffort')) {
+        update.dshLlmReasoningEffort = (0, dshLlm_1.normalizeOptionalDshLlmReasoningEffort)(input.dshLlmReasoningEffort);
+    }
+    if (hasOwnField(input, 'dshLlmFallbackReasoningEffort')) {
+        update.dshLlmFallbackReasoningEffort = (0, dshLlm_1.normalizeOptionalDshLlmReasoningEffort)(input.dshLlmFallbackReasoningEffort);
+    }
     if (hasOwnField(input, 'botType')) {
         const botType = (0, botRole_1.normalizeBotType)(input.botType);
         if (input.botType !== null && input.botType !== undefined && !botType) {
@@ -773,6 +780,12 @@ function buildMetabotCreateInput(input) {
     }
     if (hasOwnField(input, 'dshLlmFallbackModel')) {
         createInput.dshLlmFallbackModel = (0, dshLlm_1.normalizeOptionalDshLlmId)(input.dshLlmFallbackModel);
+    }
+    if (hasOwnField(input, 'dshLlmReasoningEffort')) {
+        createInput.dshLlmReasoningEffort = (0, dshLlm_1.normalizeOptionalDshLlmReasoningEffort)(input.dshLlmReasoningEffort);
+    }
+    if (hasOwnField(input, 'dshLlmFallbackReasoningEffort')) {
+        createInput.dshLlmFallbackReasoningEffort = (0, dshLlm_1.normalizeOptionalDshLlmReasoningEffort)(input.dshLlmFallbackReasoningEffort);
     }
     if (hasOwnField(input, 'botType')) {
         const botType = (0, botRole_1.normalizeBotType)(input.botType);
@@ -3836,10 +3849,14 @@ function createDefaultMetabotDaemonHandlers(input) {
         doge_1.dogeChainAdapter,
         opcat_1.opcatChainAdapter,
     ]);
-    const signer = input.signer ?? (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
+    // Mirror every successful chain write into the acting bot's chain history
+    // store (best-effort, idempotent per pinId). Injected signers are wrapped
+    // too: nested scoped handler factories pass an already-wrapped signer, and
+    // the store's pinId idempotency keeps that double coverage harmless.
+    const signer = (0, writeLedger_1.wrapSignerWithChainHistory)(input.signer ?? (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
         secretStore,
         adapters,
-    });
+    }), (0, paths_1.resolveMetabotPaths)(input.homeDir));
     const uploadLargeFile = input.uploadLargeFile ?? uploadLargeFile_1.uploadLargeFileToChain;
     const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFile_1.uploadLargeFileToChain;
     const providerLargeFileUploader = input.providerLargeFileUploader === null
@@ -4637,17 +4654,23 @@ function createDefaultMetabotDaemonHandlers(input) {
     }
     function createSignerForProfileHome(profileHomeDir) {
         const normalizedProfileHomeDir = node_path_1.default.resolve(profileHomeDir);
+        let baseSigner;
         if (normalizedProfileHomeDir === node_path_1.default.resolve(input.homeDir)) {
-            return signer;
+            baseSigner = signer;
         }
-        if (input.createSignerForHome) {
-            return input.createSignerForHome(normalizedProfileHomeDir);
+        else if (input.createSignerForHome) {
+            baseSigner = input.createSignerForHome(normalizedProfileHomeDir);
         }
-        const profileAdapters = adapters ?? new Map();
-        return (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
-            secretStore: (0, fileSecretStore_1.createFileSecretStore)(normalizedProfileHomeDir),
-            adapters: profileAdapters,
-        });
+        else {
+            const profileAdapters = adapters ?? new Map();
+            baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
+                secretStore: (0, fileSecretStore_1.createFileSecretStore)(normalizedProfileHomeDir),
+                adapters: profileAdapters,
+            });
+        }
+        // Chain history ledger on every profile signer. The main-home signer is
+        // already wrapped above; store idempotency keeps that to one record.
+        return (0, writeLedger_1.wrapSignerWithChainHistory)(baseSigner, (0, paths_1.resolveMetabotPaths)(normalizedProfileHomeDir));
     }
     async function resolveBotProfileIdentity(slug) {
         const requestedSlug = normalizeText(slug);

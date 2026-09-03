@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveDreamBudgets = resolveDreamBudgets;
+exports.failDream = failDream;
 exports.dueDreamDates = dueDreamDates;
 exports.planDream = planDream;
 exports.synthesizeDream = synthesizeDream;
@@ -82,9 +83,28 @@ async function resetStaleRunningRun(store, date) {
         await store.finishRun(date, 'failed', 'stale running run reset');
     }
 }
+/**
+ * Mark the live run for one date as failed. The DSH plugin drives dreams
+ * across a process boundary (plan/commit in the CLI, LLM in the host), so
+ * transport and LLM failures above the store layer would otherwise leave the
+ * run `running` forever. No-op unless a run is currently `running` — terminal
+ * states are never overwritten.
+ */
+async function failDream(paths, input, deps = {}) {
+    const dreamStore = deps.dreamStore ?? (0, dreamStore_1.createDreamStore)(paths);
+    const run = await dreamStore.getRun(input.date);
+    if (!run || run.status !== 'running')
+        return { failed: false };
+    await dreamStore.finishRun(input.date, 'failed', input.error ?? 'dream run failed');
+    return { failed: true };
+}
 /** Which past dates still need dream attention for this bot. */
 async function dueDreamDates(paths, input = {}, deps = {}) {
     const dreamStore = deps.dreamStore ?? (0, dreamStore_1.createDreamStore)(paths);
+    // Sweep first: the due algorithm skips `running` dates, so runs orphaned by
+    // a restart (the plugin process dies mid-dream) must be failed here or they
+    // never become due again.
+    await dreamStore.resetStaleRunningRuns({ staleMs: STALE_RUNNING_RESET_MS });
     const runStates = await dreamStore.getRunStates();
     const slug = node_path_1.default.basename(paths.profileRoot);
     return (0, dreamPrompt_1.computeDueDreamDates)({
@@ -141,6 +161,8 @@ async function planDream(paths, input, deps = {}) {
         && activity.taskRuns.length === 0
         && activity.groupTasks.length === 0
         && (activity.groupChats?.length ?? 0) === 0
+        && (activity.chainWrites?.length ?? 0) === 0
+        && (activity.chainReads?.length ?? 0) === 0
         && impressionSubjects.length === 0) {
         // Nothing happened that day — no LLM call, no summary, still recorded.
         await dreamStore.beginRun(date, llm, dreamPrompt_1.DREAM_VERSION);
@@ -340,6 +362,8 @@ async function commitDream(paths, input, deps = {}) {
             groupTaskActiveCount: activity.groupTasks.filter((task) => task.phase === 'active').length,
             groupChatCount: activity.groupChats?.length ?? 0,
             groupChatMessageCount: (activity.groupChats ?? []).reduce((sum, chat) => sum + chat.messages.length, 0),
+            chainWriteCount: activity.chainWrites?.length ?? 0,
+            chainReadCount: activity.chainReads?.length ?? 0,
             messageCount: activity.sessions.reduce((sum, session) => sum + session.messages.length, 0),
             activityCharCount: activity.sessions.reduce((sum, session) => sum + session.messages.reduce((sessionSum, message) => sessionSum + message.content.length, 0), 0),
             estimatedActivityTokens: (0, dreamFragments_1.estimateDreamActivityTokens)(activity),
@@ -639,6 +663,9 @@ function outputToJson(output) {
 async function dreamStatus(paths, deps = {}) {
     const dreamStore = deps.dreamStore ?? (0, dreamStore_1.createDreamStore)(paths);
     const memoryStore = deps.memoryStore ?? (0, memoryStore_1.createMemoryStore)(paths);
+    // Same sweep as dueDreamDates: the UI must not show a phantom "running"
+    // for a run orphaned by a restart days ago.
+    await dreamStore.resetStaleRunningRuns({ staleMs: STALE_RUNNING_RESET_MS });
     const runStates = await dreamStore.getRunStates();
     const summaries = await dreamStore.listDailySummaries({ limit: 90 });
     const identityEntries = await memoryStore.list({

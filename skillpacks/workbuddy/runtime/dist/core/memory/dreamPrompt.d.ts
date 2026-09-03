@@ -18,8 +18,9 @@ export declare const MAX_KNOWLEDGE_UPDATES = 6;
 /** Dream algorithm version, recorded on every run. Bump it on any change to the
  * prompt, budgeting, stats or write semantics — completed in-window dates with
  * an older version are then re-dreamed automatically (limited per night).
- * The file-backed port restarts versioning at 1. */
-export declare const DREAM_VERSION = 1;
+ * The file-backed port restarts versioning at 1; 2 adds the chain-history
+ * sections (own writes + full reads) to the prompt, stats and token estimate. */
+export declare const DREAM_VERSION = 2;
 declare const DREAM_SECTION_KEYS: readonly ["human", "a2a", "orders", "tasks", "group_tasks"];
 export type DreamSectionKey = (typeof DREAM_SECTION_KEYS)[number];
 /**

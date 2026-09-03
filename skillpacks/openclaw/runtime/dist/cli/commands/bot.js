@@ -46,8 +46,10 @@ async function runBotCommand(args, context) {
         }
         const dshLlmProvider = (0, helpers_1.readFlagValue)(args, '--dsh-llm-provider');
         const dshLlmModel = (0, helpers_1.readFlagValue)(args, '--dsh-llm-model');
+        const dshLlmReasoningEffort = (0, helpers_1.readFlagValue)(args, '--dsh-llm-reasoning-effort');
         const dshLlmFallbackProvider = (0, helpers_1.readFlagValue)(args, '--dsh-llm-fallback-provider');
         const dshLlmFallbackModel = (0, helpers_1.readFlagValue)(args, '--dsh-llm-fallback-model');
+        const dshLlmFallbackReasoningEffort = (0, helpers_1.readFlagValue)(args, '--dsh-llm-fallback-reasoning-effort');
         const botType = (0, helpers_1.readFlagValue)(args, '--type');
         if (botType !== null && botType !== 'twin' && botType !== 'worker') {
             return (0, commandResult_1.commandFailed)('invalid_flag', '--type must be twin or worker.');
@@ -58,8 +60,10 @@ async function runBotCommand(args, context) {
             ...(host ? { host } : {}),
             ...(dshLlmProvider ? { dshLlmProvider } : {}),
             ...(dshLlmModel ? { dshLlmModel } : {}),
+            ...(dshLlmReasoningEffort ? { dshLlmReasoningEffort } : {}),
             ...(dshLlmFallbackProvider ? { dshLlmFallbackProvider } : {}),
             ...(dshLlmFallbackModel ? { dshLlmFallbackModel } : {}),
+            ...(dshLlmFallbackReasoningEffort ? { dshLlmFallbackReasoningEffort } : {}),
             ...(botType ? { botType } : {}),
             ...(ownerGlobalMetaId ? { ownerGlobalMetaId } : {}),
         });

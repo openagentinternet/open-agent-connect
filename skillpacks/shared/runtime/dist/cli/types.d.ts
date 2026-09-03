@@ -1,4 +1,5 @@
 import type { MetabotCommandResult } from '../core/contracts/commandResult';
+import type { ChainHistoryKind, RecordChainReadInput } from '../core/chainhistory/types';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
 import type { SystemHost } from '../core/system/types';
 export type Awaitable<T> = T | Promise<T>;
@@ -315,6 +316,31 @@ export interface CliDependencies {
             subject: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    chainhistory?: {
+        recordRead?: (input: {
+            from?: string;
+            input: RecordChainReadInput;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        recall?: (input: {
+            from?: string;
+            query?: string;
+            kind?: ChainHistoryKind;
+            fromDate?: string;
+            toDate?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        summaryPending?: (input: {
+            from?: string;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        summaryApply?: (input: {
+            from?: string;
+            kind: ChainHistoryKind;
+            pinId: string;
+            outcome: 'done' | 'failed';
+            summary?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
     dream?: {
         due?: (input: {
             from?: string;
@@ -337,6 +363,10 @@ export interface CliDependencies {
             payload: Record<string, unknown>;
         }) => Awaitable<MetabotCommandResult<unknown>>;
         commit?: (input: {
+            from?: string;
+            payload: Record<string, unknown>;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        fail?: (input: {
             from?: string;
             payload: Record<string, unknown>;
         }) => Awaitable<MetabotCommandResult<unknown>>;

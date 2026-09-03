@@ -84,6 +84,19 @@ export interface DreamServiceDeps {
     impressionStore?: ImpressionStore;
     knowledgeStore?: KnowledgeStore;
 }
+/**
+ * Mark the live run for one date as failed. The DSH plugin drives dreams
+ * across a process boundary (plan/commit in the CLI, LLM in the host), so
+ * transport and LLM failures above the store layer would otherwise leave the
+ * run `running` forever. No-op unless a run is currently `running` — terminal
+ * states are never overwritten.
+ */
+export declare function failDream(paths: MetabotPaths, input: {
+    date: string;
+    error?: string | null;
+}, deps?: DreamServiceDeps): Promise<{
+    failed: boolean;
+}>;
 /** Which past dates still need dream attention for this bot. */
 export declare function dueDreamDates(paths: MetabotPaths, input?: {
     now?: Date;

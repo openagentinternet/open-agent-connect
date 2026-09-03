@@ -16,7 +16,8 @@ exports.buildKbDocumentJson = buildKbDocumentJson;
 exports.createKnowledgeBaseService = createKnowledgeBaseService;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
-const store_1 = require("./store");
+const store_1 = require("../chainhistory/store");
+const store_2 = require("./store");
 const indexStore_1 = require("./indexStore");
 const text_1 = require("./text");
 Object.defineProperty(exports, "extractKbDocTitle", { enumerable: true, get: function () { return text_1.extractKbDocTitle; } });
@@ -54,7 +55,7 @@ function buildKbDocumentJson(input) {
     return JSON.stringify(record, null, 2);
 }
 function createKnowledgeBaseService(paths) {
-    const store = (0, store_1.createKnowledgeBaseStore)(paths);
+    const store = (0, store_2.createKnowledgeBaseStore)(paths);
     const learnQueues = new Map();
     // Index stores memoized per KB: the per-instance query cache (keyed by the
     // index file's mtime:size generation) then survives across calls and
@@ -63,7 +64,7 @@ function createKnowledgeBaseService(paths) {
     const indexFor = (kbId) => {
         let index = indexStores.get(kbId);
         if (!index) {
-            index = (0, indexStore_1.createKnowledgeBaseIndexStore)((0, store_1.knowledgeBaseIndexPath)(paths, kbId));
+            index = (0, indexStore_1.createKnowledgeBaseIndexStore)((0, store_2.knowledgeBaseIndexPath)(paths, kbId));
             indexStores.set(kbId, index);
         }
         return index;
@@ -139,6 +140,16 @@ function createKnowledgeBaseService(paths) {
             const relPath = node_path_1.default.join('metabot-inbox', fileName);
             await node_fs_1.promises.mkdir(node_path_1.default.join(kb.rawDir, 'metabot-inbox'), { recursive: true });
             await node_fs_1.promises.writeFile(node_path_1.default.join(kb.rawDir, relPath), buildKbDocumentJson({ ...input, title, content }), 'utf8');
+            // Best-effort chain-history cross-mark: a metaweb-sourced save marks the
+            // pin's read record savedToKb. A marking failure must never fail the save.
+            if (input.sourceType === 'metaweb' && typeof input.pinId === 'string' && input.pinId) {
+                try {
+                    await (0, store_1.createChainHistoryStore)(paths).markReadSavedToKb(input.pinId, kb.id);
+                }
+                catch {
+                    // Marking is advisory; the document is already saved.
+                }
+            }
             return { knowledgeBase: kb, relPath };
         },
         importFiles: async (metabotSlug, knowledgeBaseId, filePaths) => {

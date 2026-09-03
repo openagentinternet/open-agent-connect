@@ -51,6 +51,7 @@ export interface MetabotPaths {
     memoryPolicyPath: string;
     memoryOrchestrationPath: string;
     memoryTranscriptsRoot: string;
+    chainHistoryRoot: string;
     llmRoot: string;
     llmRuntimesPath: string;
     llmBindingsPath: string;
