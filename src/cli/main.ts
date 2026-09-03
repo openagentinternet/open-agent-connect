@@ -17,6 +17,7 @@ import { runChatCommand } from './commands/chat';
 import { runGroupTaskCommand } from './commands/grouptask';
 import { runConversationsCommand } from './commands/conversations';
 import { runMemoryCommand } from './commands/memory';
+import { runChainhistoryCommand } from './commands/chainhistory';
 import { runDreamCommand } from './commands/dream';
 import { runTwinCommand } from './commands/twin';
 import { runFileCommand } from './commands/file';
@@ -124,6 +125,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'memory':
           result = await runMemoryCommand(rest, context);
+          break;
+        case 'chainhistory':
+          result = await runChainhistoryCommand(rest, context);
           break;
         case 'dream':
           result = await runDreamCommand(rest, context);

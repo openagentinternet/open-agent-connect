@@ -9,6 +9,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { MetabotPaths } from '../state/paths';
+import { createChainHistoryStore } from '../chainhistory/store';
 import {
   createKnowledgeBaseStore,
   knowledgeBaseIndexPath,
@@ -176,6 +177,15 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
       const relPath = path.join('metabot-inbox', fileName);
       await fs.mkdir(path.join(kb.rawDir, 'metabot-inbox'), { recursive: true });
       await fs.writeFile(path.join(kb.rawDir, relPath), buildKbDocumentJson({ ...input, title, content }), 'utf8');
+      // Best-effort chain-history cross-mark: a metaweb-sourced save marks the
+      // pin's read record savedToKb. A marking failure must never fail the save.
+      if (input.sourceType === 'metaweb' && typeof input.pinId === 'string' && input.pinId) {
+        try {
+          await createChainHistoryStore(paths).markReadSavedToKb(input.pinId, kb.id);
+        } catch {
+          // Marking is advisory; the document is already saved.
+        }
+      }
       return { knowledgeBase: kb, relPath };
     },
 
