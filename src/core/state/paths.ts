@@ -56,6 +56,9 @@ export interface MetabotPaths {
   memoryOrchestrationPath: string;
   memoryTranscriptsRoot: string;
 
+  // Per-bot chain history store (storage layout v2 amendment 2026-09-03).
+  chainHistoryRoot: string;
+
   // LLM runtime / binding paths.
   llmRoot: string;
   llmRuntimesPath: string;
@@ -228,6 +231,9 @@ function buildMetabotPaths(input: {
     memoryPolicyPath: path.join(memoryRoot, 'policy.json'),
     memoryOrchestrationPath: path.join(memoryRoot, 'orchestration.json'),
     memoryTranscriptsRoot: path.join(memoryRoot, 'transcripts'),
+
+    // Per-bot chain history store root (`.runtime/chain-history/`).
+    chainHistoryRoot: path.join(input.runtimeRoot, 'chain-history'),
 
     // LLM paths.
     llmRoot: input.llmRoot,
