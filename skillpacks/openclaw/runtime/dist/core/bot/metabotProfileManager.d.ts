@@ -19,8 +19,10 @@ export interface MetabotProfileFull extends IdentityProfileRecord {
     homepage?: MetabotHomepage;
     dshLlmProvider?: string | null;
     dshLlmModel?: string | null;
+    dshLlmReasoningEffort?: string | null;
     dshLlmFallbackProvider?: string | null;
     dshLlmFallbackModel?: string | null;
+    dshLlmFallbackReasoningEffort?: string | null;
     botType?: MetabotBotType | null;
     ownerGlobalMetaId?: string | null;
 }
@@ -36,8 +38,10 @@ export interface CreateMetabotInput {
     allowChatSkills?: string[];
     dshLlmProvider?: string | null;
     dshLlmModel?: string | null;
+    dshLlmReasoningEffort?: string | null;
     dshLlmFallbackProvider?: string | null;
     dshLlmFallbackModel?: string | null;
+    dshLlmFallbackReasoningEffort?: string | null;
     botType?: MetabotBotType | null;
     ownerGlobalMetaId?: string | null;
 }
@@ -61,8 +65,10 @@ export interface UpdateMetabotInfoInput {
     homepage?: MetabotHomepage | null;
     dshLlmProvider?: string | null;
     dshLlmModel?: string | null;
+    dshLlmReasoningEffort?: string | null;
     dshLlmFallbackProvider?: string | null;
     dshLlmFallbackModel?: string | null;
+    dshLlmFallbackReasoningEffort?: string | null;
     botType?: MetabotBotType | null;
     ownerGlobalMetaId?: string | null;
 }

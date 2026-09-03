@@ -90,7 +90,9 @@ async function readTranscript(paths, sessionId, options = {}) {
         }
     })
         .filter((turn) => turn !== null);
-    const limit = Math.max(1, Math.floor(options.limit ?? 0)) || 0;
+    // No limit by default: gatherActivity needs the whole day, not just the
+    // last turn. Callers that pass a limit get the capped tail.
+    const limit = options.limit === undefined ? 0 : Math.max(0, Math.floor(options.limit));
     return limit > 0 ? turns.slice(-limit) : turns;
 }
 async function listA2AConversationFiles(paths) {

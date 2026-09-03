@@ -110,17 +110,23 @@ function dshLlmPatchFromInput(input) {
         patch.dshLlmProvider = input.dshLlmProvider;
     if (input.dshLlmModel !== undefined)
         patch.dshLlmModel = input.dshLlmModel;
+    if (input.dshLlmReasoningEffort !== undefined)
+        patch.dshLlmReasoningEffort = input.dshLlmReasoningEffort;
     if (input.dshLlmFallbackProvider !== undefined)
         patch.dshLlmFallbackProvider = input.dshLlmFallbackProvider;
     if (input.dshLlmFallbackModel !== undefined)
         patch.dshLlmFallbackModel = input.dshLlmFallbackModel;
+    if (input.dshLlmFallbackReasoningEffort !== undefined)
+        patch.dshLlmFallbackReasoningEffort = input.dshLlmFallbackReasoningEffort;
     return patch;
 }
 function hasDshLlmPatch(patch) {
     return Object.prototype.hasOwnProperty.call(patch, 'dshLlmProvider')
         || Object.prototype.hasOwnProperty.call(patch, 'dshLlmModel')
+        || Object.prototype.hasOwnProperty.call(patch, 'dshLlmReasoningEffort')
         || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackProvider')
-        || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackModel');
+        || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackModel')
+        || Object.prototype.hasOwnProperty.call(patch, 'dshLlmFallbackReasoningEffort');
 }
 function validateProvider(value) {
     if (value === null)
@@ -308,8 +314,10 @@ async function buildMetabotProfileFull(profile) {
         ...(homepage ? { homepage } : {}),
         dshLlmProvider: dshLlm.dshLlmProvider ?? null,
         dshLlmModel: dshLlm.dshLlmModel ?? null,
+        dshLlmReasoningEffort: dshLlm.dshLlmReasoningEffort ?? null,
         dshLlmFallbackProvider: dshLlm.dshLlmFallbackProvider ?? null,
         dshLlmFallbackModel: dshLlm.dshLlmFallbackModel ?? null,
+        dshLlmFallbackReasoningEffort: dshLlm.dshLlmFallbackReasoningEffort ?? null,
         // Unset reads as 'worker' (IDBots normalizes any non-twin bot to worker).
         botType: botRole.botType ?? 'worker',
         ownerGlobalMetaId: botRole.ownerGlobalMetaId ?? null,
@@ -450,8 +458,10 @@ function buildMetabotProfileDraftFromIdentity(input) {
         allowChatSkills: input.allowChatSkills === undefined ? [] : (0, chatSkillPolicy_1.normalizeAllowChatSkills)(input.allowChatSkills),
         dshLlmProvider: input.dshLlmProvider === undefined ? null : input.dshLlmProvider,
         dshLlmModel: input.dshLlmModel === undefined ? null : input.dshLlmModel,
+        dshLlmReasoningEffort: input.dshLlmReasoningEffort === undefined ? null : input.dshLlmReasoningEffort,
         dshLlmFallbackProvider: input.dshLlmFallbackProvider === undefined ? null : input.dshLlmFallbackProvider,
         dshLlmFallbackModel: input.dshLlmFallbackModel === undefined ? null : input.dshLlmFallbackModel,
+        dshLlmFallbackReasoningEffort: input.dshLlmFallbackReasoningEffort === undefined ? null : input.dshLlmFallbackReasoningEffort,
     };
 }
 async function createMetabotProfileFromIdentity(systemHomeDir, input) {

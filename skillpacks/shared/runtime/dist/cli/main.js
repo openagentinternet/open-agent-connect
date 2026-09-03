@@ -19,6 +19,7 @@ const chat_1 = require("./commands/chat");
 const grouptask_1 = require("./commands/grouptask");
 const conversations_1 = require("./commands/conversations");
 const memory_1 = require("./commands/memory");
+const chainhistory_1 = require("./commands/chainhistory");
 const dream_1 = require("./commands/dream");
 const twin_1 = require("./commands/twin");
 const file_1 = require("./commands/file");
@@ -118,6 +119,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'memory':
                     result = await (0, memory_1.runMemoryCommand)(rest, context);
+                    break;
+                case 'chainhistory':
+                    result = await (0, chainhistory_1.runChainhistoryCommand)(rest, context);
                     break;
                 case 'dream':
                     result = await (0, dream_1.runDreamCommand)(rest, context);

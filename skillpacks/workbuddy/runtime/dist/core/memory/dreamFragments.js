@@ -38,6 +38,14 @@ function estimateDreamActivityTokens(activity) {
             tokens += estimateDreamMessageTokens(message);
         }
     }
+    // Chain content history lines render directly (summary or stored text as
+    // the gist), so the estimate mirrors what buildDreamPrompt will emit.
+    tokens += (0, memoryText_1.estimateTextTokens)((activity.chainWrites ?? [])
+        .map((write) => `${write.pinId} ${write.path ?? ''} ${write.summary ?? write.contentText ?? ''}`)
+        .join(' '));
+    tokens += (0, memoryText_1.estimateTextTokens)((activity.chainReads ?? [])
+        .map((read) => `${read.pinId} ${read.title ?? ''} ${read.path ?? ''} ${read.summary ?? read.contentExcerpt ?? ''}`)
+        .join(' '));
     return tokens;
 }
 function splitContentByTokenBudget(content, maxTokens) {

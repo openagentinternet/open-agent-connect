@@ -17,10 +17,12 @@ exports.hashDreamFragmentContent = hashDreamFragmentContent;
 // - `memory/YYYY-MM-DD.md`: the human-readable diary mirror.
 // Also owns the "what did this bot do on date D" activity query, gathered from
 // mirrored DSH transcripts, the on-chain A2A conversation stores, the group-task
-// state/message caches, and the seller-order list in the runtime state.
+// state/message caches, the seller-order list in the runtime state, and the
+// per-bot chain history store.
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const store_1 = require("../chainhistory/store");
 const types_1 = require("../grouptask/types");
 const transcriptStore_1 = require("./transcriptStore");
 let atomicWriteSequence = 0;
@@ -413,6 +415,25 @@ function createDreamStore(paths, deps = {}) {
                 await writeJsonAtomic(runsPath, file);
             });
         },
+        async resetStaleRunningRuns({ staleMs, now }) {
+            return enqueue(async () => {
+                const file = await readRuns();
+                const effectiveNow = now ?? Date.now();
+                const cutoff = effectiveNow - Math.max(0, staleMs);
+                let reset = 0;
+                for (const run of file.runs) {
+                    if (run.status !== 'running' || run.startedAt > cutoff)
+                        continue;
+                    run.status = 'failed';
+                    run.error = 'stale running run reset';
+                    run.completedAt = effectiveNow;
+                    reset += 1;
+                }
+                if (reset > 0)
+                    await writeJsonAtomic(runsPath, file);
+                return reset;
+            });
+        },
         async getFragment(dreamDate, fragmentKey) {
             const file = await readRuns();
             return file.fragments.find((fragment) => (fragment.dreamDate === dreamDate && fragment.fragmentKey === fragmentKey)) ?? null;
@@ -631,6 +652,40 @@ function createDreamStore(paths, deps = {}) {
                     phase: 'active',
                 });
             }
+            // Chain content history (own writes / full reads): timestamps are epoch
+            // milliseconds, so the day window applies directly. The store caps each
+            // kind at 50 entries and returns them chronological-ascending. Best
+            // effort: a history-store failure must never break a dream run.
+            let chainWrites = [];
+            let chainReads = [];
+            try {
+                const chainHistory = (0, store_1.createChainHistoryStore)(paths);
+                chainWrites = (await chainHistory.listWritesForDay({ startMs, endMs })).map((record) => ({
+                    pinId: record.pinId,
+                    path: record.path,
+                    operation: record.operation,
+                    occurredAtMs: record.occurredAtMs,
+                    summary: record.summary,
+                    contentText: record.contentText,
+                    contentType: record.contentType,
+                }));
+                chainReads = (await chainHistory.listReadsForDay({ startMs, endMs })).map((record) => ({
+                    pinId: record.pinId,
+                    path: record.path,
+                    protocol: record.protocol,
+                    title: record.title,
+                    authorGlobalMetaId: record.authorGlobalMetaId,
+                    summary: record.summary,
+                    contentExcerpt: record.contentExcerpt,
+                    savedToKb: record.savedToKb,
+                    readCount: record.readCount,
+                    lastReadAtMs: record.lastReadAtMs,
+                }));
+            }
+            catch {
+                chainWrites = [];
+                chainReads = [];
+            }
             return {
                 sessions,
                 // OAC has no scheduled-task feature; the prompt section stays empty.
@@ -638,6 +693,8 @@ function createDreamStore(paths, deps = {}) {
                 orderCount: dayOrders.length,
                 groupTasks: [...acceptedGroupTasks, ...activeGroupTasks],
                 groupChats,
+                chainWrites,
+                chainReads,
             };
         },
     };

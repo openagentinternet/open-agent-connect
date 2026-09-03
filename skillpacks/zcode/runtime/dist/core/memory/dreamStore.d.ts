@@ -99,12 +99,40 @@ export interface DreamGroupChatActivity {
     memberRole: string;
     messages: DreamGroupChatMessage[];
 }
+/** A pin the bot itself broadcast to the chain that day (writes ledger). */
+export interface DreamChainWriteActivity {
+    pinId: string;
+    path: string | null;
+    operation: string | null;
+    occurredAtMs: number;
+    /** Async LLM gist when available; the prompt falls back to stored text. */
+    summary: string | null;
+    contentText: string | null;
+    contentType: string | null;
+}
+/** A chain pin the bot fully read that day (reads ledger). */
+export interface DreamChainReadActivity {
+    pinId: string;
+    path: string | null;
+    protocol: string | null;
+    title: string | null;
+    authorGlobalMetaId: string | null;
+    summary: string | null;
+    contentExcerpt: string | null;
+    savedToKb: boolean;
+    readCount: number;
+    lastReadAtMs: number;
+}
 export interface DreamDayActivity {
     sessions: DreamSessionActivity[];
     taskRuns: DreamTaskRunActivity[];
     orderCount: number;
     groupTasks: DreamGroupTaskEvaluation[];
     groupChats?: DreamGroupChatActivity[];
+    /** Pins this bot published to the chain that day (chain content history). */
+    chainWrites?: DreamChainWriteActivity[];
+    /** Chain pins this bot fully read that day (chain content history). */
+    chainReads?: DreamChainReadActivity[];
 }
 /** Render the human-readable diary mirror at `memory/YYYY-MM-DD.md`. */
 export declare function renderDreamDiaryMarkdown(summary: DailySummary): string;
@@ -164,6 +192,17 @@ export interface DreamStore {
     /** Upsert a run as running; resets stale `running` records left by a crash. */
     beginRun(dreamDate: string, llm: string | null, dreamVersion: number): Promise<DreamRun>;
     finishRun(dreamDate: string, status: 'completed' | 'failed', error?: string | null): Promise<void>;
+    /**
+     * Mark every run left `running` longer than `staleMs` as failed — the
+     * crash/restart recovery sweep (IDBots `resetStaleRunningRuns` parity). The
+     * due-date algorithm skips `running` dates, so without this sweep a run
+     * orphaned by a process restart would stay `running` forever. Returns the
+     * number of runs reset.
+     */
+    resetStaleRunningRuns(options: {
+        staleMs: number;
+        now?: number;
+    }): Promise<number>;
     getFragment(dreamDate: string, fragmentKey: string): Promise<DreamFragment | null>;
     upsertFragment(fragment: DreamFragment): Promise<void>;
     upsertDailySummary(input: {
