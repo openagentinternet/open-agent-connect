@@ -1,9 +1,24 @@
 import type { MetaAppListPayload, MetaAppRecord } from '../apps.ts'
+import type {
+  TrafficApiBasePayload,
+  TrafficBalancePayload,
+  TrafficBindSummary,
+  TrafficClaimPayload,
+  TrafficLedgerEntry,
+  TrafficLedgerPayload,
+  TrafficMode,
+  TrafficModePayload,
+  TrafficRedeemPayload,
+  TrafficStatusPayload,
+  TrafficUsagePayload,
+} from '../traffic.ts'
 
 export class OacApiError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    /** Failed envelope's `data` (carries backend `errorCode` passthroughs). */
+    readonly data?: unknown,
   ) {
     super(message)
     this.name = 'OacApiError'
@@ -401,7 +416,7 @@ async function postEnvelope<T>(method: string, body: unknown = {}): Promise<Comm
   })
   const json = await response.json() as Envelope
   if (json.ok === false || json.state === 'failed') {
-    throw new OacApiError(json.code ?? 'failed', json.message ?? json.error ?? 'request failed')
+    throw new OacApiError(json.code ?? 'failed', json.message ?? json.error ?? 'request failed', json.data)
   }
   return json as CommandEnvelope<T>
 }
@@ -534,6 +549,23 @@ export const api = {
   userRename: async (name: string): Promise<OwnerWhoPayload> => post('user/rename', { name }),
   userReveal: async (): Promise<{ mnemonic: string }> => post('user/reveal'),
   userDelete: async (): Promise<{ deleted?: boolean }> => post('user/delete'),
+  /** Traffic (流量) account surface — thin wrappers over the `metabot traffic *` verbs. */
+  trafficStatus: async (): Promise<TrafficStatusPayload> =>
+    normalizeTrafficStatus(await post('traffic/status')),
+  trafficMode: async (mode?: TrafficMode): Promise<TrafficModePayload> =>
+    normalizeTrafficMode(await post('traffic/mode', mode === undefined ? {} : { mode })),
+  trafficBalance: async (): Promise<TrafficBalancePayload> =>
+    normalizeTrafficBalance(await post('traffic/balance')),
+  trafficLedger: async (cursor = '', limit = 20): Promise<TrafficLedgerPayload> =>
+    normalizeTrafficLedger(await post('traffic/ledger', { cursor, limit })),
+  trafficUsage: async (): Promise<TrafficUsagePayload> =>
+    normalizeTrafficUsage(await post('traffic/usage')),
+  trafficClaim: async (): Promise<TrafficClaimPayload> =>
+    normalizeTrafficClaim(await post('traffic/claim')),
+  trafficRedeem: async (code: string): Promise<TrafficRedeemPayload> =>
+    normalizeTrafficRedeem(await post('traffic/redeem', { code })),
+  trafficApiBase: async (action: 'get' | 'set' | 'reset' = 'get', value?: string): Promise<TrafficApiBasePayload> =>
+    normalizeTrafficApiBasePayload(await post('traffic/api-base', { action, ...(value === undefined ? {} : { value }) })),
   /** A2A conversation summaries, sorted newest first (OAC /ui/conversations source). */
   conversations: async (from: string): Promise<ConversationSummary[]> => {
     const data = await post<{ conversations?: unknown }>('conversations/list', { from })
@@ -1151,5 +1183,178 @@ function normalizeMessage(value: unknown): ConversationMessage {
     txid: txidOf(record) || null,
     timestamp: toTimestampMs(record.timestamp || record.createdAt),
     sender: normalizeActor(record.sender),
+  }
+}
+
+// --- Traffic (流量) normalizers --------------------------------------------
+
+function normalizeTrafficAccount(value: unknown): TrafficStatusPayload['account'] {
+  const record = recordOf(value)
+  const accountId = textOf(record.accountId)
+  if (!accountId) return null
+  return {
+    accountId,
+    identityAddress: textOf(record.identityAddress),
+    balanceBytes: toNumber(record.balanceBytes),
+    reservedBytes: toNumber(record.reservedBytes),
+    grantedBytesTotal: toNumber(record.grantedBytesTotal),
+    spentBytesTotal: toNumber(record.spentBytesTotal),
+    status: Math.trunc(toNumber(record.status)),
+  }
+}
+
+function normalizeTrafficFreeGrant(value: unknown): TrafficStatusPayload['freeGrant'] {
+  const record = recordOf(value)
+  if (Object.keys(record).length === 0) return null
+  return {
+    enabled: record.enabled === true,
+    grantBytes: toNumber(record.grantBytes),
+    claimed: record.claimed === true,
+    claimable: record.claimable === true,
+  }
+}
+
+function trafficModeOf(value: unknown): TrafficMode {
+  return textOf(value) === 'selfpay' ? 'selfpay' : 'traffic'
+}
+
+function normalizeTrafficStatus(data: unknown): TrafficStatusPayload {
+  const record = recordOf(data)
+  const identity = recordOf(record.identity)
+  const mvcAddress = textOf(identity.mvcAddress)
+  return {
+    mode: trafficModeOf(record.mode),
+    apiBase: textOf(record.apiBase),
+    account: normalizeTrafficAccount(record.account),
+    freeGrant: normalizeTrafficFreeGrant(record.freeGrant),
+    featureUnavailable: record.featureUnavailable === true,
+    identity: mvcAddress
+      ? { name: textOf(identity.name), globalMetaId: textOf(identity.globalMetaId), mvcAddress }
+      : null,
+  }
+}
+
+function normalizeTrafficBindSummary(value: unknown): TrafficBindSummary | undefined {
+  const record = recordOf(value)
+  if (Object.keys(record).length === 0) return undefined
+  const rows = Array.isArray(record.results) ? record.results : []
+  return {
+    accountId: textOf(record.accountId),
+    boundCount: Math.max(0, Math.trunc(toNumber(record.boundCount))),
+    conflictCount: Math.max(0, Math.trunc(toNumber(record.conflictCount))),
+    failedCount: Math.max(0, Math.trunc(toNumber(record.failedCount))),
+    results: rows.map((row) => {
+      const item = recordOf(row)
+      const status = textOf(item.status)
+      const error = textOf(item.error)
+      return {
+        botAddress: textOf(item.botAddress),
+        status: status === 'conflict' || status === 'failed' ? status : 'bound' as const,
+        ...(error ? { error } : {}),
+      }
+    }),
+  }
+}
+
+function normalizeTrafficMode(data: unknown): TrafficModePayload {
+  const record = recordOf(data)
+  const bindSummary = normalizeTrafficBindSummary(record.bindSummary)
+  return {
+    mode: trafficModeOf(record.mode),
+    ...(bindSummary ? { bindSummary } : {}),
+  }
+}
+
+function normalizeTrafficBalance(data: unknown): TrafficBalancePayload {
+  const record = recordOf(data)
+  return {
+    account: normalizeTrafficAccount(record.account),
+    featureUnavailable: record.featureUnavailable === true,
+  }
+}
+
+function normalizeTrafficLedgerEntry(value: unknown): TrafficLedgerEntry {
+  const record = recordOf(value)
+  const txId = textOf(record.txId)
+  const botAddress = textOf(record.botAddress)
+  const botName = textOf(record.botName)
+  const kind = textOf(record.kind)
+  return {
+    id: Math.trunc(toNumber(record.id)),
+    direction: Math.trunc(toNumber(record.direction)),
+    amountBytes: toNumber(record.amountBytes),
+    balanceAfter: toNumber(record.balanceAfter),
+    sourceType: textOf(record.sourceType),
+    sourceId: textOf(record.sourceId),
+    remark: textOf(record.remark),
+    timestamp: toTimestampMs(record.timestamp),
+    ...(txId ? { txId } : {}),
+    ...(botAddress ? { botAddress } : {}),
+    ...(botName ? { botName } : {}),
+    ...(kind ? { kind } : {}),
+  }
+}
+
+function normalizeTrafficLedger(data: unknown): TrafficLedgerPayload {
+  const record = recordOf(data)
+  const rows = Array.isArray(record.entries) ? record.entries : []
+  const nextCursor = textOf(record.nextCursor)
+  return {
+    entries: rows.map(normalizeTrafficLedgerEntry),
+    nextCursor: nextCursor || null,
+  }
+}
+
+function normalizeTrafficUsage(data: unknown): TrafficUsagePayload {
+  const record = recordOf(data)
+  const summary = recordOf(record.summary)
+  const rows = Array.isArray(record.daily) ? record.daily : []
+  const source = textOf(record.source)
+  return {
+    summary: Object.keys(summary).length > 0
+      ? {
+        todayBytes: toNumber(summary.todayBytes),
+        weekBytes: toNumber(summary.weekBytes),
+        monthBytes: toNumber(summary.monthBytes),
+      }
+      : null,
+    daily: rows.map((row) => {
+      const item = recordOf(row)
+      const botName = textOf(item.botName)
+      return {
+        date: textOf(item.date),
+        botAddress: textOf(item.botAddress),
+        ...(botName ? { botName } : {}),
+        bytes: toNumber(item.bytes),
+        txCount: Math.max(0, Math.trunc(toNumber(item.txCount))),
+      }
+    }),
+    source: source === 'service' || source === 'local' ? source : 'unavailable',
+  }
+}
+
+function normalizeTrafficClaim(data: unknown): TrafficClaimPayload {
+  const record = recordOf(data)
+  return {
+    grantId: textOf(record.grantId),
+    grantBytes: toNumber(record.grantBytes),
+    balanceAfter: toNumber(record.balanceAfter),
+  }
+}
+
+function normalizeTrafficRedeem(data: unknown): TrafficRedeemPayload {
+  const record = recordOf(data)
+  return {
+    codeId: Math.trunc(toNumber(record.codeId)),
+    trafficBytes: toNumber(record.trafficBytes),
+    balanceAfter: toNumber(record.balanceAfter),
+  }
+}
+
+function normalizeTrafficApiBasePayload(data: unknown): TrafficApiBasePayload {
+  const record = recordOf(data)
+  return {
+    apiBase: textOf(record.apiBase),
+    effectiveApiBase: textOf(record.effectiveApiBase),
   }
 }

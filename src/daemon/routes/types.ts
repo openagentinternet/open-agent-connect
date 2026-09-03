@@ -47,6 +47,26 @@ export interface MetabotDaemonHttpHandlers {
     get?: () => Awaitable<MetabotCommandResult<unknown>>;
     set?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  /**
+   * Traffic (流量 account-quota gas credit) verbs, all owner-scoped (the
+   * machine-wide owner identity binds the account — no `from` selection).
+   * Read verbs surface backend 404s as soft `{ featureUnavailable: true }`
+   * success payloads; write verbs (setMode/claim/redeem) fail hard with the
+   * TrafficApiError code (`traffic_<stage>_failed`) and data.errorCode intact.
+   */
+  traffic?: {
+    status?: () => Awaitable<MetabotCommandResult<unknown>>;
+    getMode?: () => Awaitable<MetabotCommandResult<unknown>>;
+    setMode?: (input: { mode: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getBalance?: () => Awaitable<MetabotCommandResult<unknown>>;
+    getLedger?: (input: { cursor?: number; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    getUsage?: () => Awaitable<MetabotCommandResult<unknown>>;
+    claim?: () => Awaitable<MetabotCommandResult<unknown>>;
+    redeem?: (input: { code: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getApiBase?: () => Awaitable<MetabotCommandResult<unknown>>;
+    setApiBase?: (input: { apiBase: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    resetApiBase?: () => Awaitable<MetabotCommandResult<unknown>>;
+  };
   buzz?: {
     post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };

@@ -17,7 +17,16 @@ type FetchRequestInitLike = {
 type FetchImpl = (input: string, init?: FetchRequestInitLike) => Promise<FetchResponseLike>;
 
 type SponsorStage = 'address_info' | 'challenge' | 'pre' | 'commit';
-type SponsorReason = 'insufficient_quota' | 'service_unavailable' | 'commit_failed' | 'pre_rejected' | 'invalid_request';
+export type SponsorReason =
+  | 'insufficient_quota'
+  | 'insufficient_traffic'
+  | 'service_unavailable'
+  | 'commit_failed'
+  | 'pre_rejected'
+  | 'invalid_request';
+
+/** Backend error code (delivered as data.errorCode) for traffic-account exhaustion. */
+const TRAFFIC_INSUFFICIENT_ERROR_CODE = 'TRAFFIC_INSUFFICIENT';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 const DEFAULT_RETRY_DELAYS_MS = [250, 750] as const;
@@ -66,6 +75,13 @@ export interface MvcSponsorCommitResult {
   raw: Record<string, unknown>;
 }
 
+/** trafficAccount block attached to a sponsor pre call (traffic-account billing). */
+export interface MvcSponsorTrafficAccount {
+  accountId: string;
+  authSignature: string;
+  timestamp: number;
+}
+
 export interface MvcSponsorOrder {
   orderId: string;
   status: string;
@@ -111,6 +127,9 @@ function pickText(record: Record<string, unknown>, ...keys: string[]): string {
 }
 
 function normalizeReason(stage: SponsorStage, message: string): SponsorReason {
+  if (/TRAFFIC_INSUFFICIENT/i.test(message)) {
+    return 'insufficient_traffic';
+  }
   if (/available amount not enough|quota not granted|insufficient quota|insufficient balance/i.test(message)) {
     return 'insufficient_quota';
   }
@@ -121,6 +140,12 @@ function normalizeReason(stage: SponsorStage, message: string): SponsorReason {
     return 'commit_failed';
   }
   return 'service_unavailable';
+}
+
+function normalizeErrorCodeReason(code: unknown): SponsorReason | undefined {
+  return normalizeText(code).toUpperCase() === TRAFFIC_INSUFFICIENT_ERROR_CODE
+    ? 'insufficient_traffic'
+    : undefined;
 }
 
 function createSponsorError(stage: SponsorStage, message: string, extra: {
@@ -173,6 +198,10 @@ function unwrapEnvelope(body: unknown, stage: SponsorStage): Record<string, unkn
     pickText(record, 'message', 'msg', 'error') || `Sponsor service returned code ${normalizeText(record.code) || 'unknown'}.`,
     {
       data: record.data,
+      // Backend sends TRAFFIC_INSUFFICIENT as data.errorCode (envelope code stays
+      // numeric) — the explicit code takes precedence over message normalization.
+      reason: normalizeErrorCodeReason(record.code)
+        ?? normalizeErrorCodeReason(readObject(record.data)?.errorCode),
       retryable: normalizeBoolean(readObject(record.data)?.retryable) === true,
     },
   );
@@ -255,6 +284,8 @@ async function requestJsonAttempt(
         {
           status: response.status,
           data: record?.data,
+          reason: normalizeErrorCodeReason(record?.code)
+            ?? normalizeErrorCodeReason(record ? readObject(record.data)?.errorCode : undefined),
           retryable: isRetryableHttpStatus(response.status),
         },
       );
@@ -502,6 +533,22 @@ function requireText(stage: SponsorStage, field: string, value: unknown): string
   });
 }
 
+function normalizeTrafficAccount(value: unknown): MvcSponsorTrafficAccount | undefined {
+  const record = readObject(value);
+  if (!record) {
+    return undefined;
+  }
+  const timestamp = Number(record.timestamp);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    throw createSponsorError('pre', 'trafficAccount.timestamp is required', { reason: 'invalid_request' });
+  }
+  return {
+    accountId: requireText('pre', 'trafficAccount.accountId', record.accountId),
+    authSignature: requireText('pre', 'trafficAccount.authSignature', record.authSignature),
+    timestamp,
+  };
+}
+
 export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = {}) {
   const baseUrl = normalizeBaseUrl(input.baseUrl);
   const fetchImpl = (input.fetchImpl ?? fetch) as FetchImpl;
@@ -555,7 +602,10 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
       challengeId: string;
       publicKey: string;
       signature: string;
+      /** Traffic-account billing pass-through (traffic mode); omitted on the legacy quota path. */
+      trafficAccount?: MvcSponsorTrafficAccount;
     }): Promise<MvcSponsorPreResult> {
+      const trafficAccount = normalizeTrafficAccount(payload?.trafficAccount);
       const record = await requestJson(fetchImpl, `${baseUrl}/v2/assist/gas/mvc/pre`, {
         method: 'POST',
         headers: createJsonHeaders(),
@@ -565,6 +615,7 @@ export function createMvcSponsorV2Client(input: CreateMvcSponsorV2ClientInput = 
           challengeId: requireText('pre', 'challengeId', payload?.challengeId),
           publicKey: requireText('pre', 'publicKey', payload?.publicKey),
           signature: requireText('pre', 'signature', payload?.signature),
+          ...(trafficAccount ? { trafficAccount } : {}),
         }),
       }, 'pre', requestOptions(false));
       return normalizePreResult(record);

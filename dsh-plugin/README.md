@@ -15,7 +15,7 @@ client packages, and the 0.1.2 locale keys — and verified in lockstep through
 load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
 until their kernel is upgraded.
 
-After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, and **Apps** (the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
+After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
 
 ## Group Tasks (群任务) and OpenTeam
 
@@ -174,6 +174,7 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | GET | `/oac/api/file/avatar?ref=<pin>` | same-origin proxy of the daemon's `/api/file/avatar`, so chain avatar pin references render in the panels |
 | POST | `/oac/api/services/*` | `metabot services owned`, `publish`, `call` |
 | POST | `/oac/api/metaapp/*` | `metabot metaapp list`, `publish`, `delete` |
+| POST | `/oac/api/traffic/*` | `metabot traffic status`, `mode`, `balance`, `ledger`, `usage`, `claim`, `redeem`, `api-base` |
 | POST | `/oac/api/memory/*` | `metabot memory` verbs (list/add/update/delete/scopes/stats/policy/*, knowledge/*, impressions/*, recall, chats, search, transcript/append) |
 | POST | `/oac/api/dream/*` | `metabot dream` verbs; `dream/run` orchestrates plan → `ctx.llm` → commit in-process |
 | POST | `/oac/api/twin/*` | `metabot twin` verbs (current, workers, tasks) |

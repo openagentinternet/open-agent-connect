@@ -492,3 +492,87 @@ body[data-oac-browser-dragging] .oac-browser-frame { pointer-events: none; }
 .oac-browser-shell[data-open='false']:focus-within .oac-browser-reopen { outline: 2px solid var(--dsw-alias-brand-primary); }
 a.oac-agent-link, a[data-oac-agent-link] { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 `
+
+export const TRAFFIC_CSS = `
+/* Traffic (流量) section: the IDBots TrafficSettings layout on the shared
+   oac-section-card/oac-field vocabulary. All colors resolve through
+   --dsw-alias-* tokens so the panel follows the active theme. */
+.oac-traffic-section { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.oac-traffic-accent { color: var(--dsw-alias-brand-primary); }
+.oac-traffic-identity-empty { flex-direction: row; align-items: flex-start; gap: 12px; }
+.oac-traffic-identity-icon { flex: none; margin-top: 2px; color: var(--dsw-alias-label-tertiary); }
+
+/* Billing-mode segmented toggle (IDBots inline-flex border pill). */
+.oac-traffic-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; }
+.oac-traffic-seg-btn { appearance: none; border: 0; border-radius: 8px; padding: 4px 10px; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; line-height: 18px; font-weight: 500; cursor: pointer; transition: color .12s, background .12s; }
+.oac-traffic-seg-btn:hover:not(:disabled):not([data-active='true']) { color: var(--dsw-alias-label-primary); }
+.oac-traffic-seg-btn[data-active='true'] { background: var(--dsw-alias-brand-primary); color: var(--dsw-alias-bg-layer-3); }
+.oac-traffic-seg-btn:disabled { opacity: .5; cursor: default; }
+
+/* Balance card: label + tariff "?" on the left, big adaptive number under it,
+   action buttons stacked on the right. */
+.oac-traffic-balance-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.oac-traffic-balance-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.oac-traffic-balance-label { display: inline-flex; align-items: center; gap: 4px; }
+.oac-traffic-tariff-btn { padding: 2px; }
+.oac-traffic-balance-row { display: flex; align-items: baseline; gap: 8px; }
+.oac-traffic-balance-value { font-size: 24px; line-height: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
+.oac-traffic-spin { color: var(--dsw-alias-label-tertiary); animation: oac-traffic-spin 1s linear infinite; }
+@keyframes oac-traffic-spin { to { transform: rotate(360deg); } }
+.oac-traffic-balance-actions { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.oac-traffic-btn-row { display: flex; gap: 8px; }
+
+/* Free-grant banner (emerald) and the low-balance warning (amber). */
+.oac-traffic-grant { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 30%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent); }
+.oac-traffic-grant p { flex: 1; margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-success-primary); }
+.oac-traffic-low { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-label) 30%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 10%, transparent); color: var(--dsw-alias-state-warn-label); }
+.oac-traffic-low p { margin: 0; font-size: 12px; line-height: 18px; }
+.oac-traffic-error-row { display: flex; align-items: center; gap: 8px; }
+.oac-traffic-error-row p { flex: 1; }
+
+/* Usage: today/7d/30d summary cards + the per-day per-bot table. */
+.oac-traffic-summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-self: stretch; }
+.oac-traffic-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-3); }
+.oac-traffic-stat-value { font-size: 14px; line-height: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
+.oac-traffic-stat-label { font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-tertiary); }
+.oac-traffic-table-wrap { align-self: stretch; overflow-x: auto; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-3); padding: 8px 12px; }
+.oac-traffic-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 18px; }
+.oac-traffic-table th { padding: 4px 12px 4px 0; text-align: left; font-weight: 500; color: var(--dsw-alias-label-tertiary); }
+.oac-traffic-table td { padding: 4px 12px 4px 0; color: var(--dsw-alias-label-primary); }
+.oac-traffic-table th:last-child, .oac-traffic-table td:last-child { padding-right: 0; }
+.oac-traffic-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Ledger rows: time, direction, source, optional txid badge, signed amount. */
+.oac-traffic-ledger-title { margin-top: 8px; }
+.oac-traffic-ledger { gap: 6px; }
+.oac-traffic-ledger-row { display: flex; align-items: center; gap: 12px; font-size: 12px; line-height: 18px; }
+.oac-traffic-ledger-time { flex: none; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
+.oac-traffic-ledger-dir { flex: none; color: var(--dsw-alias-label-primary); }
+.oac-traffic-ledger-src { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); }
+.oac-traffic-ledger-amount { flex: none; font-variant-numeric: tabular-nums; font-weight: 500; color: var(--dsw-alias-label-primary); }
+.oac-traffic-txid { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.oac-traffic-txid code { font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; color: var(--dsw-alias-label-dimmed); }
+.oac-traffic-txid-btn { padding: 2px; }
+.oac-traffic-check { color: var(--dsw-alias-state-success-primary); }
+.oac-traffic-ledger-more { display: flex; justify-content: center; }
+
+/* Advanced: assist-service base-URL override. */
+.oac-traffic-disclosure { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.oac-traffic-advanced { display: flex; flex-direction: column; gap: 6px; }
+.oac-traffic-apibase-row { display: flex; align-items: center; gap: 8px; }
+.oac-traffic-apibase-row .oac-input { flex: 1; min-width: 0; }
+
+/* Redeem dialog: uppercase mono code input + success line. */
+.oac-traffic-redeem { display: flex; flex-direction: column; gap: 10px; }
+.oac-traffic-redeem-row { display: flex; align-items: center; gap: 8px; }
+.oac-traffic-redeem-input { flex: 1; min-width: 0; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); text-transform: uppercase; }
+.oac-traffic-redeem-success { display: flex; align-items: flex-start; gap: 8px; }
+.oac-traffic-redeem-success .oac-traffic-check { flex: none; margin-top: 2px; }
+
+/* Tariff overlay table (wider than the standard dialog). */
+.oac-traffic-tariff-dialog { width: min(520px, 100%); }
+.oac-traffic-tariff-table td { padding-top: 8px; padding-bottom: 8px; }
+.oac-traffic-tariff-table tbody tr { border-top: 1px solid var(--dsw-alias-border-l2); }
+.oac-traffic-tariff-type { font-weight: 500; }
+.oac-traffic-tariff-capacity { font-weight: 600; color: var(--dsw-alias-state-warn-label); }
+`

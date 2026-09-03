@@ -15,8 +15,11 @@ import {
   runMetabotWithPayloadFile,
   type RunFn,
 } from './cli-payload.js'
+import { normalizeTrafficApiBase } from './traffic.js'
 
 const LIST_TIMEOUT_MS = 30_000
+/** Account creation + binding + redeem sign and hit the assist service. */
+const TRAFFIC_MUTATION_TIMEOUT_MS = 60_000
 
 function objectOf(payload: unknown, key: string): Record<string, unknown> | undefined {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return undefined
@@ -183,5 +186,52 @@ export async function dispatchSection(
   if (method === 'metaapp/publish') return handleMetaappPublish(payload, run)
   if (method === 'metaapp/update') return handleMetaappUpdate(payload, run)
   if (method === 'metaapp/delete') return handleMetaappDelete(payload, run)
+  if (method === 'traffic/status') {
+    return run(['traffic', 'status'], { timeoutMs: LIST_TIMEOUT_MS })
+  }
+  if (method === 'traffic/mode') {
+    const mode = readTrimmed(payload, 'mode')
+    if (mode && mode !== 'traffic' && mode !== 'selfpay') {
+      return missing('invalid_mode', 'mode must be "traffic" or "selfpay"')
+    }
+    // Setting mode=traffic runs ensure-account + bind-all in the CLI.
+    return run(mode ? ['traffic', 'mode', mode] : ['traffic', 'mode'], { timeoutMs: TRAFFIC_MUTATION_TIMEOUT_MS })
+  }
+  if (method === 'traffic/balance') {
+    return run(['traffic', 'balance'], { timeoutMs: LIST_TIMEOUT_MS })
+  }
+  if (method === 'traffic/ledger') {
+    const limit = readPositiveInteger(payload && (payload as { limit?: unknown }).limit, 20)
+    const args = ['traffic', 'ledger', '--limit', String(limit)]
+    const cursor = readTrimmed(payload, 'cursor')
+    if (cursor) args.push('--cursor', cursor)
+    return run(args, { timeoutMs: LIST_TIMEOUT_MS })
+  }
+  if (method === 'traffic/usage') {
+    return run(['traffic', 'usage'], { timeoutMs: LIST_TIMEOUT_MS })
+  }
+  if (method === 'traffic/claim') {
+    return run(['traffic', 'claim'], { timeoutMs: TRAFFIC_MUTATION_TIMEOUT_MS })
+  }
+  if (method === 'traffic/redeem') {
+    const code = readTrimmed(payload, 'code')
+    if (!code) return missing('missing_code', 'code is required')
+    return run(['traffic', 'redeem', code], { timeoutMs: TRAFFIC_MUTATION_TIMEOUT_MS })
+  }
+  if (method === 'traffic/api-base') {
+    const action = readTrimmed(payload, 'action') || 'get'
+    if (action === 'get') return run(['traffic', 'api-base'], { timeoutMs: LIST_TIMEOUT_MS })
+    if (action === 'reset') return run(['traffic', 'api-base', 'reset'], { timeoutMs: LIST_TIMEOUT_MS })
+    if (action !== 'set') return missing('invalid_action', 'action must be "get", "set", or "reset"')
+    // Validate before spawning: invalid overrides must never reach the CLI.
+    let value: string
+    try {
+      value = normalizeTrafficApiBase((payload as { value?: unknown } | null)?.value)
+    } catch (error) {
+      return missing('invalid_api_base', error instanceof Error ? error.message : String(error))
+    }
+    if (!value) return missing('missing_value', 'value is required (use action "reset" to clear)')
+    return run(['traffic', 'api-base', 'set', value], { timeoutMs: LIST_TIMEOUT_MS })
+  }
   return undefined
 }

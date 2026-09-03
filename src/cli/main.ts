@@ -13,6 +13,7 @@ import { runBuzzCommand } from './commands/buzz';
 import { runBotCommand } from './commands/bot';
 import { runBrowserCommand } from './commands/browser';
 import { runChainCommand } from './commands/chain';
+import { runTrafficCommand } from './commands/traffic';
 import { runChatCommand } from './commands/chat';
 import { runGroupTaskCommand } from './commands/grouptask';
 import { runConversationsCommand } from './commands/conversations';
@@ -92,6 +93,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'chain':
           result = await runChainCommand(rest, context);
+          break;
+        case 'traffic':
+          result = await runTrafficCommand(rest, context);
           break;
         case 'daemon':
           result = await runDaemonCommand(rest, context);

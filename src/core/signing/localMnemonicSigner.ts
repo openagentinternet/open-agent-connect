@@ -5,6 +5,7 @@ import {
   normalizeChainWriteRequest,
   type ChainWriteRequest,
   type ChainWriteResult,
+  type NormalizedChainWriteRequest,
 } from '../chain/writePin';
 import type { ChainAdapter } from '../chain/adapters/types';
 import type { ChainAdapterRegistry } from '../chain/adapters/types';
@@ -86,6 +87,24 @@ function computeCandidateTxid(rawTxHex: string): string | null {
 }
 
 /**
+ * Context handed to the optional sponsor (traffic/代付) writePin hook. The
+ * hook runs INSIDE the wallet spend lock; runSelfPaid is the regular
+ * build+broadcast worker, used as-is when the sponsor flow falls back.
+ */
+export interface SponsorWritePinContext {
+  request: NormalizedChainWriteRequest;
+  identity: DerivedIdentity;
+  runSelfPaid: () => Promise<ChainWriteResult>;
+}
+
+/**
+ * Optional MVC sponsor hook: return the sponsored (or fallback) result, or
+ * null when traffic mode does not apply (the caller then runs the regular
+ * self-paid path unchanged). Only invoked for network === 'mvc'.
+ */
+export type ResolveSponsorWritePin = (context: SponsorWritePinContext) => Promise<ChainWriteResult | null>;
+
+/**
  * Create a local mnemonic signer backed by a ChainAdapterRegistry.
  *
  * The Signer delegates all chain-specific operations (inscription building, broadcasting)
@@ -97,6 +116,8 @@ export function createLocalMnemonicSigner(input: {
   adapters?: ChainAdapterRegistry;
   /** Optional per-chain fee rates. If not provided, each adapter fetches its own. */
   feeRates?: Partial<Record<string, number>>;
+  /** Optional MVC sponsor (traffic) hook; absent = behavior identical to self-pay only. */
+  resolveSponsorWritePin?: ResolveSponsorWritePin;
 }): Signer {
   return {
     getIdentity: async () => loadSignerIdentity(input.secretStore),
@@ -120,46 +141,59 @@ export function createLocalMnemonicSigner(input: {
       });
 
       return withWalletSpendQueue(lockKey, async () => {
-        const feeRate = input.feeRates?.[request.network];
-        const inscriptionResult = await adapter.buildInscription({
-          request,
-          identity,
-          feeRate,
-        });
-
-        // Broadcast all signed transactions in order. A failure here leaves
-        // finality UNKNOWN (earlier txs of the batch may be on-chain): surface
-        // ChainBroadcastUnknownError instead of a plain retryable error.
-        const broadcastTxids: string[] = [];
-        try {
-          for (const rawTx of inscriptionResult.signedRawTxs) {
-            broadcastTxids.push(await adapter.broadcastTx(rawTx));
-          }
-        } catch (error) {
-          throw new ChainBroadcastUnknownError({
-            confirmedTxids: [...broadcastTxids],
-            candidateTxids: inscriptionResult.signedRawTxs
-              .map((rawTx: string) => computeCandidateTxid(rawTx))
-              .filter((txid: string | null): txid is string => txid !== null),
-            cause: error,
+        const runSelfPaid = async (): Promise<ChainWriteResult> => {
+          const feeRate = input.feeRates?.[request.network];
+          const inscriptionResult = await adapter.buildInscription({
+            request,
+            identity,
+            feeRate,
           });
-        }
 
-        const firstRevealTxid = broadcastTxids[inscriptionResult.revealIndices[0]];
-        const revealTxids = inscriptionResult.revealIndices.map((i: number) => broadcastTxids[i]);
+          // Broadcast all signed transactions in order. A failure here leaves
+          // finality UNKNOWN (earlier txs of the batch may be on-chain): surface
+          // ChainBroadcastUnknownError instead of a plain retryable error.
+          const broadcastTxids: string[] = [];
+          try {
+            for (const rawTx of inscriptionResult.signedRawTxs) {
+              broadcastTxids.push(await adapter.broadcastTx(rawTx));
+            }
+          } catch (error) {
+            throw new ChainBroadcastUnknownError({
+              confirmedTxids: [...broadcastTxids],
+              candidateTxids: inscriptionResult.signedRawTxs
+                .map((rawTx: string) => computeCandidateTxid(rawTx))
+                .filter((txid: string | null): txid is string => txid !== null),
+              cause: error,
+            });
+          }
 
-        return {
-          txids: revealTxids,
-          pinId: `${firstRevealTxid}i0`,
-          totalCost: inscriptionResult.totalCost,
-          network: request.network,
-          operation: request.operation,
-          path: request.path,
-          contentType: request.contentType,
-          encoding: request.encoding,
-          globalMetaId: identity.globalMetaId,
-          mvcAddress: identity.mvcAddress,
+          const firstRevealTxid = broadcastTxids[inscriptionResult.revealIndices[0]];
+          const revealTxids = inscriptionResult.revealIndices.map((i: number) => broadcastTxids[i]);
+
+          return {
+            txids: revealTxids,
+            pinId: `${firstRevealTxid}i0`,
+            totalCost: inscriptionResult.totalCost,
+            network: request.network,
+            operation: request.operation,
+            path: request.path,
+            contentType: request.contentType,
+            encoding: request.encoding,
+            globalMetaId: identity.globalMetaId,
+            mvcAddress: identity.mvcAddress,
+          };
         };
+
+        // Traffic mode (代付): route MVC pin writes through the sponsor flow.
+        // The hook covers the whole write (sponsor attempt + self-paid
+        // fallback) so both stay serialized inside the spend-queue lock.
+        if (request.network === 'mvc' && input.resolveSponsorWritePin) {
+          const sponsored = await input.resolveSponsorWritePin({ request, identity, runSelfPaid });
+          if (sponsored) {
+            return sponsored;
+          }
+        }
+        return runSelfPaid();
       });
     },
   };

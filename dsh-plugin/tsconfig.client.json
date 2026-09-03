@@ -12,5 +12,5 @@
         "verbatimModuleSyntax": true,
         "forceConsistentCasingInFileNames": true
       },
-      "include": ["src/client", "src/chip-logic.ts", "src/apps.ts", "src/browser-protocol.ts"]
+      "include": ["src/client", "src/chip-logic.ts", "src/apps.ts", "src/browser-protocol.ts", "src/traffic.ts"]
 }
