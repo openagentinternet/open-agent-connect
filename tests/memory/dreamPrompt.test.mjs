@@ -192,3 +192,145 @@ test('validateSelfIdentity enforces the 200 non-whitespace char minimum', () => 
   assert.equal(validateSelfIdentity(null).valid, false);
   assert.equal(validateSelfIdentity('我'.repeat(200)).valid, true);
 });
+
+test('DREAM_VERSION is 2 (chain history sections added)', () => {
+  assert.equal(DREAM_VERSION, 2);
+});
+
+function makeChainActivity() {
+  return {
+    chainWrites: [
+      {
+        pinId: 'pin-w-1',
+        path: '/protocols/simplebuzz',
+        operation: 'create',
+        occurredAtMs: 1,
+        summary: '  总结了这条动态的大意  ',
+        contentText: '动态原文不应优先使用',
+        contentType: 'text/plain',
+      },
+      {
+        pinId: 'pin-w-2',
+        path: null,
+        operation: null,
+        occurredAtMs: 2,
+        summary: null,
+        contentText: null,
+        contentType: 'image/png',
+      },
+      {
+        pinId: 'pin-w-3',
+        path: '/protocols/metaprotocol',
+        operation: 'modify',
+        occurredAtMs: 3,
+        summary: null,
+        contentText: '长'.repeat(400),
+        contentType: 'text/plain',
+      },
+    ],
+    chainReads: [
+      {
+        pinId: 'pin-r-1',
+        path: '/protocols/simplebuzz',
+        protocol: 'simplebuzz',
+        title: '一篇有标题的文章',
+        authorGlobalMetaId: 'gm-author-1',
+        summary: '读过的文章摘要',
+        contentExcerpt: '文章摘录不应优先',
+        savedToKb: true,
+        readCount: 2,
+        lastReadAtMs: 10,
+      },
+      {
+        pinId: 'pin-r-2',
+        path: null,
+        protocol: 'metaprotocol',
+        title: null,
+        authorGlobalMetaId: null,
+        summary: null,
+        contentExcerpt: null,
+        savedToKb: false,
+        readCount: 1,
+        lastReadAtMs: 11,
+      },
+    ],
+  };
+}
+
+test('buildDreamPrompt: chain sections render with gists, markers and inventory counts', () => {
+  const prompt = buildDreamPrompt({
+    botName: '小梦',
+    date: '2026-08-19',
+    activity: {
+      sessions: [],
+      taskRuns: [{ taskName: '每晚备份', status: 'success', startedAt: 1, sessionId: null }],
+      orderCount: 0,
+      groupTasks: [],
+      groupChats: [],
+      ...makeChainActivity(),
+    },
+  });
+  const { user } = prompt;
+  assert.match(user, /## 当日写入链上的内容\(你自己发布的,是你最深刻的经历\)/);
+  assert.match(user, /## 当日阅读的链上内容\(完整读过的文章\/帖子,读过即有印象\)/);
+  // The LLM summary is the preferred gist; stored text loses.
+  assert.match(user, /- PinID:pin-w-1\(\/protocols\/simplebuzz,create\):总结了这条动态的大意/);
+  assert.ok(!user.includes('动态原文不应优先使用'));
+  // A binary write (contentText null) degrades to a metadata-only line.
+  assert.match(user, /- PinID:pin-w-2\(\(无路径\)\):\(二进制内容\)/);
+  // Text fallback gist is whitespace-collapsed and truncated at 300 chars.
+  const w3line = user.split('\n').find((line) => line.startsWith('- PinID:pin-w-3'));
+  assert.ok(w3line.startsWith('- PinID:pin-w-3(/protocols/metaprotocol,modify):'));
+  assert.ok(w3line.includes('长'.repeat(300)));
+  assert.ok(!w3line.includes('长'.repeat(301)));
+  assert.ok(w3line.endsWith('…'));
+  // Read lines: title label, author + saved-to-KB markers; summary-preferred gist.
+  assert.match(user, /- PinID:pin-r-1\(一篇有标题的文章,作者=gm-author-1,已存入知识库\):读过的文章摘要/);
+  assert.ok(!user.includes('文章摘录不应优先'));
+  // An untitled read falls back to path/protocol; an empty excerpt degrades.
+  assert.match(user, /- PinID:pin-r-2\(metaprotocol\):\(无正文摘录\)/);
+  // Inventory counts.
+  assert.match(user, /写入链上内容 3 条;阅读链上内容 2 条。/);
+  // Placement: after the orders/group-chat sections, before 定时任务.
+  assert.ok(user.indexOf('## 当日写入链上的内容') < user.indexOf('## 定时任务'));
+  assert.ok(user.indexOf('## 当日阅读的链上内容') < user.indexOf('## 定时任务'));
+});
+
+test('buildDreamPrompt: chain sections and inventory line are omitted when empty', () => {
+  const prompt = buildDreamPrompt({
+    botName: '小梦',
+    date: '2026-08-19',
+    activity: {
+      sessions: [],
+      taskRuns: [],
+      orderCount: 0,
+      groupTasks: [],
+      groupChats: [],
+      chainWrites: [],
+      chainReads: [],
+    },
+  });
+  assert.ok(!prompt.user.includes('## 当日写入链上的内容'));
+  assert.ok(!prompt.user.includes('## 当日阅读的链上内容'));
+  assert.ok(!prompt.user.includes('写入链上内容'));
+  assert.ok(!prompt.user.includes('阅读链上内容'));
+});
+
+test('buildDreamPrompt: fragment mode never renders the chain sections', () => {
+  const prompt = buildDreamPrompt({
+    botName: '小梦',
+    date: '2026-08-19',
+    sourceMode: 'fragment',
+    activity: {
+      sessions: [],
+      taskRuns: [],
+      orderCount: 0,
+      groupTasks: [],
+      groupChats: [],
+      ...makeChainActivity(),
+    },
+  });
+  assert.ok(!prompt.user.includes('## 当日写入链上的内容'));
+  assert.ok(!prompt.user.includes('## 当日阅读的链上内容'));
+  assert.ok(!prompt.user.includes('总结了这条动态的大意'));
+});

@@ -79,6 +79,18 @@ export function estimateDreamActivityTokens(activity: DreamDayActivity): number 
       tokens += estimateDreamMessageTokens(message);
     }
   }
+  // Chain content history lines render directly (summary or stored text as
+  // the gist), so the estimate mirrors what buildDreamPrompt will emit.
+  tokens += estimateTextTokens(
+    (activity.chainWrites ?? [])
+      .map((write) => `${write.pinId} ${write.path ?? ''} ${write.summary ?? write.contentText ?? ''}`)
+      .join(' ')
+  );
+  tokens += estimateTextTokens(
+    (activity.chainReads ?? [])
+      .map((read) => `${read.pinId} ${read.title ?? ''} ${read.path ?? ''} ${read.summary ?? read.contentExcerpt ?? ''}`)
+      .join(' ')
+  );
   return tokens;
 }
 

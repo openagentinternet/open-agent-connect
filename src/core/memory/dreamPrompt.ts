@@ -12,6 +12,8 @@
 import crypto from 'node:crypto';
 
 import type {
+  DreamChainReadActivity,
+  DreamChainWriteActivity,
   DreamDayActivity,
   DreamGroupChatActivity,
   DreamGroupTaskEvaluation,
@@ -39,8 +41,9 @@ export const MAX_KNOWLEDGE_UPDATES = 6;
 /** Dream algorithm version, recorded on every run. Bump it on any change to the
  * prompt, budgeting, stats or write semantics — completed in-window dates with
  * an older version are then re-dreamed automatically (limited per night).
- * The file-backed port restarts versioning at 1. */
-export const DREAM_VERSION = 1;
+ * The file-backed port restarts versioning at 1; 2 adds the chain-history
+ * sections (own writes + full reads) to the prompt, stats and token estimate. */
+export const DREAM_VERSION = 2;
 
 const DREAM_SECTION_KEYS = ['human', 'a2a', 'orders', 'tasks', 'group_tasks'] as const;
 export type DreamSectionKey = (typeof DREAM_SECTION_KEYS)[number];
@@ -350,6 +353,29 @@ function formatGroupChatActivity(chat: DreamGroupChatActivity): string {
   }).join('\n');
 }
 
+/**
+ * Render one pin the bot published that day. The async LLM summary is the
+ * preferred gist; fall back to the stored full text (binary pins carry
+ * neither, so they degrade to a metadata-only line).
+ */
+function formatChainWriteActivity(write: DreamChainWriteActivity): string {
+  const gist = write.summary?.trim() || write.contentText?.trim() || '(二进制内容)';
+  const where = write.path?.trim() || '(无路径)';
+  const operation = write.operation ? `,${write.operation}` : '';
+  return `- PinID:${truncateText(write.pinId, 70)}(${where}${operation}):${truncateText(gist, 300)}`;
+}
+
+/** Render one pin the bot fully read that day — title/author first, gist second. */
+function formatChainReadActivity(read: DreamChainReadActivity): string {
+  const gist = read.summary?.trim() || read.contentExcerpt?.trim() || '(无正文摘录)';
+  const label = read.title?.trim()
+    ? truncateText(read.title, 80)
+    : (read.path?.trim() || read.protocol?.trim() || '(未知内容)');
+  const author = read.authorGlobalMetaId ? `,作者=${read.authorGlobalMetaId}` : '';
+  const savedToKb = read.savedToKb ? ',已存入知识库' : '';
+  return `- PinID:${truncateText(read.pinId, 70)}(${label}${author}${savedToKb}):${truncateText(gist, 300)}`;
+}
+
 export function buildDreamPrompt(input: {
   botName: string;
   role?: string | null;
@@ -436,6 +462,14 @@ export function buildDreamPrompt(input: {
   if (groupTaskSessions.length > 0) sections.push(`## 群任务协作\n${groupTaskSessions.join('\n\n')}`);
   if (groupChatSessions.length > 0) sections.push(`## 群任务链上群聊\n${groupChatSessions.join('\n\n')}`);
   if (orderSessions.length > 0) sections.push(`## 服务订单\n${orderSessions.join('\n\n')}`);
+  if (sourceMode !== 'fragment' && (input.activity.chainWrites ?? []).length > 0) {
+    const writeLines = (input.activity.chainWrites ?? []).map(formatChainWriteActivity).join('\n');
+    sections.push(`## 当日写入链上的内容(你自己发布的,是你最深刻的经历)\n${writeLines}`);
+  }
+  if (sourceMode !== 'fragment' && (input.activity.chainReads ?? []).length > 0) {
+    const readLines = (input.activity.chainReads ?? []).map(formatChainReadActivity).join('\n');
+    sections.push(`## 当日阅读的链上内容(完整读过的文章/帖子,读过即有印象)\n${readLines}`);
+  }
   if (input.activity.taskRuns.length > 0) {
     const taskLines = input.activity.taskRuns
       .map((run) => `- ${truncateText(run.taskName, 80)}(结果:${run.status})`)
@@ -510,12 +544,15 @@ export function buildDreamPrompt(input: {
     (sum, chat) => sum + chat.messages.length,
     0,
   );
+  const chainWriteCount = (input.activity.chainWrites ?? []).length;
+  const chainReadCount = (input.activity.chainReads ?? []).length;
   const inventory =
     `当天共有 ${input.activity.sessions.length} 段会话:${sessionTitles || '(无)'};` +
     `服务订单共 ${input.activity.orderCount} 笔;定时任务执行 ${input.activity.taskRuns.length} 次;` +
     `群任务验收评价 ${acceptedGroupTasks.length} 项;` +
     `进行中群任务 ${activeGroupTasks.length} 项;` +
     `链上群聊 ${groupChatCount} 段(${groupChatMessageCount} 条)。` +
+    (chainWriteCount + chainReadCount > 0 ? `写入链上内容 ${chainWriteCount} 条;阅读链上内容 ${chainReadCount} 条。` : '') +
     (ratedTotal > 0 ? `人类逐条评价 ${ratedTotal} 条(赞 ${ratedUpCount},踩 ${ratedDownCount})。` : '') +
     (sourceMode === 'fragment_summaries'
       ? '以下内容是从当天真实记录中分块提炼出的证据摘要,请综合摘要而不是臆造未展示的原文细节。'

@@ -8,6 +8,7 @@ import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const { createChainHistoryStore } = require('../../dist/core/chainhistory/store.js');
 const { createMemoryStore } = require('../../dist/core/memory/memoryStore.js');
 const { createDreamStore } = require('../../dist/core/memory/dreamStore.js');
 const { createExperienceStore } = require('../../dist/core/memory/experienceStore.js');
@@ -90,6 +91,44 @@ test('empty day records a completed run without any LLM call', async () => {
   const run = await store.getRun(date);
   assert.equal(run.status, 'completed');
   assert.equal((await store.listDailySummaries()).length, 0);
+});
+
+test('a chain-history-only day is not empty: prompt plan and stats carry chain counts', async () => {
+  const paths = await createTempProfileHome();
+  const date = yesterday();
+  const { startMs } = getDayBoundsMs(date);
+  const chainHistory = createChainHistoryStore(paths);
+  await chainHistory.recordWrite({
+    pinId: 'pin-only-w',
+    path: '/protocols/simplebuzz',
+    operation: 'create',
+    contentText: '今天只发了一条动态，没有聊天',
+    contentType: 'text/plain',
+    occurredAtMs: startMs + 3600_000,
+  });
+  await chainHistory.recordRead({
+    pinId: 'pin-only-r',
+    title: '认真读完的一篇文章',
+    authorGlobalMetaId: 'gm-author-x',
+    contentText: '文章正文',
+    readAtMs: startMs + 7200_000,
+  });
+
+  // No sessions/tasks/orders, yet the day must not short-circuit as empty.
+  const plan = await planDream(paths, { date, llm: 'test-llm' });
+  assert.equal(plan.kind, 'prompt');
+  assert.match(plan.user, /## 当日写入链上的内容/);
+  assert.match(plan.user, /今天只发了一条动态，没有聊天/);
+  assert.match(plan.user, /## 当日阅读的链上内容/);
+  assert.match(plan.user, /认真读完的一篇文章,作者=gm-author-x/);
+  assert.match(plan.user, /写入链上内容 1 条;阅读链上内容 1 条。/);
+
+  const commit = await commitDream(paths, { date, outputText: fakeDreamOutput(date) });
+  assert.equal(commit.ok, true);
+  const summaries = await createDreamStore(paths).listDailySummaries();
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].stats.chainWriteCount, 1);
+  assert.equal(summaries[0].stats.chainReadCount, 1);
 });
 
 test('a full dream writes diary, dream memories, knowledge hooks input, and self-identity', async () => {

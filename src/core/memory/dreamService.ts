@@ -275,6 +275,8 @@ export async function planDream(
     && activity.taskRuns.length === 0
     && activity.groupTasks.length === 0
     && (activity.groupChats?.length ?? 0) === 0
+    && (activity.chainWrites?.length ?? 0) === 0
+    && (activity.chainReads?.length ?? 0) === 0
     && impressionSubjects.length === 0
   ) {
     // Nothing happened that day — no LLM call, no summary, still recorded.
@@ -513,6 +515,8 @@ export async function commitDream(
       groupTaskActiveCount: activity.groupTasks.filter((task) => task.phase === 'active').length,
       groupChatCount: activity.groupChats?.length ?? 0,
       groupChatMessageCount: (activity.groupChats ?? []).reduce((sum, chat) => sum + chat.messages.length, 0),
+      chainWriteCount: activity.chainWrites?.length ?? 0,
+      chainReadCount: activity.chainReads?.length ?? 0,
       messageCount: activity.sessions.reduce((sum, session) => sum + session.messages.length, 0),
       activityCharCount: activity.sessions.reduce(
         (sum, session) => sum + session.messages.reduce((sessionSum, message) => sessionSum + message.content.length, 0),
