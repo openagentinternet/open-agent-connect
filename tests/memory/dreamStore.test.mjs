@@ -8,6 +8,8 @@ import { mkdtempTempRoot } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const chainHistoryStoreModule = require('../../dist/core/chainhistory/store.js');
+const { createChainHistoryStore } = chainHistoryStoreModule;
 const { createDreamStore } = require('../../dist/core/memory/dreamStore.js');
 const { getDayBoundsMs } = require('../../dist/core/memory/dreamPrompt.js');
 
@@ -120,6 +122,8 @@ test('gatherActivity: missing grouptask/order files yield empty group activity',
   assert.equal(activity.orderCount, 0);
   assert.deepEqual(activity.groupTasks, []);
   assert.deepEqual(activity.groupChats, []);
+  assert.deepEqual(activity.chainWrites, []);
+  assert.deepEqual(activity.chainReads, []);
 });
 
 test('gatherActivity: corrupt state files are tolerated as empty', async () => {
@@ -327,6 +331,122 @@ test('gatherActivity: in-day chat messages are capped at the first 200', async (
   assert.equal(chat.messages[199].content, 'msg-199');
   assert.equal(activity.groupTasks[0].phase, 'active');
   assert.equal(activity.groupTasks[0].dayMessageCount, 200);
+});
+
+test('gatherActivity: chain writes/reads are included, day-windowed, chronological', async () => {
+  const paths = await createTempProfileHome();
+  const chainHistory = createChainHistoryStore(paths);
+
+  // Writes: two in-day (recorded out of order), one before the day.
+  await chainHistory.recordWrite({
+    pinId: 'pin-w-old',
+    path: '/protocols/simplebuzz',
+    operation: 'create',
+    contentText: '昨天的动态',
+    contentType: 'text/plain',
+    occurredAtMs: OLD,
+  });
+  await chainHistory.recordWrite({
+    pinId: 'pin-w-2',
+    path: '/protocols/simplebuzz',
+    operation: 'create',
+    contentText: '下午发的第二条动态',
+    contentType: 'text/plain',
+    occurredAtMs: IN_DAY + 180_000,
+  });
+  await chainHistory.recordWrite({
+    pinId: 'pin-w-1',
+    contentText: '上午发的第一条动态',
+    contentType: 'text/plain',
+    occurredAtMs: IN_DAY,
+  });
+  // The async LLM gist lands on the write record after the fact.
+  await chainHistory.applySummaryOutcome('write', 'pin-w-2', { status: 'done', summary: '下午动态的大意' });
+
+  // Reads: two in-day, one before the day. pin-r-1 is read twice (readCount
+  // bumps, lastReadAtMs moves) and then marked as saved to the KB.
+  await chainHistory.recordRead({ pinId: 'pin-r-old', title: '昨天读的文章', contentText: '旧文', readAtMs: OLD });
+  await chainHistory.recordRead({ pinId: 'pin-r-2', protocol: 'metaprotocol', contentText: '第二篇正文', readAtMs: IN_DAY + 240_000 });
+  await chainHistory.recordRead({
+    pinId: 'pin-r-1',
+    path: '/protocols/simplebuzz',
+    title: '第一篇长文',
+    authorGlobalMetaId: 'gm-author-1',
+    contentText: '第一篇正文摘录',
+    readAtMs: IN_DAY + 60_000,
+  });
+  await chainHistory.recordRead({ pinId: 'pin-r-1', readAtMs: IN_DAY + 120_000 });
+  await chainHistory.markReadSavedToKb('pin-r-1', 'kb-1');
+
+  const activity = await createDreamStore(paths).gatherActivity({ startMs, endMs });
+
+  assert.deepEqual(activity.chainWrites.map((write) => write.pinId), ['pin-w-1', 'pin-w-2']);
+  const firstWrite = activity.chainWrites[0];
+  assert.equal(firstWrite.path, null);
+  assert.equal(firstWrite.operation, null);
+  assert.equal(firstWrite.contentText, '上午发的第一条动态');
+  assert.equal(firstWrite.contentType, 'text/plain');
+  assert.equal(firstWrite.summary, null);
+  assert.equal(firstWrite.occurredAtMs, IN_DAY);
+  const secondWrite = activity.chainWrites[1];
+  assert.equal(secondWrite.path, '/protocols/simplebuzz');
+  assert.equal(secondWrite.operation, 'create');
+  assert.equal(secondWrite.summary, '下午动态的大意');
+
+  assert.deepEqual(activity.chainReads.map((read) => read.pinId), ['pin-r-1', 'pin-r-2']);
+  const firstRead = activity.chainReads[0];
+  assert.equal(firstRead.title, '第一篇长文');
+  assert.equal(firstRead.path, '/protocols/simplebuzz');
+  assert.equal(firstRead.protocol, null);
+  assert.equal(firstRead.authorGlobalMetaId, 'gm-author-1');
+  assert.equal(firstRead.contentExcerpt, '第一篇正文摘录');
+  assert.equal(firstRead.savedToKb, true);
+  assert.equal(firstRead.readCount, 2);
+  assert.equal(firstRead.lastReadAtMs, IN_DAY + 120_000);
+  const secondRead = activity.chainReads[1];
+  assert.equal(secondRead.protocol, 'metaprotocol');
+  assert.equal(secondRead.savedToKb, false);
+  assert.equal(secondRead.readCount, 1);
+});
+
+test('gatherActivity: chain history is capped at 50 per kind, earliest first', async () => {
+  const paths = await createTempProfileHome();
+  const chainHistory = createChainHistoryStore(paths);
+  for (let index = 0; index < 55; index += 1) {
+    await chainHistory.recordWrite({
+      pinId: `pin-cap-w-${index}`,
+      contentText: `write ${index}`,
+      occurredAtMs: startMs + index * 1000,
+    });
+    await chainHistory.recordRead({
+      pinId: `pin-cap-r-${index}`,
+      contentText: `read ${index}`,
+      readAtMs: startMs + index * 1000,
+    });
+  }
+
+  const activity = await createDreamStore(paths).gatherActivity({ startMs, endMs });
+  assert.equal(activity.chainWrites.length, 50);
+  assert.equal(activity.chainReads.length, 50);
+  assert.equal(activity.chainWrites[0].pinId, 'pin-cap-w-0');
+  assert.equal(activity.chainWrites[49].pinId, 'pin-cap-w-49');
+  assert.equal(activity.chainReads[0].pinId, 'pin-cap-r-0');
+  assert.equal(activity.chainReads[49].pinId, 'pin-cap-r-49');
+});
+
+test('gatherActivity: a chain-history store failure degrades to empty arrays', async () => {
+  const paths = await createTempProfileHome();
+  const original = chainHistoryStoreModule.createChainHistoryStore;
+  chainHistoryStoreModule.createChainHistoryStore = () => {
+    throw new Error('chain history store unavailable');
+  };
+  try {
+    const activity = await createDreamStore(paths).gatherActivity({ startMs, endMs });
+    assert.deepEqual(activity.chainWrites, []);
+    assert.deepEqual(activity.chainReads, []);
+  } finally {
+    chainHistoryStoreModule.createChainHistoryStore = original;
+  }
 });
 
 test('resetStaleRunningRuns resets only runs past the stale cutoff', async () => {

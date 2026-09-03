@@ -6,11 +6,13 @@
 // - `memory/YYYY-MM-DD.md`: the human-readable diary mirror.
 // Also owns the "what did this bot do on date D" activity query, gathered from
 // mirrored DSH transcripts, the on-chain A2A conversation stores, the group-task
-// state/message caches, and the seller-order list in the runtime state.
+// state/message caches, the seller-order list in the runtime state, and the
+// per-bot chain history store.
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { createChainHistoryStore } from '../chainhistory/store';
 import {
   GROUP_TASK_TERMINAL_STATUSES,
   type GroupTaskMember,
@@ -130,12 +132,42 @@ export interface DreamGroupChatActivity {
   messages: DreamGroupChatMessage[];
 }
 
+/** A pin the bot itself broadcast to the chain that day (writes ledger). */
+export interface DreamChainWriteActivity {
+  pinId: string;
+  path: string | null;
+  operation: string | null;
+  occurredAtMs: number;
+  /** Async LLM gist when available; the prompt falls back to stored text. */
+  summary: string | null;
+  contentText: string | null;
+  contentType: string | null;
+}
+
+/** A chain pin the bot fully read that day (reads ledger). */
+export interface DreamChainReadActivity {
+  pinId: string;
+  path: string | null;
+  protocol: string | null;
+  title: string | null;
+  authorGlobalMetaId: string | null;
+  summary: string | null;
+  contentExcerpt: string | null;
+  savedToKb: boolean;
+  readCount: number;
+  lastReadAtMs: number;
+}
+
 export interface DreamDayActivity {
   sessions: DreamSessionActivity[];
   taskRuns: DreamTaskRunActivity[];
   orderCount: number;
   groupTasks: DreamGroupTaskEvaluation[];
   groupChats?: DreamGroupChatActivity[];
+  /** Pins this bot published to the chain that day (chain content history). */
+  chainWrites?: DreamChainWriteActivity[];
+  /** Chain pins this bot fully read that day (chain content history). */
+  chainReads?: DreamChainReadActivity[];
 }
 
 interface DreamRunsFile {
@@ -900,6 +932,40 @@ export function createDreamStore(paths: MetabotPaths, deps: {
         });
       }
 
+      // Chain content history (own writes / full reads): timestamps are epoch
+      // milliseconds, so the day window applies directly. The store caps each
+      // kind at 50 entries and returns them chronological-ascending. Best
+      // effort: a history-store failure must never break a dream run.
+      let chainWrites: DreamChainWriteActivity[] = [];
+      let chainReads: DreamChainReadActivity[] = [];
+      try {
+        const chainHistory = createChainHistoryStore(paths);
+        chainWrites = (await chainHistory.listWritesForDay({ startMs, endMs })).map((record) => ({
+          pinId: record.pinId,
+          path: record.path,
+          operation: record.operation,
+          occurredAtMs: record.occurredAtMs,
+          summary: record.summary,
+          contentText: record.contentText,
+          contentType: record.contentType,
+        }));
+        chainReads = (await chainHistory.listReadsForDay({ startMs, endMs })).map((record) => ({
+          pinId: record.pinId,
+          path: record.path,
+          protocol: record.protocol,
+          title: record.title,
+          authorGlobalMetaId: record.authorGlobalMetaId,
+          summary: record.summary,
+          contentExcerpt: record.contentExcerpt,
+          savedToKb: record.savedToKb,
+          readCount: record.readCount,
+          lastReadAtMs: record.lastReadAtMs,
+        }));
+      } catch {
+        chainWrites = [];
+        chainReads = [];
+      }
+
       return {
         sessions,
         // OAC has no scheduled-task feature; the prompt section stays empty.
@@ -907,6 +973,8 @@ export function createDreamStore(paths: MetabotPaths, deps: {
         orderCount: dayOrders.length,
         groupTasks: [...acceptedGroupTasks, ...activeGroupTasks],
         groupChats,
+        chainWrites,
+        chainReads,
       };
     },
   };
