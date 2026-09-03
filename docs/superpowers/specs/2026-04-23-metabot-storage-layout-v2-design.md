@@ -117,6 +117,8 @@ The hidden machine-managed layer inside the profile:
 
   owner/
     identity.json
+    traffic.json
+    traffic-journal.jsonl
 
   profiles/
     <slug>/
@@ -207,11 +209,22 @@ Allowed contents:
 
 - `identity.json` — the owner identity record (name, derivation path, public
   key, chat public key, MVC address, metaId, globalMetaId, and the mnemonic).
+- `traffic.json` — the machine-wide traffic (account-quota gas credit) state
+  bound to the owner identity: mode (`traffic`/`selfpay`), assist-service
+  apiBase override, the cached account record, and bot-address bindings.
+- `traffic-journal.jsonl` — append-only local journal of sponsored spends
+  (one JSON row per line: txId, botAddress, orderId, txSize,
+  sponsoredMinerFee, savedFee, billedBy, kind, createdAt); powers the offline
+  usage fallback and ledger enrichment.
 
 Rules:
 
 - there is at most one owner identity per machine; `identity.json` is written
   with mode `0600` because it contains the mnemonic.
+- `traffic.json` and `traffic-journal.jsonl` contain no secret material, but
+  hold account/billing metadata and spend activity, so they are written with
+  owner-only permissions (`0600`) like `identity.json`; `traffic.json` is
+  written atomically (write-then-rename).
 - the mnemonic is secret material and must never be copied into `manager/`,
   `skills/`, or any profile workspace/runtime file.
 - public, non-secret owner fields (name, globalMetaId, MVC address) may be

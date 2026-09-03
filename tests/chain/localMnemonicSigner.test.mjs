@@ -425,6 +425,162 @@ test('createLocalMnemonicSigner rejects unsupported chain network', async () => 
   );
 });
 
+test('createLocalMnemonicSigner routes MVC writes through the sponsor hook when provided', async () => {
+  let inscriptionCalls = 0;
+  let broadcastCalls = 0;
+  const mockAdapter = createMockMvcAdapter({
+    buildInscription: async () => {
+      inscriptionCalls += 1;
+      return { signedRawTxs: ['raw-inscription-hex'], revealIndices: [0], totalCost: 100 };
+    },
+    broadcastTx: async () => {
+      broadcastCalls += 1;
+      return 'b'.repeat(64);
+    },
+  });
+  const sponsoredResult = {
+    txids: ['d'.repeat(64)],
+    pinId: `${'d'.repeat(64)}i0`,
+    totalCost: 42,
+    network: 'mvc',
+    operation: 'create',
+    path: '/protocols/simplebuzz',
+    contentType: 'application/json',
+    encoding: 'utf-8',
+    globalMetaId: EXPECTED_IDENTITY.globalMetaId,
+    mvcAddress: EXPECTED_IDENTITY.mvcAddress,
+    feeAssist: {
+      attempted: true,
+      used: true,
+      mode: 'mvc_sponsor_v2',
+      sponsor: 'mvc_sponsor_v2',
+      stage: 'done',
+      orderId: 'order-1',
+      billedBy: 'traffic',
+    },
+  };
+  const hookCalls = [];
+  const signer = createLocalMnemonicSigner({
+    secretStore: createSecretStore(),
+    adapters: makeAdapterRegistry([mockAdapter]),
+    resolveSponsorWritePin: async (context) => {
+      hookCalls.push(context);
+      return sponsoredResult;
+    },
+  });
+
+  const result = await signer.writePin({
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"sponsored"}',
+    contentType: 'application/json',
+    network: 'mvc',
+  });
+
+  assert.deepEqual(result, sponsoredResult);
+  assert.equal(inscriptionCalls, 0);
+  assert.equal(broadcastCalls, 0);
+  assert.equal(hookCalls.length, 1);
+  assert.equal(hookCalls[0].request.network, 'mvc');
+  assert.equal(hookCalls[0].request.path, '/protocols/simplebuzz');
+  assert.equal(hookCalls[0].identity.globalMetaId, EXPECTED_IDENTITY.globalMetaId);
+  assert.equal(typeof hookCalls[0].runSelfPaid, 'function');
+});
+
+test('createLocalMnemonicSigner runs the regular self-paid path when the sponsor hook returns null', async () => {
+  let inscriptionCalls = 0;
+  let hookCalls = 0;
+  const mockAdapter = createMockMvcAdapter({
+    buildInscription: async () => {
+      inscriptionCalls += 1;
+      return { signedRawTxs: ['raw-inscription-hex'], revealIndices: [0], totalCost: 100 };
+    },
+  });
+  const signer = createLocalMnemonicSigner({
+    secretStore: createSecretStore(),
+    adapters: makeAdapterRegistry([mockAdapter]),
+    resolveSponsorWritePin: async () => {
+      hookCalls += 1;
+      return null;
+    },
+  });
+
+  const result = await signer.writePin({
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"self paid"}',
+    contentType: 'application/json',
+    network: 'mvc',
+  });
+
+  assert.equal(hookCalls, 1);
+  assert.equal(inscriptionCalls, 1);
+  assert.equal(result.pinId, `${'b'.repeat(64)}i0`);
+  assert.equal('feeAssist' in result, false);
+});
+
+test('createLocalMnemonicSigner sponsor hook fallback runs the real self-paid worker', async () => {
+  let inscriptionCalls = 0;
+  const mockAdapter = createMockMvcAdapter({
+    buildInscription: async () => {
+      inscriptionCalls += 1;
+      return { signedRawTxs: ['raw-inscription-hex'], revealIndices: [0], totalCost: 100 };
+    },
+  });
+  const signer = createLocalMnemonicSigner({
+    secretStore: createSecretStore(),
+    adapters: makeAdapterRegistry([mockAdapter]),
+    resolveSponsorWritePin: async ({ runSelfPaid }) => {
+      const selfPaid = await runSelfPaid();
+      return {
+        ...selfPaid,
+        feeAssist: {
+          attempted: true,
+          used: false,
+          mode: 'self_paid',
+          sponsor: 'mvc_sponsor_v2',
+          reason: 'insufficient_traffic',
+          stage: 'pre',
+        },
+      };
+    },
+  });
+
+  const result = await signer.writePin({
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"fallback"}',
+    contentType: 'application/json',
+    network: 'mvc',
+  });
+
+  assert.equal(inscriptionCalls, 1);
+  assert.equal(result.pinId, `${'b'.repeat(64)}i0`);
+  assert.equal(result.totalCost, 100);
+  assert.equal(result.feeAssist.used, false);
+  assert.equal(result.feeAssist.mode, 'self_paid');
+  assert.equal(result.feeAssist.reason, 'insufficient_traffic');
+});
+
+test('createLocalMnemonicSigner never invokes the sponsor hook for non-MVC networks', async () => {
+  const btcAdapter = createMockBtcAdapter();
+  const signer = createLocalMnemonicSigner({
+    secretStore: createSecretStore(),
+    adapters: makeAdapterRegistry([btcAdapter]),
+    resolveSponsorWritePin: async () => {
+      throw new Error('sponsor hook must not run for non-MVC writes');
+    },
+  });
+
+  const result = await signer.writePin({
+    path: '/protocols/simplebuzz',
+    payload: '{"content":"btc write"}',
+    contentType: 'application/json',
+    network: 'btc',
+  });
+
+  assert.equal(result.network, 'btc');
+  assert.equal(result.pinId, `${'c'.repeat(64)}i0`);
+  assert.equal('feeAssist' in result, false);
+});
+
 test('BTC adapter uses real BtcWallet for inscription via adapter', async () => {
   const signCalls = [];
 

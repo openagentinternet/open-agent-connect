@@ -31,12 +31,14 @@ import { en, NS, zh, type BotsLocaleKey } from './locale.ts'
 import { memoryEn, MEMORY_NS, memoryZh, type MemoryLocaleKey } from './locale-memory.ts'
 import { userEn, USER_NS, userZh, type UserLocaleKey } from './locale-user.ts'
 import { svcEn, SVC_NS, svcZh, type ServicesLocaleKey } from './locale-services.ts'
+import { trafficEn, TRAFFIC_NS, trafficZh, type TrafficLocaleKey } from './locale-traffic.ts'
 import { MemoryPanel } from './MemoryPanel.tsx'
+import { TrafficPanel } from './TrafficPanel.tsx'
 import { UserPanel } from './UserPanel.tsx'
 import type { SeatSessionSummary } from './preset-seat-store.ts'
 import { BotPresetSeatController } from './preset-seat-store.ts'
 import { ServicesPanel } from './ServicesPanel.tsx'
-import { APPS_CSS, BOTS_CSS, BROWSER_CSS, GROUPTASK_CSS, MEMORY_CSS, PRESETS_CSS, USER_CSS } from './styles.ts'
+import { APPS_CSS, BOTS_CSS, BROWSER_CSS, GROUPTASK_CSS, MEMORY_CSS, PRESETS_CSS, TRAFFIC_CSS, USER_CSS } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -45,6 +47,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.oac.conversations': ConversationsLocaleKey
     'settings.oac.services': ServicesLocaleKey
     'settings.oac.apps': AppsLocaleKey
+    'settings.oac.traffic': TrafficLocaleKey
     'settings.oac.memory': MemoryLocaleKey
     'settings.oac.user': UserLocaleKey
   }
@@ -60,7 +63,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const tag = document.createElement('style')
     tag.dataset.plugin = 'open-agent-connect-dsh'
-    tag.textContent = BOTS_CSS + PRESETS_CSS + APPS_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS
+    tag.textContent = BOTS_CSS + PRESETS_CSS + APPS_CSS + TRAFFIC_CSS + BROWSER_CSS + MEMORY_CSS + USER_CSS + GROUPTASK_CSS
     document.head.append(tag)
     return () => { tag.remove() }
   }, 'oac-dsh: styles')
@@ -69,12 +72,14 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(CONV_NS, { zh: convZh, en: convEn }), 'oac-dsh: conversations dictionary')
   ctx.effect(() => ctx.locale.register(SVC_NS, { zh: svcZh, en: svcEn }), 'oac-dsh: services dictionary')
   ctx.effect(() => ctx.locale.register(APP_NS, { zh: appZh, en: appEn }), 'oac-dsh: apps dictionary')
+  ctx.effect(() => ctx.locale.register(TRAFFIC_NS, { zh: trafficZh, en: trafficEn }), 'oac-dsh: traffic dictionary')
   ctx.effect(() => ctx.locale.register(MEMORY_NS, { zh: memoryZh, en: memoryEn }), 'oac-dsh: memory dictionary')
   ctx.effect(() => ctx.locale.register(USER_NS, { zh: userZh, en: userEn }), 'oac-dsh: user dictionary')
   const t = ctx.locale.bind(NS)
   const tConv = ctx.locale.bind(CONV_NS)
   const tSvc = ctx.locale.bind(SVC_NS)
   const tApps = ctx.locale.bind(APP_NS)
+  const tTraffic = ctx.locale.bind(TRAFFIC_NS)
   const tMemory = ctx.locale.bind(MEMORY_NS)
   const tUser = ctx.locale.bind(USER_NS)
 
@@ -251,6 +256,25 @@ export function apply(ctx: ClientContext): void {
       upload: (from: string, file: File) => api.metaappUpload(from, file),
     }),
   }, AppsPanel))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'oac-traffic',
+    order: 24,
+    label: () => tTraffic('nav'),
+    locale: TRAFFIC_NS,
+    inject: () => ({
+      who: () => api.userWho(),
+      bots: () => api.list(),
+      status: () => api.trafficStatus(),
+      setMode: (mode: 'traffic' | 'selfpay') => api.trafficMode(mode),
+      balance: () => api.trafficBalance(),
+      ledger: (cursor?: string, limit?: number) => api.trafficLedger(cursor, limit),
+      usage: () => api.trafficUsage(),
+      claim: () => api.trafficClaim(),
+      redeem: (code: string) => api.trafficRedeem(code),
+      apiBase: (action?: 'get' | 'set' | 'reset', value?: string) => api.trafficApiBase(action, value),
+    }),
+  }, TrafficPanel))
 
   ctx.inject(['slots', 'conversation', 'sessions'], (scope: ClientContext) => {
     const remote = ctx.remote

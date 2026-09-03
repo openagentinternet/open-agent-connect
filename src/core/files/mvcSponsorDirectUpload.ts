@@ -1,8 +1,22 @@
 import { promises as fs } from 'node:fs';
 import { mvc } from 'meta-contract';
 import type { Signer } from '../signing/signer';
-import type { MvcSponsorAddressInfo, MvcSponsorCommitResult, MvcSponsorPreResult } from '../subsidy/mvcSponsorV2Client';
+import type {
+  MvcSponsorAddressInfo,
+  MvcSponsorCommitResult,
+  MvcSponsorPreResult,
+  MvcSponsorTrafficAccount,
+} from '../subsidy/mvcSponsorV2Client';
 import { signMvcAddressMessage } from '../subsidy/mvcMessageSigning';
+import {
+  attachFeeAssistError,
+  isNoUserUtxoDraftError,
+  normalizeSponsorReason,
+  type MvcSponsorFeeAssistMetadata,
+  type MvcSponsorFeeAssistReason,
+  type MvcSponsorFeeAssistStage,
+  type MvcSponsorTrafficDeps,
+} from '../subsidy/feeAssist';
 import mvcChainAdapter from '../chain/adapters/mvc';
 import { normalizeChainWriteRequest } from '../chain/writePin';
 import {
@@ -14,34 +28,14 @@ import { rememberPendingMvcTransaction } from '../chain/mvcPendingUtxos';
 import { buildMetafileBrowserUrl } from './metafileUrls';
 import { uploadLocalFileToChain, type UploadLocalFileToChainResult } from './uploadFile';
 
-export type MvcSponsorFeeAssistMode = 'mvc_sponsor_v2' | 'self_paid';
-export type MvcSponsorFeeAssistReason =
-  | 'service_unavailable'
-  | 'no_user_utxo'
-  | 'insufficient_quota'
-  | 'pre_rejected'
-  | 'commit_failed';
-export type MvcSponsorFeeAssistStage =
-  | 'address_info'
-  | 'challenge'
-  | 'pre'
-  | 'commit'
-  | 'done';
-
-export interface MvcSponsorFeeAssistMetadata {
-  attempted: boolean;
-  used: boolean;
-  mode: MvcSponsorFeeAssistMode;
-  sponsor: 'mvc_sponsor_v2';
-  reason?: MvcSponsorFeeAssistReason;
-  stage?: MvcSponsorFeeAssistStage;
-  orderId?: string;
-  quotaBefore?: MvcSponsorAddressInfo;
-  quotaAfter?: MvcSponsorAddressInfo;
-  advisoryFeeEstimate?: number;
-  sponsoredMinerFee?: number;
-  savedFee?: number;
-}
+export type {
+  MvcSponsorFeeAssistMode,
+  MvcSponsorFeeAssistReason,
+  MvcSponsorFeeAssistStage,
+  MvcSponsorFeeAssistMetadata,
+  MvcSponsorTrafficDeps,
+  MvcSponsorTrafficSpendRecord,
+} from '../subsidy/feeAssist';
 
 export interface MvcSponsorV2DirectUploadClient {
   getAddressInfo(payload: { address: string }): Promise<MvcSponsorAddressInfo>;
@@ -57,6 +51,7 @@ export interface MvcSponsorV2DirectUploadClient {
     challengeId: string;
     publicKey: string;
     signature: string;
+    trafficAccount?: MvcSponsorTrafficAccount;
   }): Promise<MvcSponsorPreResult>;
   commitSponsor(payload: {
     orderId: string;
@@ -65,34 +60,16 @@ export interface MvcSponsorV2DirectUploadClient {
     signature: string;
     message?: string;
   }): Promise<MvcSponsorCommitResult>;
+  /**
+   * Traffic-account billing (流量), attached by the daemon wiring only when
+   * traffic mode is on. Absent = today's legacy quota flow, untouched.
+   */
+  traffic?: MvcSponsorTrafficDeps;
 }
 
 export type MvcSponsorDirectUploadResult = UploadLocalFileToChainResult & {
   feeAssist: MvcSponsorFeeAssistMetadata;
 };
-
-function normalizeSponsorReason(value: unknown, fallback: MvcSponsorFeeAssistReason): MvcSponsorFeeAssistReason {
-  return value === 'insufficient_quota'
-    || value === 'service_unavailable'
-    || value === 'commit_failed'
-    || value === 'pre_rejected'
-    || value === 'no_user_utxo'
-    ? value
-    : fallback;
-}
-
-function getStableErrorCode(error: unknown, fallback: string): string {
-  const code = (error as { code?: unknown } | undefined)?.code;
-  return typeof code === 'string' && code.trim() ? code.trim() : fallback;
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
-function isNoUserUtxoDraftError(error: unknown): boolean {
-  return /MetaBot balance is insufficient for this chain write\./i.test(getErrorMessage(error, ''));
-}
 
 function estimateDraftMinerFee(input: {
   unsignedTxHex: string;
@@ -120,40 +97,6 @@ async function selfPaidDirect(input: {
     ...direct,
     feeAssist: input.feeAssist,
   };
-}
-
-function attachFeeAssistError(input: {
-  error: unknown;
-  fallbackCode: string;
-  fallbackReason: MvcSponsorFeeAssistReason;
-  stage: MvcSponsorFeeAssistStage;
-  orderId?: string;
-  quotaBefore?: MvcSponsorAddressInfo;
-  advisoryFeeEstimate?: number;
-  sponsoredMinerFee?: number;
-}): never {
-  const error = input.error instanceof Error
-    ? input.error as Error & { code?: string; data?: Record<string, unknown> }
-    : new Error(getErrorMessage(input.error, `MVC sponsor ${input.stage} failed.`)) as Error & { code?: string; data?: Record<string, unknown> };
-  error.code = getStableErrorCode(error, input.fallbackCode);
-  const existingData = error.data && typeof error.data === 'object' ? error.data : {};
-  error.data = {
-    ...existingData,
-    feeAssist: {
-      attempted: true,
-      used: false,
-      mode: 'mvc_sponsor_v2',
-      sponsor: 'mvc_sponsor_v2',
-      reason: normalizeSponsorReason((input.error as { reason?: unknown } | undefined)?.reason, input.fallbackReason),
-      stage: input.stage,
-      orderId: input.orderId,
-      quotaBefore: input.quotaBefore,
-      advisoryFeeEstimate: input.advisoryFeeEstimate,
-      sponsoredMinerFee: input.sponsoredMinerFee,
-      savedFee: input.sponsoredMinerFee,
-    } satisfies MvcSponsorFeeAssistMetadata,
-  };
-  throw error;
 }
 
 async function fallbackSelfPaidForSponsorError(input: {
@@ -305,6 +248,16 @@ export async function uploadMvcSponsorDirectFile(input: {
     message: challenge.message,
   });
 
+  // Traffic-account billing (流量): the daemon attaches the dep only in
+  // traffic mode; undefined keeps the legacy quota path (no account, unbound
+  // bot, or backend 404).
+  const trafficAccount = await input.mvcSponsorClient.traffic?.resolveTrafficAccount({
+    botAddress: address,
+    challengeId: challenge.challengeId,
+    botMnemonic: identity.mnemonic,
+    botWalletPath: identity.path,
+  });
+
   let pre: MvcSponsorPreResult;
   try {
     pre = await input.mvcSponsorClient.preSponsor({
@@ -313,17 +266,18 @@ export async function uploadMvcSponsorDirectFile(input: {
       challengeId: challenge.challengeId,
       publicKey: challengeSignature.publicKey,
       signature: challengeSignature.signature,
+      ...(trafficAccount ? { trafficAccount } : {}),
     });
   } catch (error) {
     const reason = normalizeSponsorReason((error as { reason?: unknown } | undefined)?.reason, 'pre_rejected');
-    if (reason === 'service_unavailable') {
+    if (reason === 'service_unavailable' || reason === 'insufficient_traffic') {
       return fallbackSelfPaidForSponsorError({
         error,
         filePath: input.filePath,
         contentType: input.contentType,
         network: input.network,
         signer: input.signer,
-        fallbackReason: 'service_unavailable',
+        fallbackReason: reason,
         stage: 'pre',
         quotaBefore,
         advisoryFeeEstimate: estimatedMinerFee,
@@ -402,6 +356,20 @@ export async function uploadMvcSponsorDirectFile(input: {
   });
 
   const sponsoredMinerFee = commit.minerFee ?? pre.minerFee;
+  // Local spend journal + traffic balance-cache deduction (best-effort,
+  // never throws) — only wired in traffic mode.
+  if (input.mvcSponsorClient.traffic) {
+    await input.mvcSponsorClient.traffic.recordSpend({
+      txId: commit.txId,
+      botAddress: address,
+      orderId: pre.orderId,
+      txSize: commit.txSize ?? 0,
+      sponsoredMinerFee,
+      savedFee: sponsoredMinerFee,
+      billedBy: trafficAccount ? 'traffic' : 'quota',
+      kind: '/file',
+    }).catch(() => undefined);
+  }
   let quotaAfter: MvcSponsorAddressInfo | undefined;
   try {
     quotaAfter = await input.mvcSponsorClient.getAddressInfo({ address });

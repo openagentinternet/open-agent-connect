@@ -5,6 +5,7 @@ import { createWriteStream } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { commandFailed } from '../core/contracts/commandResult';
 import { handleConfigRoutes } from './routes/config';
+import { handleTrafficRoutes } from './routes/traffic';
 import { handleBuzzRoutes } from './routes/buzz';
 import { handleSimpleNoteRoutes } from './routes/simplenote';
 import { handleChainRoutes } from './routes/chain';
@@ -31,6 +32,7 @@ const LOCAL_DAEMON_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 const ROUTES: RouteHandler[] = [
   handleConfigRoutes,
+  handleTrafficRoutes,
   handleBuzzRoutes,
   handleSimpleNoteRoutes,
   handleChainRoutes,

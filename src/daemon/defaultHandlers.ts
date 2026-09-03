@@ -219,6 +219,19 @@ import {
 } from '../core/files/uploadLargeFile';
 import { createMetaFsLargeUploader } from '../core/files/metaFsLargeUploader';
 import { uploadFileBufferToChain, uploadLocalFileToChain } from '../core/files/uploadFile';
+import {
+  createTrafficAccountService,
+  DEFAULT_TRAFFIC_API_BASE_URL,
+  TrafficApiError,
+  type TrafficAccountService,
+  type TrafficFreeGrantCampaignStatus,
+  type TrafficLedgerEntry,
+  type TrafficUsageSummary,
+} from '../core/traffic/trafficAccountService';
+import { normalizeTrafficApiBase, type TrafficAccountRecord } from '../core/traffic/trafficStore';
+import { readOwnerIdentity } from '../core/owner/ownerIdentity';
+import { createTrafficSponsorWritePinResolver } from '../core/subsidy/mvcSponsorWritePin';
+import type { MvcSponsorTrafficDeps } from '../core/subsidy/feeAssist';
 import { postBuzzToChain } from '../core/buzz/postBuzz';
 import {
   formatSimpleNoteResult,
@@ -4976,6 +4989,23 @@ export interface BuyerOrderDeadlineSweepReport {
   skipped: number;
 }
 
+/**
+ * Map a traffic-service failure to the CLI contract: TrafficApiError keeps its
+ * `traffic_<stage>_failed` code and carries { errorCode, featureUnavailable,
+ * retryable? } in data so the DSH plugin can map backend error codes
+ * (ALREADY_CLAIMED, CODE_USED, ...) to friendly copy. Transport-level failures
+ * (no HTTP status) and 5xx are marked retryable.
+ */
+function trafficCommandFailure(error: unknown, fallbackCode: string): MetabotCommandResult<never> {
+  if (error instanceof TrafficApiError) {
+    const data: Record<string, unknown> = { featureUnavailable: error.featureUnavailable };
+    if (error.errorCode) data.errorCode = error.errorCode;
+    if (error.status === undefined || error.status >= 500) data.retryable = true;
+    return commandFailed(error.code, error.message, { data });
+  }
+  return commandFailed(fallbackCode, error instanceof Error ? error.message : String(error));
+}
+
 export function createDefaultMetabotDaemonHandlers(input: {
   homeDir: string;
   systemHomeDir?: string;
@@ -5005,6 +5035,8 @@ export function createDefaultMetabotDaemonHandlers(input: {
   providerLargeFileUploader?: ProductionLargeFileUploader | null;
   createProviderLargeFileUploader?: () => ProductionLargeFileUploader;
   createMvcSponsorClient?: () => MvcSponsorV2DirectUploadClient;
+  /** Shared traffic account service (流量); defaults to one instance per daemon process. */
+  trafficAccountService?: TrafficAccountService;
   onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
   onIdentityProfileRegistered?: () => Promise<void> | void;
   onBrowserInfrastructureChanged?: () => Promise<void> | void;
@@ -5089,9 +5121,21 @@ export function createDefaultMetabotDaemonHandlers(input: {
     dogeChainAdapter,
     opcatChainAdapter,
   ]);
+  // Traffic mode (代付): one account service per daemon process, shared by
+  // every signer (pin writes) and the sponsor upload flow.
+  const trafficAccountService = input.trafficAccountService ?? createTrafficAccountService({
+    systemHomeDir: normalizedSystemHomeDir,
+  });
+  const resolveSponsorWritePin = createTrafficSponsorWritePinResolver({ trafficAccountService });
+  const mvcSponsorTrafficDeps: MvcSponsorTrafficDeps = {
+    resolveTrafficAccount: ({ botAddress, challengeId, botMnemonic, botWalletPath }) =>
+      trafficAccountService.resolveSponsorTrafficAccount({ botAddress, challengeId, botMnemonic, botWalletPath }),
+    recordSpend: (entry) => trafficAccountService.recordLocalTrafficSpend(entry),
+  };
   const signer = input.signer ?? createLocalMnemonicSigner({
     secretStore,
     adapters,
+    resolveSponsorWritePin,
   });
   const uploadLargeFile = input.uploadLargeFile ?? uploadLargeFileToChain;
   const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFileToChain;
@@ -5190,7 +5234,17 @@ export function createDefaultMetabotDaemonHandlers(input: {
     if (config.chain.mvcSponsorUploadEnabled !== true) {
       return undefined;
     }
-    return (input.createMvcSponsorClient ?? createMvcSponsorV2Client)();
+    // Traffic mode (代付): attach the billing dep (and honor the configured
+    // assist-service base URL) so uploads resolve a trafficAccount and journal
+    // each commit; self-pay mode keeps today's quota flow untouched.
+    const trafficMode = await trafficAccountService.getTrafficPinMode() === 'traffic';
+    const client: MvcSponsorV2DirectUploadClient = trafficMode && !input.createMvcSponsorClient
+      ? createMvcSponsorV2Client({ baseUrl: await trafficAccountService.getConfiguredTrafficApiBase() })
+      : (input.createMvcSponsorClient ?? createMvcSponsorV2Client)();
+    if (trafficMode) {
+      client.traffic = mvcSponsorTrafficDeps;
+    }
+    return client;
   }
   async function updateConfigDefaultWriteNetwork(
     targetConfigStore: ReturnType<typeof createConfigStore>,
@@ -6035,6 +6089,7 @@ export function createDefaultMetabotDaemonHandlers(input: {
     return createLocalMnemonicSigner({
       secretStore: createFileSecretStore(normalizedProfileHomeDir),
       adapters: profileAdapters,
+      resolveSponsorWritePin,
     });
   }
 
@@ -12740,6 +12795,27 @@ export function createDefaultMetabotDaemonHandlers(input: {
     };
   }
 
+  /** mvc address (lowercased) -> profile name map for traffic ledger/usage enrichment. */
+  async function resolveTrafficBotNames(): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => [] as IdentityProfileRecord[]);
+    for (const profile of profiles) {
+      const address = normalizeText(profile.mvcAddress);
+      if (address && normalizeText(profile.name)) {
+        names.set(address.toLowerCase(), profile.name);
+      }
+    }
+    return names;
+  }
+
+  function withTrafficBotName<TEntry extends { botAddress?: string }>(
+    entry: TEntry,
+    botNames: Map<string, string>,
+  ): TEntry & { botName?: string } {
+    const botName = entry.botAddress ? botNames.get(entry.botAddress.toLowerCase()) : undefined;
+    return botName ? { ...entry, botName } : entry;
+  }
+
   const handlers: MetabotDaemonHttpHandlers = {
     browser: {
       getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
@@ -12807,6 +12883,218 @@ export function createDefaultMetabotDaemonHandlers(input: {
     config: {
       get: async () => commandSuccess(await configStore.read()),
       set: async (rawInput) => updateConfigDefaultWriteNetwork(configStore, rawInput),
+    },
+    traffic: {
+      // Owner-scoped overview: mode + stored apiBase override + lazily-ensured
+      // account + free-grant campaign state + public owner identity. Never
+      // hard-fails on backend errors the panel can live without: a missing
+      // identity returns all-null sections, a backend 404 returns
+      // featureUnavailable, and any other ensure failure falls back to the
+      // locally cached account (balance/usage surface the real error).
+      status: async () => {
+        try {
+          const settings = await trafficAccountService.getTrafficSettingsSnapshot();
+          const identityRecord = await readOwnerIdentity(normalizedSystemHomeDir).catch(() => null);
+          const identity = identityRecord
+            ? {
+                name: identityRecord.name,
+                globalMetaId: identityRecord.globalMetaId,
+                mvcAddress: identityRecord.mvcAddress,
+              }
+            : null;
+          if (!identity) {
+            return commandSuccess({
+              mode: settings.mode,
+              apiBase: settings.apiBase,
+              account: null,
+              freeGrant: null,
+              featureUnavailable: false,
+              identity: null,
+            });
+          }
+          let account: TrafficAccountRecord | null = null;
+          let featureUnavailable = false;
+          try {
+            account = await trafficAccountService.ensureTrafficAccount();
+          } catch (error) {
+            if (error instanceof TrafficApiError && error.featureUnavailable) {
+              featureUnavailable = true;
+            } else {
+              account = await trafficAccountService.getLocalTrafficAccount();
+            }
+          }
+          let freeGrant: TrafficFreeGrantCampaignStatus | null = null;
+          if (account && !featureUnavailable) {
+            freeGrant = await trafficAccountService.getFreeGrantCampaignStatus().catch(() => null);
+          }
+          return commandSuccess({
+            mode: settings.mode,
+            apiBase: settings.apiBase,
+            account,
+            freeGrant,
+            featureUnavailable,
+            identity,
+          });
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_status_failed');
+        }
+      },
+      getMode: async () => {
+        try {
+          return commandSuccess({ mode: await trafficAccountService.getTrafficPinMode() });
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_mode_failed');
+        }
+      },
+      // Switching to traffic mode persists the setting, then ensures the
+      // account and binds every local bot (bindAllLocalBots ensures the
+      // account internally); the bind summary is part of the contract.
+      setMode: async ({ mode }) => {
+        const normalizedMode = normalizeText(mode).toLowerCase();
+        if (normalizedMode !== 'traffic' && normalizedMode !== 'selfpay') {
+          return commandFailed('invalid_argument', 'mode must be "traffic" or "selfpay".');
+        }
+        try {
+          await trafficAccountService.setTrafficSettingsSnapshot({ mode: normalizedMode });
+          if (normalizedMode !== 'traffic') {
+            return commandSuccess({ mode: normalizedMode });
+          }
+          const bindSummary = await trafficAccountService.bindAllLocalBots();
+          return commandSuccess({ mode: normalizedMode, bindSummary });
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_account_failed');
+        }
+      },
+      getBalance: async () => {
+        try {
+          const account = await trafficAccountService.getTrafficBalance({ forceRefresh: true });
+          return commandSuccess({ account, featureUnavailable: false });
+        } catch (error) {
+          if (error instanceof TrafficApiError && error.featureUnavailable) {
+            return commandSuccess({ account: null, featureUnavailable: true });
+          }
+          return trafficCommandFailure(error, 'traffic_balance_failed');
+        }
+      },
+      getLedger: async (rawInput) => {
+        try {
+          const limit = Number.isFinite(rawInput.limit) && (rawInput.limit ?? 0) > 0
+            ? Math.floor(rawInput.limit as number)
+            : 20;
+          const cursor = Number.isFinite(rawInput.cursor) && (rawInput.cursor ?? 0) > 0
+            ? Math.floor(rawInput.cursor as number)
+            : undefined;
+          const { entries, nextCursor } = await trafficAccountService.getTrafficLedger({
+            ...(cursor !== undefined ? { cursor } : {}),
+            limit,
+          });
+          const botNames = await resolveTrafficBotNames();
+          return commandSuccess({
+            entries: entries.map((entry: TrafficLedgerEntry) => withTrafficBotName(entry, botNames)),
+            nextCursor: nextCursor > 0 ? String(nextCursor) : null,
+          });
+        } catch (error) {
+          if (error instanceof TrafficApiError && error.featureUnavailable) {
+            return commandSuccess({ entries: [], nextCursor: null, featureUnavailable: true });
+          }
+          return trafficCommandFailure(error, 'traffic_ledger_failed');
+        }
+      },
+      // Usage never hard-fails: the summary API and the daily-usage API fall
+      // back independently, and the journal fallback keeps the table useful
+      // while the backend is unreachable. source: 'service' when the daily API
+      // answered, 'local' when only the journal produced rows, 'unavailable'
+      // when neither did.
+      getUsage: async () => {
+        try {
+          let summary: TrafficUsageSummary | null = null;
+          let featureUnavailable = false;
+          try {
+            summary = await trafficAccountService.getTrafficUsageSummary();
+          } catch (error) {
+            if (error instanceof TrafficApiError && error.featureUnavailable) {
+              featureUnavailable = true;
+            }
+          }
+          const usage = await trafficAccountService.getTrafficDailyUsageWithFallback({});
+          const botNames = await resolveTrafficBotNames();
+          const daily = usage.rows.map((row) => withTrafficBotName(row, botNames));
+          const source = usage.source === 'remote'
+            ? 'service'
+            : daily.length > 0
+              ? 'local'
+              : 'unavailable';
+          return commandSuccess({
+            summary,
+            daily,
+            source,
+            ...(featureUnavailable ? { featureUnavailable: true } : {}),
+          });
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_usage_failed');
+        }
+      },
+      claim: async () => {
+        try {
+          const result = await trafficAccountService.claimFreeGrant();
+          return commandSuccess({
+            grantId: String(result.grantId),
+            grantBytes: result.grantBytes,
+            balanceAfter: result.balanceAfter,
+          });
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_campaign_failed');
+        }
+      },
+      redeem: async ({ code }) => {
+        const normalizedCode = normalizeText(code);
+        if (!normalizedCode) {
+          return commandFailed('missing_argument', 'A redeem code is required.');
+        }
+        try {
+          return commandSuccess(await trafficAccountService.redeemTrafficCode(normalizedCode));
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_redeem_failed');
+        }
+      },
+      getApiBase: async () => {
+        try {
+          const configured = await trafficAccountService.getConfiguredTrafficApiBase();
+          return commandSuccess({
+            apiBase: configured ?? '',
+            effectiveApiBase: configured ?? DEFAULT_TRAFFIC_API_BASE_URL,
+          });
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_settings_failed');
+        }
+      },
+      // Invalid overrides are rejected before the store write, so nothing is
+      // persisted on failure (normalizeTrafficApiBase throws).
+      setApiBase: async ({ apiBase }) => {
+        let normalizedApiBase: string;
+        try {
+          normalizedApiBase = normalizeTrafficApiBase(apiBase);
+        } catch (error) {
+          return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+        }
+        if (!normalizedApiBase) {
+          return commandFailed('missing_argument', 'An http(s) URL is required (use api-base reset to clear).');
+        }
+        try {
+          await trafficAccountService.setTrafficSettingsSnapshot({ apiBase: normalizedApiBase });
+          return commandSuccess({ apiBase: normalizedApiBase, effectiveApiBase: normalizedApiBase });
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_settings_failed');
+        }
+      },
+      resetApiBase: async () => {
+        try {
+          await trafficAccountService.setTrafficSettingsSnapshot({ apiBase: '' });
+          return commandSuccess({ apiBase: '', effectiveApiBase: DEFAULT_TRAFFIC_API_BASE_URL });
+        } catch (error) {
+          return trafficCommandFailure(error, 'traffic_settings_failed');
+        }
+      },
     },
     chain: {
       write: async (rawInput) => {

@@ -143,6 +143,8 @@ import {
   createLocalMnemonicSigner,
   executeTransfer,
 } from '../core/signing/localMnemonicSigner';
+import { createTrafficAccountService } from '../core/traffic/trafficAccountService';
+import { createTrafficSponsorWritePinResolver } from '../core/subsidy/mvcSponsorWritePin';
 import { normalizeChainWriteRequest, type ChainWriteNetwork } from '../core/chain/writePin';
 import { createDefaultChainAdapterRegistry } from '../core/chain/adapters/registry';
 import {
@@ -3264,6 +3266,27 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         input,
       ),
     },
+    // Traffic (流量) verbs are owner-scoped: no actor selection, every call is
+    // a plain POST to the daemon's /api/traffic/* routes.
+    traffic: {
+      status: async () => requestJsonForSelectedActor('POST', '/api/traffic/status'),
+      getMode: async () => requestJsonForSelectedActor('POST', '/api/traffic/mode', undefined, {}),
+      setMode: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/mode', undefined, { mode: input.mode }),
+      balance: async () => requestJsonForSelectedActor('POST', '/api/traffic/balance'),
+      ledger: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/ledger', undefined, {
+        ...(input.cursor ? { cursor: input.cursor } : {}),
+        ...(input.limit ? { limit: input.limit } : {}),
+      }),
+      usage: async () => requestJsonForSelectedActor('POST', '/api/traffic/usage'),
+      claim: async () => requestJsonForSelectedActor('POST', '/api/traffic/claim'),
+      redeem: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/redeem', undefined, { code: input.code }),
+      getApiBase: async () => requestJsonForSelectedActor('POST', '/api/traffic/api-base', undefined, { action: 'get' }),
+      setApiBase: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/api-base', undefined, {
+        action: 'set',
+        value: input.apiBase,
+      }),
+      resetApiBase: async () => requestJsonForSelectedActor('POST', '/api/traffic/api-base', undefined, { action: 'reset' }),
+    },
     daemon: {
       start: async () => {
         const baseUrl = await ensureDaemonBaseUrl(context);
@@ -4696,6 +4719,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     metaweb: { ...defaults.metaweb, ...provided.metaweb },
     simplenote: { ...defaults.simplenote, ...provided.simplenote },
     chain: { ...defaults.chain, ...provided.chain },
+    traffic: { ...defaults.traffic, ...provided.traffic },
     daemon: { ...defaults.daemon, ...provided.daemon },
     doctor: { ...defaults.doctor, ...provided.doctor },
     identity: { ...defaults.identity, ...provided.identity },
@@ -4732,7 +4756,11 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   let daemonRecord: GlobalDaemonRecord | null = null;
   const secretStore = createFileSecretStore(homeDir);
   const adapters = createDefaultChainAdapterRegistry();
-  const baseSigner = createLocalMnemonicSigner({ secretStore, adapters });
+  // Traffic mode (代付): one account service per daemon process, shared by
+  // every signer created here and by the daemon handlers' upload wiring.
+  const trafficAccountService = createTrafficAccountService({ systemHomeDir });
+  const resolveSponsorWritePin = createTrafficSponsorWritePinResolver({ trafficAccountService });
+  const baseSigner = createLocalMnemonicSigner({ secretStore, adapters, resolveSponsorWritePin });
   const signer = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
     ? createTestChainWriteSigner(baseSigner)
     : baseSigner;
@@ -4829,6 +4857,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     secretStore,
     signer,
     adapters,
+    trafficAccountService,
     chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
     socketPresenceApiBaseUrl,
     socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
@@ -4866,6 +4895,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       const profileBaseSigner = createLocalMnemonicSigner({
         secretStore: createFileSecretStore(profileHomeDir),
         adapters,
+        resolveSponsorWritePin,
       });
       return context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? createTestChainWriteSigner(profileBaseSigner)
@@ -5177,6 +5207,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       const profileBaseSigner = createLocalMnemonicSigner({
         secretStore: createFileSecretStore(profile.homeDir),
         adapters,
+        resolveSponsorWritePin,
       });
       const profileSigner = path.resolve(profile.homeDir) === path.resolve(homeDir)
         ? signer
@@ -5389,7 +5420,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       if (!profile) throw new Error(`MetaBot profile not found: ${slug}`);
       return profile.homeDir === homeDir
         ? signer
-        : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profile.homeDir), adapters });
+        : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profile.homeDir), adapters, resolveSponsorWritePin });
     })(),
     log: (message) => {
       console.warn(message);
@@ -5403,7 +5434,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
       systemHomeDir,
       createSignerForProfileHome: (profileHomeDir) => (profileHomeDir === homeDir
         ? signer
-        : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profileHomeDir), adapters })),
+        : createLocalMnemonicSigner({ secretStore: createFileSecretStore(profileHomeDir), adapters, resolveSponsorWritePin })),
       adapters,
       resolvePeerChatPublicKey,
       log: (message) => {

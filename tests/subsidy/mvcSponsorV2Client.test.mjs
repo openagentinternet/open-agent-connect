@@ -689,3 +689,127 @@ test('mvcSponsorV2Client keeps the configured timeout active while reading the r
   );
   assert.equal(calls, 1);
 });
+
+test('mvcSponsorV2Client serializes trafficAccount into the pre body', async () => {
+  const calls = [];
+  const client = createMvcSponsorV2Client({
+    baseUrl: 'https://www.metaso.network/assist-open-api',
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return jsonResponse({
+        code: 0,
+        data: {
+          preparedTxHex: 'prepared-tx-hex',
+          orderId: 'order-1',
+          minerFee: 111,
+          userInputIndexes: [0],
+        },
+      });
+    },
+  });
+  const trafficAccount = { accountId: 'gmid-account', authSignature: 'YXV0aA==', timestamp: 1730000000 };
+
+  const pre = await client.preSponsor({
+    address: 'mvc-address-1',
+    txHex: 'unsigned-tx-hex',
+    challengeId: 'challenge-1',
+    publicKey: 'public-key-hex',
+    signature: 'base64-signature',
+    trafficAccount,
+  });
+
+  assert.equal(pre.orderId, 'order-1');
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    address: 'mvc-address-1',
+    txHex: 'unsigned-tx-hex',
+    challengeId: 'challenge-1',
+    publicKey: 'public-key-hex',
+    signature: 'base64-signature',
+    trafficAccount,
+  });
+});
+
+test('mvcSponsorV2Client rejects a malformed trafficAccount before any request', async () => {
+  let fetchCalls = 0;
+  const client = createMvcSponsorV2Client({
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return jsonResponse({ code: 0, data: {} });
+    },
+  });
+
+  await assert.rejects(
+    () => client.preSponsor({
+      address: 'mvc-address-1',
+      txHex: 'unsigned-tx-hex',
+      challengeId: 'challenge-1',
+      publicKey: 'public-key-hex',
+      signature: 'base64-signature',
+      trafficAccount: { accountId: 'gmid-account', authSignature: '', timestamp: 1730000000 },
+    }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+      assert.equal(error.stage, 'pre');
+      // IDBots parity: requireText at the pre stage reports pre_rejected.
+      assert.equal(error.reason, 'pre_rejected');
+      assert.match(error.serviceMessage, /trafficAccount\.authSignature is required/i);
+      return true;
+    },
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+test('mvcSponsorV2Client maps TRAFFIC_INSUFFICIENT envelope errorCode to insufficient_traffic', async () => {
+  const envelopeClient = createMvcSponsorV2Client({
+    retryDelaysMs: [],
+    fetchImpl: async () => jsonResponse({
+      code: 1,
+      message: 'traffic balance not enough',
+      data: { errorCode: 'TRAFFIC_INSUFFICIENT' },
+    }),
+  });
+
+  await assert.rejects(
+    () => envelopeClient.preSponsor({
+      address: 'mvc-address-1',
+      txHex: 'unsigned-tx-hex',
+      challengeId: 'challenge-1',
+      publicKey: 'public-key-hex',
+      signature: 'base64-signature',
+      trafficAccount: { accountId: 'gmid-account', authSignature: 'YXV0aA==', timestamp: 1730000000 },
+    }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+      assert.equal(error.stage, 'pre');
+      assert.equal(error.reason, 'insufficient_traffic');
+      assert.match(error.serviceMessage, /traffic balance not enough/i);
+      return true;
+    },
+  );
+
+  // Same mapping on the HTTP-error branch, and the explicit code wins over a
+  // message that would otherwise normalize to a different reason.
+  const httpClient = createMvcSponsorV2Client({
+    retryDelaysMs: [],
+    fetchImpl: async () => jsonResponse({
+      code: 4001,
+      message: 'available amount not enough',
+      data: { errorCode: 'TRAFFIC_INSUFFICIENT' },
+    }, { ok: false, status: 400 }),
+  });
+
+  await assert.rejects(
+    () => httpClient.preSponsor({
+      address: 'mvc-address-1',
+      txHex: 'unsigned-tx-hex',
+      challengeId: 'challenge-1',
+      publicKey: 'public-key-hex',
+      signature: 'base64-signature',
+    }),
+    (error) => {
+      assert.equal(error.code, 'mvc_fee_assist_pre_failed');
+      assert.equal(error.reason, 'insufficient_traffic');
+      return true;
+    },
+  );
+});

@@ -49,6 +49,20 @@ export interface CliDependencies {
   chain?: {
     write?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  /** Traffic (流量) verbs; owner-scoped thin clients over the daemon /api/traffic/* routes. */
+  traffic?: {
+    status?: () => Awaitable<MetabotCommandResult<unknown>>;
+    getMode?: () => Awaitable<MetabotCommandResult<unknown>>;
+    setMode?: (input: { mode: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    balance?: () => Awaitable<MetabotCommandResult<unknown>>;
+    ledger?: (input: { cursor?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    usage?: () => Awaitable<MetabotCommandResult<unknown>>;
+    claim?: () => Awaitable<MetabotCommandResult<unknown>>;
+    redeem?: (input: { code: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    getApiBase?: () => Awaitable<MetabotCommandResult<unknown>>;
+    setApiBase?: (input: { apiBase: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    resetApiBase?: () => Awaitable<MetabotCommandResult<unknown>>;
+  };
   daemon?: {
     start?: () => Awaitable<MetabotCommandResult<unknown>>;
     stop?: () => Awaitable<MetabotCommandResult<unknown>>;
