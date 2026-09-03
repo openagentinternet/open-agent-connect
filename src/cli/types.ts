@@ -210,6 +210,14 @@ export interface CliDependencies {
   };
   chainhistory?: {
     recordRead?: (input: { from?: string; input: RecordChainReadInput }) => Awaitable<MetabotCommandResult<unknown>>;
+    recall?: (input: {
+      from?: string;
+      query?: string;
+      kind?: ChainHistoryKind;
+      fromDate?: string;
+      toDate?: string;
+      limit?: number;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
     summaryPending?: (input: { from?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
     summaryApply?: (input: {
       from?: string;

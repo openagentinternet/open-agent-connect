@@ -25,6 +25,9 @@ function readOptionalString(payload: Record<string, unknown>, key: string): stri
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+/** recall date flags mirror the chain_history_recall tool contract (YYYY-MM-DD). */
+const RECALL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 export async function runChainhistoryCommand(
   args: string[],
   context: CliRuntimeContext,
@@ -65,6 +68,40 @@ export async function runChainhistoryCommand(
 
   if (subcommand === 'read') {
     return commandUnknownSubcommand(`chainhistory read ${String(nested ?? '')}`.trim());
+  }
+
+  if (subcommand === 'recall') {
+    const handler = requireChainhistoryHandler(context, 'recall');
+    if (isFailure(handler)) return handler;
+    const kind = readFlagValue(args, '--kind');
+    if (kind !== null && kind !== 'write' && kind !== 'read') {
+      return commandFailed('invalid_flag', '--kind must be "write" or "read".');
+    }
+    const fromDate = readFlagValue(args, '--from-date');
+    const toDate = readFlagValue(args, '--to-date');
+    if (fromDate !== null && !RECALL_DATE_PATTERN.test(fromDate)) {
+      return commandFailed('invalid_flag', '--from-date must be YYYY-MM-DD.');
+    }
+    if (toDate !== null && !RECALL_DATE_PATTERN.test(toDate)) {
+      return commandFailed('invalid_flag', '--to-date must be YYYY-MM-DD.');
+    }
+    if (fromDate !== null && toDate !== null && fromDate > toDate) {
+      return commandFailed('invalid_flag', '--from-date must not be after --to-date.');
+    }
+    const rawLimit = readFlagValue(args, '--limit');
+    const limit = rawLimit === null ? undefined : Number(rawLimit);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+      return commandFailed('invalid_flag', '--limit must be a positive integer.');
+    }
+    const query = readFlagValue(args, '--query');
+    return handler({
+      from,
+      ...(query !== null && query.trim() ? { query: query.trim() } : {}),
+      ...(kind !== null ? { kind: kind as ChainHistoryKind } : {}),
+      ...(fromDate !== null ? { fromDate } : {}),
+      ...(toDate !== null ? { toDate } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
   }
 
   if (subcommand === 'summary' && nested === 'pending') {
