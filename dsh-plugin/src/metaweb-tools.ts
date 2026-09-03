@@ -3,10 +3,14 @@
  * pair (search_metaweb / read_metaweb_pin) plus the static worldview prompt
  * section. Tools execute the OAC core modules in-process (same dist-root
  * resolution as local-read; no CLI subprocess on the hot path); the base URL
- * honors METABOT_METAWEB_API_BASE_URL.
+ * honors METABOT_METAWEB_API_BASE_URL. read_metaweb_pin additionally mirrors
+ * each successful read into the bot's chain history via a fire-and-forget
+ * `chainhistory read record` CLI call — never awaited, never fatal.
  */
 import { core } from './local-read.js'
-import type { HostContext, HostToolDefinition } from './context-types.js'
+import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
+import { oacSlugOf } from './browser-tools.js'
+import type { HostAgentLike, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
 
 export const METAWEB_WORLDVIEW_SECTION = 'oac:metaweb-worldview'
 export const METAWEB_WORLDVIEW_ORDER = 142
@@ -68,7 +72,25 @@ function toolError(message: string): { error: string } {
   return { error: message }
 }
 
-export function buildMetawebToolDefinitions(): HostToolDefinition[] {
+export function buildMetawebToolDefinitions(input: {
+  host: HostContext
+  hostAgent: HostAgentLike
+  run?: RunFn
+}): HostToolDefinition[] {
+  const { host, hostAgent } = input
+  const run = input.run ?? (async (args, options) => {
+    const { runMetabot } = await import('./cli-bridge.js')
+    return runMetabot(args, options)
+  })
+
+  const actorSlug = (exec: HostToolExec): string => {
+    const agent = exec.agent ?? hostAgent
+    const live = oacSlugOf(host, agent)
+    if (live) return live
+    const preset = host.agentPresets?.composedPreset?.(agent.ctx)
+    return typeof preset === 'string' ? preset.replace(/^oac-/, '') : ''
+  }
+
   const render = (_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> => [
     { type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) },
   ]
@@ -162,7 +184,7 @@ export function buildMetawebToolDefinitions(): HostToolDefinition[] {
       },
       output: { schema: { type: 'string' }, render },
       timeoutMs: 20_000,
-      execute: async (args: Record<string, unknown>) => {
+      execute: async (args: Record<string, unknown>, exec: HostToolExec) => {
         const pinId = textOf(args.pinId)
         if (!pinId) return toolError('pinId is required.')
         try {
@@ -174,6 +196,30 @@ export function buildMetawebToolDefinitions(): HostToolDefinition[] {
           }
           const uriModule = core('core/metaweb/uri.js') as { METAWEB_CITATION_RULE: string }
           const pin = await pinModule.readMetawebPin(pinId, metawebOptions())
+          // Fire-and-forget chain-history read record: resolved slug + CLI
+          // payload-file call, never awaited, so a recording failure or the
+          // CLI's latency can never slow or break the read itself. No slug
+          // (non-oac session) means there is no profile to record into — skip.
+          const slug = actorSlug(exec)
+          if (slug) {
+            const meta = (pin.meta ?? {}) as Record<string, unknown>
+            const creator = (pin.creator ?? {}) as Record<string, unknown>
+            void runMetabotWithPayloadFile(
+              ['chainhistory', 'read', 'record', '--from', slug],
+              {
+                pinId: textOf(pin.pinId) || pinId,
+                path: textOf(pin.path) || null,
+                protocol: textOf(pin.protocol) || null,
+                title: textOf(meta.title) || null,
+                authorGlobalMetaId: textOf(creator.globalMetaId) || null,
+                contentText: typeof pin.text === 'string' ? pin.text : null,
+                source: 'read_metaweb_pin',
+              },
+              '--payload-file',
+              [],
+              run,
+            ).catch(() => undefined)
+          }
           return `${formatModule.formatMetawebPinDetail(pin)}\n${uriModule.METAWEB_CITATION_RULE}`
         } catch (error) {
           return toolError(error instanceof Error ? error.message : String(error))
@@ -198,7 +244,7 @@ export function bindMetawebToolInstall(ctx: HostContext): void {
     order: METAWEB_WORLDVIEW_ORDER,
     text: METAWEB_WORLDVIEW_TEXT,
   })
-  for (const definition of buildMetawebToolDefinitions()) {
+  for (const definition of buildMetawebToolDefinitions({ host: ctx, hostAgent: { ctx } })) {
     try {
       ctx.tools?.register(definition)
     } catch (error) {

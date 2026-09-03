@@ -37,6 +37,8 @@ import {
   resolveMetabotPaths,
   type MetabotPaths,
 } from '../core/state/paths';
+import { createChainHistoryStore } from '../core/chainhistory/store';
+import { recordMetawebPinRead } from '../core/chainhistory/readLedger';
 import { createMemoryStore } from '../core/memory/memoryStore';
 import { createMemoryPolicyStore } from '../core/memory/memoryPolicy';
 import {
@@ -4097,6 +4099,14 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         return commandSuccess({ observerGlobalMetaId, subject: input.subject, snapshot: namedSnapshot, observations });
       },
     },
+    chainhistory: {
+      recordRead: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        await createChainHistoryStore(resolveMetabotPaths(actor.homeDir)).recordRead(input.input);
+        return commandSuccess({ recorded: true });
+      },
+    },
     dream: {
       due: async (input) => {
         const actor = await resolveActorHomeDir(context, input.from);
@@ -4706,6 +4716,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     grouptask: { ...defaults.grouptask, ...provided.grouptask },
     conversations: { ...defaults.conversations, ...provided.conversations },
     memory: { ...defaults.memory, ...provided.memory },
+    chainhistory: { ...defaults.chainhistory, ...provided.chainhistory },
     dream: { ...defaults.dream, ...provided.dream },
     twin: { ...defaults.twin, ...provided.twin },
     file: { ...defaults.file, ...provided.file },
@@ -5533,6 +5544,9 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
                   readMetawebPin: async ({ pinId }) => {
                     const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
                     const pin = await readMetawebPin(pinId, baseUrl ? { baseUrl } : undefined);
+                    // Best-effort chain-history read record; never delays or
+                    // fails the study turn (recordMetawebPinRead also swallows).
+                    void recordMetawebPinRead(profilePaths, pin, 'study_job').catch(() => undefined);
                     const { formatMetawebPinDetail } = await import('../core/metaweb/format.js');
                     return formatMetawebPinDetail(pin);
                   },

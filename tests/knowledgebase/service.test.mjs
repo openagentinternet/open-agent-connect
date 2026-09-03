@@ -7,6 +7,7 @@ import { mkdtempTempRootSync } from '../helpers/tempRoots.mjs';
 
 const require = createRequire(import.meta.url);
 const { resolveMetabotPaths } = require('../../dist/core/state/paths.js');
+const { createChainHistoryStore } = require('../../dist/core/chainhistory/store.js');
 const {
   createKnowledgeBaseService,
   slugifyKbFileName,
@@ -163,4 +164,56 @@ test('removeKnowledgeBase prunes raw corpus AND derived index (no stale chunks)'
   assert.ok(reborn.id);
   const stale = await service.queryKnowledgeBase('bot-1', '民法');
   assert.deepEqual(stale, []);
+});
+
+test('addDocument with metaweb provenance marks the chain read record savedToKb', async () => {
+  const { paths } = makeProfile('metabot-kb-svc-kbmark-');
+  const service = createKnowledgeBaseService(paths);
+  const history = createChainHistoryStore(paths);
+  await history.recordRead({ pinId: 'pin-kbmark', title: 'read first', source: 'read_metaweb_pin' });
+
+  const saved = await service.addDocument('bot-1', {
+    title: 'Saved doc',
+    content: 'Content worth keeping.',
+    sourceType: 'metaweb',
+    pinId: 'pin-kbmark',
+  });
+
+  const record = await history.getRead('pin-kbmark');
+  assert.equal(record.savedToKb, true);
+  assert.equal(record.kbId, saved.knowledgeBase.id);
+});
+
+test('addDocument with an unknown pinId still saves (marking is best-effort)', async () => {
+  const { paths } = makeProfile('metabot-kb-svc-kbmark-miss-');
+  const service = createKnowledgeBaseService(paths);
+
+  const saved = await service.addDocument('bot-1', {
+    title: 'No prior read',
+    content: 'Saved without any chain history record.',
+    sourceType: 'metaweb',
+    pinId: 'pin-never-read',
+  });
+  assert.ok(saved.relPath);
+
+  const history = createChainHistoryStore(paths);
+  assert.equal(await history.getRead('pin-never-read'), null, 'marking never creates a record');
+});
+
+test('addDocument without metaweb sourceType never marks chain history', async () => {
+  const { paths } = makeProfile('metabot-kb-svc-kbmark-manual-');
+  const service = createKnowledgeBaseService(paths);
+  const history = createChainHistoryStore(paths);
+  await history.recordRead({ pinId: 'pin-manual', title: 'read then manual save' });
+
+  await service.addDocument('bot-1', {
+    title: 'Manual save',
+    content: 'Same pin, but saved as a manual doc.',
+    sourceType: 'manual',
+    pinId: 'pin-manual',
+  });
+
+  const record = await history.getRead('pin-manual');
+  assert.equal(record.savedToKb, false);
+  assert.equal(record.kbId, null);
 });
