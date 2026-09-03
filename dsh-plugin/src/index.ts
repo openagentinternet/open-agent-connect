@@ -41,6 +41,7 @@ import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js
 import { dispatchGroupTaskRoutes } from './grouptask.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
+import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
 import { slugFromPresetId } from './chip-logic.js'
@@ -484,6 +485,16 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   if (config.dream?.enabled !== false) {
     applyDreamScheduler(ctx, { tickMinutes: config.dream?.tickMinutes })
   }
+
+  // Chain history summary drain: same host-lifetime timer pattern, gated and
+  // budgeted through config.chainHistory.summary (enabled by default).
+  if (config.chainHistory?.summary?.enabled !== false) {
+    applyChainHistorySummaryScheduler(ctx, {
+      tickMinutes: config.chainHistory?.summary?.tickMinutes,
+      dailyCap: config.chainHistory?.summary?.dailyCap,
+      perTick: config.chainHistory?.summary?.perTick,
+    })
+  }
 }
 
 export type { HealthPayload, OacDshConfig }
@@ -541,6 +552,17 @@ export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick } from './dream-scheduler.js'
+export {
+  applyChainHistorySummaryScheduler,
+  createDshLlmSummarizerProvider,
+  runChainHistorySummaryTick,
+  type ChainHistorySummaryBotOutcome,
+  type ChainHistorySummarySchedulerOptions,
+  type ChainHistorySummaryTickOptions,
+  type SummarizerBrains,
+  type SummarizerInput,
+  type SummarizerProvider,
+} from './chain-history-summary.js'
 export {
   buildDelegationMessage,
   buildTwinToolDefinitions,

@@ -215,6 +215,18 @@ export interface OacDshConfig {
     /** Scheduler tick period in minutes (default 10). */
     tickMinutes?: number
   }
+  /** Chain history summary drain: LLM gists for pending ledger records. */
+  chainHistory?: {
+    summary?: {
+      enabled?: boolean
+      /** Scheduler tick period in minutes (default 30). */
+      tickMinutes?: number
+      /** Per-Bot daily summary budget, both kinds combined (default 40). */
+      dailyCap?: number
+      /** Global per-tick summary budget across all Bots (default 10). */
+      perTick?: number
+    }
+  }
   /** Twin/Worker orchestration (Phase 7+). */
   twin?: {
     enabled?: boolean

@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import type { MetabotCommandResult } from '../core/contracts/commandResult';
-import type { RecordChainReadInput } from '../core/chainhistory/types';
+import type { ChainHistoryKind, RecordChainReadInput } from '../core/chainhistory/types';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
 import type { SystemHost } from '../core/system/types';
 
@@ -210,6 +210,14 @@ export interface CliDependencies {
   };
   chainhistory?: {
     recordRead?: (input: { from?: string; input: RecordChainReadInput }) => Awaitable<MetabotCommandResult<unknown>>;
+    summaryPending?: (input: { from?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    summaryApply?: (input: {
+      from?: string;
+      kind: ChainHistoryKind;
+      pinId: string;
+      outcome: 'done' | 'failed';
+      summary?: string;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   dream?: {
     due?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;

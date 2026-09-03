@@ -2783,6 +2783,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     usage: 'metabot chainhistory <subcommand>',
     subcommands: [
       { name: 'read', summary: 'Read-side ledger entries.' },
+      { name: 'summary', summary: 'Async summary drain: pending candidates and outcome application.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -2803,6 +2804,33 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     },
     successFields: ['recorded'],
     examples: ['metabot chainhistory read record --from alice --payload-file /tmp/chain-read.json'],
+  },
+  {
+    commandPath: ['chainhistory', 'summary', 'pending'],
+    summary: 'List pending summary candidates (writes first, then reads, oldest first) plus today\'s completed count.',
+    usage: 'metabot chainhistory summary pending [--from <bot-slug>] [--limit <n>]',
+    optionalFlags: [
+      FROM_BOT_FLAG,
+      { flag: '--limit', value: '<n>', description: 'Maximum items. Defaults to 50, capped at 200.' },
+      HELP_JSON_FLAG,
+    ],
+    successFields: ['items', 'summarizedToday'],
+    examples: ['metabot chainhistory summary pending --from alice --limit 20'],
+  },
+  {
+    commandPath: ['chainhistory', 'summary', 'apply'],
+    summary: 'Apply one summary outcome (done with summary text, or failed) to a chain history record.',
+    usage: 'metabot chainhistory summary apply [--from <bot-slug>] --payload-file <path>',
+    requiredFlags: [{ flag: '--payload-file', value: '<path>', description: 'JSON payload: { kind: write|read, pinId, outcome: done|failed, summary? }. done requires a non-empty summary.' }],
+    optionalFlags: [FROM_BOT_FLAG, HELP_JSON_FLAG],
+    requestShape: {
+      kind: 'write | read (required)',
+      pinId: 'chain pin id (required)',
+      outcome: 'done | failed (required)',
+      summary: 'summary text (required when outcome is done; trimmed, capped at 500 chars)',
+    },
+    successFields: ['applied'],
+    examples: ['metabot chainhistory summary apply --from alice --payload-file /tmp/chain-summary.json'],
   },
   {
     commandPath: ['dream'],

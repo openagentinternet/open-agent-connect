@@ -4106,6 +4106,53 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         await createChainHistoryStore(resolveMetabotPaths(actor.homeDir)).recordRead(input.input);
         return commandSuccess({ recorded: true });
       },
+      summaryPending: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createChainHistoryStore(resolveMetabotPaths(actor.homeDir));
+        const rawLimit = typeof input.limit === 'number' && Number.isFinite(input.limit) ? Math.floor(input.limit) : 50;
+        const limit = Math.min(200, Math.max(1, rawLimit));
+        const [writes, reads] = await Promise.all([
+          store.listPendingSummaries('write', limit),
+          store.listPendingSummaries('read', limit),
+        ]);
+        // Writes first, then reads; each kind arrives oldest-first from the store.
+        const items = [
+          ...writes.map(({ record }) => ({
+            kind: 'write' as const,
+            pinId: record.pinId,
+            path: record.path,
+            contentText: record.contentText,
+            occurredAtMs: record.occurredAtMs,
+          })),
+          ...reads.map(({ record }) => ({
+            kind: 'read' as const,
+            pinId: record.pinId,
+            path: record.path,
+            protocol: record.protocol,
+            title: record.title,
+            contentText: record.contentExcerpt,
+            occurredAtMs: record.firstReadAtMs,
+          })),
+        ].slice(0, limit);
+        const now = new Date();
+        const localMidnightMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const summarizedToday = await store.countSummariesSince(null, localMidnightMs);
+        return commandSuccess({ items, summarizedToday });
+      },
+      summaryApply: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createChainHistoryStore(resolveMetabotPaths(actor.homeDir));
+        const applied = await store.applySummaryOutcome(
+          input.kind,
+          input.pinId,
+          input.outcome === 'done'
+            ? { status: 'done', summary: input.summary ?? '' }
+            : { status: 'failed' },
+        );
+        return commandSuccess({ applied });
+      },
     },
     dream: {
       due: async (input) => {
