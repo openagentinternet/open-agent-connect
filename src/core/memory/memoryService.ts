@@ -13,6 +13,8 @@ import { buildExperiencePromptBlocksXml, RECENT_SUMMARIES_PROMPT_DAYS } from './
 import { createImpressionStore, type ImpressionStore } from './impressionStore';
 import { buildKnowledgeBlock, KNOWLEDGE_PROMPT_MAX_ITEMS } from './knowledgePromptBlocks';
 import { createKnowledgeStore, type KnowledgeStore } from './knowledgeStore';
+import { buildKnowledgeBasesPromptBlock } from '../knowledgebase/promptBlocks';
+import { createKnowledgeBaseStore, type KnowledgeBaseStore } from '../knowledgebase/store';
 import { extractTurnMemoryChanges } from './memoryExtractor';
 import { judgeMemoryCandidate } from './memoryJudge';
 import { buildScopedMemoryPromptBlocks } from './memoryPromptBlocks';
@@ -66,6 +68,7 @@ export async function buildMemoryBlocksForRequest(
     policy?: MemoryPolicyStore;
     dream?: DreamStore;
     knowledge?: KnowledgeStore;
+    knowledgeBases?: KnowledgeBaseStore;
     experience?: ExperienceStore;
     impressions?: ImpressionStore;
   } = {},
@@ -151,6 +154,7 @@ export async function buildMemoryBlocksForRequest(
   // Knowledge hot layer: local (owner) sessions only, matching the IDBots
   // cowork channel — A2A replies do not get the knowledge block.
   let knowledgeXml = '';
+  let knowledgeBasesXml = '';
   if (resolution.ownerReadPolicy === 'all') {
     const knowledgeEntries = await knowledge.listKnowledge({
       status: 'active',
@@ -158,6 +162,11 @@ export async function buildMemoryBlocksForRequest(
       touchLastUsed: true,
     });
     knowledgeXml = buildKnowledgeBlock(knowledgeEntries);
+    // Knowledge-base hot layer: which document corpora this bot owns (name,
+    // description, counts) so the model knows where to query and save.
+    // Empty registry builds '' — no block when the bot has no KBs.
+    const kbStore = stores.knowledgeBases ?? createKnowledgeBaseStore(paths);
+    knowledgeBasesXml = buildKnowledgeBasesPromptBlock(await kbStore.listKnowledgeBases());
   }
 
   // Person-anchor cognition block for direct external (A2A 1:1) conversations.
@@ -176,7 +185,7 @@ export async function buildMemoryBlocksForRequest(
   }
 
   return {
-    xml: [scopedXml, experienceXml, knowledgeXml, cognitionXml].filter(Boolean).join('\n\n'),
+    xml: [scopedXml, experienceXml, knowledgeXml, knowledgeBasesXml, cognitionXml].filter(Boolean).join('\n\n'),
     policy,
     resolution,
   };

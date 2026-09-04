@@ -1358,3 +1358,137 @@ function normalizeTrafficApiBasePayload(data: unknown): TrafficApiBasePayload {
     effectiveApiBase: textOf(record.effectiveApiBase),
   }
 }
+
+// ---- Knowledge bases (bot editor Knowledge tab) ----------------------------
+
+export type KbRecord = {
+  id: string
+  name: string
+  description: string
+  isDefault: boolean
+  autoLearn: boolean
+  docCount: number
+  chunkCount: number
+  lastLearnedAt: number | null
+}
+
+export type KbHit = {
+  docRelPath: string
+  ord: number
+  snippet: string
+  score: number
+  title: string
+}
+
+export type KbQueryResult = {
+  knowledgeBaseId: string
+  knowledgeBaseName: string
+  hits: KbHit[]
+}
+
+export type StudyJob = {
+  id: string
+  topic: string
+  status: string
+  budgetPins: number
+  pinsProcessed: number
+  runCount: number
+  consecutiveFailures: number
+  summary: string | null
+  error: string | null
+}
+
+function kbRecordOf(value: unknown): KbRecord {
+  const record = recordOf(value)
+  const lastLearnedAt = toNumber(record.lastLearnedAt)
+  return {
+    id: textOf(record.id),
+    name: textOf(record.name),
+    description: textOf(record.description),
+    isDefault: record.isDefault === true,
+    autoLearn: record.autoLearn === true,
+    docCount: Math.max(0, toNumber(record.docCount)),
+    chunkCount: Math.max(0, toNumber(record.chunkCount)),
+    lastLearnedAt: lastLearnedAt > 0 ? lastLearnedAt : null,
+  }
+}
+
+function kbHitOf(value: unknown): KbHit {
+  const record = recordOf(value)
+  return {
+    docRelPath: textOf(record.docRelPath),
+    ord: Math.max(0, toNumber(record.ord)),
+    snippet: textOf(record.snippet),
+    score: toNumber(record.score),
+    title: textOf(record.title),
+  }
+}
+
+function studyJobOf(value: unknown): StudyJob {
+  const record = recordOf(value)
+  const pins = Array.isArray(record.processedPinIds) ? record.processedPinIds.length : 0
+  return {
+    id: textOf(record.id),
+    topic: textOf(record.topic),
+    status: textOf(record.status) || 'pending',
+    budgetPins: Math.max(0, toNumber(record.budgetPins)),
+    pinsProcessed: pins,
+    runCount: Math.max(0, toNumber(record.runCount)),
+    consecutiveFailures: Math.max(0, toNumber(record.consecutiveFailures)),
+    summary: textOf(record.summary) || null,
+    error: textOf(record.error) || null,
+  }
+}
+
+export async function kbList(from: string): Promise<KbRecord[]> {
+  const data = recordOf(await post<unknown>('kb/list', { from }))
+  const rows = Array.isArray(data.knowledgeBases) ? data.knowledgeBases : []
+  return rows.map(kbRecordOf)
+}
+
+export async function kbCreate(from: string, name: string, description?: string): Promise<void> {
+  await post('kb/create', { from, name, ...(description ? { description } : {}) })
+}
+
+export async function kbUpdate(
+  from: string,
+  id: string,
+  patch: { name?: string; description?: string; autoLearn?: boolean },
+): Promise<void> {
+  await post('kb/update', { from, id, ...patch })
+}
+
+export async function kbRemove(from: string, id: string): Promise<void> {
+  await post('kb/remove', { from, id })
+}
+
+export async function kbQuery(from: string, text: string, id?: string): Promise<KbQueryResult[]> {
+  const data = recordOf(await post<unknown>('kb/query', { from, text, ...(id ? { id } : {}) }))
+  const results = Array.isArray(data.results) ? data.results : []
+  return results.map((entry) => {
+    const record = recordOf(entry)
+    const hits = Array.isArray(record.hits) ? record.hits : []
+    return {
+      knowledgeBaseId: textOf(record.knowledgeBaseId),
+      knowledgeBaseName: textOf(record.knowledgeBaseName),
+      hits: hits.map(kbHitOf),
+    }
+  })
+}
+
+export async function kbAddDocument(
+  from: string,
+  input: { id?: string; title: string; content: string; sourceType?: string; url?: string; pinId?: string },
+): Promise<void> {
+  await post('kb/add-document', { from, ...input })
+}
+
+export async function kbLearn(from: string, id?: string, full?: boolean): Promise<void> {
+  await post('kb/learn', { from, ...(id ? { id } : {}), ...(full ? { full: true } : {}) })
+}
+
+export async function studyList(from: string): Promise<StudyJob[]> {
+  const data = recordOf(await post<unknown>('study/list', { from }))
+  const rows = Array.isArray(data.jobs) ? data.jobs : []
+  return rows.map(studyJobOf)
+}

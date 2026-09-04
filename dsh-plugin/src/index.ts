@@ -40,6 +40,7 @@ import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
 import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 import { dispatchGroupTaskRoutes } from './grouptask.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
+import { dispatchKbRoutes } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
@@ -218,6 +219,8 @@ async function dispatchPost(
     llm: ctx.llm as unknown as import('./llm-generate.js').LlmStreamLike | undefined,
   })
   if (memory !== undefined) return memory
+  const kb = await dispatchKbRoutes(method, payload)
+  if (kb !== undefined) return kb
   const section = await dispatchSection(method, payload)
   if (section !== undefined) return section
   return { ok: false, state: 'failed', code: 'not-found', message: `unknown oac API method "${method}"` }
@@ -554,6 +557,7 @@ export {
 export { dispatchSection } from './sections.js'
 export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
+export { dispatchKbRoutes } from './kb-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick } from './dream-scheduler.js'
 export {
