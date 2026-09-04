@@ -27,6 +27,18 @@ daemon's engine (5 s tick) drives every active task — chair planning, worker
 replies, status transitions — and the panel reads the synced stores directly
 (no CLI boot per poll).
 
+**Chat entry (Twin only).** The Twin Bot's DSH sessions carry the native
+`group_task` tool (an action union mirroring the IDBots `metabot-group-task`
+skill verbs: `propose`/`decide`/`create_from_proposal`/`search_candidates`,
+`list`/`detail`/`messages`/`post`, `close`/`reopen`/`kick`/`member_status`/
+`invite`/`invites`/`health`) plus the `oac:group-task` SOP section — so asking
+the Meta bot in chat to 开一个群任务 runs the wish → slate → owner confirm →
+create → OpenTeam invite flow instead of falling back to local worker
+delegation. Tool actions execute through the same `metabot grouptask …`
+bridge the panel routes use, and chat `propose` calls record the current DSH
+session id as the proposal's source session (the source-session relay builds
+on this later).
+
 Prerequisites (surfaced by the health banner above the task list, and by
 `metabot grouptask health`):
 
