@@ -185,3 +185,27 @@ test('blocks: dream-written work reviews join the experience hot layer', async (
   assert.match(result.xml, /官网落地页/);
   assert.match(result.xml, /5 星好评/);
 });
+
+test('blocks: local owner turn ensures the default knowledge base and lists it', async () => {
+  const paths = await createTempProfileHome();
+  const { createKnowledgeBaseService } = require('../../dist/core/knowledgebase/service.js');
+
+  // First turn: no KBs exist yet — the prompt block ensures the default KB
+  // (IDBots parity) so the model always has a save target.
+  const first = await buildMemoryBlocksForRequest(paths, { channel: 'dsh', userText: '你好' });
+  assert.match(first.xml, /<knowledge_bases>/);
+  assert.match(first.xml, /<kb name="Default" default="true" docs="0" chunks="0"><\/kb>/);
+
+  // The default row persists in the registry (UI and agents see it too).
+  const slug = path.basename(paths.profileRoot);
+  const kbService = createKnowledgeBaseService(paths);
+  const defaultKb = await kbService.store.getDefaultKnowledgeBase(slug);
+  assert.ok(defaultKb, 'default KB created');
+  assert.equal(defaultKb.name, 'Default');
+  assert.equal(defaultKb.metabotSlug, slug);
+
+  // Second turn reuses it (no duplicate defaults).
+  await buildMemoryBlocksForRequest(paths, { channel: 'dsh', userText: 'again' });
+  const rows = await kbService.store.listKnowledgeBases();
+  assert.equal(rows.filter((row) => row.isDefault).length, 1);
+});
