@@ -45,6 +45,7 @@ import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
 import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
+import { installGroupTaskOnAgent } from './group-task-tools.js'
 import { slugFromPresetId } from './chip-logic.js'
 import { reconcilePresets } from './preset.js'
 import { dispatchSection } from './sections.js'
@@ -456,6 +457,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
           const orchestrator = installTwinOnAgent(ctx, agent, slug, {
             stepTimeoutMs: config.twin?.stepTimeoutMs,
           })
+          installGroupTaskOnAgent(agent, slug)
           if (!notifiedBacklogs.has(slug)) {
             notifiedBacklogs.add(slug)
             await orchestrator.clearPendingNotifications(slug)
@@ -574,6 +576,12 @@ export {
   TWIN_OVERLAY_TEXT,
   WORKER_DELEGATION_SYSTEM_PROMPT,
 } from './twin-tools.js'
+export {
+  buildGroupTaskToolDefinition,
+  createGroupTaskController,
+  GROUP_TASK_SOP_TEXT,
+  installGroupTaskOnAgent,
+} from './group-task-tools.js'
 export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
 export {
   buildChainHistoryRecallToolDefinitions,
