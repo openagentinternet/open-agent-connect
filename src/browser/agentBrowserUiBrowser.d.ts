@@ -51,9 +51,18 @@ declare module '@openagentinternet/agent-browser-ui/browser' {
   export const BROWSER_MENU_SECTIONS: BrowserMenuSectionDefinition[];
   export const BROWSER_SETTINGS_TABS: BrowserSettingsTabDefinition[];
 
+  export type BrowserTheme = 'light' | 'dark' | 'system';
+
+  export interface RenderBrowserPageHtmlOptions {
+    /** Initial Browser theme; defaults to `light` when omitted. */
+    theme?: BrowserTheme;
+  }
+
   export function buildBrowserPageDefinition(): BrowserPageDefinition;
   export function renderBrowserPageHtml(
     definition?: BrowserPageDefinition,
     languagePreference?: string | null,
+    options?: RenderBrowserPageHtmlOptions,
   ): Promise<string>;
+  export function normalizeBrowserTheme(theme: unknown): BrowserTheme;
 }

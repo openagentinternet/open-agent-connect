@@ -47,6 +47,19 @@ test('Browser page renders template preview images with browser-safe URLs', asyn
   assert.match(html, /data:image\/svg\+xml/);
 });
 
+test('Browser page render bakes the requested theme and defaults to light', async () => {
+  const dark = await browserModule.renderBrowserPageHtml(undefined, null, { theme: 'dark' });
+  assert.match(dark, /data-browser-theme="dark"/);
+  assert.match(dark, /data-browser-resolved-theme="dark"/);
+  assert.match(dark, /color-scheme: dark/);
+
+  const system = await browserModule.renderBrowserPageHtml(undefined, null, { theme: 'system' });
+  assert.match(system, /data-browser-theme="system"/);
+
+  const fallback = await browserModule.renderBrowserPageHtml();
+  assert.match(fallback, /data-browser-theme="light"/);
+});
+
 test('Browser module keeps exported page script English-only even for zh-CN callers', async () => {
   const definition = browserPageApp.buildBrowserPageDefinition();
   const html = await browserModule.renderBrowserPageHtml(undefined, 'zh-CN');

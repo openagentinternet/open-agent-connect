@@ -12,6 +12,7 @@ import { buildMetaAppsPageDefinition } from '../../ui/pages/metaapps/app';
 import { buildServicesPageDefinition } from '../../ui/pages/services/app';
 import { buildSettingsPageDefinition } from '../../ui/pages/settings/app';
 import type { LocalUiPageDefinition } from '../../ui/pages/types';
+import { normalizeBrowserTheme } from '@openagentinternet/agent-browser-ui/browser';
 import { renderBrowserPageHtml } from '../../browser/page';
 import { createI18nContext, renderClientI18nScript } from '../../ui/i18n';
 import type { I18nKey, LocalUiI18nContext } from '../../ui/i18n';
@@ -276,6 +277,11 @@ async function serveBundledUiAsset(context: Parameters<RouteHandler>[0]): Promis
 
 export const handleUiRoutes: RouteHandler = async (context) => {
   const { req, url, handlers } = context;
+  // Browser shell theme: embedding hosts (the DSH Bot Browser sidebar) append
+  // their resolved theme as `?theme=` so the iframe's first paint already
+  // matches; runtime flips arrive as set-theme postMessages and never reload.
+  // Pages opened directly (no param) keep ABC's light default.
+  const browserTheme = normalizeBrowserTheme(url.searchParams.get('theme'));
   const canonicalBareBrowser = canonicalBareBrowserPath(url);
 
   if (canonicalBareBrowser) {
@@ -295,7 +301,7 @@ export const handleUiRoutes: RouteHandler = async (context) => {
     }
     const html = handlers.ui?.renderPage
       ? await handlers.ui.renderPage('browser')
-      : await renderBrowserPageHtml(undefined, getBrowserLanguagePreference(req));
+      : await renderBrowserPageHtml(undefined, getBrowserLanguagePreference(req), { theme: browserTheme });
     context.sendHtml(200, html);
     return true;
   }
@@ -366,7 +372,7 @@ export const handleUiRoutes: RouteHandler = async (context) => {
   if (page === 'browser') {
     const html = handlers.ui?.renderPage
       ? await handlers.ui.renderPage(page)
-      : await renderBrowserPageHtml(undefined, getBrowserLanguagePreference(req));
+      : await renderBrowserPageHtml(undefined, getBrowserLanguagePreference(req), { theme: browserTheme });
     context.sendHtml(200, html);
     return true;
   }

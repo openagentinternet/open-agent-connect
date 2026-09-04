@@ -268,6 +268,13 @@ user-message tail (active tab URI/title, open tabs, MetaApp `source_dir` when
 known). If the sidebar is closed, the block says so — the model must not guess
 from earlier CLI opens.
 
+**Theme following.** The Browser follows the DSH theme: the sidebar appends
+the DSH-resolved theme to the iframe URL (`?theme=dark|light`), the daemon
+bakes it into the served ABC page (no light flash in dark mode), and DSH
+theme flips are pushed into the loaded iframe as ABC
+`agent-browser:set-theme` postMessages without reloading it. Pages opened
+outside DSH keep ABC's light default.
+
 When the plugin is not mounted (Codex, Claude Code, OpenClaw, ...), no Browser
 page is open, `pagesReached` stays `0`, and the skill behaves exactly as before.
 
