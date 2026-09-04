@@ -61,6 +61,16 @@ function metawebUriClientNote(displayName: string): string {
   ].join('\n');
 }
 
+function metawebUriNetworkManageNote(displayName: string): string {
+  return [
+    '### MetaWeb URI Links',
+    '',
+    metawebUriPresentation(displayName),
+    '',
+    'Prefer the native `search_online_bots` tool for "view online bots" requests when it is available in this session\'s function list: its bullet lines carry catalog-backed bot names that stay clickable in the chat, so reuse those bullets verbatim instead of rebuilding the CLI table. Fall back to the CLI `network bots --online` table when the tool is absent or a deeper `--limit 50` fetch is needed.',
+  ].join('\n');
+}
+
 /**
  * Extra adapter markdown for one skill on one host. Returns '' when the
  * skill carries no host-specific guidance. `displayName` feeds the generic
@@ -71,10 +81,13 @@ export function renderSkillHostAdapterNote(
   hostId: string,
   displayName: string,
 ): string {
+  if (METAWEB_URI_CLIENT_HOSTS.has(hostId)) {
+    if (skillName === 'metabot-browser') return metawebUriBrowserNote(displayName);
+    if (skillName === 'metabot-network-manage') return metawebUriNetworkManageNote(displayName);
+    return metawebUriClientNote(displayName);
+  }
   if (skillName === 'metabot-browser') {
-    if (METAWEB_URI_CLIENT_HOSTS.has(hostId)) return metawebUriBrowserNote(displayName);
     return BROWSER_HOST_NOTES[hostId] ?? defaultBrowserNote(displayName);
   }
-  if (METAWEB_URI_CLIENT_HOSTS.has(hostId)) return metawebUriClientNote(displayName);
   return '';
 }

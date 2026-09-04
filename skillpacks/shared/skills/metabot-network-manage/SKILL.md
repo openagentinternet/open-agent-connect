@@ -83,6 +83,7 @@ $HOME/.metabot/bin/metabot network sources remove --base-url http://127.0.0.1:48
 
 - For first-run discovery, lead with online Bots and Bot pages. Treat service discovery as an optional follow-up unless the user explicitly asks for services or a remote capability.
 
+- On hosts whose session exposes a native `search_online_bots` tool (see the Host Adapter section), prefer it for "view online bots" requests: it returns bullet lines whose bot names are already clickable Bot-page links — reuse those bullets verbatim. The CLI `network bots --online` table below is the fallback (and the path for deeper `--limit 50` fetches).
 - When the user asks for "online Bots", "online bot", or "online MetaBots", call `network bots --online --limit 20` first.
 - Return a Markdown table (max 20 rows): copy the **exact** rows from CLI stdout — do not reformat, summarise, or re-order the data, and keep the name and bio cells verbatim. The one transformation you apply is turning each `globalmetaid` cell (and the Bot `name` when it is non-empty) into a clickable Bot-page link, following the universal convention in the `metabot-browser` skill ("Resource To Local Browser Link"): the MetaWeb URI form `[name](metaid://<globalMetaId>)` on hosts whose client opens Agent Internet URIs directly (see the Host Adapter section), the `localUiUrl` http form everywhere else.
 - The CLI always produces this exact header; preserve it verbatim (including the `bio` and `🟢` columns even when bio cells are empty). Render the table the same way, with the id and name linked:
