@@ -30,6 +30,7 @@ const METABOT_SKILLS = [
   'metabot-metaapp',
   'metabot-upload-file',
   'metabot-wallet-manage',
+  'metabot-schedule',
 ];
 
 const HOSTS = {

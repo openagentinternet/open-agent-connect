@@ -320,6 +320,15 @@ export interface ImpressionStore {
     seatRole?: string;
     evidencePinIds?: string[];
   }): Promise<ImpressionCollaborationFact>;
+  /** Hygiene compression: keep the newest `anchorsPerPair` active observations
+   * per (observer, subject) pair and supersede the older ones past the cutoff;
+   * rebuild the pair's snapshot from the remaining actives afterwards (the
+   * snapshot is deleted when nothing remains). */
+  compactObservations(input: {
+    cutoffMs: number;
+    anchorsPerPair: number;
+    excludeObservers?: ReadonlySet<string>;
+  }): Promise<{ pairsCompacted: number; observationsSuperseded: number; snapshotsRebuilt: number }>;
 }
 
 export function createImpressionStore(
@@ -536,6 +545,68 @@ export function createImpressionStore(
         .sort((left, right) => right.updatedAt - left.updatedAt
           || left.subjectGlobalMetaId.localeCompare(right.subjectGlobalMetaId))
         .slice(0, Math.min(500, Math.max(1, Math.floor(limit))));
+    },
+
+    async compactObservations(input) {
+      const cutoff = Math.floor(input.cutoffMs);
+      const anchors = Math.max(0, Math.min(50, Math.floor(input.anchorsPerPair)));
+      const compacted = await enqueue(async () => {
+        const file = await readFile();
+        // Candidate pairs: every pair holding an active observation older than
+        // the retention cutoff (IDBots `DISTINCT … WHERE status='active' AND created_at < ?`).
+        const pairKeys = new Set<string>();
+        for (const observation of file.observations) {
+          if (observation.status !== 'active' || observation.createdAt >= cutoff) continue;
+          pairKeys.add(`${observation.observerGlobalMetaId}|${observation.subjectGlobalMetaId}`);
+        }
+        const compactedPairs: Array<{ observer: string; subject: string }> = [];
+        let observationsSuperseded = 0;
+        for (const pairKey of pairKeys) {
+          const [observer, subject] = pairKey.split('|');
+          if (input.excludeObservers?.has(observer)) continue;
+          const rows = file.observations
+            .filter((observation) => (
+              observation.observerGlobalMetaId === observer
+              && observation.subjectGlobalMetaId === subject
+              && observation.status === 'active'
+            ))
+            .sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id));
+          const toSupersede = rows.slice(anchors).filter((row) => row.createdAt < cutoff);
+          if (toSupersede.length === 0) continue;
+          const supersededIds = new Set(toSupersede.map((row) => row.id));
+          for (const observation of file.observations) {
+            if (supersededIds.has(observation.id) && observation.status === 'active') {
+              observation.status = 'superseded';
+            }
+          }
+          observationsSuperseded += toSupersede.length;
+          compactedPairs.push({ observer, subject });
+        }
+        if (observationsSuperseded > 0) await writeFile(file);
+        return { compactedPairs, observationsSuperseded };
+      });
+
+      // Rebuild each compacted pair's snapshot from the remaining actives
+      // (rebuildSnapshot also deletes the snapshot when nothing remains).
+      // These run after the supersede write drains and are best effort — a
+      // rebuild failure never fails the step.
+      let snapshotsRebuilt = 0;
+      for (const pair of compacted.compactedPairs) {
+        try {
+          await this.rebuildSnapshot(pair.observer, pair.subject);
+          snapshotsRebuilt += 1;
+        } catch (error) {
+          console.warn(
+            `[ImpressionStore] Snapshot rebuild failed after compaction for ${pair.observer} -> ${pair.subject}: `
+            + `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      return {
+        pairsCompacted: compacted.compactedPairs.length,
+        observationsSuperseded: compacted.observationsSuperseded,
+        snapshotsRebuilt,
+      };
     },
 
     async appendCollaborationFact(input) {

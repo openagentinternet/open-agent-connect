@@ -203,6 +203,8 @@ import {
 } from '../core/chat/privateConversation';
 import { createLocalMnemonicSigner, executeTransfer } from '../core/signing/localMnemonicSigner';
 import { createGroupTaskDaemonHandlers } from './grouptaskHandlers';
+import { createScheduleDaemonHandlers } from './scheduleHandlers';
+import type { ScheduleStore } from '../core/schedule/store';
 import type { LocalIdentitySecrets, SecretStore } from '../core/secrets/secretStore';
 import {
   confirmWalletTransfer,
@@ -5048,6 +5050,13 @@ export function createDefaultMetabotDaemonHandlers(input: {
   autoReplyConfig?: PrivateChatAutoReplyConfig;
   llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
   providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
+  /** Scheduled-task verbs: shared per-profile store instances + host leases
+   *  owned by the daemon process (the tick and the routes must mutate the
+   *  same store instances / lease map). */
+  schedule?: {
+    createScheduleStore?: (homeDir: string) => ScheduleStore;
+    hostLeases?: Map<string, { host: string; expiresAtMs: number }>;
+  };
   // Test hook for the seller progress heartbeat cadence; defaults to
   // PROVIDER_ORDER_PROGRESS_NOTICE_INTERVAL_MS (120s, IDBots parity).
   providerOrderProgressNoticeIntervalMs?: number;
@@ -16423,6 +16432,12 @@ export function createDefaultMetabotDaemonHandlers(input: {
       createSignerForProfileHome,
       adapters,
       resolvePeerChatPublicKey,
+      log: (message) => console.warn(message),
+    }),
+    schedule: createScheduleDaemonHandlers({
+      systemHomeDir: normalizedSystemHomeDir,
+      createScheduleStore: input.schedule?.createScheduleStore,
+      hostLeases: input.schedule?.hostLeases,
       log: (message) => console.warn(message),
     }),
     chat: {

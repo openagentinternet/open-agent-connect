@@ -20,6 +20,7 @@ import { runConversationsCommand } from './commands/conversations';
 import { runMemoryCommand } from './commands/memory';
 import { runChainhistoryCommand } from './commands/chainhistory';
 import { runDreamCommand } from './commands/dream';
+import { runScheduleCommand } from './commands/schedule';
 import { runTwinCommand } from './commands/twin';
 import { runFileCommand } from './commands/file';
 import { runTraceCommand } from './commands/trace';
@@ -135,6 +136,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'dream':
           result = await runDreamCommand(rest, context);
+          break;
+        case 'schedule':
+          result = await runScheduleCommand(rest, context);
           break;
         case 'twin':
           result = await runTwinCommand(rest, context);

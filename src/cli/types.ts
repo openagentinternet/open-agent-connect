@@ -3,6 +3,7 @@ import type { MetabotCommandResult } from '../core/contracts/commandResult';
 import type { ChainHistoryKind, RecordChainReadInput } from '../core/chainhistory/types';
 import type { ConcreteSkillHost, SkillRenderFormat } from '../core/skills/skillContractTypes';
 import type { SystemHost } from '../core/system/types';
+import type { ScheduleChannel, ScheduleRunExecutor, ScheduleSpec } from '../core/schedule/store';
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -221,6 +222,11 @@ export interface CliDependencies {
     knowledgeDelete?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     impressionsList?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     impressionsShow?: (input: { from?: string; subject: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    hygieneStatus?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    hygieneDue?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    hygieneRun?: (input: { from?: string; noDeep?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    hygieneConfigGet?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    hygieneConfigSet?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   chainhistory?: {
     recordRead?: (input: { from?: string; input: RecordChainReadInput }) => Awaitable<MetabotCommandResult<unknown>>;
@@ -251,6 +257,34 @@ export interface CliDependencies {
     fail?: (input: { from?: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
     summaries?: (input: { from?: string; limit?: number; before?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     selfIdentity?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
+  schedule?: {
+    create?: (input: {
+      from?: string;
+      name: string;
+      prompt: string;
+      schedule: ScheduleSpec;
+      workingDirectory?: string;
+      channel?: ScheduleChannel;
+      expiresAt?: string | null;
+      enabled?: boolean;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    show?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    update?: (input: { from?: string; id: string; payload: Record<string, unknown> }) => Awaitable<MetabotCommandResult<unknown>>;
+    delete?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    enable?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    disable?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    run?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    runs?: (input: { from?: string; id?: string; limit?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    due?: (input: { from?: string; all?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    claim?: (input: { from?: string; id: string; executor?: ScheduleRunExecutor }) => Awaitable<MetabotCommandResult<unknown>>;
+    complete?: (input: {
+      from?: string;
+      runId: string;
+      error?: string | null;
+      durationMs?: number | null;
+    }) => Awaitable<MetabotCommandResult<unknown>>;
   };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

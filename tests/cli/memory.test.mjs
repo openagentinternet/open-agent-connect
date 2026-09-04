@@ -45,6 +45,11 @@ test('runCli dispatches memory CRUD and reads to the memory dependency group', a
       transcriptAppend: record('transcriptAppend'),
       chats: record('chats'),
       search: record('search'),
+      hygieneStatus: record('hygieneStatus'),
+      hygieneDue: record('hygieneDue'),
+      hygieneRun: record('hygieneRun'),
+      hygieneConfigGet: record('hygieneConfigGet'),
+      hygieneConfigSet: record('hygieneConfigSet'),
     },
   };
 
@@ -64,14 +69,21 @@ test('runCli dispatches memory CRUD and reads to the memory dependency group', a
   assert.equal(await run(['memory', 'transcript', 'append', '--from', 'alice', '--payload-file', 'p.json']), 0);
   assert.equal(await run(['memory', 'chats', '--from', 'alice', '--sort-order', 'asc']), 0);
   assert.equal(await run(['memory', 'search', '--from', 'alice', '--payload-file', 'p.json']), 0);
+  assert.equal(await run(['memory', 'hygiene', 'status', '--from', 'alice']), 0);
+  assert.equal(await run(['memory', 'hygiene', 'due', '--from', 'alice']), 0);
+  assert.equal(await run(['memory', 'hygiene', 'run', '--from', 'alice', '--no-deep']), 0);
+  assert.equal(await run(['memory', 'hygiene', 'config', 'get', '--from', 'alice']), 0);
+  assert.equal(await run(['memory', 'hygiene', 'config', 'set', '--from', 'alice', '--payload-file', 'p.json']), 0);
 
   assert.deepEqual(calls.map(([name]) => name), [
     'list', 'add', 'update', 'delete', 'blocks', 'extract',
     'policyGet', 'policySet', 'policyDelete', 'scopes', 'stats',
     'transcriptAppend', 'chats', 'search',
+    'hygieneStatus', 'hygieneDue', 'hygieneRun', 'hygieneConfigGet', 'hygieneConfigSet',
   ]);
   assert.deepEqual(calls[0][1], { from: 'alice', query: '咖啡', limit: 5, includeDeleted: false, scopeKind: undefined, scopeKey: undefined, usageClass: undefined, status: undefined, origin: undefined });
   assert.equal(calls[12][1].sortOrder, 'asc');
+  assert.deepEqual(calls[16][1], { from: 'alice', noDeep: true });
 });
 
 test('runCli rejects malformed memory invocations', async () => {
@@ -108,4 +120,10 @@ test('runCli rejects malformed memory invocations', async () => {
   assert.equal(await run(['memory', 'list', '--limit', 'abc']), 1);
   // invalid --sort-order
   assert.equal(await run(['memory', 'chats', '--sort-order', 'sideways']), 1);
+  // unknown hygiene subcommand
+  assert.equal(await run(['memory', 'hygiene', 'frobnicate']), 1);
+  // unknown hygiene config subcommand
+  assert.equal(await run(['memory', 'hygiene', 'config', 'frobnicate']), 1);
+  // config set without --payload-file
+  assert.equal(await run(['memory', 'hygiene', 'config', 'set', '--from', 'alice']), 1);
 });

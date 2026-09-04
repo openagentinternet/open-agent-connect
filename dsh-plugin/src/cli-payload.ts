@@ -1,4 +1,4 @@
-import { mkdtemp, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runMetabot, type MetabotCommandResult, type RunMetabotOptions } from './cli-bridge.js'
@@ -28,6 +28,7 @@ export async function runMetabotWithPayloadFile(
     )
   } finally {
     await unlink(path).catch(() => undefined)
+    await rmdir(dir).catch(() => undefined)
   }
 }
 
