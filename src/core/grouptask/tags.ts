@@ -18,6 +18,15 @@ import type { GroupTaskMessage, GroupTaskStatus } from './types';
 
 export const DELIVERABLE_TAG = /\[DELIVERABLE\]/i;
 export const STATUS_TAG = /\[STATUS:\s*(EXECUTING|REVIEW)\s*\]/i;
+/**
+ * Status tags move the task only from protocol positions: a line START, or
+ * the tail of the FINAL line (the IDBots status_parser discipline). The last
+ * honored position wins, so a prose mention like "→ 汇总 [STATUS:REVIEW]"
+ * (mid-text, real tag on the final line) can never transition the task —
+ * that exact pattern sent a live task to review before any work started.
+ */
+const STATUS_LINE_START_TAG = /^\s*\[STATUS:\s*(EXECUTING|REVIEW)\s*\]/i;
+const STATUS_LINE_TAIL_TAG = /\[STATUS:\s*(EXECUTING|REVIEW)\s*\]\s*$/i;
 export const CHECKPOINT_OPEN_TAG = /\[CHECKPOINT:\s*([^\]\n]+?)\s*\]/i;
 export const CHECKPOINT_RESOLVED_TAG = /\[CHECKPOINT_RESOLVED(?::\s*([^\]\n]+?)\s*)?\]/i;
 export const PLAN_CHANGE_TAG = /\[PLAN_CHANGE:\s*([^\]\n]+?)\s*\]/gi;
@@ -155,9 +164,31 @@ export function parseWorkingAck(content: string): GroupTaskWorkingAck | null {
   return { note, etaMinutes: Number.isFinite(etaMinutes as number) ? etaMinutes : null };
 }
 
+/**
+ * The last protocol-position [STATUS:…] tag in the body: line-start anywhere,
+ * or the tail of the final line. Null when none.
+ */
+function lastHonoredStatusTag(content: string): RegExpExecArray | null {
+  const lines = content.split(/\r?\n/);
+  let best: { exec: RegExpExecArray; index: number } | null = null;
+  let offset = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    const isFinalLine = i === lines.length - 1;
+    const startMatch = STATUS_LINE_START_TAG.exec(line);
+    const tailMatch = isFinalLine ? STATUS_LINE_TAIL_TAG.exec(line) : null;
+    const candidate = (tailMatch && (!startMatch || tailMatch.index >= startMatch.index))
+      ? tailMatch
+      : startMatch;
+    if (candidate) best = { exec: candidate, index: offset + candidate.index };
+    offset += line.length + 1;
+  }
+  return best?.exec ?? null;
+}
+
 /** Parse every engine-relevant tag of one message body. */
 export function parseGroupTaskTags(content: string): ParsedGroupTaskTags {
-  const statusMatch = content.match(STATUS_TAG);
+  const statusMatch = lastHonoredStatusTag(content);
   const checkpointMatch = content.match(CHECKPOINT_OPEN_TAG);
   const resolvedMatch = content.match(CHECKPOINT_RESOLVED_TAG);
   const dependsMatch = content.match(DEPENDS_ON_TAG);
