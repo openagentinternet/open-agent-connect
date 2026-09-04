@@ -87,7 +87,10 @@ async function resolveActorHomeDir(from: string): Promise<string | null> {
   const home = systemHomeDir()
   const profiles = await list(home).catch(() => [])
   const resolved = match(from, profiles)
-  return resolved.status === 'ok' && resolved.match ? resolved.match.homeDir : null
+  // resolveProfileNameMatch answers 'matched' | 'not_found' | 'ambiguous' —
+  // checking for 'ok' here silently disabled every local read (all callers
+  // fell back to the CLI), so it must match the matcher's own contract.
+  return resolved.status === 'matched' && resolved.match ? resolved.match.homeDir : null
 }
 
 function resolvePaths(homeDir: string): unknown {
