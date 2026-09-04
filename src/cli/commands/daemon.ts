@@ -19,5 +19,13 @@ export async function runDaemonCommand(args: string[], context: CliRuntimeContex
     return handler();
   }
 
+  if (args[0] === 'restart') {
+    const handler = context.dependencies.daemon?.restart;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Daemon restart handler is not configured.');
+    }
+    return handler();
+  }
+
   return commandUnknownSubcommand(`daemon ${args.join(' ')}`.trim());
 }

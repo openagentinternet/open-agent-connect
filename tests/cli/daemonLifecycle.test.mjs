@@ -254,6 +254,94 @@ test('daemon stop waits for a verified daemon to exit before clearing its record
   assert.equal(await store.readDaemon(), null);
 });
 
+test('daemon restart stops the tracked daemon and starts a fresh tracked process', async (t) => {
+  const { systemHomeDir, homeDir } = await createIndexedProfileHome();
+  const store = createDaemonStateStore(systemHomeDir);
+  const env = {
+    ...process.env,
+    PATH: DAEMON_TEST_PATH,
+    HOME: systemHomeDir,
+    METABOT_HOME: homeDir,
+    METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+  };
+  t.after(async () => {
+    // Stops the daemon process group and waits for exit before removing the
+    // temp system home.
+    await cleanupTempRoot(systemHomeDir);
+  });
+
+  const startOutput = [];
+  const startExitCode = await runCli(['daemon', 'start'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { startOutput.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+  assert.equal(startExitCode, 0, startOutput.join(''));
+  const pidBefore = (await store.readDaemon())?.pid;
+  assert.ok(pidBefore);
+
+  const restartOutput = [];
+  const restartExitCode = await runCli(['daemon', 'restart'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { restartOutput.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(restartExitCode, 0, restartOutput.join(''));
+  const payload = parseLastJson(restartOutput).data;
+  assert.equal(payload.restarted, true);
+  assert.equal(payload.wasRunning, true);
+  assert.equal(payload.previousPid, pidBefore);
+  assert.ok(payload.baseUrl);
+  const daemonAfterRestart = await store.readDaemon();
+  assert.ok(daemonAfterRestart?.pid);
+  assert.notEqual(daemonAfterRestart.pid, pidBefore);
+});
+
+test('daemon restart starts the daemon when none was running', async (t) => {
+  const { systemHomeDir, homeDir } = await createIndexedProfileHome();
+  const store = createDaemonStateStore(systemHomeDir);
+  const env = {
+    ...process.env,
+    PATH: DAEMON_TEST_PATH,
+    HOME: systemHomeDir,
+    METABOT_HOME: homeDir,
+    METABOT_TEST_SKIP_BACKGROUND_LLM_DISCOVERY: '1',
+    METABOT_TEST_FAKE_CHAIN_WRITE: '1',
+    METABOT_TEST_FAKE_SUBSIDY: '1',
+    METABOT_CHAIN_API_BASE_URL: 'http://127.0.0.1:9',
+  };
+  t.after(async () => {
+    // Stops the daemon process group and waits for exit before removing the
+    // temp system home.
+    await cleanupTempRoot(systemHomeDir);
+  });
+
+  assert.equal(await store.readDaemon(), null);
+
+  const restartOutput = [];
+  const restartExitCode = await runCli(['daemon', 'restart'], {
+    env,
+    cwd: homeDir,
+    stdout: { write: (chunk) => { restartOutput.push(String(chunk)); return true; } },
+    stderr: { write: () => true },
+  });
+
+  assert.equal(restartExitCode, 0, restartOutput.join(''));
+  const payload = parseLastJson(restartOutput).data;
+  assert.equal(payload.restarted, true);
+  assert.equal(payload.wasRunning, false);
+  assert.equal(payload.previousPid, null);
+  const daemonAfterRestart = await store.readDaemon();
+  assert.ok(daemonAfterRestart?.pid);
+  assert.equal(daemonAfterRestart.pid, payload.pid);
+});
+
 test('first installation persists the bounded fallback port and never drifts after it is configured', async (t) => {
   const { systemHomeDir, homeDir } = await createIndexedProfileHome();
   const daemonStore = createDaemonStateStore(systemHomeDir);

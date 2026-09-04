@@ -67,6 +67,7 @@ export interface CliDependencies {
   daemon?: {
     start?: () => Awaitable<MetabotCommandResult<unknown>>;
     stop?: () => Awaitable<MetabotCommandResult<unknown>>;
+    restart?: () => Awaitable<MetabotCommandResult<unknown>>;
   };
   doctor?: {
     run?: () => Awaitable<MetabotCommandResult<unknown>>;

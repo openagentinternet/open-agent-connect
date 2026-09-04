@@ -209,7 +209,7 @@ export const ROOT_COMMAND_HELP: CommandHelpSpec = {
     { name: 'bot', summary: 'Manage local MetaBot profiles, config, wallets, runtimes, and sessions.' },
     { name: 'config', summary: 'Read or change supported public runtime switches.' },
     { name: 'doctor', summary: 'Check daemon health, identity state, and local runtime readiness.' },
-    { name: 'daemon', summary: 'Start or stop the local MetaBot daemon process.' },
+    { name: 'daemon', summary: 'Start, stop, or restart the local MetaBot daemon process.' },
     { name: 'file', summary: 'Upload local files to MetaWeb.' },
     { name: 'buzz', summary: 'Publish simplebuzz posts to MetaWeb.' },
     { name: 'metaapp', summary: 'Manage MetaApp owner list/delete, payload publishing, project packaging, sharing, viewing, and commenting.' },
@@ -1004,6 +1004,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     subcommands: [
       { name: 'start', summary: 'Start or reuse the local daemon process.' },
       { name: 'stop', summary: 'Stop the currently running local daemon process.' },
+      { name: 'restart', summary: 'Stop the tracked daemon (if any) and start a fresh one.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },
@@ -1032,6 +1033,23 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     failureSemantics: [
       'Fails with daemon_not_running when no daemon process is tracked.',
       'Fails with daemon_stop_failed when the process cannot be signaled.',
+    ],
+    optionalFlags: [HELP_JSON_FLAG],
+  },
+  {
+    commandPath: ['daemon', 'restart'],
+    summary: 'Stop the tracked local MetaBot daemon (if any) and start a fresh one.',
+    usage: 'metabot daemon restart',
+    successFields: [
+      'baseUrl',
+      'pid',
+      'restarted',
+      'wasRunning',
+      'previousPid',
+    ],
+    failureSemantics: [
+      'Fails with daemon_stop_failed or daemon_ownership_unverified when the tracked daemon cannot be stopped.',
+      'Fails when the fresh daemon cannot bind its local port or initialize runtime dependencies.',
     ],
     optionalFlags: [HELP_JSON_FLAG],
   },

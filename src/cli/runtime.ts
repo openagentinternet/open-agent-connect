@@ -2431,6 +2431,46 @@ async function runHostPersonaProjection(
   }
 }
 
+async function runDaemonStartCommand(context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
+  const baseUrl = await ensureDaemonBaseUrl(context);
+  const daemonRecord = await resolveDaemonRecord(context);
+  const parsed = new URL(baseUrl);
+  return commandSuccess({
+    host: parsed.hostname,
+    port: Number(parsed.port || '80'),
+    baseUrl,
+    pid: daemonRecord?.pid ?? null,
+  });
+}
+
+async function runDaemonStopCommand(context: CliRuntimeContext): Promise<MetabotCommandResult<unknown>> {
+  const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+  const daemonStore = createDaemonStateStore(systemHomeDir);
+  const daemonRecord = await daemonStore.readDaemon();
+  if (!daemonRecord || !daemonRecord.pid) {
+    return commandFailed('daemon_not_running', 'No local daemon process is currently tracked.');
+  }
+  const pid = daemonRecord.pid;
+  try {
+    const stopped = await stopRunningDaemon({
+      daemonRecord,
+      lockPath: resolveMetabotDaemonPaths(systemHomeDir).daemonLockPath,
+    });
+    await daemonStore.clearDaemon(pid);
+    return commandSuccess({
+      pid,
+      stopped: stopped === 'stopped',
+      alreadyStopped: stopped === 'already_stopped',
+    });
+  } catch (error) {
+    if (error instanceof DaemonOwnershipVerificationError) {
+      return commandFailed('daemon_ownership_unverified', error.message);
+    }
+    const code = (error as NodeJS.ErrnoException).code;
+    return commandFailed('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
+  }
+}
+
 export function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies {
   async function requestJsonForSelectedActor<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
@@ -3290,43 +3330,27 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
       resetApiBase: async () => requestJsonForSelectedActor('POST', '/api/traffic/api-base', undefined, { action: 'reset' }),
     },
     daemon: {
-      start: async () => {
-        const baseUrl = await ensureDaemonBaseUrl(context);
-        const daemonRecord = await resolveDaemonRecord(context);
-        const parsed = new URL(baseUrl);
+      start: () => runDaemonStartCommand(context),
+      stop: () => runDaemonStopCommand(context),
+      restart: async () => {
+        const stopResult = await runDaemonStopCommand(context);
+        // Restart tolerates "nothing was running"; any real stop failure
+        // (stop failed, ownership unverified) propagates untouched.
+        if (!stopResult.ok && stopResult.code !== 'daemon_not_running') {
+          return stopResult;
+        }
+        const startResult = await runDaemonStartCommand(context);
+        if (!startResult.ok || startResult.state !== 'success') {
+          return startResult;
+        }
         return commandSuccess({
-          host: parsed.hostname,
-          port: Number(parsed.port || '80'),
-          baseUrl,
-          pid: daemonRecord?.pid ?? null,
+          ...(startResult.data as Record<string, unknown>),
+          restarted: true,
+          wasRunning: stopResult.ok,
+          previousPid: stopResult.ok
+            ? ((stopResult.data as { pid?: number | null }).pid ?? null)
+            : null,
         });
-      },
-      stop: async () => {
-        const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-        const daemonStore = createDaemonStateStore(systemHomeDir);
-        const daemonRecord = await daemonStore.readDaemon();
-        if (!daemonRecord || !daemonRecord.pid) {
-          return commandFailed('daemon_not_running', 'No local daemon process is currently tracked.');
-        }
-        const pid = daemonRecord.pid;
-        try {
-          const stopped = await stopRunningDaemon({
-            daemonRecord,
-            lockPath: resolveMetabotDaemonPaths(systemHomeDir).daemonLockPath,
-          });
-          await daemonStore.clearDaemon(pid);
-          return commandSuccess({
-            pid,
-            stopped: stopped === 'stopped',
-            alreadyStopped: stopped === 'already_stopped',
-          });
-        } catch (error) {
-          if (error instanceof DaemonOwnershipVerificationError) {
-            return commandFailed('daemon_ownership_unverified', error.message);
-          }
-          const code = (error as NodeJS.ErrnoException).code;
-          return commandFailed('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
-        }
       },
     },
     doctor: {
