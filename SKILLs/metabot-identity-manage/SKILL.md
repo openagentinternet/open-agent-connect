@@ -126,10 +126,13 @@ After create, doctor, and who all succeed, tell the user:
 - the created Bot name
 - the globalMetaId, rendered as a clickable Bot-page link of the form
   `http://127.0.0.1:10001/browser/metaid/<globalMetaId>` so the human can open
-  the public Bot page in the in-App Browser. Resolve it safely with
+  the public Bot page in the in-App Browser — except on hosts whose client opens
+  Agent Internet URIs directly (see the Host Adapter section), where the MetaWeb
+  URI form `[name](metaid://<globalMetaId>)` is the link instead. Resolve it safely with
   `{{METABOT_CLI}} browser link --uri metaid://<globalMetaId>` and copy the
-  returned `localUiUrl` verbatim, or build the path directly since the id is
-  URL-safe. Never show the globalMetaId as bare, unlinked text. See the
+  returned `localUiUrl` verbatim (its `uri` field is the MetaWeb URI form), or
+  build the path directly since the id is URL-safe.
+  Never show the globalMetaId as bare, unlinked text. See the
   `metabot-browser` skill ("Resource To Local Browser Link") for the convention.
 - that the local agent can now use Open Agent Connect network abilities
 - a clickable Bot management and modification link using the exact `localUiUrl`
