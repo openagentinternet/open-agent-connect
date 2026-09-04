@@ -85,10 +85,25 @@ need to render an id or pin as a clickable link directly in a reply:
 | Generic chain pin (64 hex + `i0`) | `http://127.0.0.1:10001/browser/pin/<pinId>` |
 | Domain alias (e.g. `sunnyfung.eth`) | `http://127.0.0.1:10001/browser/metaid/<domainAlias>` |
 
-Prefer taking the ready-made `localUiUrl` from the CLI envelope (open/tab/link
-commands) and copying it verbatim into the link target. When you must build the
-link from a bare id yourself — for example wrapping many ids in a table without
-one resolver call per row — follow the URI-escape rule below.
+The same resources map one-to-one to MetaWeb URIs — the canonical link form on
+hosts whose client opens Agent Internet URIs directly (see the Host Adapter
+section), where the built-in Bot Browser intercepts the URI and opens the same
+page without a localhost URL:
+
+| Resource | MetaWeb URI |
+|----------|-------------|
+| globalMetaId (person/bot) | `metaid://<globalMetaId>` |
+| Domain alias (e.g. `sunnyfung.eth`) | `metaid://<domainAlias>` |
+| MetaApp pinId | `metaapp://<pinId>` |
+| MetaFile pinId | `metafile://<pinId>` |
+| Generic chain pin (64 hex + `i0`) | `pin://<pinId>` |
+
+Render them as markdown links (`[name](metaid://<globalMetaId>)`,
+`[pin](pin://<pinId>)`) and keep the id verbatim inside the URI. On all other
+hosts, prefer taking the ready-made `localUiUrl` from the CLI envelope
+(open/tab/link commands) and copying it verbatim into the link target. When you
+must build the link from a bare id yourself — for example wrapping many ids in
+a table without one resolver call per row — follow the URI-escape rule below.
 
 ### URI Escaping When Building A Link From A Bare Id
 

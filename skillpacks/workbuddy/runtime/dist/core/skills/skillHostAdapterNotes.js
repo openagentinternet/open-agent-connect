@@ -29,13 +29,45 @@ function defaultBrowserNote(displayName) {
     ].join('\n');
 }
 /**
+ * Hosts whose chat client opens Agent Internet URIs directly in a built-in
+ * Bot Browser: markdown links (and bare URIs) with these schemes are
+ * intercepted client-side, so skills present MetaWeb URI links instead of
+ * `http://127.0.0.1:...` localUiUrl links.
+ */
+const METAWEB_URI_CLIENT_HOSTS = new Set(['dsh']);
+function metawebUriPresentation(displayName) {
+    return `This ${displayName} client has a built-in Bot Browser that opens Agent Internet URIs directly: metaid://, pin://, metaapp://, metafile://, and map://. Wherever this skill says to render a resource as a clickable Bot-page or Browser link, link the MetaWeb URI itself — \`[name](metaid://<globalMetaId>)\`, \`[pin](pin://<pinId>)\`, \`[app](metaapp://<pinId>)\`, \`[file](metafile://<pinId>)\` — instead of the \`http://127.0.0.1:...\` localUiUrl form: the client intercepts these links (and bare URIs in plain text) and opens the page in the built-in Bot Browser. Never shorten, truncate, or ellipsis a globalMetaId or pinId inside a URI.`;
+}
+function metawebUriBrowserNote(displayName) {
+    return [
+        IN_APP_BROWSER_HEADING,
+        '',
+        'Open pages exactly as this skill instructs — through the MetaBot CLI open commands (`browser tab open` first, `browser open` when no Browser page is running); the daemon pushes the page into every open Browser page regardless of host.',
+        '',
+        metawebUriPresentation(displayName),
+        '',
+        'This replaces the "present the `localUiUrl` as a clickable absolute-URL markdown link" guidance elsewhere in this skill: on this host the MetaWeb URI link IS the clickable presentation, and `http://127.0.0.1:.../browser/...` links are unnecessary.',
+    ].join('\n');
+}
+function metawebUriClientNote(displayName) {
+    return [
+        '### MetaWeb URI Links',
+        '',
+        metawebUriPresentation(displayName),
+    ].join('\n');
+}
+/**
  * Extra adapter markdown for one skill on one host. Returns '' when the
  * skill carries no host-specific guidance. `displayName` feeds the generic
  * fallback note.
  */
 function renderSkillHostAdapterNote(skillName, hostId, displayName) {
     if (skillName === 'metabot-browser') {
+        if (METAWEB_URI_CLIENT_HOSTS.has(hostId))
+            return metawebUriBrowserNote(displayName);
         return BROWSER_HOST_NOTES[hostId] ?? defaultBrowserNote(displayName);
     }
+    if (METAWEB_URI_CLIENT_HOSTS.has(hostId))
+        return metawebUriClientNote(displayName);
     return '';
 }
