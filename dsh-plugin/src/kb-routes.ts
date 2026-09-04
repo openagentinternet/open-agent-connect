@@ -8,7 +8,7 @@
  */
 import { mkdtemp, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { runMetabot, type MetabotCommandResult, type RunMetabotOptions } from './cli-bridge.js'
 import { core, localActorHomeDir } from './local-read.js'
 
@@ -44,6 +44,7 @@ function optionalTrimmed(payload: Record<string, unknown>, key: string): string 
 
 /** In-process stores bound to one profile home (memoized like the agent tools). */
 type KbServiceLike = {
+  ensureDefaultKnowledgeBase(slug: string): Promise<unknown>
   store: {
     listKnowledgeBases(): Promise<Array<Record<string, unknown>>>
   }
@@ -100,6 +101,9 @@ async function localKbList(from: string): Promise<MetabotCommandResult | null> {
     const homeDir = await localActorHomeDir(from)
     if (!homeDir) return null
     const service = kbServiceFor(homeDir)
+    // Ensure the default KB like IDBots does (every metabot owns one), so the
+    // panel and the model's <knowledge_bases> block always show a save target.
+    await service.ensureDefaultKnowledgeBase(basename(pathsOf(homeDir).profileRoot))
     const rows = await service.store.listKnowledgeBases()
     return {
       ok: true,

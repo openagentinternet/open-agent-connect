@@ -3,6 +3,7 @@
 // Ports IDBots coworkRunner.buildScopedMemoryPromptBlocksXml /
 // CoworkStore.applyTurnMemoryUpdates onto the file-backed stores.
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 import type { MetabotPaths } from '../state/paths';
 import { loadChatPersona } from '../chat/chatPersonaLoader';
@@ -14,7 +15,8 @@ import { createImpressionStore, type ImpressionStore } from './impressionStore';
 import { buildKnowledgeBlock, KNOWLEDGE_PROMPT_MAX_ITEMS } from './knowledgePromptBlocks';
 import { createKnowledgeStore, type KnowledgeStore } from './knowledgeStore';
 import { buildKnowledgeBasesPromptBlock } from '../knowledgebase/promptBlocks';
-import { createKnowledgeBaseStore, type KnowledgeBaseStore } from '../knowledgebase/store';
+import { createKnowledgeBaseService, type KnowledgeBaseService } from '../knowledgebase/service';
+import type { KnowledgeBaseStore } from '../knowledgebase/store';
 import { extractTurnMemoryChanges } from './memoryExtractor';
 import { judgeMemoryCandidate } from './memoryJudge';
 import { buildScopedMemoryPromptBlocks } from './memoryPromptBlocks';
@@ -163,10 +165,17 @@ export async function buildMemoryBlocksForRequest(
     });
     knowledgeXml = buildKnowledgeBlock(knowledgeEntries);
     // Knowledge-base hot layer: which document corpora this bot owns (name,
-    // description, counts) so the model knows where to query and save.
-    // Empty registry builds '' — no block when the bot has no KBs.
-    const kbStore = stores.knowledgeBases ?? createKnowledgeBaseStore(paths);
-    knowledgeBasesXml = buildKnowledgeBasesPromptBlock(await kbStore.listKnowledgeBases());
+    // description, counts) so the model knows where to query and save. The
+    // default KB is ensured right here (IDBots parity: the prompt block
+    // ensures it every turn), so every bot always has a place to save finds
+    // and the block lists it even at 0 documents.
+    if (stores.knowledgeBases) {
+      knowledgeBasesXml = buildKnowledgeBasesPromptBlock(await stores.knowledgeBases.listKnowledgeBases());
+    } else {
+      const kbService: KnowledgeBaseService = createKnowledgeBaseService(paths);
+      await kbService.ensureDefaultKnowledgeBase(path.basename(paths.profileRoot));
+      knowledgeBasesXml = buildKnowledgeBasesPromptBlock(await kbService.store.listKnowledgeBases());
+    }
   }
 
   // Person-anchor cognition block for direct external (A2A 1:1) conversations.
