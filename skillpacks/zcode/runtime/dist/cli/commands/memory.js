@@ -250,5 +250,45 @@ async function runMemoryCommand(args, context) {
         }
         return (0, helpers_1.commandUnknownSubcommand)(`memory impressions ${String(nested ?? '')}`.trim());
     }
+    if (subcommand === 'hygiene') {
+        if (nested === 'status') {
+            const handler = requireMemoryHandler(context, 'hygieneStatus');
+            if (isFailure(handler))
+                return handler;
+            return handler({ from });
+        }
+        if (nested === 'due') {
+            const handler = requireMemoryHandler(context, 'hygieneDue');
+            if (isFailure(handler))
+                return handler;
+            return handler({ from });
+        }
+        if (nested === 'run') {
+            const handler = requireMemoryHandler(context, 'hygieneRun');
+            if (isFailure(handler))
+                return handler;
+            return handler({ from, noDeep: args.includes('--no-deep') });
+        }
+        if (nested === 'config') {
+            const verb = args[2];
+            if (verb === 'get') {
+                const handler = requireMemoryHandler(context, 'hygieneConfigGet');
+                if (isFailure(handler))
+                    return handler;
+                return handler({ from });
+            }
+            if (verb === 'set') {
+                const handler = requireMemoryHandler(context, 'hygieneConfigSet');
+                if (isFailure(handler))
+                    return handler;
+                const payload = await readPayload(context, args, { required: true });
+                if (isFailure(payload))
+                    return payload;
+                return handler({ from, payload });
+            }
+            return (0, helpers_1.commandUnknownSubcommand)(`memory hygiene config ${String(verb ?? '')}`.trim());
+        }
+        return (0, helpers_1.commandUnknownSubcommand)(`memory hygiene ${String(nested ?? '')}`.trim());
+    }
     return (0, helpers_1.commandUnknownSubcommand)(`memory ${String(subcommand ?? '')}`.trim());
 }

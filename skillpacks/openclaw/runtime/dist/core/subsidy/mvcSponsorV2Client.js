@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createMvcSponsorV2Client = createMvcSponsorV2Client;
 const DEFAULT_ASSIST_OPEN_API_BASE_URL = 'https://www.metaso.network/assist-open-api';
+/** Backend error code (delivered as data.errorCode) for traffic-account exhaustion. */
+const TRAFFIC_INSUFFICIENT_ERROR_CODE = 'TRAFFIC_INSUFFICIENT';
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 const DEFAULT_RETRY_DELAYS_MS = [250, 750];
 function normalizeText(value) {
@@ -26,6 +28,9 @@ function pickText(record, ...keys) {
     return '';
 }
 function normalizeReason(stage, message) {
+    if (/TRAFFIC_INSUFFICIENT/i.test(message)) {
+        return 'insufficient_traffic';
+    }
     if (/available amount not enough|quota not granted|insufficient quota|insufficient balance/i.test(message)) {
         return 'insufficient_quota';
     }
@@ -36,6 +41,11 @@ function normalizeReason(stage, message) {
         return 'commit_failed';
     }
     return 'service_unavailable';
+}
+function normalizeErrorCodeReason(code) {
+    return normalizeText(code).toUpperCase() === TRAFFIC_INSUFFICIENT_ERROR_CODE
+        ? 'insufficient_traffic'
+        : undefined;
 }
 function createSponsorError(stage, message, extra = {}) {
     const serviceMessage = normalizeText(message) || `MVC sponsor ${stage} failed.`;
@@ -75,6 +85,10 @@ function unwrapEnvelope(body, stage) {
     }
     throw createSponsorError(stage, pickText(record, 'message', 'msg', 'error') || `Sponsor service returned code ${normalizeText(record.code) || 'unknown'}.`, {
         data: record.data,
+        // Backend sends TRAFFIC_INSUFFICIENT as data.errorCode (envelope code stays
+        // numeric) — the explicit code takes precedence over message normalization.
+        reason: normalizeErrorCodeReason(record.code)
+            ?? normalizeErrorCodeReason(readObject(record.data)?.errorCode),
         retryable: normalizeBoolean(readObject(record.data)?.retryable) === true,
     });
 }
@@ -132,6 +146,8 @@ async function requestJsonAttempt(fetchImpl, url, init, stage, timeoutMs) {
                 : `Sponsor service request failed with HTTP ${response.status}.`, {
                 status: response.status,
                 data: record?.data,
+                reason: normalizeErrorCodeReason(record?.code)
+                    ?? normalizeErrorCodeReason(record ? readObject(record.data)?.errorCode : undefined),
                 retryable: isRetryableHttpStatus(response.status),
             });
         }
@@ -356,6 +372,21 @@ function requireText(stage, field, value) {
         reason: stage === 'commit' ? 'commit_failed' : stage === 'pre' ? 'pre_rejected' : 'invalid_request',
     });
 }
+function normalizeTrafficAccount(value) {
+    const record = readObject(value);
+    if (!record) {
+        return undefined;
+    }
+    const timestamp = Number(record.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+        throw createSponsorError('pre', 'trafficAccount.timestamp is required', { reason: 'invalid_request' });
+    }
+    return {
+        accountId: requireText('pre', 'trafficAccount.accountId', record.accountId),
+        authSignature: requireText('pre', 'trafficAccount.authSignature', record.authSignature),
+        timestamp,
+    };
+}
 function createMvcSponsorV2Client(input = {}) {
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const fetchImpl = (input.fetchImpl ?? fetch);
@@ -396,6 +427,7 @@ function createMvcSponsorV2Client(input = {}) {
             return normalizeChallenge(record);
         },
         async preSponsor(payload) {
+            const trafficAccount = normalizeTrafficAccount(payload?.trafficAccount);
             const record = await requestJson(fetchImpl, `${baseUrl}/v2/assist/gas/mvc/pre`, {
                 method: 'POST',
                 headers: createJsonHeaders(),
@@ -405,6 +437,7 @@ function createMvcSponsorV2Client(input = {}) {
                     challengeId: requireText('pre', 'challengeId', payload?.challengeId),
                     publicKey: requireText('pre', 'publicKey', payload?.publicKey),
                     signature: requireText('pre', 'signature', payload?.signature),
+                    ...(trafficAccount ? { trafficAccount } : {}),
                 }),
             }, 'pre', requestOptions(false));
             return normalizePreResult(record);

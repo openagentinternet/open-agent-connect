@@ -232,6 +232,14 @@ export interface DreamStore {
         startMs: number;
         endMs: number;
     }): Promise<DreamDayActivity>;
+    /** Hygiene: hard-delete completed/failed runs and every fragment older than
+     * the retention horizon — pure history the scheduler never reads again. */
+    purgeOldRunsAndFragments(input: {
+        cutoffDateKey: string;
+    }): Promise<{
+        runsDeleted: number;
+        fragmentsDeleted: number;
+    }>;
 }
 export declare function createDreamStore(paths: MetabotPaths, deps?: {
     getDreamIdentityLatestDate?: () => Promise<string | null>;

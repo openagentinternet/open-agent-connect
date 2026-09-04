@@ -98,44 +98,56 @@ function createLocalMnemonicSigner(input) {
                 fallbackAddress: identity.addresses?.[request.network] ?? identity.mvcAddress,
             });
             return (0, spendQueue_1.withWalletSpendQueue)(lockKey, async () => {
-                const feeRate = input.feeRates?.[request.network];
-                const inscriptionResult = await adapter.buildInscription({
-                    request,
-                    identity,
-                    feeRate,
-                });
-                // Broadcast all signed transactions in order. A failure here leaves
-                // finality UNKNOWN (earlier txs of the batch may be on-chain): surface
-                // ChainBroadcastUnknownError instead of a plain retryable error.
-                const broadcastTxids = [];
-                try {
-                    for (const rawTx of inscriptionResult.signedRawTxs) {
-                        broadcastTxids.push(await adapter.broadcastTx(rawTx));
+                const runSelfPaid = async () => {
+                    const feeRate = input.feeRates?.[request.network];
+                    const inscriptionResult = await adapter.buildInscription({
+                        request,
+                        identity,
+                        feeRate,
+                    });
+                    // Broadcast all signed transactions in order. A failure here leaves
+                    // finality UNKNOWN (earlier txs of the batch may be on-chain): surface
+                    // ChainBroadcastUnknownError instead of a plain retryable error.
+                    const broadcastTxids = [];
+                    try {
+                        for (const rawTx of inscriptionResult.signedRawTxs) {
+                            broadcastTxids.push(await adapter.broadcastTx(rawTx));
+                        }
+                    }
+                    catch (error) {
+                        throw new ChainBroadcastUnknownError({
+                            confirmedTxids: [...broadcastTxids],
+                            candidateTxids: inscriptionResult.signedRawTxs
+                                .map((rawTx) => computeCandidateTxid(rawTx))
+                                .filter((txid) => txid !== null),
+                            cause: error,
+                        });
+                    }
+                    const firstRevealTxid = broadcastTxids[inscriptionResult.revealIndices[0]];
+                    const revealTxids = inscriptionResult.revealIndices.map((i) => broadcastTxids[i]);
+                    return {
+                        txids: revealTxids,
+                        pinId: `${firstRevealTxid}i0`,
+                        totalCost: inscriptionResult.totalCost,
+                        network: request.network,
+                        operation: request.operation,
+                        path: request.path,
+                        contentType: request.contentType,
+                        encoding: request.encoding,
+                        globalMetaId: identity.globalMetaId,
+                        mvcAddress: identity.mvcAddress,
+                    };
+                };
+                // Traffic mode (代付): route MVC pin writes through the sponsor flow.
+                // The hook covers the whole write (sponsor attempt + self-paid
+                // fallback) so both stay serialized inside the spend-queue lock.
+                if (request.network === 'mvc' && input.resolveSponsorWritePin) {
+                    const sponsored = await input.resolveSponsorWritePin({ request, identity, runSelfPaid });
+                    if (sponsored) {
+                        return sponsored;
                     }
                 }
-                catch (error) {
-                    throw new ChainBroadcastUnknownError({
-                        confirmedTxids: [...broadcastTxids],
-                        candidateTxids: inscriptionResult.signedRawTxs
-                            .map((rawTx) => computeCandidateTxid(rawTx))
-                            .filter((txid) => txid !== null),
-                        cause: error,
-                    });
-                }
-                const firstRevealTxid = broadcastTxids[inscriptionResult.revealIndices[0]];
-                const revealTxids = inscriptionResult.revealIndices.map((i) => broadcastTxids[i]);
-                return {
-                    txids: revealTxids,
-                    pinId: `${firstRevealTxid}i0`,
-                    totalCost: inscriptionResult.totalCost,
-                    network: request.network,
-                    operation: request.operation,
-                    path: request.path,
-                    contentType: request.contentType,
-                    encoding: request.encoding,
-                    globalMetaId: identity.globalMetaId,
-                    mvcAddress: identity.mvcAddress,
-                };
+                return runSelfPaid();
             });
         },
     };

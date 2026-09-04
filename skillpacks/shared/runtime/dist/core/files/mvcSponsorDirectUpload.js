@@ -7,31 +7,13 @@ exports.uploadMvcSponsorDirectFile = uploadMvcSponsorDirectFile;
 const node_fs_1 = require("node:fs");
 const meta_contract_1 = require("meta-contract");
 const mvcMessageSigning_1 = require("../subsidy/mvcMessageSigning");
+const feeAssist_1 = require("../subsidy/feeAssist");
 const mvc_1 = __importDefault(require("../chain/adapters/mvc"));
 const writePin_1 = require("../chain/writePin");
 const mvcFileInscriptionDraft_1 = require("../chain/mvcFileInscriptionDraft");
 const mvcPendingUtxos_1 = require("../chain/mvcPendingUtxos");
 const metafileUrls_1 = require("./metafileUrls");
 const uploadFile_1 = require("./uploadFile");
-function normalizeSponsorReason(value, fallback) {
-    return value === 'insufficient_quota'
-        || value === 'service_unavailable'
-        || value === 'commit_failed'
-        || value === 'pre_rejected'
-        || value === 'no_user_utxo'
-        ? value
-        : fallback;
-}
-function getStableErrorCode(error, fallback) {
-    const code = error?.code;
-    return typeof code === 'string' && code.trim() ? code.trim() : fallback;
-}
-function getErrorMessage(error, fallback) {
-    return error instanceof Error && error.message ? error.message : fallback;
-}
-function isNoUserUtxoDraftError(error) {
-    return /MetaBot balance is insufficient for this chain write\./i.test(getErrorMessage(error, ''));
-}
 function estimateDraftMinerFee(input) {
     const tx = new meta_contract_1.mvc.Transaction(input.unsignedTxHex);
     const outputTotal = tx.outputs.reduce((sum, output) => sum + Number(output.satoshis || 0), 0);
@@ -49,30 +31,6 @@ async function selfPaidDirect(input) {
         feeAssist: input.feeAssist,
     };
 }
-function attachFeeAssistError(input) {
-    const error = input.error instanceof Error
-        ? input.error
-        : new Error(getErrorMessage(input.error, `MVC sponsor ${input.stage} failed.`));
-    error.code = getStableErrorCode(error, input.fallbackCode);
-    const existingData = error.data && typeof error.data === 'object' ? error.data : {};
-    error.data = {
-        ...existingData,
-        feeAssist: {
-            attempted: true,
-            used: false,
-            mode: 'mvc_sponsor_v2',
-            sponsor: 'mvc_sponsor_v2',
-            reason: normalizeSponsorReason(input.error?.reason, input.fallbackReason),
-            stage: input.stage,
-            orderId: input.orderId,
-            quotaBefore: input.quotaBefore,
-            advisoryFeeEstimate: input.advisoryFeeEstimate,
-            sponsoredMinerFee: input.sponsoredMinerFee,
-            savedFee: input.sponsoredMinerFee,
-        },
-    };
-    throw error;
-}
 async function fallbackSelfPaidForSponsorError(input) {
     return selfPaidDirect({
         filePath: input.filePath,
@@ -84,7 +42,7 @@ async function fallbackSelfPaidForSponsorError(input) {
             used: false,
             mode: 'self_paid',
             sponsor: 'mvc_sponsor_v2',
-            reason: normalizeSponsorReason(input.error?.reason, input.fallbackReason),
+            reason: (0, feeAssist_1.normalizeSponsorReason)(input.error?.reason, input.fallbackReason),
             stage: input.stage,
             quotaBefore: input.quotaBefore,
             advisoryFeeEstimate: input.advisoryFeeEstimate,
@@ -134,8 +92,8 @@ async function uploadMvcSponsorDirectFile(input) {
         });
     }
     catch (error) {
-        if (!isNoUserUtxoDraftError(error)) {
-            attachFeeAssistError({
+        if (!(0, feeAssist_1.isNoUserUtxoDraftError)(error)) {
+            (0, feeAssist_1.attachFeeAssistError)({
                 error,
                 fallbackCode: 'mvc_fee_assist_address_info_failed',
                 fallbackReason: 'service_unavailable',
@@ -172,7 +130,7 @@ async function uploadMvcSponsorDirectFile(input) {
         challenge = await input.mvcSponsorClient.getChallenge();
     }
     catch (error) {
-        if (normalizeSponsorReason(error?.reason, 'service_unavailable') === 'service_unavailable') {
+        if ((0, feeAssist_1.normalizeSponsorReason)(error?.reason, 'service_unavailable') === 'service_unavailable') {
             return fallbackSelfPaidForSponsorError({
                 error,
                 filePath: input.filePath,
@@ -185,7 +143,7 @@ async function uploadMvcSponsorDirectFile(input) {
                 advisoryFeeEstimate: estimatedMinerFee,
             });
         }
-        attachFeeAssistError({
+        (0, feeAssist_1.attachFeeAssistError)({
             error,
             fallbackCode: 'mvc_fee_assist_challenge_failed',
             fallbackReason: 'service_unavailable',
@@ -199,6 +157,15 @@ async function uploadMvcSponsorDirectFile(input) {
         path: identity.path,
         message: challenge.message,
     });
+    // Traffic-account billing (流量): the daemon attaches the dep only in
+    // traffic mode; undefined keeps the legacy quota path (no account, unbound
+    // bot, or backend 404).
+    const trafficAccount = await input.mvcSponsorClient.traffic?.resolveTrafficAccount({
+        botAddress: address,
+        challengeId: challenge.challengeId,
+        botMnemonic: identity.mnemonic,
+        botWalletPath: identity.path,
+    });
     let pre;
     try {
         pre = await input.mvcSponsorClient.preSponsor({
@@ -207,24 +174,25 @@ async function uploadMvcSponsorDirectFile(input) {
             challengeId: challenge.challengeId,
             publicKey: challengeSignature.publicKey,
             signature: challengeSignature.signature,
+            ...(trafficAccount ? { trafficAccount } : {}),
         });
     }
     catch (error) {
-        const reason = normalizeSponsorReason(error?.reason, 'pre_rejected');
-        if (reason === 'service_unavailable') {
+        const reason = (0, feeAssist_1.normalizeSponsorReason)(error?.reason, 'pre_rejected');
+        if (reason === 'service_unavailable' || reason === 'insufficient_traffic') {
             return fallbackSelfPaidForSponsorError({
                 error,
                 filePath: input.filePath,
                 contentType: input.contentType,
                 network: input.network,
                 signer: input.signer,
-                fallbackReason: 'service_unavailable',
+                fallbackReason: reason,
                 stage: 'pre',
                 quotaBefore,
                 advisoryFeeEstimate: estimatedMinerFee,
             });
         }
-        attachFeeAssistError({
+        (0, feeAssist_1.attachFeeAssistError)({
             error,
             fallbackCode: 'mvc_fee_assist_pre_failed',
             fallbackReason: reason === 'insufficient_quota' ? 'insufficient_quota' : 'pre_rejected',
@@ -244,7 +212,7 @@ async function uploadMvcSponsorDirectFile(input) {
         })).txHex;
     }
     catch (error) {
-        attachFeeAssistError({
+        (0, feeAssist_1.attachFeeAssistError)({
             error,
             fallbackCode: 'mvc_fee_assist_commit_failed',
             fallbackReason: 'pre_rejected',
@@ -273,7 +241,7 @@ async function uploadMvcSponsorDirectFile(input) {
         });
     }
     catch (error) {
-        attachFeeAssistError({
+        (0, feeAssist_1.attachFeeAssistError)({
             error,
             fallbackCode: 'mvc_fee_assist_commit_failed',
             fallbackReason: 'commit_failed',
@@ -294,6 +262,20 @@ async function uploadMvcSponsorDirectFile(input) {
         }),
     });
     const sponsoredMinerFee = commit.minerFee ?? pre.minerFee;
+    // Local spend journal + traffic balance-cache deduction (best-effort,
+    // never throws) — only wired in traffic mode.
+    if (input.mvcSponsorClient.traffic) {
+        await input.mvcSponsorClient.traffic.recordSpend({
+            txId: commit.txId,
+            botAddress: address,
+            orderId: pre.orderId,
+            txSize: commit.txSize ?? 0,
+            sponsoredMinerFee,
+            savedFee: sponsoredMinerFee,
+            billedBy: trafficAccount ? 'traffic' : 'quota',
+            kind: '/file',
+        }).catch(() => undefined);
+    }
     let quotaAfter;
     try {
         quotaAfter = await input.mvcSponsorClient.getAddressInfo({ address });

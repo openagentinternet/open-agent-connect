@@ -1,5 +1,5 @@
 type SponsorStage = 'address_info' | 'challenge' | 'pre' | 'commit';
-type SponsorReason = 'insufficient_quota' | 'service_unavailable' | 'commit_failed' | 'pre_rejected' | 'invalid_request';
+export type SponsorReason = 'insufficient_quota' | 'insufficient_traffic' | 'service_unavailable' | 'commit_failed' | 'pre_rejected' | 'invalid_request';
 export interface MvcSponsorV2ClientError extends Error {
     code: string;
     stage: SponsorStage;
@@ -39,6 +39,12 @@ export interface MvcSponsorCommitResult {
     minerFee?: number;
     raw: Record<string, unknown>;
 }
+/** trafficAccount block attached to a sponsor pre call (traffic-account billing). */
+export interface MvcSponsorTrafficAccount {
+    accountId: string;
+    authSignature: string;
+    timestamp: number;
+}
 export interface MvcSponsorOrder {
     orderId: string;
     status: string;
@@ -68,6 +74,8 @@ export declare function createMvcSponsorV2Client(input?: CreateMvcSponsorV2Clien
         challengeId: string;
         publicKey: string;
         signature: string;
+        /** Traffic-account billing pass-through (traffic mode); omitted on the legacy quota path. */
+        trafficAccount?: MvcSponsorTrafficAccount;
     }): Promise<MvcSponsorPreResult>;
     getSponsorOrder(payload: {
         orderId: string;

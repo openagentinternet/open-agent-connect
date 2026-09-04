@@ -68,10 +68,15 @@ const writeLedger_1 = require("../core/chainhistory/writeLedger");
 const privateConversation_1 = require("../core/chat/privateConversation");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
 const grouptaskHandlers_1 = require("./grouptaskHandlers");
+const scheduleHandlers_1 = require("./scheduleHandlers");
 const nativeWallet_1 = require("../core/wallet/nativeWallet");
 const uploadLargeFile_1 = require("../core/files/uploadLargeFile");
 const metaFsLargeUploader_1 = require("../core/files/metaFsLargeUploader");
 const uploadFile_1 = require("../core/files/uploadFile");
+const trafficAccountService_1 = require("../core/traffic/trafficAccountService");
+const trafficStore_1 = require("../core/traffic/trafficStore");
+const ownerIdentity_1 = require("../core/owner/ownerIdentity");
+const mvcSponsorWritePin_1 = require("../core/subsidy/mvcSponsorWritePin");
 const postBuzz_1 = require("../core/buzz/postBuzz");
 const publish_1 = require("../core/simplenote/publish");
 const profileUploadGate_1 = require("../core/files/profileUploadGate");
@@ -3817,6 +3822,24 @@ function startBackgroundLlmDiscoverySweep(homeDir, providers, discover) {
         console.warn('[llm] background runtime discovery failed', error);
     });
 }
+/**
+ * Map a traffic-service failure to the CLI contract: TrafficApiError keeps its
+ * `traffic_<stage>_failed` code and carries { errorCode, featureUnavailable,
+ * retryable? } in data so the DSH plugin can map backend error codes
+ * (ALREADY_CLAIMED, CODE_USED, ...) to friendly copy. Transport-level failures
+ * (no HTTP status) and 5xx are marked retryable.
+ */
+function trafficCommandFailure(error, fallbackCode) {
+    if (error instanceof trafficAccountService_1.TrafficApiError) {
+        const data = { featureUnavailable: error.featureUnavailable };
+        if (error.errorCode)
+            data.errorCode = error.errorCode;
+        if (error.status === undefined || error.status >= 500)
+            data.retryable = true;
+        return (0, commandResult_1.commandFailed)(error.code, error.message, { data });
+    }
+    return (0, commandResult_1.commandFailed)(fallbackCode, error instanceof Error ? error.message : String(error));
+}
 function createDefaultMetabotDaemonHandlers(input) {
     const normalizedSystemHomeDir = normalizeText(input.systemHomeDir) || input.homeDir;
     /** Map a ChainBroadcastUnknownError (or a recorded prior unknown attempt for
@@ -3849,6 +3872,16 @@ function createDefaultMetabotDaemonHandlers(input) {
         doge_1.dogeChainAdapter,
         opcat_1.opcatChainAdapter,
     ]);
+    // Traffic mode (代付): one account service per daemon process, shared by
+    // every signer (pin writes) and the sponsor upload flow.
+    const trafficAccountService = input.trafficAccountService ?? (0, trafficAccountService_1.createTrafficAccountService)({
+        systemHomeDir: normalizedSystemHomeDir,
+    });
+    const resolveSponsorWritePin = (0, mvcSponsorWritePin_1.createTrafficSponsorWritePinResolver)({ trafficAccountService });
+    const mvcSponsorTrafficDeps = {
+        resolveTrafficAccount: ({ botAddress, challengeId, botMnemonic, botWalletPath }) => trafficAccountService.resolveSponsorTrafficAccount({ botAddress, challengeId, botMnemonic, botWalletPath }),
+        recordSpend: (entry) => trafficAccountService.recordLocalTrafficSpend(entry),
+    };
     // Mirror every successful chain write into the acting bot's chain history
     // store (best-effort, idempotent per pinId). Injected signers are wrapped
     // too: nested scoped handler factories pass an already-wrapped signer, and
@@ -3856,6 +3889,7 @@ function createDefaultMetabotDaemonHandlers(input) {
     const signer = (0, writeLedger_1.wrapSignerWithChainHistory)(input.signer ?? (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
         secretStore,
         adapters,
+        resolveSponsorWritePin,
     }), (0, paths_1.resolveMetabotPaths)(input.homeDir));
     const uploadLargeFile = input.uploadLargeFile ?? uploadLargeFile_1.uploadLargeFileToChain;
     const providerArtifactUploadLargeFile = input.providerArtifactUploadLargeFile ?? uploadLargeFile_1.uploadLargeFileToChain;
@@ -3949,7 +3983,17 @@ function createDefaultMetabotDaemonHandlers(input) {
         if (config.chain.mvcSponsorUploadEnabled !== true) {
             return undefined;
         }
-        return (input.createMvcSponsorClient ?? mvcSponsorV2Client_1.createMvcSponsorV2Client)();
+        // Traffic mode (代付): attach the billing dep (and honor the configured
+        // assist-service base URL) so uploads resolve a trafficAccount and journal
+        // each commit; self-pay mode keeps today's quota flow untouched.
+        const trafficMode = await trafficAccountService.getTrafficPinMode() === 'traffic';
+        const client = trafficMode && !input.createMvcSponsorClient
+            ? (0, mvcSponsorV2Client_1.createMvcSponsorV2Client)({ baseUrl: await trafficAccountService.getConfiguredTrafficApiBase() })
+            : (input.createMvcSponsorClient ?? mvcSponsorV2Client_1.createMvcSponsorV2Client)();
+        if (trafficMode) {
+            client.traffic = mvcSponsorTrafficDeps;
+        }
+        return client;
     }
     async function updateConfigDefaultWriteNetwork(targetConfigStore, rawInput) {
         const chainInput = rawInput.chain && typeof rawInput.chain === 'object' && !Array.isArray(rawInput.chain)
@@ -4666,6 +4710,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
                 secretStore: (0, fileSecretStore_1.createFileSecretStore)(normalizedProfileHomeDir),
                 adapters: profileAdapters,
+                resolveSponsorWritePin,
             });
         }
         // Chain history ledger on every profile signer. The main-home signer is
@@ -10621,6 +10666,22 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
         };
     }
+    /** mvc address (lowercased) -> profile name map for traffic ledger/usage enrichment. */
+    async function resolveTrafficBotNames() {
+        const names = new Map();
+        const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []);
+        for (const profile of profiles) {
+            const address = normalizeText(profile.mvcAddress);
+            if (address && normalizeText(profile.name)) {
+                names.set(address.toLowerCase(), profile.name);
+            }
+        }
+        return names;
+    }
+    function withTrafficBotName(entry, botNames) {
+        const botName = entry.botAddress ? botNames.get(entry.botAddress.toLowerCase()) : undefined;
+        return botName ? { ...entry, botName } : entry;
+    }
     const handlers = {
         browser: {
             getRuntime: async (request = {}) => browserHostAdapter.getRuntime({
@@ -10688,6 +10749,233 @@ function createDefaultMetabotDaemonHandlers(input) {
         config: {
             get: async () => (0, commandResult_1.commandSuccess)(await configStore.read()),
             set: async (rawInput) => updateConfigDefaultWriteNetwork(configStore, rawInput),
+        },
+        traffic: {
+            // Owner-scoped overview: mode + stored apiBase override + lazily-ensured
+            // account + free-grant campaign state + public owner identity. Never
+            // hard-fails on backend errors the panel can live without: a missing
+            // identity returns all-null sections, a backend 404 returns
+            // featureUnavailable, and any other ensure failure falls back to the
+            // locally cached account (balance/usage surface the real error).
+            status: async () => {
+                try {
+                    const settings = await trafficAccountService.getTrafficSettingsSnapshot();
+                    const identityRecord = await (0, ownerIdentity_1.readOwnerIdentity)(normalizedSystemHomeDir).catch(() => null);
+                    const identity = identityRecord
+                        ? {
+                            name: identityRecord.name,
+                            globalMetaId: identityRecord.globalMetaId,
+                            mvcAddress: identityRecord.mvcAddress,
+                        }
+                        : null;
+                    if (!identity) {
+                        return (0, commandResult_1.commandSuccess)({
+                            mode: settings.mode,
+                            apiBase: settings.apiBase,
+                            account: null,
+                            freeGrant: null,
+                            featureUnavailable: false,
+                            identity: null,
+                        });
+                    }
+                    let account = null;
+                    let featureUnavailable = false;
+                    try {
+                        account = await trafficAccountService.ensureTrafficAccount();
+                    }
+                    catch (error) {
+                        if (error instanceof trafficAccountService_1.TrafficApiError && error.featureUnavailable) {
+                            featureUnavailable = true;
+                        }
+                        else {
+                            account = await trafficAccountService.getLocalTrafficAccount();
+                        }
+                    }
+                    let freeGrant = null;
+                    if (account && !featureUnavailable) {
+                        freeGrant = await trafficAccountService.getFreeGrantCampaignStatus().catch(() => null);
+                    }
+                    return (0, commandResult_1.commandSuccess)({
+                        mode: settings.mode,
+                        apiBase: settings.apiBase,
+                        account,
+                        freeGrant,
+                        featureUnavailable,
+                        identity,
+                    });
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_status_failed');
+                }
+            },
+            getMode: async () => {
+                try {
+                    return (0, commandResult_1.commandSuccess)({ mode: await trafficAccountService.getTrafficPinMode() });
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_mode_failed');
+                }
+            },
+            // Switching to traffic mode persists the setting, then ensures the
+            // account and binds every local bot (bindAllLocalBots ensures the
+            // account internally); the bind summary is part of the contract.
+            setMode: async ({ mode }) => {
+                const normalizedMode = normalizeText(mode).toLowerCase();
+                if (normalizedMode !== 'traffic' && normalizedMode !== 'selfpay') {
+                    return (0, commandResult_1.commandFailed)('invalid_argument', 'mode must be "traffic" or "selfpay".');
+                }
+                try {
+                    await trafficAccountService.setTrafficSettingsSnapshot({ mode: normalizedMode });
+                    if (normalizedMode !== 'traffic') {
+                        return (0, commandResult_1.commandSuccess)({ mode: normalizedMode });
+                    }
+                    const bindSummary = await trafficAccountService.bindAllLocalBots();
+                    return (0, commandResult_1.commandSuccess)({ mode: normalizedMode, bindSummary });
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_account_failed');
+                }
+            },
+            getBalance: async () => {
+                try {
+                    const account = await trafficAccountService.getTrafficBalance({ forceRefresh: true });
+                    return (0, commandResult_1.commandSuccess)({ account, featureUnavailable: false });
+                }
+                catch (error) {
+                    if (error instanceof trafficAccountService_1.TrafficApiError && error.featureUnavailable) {
+                        return (0, commandResult_1.commandSuccess)({ account: null, featureUnavailable: true });
+                    }
+                    return trafficCommandFailure(error, 'traffic_balance_failed');
+                }
+            },
+            getLedger: async (rawInput) => {
+                try {
+                    const limit = Number.isFinite(rawInput.limit) && (rawInput.limit ?? 0) > 0
+                        ? Math.floor(rawInput.limit)
+                        : 20;
+                    const cursor = Number.isFinite(rawInput.cursor) && (rawInput.cursor ?? 0) > 0
+                        ? Math.floor(rawInput.cursor)
+                        : undefined;
+                    const { entries, nextCursor } = await trafficAccountService.getTrafficLedger({
+                        ...(cursor !== undefined ? { cursor } : {}),
+                        limit,
+                    });
+                    const botNames = await resolveTrafficBotNames();
+                    return (0, commandResult_1.commandSuccess)({
+                        entries: entries.map((entry) => withTrafficBotName(entry, botNames)),
+                        nextCursor: nextCursor > 0 ? String(nextCursor) : null,
+                    });
+                }
+                catch (error) {
+                    if (error instanceof trafficAccountService_1.TrafficApiError && error.featureUnavailable) {
+                        return (0, commandResult_1.commandSuccess)({ entries: [], nextCursor: null, featureUnavailable: true });
+                    }
+                    return trafficCommandFailure(error, 'traffic_ledger_failed');
+                }
+            },
+            // Usage never hard-fails: the summary API and the daily-usage API fall
+            // back independently, and the journal fallback keeps the table useful
+            // while the backend is unreachable. source: 'service' when the daily API
+            // answered, 'local' when only the journal produced rows, 'unavailable'
+            // when neither did.
+            getUsage: async () => {
+                try {
+                    let summary = null;
+                    let featureUnavailable = false;
+                    try {
+                        summary = await trafficAccountService.getTrafficUsageSummary();
+                    }
+                    catch (error) {
+                        if (error instanceof trafficAccountService_1.TrafficApiError && error.featureUnavailable) {
+                            featureUnavailable = true;
+                        }
+                    }
+                    const usage = await trafficAccountService.getTrafficDailyUsageWithFallback({});
+                    const botNames = await resolveTrafficBotNames();
+                    const daily = usage.rows.map((row) => withTrafficBotName(row, botNames));
+                    const source = usage.source === 'remote'
+                        ? 'service'
+                        : daily.length > 0
+                            ? 'local'
+                            : 'unavailable';
+                    return (0, commandResult_1.commandSuccess)({
+                        summary,
+                        daily,
+                        source,
+                        ...(featureUnavailable ? { featureUnavailable: true } : {}),
+                    });
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_usage_failed');
+                }
+            },
+            claim: async () => {
+                try {
+                    const result = await trafficAccountService.claimFreeGrant();
+                    return (0, commandResult_1.commandSuccess)({
+                        grantId: String(result.grantId),
+                        grantBytes: result.grantBytes,
+                        balanceAfter: result.balanceAfter,
+                    });
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_campaign_failed');
+                }
+            },
+            redeem: async ({ code }) => {
+                const normalizedCode = normalizeText(code);
+                if (!normalizedCode) {
+                    return (0, commandResult_1.commandFailed)('missing_argument', 'A redeem code is required.');
+                }
+                try {
+                    return (0, commandResult_1.commandSuccess)(await trafficAccountService.redeemTrafficCode(normalizedCode));
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_redeem_failed');
+                }
+            },
+            getApiBase: async () => {
+                try {
+                    const configured = await trafficAccountService.getConfiguredTrafficApiBase();
+                    return (0, commandResult_1.commandSuccess)({
+                        apiBase: configured ?? '',
+                        effectiveApiBase: configured ?? trafficAccountService_1.DEFAULT_TRAFFIC_API_BASE_URL,
+                    });
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_settings_failed');
+                }
+            },
+            // Invalid overrides are rejected before the store write, so nothing is
+            // persisted on failure (normalizeTrafficApiBase throws).
+            setApiBase: async ({ apiBase }) => {
+                let normalizedApiBase;
+                try {
+                    normalizedApiBase = (0, trafficStore_1.normalizeTrafficApiBase)(apiBase);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
+                }
+                if (!normalizedApiBase) {
+                    return (0, commandResult_1.commandFailed)('missing_argument', 'An http(s) URL is required (use api-base reset to clear).');
+                }
+                try {
+                    await trafficAccountService.setTrafficSettingsSnapshot({ apiBase: normalizedApiBase });
+                    return (0, commandResult_1.commandSuccess)({ apiBase: normalizedApiBase, effectiveApiBase: normalizedApiBase });
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_settings_failed');
+                }
+            },
+            resetApiBase: async () => {
+                try {
+                    await trafficAccountService.setTrafficSettingsSnapshot({ apiBase: '' });
+                    return (0, commandResult_1.commandSuccess)({ apiBase: '', effectiveApiBase: trafficAccountService_1.DEFAULT_TRAFFIC_API_BASE_URL });
+                }
+                catch (error) {
+                    return trafficCommandFailure(error, 'traffic_settings_failed');
+                }
+            },
         },
         chain: {
             write: async (rawInput) => {
@@ -13732,6 +14020,12 @@ function createDefaultMetabotDaemonHandlers(input) {
             createSignerForProfileHome,
             adapters,
             resolvePeerChatPublicKey,
+            log: (message) => console.warn(message),
+        }),
+        schedule: (0, scheduleHandlers_1.createScheduleDaemonHandlers)({
+            systemHomeDir: normalizedSystemHomeDir,
+            createScheduleStore: input.schedule?.createScheduleStore,
+            hostLeases: input.schedule?.hostLeases,
             log: (message) => console.warn(message),
         }),
         chat: {

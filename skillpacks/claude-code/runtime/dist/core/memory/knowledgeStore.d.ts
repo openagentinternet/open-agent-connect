@@ -112,5 +112,13 @@ export interface KnowledgeStore {
     /** Compact active set handed to the dream prompt for create-vs-revise. */
     listKnowledgeForDream(limit?: number): Promise<DreamKnowledgeView[]>;
     countActive(): Promise<number>;
+    /** Hygiene: per entry keep the newest `keepPerEntry` revisions, physically
+     * drop the rest (live entry and recent undo trail stay). */
+    pruneKnowledgeRevisions(input: {
+        keepPerEntry: number;
+    }): Promise<{
+        entriesPruned: number;
+        revisionsDeleted: number;
+    }>;
 }
 export declare function createKnowledgeStore(paths: MetabotPaths): KnowledgeStore;
