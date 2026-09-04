@@ -17,6 +17,8 @@ until their kernel is upgraded.
 
 After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
 
+The **Bots → edit** dialog gains a **Knowledge** tab (IDBots `KnowledgeBasePanel` parity): per-Bot document knowledge bases with create/edit/delete (`--confirm`-gated at the CLI), `Learn`/`Rebuild` indexing (incremental by default), manual document save-and-index, a CJK-aware query playground, the nightly auto-learn toggle, and the study-jobs status panel (topics assigned via the `metaweb_study_enqueue` agent tool). The model itself gets the same registry every turn through the `<knowledge_bases>` volatile prompt block.
+
 ## Group Tasks (群任务) and OpenTeam
 
 The **A2A Chat** sidebar-footer panel has a second tab, **Group Tasks**: one
@@ -176,6 +178,8 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | POST | `/oac/api/metaapp/*` | `metabot metaapp list`, `publish`, `delete` |
 | POST | `/oac/api/traffic/*` | `metabot traffic status`, `mode`, `balance`, `ledger`, `usage`, `claim`, `redeem`, `api-base` |
 | POST | `/oac/api/memory/*` | `metabot memory` verbs (list/add/update/delete/scopes/stats/policy/*, knowledge/*, impressions/*, recall, chats, search, transcript/append) |
+| POST | `/oac/api/kb/*` | `metabot knowledge-base` verbs (list/create/update/remove/query/add-document/learn) backing the bot-editor Knowledge tab; reads run in-process |
+| POST | `/oac/api/study/list` | read-only dump of the Bot's nightly MetaWeb study jobs (in-process) |
 | POST | `/oac/api/dream/*` | `metabot dream` verbs; `dream/run` orchestrates plan → `ctx.llm` → commit in-process |
 | POST | `/oac/api/twin/*` | `metabot twin` verbs (current, workers, tasks) |
 | POST | `/oac/api/user/*` | `metabot identity who`, `bot bind-owner` |

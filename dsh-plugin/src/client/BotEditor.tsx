@@ -21,15 +21,17 @@ import {
 import { BotAvatar } from './BotAvatar.tsx'
 import { LlmPicker } from './LlmPicker.tsx'
 import type { BotsLocaleKey } from './locale.ts'
+import { KnowledgeTab } from './KnowledgeTab.tsx'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
-type TabKey = 'basic' | 'behavior' | 'chat' | 'advanced'
+type TabKey = 'basic' | 'behavior' | 'chat' | 'knowledge' | 'advanced'
 type NoteTone = 'saving' | 'success' | 'warn' | 'error'
 
 const TABS: Array<{ id: TabKey; label: BotsLocaleKey }> = [
   { id: 'basic', label: 'tabBasic' },
   { id: 'behavior', label: 'tabBehavior' },
   { id: 'chat', label: 'tabChat' },
+  { id: 'knowledge', label: 'tabKnowledge' },
   { id: 'advanced', label: 'tabAdvanced' },
 ]
 
@@ -638,6 +640,9 @@ export function BotEditor({
             </div>
           </div>
         </div>
+      ) : null}
+      {tab === 'knowledge' ? (
+        <KnowledgeTab bot={bot} t={t} />
       ) : null}
       {tab === 'advanced' ? (
         <div id={tabPanelId('advanced')} role="tabpanel" aria-labelledby={tabId('advanced')} className="oac-tab-panel">

@@ -72,8 +72,9 @@ import { getDayBoundsMs } from '../core/memory/dreamPrompt';
 import { createExperienceStore } from '../core/memory/experienceStore';
 import { createImpressionStore } from '../core/memory/impressionStore';
 import { resolveContactNames } from '../core/memory/contactNames';
-import { createKnowledgeStore } from '../core/memory/knowledgeStore';
+import { createKnowledgeStore, KNOWLEDGE_KINDS, type KnowledgeKind } from '../core/memory/knowledgeStore';
 import { formatKnowledgeUpsertResult } from '../core/memory/knowledgePromptBlocks';
+import { createProcedureStore, scoreProceduresForQuery } from '../core/memory/procedureStore';
 import { loadChatPersona } from '../core/chat/chatPersonaLoader';
 import { createOrchestrationStore } from '../core/memory/orchestrationStore';
 import {
@@ -4689,6 +4690,102 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         );
       },
     },
+    knowledgeBase: {
+      list: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const service = createKnowledgeBaseService(resolveMetabotPaths(actor.homeDir));
+        const knowledgeBases = await service.store.listKnowledgeBases();
+        return commandSuccess({ knowledgeBases });
+      },
+      create: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const service = createKnowledgeBaseService(paths);
+        const knowledgeBase = await service.store.createKnowledgeBase({
+          metabotSlug: path.basename(paths.profileRoot),
+          name: input.name,
+          ...(input.description ? { description: input.description } : {}),
+          ...(input.autoLearn !== undefined ? { autoLearn: input.autoLearn } : {}),
+        });
+        return commandSuccess({ knowledgeBase });
+      },
+      update: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const service = createKnowledgeBaseService(paths);
+        const slug = path.basename(paths.profileRoot);
+        const existing = await service.store.getKnowledgeBase(input.id);
+        if (!existing || existing.metabotSlug !== slug) {
+          return commandFailed('kb_not_found', `Knowledge base ${input.id} not found for this Bot.`);
+        }
+        const knowledgeBase = await service.store.updateKnowledgeBase(input.id, {
+          ...(input.name ? { name: input.name } : {}),
+          ...(input.description ? { description: input.description } : {}),
+          ...(input.autoLearn !== undefined ? { autoLearn: input.autoLearn } : {}),
+        });
+        return commandSuccess({ knowledgeBase });
+      },
+      remove: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const service = createKnowledgeBaseService(paths);
+        const slug = path.basename(paths.profileRoot);
+        const existing = await service.store.getKnowledgeBase(input.id);
+        if (!existing || existing.metabotSlug !== slug) {
+          return commandFailed('kb_not_found', `Knowledge base ${input.id} not found for this Bot.`);
+        }
+        const removed = await service.store.removeKnowledgeBase(input.id);
+        return commandSuccess({ removed, knowledgeBaseId: input.id });
+      },
+      query: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const service = createKnowledgeBaseService(resolveMetabotPaths(actor.homeDir));
+        const results = await service.queryKnowledgeBase(
+          path.basename(resolveMetabotPaths(actor.homeDir).profileRoot),
+          input.text,
+          {
+            ...(input.id ? { knowledgeBaseId: input.id } : {}),
+            ...(input.topK != null ? { topK: input.topK } : {}),
+            ...(input.minScore != null ? { minScore: input.minScore } : {}),
+          },
+        );
+        return commandSuccess({ results });
+      },
+      addDocument: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const service = createKnowledgeBaseService(resolveMetabotPaths(actor.homeDir));
+        const saved = await service.addDocument(
+          path.basename(resolveMetabotPaths(actor.homeDir).profileRoot),
+          {
+            title: input.title,
+            content: input.content,
+            ...(input.id ? { knowledgeBaseId: input.id } : {}),
+            ...(input.sourceType ? { sourceType: input.sourceType as 'web' | 'metaweb' | 'manual' } : {}),
+            ...(input.url ? { url: input.url } : {}),
+            ...(input.pinId ? { pinId: input.pinId } : {}),
+            ...(input.tags ? { tags: input.tags } : {}),
+          },
+        );
+        return commandSuccess({ knowledgeBase: saved.knowledgeBase, relPath: saved.relPath });
+      },
+      learn: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const service = createKnowledgeBaseService(resolveMetabotPaths(actor.homeDir));
+        const knowledgeBase = await service.learnKnowledgeBase(
+          path.basename(resolveMetabotPaths(actor.homeDir).profileRoot),
+          input.id,
+          input.full === true,
+        );
+        return commandSuccess({ knowledgeBase });
+      },
+    },
     twin: {
       current: async () => {
         const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
@@ -4851,6 +4948,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     memory: { ...defaults.memory, ...provided.memory },
     chainhistory: { ...defaults.chainhistory, ...provided.chainhistory },
     dream: { ...defaults.dream, ...provided.dream },
+    knowledgeBase: { ...defaults.knowledgeBase, ...provided.knowledgeBase },
     twin: { ...defaults.twin, ...provided.twin },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },
@@ -5671,6 +5769,8 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
               // Real tools with the pin budget enforced at the executor seam.
               let savedDocs = 0;
               const kbService = createKnowledgeBaseService(profilePaths);
+              const studyProcedures = createProcedureStore(profilePaths);
+              const studyKnowledge = createKnowledgeStore(profilePaths);
               return await runStudyTurnWithTools(prompt, {
                 runLlm: llm,
                 tools: {
@@ -5707,6 +5807,74 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
                   learnKnowledgeBase: async () => {
                     const learned = await kbService.learnKnowledgeBase(slug);
                     return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`;
+                  },
+                  listKnowledgeBases: async () => {
+                    const rows = (await kbService.store.listKnowledgeBases())
+                      .filter((row) => row.metabotSlug === slug);
+                    if (!rows.length) return 'No knowledge bases yet.';
+                    return rows.map((row) => `- "${row.name}"${row.isDefault ? ' (default)' : ''} `
+                      + `docs=${row.docCount} chunks=${row.chunkCount}`
+                      + `${row.description ? ` — ${row.description}` : ''}`).join('\n');
+                  },
+                  queryKnowledgeBases: async ({ query, knowledgeBaseId }) => {
+                    const results = await kbService.queryKnowledgeBase(slug, query, {
+                      ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
+                    });
+                    if (!results.length) return 'No hits.';
+                    return results.map((result) => result.hits.map((hit) =>
+                      `- [${result.knowledgeBaseName}] ${hit.title}#${hit.ord} (score ${hit.score})\n  ${hit.snippet}`
+                    ).join('\n')).join('\n');
+                  },
+                  saveProcedure: async (input) => {
+                    const { procedure, created } = await studyProcedures.upsertProcedure({
+                      title: input.title,
+                      steps: input.steps,
+                      ...(input.pitfalls?.length ? { pitfalls: input.pitfalls } : {}),
+                      ...(input.triggerText ? { triggerText: input.triggerText } : {}),
+                      ...(input.sourcePinIds?.length ? { sourcePinIds: input.sourcePinIds } : {}),
+                      origin: 'agent',
+                    });
+                    return `${created ? 'Saved' : 'Updated'} procedure "${procedure.title}" `
+                      + `v${procedure.version} (${procedure.steps.length} steps).`;
+                  },
+                  recallProcedures: async ({ query }) => {
+                    const rows = await studyProcedures.listProcedures({ status: 'active' });
+                    const scored = scoreProceduresForQuery(rows, query).slice(0, 5);
+                    if (!scored.length) return 'No matching procedures.';
+                    return scored.map(({ procedure, score }) =>
+                      `- ${procedure.title} (${score})\n  ${procedure.steps.join(' → ')}`
+                      + (procedure.pitfalls.length ? `\n  Pitfalls: ${procedure.pitfalls.join('; ')}` : '')
+                    ).join('\n');
+                  },
+                  upsertKnowledge: async ({ topic, summary, kind }) => {
+                    const validKind: KnowledgeKind | undefined = kind && (KNOWLEDGE_KINDS as readonly string[]).includes(kind)
+                      ? kind as KnowledgeKind
+                      : undefined;
+                    const result = await studyKnowledge.upsertKnowledge({
+                      topic,
+                      summary,
+                      ...(validKind ? { kind: validKind } : {}),
+                      origin: 'agent',
+                    });
+                    return formatKnowledgeUpsertResult({
+                      topic: result.entry.topic,
+                      created: result.created,
+                      revised: result.revised,
+                      version: result.entry.version,
+                      kind: result.entry.kind,
+                    });
+                  },
+                  recallKnowledge: async (input) => {
+                    const rows = await studyKnowledge.searchKnowledge({
+                      ...(input.query ? { query: input.query } : {}),
+                      ...(input.kind && (KNOWLEDGE_KINDS as readonly string[]).includes(input.kind)
+                        ? { kind: input.kind as KnowledgeKind }
+                        : {}),
+                      limit: 5,
+                      touchLastUsed: true,
+                    });
+                    if (!rows.length) return 'No matching knowledge.';
+                    return rows.map((row) => `- [${row.kind}] ${row.topic}: ${row.summary}`).join('\n');
                   },
                 },
               });

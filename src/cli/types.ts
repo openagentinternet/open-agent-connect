@@ -253,6 +253,24 @@ export interface CliDependencies {
     summaries?: (input: { from?: string; limit?: number; before?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     selfIdentity?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
   };
+  knowledgeBase?: {
+    list?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    create?: (input: { from?: string; name: string; description?: string; autoLearn?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    update?: (input: { from?: string; id: string; name?: string; description?: string; autoLearn?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    remove?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    query?: (input: { from?: string; text: string; id?: string; topK?: number; minScore?: number }) => Awaitable<MetabotCommandResult<unknown>>;
+    addDocument?: (input: {
+      from?: string;
+      id?: string;
+      title: string;
+      content: string;
+      sourceType?: string;
+      url?: string;
+      pinId?: string;
+      tags?: string[];
+    }) => Awaitable<MetabotCommandResult<unknown>>;
+    learn?: (input: { from?: string; id?: string; full?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     uploadLarge?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
