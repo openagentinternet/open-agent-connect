@@ -4,6 +4,14 @@
  * where node:sqlite is unavailable). Everything here is derived state: delete
  * the file + run learn to rebuild. Ranking mirrors the IDBots blend:
  * normalized bm25-style tf/idf + phraseScore (0.85 / 0.15), minScore 0.18.
+ *
+ * Incremental learn mirrors the IDBots docs-table semantics: a document whose
+ * raw bytes are unchanged (size+mtime short-circuit, else sha256 of the file
+ * bytes) reuses its stored chunks AND their precomputed token lists — the
+ * expensive extraction/chunking/tokenization steps only rerun for changed or
+ * new files, and docs that vanished from the raw dir drop out. Tokens live in
+ * the chunk rows (the equivalent of IDBots' FTS5 `token_text` column), which
+ * also removes the per-generation re-tokenization from the query path.
  */
 
 import { promises as fs } from 'node:fs';
@@ -12,7 +20,7 @@ import {
   chunkKnowledgeBaseText,
   cleanKnowledgeBaseText,
   phraseScore,
-  sha256Text,
+  sha256FileAsync,
   tokenizeKnowledgeBaseText,
   buildKbCitationSnippet,
 } from './text';
@@ -31,6 +39,8 @@ export interface KbIndexChunkRow {
   docRelPath: string;
   ord: number;
   text: string;
+  /** Precomputed query tokens (v2); absent rows fall back to on-the-fly tokenization. */
+  tokens?: string[];
 }
 
 export interface KbQueryHit {
@@ -41,8 +51,8 @@ export interface KbQueryHit {
   title: string;
 }
 
-interface IndexFileV1 {
-  version: 1;
+interface IndexFile {
+  version: 1 | 2;
   docs: KbIndexDocRow[];
   chunks: KbIndexChunkRow[];
   /** token -> chunk indexes (positional into chunks). */
@@ -51,8 +61,12 @@ interface IndexFileV1 {
 
 export interface KbIndexStore {
   filePath: string;
-  load(): Promise<IndexFileV1 | null>;
-  rebuild(rawDir: string, now: () => number): Promise<{ docCount: number; chunkCount: number }>;
+  load(): Promise<IndexFile | null>;
+  rebuild(
+    rawDir: string,
+    now: () => number,
+    options?: { full?: boolean },
+  ): Promise<{ docCount: number; chunkCount: number }>;
   query(
     query: string,
     options: { topK?: number; minScore?: number },
@@ -65,27 +79,27 @@ export const KB_QUERY_DEFAULT_MIN_SCORE = 0.18;
 const BM25_K1 = 1.2;
 const BM25_B = 0.75;
 
-function emptyIndex(): IndexFileV1 {
-  return { version: 1, docs: [], chunks: [], inverted: {} };
+function emptyIndex(): IndexFile {
+  return { version: 2, docs: [], chunks: [], inverted: {} };
 }
 
 function indexTokens(text: string): string[] {
   return [...new Set(tokenizeKnowledgeBaseText(text))];
 }
 
-/** Build the full index from every file under rawDir (recursive). */
-async function buildIndexFromRawDir(
-  rawDir: string,
-  now: () => number,
-): Promise<IndexFileV1> {
-  const index = emptyIndex();
-  const { extractKnowledgeBaseTextAsync, extractKbDocTitle, SUPPORTED_KB_EXTENSIONS } = await import('./text.js');
+/** Chunk tokens from the stored list, falling back to tokenization for v1 rows. */
+function tokensOfChunk(chunk: KbIndexChunkRow): string[] {
+  if (Array.isArray(chunk.tokens)) return chunk.tokens;
+  return tokenizeKnowledgeBaseText(chunk.text);
+}
 
-  async function walk(dir: string): Promise<string[]> {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
+async function walkRawFiles(dir: string): Promise<string[]> {
+  const { SUPPORTED_KB_EXTENSIONS } = await import('./text.js');
+  async function walk(current: string): Promise<string[]> {
+    const entries = await fs.readdir(current, { withFileTypes: true });
     const files: string[] = [];
     for (const entry of entries) {
-      const full = path.join(dir, entry.name);
+      const full = path.join(current, entry.name);
       if (entry.isDirectory()) {
         files.push(...await walk(full));
       } else if (entry.isFile() && SUPPORTED_KB_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
@@ -94,39 +108,145 @@ async function buildIndexFromRawDir(
     }
     return files;
   }
+  return walk(dir).catch(() => [] as string[]);
+}
 
-  const files = await walk(rawDir).catch(() => [] as string[]);
-  files.sort();
-  for (const filePath of files) {
-    const stat = await fs.stat(filePath);
-    let extraction: { text: string; title?: string };
-    try {
-      extraction = await extractKnowledgeBaseTextAsync(filePath);
-    } catch {
-      continue; // unsupported/failed files are skipped, learn never dies on one doc
-    }
-    const relpath = path.relative(rawDir, filePath);
-    const title = extraction.title?.trim() || extractKbDocTitle(filePath, extraction.text);
-    const chunks = chunkKnowledgeBaseText(extraction.text);
-    const docRow: KbIndexDocRow = {
+interface LearnedDoc {
+  row: KbIndexDocRow;
+  chunks: Required<Pick<KbIndexChunkRow, 'docRelPath' | 'ord' | 'text' | 'tokens'>>[];
+}
+
+/** Extract + chunk + tokenize one raw file into an indexable doc. */
+async function learnDoc(
+  rawDir: string,
+  filePath: string,
+  stat: { size: number; mtimeMs: number },
+  rawSha256: string,
+  now: () => number,
+): Promise<LearnedDoc | null> {
+  const { extractKnowledgeBaseTextAsync, extractKbDocTitle } = await import('./text.js');
+  let extraction: { text: string; title?: string };
+  try {
+    extraction = await extractKnowledgeBaseTextAsync(filePath);
+  } catch {
+    return null; // unsupported/failed files are skipped, learn never dies on one doc
+  }
+  const relpath = path.relative(rawDir, filePath);
+  const title = extraction.title?.trim() || extractKbDocTitle(filePath, extraction.text);
+  const chunks = chunkKnowledgeBaseText(extraction.text);
+  return {
+    row: {
       relpath,
-      sha256: sha256Text(extraction.text),
+      sha256: rawSha256,
       size: stat.size,
       mtimeMs: Math.floor(stat.mtimeMs),
       title,
       chunkCount: chunks.length,
       ingestedAt: now(),
-    };
-    index.docs.push(docRow);
-    chunks.forEach((chunk, ord) => {
-      const chunkIndex = index.chunks.length;
-      index.chunks.push({ docRelPath: relpath, ord, text: chunk.text });
-      for (const token of indexTokens(chunk.text)) {
-        (index.inverted[token] ??= []).push(chunkIndex);
-      }
-    });
+    },
+    chunks: chunks.map((chunk, ord) => ({
+      docRelPath: relpath,
+      ord,
+      text: chunk.text,
+      tokens: indexTokens(chunk.text),
+    })),
+  };
+}
+
+function buildInverted(chunks: Array<KbIndexChunkRow>): Record<string, number[]> {
+  const inverted: Record<string, number[]> = {};
+  chunks.forEach((chunk, chunkIndex) => {
+    for (const token of new Set(tokensOfChunk(chunk))) {
+      (inverted[token] ??= []).push(chunkIndex);
+    }
+  });
+  return inverted;
+}
+
+/**
+ * Full rebuild: re-extract every file. Used by learn(full) and as the
+ * v1→v2 migration path (v1 chunk rows carry no token lists to reuse).
+ */
+async function buildFullIndex(rawDir: string, now: () => number): Promise<IndexFile> {
+  const files = (await walkRawFiles(rawDir)).sort();
+  const docs: KbIndexDocRow[] = [];
+  const chunks: KbIndexChunkRow[] = [];
+  for (const filePath of files) {
+    const stat = await fs.stat(filePath);
+    const learned = await learnDoc(rawDir, filePath, stat, await sha256FileAsync(filePath), now);
+    if (!learned) continue;
+    docs.push(learned.row);
+    for (const chunk of learned.chunks) {
+      chunks.push({ docRelPath: chunk.docRelPath, ord: chunk.ord, text: chunk.text, tokens: chunk.tokens });
+    }
   }
-  return index;
+  return { version: 2, docs, chunks, inverted: buildInverted(chunks) };
+}
+
+/**
+ * Incremental rebuild: reuse stored chunks+tokens for unchanged docs, re-learn
+ * only new/changed files, drop docs that vanished. A doc whose (changed) file
+ * now fails extraction keeps its previous chunks rather than losing coverage.
+ */
+async function buildIncrementalIndex(
+  rawDir: string,
+  previous: IndexFile,
+  now: () => number,
+): Promise<IndexFile> {
+  const oldDocByPath = new Map(previous.docs.map((doc) => [doc.relpath, doc]));
+  const oldChunksByPath = new Map<string, KbIndexChunkRow[]>();
+  for (const chunk of previous.chunks) {
+    const list = oldChunksByPath.get(chunk.docRelPath) ?? [];
+    list.push(chunk);
+    oldChunksByPath.set(chunk.docRelPath, list);
+  }
+
+  const files = (await walkRawFiles(rawDir)).sort();
+  const docs: KbIndexDocRow[] = [];
+  const chunks: KbIndexChunkRow[] = [];
+
+  const reuseDoc = (row: KbIndexDocRow, oldChunks: KbIndexChunkRow[]): boolean => {
+    if (oldChunks.length === 0) return false;
+    if (oldChunks.some((chunk) => !Array.isArray(chunk.tokens))) return false; // v1 rows
+    docs.push(row);
+    for (const chunk of oldChunks) {
+      chunks.push({ docRelPath: chunk.docRelPath, ord: chunk.ord, text: chunk.text, tokens: chunk.tokens });
+    }
+    return true;
+  };
+
+  for (const filePath of files) {
+    const relpath = path.relative(rawDir, filePath);
+    const stat = await fs.stat(filePath);
+    const oldRow = oldDocByPath.get(relpath);
+    const oldChunks = oldChunksByPath.get(relpath) ?? [];
+
+    if (oldRow
+      && oldRow.size === stat.size
+      && oldRow.mtimeMs === Math.floor(stat.mtimeMs)
+      && reuseDoc(oldRow, oldChunks)) {
+      continue;
+    }
+
+    const rawSha256 = await sha256FileAsync(filePath);
+    if (oldRow
+      && oldRow.sha256 === rawSha256
+      && reuseDoc({ ...oldRow, size: stat.size, mtimeMs: Math.floor(stat.mtimeMs) }, oldChunks)) {
+      continue;
+    }
+
+    const learned = await learnDoc(rawDir, filePath, stat, rawSha256, now);
+    if (learned) {
+      docs.push(learned.row);
+      for (const chunk of learned.chunks) {
+        chunks.push({ docRelPath: chunk.docRelPath, ord: chunk.ord, text: chunk.text, tokens: chunk.tokens });
+      }
+    } else if (oldRow && oldChunks.length > 0) {
+      // Previously-indexed doc became unreadable — keep the stale copy.
+      reuseDoc(oldRow, oldChunks);
+    }
+  }
+  return { version: 2, docs, chunks, inverted: buildInverted(chunks) };
 }
 
 function bm25Score(
@@ -144,10 +264,9 @@ function bm25Score(
 }
 
 export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
-  // Query-path cache: tokenize each chunk once per index-file generation
-  // (mtime+size) instead of on every query — the corpus grows nightly and
-  // per-query retokenization becomes a multi-second event-loop block.
-  let cache: { key: string; index: IndexFileV1; chunkTokens: string[][] } | null = null;
+  // Query-path cache: parse the index JSON once per index-file generation
+  // (mtime+size) instead of on every query.
+  let cache: { key: string; index: IndexFile } | null = null;
 
   function indexGenerationKey(): Promise<string> {
     return fs.stat(filePath).then(
@@ -156,25 +275,23 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
     );
   }
 
-  function chunkTokensOf(index: IndexFileV1): string[][] {
-    return index.chunks.map((chunk) => tokenizeKnowledgeBaseText(chunk.text));
-  }
-
-  async function readIndexCached(): Promise<{ index: IndexFileV1; chunkTokens: string[][] }> {
+  async function readIndexCached(): Promise<IndexFile> {
     const key = await indexGenerationKey();
-    if (cache && cache.key === key) return cache;
+    if (cache && cache.key === key) return cache.index;
     const index = await readIndex();
-    cache = { key, index, chunkTokens: chunkTokensOf(index) };
-    return cache;
+    cache = { key, index };
+    return index;
   }
 
-  async function readIndex(): Promise<IndexFileV1> {
+  async function readIndex(): Promise<IndexFile> {
     try {
       const raw = await fs.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<IndexFileV1>;
-      if (!parsed || typeof parsed !== 'object' || parsed.version !== 1) return emptyIndex();
+      const parsed = JSON.parse(raw) as Partial<IndexFile>;
+      if (!parsed || typeof parsed !== 'object' || (parsed.version !== 1 && parsed.version !== 2)) {
+        return emptyIndex();
+      }
       return {
-        version: 1,
+        version: parsed.version,
         docs: Array.isArray(parsed.docs) ? parsed.docs : [],
         chunks: Array.isArray(parsed.chunks) ? parsed.chunks : [],
         inverted: parsed.inverted && typeof parsed.inverted === 'object' && !Array.isArray(parsed.inverted)
@@ -186,7 +303,7 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
     }
   }
 
-  async function writeIndex(index: IndexFileV1): Promise<void> {
+  async function writeIndex(index: IndexFile): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
     await fs.writeFile(tmpPath, JSON.stringify(index), 'utf8');
@@ -198,33 +315,34 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
 
     load: readIndex,
 
-    rebuild: async (rawDir, now) => {
-      const index = await buildIndexFromRawDir(rawDir, now);
+    rebuild: async (rawDir, now, options) => {
+      const previous = options?.full ? null : await readIndex();
+      const index = previous && previous.version === 2 && previous.docs.length >= 0
+        ? await buildIncrementalIndex(rawDir, previous, now)
+        : await buildFullIndex(rawDir, now);
       await writeIndex(index);
       cache = null;
       return { docCount: index.docs.length, chunkCount: index.chunks.length };
     },
 
     query: async (query, options: { topK?: number; minScore?: number } = {}) => {
-      const { index, chunkTokens } = await readIndexCached();
+      const index = await readIndexCached();
       if (index.chunks.length === 0 || !query.trim()) return [];
       const tokens = indexTokens(query);
       if (!tokens.length) return [];
 
-      const avgLen = chunkTokens.reduce((sum, tokens2) => sum + tokens2.length, 0)
-        / Math.max(1, chunkTokens.length);
+      const chunkTokenLists = index.chunks.map(tokensOfChunk);
+      const avgLen = chunkTokenLists.reduce((sum, list) => sum + list.length, 0)
+        / Math.max(1, chunkTokenLists.length);
       const scores = new Map<number, number>();
-      const hits: Array<{ token: string; chunkIndexes: number[] }> = [];
 
       for (const token of tokens) {
         const postings = index.inverted[token];
         if (!postings?.length) continue;
-        hits.push({ token, chunkIndexes: postings });
         const df = new Set(postings).size;
         for (const chunkIndex of postings) {
-          const chunk = index.chunks[chunkIndex];
-          const chunkTokenList = chunkTokens[chunkIndex];
-          if (!chunk || !chunkTokenList) continue;
+          const chunkTokenList = chunkTokenLists[chunkIndex];
+          if (!chunkTokenList) continue;
           const tf = chunkTokenList.filter((item) => item === token).length;
           const raw = bm25Score(tf, chunkTokenList.length, avgLen, df, index.chunks.length);
           scores.set(chunkIndex, (scores.get(chunkIndex) ?? 0) + raw);

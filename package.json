@@ -75,11 +75,17 @@
     "@openagentinternet/agent-browser-name-resolvers": "0.5.4",
     "@openagentinternet/agent-browser-ui": "0.5.4",
     "@scure/bip39": "^1.6.0",
+    "adm-zip": "^0.6.0",
     "bitcoinjs-lib": "^6.1.6",
     "crypto-js": "^4.2.0",
+    "fast-xml-parser": "^5.11.0",
+    "mammoth": "^1.12.1",
     "meta-contract": "^0.4.16",
+    "pdfjs-dist": "^6.2.108",
     "rimraf": "^6.1.3",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "turndown": "^7.2.4",
+    "xlsx": "^0.18.5"
   },
   "overrides": {
     "@protobufjs/utf8": "1.1.1",
@@ -96,6 +102,7 @@
     "@openagentinternet/agent-browser-test-harness": "0.5.4",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^26.0.1",
+    "@types/turndown": "^5.0.6",
     "playwright": "^1.60.0",
     "typescript": "^5.7.3"
   }

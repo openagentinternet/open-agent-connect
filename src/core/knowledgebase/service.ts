@@ -133,12 +133,11 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
       const kb = await requireKb(metabotSlug, knowledgeBaseId);
       await enqueueLearn(kb.id, async () => {
         const index = indexFor(kb.id);
-        // OAC index: incremental-by-file-mtime/hash would need a merge path;
-        // the corpus is local and modest, so a full rebuild per learn keeps
-        // semantics identical to learn(full) — stale docs always drop.
-        void full;
+        // Incremental by default (unchanged docs reuse their stored chunks +
+        // tokens); learn(full) forces a from-scratch rebuild — stale docs
+        // always drop either way, since the walk is the source of truth.
         await fs.mkdir(kb.rawDir, { recursive: true });
-        const stats = await index.rebuild(kb.rawDir, () => Date.now());
+        const stats = await index.rebuild(kb.rawDir, () => Date.now(), { full: full === true });
         await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
       });
       const updated = await store.getKnowledgeBase(kb.id);
