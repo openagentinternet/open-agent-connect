@@ -10,6 +10,7 @@
 import {
   Component,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -17,6 +18,7 @@ import {
   type ReactNode,
 } from 'react'
 import { BROWSER_NS, type BrowserLocaleKey } from './locale-browser.ts'
+import { postBrowserThemeMessage, readDshTheme, watchDshTheme, withThemeParam } from './browser-theme.ts'
 import type { BotBrowserStore } from './browser-store.ts'
 
 /** Structural face of the DSH client locale service (bind/subscribe/getSnapshot). */
@@ -80,6 +82,26 @@ export function BotBrowserSidebar({
     () => locale.getSnapshot().revision,
   )
   const t = (key: BrowserLocaleKey): string => locale.bind(BROWSER_NS)(key)
+
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
+
+  // The iframe src bakes the DSH-resolved theme once per URL change so the
+  // daemon-served ABC page paints in the right palette from the first frame.
+  // Live theme flips must NOT rewrite the src (that would reload the iframe
+  // and drop Browser page state) — the watcher below pushes them as
+  // set-theme postMessages instead.
+  const iframeSrc = useMemo(
+    () => (state.url === null ? null : withThemeParam(state.url, readDshTheme())),
+    [state.url],
+  )
+
+  // Follow DSH theme flips while a Browser page is loaded, including while the
+  // panel is closed (the iframe stays mounted hidden, so it must not come back
+  // stale). ABC applies the message without reloading.
+  useEffect(() => {
+    if (state.url === null) return undefined
+    return watchDshTheme((theme) => postBrowserThemeMessage(iframeRef.current, theme))
+  }, [state.url])
 
   // Layout push + drag state ride CSS variables on <html> so the write is
   // immediate (no React round trip) and `#root { margin-right }` follows live.
@@ -160,10 +182,14 @@ export function BotBrowserSidebar({
             <iframe
               key={state.url}
               className="oac-browser-frame"
-              src={state.url}
+              src={iframeSrc ?? undefined}
               title={t('title')}
               allow="clipboard-read; clipboard-write; fullscreen"
-              ref={(element) => onIframe?.(element)}
+              ref={(element) => {
+                iframeRef.current = element
+                onIframe?.(element)
+              }}
+              onLoad={() => postBrowserThemeMessage(iframeRef.current, readDshTheme())}
             />
           ) : (
             <div className="oac-browser-landing">
