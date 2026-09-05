@@ -38,6 +38,37 @@ export interface A2AConversationInjected {
   browserOpen: (uri?: string) => Promise<void>
 }
 
+type UnreadState = {
+  private: Record<string, number>
+  group: Record<string, number>
+  privateSeen: Record<string, number>
+  groupSeen: Record<string, number>
+}
+
+const UNREAD_STORAGE_KEY = 'oac-dsh:a2a-unread:v1'
+const UNREAD_POLL_MS = 15_000
+
+function readUnreadState(): UnreadState {
+  const fallback: UnreadState = { private: {}, group: {}, privateSeen: {}, groupSeen: {} }
+  try {
+    const raw = window.localStorage.getItem(UNREAD_STORAGE_KEY)
+    if (!raw) return fallback
+    const value = JSON.parse(raw) as Partial<UnreadState>
+    return {
+      private: value.private && typeof value.private === 'object' ? value.private : {},
+      group: value.group && typeof value.group === 'object' ? value.group : {},
+      privateSeen: value.privateSeen && typeof value.privateSeen === 'object' ? value.privateSeen : {},
+      groupSeen: value.groupSeen && typeof value.groupSeen === 'object' ? value.groupSeen : {},
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function writeUnreadState(state: UnreadState): void {
+  try { window.localStorage.setItem(UNREAD_STORAGE_KEY, JSON.stringify(state)) } catch { /* storage may be disabled */ }
+}
+
 const GUIDANCE_POLL_MS = 1500
 const GUIDANCE_POLL_MAX = 10
 
@@ -163,6 +194,8 @@ export function A2AConversation({
   const [guidanceOpen, setGuidanceOpen] = useState(false)
   const [guidanceDraft, setGuidanceDraft] = useState('')
   const [guidanceStatus, setGuidanceStatus] = useState<string | null>(null)
+  const [unread, setUnread] = useState<UnreadState>(() => readUnreadState())
+  const unreadRef = useRef(unread)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const guidanceTokenRef = useRef(0)
@@ -176,7 +209,6 @@ export function A2AConversation({
   }, [selectedPeer])
 
   useEffect(() => {
-    if (!open) return
     let current = true
     setGuidanceStatus(null)
     void bots().then((rows) => {
@@ -190,7 +222,83 @@ export function A2AConversation({
       if (current) setListError(errorText(cause))
     })
     return () => { current = false }
-  }, [open, bots])
+  }, [bots])
+
+  const updateUnread = useCallback((next: UnreadState): void => {
+    unreadRef.current = next
+    setUnread(next)
+    writeUnreadState(next)
+  }, [])
+
+  const clearPrivateUnread = useCallback((peer: string): void => {
+    if (!from || !peer) return
+    const key = `${from}:${peer}`
+    if (!(key in unread.private)) return
+    const next = { ...unread, private: { ...unread.private } }
+    delete next.private[key]
+    next.privateSeen[key] = Math.max(next.privateSeen[key] ?? 0, unread.private[key] ?? 0)
+    updateUnread(next)
+  }, [from, unread, updateUnread])
+
+  const clearGroupUnread = useCallback((key: string): void => {
+    if (!(key in unread.group)) return
+    const next = { ...unread, group: { ...unread.group } }
+    delete next.group[key]
+    next.groupSeen[key] = Math.max(next.groupSeen[key] ?? 0, unread.group[key] ?? 0)
+    updateUnread(next)
+  }, [unread, updateUnread])
+
+  // Keep unread state warm while the A2A panel is closed. The first snapshot
+  // establishes a baseline so installing/upgrading the plugin does not mark
+  // every historical message as new.
+  useEffect(() => {
+    if (profiles.length === 0) return undefined
+    let current = true
+    let timer: ReturnType<typeof setInterval> | null = null
+    const poll = async (): Promise<void> => {
+      const next: UnreadState = {
+        private: { ...unreadRef.current.private },
+        group: { ...unreadRef.current.group },
+        privateSeen: { ...unreadRef.current.privateSeen },
+        groupSeen: { ...unreadRef.current.groupSeen },
+      }
+      try {
+        const privateRows = await Promise.all(profiles.map(async (bot) => {
+          const rows = await list(bot.slug)
+          return Promise.all(rows.map(async (row) => ({ bot, row, thread: await thread(bot.slug, row.peerGlobalMetaId) })))
+        })).then((batches) => batches.flat())
+        for (const { bot, row, thread: conversation } of privateRows) {
+          const key = `${bot.slug}:${row.peerGlobalMetaId}`
+          const latest = conversation.messages[conversation.messages.length - 1]
+          const latestAt = latest?.timestamp ?? row.latestAt
+          if (!next.privateSeen[key]) {
+            next.privateSeen[key] = latestAt
+          } else if (latest && !isLocalMessage(latest) && latestAt > next.privateSeen[key]) {
+            next.private[key] = latestAt
+            next.privateSeen[key] = latestAt
+          }
+        }
+      } catch { /* transient daemon/read failures are retried next tick */ }
+      try {
+        const tasks = await grouptask.list('all', true)
+        for (const task of tasks) {
+          const key = `${task.chairSlug}:${task.id}`
+          if (!next.groupSeen[key]) next.groupSeen[key] = task.updatedAt
+          else if (task.updatedAt > next.groupSeen[key]) {
+            next.group[key] = task.updatedAt
+            next.groupSeen[key] = task.updatedAt
+          }
+        }
+      } catch { /* transient daemon/read failures are retried next tick */ }
+      if (current) updateUnread(next)
+    }
+    void poll()
+    timer = setInterval(() => { void poll() }, UNREAD_POLL_MS)
+    return () => {
+      current = false
+      if (timer !== null) clearInterval(timer)
+    }
+  }, [profiles, list, thread, grouptask, updateUnread])
 
   // Conversation list follows the selected local Bot; newest first comes from
   // the api normalization. Switching Bots resets the selection; plain reloads
@@ -288,6 +396,7 @@ export function A2AConversation({
   }, [open])
 
   const selectPeer = (peer: string): void => {
+    clearPrivateUnread(peer)
     if (peer === selectedPeer) return
     setSelectedPeer(peer)
     setGuidanceStatus(null)
@@ -378,6 +487,9 @@ export function A2AConversation({
       >
         <IconNewChatOutline16 />
         {wide ? <span>{t('nav')}</span> : null}
+        {Object.keys(unread.private).length > 0 || Object.keys(unread.group).length > 0
+          ? <span className="oac-unread-dot" aria-label={t('unread')} />
+          : null}
       </button>
       {open ? (
         <div className="oac-a2a-overlay" role="presentation">
@@ -425,7 +537,15 @@ export function A2AConversation({
               </div>
             </div>
             {mode === 'grouptask' ? (
-              <GroupTaskView bots={profiles} gt={grouptask} t={t} createSignal={gtCreateSignal} onOpenBotPage={openBotPage} />
+              <GroupTaskView
+                bots={profiles}
+                gt={grouptask}
+                t={t}
+                createSignal={gtCreateSignal}
+                onOpenBotPage={openBotPage}
+                unreadTaskKeys={new Set(Object.keys(unread.group))}
+                onTaskRead={clearGroupUnread}
+              />
             ) : null}
             <div className="oac-a2a-body" style={mode === 'grouptask' ? { display: 'none' } : undefined}>
               <div className="oac-a2a-list">
@@ -468,6 +588,9 @@ export function A2AConversation({
                       <span className="oac-a2a-row-time" title={timestampLabel(row.latestAt)}>
                         {relativeTimeLabel(row.latestAt)}
                       </span>
+                      {unread.private[`${from}:${row.peerGlobalMetaId}`]
+                        ? <span className="oac-unread-dot" aria-label={t('unread')} />
+                        : null}
                     </button>
                   ))}
                 </div>
