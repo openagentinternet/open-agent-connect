@@ -243,21 +243,51 @@ export async function dispatchGroupTaskRoutes(
   }
 
   if (method === 'grouptask/invite') {
-    const ref = readTaskRef(body)
-    if (isFailure(ref)) return ref
-    const globalMetaId = readTrimmed(body, 'globalMetaId')
-    if (!globalMetaId) return failed('missing_global_metaid', 'globalMetaId is required')
+    const ref = readTaskRef(body);
+    if (isFailure(ref)) return ref;
+    const globalMetaId = readTrimmed(body, 'globalMetaId');
+    if (!globalMetaId) return failed('missing_global_metaid', 'globalMetaId is required');
     const args = [
       'grouptask', 'invite',
       '--chair', ref.chair, '--task', String(ref.taskId),
       '--global-metaid', globalMetaId,
-    ]
-    const name = readTrimmed(body, 'name')
-    if (name) args.push('--name', name)
-    const skills = readStringList(body, 'requiredSkills')
-    if (skills.length > 0) args.push('--skills', skills.join(','))
-    if (body.allowReinvite === true) args.push('--allow-reinvite')
-    return run(args, { timeoutMs: WRITE_TIMEOUT_MS })
+    ];
+    const name = readTrimmed(body, 'name');
+    if (name) args.push('--name', name);
+    const skills = readStringList(body, 'requiredSkills');
+    if (skills.length > 0) args.push('--skills', skills.join(','));
+    if (body.allowReinvite === true) args.push('--allow-reinvite');
+    return run(args, { timeoutMs: WRITE_TIMEOUT_MS });
+  }
+
+  if (method === 'grouptask/supervise') {
+    const ref = readTaskRef(body);
+    if (isFailure(ref)) return ref;
+    const action = readTrimmed(body, 'superviseAction');
+    if (!['nudge', 'flag', 'pause', 'resume'].includes(action)) {
+      return failed('invalid_action', "superviseAction must be 'nudge', 'flag', 'pause', or 'resume'");
+    }
+    const args = ['grouptask', 'supervise', '--chair', ref.chair, '--task', String(ref.taskId), '--action', action];
+    const member = readTrimmed(body, 'member');
+    const globalMetaId = readTrimmed(body, 'globalMetaId');
+    if (member) args.push('--member', member);
+    else if (globalMetaId) args.push('--global-metaid', globalMetaId);
+    const note = readTrimmed(body, 'note');
+    if (note) args.push('--note', note);
+    return run(args, { timeoutMs: WRITE_TIMEOUT_MS });
+  }
+
+  if (method === 'grouptask/deliverable-delete') {
+    const ref = readTaskRef(body);
+    if (isFailure(ref)) return ref;
+    const deliverableId = readInt(body, 'deliverableId');
+    if (deliverableId === undefined || deliverableId <= 0) {
+      return failed('missing_deliverable', 'deliverableId must be a positive integer');
+    }
+    return run(
+      ['grouptask', 'deliverable-delete', '--chair', ref.chair, '--task', String(ref.taskId), '--deliverable', String(deliverableId)],
+      { timeoutMs: READ_TIMEOUT_MS },
+    );
   }
 
   if (method === 'grouptask/invites') {

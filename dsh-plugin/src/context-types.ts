@@ -233,6 +233,14 @@ export interface OacDshConfig {
     /** Delegated worker step watchdog (default 300_000, the IDBots value). */
     stepTimeoutMs?: number
   }
+  /** Group tasks: source-session relay drain ("哪里发起哪里结束"). */
+  groupTask?: {
+    relay?: {
+      enabled?: boolean
+      /** Drain period in seconds (default 30). */
+      tickSeconds?: number
+    }
+  }
   /** User panel + owner binding routes (Phase 5+). */
   user?: {
     enabled?: boolean

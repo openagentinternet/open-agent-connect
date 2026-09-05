@@ -137,9 +137,55 @@ export async function runGroupTaskCommand(
       content,
       asSlug: asSlug || undefined,
       asOwner: asOwner || undefined,
+      confirmChair: hasFlag(args, '--confirm-chair') || undefined,
       replyPin: normalizeText(readFlagValue(args, '--reply-pin')) || undefined,
       mention: readCsvFlag(args, '--mention'),
     });
+  }
+
+  if (action === 'supervise') {
+    const handler = requireHandler(context, 'supervise');
+    if (!handler) return commandFailed('not_implemented', 'Group task supervise handler is not configured.');
+    const ref = readTaskRefFlags(args);
+    if (isFailure(ref)) return ref;
+    const superviseAction = normalizeText(readFlagValue(args, '--action'));
+    if (!['nudge', 'flag', 'pause', 'resume'].includes(superviseAction)) {
+      return commandFailed('invalid_flag', "--action must be one of: nudge, flag, pause, resume.");
+    }
+    const member = normalizeText(readFlagValue(args, '--member'));
+    const globalMetaId = normalizeText(readFlagValue(args, '--global-metaid'));
+    if (member && globalMetaId) {
+      return commandFailed('invalid_flag', '--member and --global-metaid are mutually exclusive.');
+    }
+    return handler({
+      ...ref,
+      action: superviseAction,
+      memberSlug: member || undefined,
+      globalMetaId: globalMetaId || undefined,
+      note: normalizeText(readFlagValue(args, '--note')) || undefined,
+    });
+  }
+
+  if (action === 'deliverable-delete') {
+    const handler = requireHandler(context, 'deleteDeliverable');
+    if (!handler) return commandFailed('not_implemented', 'Group task deliverable-delete handler is not configured.');
+    const ref = readTaskRefFlags(args);
+    if (isFailure(ref)) return ref;
+    const deliverableId = readIntFlag(args, '--deliverable');
+    if (deliverableId === 'invalid' || typeof deliverableId !== 'number' || deliverableId <= 0) {
+      return commandFailed('invalid_flag', '--deliverable must be a positive integer deliverable id.');
+    }
+    return handler({ ...ref, deliverableId });
+  }
+
+  if (action === 'relay') {
+    const handler = requireHandler(context, 'relayDrain');
+    if (!handler) return commandFailed('not_implemented', 'Group task relay handler is not configured.');
+    const sub = normalizeText(args[1]);
+    if (sub !== 'drain') {
+      return commandUnknownSubcommand(`grouptask relay ${args.slice(1).join(' ')}`.trim());
+    }
+    return handler({ chairSlug: normalizeText(readFlagValue(args, '--chair')) || undefined });
   }
 
   if (action === 'close') {
