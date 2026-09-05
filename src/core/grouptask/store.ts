@@ -35,6 +35,8 @@ import {
   type GroupTaskStatus,
   type GroupTaskStatusEvent,
   type GroupTaskStatusEventActor,
+  type GroupTaskSuperviseAction,
+  type GroupTaskSupervisorSignal,
   type GroupTaskTransition,
 } from './types';
 
@@ -48,6 +50,7 @@ export interface GroupTaskStateFile {
   checkpoints: GroupTaskCheckpoint[];
   integrityEvents: GroupTaskIntegrityEvent[];
   planChanges: GroupTaskPlanChange[];
+  supervisorSignals: GroupTaskSupervisorSignal[];
   acceptanceSummaries: GroupTaskAcceptanceSummary[];
   kv: Record<string, string>;
 }
@@ -61,6 +64,7 @@ export interface CreateGroupTaskRecordInput {
   chairGlobalMetaId?: string | null;
   createdBy: string;
   createPinId?: string | null;
+  sourceSessionId?: string | null;
 }
 
 export interface AddGroupTaskMemberInput {
@@ -109,6 +113,7 @@ function emptyState(): GroupTaskStateFile {
     checkpoints: [],
     integrityEvents: [],
     planChanges: [],
+    supervisorSignals: [],
     acceptanceSummaries: [],
     kv: {},
   };
@@ -159,6 +164,8 @@ export interface GroupTaskStore {
   setTaskPinned(taskId: number, pinned: boolean): Promise<GroupTaskRecord>;
   archiveTask(taskId: number): Promise<GroupTaskRecord>;
   unarchiveTask(taskId: number): Promise<GroupTaskRecord>;
+  /** Owner dispatch pause: pass epoch ms to pause, null to resume. */
+  setTaskDispatchPaused(taskId: number, pausedAt: number | null): Promise<GroupTaskRecord>;
 
   // Members
   addMember(input: AddGroupTaskMemberInput): Promise<GroupTaskMember>;
@@ -235,6 +242,16 @@ export interface GroupTaskStore {
   }): Promise<GroupTaskPlanChange>;
   listPlanChanges(taskId: number): Promise<GroupTaskPlanChange[]>;
 
+  // Owner supervision signals (IDBots supervise parity)
+  addSupervisorSignal(input: {
+    taskId: number;
+    signalType: GroupTaskSuperviseAction;
+    memberGlobalMetaId?: string | null;
+    memberName?: string | null;
+    note?: string | null;
+  }): Promise<GroupTaskSupervisorSignal>;
+  listSupervisorSignals(taskId: number): Promise<GroupTaskSupervisorSignal[]>;
+
   // Acceptance summaries
   addAcceptanceSummary(input: Omit<GroupTaskAcceptanceSummary, 'id' | 'version' | 'generatedAt'> & {
     generatedAt?: number;
@@ -295,6 +312,9 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       checkpoints: Array.isArray(parsed.checkpoints) ? parsed.checkpoints : base.checkpoints,
       integrityEvents: Array.isArray(parsed.integrityEvents) ? parsed.integrityEvents : base.integrityEvents,
       planChanges: Array.isArray(parsed.planChanges) ? parsed.planChanges : base.planChanges,
+      supervisorSignals: Array.isArray(parsed.supervisorSignals)
+        ? parsed.supervisorSignals
+        : base.supervisorSignals,
       acceptanceSummaries: Array.isArray(parsed.acceptanceSummaries)
         ? parsed.acceptanceSummaries
         : base.acceptanceSummaries,
@@ -359,6 +379,8 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
         displayName: null,
         pinned: false,
         archivedAt: null,
+        sourceSessionId: input.sourceSessionId?.trim() || null,
+        dispatchPausedAt: null,
       };
       state.tasks.push(task);
       await writeState(state);
@@ -507,6 +529,15 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       const state = await readState();
       const task = requireTask(state, taskId);
       task.archivedAt = null;
+      await writeState(state);
+      return task;
+    }),
+
+    setTaskDispatchPaused: (taskId, pausedAt) => enqueue(async () => {
+      const state = await readState();
+      const task = requireTask(state, taskId);
+      task.dispatchPausedAt = pausedAt;
+      task.updatedAt = Date.now();
       await writeState(state);
       return task;
     }),
@@ -834,6 +865,30 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
     listPlanChanges: async (taskId) => {
       const state = await readState();
       return state.planChanges.filter((entry) => entry.taskId === taskId);
+    },
+
+    addSupervisorSignal: (input) => enqueue(async () => {
+      const state = await readState();
+      requireTask(state, input.taskId);
+      const signal: GroupTaskSupervisorSignal = {
+        id: nextId(state),
+        taskId: input.taskId,
+        signalType: input.signalType,
+        memberGlobalMetaId: input.memberGlobalMetaId?.trim() || null,
+        memberName: input.memberName?.trim() || null,
+        note: input.note?.trim().slice(0, 500) || null,
+        createdAt: Date.now(),
+      };
+      state.supervisorSignals.push(signal);
+      await writeState(state);
+      return signal;
+    }),
+
+    listSupervisorSignals: async (taskId) => {
+      const state = await readState();
+      return state.supervisorSignals
+        .filter((entry) => entry.taskId === taskId)
+        .sort((left, right) => left.createdAt - right.createdAt);
     },
 
     addAcceptanceSummary: (input) => enqueue(async () => {

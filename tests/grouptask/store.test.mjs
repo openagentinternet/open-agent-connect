@@ -270,3 +270,33 @@ test('deliverable dedupe lookup and correction reopen reset verification state',
   assert.equal(reopened.confirmation, 'unconfirmed');
   assert.equal(await store.reopenDeliverable(9999), null);
 });
+
+// ---------------------------------------------------------------------------
+// Phase 2: source session, dispatch pause, supervisor signals
+// ---------------------------------------------------------------------------
+
+test('grouptask store: sourceSessionId persists and dispatch pause sets/clears', async () => {
+  const { store } = createStore('metabot-grouptask-store-p2-');
+  const task = await createTask(store, { sourceSessionId: 'sess-origin-42' });
+  assert.equal(task.sourceSessionId, 'sess-origin-42');
+  const plain = await createTask(store);
+  assert.equal(plain.sourceSessionId, null);
+
+  const paused = await store.setTaskDispatchPaused(task.id, 1234);
+  assert.equal(paused.dispatchPausedAt, 1234);
+  const resumed = await store.setTaskDispatchPaused(task.id, null);
+  assert.equal(resumed.dispatchPausedAt, null);
+});
+
+test('grouptask store: supervisor signals append and list per task', async () => {
+  const { store } = createStore('metabot-grouptask-store-sig-');
+  const task = await createTask(store);
+  await store.addSupervisorSignal({ taskId: task.id, signalType: 'pause', note: 'owner busy' });
+  await store.addSupervisorSignal({
+    taskId: task.id, signalType: 'nudge', memberGlobalMetaId: 'IDWORKER1', memberName: 'worker', note: 'no ACK',
+  });
+  const signals = await store.listSupervisorSignals(task.id);
+  assert.deepEqual(signals.map((signal) => signal.signalType), ['pause', 'nudge']);
+  assert.equal(signals[1].memberName, 'worker');
+  assert.equal((await store.listSupervisorSignals(999)).length, 0);
+});

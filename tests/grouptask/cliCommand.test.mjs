@@ -113,9 +113,92 @@ test('grouptask post rejects --as with --as-owner and forwards mention list', as
     content: 'hello',
     asSlug: undefined,
     asOwner: true,
+    confirmChair: undefined,
     replyPin: undefined,
     mention: ['id1', 'id2'],
   }]);
+});
+
+test('grouptask post passes the chair-identity confirm flag', async () => {
+  const calls = [];
+  const deps = { postMessage: async (input) => { calls.push(input); return commandSuccess({}); } };
+  const gated = await runGroupTask(
+    ['post', '--chair', 'twin', '--task', '1', '--content', 'x', '--as', 'twin'],
+    deps,
+  );
+  assert.equal(gated.exitCode, 0);
+  assert.equal(calls[0].confirmChair, undefined, 'ungated chair send carries no override');
+
+  const confirmed = await runGroupTask(
+    ['post', '--chair', 'twin', '--task', '1', '--content', 'x', '--as', 'twin', '--confirm-chair'],
+    deps,
+  );
+  assert.equal(confirmed.exitCode, 0);
+  assert.equal(calls[1].confirmChair, true);
+});
+
+test('grouptask supervise parses actions and member targeting', async () => {
+  const calls = [];
+  const deps = { supervise: async (input) => { calls.push(input); return commandSuccess({}); } };
+
+  const bad = await runGroupTask(['supervise', '--chair', 'twin', '--task', '1', '--action', 'shout'], deps);
+  assert.equal(bad.result.code, 'invalid_flag');
+
+  const both = await runGroupTask(
+    ['supervise', '--chair', 'twin', '--task', '1', '--action', 'nudge', '--member', 'a', '--global-metaid', 'b'],
+    deps,
+  );
+  assert.equal(both.result.code, 'invalid_flag');
+
+  const ok = await runGroupTask(
+    ['supervise', '--chair', 'twin', '--task', '1', '--action', 'nudge', '--member', 'bob', '--note', 'no ACK'],
+    deps,
+  );
+  assert.equal(ok.exitCode, 0);
+  assert.deepEqual(calls.at(-1), {
+    chair: 'twin',
+    taskId: 1,
+    action: 'nudge',
+    memberSlug: 'bob',
+    globalMetaId: undefined,
+    note: 'no ACK',
+  });
+
+  const resume = await runGroupTask(['supervise', '--chair', 'twin', '--task', '1', '--action', 'resume'], deps);
+  assert.equal(resume.exitCode, 0);
+  assert.deepEqual(calls.at(-1), {
+    chair: 'twin',
+    taskId: 1,
+    action: 'resume',
+    memberSlug: undefined,
+    globalMetaId: undefined,
+    note: undefined,
+  });
+});
+
+test('grouptask deliverable-delete and relay drain parse', async () => {
+  const calls = [];
+  const deps = {
+    deleteDeliverable: async (input) => { calls.push(['delete', input]); return commandSuccess({}); },
+    relayDrain: async (input) => { calls.push(['drain', input]); return commandSuccess({ relayed: [] }); },
+  };
+
+  const bad = await runGroupTask(['deliverable-delete', '--chair', 'twin', '--task', '1'], deps);
+  assert.equal(bad.result.code, 'invalid_flag');
+
+  const ok = await runGroupTask(
+    ['deliverable-delete', '--chair', 'twin', '--task', '1', '--deliverable', '9'],
+    deps,
+  );
+  assert.equal(ok.exitCode, 0);
+  assert.deepEqual(calls.at(-1), ['delete', { chair: 'twin', taskId: 1, deliverableId: 9 }]);
+
+  const drain = await runGroupTask(['relay', 'drain', '--chair', 'twin'], deps);
+  assert.equal(drain.exitCode, 0);
+  assert.deepEqual(calls.at(-1), ['drain', { chairSlug: 'twin' }]);
+
+  const unknownSub = await runGroupTask(['relay', 'rewind'], deps);
+  assert.equal(unknownSub.result.code, 'unknown_command');
 });
 
 test('grouptask close validates outcome and rating', async () => {

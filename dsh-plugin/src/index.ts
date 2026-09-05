@@ -48,6 +48,7 @@ import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
 import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
 import { installGroupTaskOnAgent } from './group-task-tools.js'
+import { applyGroupTaskRelayDrain } from './group-task-relay.js'
 import { slugFromPresetId } from './chip-logic.js'
 import { reconcilePresets } from './preset.js'
 import { dispatchSection } from './sections.js'
@@ -506,6 +507,17 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindSimpleNoteToolInstall(ctx)
   bindKnowledgeBaseToolInstall(ctx)
 
+  // Source-session relay: drain group-task milestones back into the chat that
+  // originated each task ("哪里发起哪里结束"), on a host-lifetime timer.
+  if (config.groupTask?.relay?.enabled !== false) {
+    ctx.effect(() => {
+      const drainer = applyGroupTaskRelayDrain(ctx, {
+        tickMs: (config.groupTask?.relay?.tickSeconds ?? 30) * 1000,
+      })
+      return () => drainer.stop()
+    }, 'oac-dsh: group-task relay drain')
+  }
+
   // Nightly dream scheduler: ticks on a timer while the DSH host is alive;
   // the CLI's due-date arithmetic owns window/catch-up/backoff decisions. The
   // memory-hygiene tail runs right after each tick's dream pass (config
@@ -635,6 +647,7 @@ export {
   GROUP_TASK_SOP_TEXT,
   installGroupTaskOnAgent,
 } from './group-task-tools.js'
+export { applyGroupTaskRelayDrain } from './group-task-relay.js'
 export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
 export {
   buildChainHistoryRecallToolDefinitions,

@@ -146,7 +146,7 @@ function createHarness(prefix, options = {}) {
   };
 
   const chairStore = storeForProfile(profiles[0]);
-  const seedTask = async (status = 'planning') => {
+  const seedTask = async (status = 'planning', opts = {}) => {
     const task = await chairStore.createTask({
       groupId: 'grp-engine',
       title: 'Engine test task',
@@ -155,6 +155,7 @@ function createHarness(prefix, options = {}) {
       chairSlug: 'twin-bot',
       chairGlobalMetaId: 'IDTWIN',
       createdBy: 'user',
+      ...(opts.sourceSessionId ? { sourceSessionId: opts.sourceSessionId } : {}),
     });
     await chairStore.addMember({ taskId: task.id, slug: 'twin-bot', globalMetaId: 'IDTWIN', role: 'chair' });
     await chairStore.addMember({ taskId: task.id, slug: 'worker-1', globalMetaId: 'IDWORKER1', role: 'worker' });
@@ -530,4 +531,95 @@ test('engine: planning with a clean roster is never deferred (no invites, no wai
   assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1,
     'local-only planning ran on the first tick');
   assert.ok(!(await h.chairStore.kvGet(`${GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX}${task.id}`)));
+});
+
+// ---------------------------------------------------------------------------
+// Owner supervision: dispatch pause + supervisor wakes (Phase 2)
+// ---------------------------------------------------------------------------
+
+test('engine: a dispatch pause silences mentioned workers but the owner still reaches the chair', async () => {
+  const h = createHarness('metabot-gt-engine-pause-');
+  const task = await h.seedTask('executing');
+  await h.chairStore.setTaskDispatchPaused(task.id, Date.now());
+
+  h.pushHistory('IDTWIN', '@worker 1 please continue', { mention: ['IDWORKER1'] });
+  await h.engine.tick();
+  assert.equal(h.pins.filter((pin) => pin.label === 'worker-1').length, 0, 'worker gated by the pause');
+  assert.equal(h.llmCalls.length, 0, 'no turn for the silenced worker');
+
+  h.pushHistory('IDOWNER', 'keep going but hold the publish step');
+  h.llmTurns.push('understood — holding the publish step\n[STATUS:EXECUTING]');
+  await h.engine.tick();
+  assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1, 'chair answered the owner while paused');
+});
+
+test('engine: resume queues a supervisor wake and the chair re-engages the roster', async () => {
+  const h = createHarness('metabot-gt-engine-resume-');
+  const task = await h.seedTask('executing');
+  // What superviseGroupTask(resume) leaves behind: pause cleared + request kv.
+  await h.chairStore.setTaskDispatchPaused(task.id, Date.now());
+  await h.chairStore.setTaskDispatchPaused(task.id, null);
+  await h.chairStore.kvSet(`group_task_nudge_request:${task.id}`,
+    JSON.stringify({ kind: 'resume', at: Date.now(), attempts: 0 }));
+
+  h.llmTurns.push('work resumes — @worker 1 please continue with the visual pass\n[STATUS:EXECUTING]');
+  await h.engine.tick();
+
+  const chairPins = h.pins.filter((pin) => pin.label === 'twin-bot');
+  assert.equal(chairPins.length, 1, 'resume wake produced one chair message');
+  assert.equal(h.llmCalls.length, 1);
+  assert.ok(h.llmCalls[0].prompt.includes('[SYSTEM supervisor wake'), 'wake directive used');
+  assert.ok(h.llmCalls[0].prompt.includes('RESUMED'), 'resume variant used');
+  assert.ok(!(await h.chairStore.kvGet(`group_task_nudge_request:${task.id}`)), 'request kv consumed');
+});
+
+test('engine: a nudge request drives the chair to ping the silent member', async () => {
+  const h = createHarness('metabot-gt-engine-nudge-');
+  const task = await h.seedTask('executing');
+  await h.chairStore.kvSet(`group_task_nudge_request:${task.id}`,
+    JSON.stringify({ kind: 'nudge', memberSlug: 'worker-1', name: 'worker 1', note: 'still no ACK', at: Date.now(), attempts: 0 }));
+
+  h.llmTurns.push('@worker 1 status check — please ACK your assignment\n[STATUS:EXECUTING]');
+  await h.engine.tick();
+
+  const chairPins = h.pins.filter((pin) => pin.label === 'twin-bot');
+  assert.equal(chairPins.length, 1, 'nudge produced one chair message');
+  assert.ok(h.llmCalls[0].prompt.includes('worker 1'), 'nudge target surfaced to the chair');
+  assert.ok(h.llmCalls[0].prompt.includes('still no ACK'), 'owner note surfaced to the chair');
+});
+
+test('engine: dispatch and review milestones emit relay rows for the source session', async () => {
+  const { createGroupTaskRelayStore } = require('../../dist/core/grouptask/relayStore.js');
+  const h = createHarness('metabot-gt-engine-relay-');
+  const task = await h.seedTask('planning', { sourceSessionId: 'sess-origin-1' });
+  h.pushHistory('IDTWIN', '[GROUP TASK] Engine test task');
+
+  h.llmTurns.push('@worker 1 ship it\n[STATUS:EXECUTING]');
+  await h.engine.tick();
+  // Round-trip applies [STATUS:EXECUTING] → dispatch relay row.
+  h.pushHistory('IDTWIN', '@worker 1 ship it\n[STATUS:EXECUTING]', { mention: ['IDWORKER1'] });
+  h.llmTurns.push('[WORKING] on it');
+  await h.engine.tick();
+  const relayStore = createGroupTaskRelayStore(resolveMetabotPaths(h.profiles[0].homeDir));
+  let pending = await relayStore.listPending();
+  assert.deepEqual(pending.map((row) => row.kind), ['dispatch'], 'dispatch row emitted once');
+  assert.equal(pending[0].sessionId, 'sess-origin-1');
+
+  // Review entry emits the review row.
+  h.pushHistory('IDTWIN', 'All criteria met.\n[STATUS:REVIEW]');
+  await h.engine.tick();
+  pending = await relayStore.listPending();
+  assert.deepEqual(pending.map((row) => row.kind), ['dispatch', 'review'], 'review row appended');
+
+  // A task without a source session never emits.
+  const plain = await h.chairStore.createTask({
+    groupId: 'grp-engine-2', title: 'No origin', goal: 'g', chairSlug: 'twin-bot', createdBy: 'user',
+  });
+  await h.chairStore.addMember({ taskId: plain.id, slug: 'twin-bot', globalMetaId: 'IDTWIN', role: 'chair' });
+  await h.chairStore.updateTaskStatus(plain.id, 'executing');
+  await h.chairStore.kvSet(`${GROUP_TASK_PLANNED_KV_PREFIX}${plain.id}`, '1');
+  h.pushHistory('IDTWIN', 'done\n[STATUS:REVIEW]', { groupId: 'grp-engine-2' });
+  await h.engine.tick();
+  pending = await relayStore.listPending();
+  assert.equal(pending.filter((row) => row.taskId === plain.id).length, 0, 'no rows without a source session');
 });

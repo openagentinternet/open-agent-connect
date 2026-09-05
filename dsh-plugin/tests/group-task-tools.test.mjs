@@ -287,3 +287,35 @@ test('unknown actions fail with the action inventory', async () => {
   await assert.rejects(controller.run('nope', {}), /unknown_action/)
   await assert.rejects(controller.run('detail', {}), /missing_task_id/)
 })
+
+// ---------------------------------------------------------------------------
+// Phase 2: supervise + deliverable_delete actions
+// ---------------------------------------------------------------------------
+
+test('supervise action validates and maps to the CLI verb', async () => {
+  const { calls, run } = fakeRun((args) => ({ ok: true, state: 'success', data: { task: {} } }))
+  const controller = plugin.createGroupTaskController('alice', { run })
+  await assert.rejects(
+    controller.run('supervise', { taskId: 3, superviseAction: 'shout' }),
+    /invalid_action/,
+  )
+  await controller.run('supervise', { taskId: 3, superviseAction: 'nudge', member: 'bob', note: 'no ACK' })
+  const call = calls.find((args) => args[1] === 'supervise')
+  assert.equal(flagValue(call, '--chair'), 'alice')
+  assert.equal(flagValue(call, '--action'), 'nudge')
+  assert.equal(flagValue(call, '--member'), 'bob')
+  assert.equal(flagValue(call, '--note'), 'no ACK')
+  await controller.run('supervise', { taskId: 3, superviseAction: 'pause' })
+  const pauseCall = calls.filter((args) => args[1] === 'supervise').at(-1)
+  assert.equal(flagValue(pauseCall, '--action'), 'pause')
+  assert.equal(flagValue(pauseCall, '--member'), undefined)
+})
+
+test('deliverable_delete maps the ledger row id', async () => {
+  const { calls, run } = fakeRun()
+  const controller = plugin.createGroupTaskController('alice', { run })
+  await assert.rejects(controller.run('deliverable_delete', { taskId: 3 }), /missing_deliverable/)
+  await controller.run('deliverable_delete', { taskId: 3, deliverableId: 9 })
+  const call = calls.find((args) => args[1] === 'deliverable-delete')
+  assert.equal(flagValue(call, '--deliverable'), '9')
+})

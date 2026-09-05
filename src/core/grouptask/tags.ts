@@ -298,6 +298,8 @@ export interface DecideRespondersInput {
   message: Pick<GroupTaskMessage, 'content' | 'mention' | 'senderGlobalMetaId' | 'senderSuspect'>;
   taskStatus: GroupTaskStatus;
   hasOpenCheckpoint: boolean;
+  /** Owner dispatch pause (supervise): workers silent, owner→chair only. */
+  dispatchPaused?: boolean;
   /** Active local seats only (removed and remote members excluded). */
   seats: GroupTaskResponderSeat[];
   ownerGlobalMetaId: string | null;
@@ -321,7 +323,11 @@ export function decideGroupTaskResponders(input: DecideRespondersInput): GroupTa
   const senderGmid = normalizeId(input.message.senderGlobalMetaId);
   const ownerGmid = normalizeId(input.ownerGlobalMetaId);
   const fromOwner = Boolean(ownerGmid) && senderGmid === ownerGmid;
-  const humanGate = input.taskStatus === 'review' || input.hasOpenCheckpoint;
+  // Human gate: owner dispatch pause behaves like review/checkpoint —
+  // workers never speak, only owner messages reach the chair.
+  const humanGate = input.taskStatus === 'review'
+    || input.hasOpenCheckpoint === true
+    || input.dispatchPaused === true;
 
   const decisions: GroupTaskResponderDecision[] = [];
   const chair = input.seats.find((seat) => seat.role === 'chair') ?? null;
