@@ -131,6 +131,7 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
 
     learnKnowledgeBase: async (metabotSlug, knowledgeBaseId, full) => {
       const kb = await requireKb(metabotSlug, knowledgeBaseId);
+      let learnSummary: KnowledgeBaseRecord['learnSummary'];
       await enqueueLearn(kb.id, async () => {
         const index = indexFor(kb.id);
         // Incremental by default (unchanged docs reuse their stored chunks +
@@ -139,10 +140,11 @@ export function createKnowledgeBaseService(paths: MetabotPaths): KnowledgeBaseSe
         await fs.mkdir(kb.rawDir, { recursive: true });
         const stats = await index.rebuild(kb.rawDir, () => Date.now(), { full: full === true });
         await store.setCounts(kb.id, stats.docCount, stats.chunkCount, Date.now());
+        learnSummary = { added: stats.added, updated: stats.updated, removed: stats.removed };
       });
       const updated = await store.getKnowledgeBase(kb.id);
       if (!updated) throw new KnowledgeBaseServiceError('kb_not_found', `Knowledge base ${kb.id} disappeared mid-learn.`);
-      return updated;
+      return learnSummary ? { ...updated, learnSummary } : updated;
     },
 
     queryKnowledgeBase: async (metabotSlug, query, options) => {

@@ -25,6 +25,8 @@ export interface KnowledgeBaseRecord {
   lastAutoLearnDate: string | null;
   createdAt: number;
   updatedAt: number;
+  /** Only set on the record a learn call returns (transient, never persisted). */
+  learnSummary?: { added: number; updated: number; removed: number };
 }
 
 export interface CreateKnowledgeBaseInput {
@@ -203,8 +205,10 @@ export function createKnowledgeBaseStore(paths: MetabotPaths): KnowledgeBaseStor
       if (state.bases.length === before) return false;
       await writeRegistry(state);
       // Prune the raw corpus AND the derived index so a same-named KB cannot
-      // resurrect old documents or serve stale chunks.
-      if (target?.rawDir) {
+      // resurrect old documents or serve stale chunks. External source
+      // directories (picked at create time) are read in place and are NEVER
+      // deleted — only the managed internal corpus is removed here.
+      if (target?.rawDir && target.rawDir === path.join(rootDir, target.id, 'raw')) {
         await fs.rm(target.rawDir, { recursive: true, force: true }).catch(() => undefined);
       }
       await fs.rm(knowledgeBaseIndexPath(paths, id), { force: true }).catch(() => undefined);

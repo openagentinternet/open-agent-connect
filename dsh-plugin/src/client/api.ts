@@ -1425,8 +1425,13 @@ export async function kbList(from: string): Promise<KbRecord[]> {
   return rows.map(kbRecordOf)
 }
 
-export async function kbCreate(from: string, name: string, description: string): Promise<void> {
-  await post('kb/create', { from, name, description })
+export async function kbCreate(
+  from: string,
+  name: string,
+  description: string,
+  rawDir?: string,
+): Promise<void> {
+  await post('kb/create', { from, name, description, ...(rawDir ? { rawDir } : {}) })
 }
 
 export async function kbUpdate(
@@ -1441,8 +1446,28 @@ export async function kbRemove(from: string, id: string): Promise<void> {
   await post('kb/remove', { from, id })
 }
 
-export async function kbLearn(from: string, id?: string, full?: boolean): Promise<void> {
-  await post('kb/learn', { from, ...(id ? { id } : {}), ...(full ? { full: true } : {}) })
+export type KbLearnSummary = { added: number; updated: number; removed: number }
+
+export async function kbLearn(from: string, id?: string, full?: boolean): Promise<KbLearnSummary | null> {
+  const data = recordOf(await post<unknown>('kb/learn', { from, ...(id ? { id } : {}), ...(full ? { full: true } : {}) }))
+  const summary = recordOf(recordOf(data.knowledgeBase).learnSummary)
+  if (!Object.keys(summary).length) return null
+  return {
+    added: Math.max(0, toNumber(summary.added)),
+    updated: Math.max(0, toNumber(summary.updated)),
+    removed: Math.max(0, toNumber(summary.removed)),
+  }
+}
+
+/** Open the host OS directory chooser; null when the operator cancels. */
+export async function kbBrowseDir(): Promise<string | null> {
+  const data = recordOf(await post<unknown>('kb/browse-dir', {}))
+  const picked = data.path
+  return typeof picked === 'string' && picked.trim() ? picked.trim() : null
+}
+
+export async function kbOpenDir(from: string, id: string): Promise<void> {
+  await post('kb/open-dir', { from, id })
 }
 
 /** Raw-byte KB document import (the browser form of IDBots' importFiles picker). */

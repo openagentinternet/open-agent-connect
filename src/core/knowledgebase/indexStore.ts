@@ -66,12 +66,22 @@ export interface KbIndexStore {
     rawDir: string,
     now: () => number,
     options?: { full?: boolean },
-  ): Promise<{ docCount: number; chunkCount: number }>;
+  ): Promise<KbLearnStats & { docCount: number; chunkCount: number }>;
   query(
     query: string,
     options: { topK?: number; minScore?: number },
   ): Promise<KbQueryHit[]>;
   clear(): Promise<void>;
+}
+
+/** What one learn pass did relative to the previous index (IDBots parity). */
+export interface KbLearnStats {
+  /** Documents that were not in the previous index. */
+  added: number;
+  /** Documents whose raw bytes changed since the previous index. */
+  updated: number;
+  /** Documents that vanished from the raw dir. */
+  removed: number;
 }
 
 export const KB_QUERY_DEFAULT_TOP_K = 8;
@@ -322,7 +332,18 @@ export function createKnowledgeBaseIndexStore(filePath: string): KbIndexStore {
         : await buildFullIndex(rawDir, now);
       await writeIndex(index);
       cache = null;
-      return { docCount: index.docs.length, chunkCount: index.chunks.length };
+      // Learn summary vs the previous index, by raw-content sha256 per relpath
+      // (IDBots' learn {added, updated, removed}). A full rebuild diffs against
+      // the previous index the same way when one exists.
+      const prevByPath = new Map((previous?.docs ?? []).map((doc) => [doc.relpath, doc.sha256]));
+      const added = index.docs.filter((doc) => !prevByPath.has(doc.relpath)).length;
+      const removed = [...prevByPath.keys()].filter(
+        (relpath) => !index.docs.some((doc) => doc.relpath === relpath),
+      ).length;
+      const updated = index.docs.filter(
+        (doc) => prevByPath.get(doc.relpath) !== undefined && prevByPath.get(doc.relpath) !== doc.sha256,
+      ).length;
+      return { docCount: index.docs.length, chunkCount: index.chunks.length, added, updated, removed };
     },
 
     query: async (query, options: { topK?: number; minScore?: number } = {}) => {
