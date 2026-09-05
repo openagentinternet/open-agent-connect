@@ -7,6 +7,11 @@ import path from 'node:path';
 
 import type { MetabotPaths } from '../state/paths';
 import type { MemoryGuardLevel } from './memoryExtractor';
+import {
+  MEMORY_HYGIENE_THRESHOLD_KEYS,
+  normalizeMemoryHygieneConfig,
+  type MemoryHygieneConfig,
+} from './memoryHygienePolicy';
 import { clampMemoryPromptMaxChars } from './memoryPromptBlocks';
 import type { MemoryEffectivePolicy, MemoryPolicy, MemoryPolicyUpdates } from './memoryTypes';
 
@@ -46,7 +51,19 @@ function defaultPolicy(): Omit<MemoryPolicy, 'updatedAt'> {
     memoryGuardLevel: DEFAULT_MEMORY_GUARD_LEVEL,
     memoryUserMemoriesMaxItems: DEFAULT_MEMORY_USER_MEMORIES_MAX_ITEMS,
     dreamEnabled: true,
+    hygieneEnabled: true,
   };
+}
+
+/** Keep only the known threshold keys when persisting the `hygiene` object. */
+function normalizeHygieneObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const record = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of MEMORY_HYGIENE_THRESHOLD_KEYS) {
+    if (record[key] !== undefined) out[key] = record[key];
+  }
+  return out;
 }
 
 function normalizePolicyFile(value: unknown): (Partial<MemoryPolicyUpdates> & { updatedAt?: number }) {
@@ -66,6 +83,8 @@ function normalizePolicyFile(value: unknown): (Partial<MemoryPolicyUpdates> & { 
     out.memoryPromptMaxChars = clampMemoryPromptMaxChars(record.memoryPromptMaxChars);
   }
   if (typeof record.dreamEnabled === 'boolean') out.dreamEnabled = record.dreamEnabled;
+  if (typeof record.hygieneEnabled === 'boolean') out.hygieneEnabled = record.hygieneEnabled;
+  if (record.hygiene !== undefined) out.hygiene = normalizeHygieneObject(record.hygiene);
   if (typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt)) {
     out.updatedAt = record.updatedAt;
   }
@@ -78,6 +97,12 @@ export interface MemoryPolicyStore {
   setOverride(updates: MemoryPolicyUpdates): Promise<MemoryPolicy>;
   deleteOverride(): Promise<boolean>;
   effectivePolicy(): Promise<MemoryEffectivePolicy>;
+  /** Effective hygiene thresholds with the master switch folded in from the
+   * `hygieneEnabled` flag. */
+  getHygieneConfig(): Promise<MemoryHygieneConfig>;
+  /** Merge threshold updates into the `hygiene` object; `enabled` in the
+   * update maps to the `hygieneEnabled` policy flag. */
+  setHygieneConfig(update: Record<string, unknown>): Promise<MemoryHygieneConfig>;
 }
 
 export function createMemoryPolicyStore(paths: MetabotPaths): MemoryPolicyStore {
@@ -132,6 +157,7 @@ export function createMemoryPolicyStore(paths: MetabotPaths): MemoryPolicyStore 
           normalized.memoryUserMemoriesMaxItems ?? Number.NaN,
         ),
         dreamEnabled: normalizeBoolean(normalized.dreamEnabled, defaults.dreamEnabled),
+        hygieneEnabled: normalizeBoolean(normalized.hygieneEnabled, defaults.hygieneEnabled),
         updatedAt: normalized.updatedAt,
       };
     },
@@ -163,8 +189,34 @@ export function createMemoryPolicyStore(paths: MetabotPaths): MemoryPolicyStore 
         ),
         memoryPromptMaxChars: clampMemoryPromptMaxChars(override.memoryPromptMaxChars ?? Number.NaN),
         dreamEnabled: normalizeBoolean(override.dreamEnabled, defaults.dreamEnabled),
+        hygieneEnabled: normalizeBoolean(override.hygieneEnabled, defaults.hygieneEnabled),
         source: hasOverride ? 'profile' : 'default',
       };
+    },
+
+    async getHygieneConfig() {
+      const override = await readOverride();
+      const normalized = normalizeMemoryHygieneConfig(override.hygiene ?? {});
+      return {
+        ...normalized,
+        enabled: normalizeBoolean(override.hygieneEnabled, true),
+      };
+    },
+
+    async setHygieneConfig(update) {
+      const current = await readOverride();
+      const merged: Record<string, unknown> = { ...(current.hygiene ?? {}), ...update };
+      delete merged.enabled; // The master switch is the hygieneEnabled flag.
+      const normalized = normalizeMemoryHygieneConfig(merged);
+      const nextEnabled = typeof update.enabled === 'boolean'
+        ? update.enabled
+        : normalizeBoolean(current.hygieneEnabled, true);
+      const nextOverride = { ...current };
+      nextOverride.hygiene = normalizeHygieneObject(normalized);
+      nextOverride.hygieneEnabled = nextEnabled;
+      nextOverride.updatedAt = Date.now();
+      await writeOverride(normalizePolicyFile(nextOverride));
+      return { ...normalized, enabled: nextEnabled };
     },
   };
 }

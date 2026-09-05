@@ -30,6 +30,35 @@ export interface MetabotDaemonHttpHandlers {
         get?: () => Awaitable<MetabotCommandResult<unknown>>;
         set?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
+    /**
+     * Traffic (流量 account-quota gas credit) verbs, all owner-scoped (the
+     * machine-wide owner identity binds the account — no `from` selection).
+     * Read verbs surface backend 404s as soft `{ featureUnavailable: true }`
+     * success payloads; write verbs (setMode/claim/redeem) fail hard with the
+     * TrafficApiError code (`traffic_<stage>_failed`) and data.errorCode intact.
+     */
+    traffic?: {
+        status?: () => Awaitable<MetabotCommandResult<unknown>>;
+        getMode?: () => Awaitable<MetabotCommandResult<unknown>>;
+        setMode?: (input: {
+            mode: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        getBalance?: () => Awaitable<MetabotCommandResult<unknown>>;
+        getLedger?: (input: {
+            cursor?: number;
+            limit?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        getUsage?: () => Awaitable<MetabotCommandResult<unknown>>;
+        claim?: () => Awaitable<MetabotCommandResult<unknown>>;
+        redeem?: (input: {
+            code: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        getApiBase?: () => Awaitable<MetabotCommandResult<unknown>>;
+        setApiBase?: (input: {
+            apiBase: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        resetApiBase?: () => Awaitable<MetabotCommandResult<unknown>>;
+    };
     buzz?: {
         post?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
@@ -246,6 +275,17 @@ export interface MetabotDaemonHttpHandlers {
             local: string;
             signal?: AbortSignal;
         }) => Awaitable<AsyncIterable<unknown>>;
+    };
+    schedule?: {
+        /** Host lease heartbeat: keeps this profile's tasks out of the daemon tick
+         *  while the host is alive. */
+        heartbeat?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        due?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        claim?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        complete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        show?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        runs?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     };
     file?: {
         upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

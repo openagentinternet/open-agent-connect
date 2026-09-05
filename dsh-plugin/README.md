@@ -108,6 +108,14 @@ data under `~/.metabot/profiles/<slug>/`):
   30-minute stale threshold (on `dream due`/`dream status`), and host-side
   LLM/transport failures mark the live run failed through `dream fail`, so
   no date can wedge in "running" forever.
+- **Memory hygiene** — right after the dream pass, the same scheduler runs the
+  per-Bot memory-hygiene pass (`memory hygiene due --from <slug>` → `memory
+  hygiene run --from <slug>`, eligible once per local date, all-day catch-up;
+  gate with `hygiene.enabled`, default on). Deterministic compression of the
+  memory layer runs every time (observation supersede, episode archive, memory
+  decay, tombstone purge, knowledge-revision keep-N, dream-run retention); the
+  LLM deep-consolidation step runs only when the Bot has an LLM runtime bound
+  and is skipped, not failed, otherwise.
 - **Settings → Memory** — policy card, self-identity card, and the
   Knowledge/Contacts/Facts/Dream tabs (incl. manual run-dream). The Dream
   tab lists all recent runs (completed/failed/running, incl. quiet days
@@ -120,9 +128,13 @@ data under `~/.metabot/profiles/<slug>/`):
   `twin_task_cancel`, `worker_session_stop` — by task/step ids or a
   live-session target — and `oac_session_insert_user_message` for pushing one
   instruction into a live Worker session) and delegates to Workers as DSH
-  sub-sessions (`agents.create` + preset mount), with ORCH-NOTIFY wake-ups
-  back into the twin session. Delegated sessions run with the Worker Bot's
-  own DSH LLM pair (falling back to the host default model), carry the host
+  sub-sessions (`agents.create` + preset mount). The blocking delegate tool
+  result is the delivery channel: every settle marks its attempt `notified` in
+  the task ledger, and nothing injects ORCH-NOTIFY wake-ups back into a twin
+  session — this host has no single "the twin session", so injected
+  notifications would land stale in unrelated conversations. Delegated
+  sessions run with the Worker Bot's own DSH LLM pair (falling back to the
+  host default model), carry the host
   workspace cwd so they appear in the DSH conversation list and stay readable
   there after the step ends, and report honest outcomes — a turn that dies
   without a handoff fails the step (WORKER_EMPTY_HANDOFF with the turn's own
@@ -133,7 +145,37 @@ data under `~/.metabot/profiles/<slug>/`):
 
 Host config toggles (cordis.yml `config` of this plugin): `memory.enabled`,
 `memory.injection`, `memory.extraction`, `memory.tools`, `dream.enabled`,
-`dream.tickMinutes`, `twin.enabled`, `twin.stepTimeoutMs`.
+`dream.tickMinutes`, `hygiene.enabled`, `schedule.enabled`,
+`schedule.tickSeconds`, `schedule.runTimeoutMs`, `twin.enabled`,
+`twin.stepTimeoutMs`.
+
+## Scheduled tasks (定时任务)
+
+CLI-first like everything else here: `metabot schedule *` owns the data model,
+due math, and run ledger (`create --name --prompt --at|--every|--cron`,
+`list`/`show`, `update --payload-file`, `delete`, `enable`/`disable`, `run`
+manual execution, `runs` history, and the host-facing `due`/`claim`/
+`complete`). Tasks belong to one Bot and fire per the task's schedule
+(one-shot `at`, `interval`, or 5-field `cron`); prompts describe runtime
+behavior, not pre-computed results.
+
+While the DSH host is alive, the plugin scheduler (`schedule.tickSeconds`,
+default 60) claims due work as the host: it heartbeats every local Bot so the
+OAC daemon stands down under the host lease, then runs each due `auto`/`host`
+task as a **new DSH conversation** — `agents.create` + the Bot's `oac-<slug>`
+preset, the Bot's DSH LLM pair with the host default model as fallback, and
+the task prompt sent as the user message prefixed `[Scheduled] <name>` (which
+the DSH title fallback picks up as the conversation title). The run settles
+honestly: a turn that dies or times out (`schedule.runTimeoutMs`, default 30
+minutes) settles the run as `error`, anything else as `success` — each run
+shows up in `metabot schedule runs` and the session stays live in the
+conversation list to watch or continue. `daemon`-channel tasks are left to the
+daemon tick, and when the DSH host is closed the daemon runs `auto`/`host`
+tasks headlessly through the Bot's bound LLM runtime (lease expiry hands
+execution back with a fire-once catch-up). While DSH is open but the daemon is
+down, the tick falls back to the `metabot schedule due|claim|complete` CLI
+verbs — a dead daemon cannot race a claim. Per-run bookkeeping lives in
+`<profile>/.runtime/schedule/schedule.json`.
 
 ## MetaWeb learning: search, install, demo
 

@@ -80,6 +80,10 @@ const memoryService_1 = require("../core/memory/memoryService");
 const transcriptStore_1 = require("../core/memory/transcriptStore");
 const dreamStore_1 = require("../core/memory/dreamStore");
 const dreamService_1 = require("../core/memory/dreamService");
+const hygieneStore_1 = require("../core/memory/hygieneStore");
+const memoryHygieneService_1 = require("../core/memory/memoryHygieneService");
+const store_2 = require("../core/schedule/store");
+const service_1 = require("../core/schedule/service");
 const experiencePromptBlocks_1 = require("../core/memory/experiencePromptBlocks");
 const dreamPrompt_1 = require("../core/memory/dreamPrompt");
 const experienceStore_1 = require("../core/memory/experienceStore");
@@ -111,6 +115,8 @@ const skillInstall_1 = require("../core/skills/skillInstall");
 const platformRegistry_1 = require("../core/platform/platformRegistry");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
 const localMnemonicSigner_1 = require("../core/signing/localMnemonicSigner");
+const trafficAccountService_1 = require("../core/traffic/trafficAccountService");
+const mvcSponsorWritePin_1 = require("../core/subsidy/mvcSponsorWritePin");
 const writePin_1 = require("../core/chain/writePin");
 const registry_1 = require("../core/chain/adapters/registry");
 const nativeWallet_1 = require("../core/wallet/nativeWallet");
@@ -122,7 +128,7 @@ const engineLog_1 = require("../core/grouptask/engineLog");
 const deliverableVerification_1 = require("../core/grouptask/deliverableVerification");
 const profileUploadGate_1 = require("../core/files/profileUploadGate");
 const metabotProfileManager_1 = require("../core/bot/metabotProfileManager");
-const service_1 = require("../core/knowledgebase/service");
+const service_2 = require("../core/knowledgebase/service");
 const studyJobs_1 = require("../core/knowledgebase/studyJobs");
 const simplemsgListener_1 = require("../core/a2a/simplemsgListener");
 const simplemsgPresenceWatchdog_1 = require("../core/a2a/simplemsgPresenceWatchdog");
@@ -174,6 +180,8 @@ const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
 const DEFAULT_SERVICE_REFUND_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+/** Scheduled-task daemon tick cadence (IDBots scheduler parity). */
+const SCHEDULE_TICK_INTERVAL_MS = 30_000;
 let cachedDaemonRuntimeFingerprint = null;
 function normalizeDispatcherPrivateChatMessage(message) {
     return {
@@ -2543,6 +2551,27 @@ function createDefaultCliDependencies(context) {
         chain: {
             write: async (input) => requestJsonForSelectedActor('POST', '/api/chain/write', typeof input.from === 'string' ? input.from : undefined, input),
         },
+        // Traffic (流量) verbs are owner-scoped: no actor selection, every call is
+        // a plain POST to the daemon's /api/traffic/* routes.
+        traffic: {
+            status: async () => requestJsonForSelectedActor('POST', '/api/traffic/status'),
+            getMode: async () => requestJsonForSelectedActor('POST', '/api/traffic/mode', undefined, {}),
+            setMode: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/mode', undefined, { mode: input.mode }),
+            balance: async () => requestJsonForSelectedActor('POST', '/api/traffic/balance'),
+            ledger: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/ledger', undefined, {
+                ...(input.cursor ? { cursor: input.cursor } : {}),
+                ...(input.limit ? { limit: input.limit } : {}),
+            }),
+            usage: async () => requestJsonForSelectedActor('POST', '/api/traffic/usage'),
+            claim: async () => requestJsonForSelectedActor('POST', '/api/traffic/claim'),
+            redeem: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/redeem', undefined, { code: input.code }),
+            getApiBase: async () => requestJsonForSelectedActor('POST', '/api/traffic/api-base', undefined, { action: 'get' }),
+            setApiBase: async (input) => requestJsonForSelectedActor('POST', '/api/traffic/api-base', undefined, {
+                action: 'set',
+                value: input.apiBase,
+            }),
+            resetApiBase: async () => requestJsonForSelectedActor('POST', '/api/traffic/api-base', undefined, { action: 'reset' }),
+        },
         daemon: {
             start: async () => {
                 const baseUrl = await ensureDaemonBaseUrl(context);
@@ -3060,6 +3089,8 @@ function createDefaultCliDependencies(context) {
                     'memoryUserMemoriesMaxItems',
                     'memoryPromptMaxChars',
                     'dreamEnabled',
+                    'hygieneEnabled',
+                    'hygiene',
                 ];
                 const updates = {};
                 for (const key of allowed) {
@@ -3313,6 +3344,94 @@ function createDefaultCliDependencies(context) {
                     : snapshot;
                 return (0, commandResult_1.commandSuccess)({ observerGlobalMetaId, subject: input.subject, snapshot: namedSnapshot, observations });
             },
+            hygieneStatus: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const policyStore = (0, memoryPolicy_1.createMemoryPolicyStore)(paths);
+                const hygieneStore = (0, hygieneStore_1.createHygieneStore)(paths);
+                const [config, ledger, due] = await Promise.all([
+                    policyStore.getHygieneConfig(),
+                    hygieneStore.getLedger(),
+                    (0, memoryHygieneService_1.memoryHygieneDue)(paths),
+                ]);
+                return (0, commandResult_1.commandSuccess)({
+                    config,
+                    lastRun: ledger.lastRun,
+                    deepConsolidationLastRunAt: ledger.deepConsolidationLastRunAt,
+                    due,
+                });
+            },
+            hygieneDue: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                return (0, commandResult_1.commandSuccess)(await (0, memoryHygieneService_1.memoryHygieneDue)((0, paths_1.resolveMetabotPaths)(actor.homeDir)));
+            },
+            hygieneRun: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const slug = node_path_1.default.basename(paths.profileRoot);
+                const runtimeResolver = createCliLlmRuntimeResolver(paths);
+                const executor = new executor_1.LlmExecutor({
+                    sessionsRoot: paths.llmExecutorSessionsRoot,
+                    transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+                    skillsRoot: paths.skillsRoot,
+                    systemHomeDir: paths.systemHomeDir,
+                    env: context.env,
+                    backends: (0, executor_1.createRegistryBackendFactories)(),
+                });
+                // The deep-consolidation call: 180s attempt timeout, JSON-only prompt.
+                // No healthy runtime binding = skip (null), never fail; a started run
+                // that errors mid-call lands in the run's error list via a throw.
+                const complete = async (request) => {
+                    const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: slug });
+                    if (!resolved.runtime)
+                        return null;
+                    const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                        runtimeResolver,
+                        llmExecutor: executor,
+                        metaBotSlug: slug,
+                        prompt: request.user,
+                        systemPrompt: request.system,
+                        timeoutMs: 180_000,
+                        pollIntervalMs: 5_000,
+                    });
+                    if (outcome.status !== 'completed') {
+                        throw new Error(outcome.error || `Deep consolidation ended with status ${outcome.status}.`);
+                    }
+                    return outcome.output;
+                };
+                try {
+                    const stats = await (0, memoryHygieneService_1.runMemoryHygiene)(paths, {
+                        trigger: 'manual',
+                        deep: input.noDeep ? false : undefined,
+                        complete,
+                    });
+                    return (0, commandResult_1.commandSuccess)(stats);
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('hygiene_run_failed', error instanceof Error ? error.message : String(error));
+                }
+            },
+            hygieneConfigGet: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, memoryPolicy_1.createMemoryPolicyStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                return (0, commandResult_1.commandSuccess)({ config: await store.getHygieneConfig() });
+            },
+            hygieneConfigSet: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, memoryPolicy_1.createMemoryPolicyStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const config = await store.setHygieneConfig(input.payload);
+                return (0, commandResult_1.commandSuccess)({ config });
+            },
         },
         chainhistory: {
             recordRead: async (input) => {
@@ -3548,6 +3667,207 @@ function createDefaultCliDependencies(context) {
                     text: entries[0]?.text ?? '',
                     updatedAt: entries[0]?.updatedAt ?? null,
                 });
+            },
+        },
+        schedule: {
+            create: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                try {
+                    const task = await store.createTask({
+                        name: input.name,
+                        prompt: input.prompt,
+                        schedule: input.schedule,
+                        ...(input.workingDirectory !== undefined ? { workingDirectory: input.workingDirectory } : {}),
+                        ...(input.channel !== undefined ? { channel: input.channel } : {}),
+                        ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+                        ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+                    });
+                    return (0, commandResult_1.commandSuccess)({ task });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
+                }
+            },
+            list: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const tasks = await store.listTasks();
+                return (0, commandResult_1.commandSuccess)({ tasks });
+            },
+            show: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const task = await store.getTask(input.id);
+                if (!task)
+                    return (0, commandResult_1.commandFailed)('task_not_found', `Scheduled task not found: ${input.id}`);
+                return (0, commandResult_1.commandSuccess)({ task });
+            },
+            update: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                try {
+                    const result = await store.updateTask(input.id, input.payload);
+                    if ('notFound' in result) {
+                        return (0, commandResult_1.commandFailed)('task_not_found', `Scheduled task not found: ${input.id}`);
+                    }
+                    return (0, commandResult_1.commandSuccess)({ task: result.task, warnings: result.warnings });
+                }
+                catch (error) {
+                    return (0, commandResult_1.commandFailed)('invalid_argument', error instanceof Error ? error.message : String(error));
+                }
+            },
+            delete: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const result = await store.deleteTask(input.id);
+                if (!result.deleted) {
+                    return (0, commandResult_1.commandFailed)('task_not_found', `Scheduled task not found: ${input.id}`);
+                }
+                return (0, commandResult_1.commandSuccess)({ deleted: true });
+            },
+            enable: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const result = await store.setEnabled(input.id, true);
+                if ('notFound' in result) {
+                    return (0, commandResult_1.commandFailed)('task_not_found', `Scheduled task not found: ${input.id}`);
+                }
+                return (0, commandResult_1.commandSuccess)({ task: result.task, warnings: result.warnings });
+            },
+            disable: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const result = await store.setEnabled(input.id, false);
+                if ('notFound' in result) {
+                    return (0, commandResult_1.commandFailed)('task_not_found', `Scheduled task not found: ${input.id}`);
+                }
+                return (0, commandResult_1.commandSuccess)({ task: result.task, warnings: result.warnings });
+            },
+            run: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const slug = node_path_1.default.basename(paths.profileRoot);
+                const runtimeResolver = createCliLlmRuntimeResolver(paths);
+                const executor = new executor_1.LlmExecutor({
+                    sessionsRoot: paths.llmExecutorSessionsRoot,
+                    transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+                    skillsRoot: paths.skillsRoot,
+                    systemHomeDir: paths.systemHomeDir,
+                    env: context.env,
+                    backends: (0, executor_1.createRegistryBackendFactories)(),
+                });
+                const result = await (0, service_1.runScheduledTask)(paths, {
+                    taskId: input.id,
+                    trigger: 'manual',
+                    executor: 'cli',
+                }, {
+                    runLlm: async (turn) => {
+                        const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                            runtimeResolver,
+                            llmExecutor: executor,
+                            metaBotSlug: slug,
+                            prompt: turn.prompt,
+                            systemPrompt: turn.systemPrompt,
+                            timeoutMs: 30 * 60_000,
+                            pollIntervalMs: 5_000,
+                        });
+                        if (outcome.status !== 'completed') {
+                            return {
+                                ok: false,
+                                error: outcome.error || `Scheduled task execution ended with status ${outcome.status}.`,
+                            };
+                        }
+                        return { ok: true, output: outcome.output };
+                    },
+                });
+                if (result.kind === 'already_running') {
+                    return (0, commandResult_1.commandFailed)('already_running', `Scheduled task is already running: ${input.id}`);
+                }
+                if (result.kind === 'failed') {
+                    return (0, commandResult_1.commandFailed)('schedule_run_failed', result.error);
+                }
+                return (0, commandResult_1.commandSuccess)({ taskId: input.id, output: result.output });
+            },
+            runs: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const runs = await store.listRuns({
+                    ...(input.id ? { taskId: input.id } : {}),
+                    ...(input.limit !== undefined ? { limit: input.limit } : {}),
+                });
+                return (0, commandResult_1.commandSuccess)({ runs });
+            },
+            due: async (input) => {
+                if (input.all) {
+                    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+                    const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
+                    const due = [];
+                    for (const profile of profiles) {
+                        const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
+                        const tasks = await store.listDue();
+                        if (tasks.length > 0)
+                            due.push({ slug: profile.slug, tasks });
+                    }
+                    return (0, commandResult_1.commandSuccess)({ due });
+                }
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const tasks = await store.listDue();
+                const slug = node_path_1.default.basename((0, paths_1.resolveMetabotPaths)(actor.homeDir).profileRoot);
+                return (0, commandResult_1.commandSuccess)({ due: [{ slug, tasks }] });
+            },
+            claim: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const executor = input.executor ?? 'host';
+                const result = await store.claim(input.id, { trigger: 'scheduled', executor });
+                if (!result.ok) {
+                    if (result.code === 'task_not_found') {
+                        return (0, commandResult_1.commandFailed)('task_not_found', `Scheduled task not found: ${input.id}`);
+                    }
+                    if (result.code === 'task_expired') {
+                        return (0, commandResult_1.commandFailed)('task_expired', `Scheduled task has expired: ${input.id}`);
+                    }
+                    return (0, commandResult_1.commandFailed)('already_running', `Scheduled task is already running: ${input.id}`);
+                }
+                return (0, commandResult_1.commandSuccess)({ run: result.run, task: result.task });
+            },
+            complete: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const result = await store.complete(input.runId, {
+                    ...(input.error !== undefined ? { error: input.error } : {}),
+                    ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+                });
+                if ('notFound' in result) {
+                    return (0, commandResult_1.commandFailed)('task_run_not_found', `Scheduled task run not found: ${input.runId}`);
+                }
+                return (0, commandResult_1.commandSuccess)({ settled: result.settled, run: result.run, task: result.task });
             },
         },
         file: {
@@ -3988,6 +4308,7 @@ function mergeCliDependencies(context) {
         metaweb: { ...defaults.metaweb, ...provided.metaweb },
         simplenote: { ...defaults.simplenote, ...provided.simplenote },
         chain: { ...defaults.chain, ...provided.chain },
+        traffic: { ...defaults.traffic, ...provided.traffic },
         daemon: { ...defaults.daemon, ...provided.daemon },
         doctor: { ...defaults.doctor, ...provided.doctor },
         identity: { ...defaults.identity, ...provided.identity },
@@ -4000,6 +4321,7 @@ function mergeCliDependencies(context) {
         memory: { ...defaults.memory, ...provided.memory },
         chainhistory: { ...defaults.chainhistory, ...provided.chainhistory },
         dream: { ...defaults.dream, ...provided.dream },
+        schedule: { ...defaults.schedule, ...provided.schedule },
         twin: { ...defaults.twin, ...provided.twin },
         file: { ...defaults.file, ...provided.file },
         wallet: { ...defaults.wallet, ...provided.wallet },
@@ -4024,7 +4346,11 @@ async function serveCliDaemonProcess(context) {
     let daemonRecord = null;
     const secretStore = (0, fileSecretStore_1.createFileSecretStore)(homeDir);
     const adapters = (0, registry_1.createDefaultChainAdapterRegistry)();
-    const baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore, adapters });
+    // Traffic mode (代付): one account service per daemon process, shared by
+    // every signer created here and by the daemon handlers' upload wiring.
+    const trafficAccountService = (0, trafficAccountService_1.createTrafficAccountService)({ systemHomeDir });
+    const resolveSponsorWritePin = (0, mvcSponsorWritePin_1.createTrafficSponsorWritePinResolver)({ trafficAccountService });
+    const baseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore, adapters, resolveSponsorWritePin });
     const signer = context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
         ? createTestChainWriteSigner(baseSigner)
         : baseSigner;
@@ -4109,6 +4435,21 @@ async function serveCliDaemonProcess(context) {
     };
     let refreshA2ASimplemsgListenerAfterInfrastructureChange = async () => { };
     let onProviderPresenceChanged = async () => { };
+    // Scheduled-task host leases + per-profile store instances shared by the
+    // daemon tick and the /api/schedule/* handlers: claim/complete mutate the
+    // same store instance (serialized write queue) the tick uses, so a host
+    // claim can never race the daemon's own tick.
+    const scheduleStores = new Map();
+    const scheduleStoreFor = (profileHomeDir) => {
+        const resolvedHomeDir = node_path_1.default.resolve(profileHomeDir);
+        let store = scheduleStores.get(resolvedHomeDir);
+        if (!store) {
+            store = (0, store_2.createScheduleStore)((0, paths_1.resolveMetabotPaths)(resolvedHomeDir));
+            scheduleStores.set(resolvedHomeDir, store);
+        }
+        return store;
+    };
+    const scheduleHostLeases = new Map();
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
         systemHomeDir,
@@ -4116,6 +4457,7 @@ async function serveCliDaemonProcess(context) {
         secretStore,
         signer,
         adapters,
+        trafficAccountService,
         chainApiBaseUrl: context.env.METABOT_CHAIN_API_BASE_URL,
         socketPresenceApiBaseUrl,
         socketPresenceFailureMode: context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
@@ -4153,6 +4495,7 @@ async function serveCliDaemonProcess(context) {
             const profileBaseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
                 secretStore: (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir),
                 adapters,
+                resolveSponsorWritePin,
             });
             return context.env[TEST_FAKE_CHAIN_WRITE_ENV] === '1'
                 ? createTestChainWriteSigner(profileBaseSigner)
@@ -4164,6 +4507,10 @@ async function serveCliDaemonProcess(context) {
         onProviderPresenceChanged: (enabled) => onProviderPresenceChanged(enabled),
         onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
         onBrowserInfrastructureChanged: () => refreshA2ASimplemsgListenerAfterInfrastructureChange(),
+        schedule: {
+            createScheduleStore: scheduleStoreFor,
+            hostLeases: scheduleHostLeases,
+        },
     });
     const daemon = (0, daemon_1.createMetabotDaemon)({
         homeDirOrPaths: paths,
@@ -4438,6 +4785,7 @@ async function serveCliDaemonProcess(context) {
             const profileBaseSigner = (0, localMnemonicSigner_1.createLocalMnemonicSigner)({
                 secretStore: (0, fileSecretStore_1.createFileSecretStore)(profile.homeDir),
                 adapters,
+                resolveSponsorWritePin,
             });
             const profileSigner = node_path_1.default.resolve(profile.homeDir) === node_path_1.default.resolve(homeDir)
                 ? signer
@@ -4637,7 +4985,7 @@ async function serveCliDaemonProcess(context) {
                 throw new Error(`MetaBot profile not found: ${slug}`);
             return profile.homeDir === homeDir
                 ? signer
-                : (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore: (0, fileSecretStore_1.createFileSecretStore)(profile.homeDir), adapters });
+                : (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore: (0, fileSecretStore_1.createFileSecretStore)(profile.homeDir), adapters, resolveSponsorWritePin });
         })(),
         log: (message) => {
             console.warn(message);
@@ -4651,7 +4999,7 @@ async function serveCliDaemonProcess(context) {
             systemHomeDir,
             createSignerForProfileHome: (profileHomeDir) => (profileHomeDir === homeDir
                 ? signer
-                : (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore: (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir), adapters })),
+                : (0, localMnemonicSigner_1.createLocalMnemonicSigner)({ secretStore: (0, fileSecretStore_1.createFileSecretStore)(profileHomeDir), adapters, resolveSponsorWritePin })),
             adapters,
             resolvePeerChatPublicKey,
             log: (message) => {
@@ -4723,7 +5071,7 @@ async function serveCliDaemonProcess(context) {
                     // Nightly KB auto-learn (imported/raw files indexed once per local
                     // day in the window) rides the same tick as the study drain.
                     try {
-                        const kbService = (0, service_1.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
+                        const kbService = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(profile.homeDir));
                         for (const kb of await kbService.store.listDueForAutoLearn(new Date())) {
                             await kbService.learnKnowledgeBase(profile.slug, kb.id).catch(() => undefined);
                             await kbService.store.markAutoLearned(kb.id, new Date().toISOString().slice(0, 10));
@@ -4769,7 +5117,7 @@ async function serveCliDaemonProcess(context) {
                             };
                             // Real tools with the pin budget enforced at the executor seam.
                             let savedDocs = 0;
-                            const kbService = (0, service_1.createKnowledgeBaseService)(profilePaths);
+                            const kbService = (0, service_2.createKnowledgeBaseService)(profilePaths);
                             return await (0, studyJobs_1.runStudyTurnWithTools)(prompt, {
                                 runLlm: llm,
                                 tools: {
@@ -4826,6 +5174,95 @@ async function serveCliDaemonProcess(context) {
         })();
     }, studyJobs_1.STUDY_TICK_INTERVAL_MINUTES * 60_000);
     studyTimer.unref?.();
+    // Scheduled-task scheduler (IDBots scheduledTaskStore parity): a 30s tick
+    // that iterates every indexed profile and runs due tasks headlessly through
+    // the bot's LLM runtime. Profiles under a fresh host lease (DSH plugin
+    // heartbeat) skip `auto`/`host` tasks — the host owns execution there —
+    // while `daemon`-channel tasks always run here. Lease expiry hands execution
+    // back to the daemon with the fire-once catch-up rule. The tick has an
+    // in-flight guard and logs failures to the size-capped engine log; a
+    // schedule failure must never take the daemon down.
+    let scheduleTickInFlight = false;
+    const scheduleTimer = setInterval(() => {
+        if (scheduleTickInFlight) {
+            groupTaskEngineLog('[Schedule] tick skipped: previous tick still running');
+            return;
+        }
+        scheduleTickInFlight = true;
+        void (async () => {
+            try {
+                const profiles = await (0, metabotProfileManager_1.listMetabotProfiles)(systemHomeDir).catch(() => []);
+                for (const profile of profiles) {
+                    const profileHomeDir = typeof profile.homeDir === 'string' ? node_path_1.default.resolve(profile.homeDir) : '';
+                    if (!profileHomeDir)
+                        continue;
+                    const profilePaths = (0, paths_1.resolveMetabotPaths)(profileHomeDir);
+                    const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
+                        runtimeStore: (0, llmRuntimeStore_1.createLlmRuntimeStore)(profilePaths),
+                        bindingStore: (0, llmBindingStore_1.createLlmBindingStore)(profilePaths),
+                        getPreferredRuntimeId: async () => {
+                            try {
+                                const raw = await node_fs_1.default.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                                const data = JSON.parse(raw);
+                                return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+                            }
+                            catch {
+                                return null;
+                            }
+                        },
+                    });
+                    const runLlm = async (turn) => {
+                        const outcome = await (0, llmRuntimeExecution_1.runLlmPromptWithRuntimeFallback)({
+                            runtimeResolver,
+                            llmExecutor,
+                            metaBotSlug: profile.slug,
+                            prompt: turn.prompt,
+                            systemPrompt: turn.systemPrompt,
+                            timeoutMs: 30 * 60_000,
+                            pollIntervalMs: 5_000,
+                        });
+                        if (outcome.status !== 'completed') {
+                            return {
+                                ok: false,
+                                error: outcome.error || `Scheduled task execution ended with status ${outcome.status}.`,
+                            };
+                        }
+                        return { ok: true, output: outcome.output };
+                    };
+                    try {
+                        const store = scheduleStoreFor(profileHomeDir);
+                        const due = await store.listDue();
+                        if (due.length === 0)
+                            continue;
+                        const lease = scheduleHostLeases.get(profile.slug);
+                        const leaseFresh = lease !== undefined && lease.expiresAtMs > Date.now();
+                        for (const task of due) {
+                            if (leaseFresh && task.channel !== 'daemon')
+                                continue;
+                            const result = await (0, service_1.runScheduledTask)(profilePaths, {
+                                taskId: task.id,
+                                trigger: 'scheduled',
+                                executor: 'daemon',
+                            }, { runLlm });
+                            if (result.kind === 'failed') {
+                                groupTaskEngineLog(`[Schedule:${profile.slug}] task ${task.id} failed: ${result.error}`);
+                            }
+                        }
+                    }
+                    catch (error) {
+                        groupTaskEngineLog(`[Schedule:${profile.slug}] ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                }
+            }
+            catch {
+                // Scheduler failures never take down the daemon.
+            }
+            finally {
+                scheduleTickInFlight = false;
+            }
+        })();
+    }, SCHEDULE_TICK_INTERVAL_MS);
+    scheduleTimer.unref?.();
     // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
     // them (with their remaining budget) or settle expired waits into the
     // timeout + refund path. Runs even when the simplemsg listener is disabled —
@@ -4861,6 +5298,7 @@ async function serveCliDaemonProcess(context) {
         }
         clearInterval(onlineServiceCacheInterval);
         clearInterval(providerWorkspaceSweepInterval);
+        clearInterval(scheduleTimer);
         serviceRefundSyncLoop.stop();
         let shutdownFailure = null;
         try {

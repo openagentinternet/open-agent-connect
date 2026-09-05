@@ -62,6 +62,14 @@ import {
   synthesizeDream,
   type DreamModelLimits,
 } from '../core/memory/dreamService';
+import { createHygieneStore } from '../core/memory/hygieneStore';
+import {
+  memoryHygieneDue,
+  runMemoryHygiene,
+  type MemoryHygieneLlmCompletion,
+} from '../core/memory/memoryHygieneService';
+import { createScheduleStore, type ScheduleRunExecutor } from '../core/schedule/store';
+import { runScheduledTask } from '../core/schedule/service';
 import {
   formatExperienceRecallResults,
   formatExperienceTimelineFallback,
@@ -264,6 +272,8 @@ const DAEMON_CONFIG_RESTART_TIMEOUT_MS = 5_000;
 const METALET_HOST = 'https://www.metalet.space';
 const CHAIN_NET = 'livenet';
 const DEFAULT_SERVICE_REFUND_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+/** Scheduled-task daemon tick cadence (IDBots scheduler parity). */
+const SCHEDULE_TICK_INTERVAL_MS = 30_000;
 let cachedDaemonRuntimeFingerprint: string | null = null;
 
 type A2ASimplemsgInboundDispatcherMessage = Pick<
@@ -3740,6 +3750,9 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         detail: get('/api/grouptask/detail'),
         messages: get('/api/grouptask/messages'),
         postMessage: post('/api/grouptask/message'),
+        supervise: post('/api/grouptask/supervise'),
+        deleteDeliverable: post('/api/grouptask/deliverable/delete'),
+        relayDrain: post('/api/grouptask/relay/drain'),
         close: post('/api/grouptask/close'),
         reopen: post('/api/grouptask/reopen'),
         kickMember: post('/api/grouptask/member/kick'),
@@ -3912,6 +3925,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           'memoryUserMemoriesMaxItems',
           'memoryPromptMaxChars',
           'dreamEnabled',
+          'hygieneEnabled',
+          'hygiene',
         ] as const;
         const updates: Record<string, unknown> = {};
         for (const key of allowed) {
@@ -4146,6 +4161,87 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           : snapshot;
         return commandSuccess({ observerGlobalMetaId, subject: input.subject, snapshot: namedSnapshot, observations });
       },
+      hygieneStatus: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const policyStore = createMemoryPolicyStore(paths);
+        const hygieneStore = createHygieneStore(paths);
+        const [config, ledger, due] = await Promise.all([
+          policyStore.getHygieneConfig(),
+          hygieneStore.getLedger(),
+          memoryHygieneDue(paths),
+        ]);
+        return commandSuccess({
+          config,
+          lastRun: ledger.lastRun,
+          deepConsolidationLastRunAt: ledger.deepConsolidationLastRunAt,
+          due,
+        });
+      },
+      hygieneDue: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        return commandSuccess(await memoryHygieneDue(resolveMetabotPaths(actor.homeDir)));
+      },
+      hygieneRun: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const slug = path.basename(paths.profileRoot);
+        const runtimeResolver = createCliLlmRuntimeResolver(paths);
+        const executor = new LlmExecutor({
+          sessionsRoot: paths.llmExecutorSessionsRoot,
+          transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+          skillsRoot: paths.skillsRoot,
+          systemHomeDir: paths.systemHomeDir,
+          env: context.env,
+          backends: createRegistryBackendFactories(),
+        });
+        // The deep-consolidation call: 180s attempt timeout, JSON-only prompt.
+        // No healthy runtime binding = skip (null), never fail; a started run
+        // that errors mid-call lands in the run's error list via a throw.
+        const complete: MemoryHygieneLlmCompletion = async (request) => {
+          const resolved = await runtimeResolver.resolveRuntime({ metaBotSlug: slug });
+          if (!resolved.runtime) return null;
+          const outcome = await runLlmPromptWithRuntimeFallback({
+            runtimeResolver,
+            llmExecutor: executor,
+            metaBotSlug: slug,
+            prompt: request.user,
+            systemPrompt: request.system,
+            timeoutMs: 180_000,
+            pollIntervalMs: 5_000,
+          });
+          if (outcome.status !== 'completed') {
+            throw new Error(outcome.error || `Deep consolidation ended with status ${outcome.status}.`);
+          }
+          return outcome.output;
+        };
+        try {
+          const stats = await runMemoryHygiene(paths, {
+            trigger: 'manual',
+            deep: input.noDeep ? false : undefined,
+            complete,
+          });
+          return commandSuccess(stats as unknown as Record<string, unknown>);
+        } catch (error) {
+          return commandFailed('hygiene_run_failed', error instanceof Error ? error.message : String(error));
+        }
+      },
+      hygieneConfigGet: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryPolicyStore(resolveMetabotPaths(actor.homeDir));
+        return commandSuccess({ config: await store.getHygieneConfig() });
+      },
+      hygieneConfigSet: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createMemoryPolicyStore(resolveMetabotPaths(actor.homeDir));
+        const config = await store.setHygieneConfig(input.payload);
+        return commandSuccess({ config });
+      },
     },
     chainhistory: {
       recordRead: async (input) => {
@@ -4373,6 +4469,191 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           text: entries[0]?.text ?? '',
           updatedAt: entries[0]?.updatedAt ?? null,
         });
+      },
+    },
+    schedule: {
+      create: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        try {
+          const task = await store.createTask({
+            name: input.name,
+            prompt: input.prompt,
+            schedule: input.schedule,
+            ...(input.workingDirectory !== undefined ? { workingDirectory: input.workingDirectory } : {}),
+            ...(input.channel !== undefined ? { channel: input.channel } : {}),
+            ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+            ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+          });
+          return commandSuccess({ task } as unknown as Record<string, unknown>);
+        } catch (error) {
+          return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+        }
+      },
+      list: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const tasks = await store.listTasks();
+        return commandSuccess({ tasks } as unknown as Record<string, unknown>);
+      },
+      show: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const task = await store.getTask(input.id);
+        if (!task) return commandFailed('task_not_found', `Scheduled task not found: ${input.id}`);
+        return commandSuccess({ task } as unknown as Record<string, unknown>);
+      },
+      update: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        try {
+          const result = await store.updateTask(input.id, input.payload);
+          if ('notFound' in result) {
+            return commandFailed('task_not_found', `Scheduled task not found: ${input.id}`);
+          }
+          return commandSuccess({ task: result.task, warnings: result.warnings } as unknown as Record<string, unknown>);
+        } catch (error) {
+          return commandFailed('invalid_argument', error instanceof Error ? error.message : String(error));
+        }
+      },
+      delete: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const result = await store.deleteTask(input.id);
+        if (!result.deleted) {
+          return commandFailed('task_not_found', `Scheduled task not found: ${input.id}`);
+        }
+        return commandSuccess({ deleted: true } as unknown as Record<string, unknown>);
+      },
+      enable: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const result = await store.setEnabled(input.id, true);
+        if ('notFound' in result) {
+          return commandFailed('task_not_found', `Scheduled task not found: ${input.id}`);
+        }
+        return commandSuccess({ task: result.task, warnings: result.warnings } as unknown as Record<string, unknown>);
+      },
+      disable: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const result = await store.setEnabled(input.id, false);
+        if ('notFound' in result) {
+          return commandFailed('task_not_found', `Scheduled task not found: ${input.id}`);
+        }
+        return commandSuccess({ task: result.task, warnings: result.warnings } as unknown as Record<string, unknown>);
+      },
+      run: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const paths = resolveMetabotPaths(actor.homeDir);
+        const slug = path.basename(paths.profileRoot);
+        const runtimeResolver = createCliLlmRuntimeResolver(paths);
+        const executor = new LlmExecutor({
+          sessionsRoot: paths.llmExecutorSessionsRoot,
+          transcriptsRoot: paths.llmExecutorTranscriptsRoot,
+          skillsRoot: paths.skillsRoot,
+          systemHomeDir: paths.systemHomeDir,
+          env: context.env,
+          backends: createRegistryBackendFactories(),
+        });
+        const result = await runScheduledTask(paths, {
+          taskId: input.id,
+          trigger: 'manual',
+          executor: 'cli',
+        }, {
+          runLlm: async (turn) => {
+            const outcome = await runLlmPromptWithRuntimeFallback({
+              runtimeResolver,
+              llmExecutor: executor,
+              metaBotSlug: slug,
+              prompt: turn.prompt,
+              systemPrompt: turn.systemPrompt,
+              timeoutMs: 30 * 60_000,
+              pollIntervalMs: 5_000,
+            });
+            if (outcome.status !== 'completed') {
+              return {
+                ok: false,
+                error: outcome.error || `Scheduled task execution ended with status ${outcome.status}.`,
+              };
+            }
+            return { ok: true, output: outcome.output };
+          },
+        });
+        if (result.kind === 'already_running') {
+          return commandFailed('already_running', `Scheduled task is already running: ${input.id}`);
+        }
+        if (result.kind === 'failed') {
+          return commandFailed('schedule_run_failed', result.error);
+        }
+        return commandSuccess({ taskId: input.id, output: result.output } as unknown as Record<string, unknown>);
+      },
+      runs: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const runs = await store.listRuns({
+          ...(input.id ? { taskId: input.id } : {}),
+          ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        });
+        return commandSuccess({ runs } as unknown as Record<string, unknown>);
+      },
+      due: async (input) => {
+        if (input.all) {
+          const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+          const profiles = await listMetabotProfiles(systemHomeDir).catch(() => []);
+          const due = [];
+          for (const profile of profiles) {
+            const store = createScheduleStore(resolveMetabotPaths(profile.homeDir));
+            const tasks = await store.listDue();
+            if (tasks.length > 0) due.push({ slug: profile.slug, tasks });
+          }
+          return commandSuccess({ due } as unknown as Record<string, unknown>);
+        }
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const tasks = await store.listDue();
+        const slug = path.basename(resolveMetabotPaths(actor.homeDir).profileRoot);
+        return commandSuccess({ due: [{ slug, tasks }] } as unknown as Record<string, unknown>);
+      },
+      claim: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const executor: ScheduleRunExecutor = input.executor ?? 'host';
+        const result = await store.claim(input.id, { trigger: 'scheduled', executor });
+        if (!result.ok) {
+          if (result.code === 'task_not_found') {
+            return commandFailed('task_not_found', `Scheduled task not found: ${input.id}`);
+          }
+          if (result.code === 'task_expired') {
+            return commandFailed('task_expired', `Scheduled task has expired: ${input.id}`);
+          }
+          return commandFailed('already_running', `Scheduled task is already running: ${input.id}`);
+        }
+        return commandSuccess({ run: result.run, task: result.task } as unknown as Record<string, unknown>);
+      },
+      complete: async (input) => {
+        const actor = await resolveActorHomeDir(context, input.from);
+        if (!('homeDir' in actor)) return actor;
+        const store = createScheduleStore(resolveMetabotPaths(actor.homeDir));
+        const result = await store.complete(input.runId, {
+          ...(input.error !== undefined ? { error: input.error } : {}),
+          ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+        });
+        if ('notFound' in result) {
+          return commandFailed('task_run_not_found', `Scheduled task run not found: ${input.runId}`);
+        }
+        return commandSuccess({ settled: result.settled, run: result.run, task: result.task } as unknown as Record<string, unknown>);
       },
     },
     file: {
@@ -4949,6 +5230,7 @@ export function mergeCliDependencies(context: CliRuntimeContext): CliDependencie
     chainhistory: { ...defaults.chainhistory, ...provided.chainhistory },
     dream: { ...defaults.dream, ...provided.dream },
     knowledgeBase: { ...defaults.knowledgeBase, ...provided.knowledgeBase },
+    schedule: { ...defaults.schedule, ...provided.schedule },
     twin: { ...defaults.twin, ...provided.twin },
     file: { ...defaults.file, ...provided.file },
     wallet: { ...defaults.wallet, ...provided.wallet },
@@ -5068,6 +5350,22 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
   let refreshA2ASimplemsgListenerAfterInfrastructureChange: () => Promise<void> = async () => {};
   let onProviderPresenceChanged: (enabled: boolean) => Promise<void> = async () => {};
 
+  // Scheduled-task host leases + per-profile store instances shared by the
+  // daemon tick and the /api/schedule/* handlers: claim/complete mutate the
+  // same store instance (serialized write queue) the tick uses, so a host
+  // claim can never race the daemon's own tick.
+  const scheduleStores = new Map<string, ReturnType<typeof createScheduleStore>>();
+  const scheduleStoreFor = (profileHomeDir: string): ReturnType<typeof createScheduleStore> => {
+    const resolvedHomeDir = path.resolve(profileHomeDir);
+    let store = scheduleStores.get(resolvedHomeDir);
+    if (!store) {
+      store = createScheduleStore(resolveMetabotPaths(resolvedHomeDir));
+      scheduleStores.set(resolvedHomeDir, store);
+    }
+    return store;
+  };
+  const scheduleHostLeases = new Map<string, { host: string; expiresAtMs: number }>();
+
   const handlers = createDefaultMetabotDaemonHandlers({
     homeDir,
     systemHomeDir,
@@ -5125,6 +5423,10 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     onProviderPresenceChanged: (enabled) => onProviderPresenceChanged(enabled),
     onIdentityProfileRegistered: () => refreshA2ASimplemsgListenerAfterIdentityRegistration(),
     onBrowserInfrastructureChanged: () => refreshA2ASimplemsgListenerAfterInfrastructureChange(),
+    schedule: {
+      createScheduleStore: scheduleStoreFor,
+      hostLeases: scheduleHostLeases,
+    },
   });
 
   const daemon = createMetabotDaemon({
@@ -5893,6 +6195,91 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     })();
   }, STUDY_TICK_INTERVAL_MINUTES * 60_000);
   studyTimer.unref?.();
+
+  // Scheduled-task scheduler (IDBots scheduledTaskStore parity): a 30s tick
+  // that iterates every indexed profile and runs due tasks headlessly through
+  // the bot's LLM runtime. Profiles under a fresh host lease (DSH plugin
+  // heartbeat) skip `auto`/`host` tasks — the host owns execution there —
+  // while `daemon`-channel tasks always run here. Lease expiry hands execution
+  // back to the daemon with the fire-once catch-up rule. The tick has an
+  // in-flight guard and logs failures to the size-capped engine log; a
+  // schedule failure must never take the daemon down.
+  let scheduleTickInFlight = false;
+  const scheduleTimer = setInterval(() => {
+    if (scheduleTickInFlight) {
+      groupTaskEngineLog('[Schedule] tick skipped: previous tick still running');
+      return;
+    }
+    scheduleTickInFlight = true;
+    void (async () => {
+      try {
+        const profiles = await listMetabotProfiles(systemHomeDir).catch(() => []);
+        for (const profile of profiles) {
+          const profileHomeDir = typeof profile.homeDir === 'string' ? path.resolve(profile.homeDir) : '';
+          if (!profileHomeDir) continue;
+          const profilePaths = resolveMetabotPaths(profileHomeDir);
+          const runtimeResolver = createLlmRuntimeResolver({
+            runtimeStore: createLlmRuntimeStore(profilePaths),
+            bindingStore: createLlmBindingStore(profilePaths),
+            getPreferredRuntimeId: async () => {
+              try {
+                const raw = await fs.promises.readFile(profilePaths.preferredLlmRuntimePath, 'utf8');
+                const data = JSON.parse(raw) as { runtimeId?: string | null };
+                return typeof data.runtimeId === 'string' ? data.runtimeId : null;
+              } catch {
+                return null;
+              }
+            },
+          });
+          const runLlm = async (turn: { prompt: string; systemPrompt: string }) => {
+            const outcome = await runLlmPromptWithRuntimeFallback({
+              runtimeResolver,
+              llmExecutor,
+              metaBotSlug: profile.slug,
+              prompt: turn.prompt,
+              systemPrompt: turn.systemPrompt,
+              timeoutMs: 30 * 60_000,
+              pollIntervalMs: 5_000,
+            });
+            if (outcome.status !== 'completed') {
+              return {
+                ok: false as const,
+                error: outcome.error || `Scheduled task execution ended with status ${outcome.status}.`,
+              };
+            }
+            return { ok: true as const, output: outcome.output };
+          };
+          try {
+            const store = scheduleStoreFor(profileHomeDir);
+            const due = await store.listDue();
+            if (due.length === 0) continue;
+            const lease = scheduleHostLeases.get(profile.slug);
+            const leaseFresh = lease !== undefined && lease.expiresAtMs > Date.now();
+            for (const task of due) {
+              if (leaseFresh && task.channel !== 'daemon') continue;
+              const result = await runScheduledTask(profilePaths, {
+                taskId: task.id,
+                trigger: 'scheduled',
+                executor: 'daemon',
+              }, { runLlm });
+              if (result.kind === 'failed') {
+                groupTaskEngineLog(`[Schedule:${profile.slug}] task ${task.id} failed: ${result.error}`);
+              }
+            }
+          } catch (error) {
+            groupTaskEngineLog(
+              `[Schedule:${profile.slug}] ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      } catch {
+        // Scheduler failures never take down the daemon.
+      } finally {
+        scheduleTickInFlight = false;
+      }
+    })();
+  }, SCHEDULE_TICK_INTERVAL_MS);
+  scheduleTimer.unref?.();
   // Buyer-side boot recovery: caller reply waits are in-memory only, so re-arm
   // them (with their remaining budget) or settle expired waits into the
   // timeout + refund path. Runs even when the simplemsg listener is disabled —
@@ -5927,6 +6314,7 @@ export async function serveCliDaemonProcess(context: Pick<CliRuntimeContext, 'en
     }
     clearInterval(onlineServiceCacheInterval);
     clearInterval(providerWorkspaceSweepInterval);
+    clearInterval(scheduleTimer);
     serviceRefundSyncLoop.stop();
     let shutdownFailure: unknown = null;
     try {

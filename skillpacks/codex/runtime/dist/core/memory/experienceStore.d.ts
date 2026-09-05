@@ -18,6 +18,8 @@ export interface ExperienceEpisode {
     metadata: Record<string, unknown>;
     createdAt: number;
     updatedAt: number;
+    /** Hygiene soft-archive mark (ISO 8601); archived episodes leave hot paths. */
+    archivedAt: string | null;
 }
 export interface ExperienceParticipant {
     episodeId: string;
@@ -93,6 +95,8 @@ export interface ExperienceStore {
         subjectGlobalMetaId?: string;
         fromTime?: number;
         toTime?: number;
+        /** When set, hygiene-archived episodes join the listing (default excludes them). */
+        includeArchived?: boolean;
         limit?: number;
     }): Promise<ExperienceEpisode[]>;
     listParticipants(episodeId: string): Promise<ExperienceParticipant[]>;
@@ -101,5 +105,22 @@ export interface ExperienceStore {
         toTime?: number;
         limit?: number;
     }): Promise<ExperienceEvidence[]>;
+    /** Hygiene: soft-archive terminal episodes past the retention horizon. */
+    archiveEpisodes(input: {
+        cutoffMs: number;
+        archivedAt: string;
+    }): Promise<number>;
+    /** Hygiene: settle open episodes whose source of truth already reached a
+     * terminal state — orders completed/refunded/failed, group tasks
+     * done/cancelled, direct interactions dormant past the cutoff. Idempotent:
+     * terminal rows are never re-touched. */
+    reconcileOpenEpisodes(input: {
+        nowMs: number;
+        dormantCutoffMs: number;
+    }): Promise<{
+        serviceOrdersSettled: number;
+        taskEpisodesSettled: number;
+        dormantInteractionsClosed: number;
+    }>;
 }
 export declare function createExperienceStore(paths: MetabotPaths): ExperienceStore;

@@ -125,6 +125,7 @@ function normalizeEntry(value: unknown): MemoryEntry | null {
     createdAt,
     updatedAt: normalizeFiniteNumber(record.updatedAt, createdAt),
     lastUsedAt: normalizeFiniteNumber(record.lastUsedAt, Number.NaN) || null,
+    archivedAt: normalizeOptionalText(record.archivedAt),
   };
 }
 
@@ -172,6 +173,18 @@ export interface MemoryStore {
   remove(input: MemoryDeleteInput): Promise<boolean>;
   /** Dream pipeline: replace one day's dream batch (self_identity excluded). */
   softDeleteDreamMemoriesForDate(dreamDate: string): Promise<number>;
+  /** Hygiene: soft-archive specific memories by id (deep-consolidation retire).
+   * self_identity is always refused; `notUsedSince` guards against the LLM
+   * await window — rows touched after that snapshot survive. */
+  archiveMemories(input: { ids: string[]; archivedAt: string; notUsedSince?: number }): Promise<number>;
+  /** Hygiene reverse: clear the soft-archive mark on specific memories. */
+  unarchiveMemories(ids: string[]): Promise<number>;
+  /** Hygiene decay: dream-origin rows untouched past the cutoff get the mark
+   * (self_identity and conversation-origin rows are never auto-archived). */
+  archiveDecayedDreamMemories(input: { cutoffMs: number; archivedAt: string }): Promise<number>;
+  /** Hygiene purge: physically remove `status='deleted'` tombstones past the
+   * grace period — the one low-risk delete in the memory layer. */
+  purgeDeletedMemoryTombstones(cutoffMs: number): Promise<number>;
   /** Append one provenance source to an existing entry (no field changes). */
   addSource(id: string, scope: MemoryScope, source: MemoryEntrySourceInput): Promise<boolean>;
   /** Startup repair: revive the newest deleted self_identity when none is live. */
@@ -322,6 +335,7 @@ export function createMemoryStore(paths: MetabotPaths): MemoryStore {
       createdAt: now,
       updatedAt: now,
       lastUsedAt: null,
+      archivedAt: null,
     };
     addSource(entry, input.source, now);
     file.entries.push(entry);
@@ -348,6 +362,9 @@ export function createMemoryStore(paths: MetabotPaths): MemoryStore {
         if (entry.scopeKind !== scope.kind || entry.scopeKey !== scope.key) return false;
         if (!includeDeleted && status === 'all' && entry.status === 'deleted') return false;
         if (status !== 'all' && entry.status !== status) return false;
+        // Hygiene-archived rows leave injection and default listings; admin/UI
+        // surfaces opt back in with includeArchived.
+        if (!options.includeArchived && entry.archivedAt != null) return false;
         if (query && !entry.text.toLowerCase().includes(query)) return false;
         if (options.usageClass && entry.usageClass !== normalizeMemoryUsageClass(options.usageClass)) return false;
         if (options.origin && entry.origin !== normalizeMemoryOrigin(options.origin)) return false;
@@ -493,6 +510,80 @@ export function createMemoryStore(paths: MetabotPaths): MemoryStore {
         if (newestSource) newestSource.isActive = true;
         await writeFile(file);
         return true;
+      });
+    },
+
+    async archiveMemories(input) {
+      const ids = new Set(input.ids.map((id) => id.trim()).filter(Boolean));
+      if (ids.size === 0) return 0;
+      return enqueue(async () => {
+        const file = await readFile();
+        const now = Date.now();
+        let archived = 0;
+        for (const entry of file.entries) {
+          if (!ids.has(entry.id)) continue;
+          if (entry.archivedAt != null) continue;
+          if (entry.usageClass === 'self_identity' || entry.status !== 'created') continue;
+          // The LLM call had an await window: anything edited or injection-
+          // touched (lastUsedAt/updatedAt bumped) since the inventory snapshot
+          // must survive the proposal.
+          if (input.notUsedSince != null && (entry.lastUsedAt ?? entry.updatedAt) > input.notUsedSince) continue;
+          entry.archivedAt = input.archivedAt;
+          entry.updatedAt = now;
+          archived += 1;
+        }
+        if (archived > 0) await writeFile(file);
+        return archived;
+      });
+    },
+
+    async unarchiveMemories(ids) {
+      const idSet = new Set(ids.map((id) => id.trim()).filter(Boolean));
+      if (idSet.size === 0) return 0;
+      return enqueue(async () => {
+        const file = await readFile();
+        let restored = 0;
+        for (const entry of file.entries) {
+          if (!idSet.has(entry.id) || entry.archivedAt == null) continue;
+          entry.archivedAt = null;
+          entry.updatedAt = Date.now();
+          restored += 1;
+        }
+        if (restored > 0) await writeFile(file);
+        return restored;
+      });
+    },
+
+    async archiveDecayedDreamMemories(input) {
+      const cutoff = Math.floor(input.cutoffMs);
+      return enqueue(async () => {
+        const file = await readFile();
+        let archived = 0;
+        for (const entry of file.entries) {
+          if (entry.archivedAt != null) continue;
+          if (entry.status !== 'created' || entry.origin !== 'dream') continue;
+          if (entry.usageClass === 'self_identity') continue;
+          if ((entry.lastUsedAt ?? entry.updatedAt) >= cutoff) continue;
+          entry.archivedAt = input.archivedAt;
+          entry.updatedAt = Date.now();
+          archived += 1;
+        }
+        if (archived > 0) await writeFile(file);
+        return archived;
+      });
+    },
+
+    async purgeDeletedMemoryTombstones(cutoffMs) {
+      const cutoff = Math.floor(cutoffMs);
+      return enqueue(async () => {
+        const file = await readFile();
+        const before = file.entries.length;
+        file.entries = file.entries.filter((entry) => (
+          entry.status !== 'deleted' || entry.updatedAt >= cutoff
+        ));
+        const purged = before - file.entries.length;
+        if (purged > 0) await writeFile(file);
+        return purged;
       });
     },
 

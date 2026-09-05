@@ -32,6 +32,8 @@ export interface MemoryEntry {
     createdAt: number;
     updatedAt: number;
     lastUsedAt: number | null;
+    /** Hygiene soft-archive mark (ISO 8601); archived rows leave hot paths. */
+    archivedAt: string | null;
 }
 export interface MemoryEntrySourceInput {
     sessionId?: string;
@@ -68,6 +70,8 @@ export interface MemoryListOptions extends MemoryScopeSelectorInput {
     limit?: number;
     offset?: number;
     includeDeleted?: boolean;
+    /** When set, hygiene-archived rows join the listing (default excludes them). */
+    includeArchived?: boolean;
     touchLastUsed?: boolean;
 }
 export interface MemoryCreateInput extends MemoryScopeSelectorInput, MemoryClassifyInput {
@@ -107,6 +111,8 @@ export interface MemoryPolicy {
     memoryGuardLevel: MemoryGuardLevel;
     memoryUserMemoriesMaxItems: number;
     dreamEnabled: boolean;
+    /** Memory-hygiene master switch; join `dreamEnabled` as a per-Bot policy flag. */
+    hygieneEnabled: boolean;
     updatedAt: number;
 }
 export interface MemoryEffectivePolicy {
@@ -118,9 +124,14 @@ export interface MemoryEffectivePolicy {
     /** Combined char budget for injected memory blocks (oldest-first eviction). */
     memoryPromptMaxChars: number;
     dreamEnabled: boolean;
+    /** Memory-hygiene master switch; join `dreamEnabled` as a per-Bot policy flag. */
+    hygieneEnabled: boolean;
     source: 'default' | 'config' | 'profile';
 }
-export type MemoryPolicyUpdates = Partial<Pick<MemoryEffectivePolicy, 'memoryEnabled' | 'memoryImplicitUpdateEnabled' | 'memoryLlmJudgeEnabled' | 'memoryGuardLevel' | 'memoryUserMemoriesMaxItems' | 'memoryPromptMaxChars' | 'dreamEnabled'>>;
+export interface MemoryPolicyUpdates extends Partial<Pick<MemoryEffectivePolicy, 'memoryEnabled' | 'memoryImplicitUpdateEnabled' | 'memoryLlmJudgeEnabled' | 'memoryGuardLevel' | 'memoryUserMemoriesMaxItems' | 'memoryPromptMaxChars' | 'dreamEnabled' | 'hygieneEnabled'>> {
+    /** Hygiene threshold overrides (`.runtime/memory/policy.json` → `hygiene` object). */
+    hygiene?: Record<string, unknown>;
+}
 export interface ApplyTurnMemoryUpdatesOptions {
     sessionId?: string;
     userText: string;

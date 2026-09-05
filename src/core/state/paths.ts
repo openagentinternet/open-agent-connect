@@ -55,9 +55,14 @@ export interface MetabotPaths {
   memoryPolicyPath: string;
   memoryOrchestrationPath: string;
   memoryTranscriptsRoot: string;
+  /** Memory hygiene run ledger (`.runtime/memory/hygiene.json`). */
+  memoryHygienePath: string;
 
   // Per-bot chain history store (storage layout v2 amendment 2026-09-03).
   chainHistoryRoot: string;
+
+  // Per-bot scheduled-task store (storage layout v2 amendment 2026-09-05).
+  schedulePath: string;
 
   // LLM runtime / binding paths.
   llmRoot: string;
@@ -231,9 +236,13 @@ function buildMetabotPaths(input: {
     memoryPolicyPath: path.join(memoryRoot, 'policy.json'),
     memoryOrchestrationPath: path.join(memoryRoot, 'orchestration.json'),
     memoryTranscriptsRoot: path.join(memoryRoot, 'transcripts'),
+    memoryHygienePath: path.join(memoryRoot, 'hygiene.json'),
 
     // Per-bot chain history store root (`.runtime/chain-history/`).
     chainHistoryRoot: path.join(input.runtimeRoot, 'chain-history'),
+
+    // Per-bot scheduled-task store (`.runtime/schedule/schedule.json`).
+    schedulePath: path.join(input.runtimeRoot, 'schedule', 'schedule.json'),
 
     // LLM paths.
     llmRoot: input.llmRoot,

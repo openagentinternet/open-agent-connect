@@ -11,12 +11,14 @@ const node_fs_1 = require("node:fs");
 const promises_1 = require("node:fs/promises");
 const commandResult_1 = require("../core/contracts/commandResult");
 const config_1 = require("./routes/config");
+const traffic_1 = require("./routes/traffic");
 const buzz_1 = require("./routes/buzz");
 const simplenote_1 = require("./routes/simplenote");
 const chain_1 = require("./routes/chain");
 const daemon_1 = require("./routes/daemon");
 const chat_1 = require("./routes/chat");
 const grouptask_1 = require("./routes/grouptask");
+const schedule_1 = require("./routes/schedule");
 const conversations_1 = require("./routes/conversations");
 const file_1 = require("./routes/file");
 const identity_1 = require("./routes/identity");
@@ -34,12 +36,14 @@ const JSON_BODY_LIMIT_BYTES = 1024 * 1024;
 const LOCAL_DAEMON_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 const ROUTES = [
     config_1.handleConfigRoutes,
+    traffic_1.handleTrafficRoutes,
     buzz_1.handleBuzzRoutes,
     simplenote_1.handleSimpleNoteRoutes,
     chain_1.handleChainRoutes,
     daemon_1.handleDaemonRoutes,
     chat_1.handleChatRoutes,
     grouptask_1.handleGroupTaskRoutes,
+    schedule_1.handleScheduleRoutes,
     conversations_1.handleConversationRoutes,
     file_1.handleFileRoutes,
     identity_1.handleIdentityRoutes,

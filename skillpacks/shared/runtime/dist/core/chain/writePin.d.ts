@@ -1,3 +1,4 @@
+import type { MvcSponsorFeeAssistMetadata } from '../subsidy/feeAssist';
 export type ChainWriteOperation = 'init' | 'create' | 'modify' | 'revoke';
 export type ChainWriteEncryption = '0' | '1' | '2';
 export type ChainWriteEncoding = 'utf-8' | 'base64' | 'binary';
@@ -34,6 +35,8 @@ export interface ChainWriteResult {
     encoding: ChainWriteEncoding;
     globalMetaId: string;
     mvcAddress: string;
+    /** Sponsor (fee-assist) diagnostics when the write touched the sponsor flow. */
+    feeAssist?: MvcSponsorFeeAssistMetadata;
 }
 export declare function chainWritePayloadToBuffer(input: {
     payload: ChainWritePayload;

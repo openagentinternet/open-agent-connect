@@ -103,6 +103,19 @@ export interface ImpressionStore {
         seatRole?: string;
         evidencePinIds?: string[];
     }): Promise<ImpressionCollaborationFact>;
+    /** Hygiene compression: keep the newest `anchorsPerPair` active observations
+     * per (observer, subject) pair and supersede the older ones past the cutoff;
+     * rebuild the pair's snapshot from the remaining actives afterwards (the
+     * snapshot is deleted when nothing remains). */
+    compactObservations(input: {
+        cutoffMs: number;
+        anchorsPerPair: number;
+        excludeObservers?: ReadonlySet<string>;
+    }): Promise<{
+        pairsCompacted: number;
+        observationsSuperseded: number;
+        snapshotsRebuilt: number;
+    }>;
 }
 export declare function createImpressionStore(paths: MetabotPaths, deps?: {
     experienceStore?: ExperienceStore;

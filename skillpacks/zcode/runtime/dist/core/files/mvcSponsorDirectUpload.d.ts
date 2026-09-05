@@ -1,23 +1,8 @@
 import type { Signer } from '../signing/signer';
-import type { MvcSponsorAddressInfo, MvcSponsorCommitResult, MvcSponsorPreResult } from '../subsidy/mvcSponsorV2Client';
+import type { MvcSponsorAddressInfo, MvcSponsorCommitResult, MvcSponsorPreResult, MvcSponsorTrafficAccount } from '../subsidy/mvcSponsorV2Client';
+import { type MvcSponsorFeeAssistMetadata, type MvcSponsorTrafficDeps } from '../subsidy/feeAssist';
 import { type UploadLocalFileToChainResult } from './uploadFile';
-export type MvcSponsorFeeAssistMode = 'mvc_sponsor_v2' | 'self_paid';
-export type MvcSponsorFeeAssistReason = 'service_unavailable' | 'no_user_utxo' | 'insufficient_quota' | 'pre_rejected' | 'commit_failed';
-export type MvcSponsorFeeAssistStage = 'address_info' | 'challenge' | 'pre' | 'commit' | 'done';
-export interface MvcSponsorFeeAssistMetadata {
-    attempted: boolean;
-    used: boolean;
-    mode: MvcSponsorFeeAssistMode;
-    sponsor: 'mvc_sponsor_v2';
-    reason?: MvcSponsorFeeAssistReason;
-    stage?: MvcSponsorFeeAssistStage;
-    orderId?: string;
-    quotaBefore?: MvcSponsorAddressInfo;
-    quotaAfter?: MvcSponsorAddressInfo;
-    advisoryFeeEstimate?: number;
-    sponsoredMinerFee?: number;
-    savedFee?: number;
-}
+export type { MvcSponsorFeeAssistMode, MvcSponsorFeeAssistReason, MvcSponsorFeeAssistStage, MvcSponsorFeeAssistMetadata, MvcSponsorTrafficDeps, MvcSponsorTrafficSpendRecord, } from '../subsidy/feeAssist';
 export interface MvcSponsorV2DirectUploadClient {
     getAddressInfo(payload: {
         address: string;
@@ -34,6 +19,7 @@ export interface MvcSponsorV2DirectUploadClient {
         challengeId: string;
         publicKey: string;
         signature: string;
+        trafficAccount?: MvcSponsorTrafficAccount;
     }): Promise<MvcSponsorPreResult>;
     commitSponsor(payload: {
         orderId: string;
@@ -42,6 +28,11 @@ export interface MvcSponsorV2DirectUploadClient {
         signature: string;
         message?: string;
     }): Promise<MvcSponsorCommitResult>;
+    /**
+     * Traffic-account billing (流量), attached by the daemon wiring only when
+     * traffic mode is on. Absent = today's legacy quota flow, untouched.
+     */
+    traffic?: MvcSponsorTrafficDeps;
 }
 export type MvcSponsorDirectUploadResult = UploadLocalFileToChainResult & {
     feeAssist: MvcSponsorFeeAssistMetadata;

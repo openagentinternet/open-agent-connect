@@ -25,6 +25,7 @@ const EXPECTED_METABOT_SKILLS = [
   'metabot-post-skillservice',
   'metabot-create-wiki',
   'metabot-metaapp',
+  'metabot-schedule',
   'metabot-upload-file',
   'metabot-wallet-manage',
 ];

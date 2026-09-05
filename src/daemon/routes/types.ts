@@ -226,6 +226,17 @@ export interface MetabotDaemonHttpHandlers {
       signal?: AbortSignal;
     }) => Awaitable<AsyncIterable<unknown>>;
   };
+  schedule?: {
+    /** Host lease heartbeat: keeps this profile's tasks out of the daemon tick
+     *  while the host is alive. */
+    heartbeat?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    due?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    claim?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    complete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    show?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    runs?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+  };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     uploadLarge?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

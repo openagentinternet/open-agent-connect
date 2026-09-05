@@ -12,6 +12,7 @@ exports.createMemoryPolicyStore = createMemoryPolicyStore;
 // field. A missing file means "all defaults".
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const memoryHygienePolicy_1 = require("./memoryHygienePolicy");
 const memoryPromptBlocks_1 = require("./memoryPromptBlocks");
 const DEFAULT_MEMORY_ENABLED = true;
 const DEFAULT_MEMORY_IMPLICIT_UPDATE_ENABLED = true;
@@ -42,7 +43,20 @@ function defaultPolicy() {
         memoryGuardLevel: DEFAULT_MEMORY_GUARD_LEVEL,
         memoryUserMemoriesMaxItems: DEFAULT_MEMORY_USER_MEMORIES_MAX_ITEMS,
         dreamEnabled: true,
+        hygieneEnabled: true,
     };
+}
+/** Keep only the known threshold keys when persisting the `hygiene` object. */
+function normalizeHygieneObject(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return {};
+    const record = value;
+    const out = {};
+    for (const key of memoryHygienePolicy_1.MEMORY_HYGIENE_THRESHOLD_KEYS) {
+        if (record[key] !== undefined)
+            out[key] = record[key];
+    }
+    return out;
 }
 function normalizePolicyFile(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -66,6 +80,10 @@ function normalizePolicyFile(value) {
     }
     if (typeof record.dreamEnabled === 'boolean')
         out.dreamEnabled = record.dreamEnabled;
+    if (typeof record.hygieneEnabled === 'boolean')
+        out.hygieneEnabled = record.hygieneEnabled;
+    if (record.hygiene !== undefined)
+        out.hygiene = normalizeHygieneObject(record.hygiene);
     if (typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt)) {
         out.updatedAt = record.updatedAt;
     }
@@ -118,6 +136,7 @@ function createMemoryPolicyStore(paths) {
                 memoryGuardLevel: normalizeMemoryGuardLevel(normalized.memoryGuardLevel),
                 memoryUserMemoriesMaxItems: clampMemoryUserMemoriesMaxItems(normalized.memoryUserMemoriesMaxItems ?? Number.NaN),
                 dreamEnabled: normalizeBoolean(normalized.dreamEnabled, defaults.dreamEnabled),
+                hygieneEnabled: normalizeBoolean(normalized.hygieneEnabled, defaults.hygieneEnabled),
                 updatedAt: normalized.updatedAt,
             };
         },
@@ -144,8 +163,32 @@ function createMemoryPolicyStore(paths) {
                 memoryUserMemoriesMaxItems: clampMemoryUserMemoriesMaxItems(override.memoryUserMemoriesMaxItems ?? Number.NaN),
                 memoryPromptMaxChars: (0, memoryPromptBlocks_1.clampMemoryPromptMaxChars)(override.memoryPromptMaxChars ?? Number.NaN),
                 dreamEnabled: normalizeBoolean(override.dreamEnabled, defaults.dreamEnabled),
+                hygieneEnabled: normalizeBoolean(override.hygieneEnabled, defaults.hygieneEnabled),
                 source: hasOverride ? 'profile' : 'default',
             };
+        },
+        async getHygieneConfig() {
+            const override = await readOverride();
+            const normalized = (0, memoryHygienePolicy_1.normalizeMemoryHygieneConfig)(override.hygiene ?? {});
+            return {
+                ...normalized,
+                enabled: normalizeBoolean(override.hygieneEnabled, true),
+            };
+        },
+        async setHygieneConfig(update) {
+            const current = await readOverride();
+            const merged = { ...(current.hygiene ?? {}), ...update };
+            delete merged.enabled; // The master switch is the hygieneEnabled flag.
+            const normalized = (0, memoryHygienePolicy_1.normalizeMemoryHygieneConfig)(merged);
+            const nextEnabled = typeof update.enabled === 'boolean'
+                ? update.enabled
+                : normalizeBoolean(current.hygieneEnabled, true);
+            const nextOverride = { ...current };
+            nextOverride.hygiene = normalizeHygieneObject(normalized);
+            nextOverride.hygieneEnabled = nextEnabled;
+            nextOverride.updatedAt = Date.now();
+            await writeOverride(normalizePolicyFile(nextOverride));
+            return { ...normalized, enabled: nextEnabled };
         },
     };
 }

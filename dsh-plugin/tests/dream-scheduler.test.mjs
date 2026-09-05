@@ -180,6 +180,98 @@ test('scheduler surfaces the primary error when no fallback LLM is configured', 
   assert.equal(outcomes[0].error, 'primary down')
 })
 
+test('hygiene tail runs the due memory-hygiene pass after dream work', async () => {
+  const llm = fakeLlm()
+  const hygieneCalls = []
+  const run = async (args) => {
+    const verb = args.slice(0, 2).join(' ')
+    if (verb === 'bot list') {
+      return { ok: true, state: 'success', data: { profiles: [{ slug: 'alice', dshLlmProvider: 'p', dshLlmModel: 'm' }] } }
+    }
+    if (verb === 'memory policy') return { ok: true, state: 'success', data: { effective: { dreamEnabled: true } } }
+    if (verb === 'dream due') return { ok: true, state: 'success', data: { dueDates: [], repairDates: [] } }
+    if (verb === 'memory hygiene') {
+      hygieneCalls.push(args.slice(2))
+      if (args[2] === 'due') return { ok: true, state: 'success', data: { due: true, reason: 'eligible' } }
+      return { ok: true, state: 'success', data: { ran: true } }
+    }
+    return { ok: true, state: 'success', data: {} }
+  }
+  const outcomes = await plugin.runDreamSchedulerTick({ run, llm })
+  assert.equal(outcomes[0].hygieneRan, true)
+  assert.deepEqual(hygieneCalls, [['due', '--from', 'alice'], ['run', '--from', 'alice']])
+})
+
+test('hygiene tail skips when not due and can be disabled', async () => {
+  const llm = fakeLlm()
+  const hygieneCalls = []
+  const run = async (args) => {
+    const verb = args.slice(0, 2).join(' ')
+    if (verb === 'bot list') {
+      return { ok: true, state: 'success', data: { profiles: [{ slug: 'alice', dshLlmProvider: 'p', dshLlmModel: 'm' }] } }
+    }
+    if (verb === 'memory policy') return { ok: true, state: 'success', data: { effective: { dreamEnabled: true } } }
+    if (verb === 'dream due') return { ok: true, state: 'success', data: { dueDates: [], repairDates: [] } }
+    if (verb === 'memory hygiene') {
+      hygieneCalls.push(args.slice(2))
+      if (args[2] === 'due') return { ok: true, state: 'success', data: { due: false, reason: 'already ran today' } }
+      return { ok: true, state: 'success', data: { ran: true } }
+    }
+    return { ok: true, state: 'success', data: {} }
+  }
+  const outcomes = await plugin.runDreamSchedulerTick({ run, llm })
+  assert.equal(outcomes[0].hygieneRan, false)
+  assert.equal(outcomes[0].hygieneSkipped, 'not due')
+  assert.deepEqual(hygieneCalls, [['due', '--from', 'alice']])
+
+  const disabled = await plugin.runDreamSchedulerTick({ run, llm, hygieneEnabled: false })
+  assert.equal(disabled[0].hygieneRan, undefined)
+  assert.equal(disabled[0].hygieneSkipped, undefined)
+  assert.deepEqual(hygieneCalls, [['due', '--from', 'alice']]) // no additional calls
+})
+
+test('hygiene tail reports per-bot failures without throwing', async () => {
+  const llm = fakeLlm()
+  const run = async (args) => {
+    const verb = args.slice(0, 2).join(' ')
+    if (verb === 'bot list') {
+      return { ok: true, state: 'success', data: { profiles: [{ slug: 'alice', dshLlmProvider: 'p', dshLlmModel: 'm' }] } }
+    }
+    if (verb === 'memory policy') return { ok: true, state: 'success', data: { effective: { dreamEnabled: true } } }
+    if (verb === 'dream due') return { ok: true, state: 'success', data: { dueDates: [], repairDates: [] } }
+    if (verb === 'memory hygiene') {
+      return { ok: false, state: 'failed', code: 'hygiene_failed', message: 'store exploded' }
+    }
+    return { ok: true, state: 'success', data: {} }
+  }
+  const outcomes = await plugin.runDreamSchedulerTick({ run, llm })
+  assert.equal(outcomes[0].hygieneRan, false)
+  assert.equal(outcomes[0].hygieneError, 'store exploded')
+})
+
+test('dream-disabled tick skips dream work but still runs the hygiene tail', async () => {
+  const llm = fakeLlm()
+  const calls = []
+  const run = async (args) => {
+    const verb = args.slice(0, 2).join(' ')
+    calls.push(verb)
+    if (verb === 'bot list') {
+      return { ok: true, state: 'success', data: { profiles: [{ slug: 'alice', dshLlmProvider: 'p', dshLlmModel: 'm' }] } }
+    }
+    if (verb === 'memory hygiene') {
+      if (args[2] === 'due') return { ok: true, state: 'success', data: { due: true, reason: 'eligible' } }
+      return { ok: true, state: 'success', data: { ran: true } }
+    }
+    return { ok: true, state: 'success', data: {} }
+  }
+  const outcomes = await plugin.runDreamSchedulerTick({ run, llm, dreamEnabled: false })
+  assert.deepEqual(calls, ['bot list', 'memory hygiene', 'memory hygiene'])
+  assert.deepEqual(outcomes[0].dreamed, [])
+  assert.equal(outcomes[0].skipped, undefined)
+  assert.equal(outcomes[0].hygieneRan, true)
+  assert.equal(llm.requests.length, 0)
+})
+
 test('applyDreamScheduler logs per-bot outcomes after the boot tick', async (t) => {
   mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
   t.after(() => mock.timers.reset())
