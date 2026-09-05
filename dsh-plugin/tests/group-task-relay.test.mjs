@@ -76,6 +76,7 @@ test('relay drain survives CLI failures and ignores foreign sessions', async () 
   const { ctx, preStepHandlers } = fakeCtx()
   let fail = true
   const drainer = plugin.applyGroupTaskRelayDrain(ctx, {
+    daemonAlive: async () => true,
     run: async () => (fail ? { ok: false, code: 'daemon_down' } : { ok: true, data: { relayed: [row()] } }),
   })
   assert.equal(await drainer.drainOnce(), 0, 'CLI failure drains nothing')
