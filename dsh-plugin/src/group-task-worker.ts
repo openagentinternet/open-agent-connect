@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
+import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import {
   agentsRegistryOf,
   errorFromTurnEvents,
@@ -50,6 +51,8 @@ export interface GroupTaskWorkerOptions {
   enabled?: boolean
   pollMs?: number
   turnTimeoutMs?: number
+  /** Daemon liveness probe override (tests). */
+  daemonAlive?: () => Promise<boolean>
 }
 
 export interface GroupTaskWorkerRunner {
@@ -111,6 +114,7 @@ export function applyGroupTaskWorkerSessions(
   const enabled = options.enabled !== false
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS
   const turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS
+  const daemonAlive = options.daemonAlive ?? daemonAliveByHttp
 
   /** Live sub-sessions keyed by `${taskId}:${workerSlug}` (reused across turns). */
   const activeSessions = new Map<string, ActiveWorkerSession>()
@@ -265,7 +269,25 @@ export function applyGroupTaskWorkerSessions(
     })
   }
 
+  /**
+   * Cheap raw-HTTP daemon probe — NO CLI spawn, so a down daemon can never be
+   * auto-started by this poller (the Phase 3 daemon-storm incident: the 8s
+   * claim poll racing dsh-web restarts auto-started three daemons and wedged
+   * every panel CLI call). The engine's TTL fallback covers the outage.
+   */
+  async function daemonAliveByHttp(): Promise<boolean> {
+    try {
+      const base = await resolveDaemonBaseUrl()
+      if (!base) return false
+      const response = await fetch(`${base}/api/grouptask/health`, { signal: AbortSignal.timeout(2_500) })
+      return response.ok
+    } catch {
+      return false
+    }
+  }
+
   async function claimOnce(): Promise<boolean> {
+    if (!(await daemonAlive())) return false
     const result: MetabotCommandResult = await run(['grouptask', 'work', 'claim'], { timeoutMs: 60_000 })
     if (!result.ok) return false
     const claim = (result.data as { request?: WorkClaim | null } | undefined)?.request ?? null
