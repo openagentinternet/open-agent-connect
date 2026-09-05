@@ -1365,25 +1365,12 @@ export type KbRecord = {
   id: string
   name: string
   description: string
+  rawDir: string
   isDefault: boolean
   autoLearn: boolean
   docCount: number
   chunkCount: number
   lastLearnedAt: number | null
-}
-
-export type KbHit = {
-  docRelPath: string
-  ord: number
-  snippet: string
-  score: number
-  title: string
-}
-
-export type KbQueryResult = {
-  knowledgeBaseId: string
-  knowledgeBaseName: string
-  hits: KbHit[]
 }
 
 export type StudyJob = {
@@ -1394,6 +1381,7 @@ export type StudyJob = {
   pinsProcessed: number
   runCount: number
   consecutiveFailures: number
+  lastRunAt: number | null
   summary: string | null
   error: string | null
 }
@@ -1405,22 +1393,12 @@ function kbRecordOf(value: unknown): KbRecord {
     id: textOf(record.id),
     name: textOf(record.name),
     description: textOf(record.description),
+    rawDir: textOf(record.rawDir),
     isDefault: record.isDefault === true,
     autoLearn: record.autoLearn === true,
     docCount: Math.max(0, toNumber(record.docCount)),
     chunkCount: Math.max(0, toNumber(record.chunkCount)),
     lastLearnedAt: lastLearnedAt > 0 ? lastLearnedAt : null,
-  }
-}
-
-function kbHitOf(value: unknown): KbHit {
-  const record = recordOf(value)
-  return {
-    docRelPath: textOf(record.docRelPath),
-    ord: Math.max(0, toNumber(record.ord)),
-    snippet: textOf(record.snippet),
-    score: toNumber(record.score),
-    title: textOf(record.title),
   }
 }
 
@@ -1435,6 +1413,7 @@ function studyJobOf(value: unknown): StudyJob {
     pinsProcessed: pins,
     runCount: Math.max(0, toNumber(record.runCount)),
     consecutiveFailures: Math.max(0, toNumber(record.consecutiveFailures)),
+    lastRunAt: toNumber(record.lastRunAt) > 0 ? toNumber(record.lastRunAt) : null,
     summary: textOf(record.summary) || null,
     error: textOf(record.error) || null,
   }
@@ -1446,8 +1425,8 @@ export async function kbList(from: string): Promise<KbRecord[]> {
   return rows.map(kbRecordOf)
 }
 
-export async function kbCreate(from: string, name: string, description?: string): Promise<void> {
-  await post('kb/create', { from, name, ...(description ? { description } : {}) })
+export async function kbCreate(from: string, name: string, description: string): Promise<void> {
+  await post('kb/create', { from, name, description })
 }
 
 export async function kbUpdate(
@@ -1462,29 +1441,24 @@ export async function kbRemove(from: string, id: string): Promise<void> {
   await post('kb/remove', { from, id })
 }
 
-export async function kbQuery(from: string, text: string, id?: string): Promise<KbQueryResult[]> {
-  const data = recordOf(await post<unknown>('kb/query', { from, text, ...(id ? { id } : {}) }))
-  const results = Array.isArray(data.results) ? data.results : []
-  return results.map((entry) => {
-    const record = recordOf(entry)
-    const hits = Array.isArray(record.hits) ? record.hits : []
-    return {
-      knowledgeBaseId: textOf(record.knowledgeBaseId),
-      knowledgeBaseName: textOf(record.knowledgeBaseName),
-      hits: hits.map(kbHitOf),
-    }
-  })
-}
-
-export async function kbAddDocument(
-  from: string,
-  input: { id?: string; title: string; content: string; sourceType?: string; url?: string; pinId?: string },
-): Promise<void> {
-  await post('kb/add-document', { from, ...input })
-}
-
 export async function kbLearn(from: string, id?: string, full?: boolean): Promise<void> {
   await post('kb/learn', { from, ...(id ? { id } : {}), ...(full ? { full: true } : {}) })
+}
+
+/** Raw-byte KB document import (the browser form of IDBots' importFiles picker). */
+export async function kbImport(from: string, id: string, file: File): Promise<number> {
+  const params = new URLSearchParams({ from, id, filename: file.name })
+  const response = await fetch(`/oac/api/kb/import?${params.toString()}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: await file.arrayBuffer(),
+  })
+  const json = await response.json() as Envelope & { data?: { imported?: unknown } }
+  if (json.ok === false || json.state === 'failed') {
+    throw new OacApiError(json.code ?? 'failed', json.message ?? json.error ?? 'import failed')
+  }
+  return Math.max(0, toNumber(json.data?.imported))
 }
 
 export async function studyList(from: string): Promise<StudyJob[]> {

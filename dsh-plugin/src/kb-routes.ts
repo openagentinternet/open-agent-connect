@@ -1,10 +1,12 @@
 /**
  * Knowledge-base / study routes — the host surface for the bot editor's
- * Knowledge tab (Settings → Bots). Reads (kb/list, kb/query, study/list) run
- * in-process against the OAC core stores; writes forward to the
- * `metabot knowledge-base` CLI verbs so the CLI stays the single management
- * surface. Large document bodies ride a temp file (--content-file) instead
- * of argv.
+ * Knowledge tab (Settings → Bots), mirroring IDBots' knowledgeBase:* IPC
+ * surface. Reads (kb/list, study/list) run in-process against the OAC core
+ * stores; writes forward to the `metabot knowledge-base` CLI verbs so the CLI
+ * stays the single management surface. `kb/import` is a raw-byte upload (like
+ * file/upload): the bytes land in a temp file and the core importFiles copies
+ * them into the KB's raw corpus. Indexing is a separate, explicit Learn click
+ * (IDBots parity) or the nightly auto-learn.
  */
 import { mkdtemp, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -15,8 +17,6 @@ import { core, localActorHomeDir } from './local-read.js'
 const CLI_TIMEOUT_MS = 60_000
 // Converter-heavy learn of large binary docs (pdf/pptx/epub) can take minutes.
 const LEARN_TIMEOUT_MS = 300_000
-/** Above this many chars the document body goes to a temp file, not argv. */
-const INLINE_CONTENT_LIMIT = 16_000
 
 export interface KbRouteDeps {
   run?: (args: string[], options?: RunMetabotOptions) => Promise<MetabotCommandResult>
@@ -37,29 +37,22 @@ function trimmed(payload: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function optionalTrimmed(payload: Record<string, unknown>, key: string): string | undefined {
-  const value = trimmed(payload, key)
-  return value || undefined
-}
-
 /** In-process stores bound to one profile home (memoized like the agent tools). */
 type KbServiceLike = {
   ensureDefaultKnowledgeBase(slug: string): Promise<unknown>
   store: {
+    getKnowledgeBase(id: string): Promise<Record<string, unknown> | null>
     listKnowledgeBases(): Promise<Array<Record<string, unknown>>>
   }
-  queryKnowledgeBase(
-    slug: string,
-    query: string,
-    options?: Record<string, unknown>,
-  ): Promise<Array<Record<string, unknown>>>
+  importFiles(slug: string, knowledgeBaseId: string, filePaths: string[]): Promise<number>
 }
+
+const serviceCache = new Map<string, KbServiceLike>()
 
 type StudyStoreLike = {
   listStudyJobs(slug?: string): Promise<Array<Record<string, unknown>>>
 }
 
-const serviceCache = new Map<string, KbServiceLike>()
 const studyStoreCache = new Map<string, StudyStoreLike>()
 
 function pathsOf(homeDir: string): { profileRoot: string } {
@@ -115,27 +108,6 @@ async function localKbList(from: string): Promise<MetabotCommandResult | null> {
   }
 }
 
-async function localKbQuery(
-  from: string,
-  body: Record<string, unknown>,
-): Promise<MetabotCommandResult | null> {
-  try {
-    const homeDir = await localActorHomeDir(from)
-    if (!homeDir) return null
-    const query = trimmed(body, 'text')
-    if (!query) return failure('missing_text', 'text is required')
-    const service = kbServiceFor(homeDir)
-    const results = await service.queryKnowledgeBase(from, query, {
-      ...(trimmed(body, 'id') ? { knowledgeBaseId: trimmed(body, 'id') } : {}),
-      ...(typeof body.topK === 'number' ? { topK: body.topK } : {}),
-      ...(typeof body.minScore === 'number' ? { minScore: body.minScore } : {}),
-    })
-    return { ok: true, state: 'success', data: { results } }
-  } catch {
-    return null // fall back to the CLI path
-  }
-}
-
 async function localStudyList(from: string): Promise<MetabotCommandResult | null> {
   try {
     const homeDir = await localActorHomeDir(from)
@@ -161,8 +133,7 @@ export async function dispatchKbRoutes(
   deps: KbRouteDeps = {},
 ): Promise<MetabotCommandResult | undefined> {
   if (method !== 'kb/list' && method !== 'kb/create' && method !== 'kb/update' && method !== 'kb/remove'
-    && method !== 'kb/query' && method !== 'kb/add-document' && method !== 'kb/learn'
-    && method !== 'study/list') {
+    && method !== 'kb/learn' && method !== 'study/list') {
     return undefined
   }
   const run = deps.run ?? runMetabot
@@ -174,16 +145,6 @@ export async function dispatchKbRoutes(
     const local = await localKbList(from)
     if (local) return local
     return runKbCli(run, ['knowledge-base', 'list', '--from', from])
-  }
-
-  if (method === 'kb/query') {
-    const local = await localKbQuery(from, body)
-    if (local) return local
-    const args = ['knowledge-base', 'query', '--from', from, '--text', trimmed(body, 'text')]
-    if (trimmed(body, 'id')) args.push('--id', trimmed(body, 'id'))
-    if (typeof body.topK === 'number') args.push('--top-k', String(Math.trunc(body.topK)))
-    if (typeof body.minScore === 'number') args.push('--min-score', String(body.minScore))
-    return runKbCli(run, args)
   }
 
   if (method === 'study/list') {
@@ -217,36 +178,47 @@ export async function dispatchKbRoutes(
     return runKbCli(run, ['knowledge-base', 'remove', '--from', from, '--id', id, '--confirm'])
   }
 
-  if (method === 'kb/add-document') {
-    const title = trimmed(body, 'title')
-    const content = typeof body.content === 'string' ? body.content : ''
-    if (!title) return failure('missing_title', 'title is required')
-    if (!content.trim()) return failure('missing_content', 'content is required')
-    const args = ['knowledge-base', 'add-document', '--from', from, '--title', title]
-    if (trimmed(body, 'id')) args.push('--id', trimmed(body, 'id'))
-    if (trimmed(body, 'sourceType')) args.push('--source-type', trimmed(body, 'sourceType'))
-    if (trimmed(body, 'url')) args.push('--url', trimmed(body, 'url'))
-    if (trimmed(body, 'pinId')) args.push('--pin-id', trimmed(body, 'pinId'))
-    if (Array.isArray(body.tags) && body.tags.length) {
-      const tags = body.tags.map((tag) => String(tag ?? '').trim()).filter(Boolean).slice(0, 10)
-      if (tags.length) args.push('--tags', tags.join(','))
-    }
-    if (content.length > INLINE_CONTENT_LIMIT) {
-      const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-payload-'))
-      const path = join(dir, 'document.txt')
-      await writeFile(path, content, 'utf8')
-      try {
-        return await runKbCli(run, [...args, '--content-file', path], LEARN_TIMEOUT_MS)
-      } finally {
-        await unlink(path).catch(() => undefined)
-      }
-    }
-    return runKbCli(run, [...args, '--content', content])
-  }
-
   // kb/learn
   const args = ['knowledge-base', 'learn', '--from', from]
   if (trimmed(body, 'id')) args.push('--id', trimmed(body, 'id'))
   if (body.full === true) args.push('--full')
   return runKbCli(run, args, LEARN_TIMEOUT_MS)
+}
+
+/**
+ * Raw-byte document import for one KB (`POST /oac/api/kb/import?from=&id=&filename=`,
+ * body = file bytes). The bytes land in a temp file (oac-dsh-payload
+ * convention, unlinked after the run) and the core importFiles copies them
+ * into the KB's raw corpus; indexing stays an explicit Learn click.
+ */
+export async function importKbFile(
+  from: string,
+  knowledgeBaseId: string,
+  filename: string,
+  bytes: Buffer,
+): Promise<MetabotCommandResult> {
+  if (!from) return failure('missing_from', 'from is required')
+  if (!knowledgeBaseId) return failure('missing_id', 'id is required')
+  if (bytes.length === 0) return failure('empty_body', 'import body is empty')
+  const homeDir = await localActorHomeDir(from)
+  if (!homeDir) return failure('kb_unavailable', 'knowledge bases are only manageable locally')
+  const service = kbServiceFor(homeDir)
+  const slug = basename(pathsOf(homeDir).profileRoot)
+  const kb = await service.store.getKnowledgeBase(knowledgeBaseId)
+  if (!kb || kb.metabotSlug !== slug) {
+    return failure('kb_not_found', `Knowledge base ${knowledgeBaseId} not found for this Bot.`)
+  }
+  const safeName = basename(filename || 'document.bin')
+  const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-payload-'))
+  const path = join(dir, safeName)
+  await writeFile(path, bytes)
+  try {
+    const imported = await service.importFiles(slug, knowledgeBaseId, [path])
+    if (!imported) return failure('unsupported_format', `"${safeName}" is not a supported document format.`)
+    return { ok: true, state: 'success', data: { imported, knowledgeBaseId } }
+  } catch (error) {
+    return failure('import_failed', error instanceof Error ? error.message : String(error))
+  } finally {
+    await unlink(path).catch(() => undefined)
+  }
 }

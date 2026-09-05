@@ -1,29 +1,32 @@
 /**
- * Bot editor Knowledge tab: per-bot document knowledge bases (list, create,
- * edit, delete, add-document, query, learn) plus the nightly study-jobs
- * status panel — the DSH port of IDBots' KnowledgeBasePanel +
- * MetawebStudyJobsPanel, mounted inside the same editor chrome.
+ * Bot editor Knowledge tab — DSH port of IDBots' KnowledgeBasePanel +
+ * MetawebStudyJobsPanel (same card structure, minus the Electron-only bits:
+ * no native directory picker → no "open directory" / custom raw-dir rows, and
+ * file import uses a browser file input over the raw kb/import route).
+ *
+ * Manages this Bot's document corpora as cards: create (name + description),
+ * inline edit, auto-learn toggle, manual/incremental learn, from-scratch
+ * relearn under an Advanced disclosure, file import, delete (never the default
+ * KB). No manual document typing — agents and the file import feed the corpus.
+ * The read-only study-jobs panel sits below (topics are assigned in chat).
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
-import {
-  OacApiError,
-  kbAddDocument,
-  kbCreate,
-  kbLearn,
-  kbList,
-  kbQuery,
-  kbRemove,
-  kbUpdate,
-  studyList,
-  type KbQueryResult,
-  type KbRecord,
-  type StudyJob,
-} from './api.ts'
+import { kbImport, kbLearn, kbList, kbCreate, kbRemove, kbUpdate, studyList, type KbRecord, type StudyJob } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'
 
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
+
+/** Keep in sync with SUPPORTED_KB_EXTENSIONS in the OAC core text pipeline. */
+const KB_IMPORT_FILE_EXTENSIONS = [
+  '.md', '.markdown', '.txt', '.json', '.csv', '.tsv', '.yaml', '.yml',
+  '.xml', '.log', '.rst', '.pdf', '.docx', '.pptx', '.xlsx', '.xls',
+  '.html', '.htm', '.epub',
+]
+const NOTICE_AUTO_CLEAR_MS = 10_000
+
+type Notice = { kind: 'success' | 'error'; text: string }
 
 const STUDY_STATUS_KEYS: Record<string, BotsLocaleKey> = {
   pending: 'kbStatusPending',
@@ -33,328 +36,473 @@ const STUDY_STATUS_KEYS: Record<string, BotsLocaleKey> = {
 }
 
 function errorText(cause: unknown): string {
-  if (cause instanceof OacApiError) return cause.message
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }): ReactNode {
-  const [kbs, setKbs] = useState<KbRecord[] | null>(null)
-  const [jobs, setJobs] = useState<StudyJob[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [note, setNote] = useState<string | null>(null)
+function interpolate(template: string, vars: Record<string, string | number>): string {
+  let text = template
+  for (const [name, value] of Object.entries(vars)) {
+    text = text.replaceAll(`{${name}}`, String(value))
+  }
+  return text
+}
 
+function formatLastLearnedAt(t: Translate, value: number | null): string {
+  if (!value) return t('kbNeverLearned')
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return t('kbNeverLearned')
+  return interpolate(t('kbLastLearned'), { time: date.toLocaleString() })
+}
+
+function formatRunAt(t: Translate, value: number | null): string {
+  if (!value) return t('kbStudyNever')
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return t('kbStudyNever')
+  return interpolate(t('kbStudyLastRun'), { time: date.toLocaleString() })
+}
+
+export function KnowledgeTab({ bot, t }: { bot: { slug: string }; t: Translate }): ReactNode {
+  const [kbs, setKbs] = useState<KbRecord[]>([])
+  const [loaded, setLoaded] = useState(false)
+  const [panelError, setPanelError] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
   const [createDescription, setCreateDescription] = useState('')
-  const [editId, setEditId] = useState<string | null>(null)
+  const [createSaving, setCreateSaving] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [learningIds, setLearningIds] = useState<ReadonlySet<string>>(new Set())
+  const [importingIds, setImportingIds] = useState<ReadonlySet<string>>(new Set())
+  const [autoLearnSavingIds, setAutoLearnSavingIds] = useState<ReadonlySet<string>>(new Set())
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
-  const [removingId, setRemovingId] = useState<string | null>(null)
-  const [docKbId, setDocKbId] = useState('')
-  const [docTitle, setDocTitle] = useState('')
-  const [docContent, setDocContent] = useState('')
-  const [queryText, setQueryText] = useState('')
-  const [queryResults, setQueryResults] = useState<KbQueryResult[] | null>(null)
+  const [editError, setEditError] = useState('')
+  const [notices, setNotices] = useState<Record<string, Notice>>({})
+  const [jobs, setJobs] = useState<StudyJob[]>([])
+  const [jobsLoaded, setJobsLoaded] = useState(false)
+  const [jobsError, setJobsError] = useState('')
+  const noticeTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const importInputRef = useRef<HTMLInputElement | null>(null)
+  const importTargetRef = useRef<string | null>(null)
 
-  const guard = async (key: string, work: () => Promise<void>): Promise<void> => {
-    if (busy !== null) return
-    setBusy(key)
-    setError(null)
-    setNote(null)
-    try {
-      await work()
-    } catch (cause) {
-      setError(errorText(cause))
-    } finally {
-      setBusy(null)
-    }
-  }
+  const showNotice = useCallback((kbId: string, notice: Notice) => {
+    setNotices((prev) => ({ ...prev, [kbId]: notice }))
+    const timers = noticeTimersRef.current
+    const existing = timers.get(kbId)
+    if (existing) clearTimeout(existing)
+    timers.set(kbId, setTimeout(() => {
+      timers.delete(kbId)
+      setNotices((prev) => {
+        const next = { ...prev }
+        delete next[kbId]
+        return next
+      })
+    }, NOTICE_AUTO_CLEAR_MS))
+  }, [])
 
-  const reload = useCallback((slug: string) => {
+  const loadKbs = useCallback((slug: string) => {
     void kbList(slug).then((rows) => {
       setKbs(rows)
-      setDocKbId((current) => (rows.some((row) => row.id === current) ? current : rows[0]?.id ?? ''))
-    }).catch((cause) => setError(errorText(cause)))
-    void studyList(slug).then(setJobs).catch(() => setJobs(null))
+      setPanelError('')
+      setLoaded(true)
+    }).catch((cause) => {
+      setPanelError(errorText(cause) || t('kbLoadFailed'))
+      setLoaded(true)
+    })
+  }, [t])
+
+  const loadJobs = useCallback((slug: string) => {
+    void studyList(slug).then((rows) => {
+      setJobs(rows)
+      setJobsError('')
+      setJobsLoaded(true)
+    }).catch((cause) => {
+      setJobsError(errorText(cause))
+      setJobsLoaded(true)
+    })
   }, [])
 
   useEffect(() => {
-    reload(bot.slug)
-  }, [bot.slug, reload])
+    setKbs([])
+    setLoaded(false)
+    setPanelError('')
+    setCreateOpen(false)
+    setCreateError('')
+    setEditingId(null)
+    setNotices({})
+    loadKbs(bot.slug)
+    setJobs([])
+    setJobsLoaded(false)
+    loadJobs(bot.slug)
+  }, [bot.slug, loadKbs, loadJobs, t])
 
-  const flash = (key: BotsLocaleKey): void => setNote(t(key))
+  useEffect(() => {
+    const timers = noticeTimersRef.current
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer))
+      timers.clear()
+    }
+  }, [])
 
-  const learn = (kb: KbRecord, full: boolean): void => {
-    void guard(full ? `rebuild:${kb.id}` : `learn:${kb.id}`, async () => {
-      await kbLearn(bot.slug, kb.id, full)
-      reload(bot.slug)
-      flash('kbLearnDone')
+  const reload = (): void => {
+    loadKbs(bot.slug)
+    loadJobs(bot.slug)
+  }
+
+  const handleCreate = async (): Promise<void> => {
+    const name = createName.trim()
+    const description = createDescription.trim()
+    if (!name) {
+      setCreateError(t('kbNameRequired'))
+      return
+    }
+    if (!description) {
+      setCreateError(t('kbDescriptionRequired'))
+      return
+    }
+    setCreateSaving(true)
+    setCreateError('')
+    try {
+      await kbCreate(bot.slug, name, description)
+      setCreateOpen(false)
+      setCreateName('')
+      setCreateDescription('')
+      loadKbs(bot.slug)
+    } catch (cause) {
+      setCreateError(errorText(cause) || t('kbCreateFailed'))
+    } finally {
+      setCreateSaving(false)
+    }
+  }
+
+  const handleToggleAutoLearn = (kb: KbRecord): void => {
+    if (autoLearnSavingIds.has(kb.id)) return
+    setAutoLearnSavingIds((prev) => new Set(prev).add(kb.id))
+    void kbUpdate(bot.slug, kb.id, { autoLearn: !kb.autoLearn })
+      .then(() => loadKbs(bot.slug))
+      .catch((cause) => showNotice(kb.id, { kind: 'error', text: errorText(cause) || t('kbUpdateFailed') }))
+      .finally(() => {
+        setAutoLearnSavingIds((prev) => {
+          const next = new Set(prev)
+          next.delete(kb.id)
+          return next
+        })
+      })
+  }
+
+  const handleLearn = (kb: KbRecord, full: boolean): void => {
+    if (learningIds.has(kb.id)) return
+    if (full && !window.confirm(interpolate(t('kbRelearnFullConfirm'), { name: kb.name }))) return
+    setLearningIds((prev) => new Set(prev).add(kb.id))
+    void kbLearn(bot.slug, kb.id, full)
+      .then(() => {
+        loadKbs(bot.slug)
+        showNotice(kb.id, { kind: 'success', text: t('kbLearnDone') })
+      })
+      .catch((cause) => showNotice(kb.id, { kind: 'error', text: errorText(cause) || t('kbLearnFailed') }))
+      .finally(() => {
+        setLearningIds((prev) => {
+          const next = new Set(prev)
+          next.delete(kb.id)
+          return next
+        })
+      })
+  }
+
+  const handleImportPicked = (kb: KbRecord, event: ChangeEvent<HTMLInputElement>): void => {
+    const picked = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (!picked.length || importingIds.has(kb.id)) return
+    setImportingIds((prev) => new Set(prev).add(kb.id))
+    void (async () => {
+      let imported = 0
+      let firstError = ''
+      for (const file of picked) {
+        try {
+          imported += await kbImport(bot.slug, kb.id, file)
+        } catch (cause) {
+          if (!firstError) firstError = errorText(cause)
+        }
+      }
+      const skipped = picked.length - imported
+      if (imported > 0) {
+        showNotice(kb.id, {
+          kind: 'success',
+          text: `${interpolate(t('kbImportResult'), { imported, skipped })} ${t('kbImportLearnHint')}`,
+        })
+      } else {
+        showNotice(kb.id, { kind: 'error', text: firstError || t('kbImportFailed') })
+      }
+      loadKbs(bot.slug)
+    })().finally(() => {
+      setImportingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(kb.id)
+        return next
+      })
     })
+  }
+
+  const handleSaveEdit = (kb: KbRecord): void => {
+    const name = editName.trim()
+    const description = editDescription.trim()
+    if (!name) {
+      setEditError(t('kbNameRequired'))
+      return
+    }
+    if (!description) {
+      setEditError(t('kbDescriptionRequired'))
+      return
+    }
+    void kbUpdate(bot.slug, kb.id, { name, description })
+      .then(() => {
+        setEditingId(null)
+        loadKbs(bot.slug)
+      })
+      .catch((cause) => setEditError(errorText(cause) || t('kbUpdateFailed')))
+  }
+
+  const handleRemove = (kb: KbRecord): void => {
+    if (kb.isDefault) return
+    if (!window.confirm(interpolate(t('kbDeleteConfirm'), { name: kb.name }))) return
+    void kbRemove(bot.slug, kb.id)
+      .then(() => loadKbs(bot.slug))
+      .catch((cause) => showNotice(kb.id, { kind: 'error', text: errorText(cause) || t('kbDeleteFailed') }))
+  }
+
+  const renderCard = (kb: KbRecord): ReactNode => {
+    const learning = learningIds.has(kb.id)
+    const importing = importingIds.has(kb.id)
+    const autoLearnSaving = autoLearnSavingIds.has(kb.id)
+    const editing = editingId === kb.id
+    const notice = notices[kb.id]
+    return (
+      <div key={kb.id} className="oac-kb-card" data-slot={`knowledge-base-card-${kb.id}`}>
+        <div className="oac-kb-row-head">
+          <div className="oac-kb-name-row">
+            <span className="oac-kb-name" title={kb.name}>{kb.name}</span>
+            {kb.isDefault ? <span className="oac-kb-badge">{t('kbDefaultBadge')}</span> : null}
+          </div>
+          <div className="oac-kb-row" style={{ flexWrap: 'nowrap' }}>
+            <span className="oac-kb-hint">{t('kbAutoLearn')}</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={kb.autoLearn}
+              aria-label={t('kbAutoLearn')}
+              title={t('kbAutoLearnHint')}
+              className="oac-kb-toggle"
+              data-on={kb.autoLearn ? 'true' : 'false'}
+              disabled={autoLearnSaving}
+              onClick={() => handleToggleAutoLearn(kb)}
+            >
+              <span className="oac-kb-toggle-knob" />
+            </button>
+          </div>
+        </div>
+        {!editing && kb.description ? <p className="oac-kb-desc">{kb.description}</p> : null}
+        <p className="oac-kb-path" title={kb.rawDir}>{kb.rawDir}</p>
+        <p className="oac-kb-stats">
+          {`${interpolate(t('kbStatsDocs'), { count: kb.docCount })} · ${interpolate(t('kbStatsChunks'), { count: kb.chunkCount })} · ${formatLastLearnedAt(t, kb.lastLearnedAt)}`}
+        </p>
+
+        {notice ? <div className="oac-kb-notice" data-kind={notice.kind}>{notice.text}</div> : null}
+
+        {editing ? (
+          <div className="oac-kb-card" style={{ padding: 0, border: 'none', gap: 8 }} data-slot={`knowledge-base-edit-form-${kb.id}`}>
+            <Input
+              value={editName}
+              placeholder={t('kbNamePlaceholder')}
+              onChange={(event) => setEditName(event.target.value)}
+            />
+            <textarea
+              className="oac-input"
+              rows={2}
+              value={editDescription}
+              placeholder={t('kbDescriptionPlaceholder')}
+              onChange={(event) => setEditDescription(event.target.value)}
+            />
+            {editError ? <div className="oac-kb-error">{editError}</div> : null}
+            <div className="oac-kb-row" style={{ justifyContent: 'flex-end' }}>
+              <Button type="button" variant="outline" disabled={false} onClick={() => setEditingId(null)}>
+                {t('cancel')}
+              </Button>
+              <Button type="button" variant="primary" onClick={() => handleSaveEdit(kb)}>
+                {t('save')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="oac-kb-row">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={learning}
+              onClick={() => handleLearn(kb, false)}
+            >
+              {learning ? t('kbLearning') : t('kbLearnNow')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={importing || learning}
+              onClick={() => {
+                importTargetRef.current = kb.id
+                importInputRef.current?.click()
+              }}
+            >
+              {importing ? t('kbImporting') : t('kbImportFiles')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={learning}
+              onClick={() => {
+                setEditingId(kb.id)
+                setEditName(kb.name)
+                setEditDescription(kb.description)
+                setEditError('')
+              }}
+            >
+              {t('kbEdit')}
+            </Button>
+            {!kb.isDefault ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="oac-kb-danger-btn"
+                disabled={learning}
+                onClick={() => handleRemove(kb)}
+              >
+                {t('kbDelete')}
+              </Button>
+            ) : null}
+          </div>
+        )}
+
+        <details className="oac-kb-advanced" data-slot={`knowledge-base-advanced-${kb.id}`}>
+          <summary>{t('kbAdvancedToggle')}</summary>
+          <div className="oac-kb-adv-row">
+            <p className="oac-kb-hint">{t('kbRelearnFullHint')}</p>
+            <Button
+              type="button"
+              variant="outline"
+              className="oac-kb-danger-btn"
+              disabled={learning}
+              onClick={() => handleLearn(kb, true)}
+            >
+              {learning ? t('kbLearning') : t('kbRelearnFull')}
+            </Button>
+          </div>
+        </details>
+      </div>
+    )
   }
 
   return (
     <div id="oac-editor-panel-knowledge" role="tabpanel" className="oac-tab-panel">
       <div className="oac-form">
-        <p className="oac-hint">{t('kbHint')}</p>
-        {error ? <div className="oac-error">{error}</div> : null}
-        {note ? <div className="oac-hint">{note}</div> : null}
-
-        <div className="oac-form-actions">
+        <div className="oac-kb-row" style={{ justifyContent: 'space-between' }}>
+          <p className="oac-kb-hint">{t('kbPanelHint')}</p>
           <Button
             type="button"
             variant="outline"
-            disabled={busy !== null}
-            onClick={() => reload(bot.slug)}
+            onClick={() => {
+              setCreateOpen((prev) => !prev)
+              setCreateError('')
+            }}
           >
+            {createOpen ? t('cancel') : t('kbCreate')}
+          </Button>
+        </div>
+        <p className="oac-kb-hint">{interpolate(t('kbFormatsHint'), { formats: KB_IMPORT_FILE_EXTENSIONS.join(' ') })}</p>
+
+        {panelError ? <div className="oac-kb-error">{panelError}</div> : null}
+
+        {createOpen ? (
+          <div className="oac-kb-card" data-slot="knowledge-base-create-form">
+            <Input
+              value={createName}
+              placeholder={t('kbNamePlaceholder')}
+              onChange={(event) => setCreateName(event.target.value)}
+            />
+            <textarea
+              className="oac-input"
+              rows={2}
+              value={createDescription}
+              placeholder={t('kbDescriptionPlaceholder')}
+              onChange={(event) => setCreateDescription(event.target.value)}
+            />
+            {createError ? <div className="oac-kb-error">{createError}</div> : null}
+            <div className="oac-kb-row" style={{ justifyContent: 'flex-end' }}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={createSaving}
+                onClick={() => {
+                  setCreateOpen(false)
+                  setCreateError('')
+                }}
+              >
+                {t('cancel')}
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={createSaving}
+                onClick={() => void handleCreate()}
+              >
+                {createSaving ? t('saving') : t('kbCreate')}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {loaded && !panelError && kbs.length === 0 ? (
+          <p className="oac-kb-hint">{t('kbEmpty')}</p>
+        ) : (
+          kbs.map(renderCard)
+        )}
+
+        {/* Hidden multi-file picker driving the raw kb/import upload. */}
+        <input
+          ref={importInputRef}
+          type="file"
+          multiple
+          accept={KB_IMPORT_FILE_EXTENSIONS.join(',')}
+          style={{ display: 'none' }}
+          onChange={(event) => {
+            const kbId = importTargetRef.current
+            const kb = kbs.find((entry) => entry.id === kbId)
+            if (kb) handleImportPicked(kb, event)
+            else event.target.value = ''
+          }}
+        />
+
+        <hr className="oac-kb-sep" />
+        <div className="oac-kb-row" style={{ justifyContent: 'space-between' }}>
+          <p className="oac-kb-hint">{t('kbStudyPanelHint')}</p>
+          <Button type="button" variant="outline" onClick={() => loadJobs(bot.slug)}>
             {t('refresh')}
           </Button>
         </div>
-
-        {kbs !== null && kbs.length === 0 ? <p className="oac-hint">{t('kbEmpty')}</p> : null}
-        {(kbs ?? []).map((kb) => (
-          <div key={kb.id} className="oac-info">
-            <div className="oac-info-row">
-              <span className="oac-info-label">
-                {kb.name}
-                {kb.isDefault ? <span className="oac-hint"> · {t('kbDefault')}</span> : null}
+        {jobsError ? <div className="oac-kb-error">{jobsError}</div> : null}
+        {jobsLoaded && !jobsError && jobs.length === 0 ? (
+          <p className="oac-kb-hint">{t('kbStudyEmpty')}</p>
+        ) : null}
+        {jobs.map((job) => (
+          <div key={job.id} className="oac-kb-card" data-slot={`knowledge-base-study-job-${job.id}`}>
+            <div className="oac-kb-row-head">
+              <span className="oac-kb-name" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{job.topic}</span>
+              <span className="oac-kb-study-badge" data-status={job.status}>
+                {t(STUDY_STATUS_KEYS[job.status] ?? 'kbStatusPending')}
               </span>
-              <code className="oac-info-value">
-                {t('kbDocsChunks', { docs: kb.docCount, chunks: kb.chunkCount })}
-              </code>
             </div>
-            {editId === kb.id ? (
-              <div className="oac-form">
-                <Input
-                  value={editName}
-                  placeholder={t('kbNamePlaceholder')}
-                  onChange={(event) => setEditName(event.target.value)}
-                />
-                <Input
-                  value={editDescription}
-                  placeholder={t('kbDescriptionPlaceholder')}
-                  onChange={(event) => setEditDescription(event.target.value)}
-                />
-                <div className="oac-form-actions">
-                  <Button
-                    type="button"
-                    variant="primary"
-                    disabled={busy !== null}
-                    onClick={() => void guard(`edit:${kb.id}`, async () => {
-                      await kbUpdate(bot.slug, kb.id, {
-                        ...(editName.trim() ? { name: editName.trim() } : {}),
-                        description: editDescription.trim(),
-                      })
-                      setEditId(null)
-                      reload(bot.slug)
-                      flash('kbSaved')
-                    })}
-                  >
-                    {t('saving')}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => setEditId(null)}>
-                    {t('cancel')}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <>
-                {kb.description ? <div className="oac-info-row"><span className="oac-hint">{kb.description}</span></div> : null}
-                <div className="oac-form-actions">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() => learn(kb, false)}
-                  >
-                    {t('kbLearn')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() => learn(kb, true)}
-                  >
-                    {t('kbRebuild')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() => void guard(`autolearn:${kb.id}`, async () => {
-                      await kbUpdate(bot.slug, kb.id, { autoLearn: !kb.autoLearn })
-                      reload(bot.slug)
-                    })}
-                  >
-                    {kb.autoLearn ? t('kbAutoLearnOn') : t('kbAutoLearnOff')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() => {
-                      setEditId(kb.id)
-                      setEditName(kb.name)
-                      setEditDescription(kb.description)
-                    }}
-                  >
-                    {t('kbEdit')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() => {
-                      if (removingId !== kb.id) {
-                        setRemovingId(kb.id)
-                        return
-                      }
-                      void guard(`remove:${kb.id}`, async () => {
-                        await kbRemove(bot.slug, kb.id)
-                        setRemovingId(null)
-                        reload(bot.slug)
-                      })
-                    }}
-                  >
-                    {removingId === kb.id ? t('kbRemoveConfirm') : t('kbRemove')}
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-
-        <div className="oac-form">
-          <p className="oac-hint">{t('kbCreate')}</p>
-          <Input
-            value={createName}
-            placeholder={t('kbNamePlaceholder')}
-            onChange={(event) => setCreateName(event.target.value)}
-          />
-          <Input
-            value={createDescription}
-            placeholder={t('kbDescriptionPlaceholder')}
-            onChange={(event) => setCreateDescription(event.target.value)}
-          />
-          <div className="oac-form-actions">
-            <Button
-              type="button"
-              variant="primary"
-              disabled={busy !== null || !createName.trim()}
-              onClick={() => void guard('create', async () => {
-                await kbCreate(bot.slug, createName.trim(), createDescription.trim() || undefined)
-                setCreateName('')
-                setCreateDescription('')
-                reload(bot.slug)
-                flash('kbSaved')
-              })}
-            >
-              {t('kbCreate')}
-            </Button>
-          </div>
-        </div>
-
-        <p className="oac-hint">{t('kbAddDocTitle')}</p>
-        <div className="oac-form">
-          <select
-            className="oac-input"
-            value={docKbId}
-            onChange={(event) => setDocKbId(event.target.value)}
-          >
-            {(kbs ?? []).map((kb) => (
-              <option key={kb.id} value={kb.id}>{kb.name}</option>
-            ))}
-          </select>
-          <Input
-            value={docTitle}
-            placeholder={t('kbDocTitlePlaceholder')}
-            onChange={(event) => setDocTitle(event.target.value)}
-          />
-          <textarea
-            className="oac-input"
-            rows={5}
-            value={docContent}
-            placeholder={t('kbDocContentPlaceholder')}
-            onChange={(event) => setDocContent(event.target.value)}
-          />
-          <div className="oac-form-actions">
-            <Button
-              type="button"
-              variant="primary"
-              disabled={busy !== null || !docTitle.trim() || !docContent.trim() || !docKbId}
-              onClick={() => void guard('addDoc', async () => {
-                await kbAddDocument(bot.slug, { id: docKbId, title: docTitle.trim(), content: docContent })
-                setDocTitle('')
-                setDocContent('')
-                await kbLearn(bot.slug, docKbId)
-                reload(bot.slug)
-                flash('kbLearnDone')
-              })}
-            >
-              {t('kbDocAdd')}
-            </Button>
-          </div>
-        </div>
-
-        <p className="oac-hint">{t('kbQueryTitle')}</p>
-        <div className="oac-form">
-          <Input
-            value={queryText}
-            placeholder={t('kbQueryPlaceholder')}
-            onChange={(event) => setQueryText(event.target.value)}
-          />
-          <div className="oac-form-actions">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy !== null || !queryText.trim()}
-              onClick={() => void guard('query', async () => {
-                const results = await kbQuery(bot.slug, queryText.trim())
-                setQueryResults(results)
-              })}
-            >
-              {t('kbQueryButton')}
-            </Button>
-          </div>
-          {queryResults !== null ? (
-            queryResults.length === 0 ? <p className="oac-hint">{t('kbQueryEmpty')}</p> : (
-              queryResults.map((result) => (
-                <div key={result.knowledgeBaseId}>
-                  <p className="oac-hint">
-                    {t('kbQueryHits', { name: result.knowledgeBaseName, count: result.hits.length })}
-                  </p>
-                  {result.hits.map((hit) => (
-                    <div key={`${hit.docRelPath}#${hit.ord}`} className="oac-info">
-                      <div className="oac-info-row">
-                        <span className="oac-info-label">{hit.title}</span>
-                        <code className="oac-info-value">{hit.score.toFixed(3)}</code>
-                      </div>
-                      <span className="oac-hint">{hit.snippet}</span>
-                    </div>
-                  ))}
-                </div>
-              ))
-            )
-          ) : null}
-        </div>
-
-        <p className="oac-hint">{t('kbStudyHint')}</p>
-        {jobs !== null && jobs.length === 0 ? <p className="oac-hint">{t('kbStudyEmpty')}</p> : null}
-        {(jobs ?? []).map((job) => (
-          <div key={job.id} className="oac-info">
-            <div className="oac-info-row">
-              <span className="oac-info-label">{job.topic}</span>
-              <code className="oac-info-value">{t(STUDY_STATUS_KEYS[job.status] ?? 'kbStatusPending')}</code>
-            </div>
-            <span className="oac-hint">
-              {t('kbStudyStats', {
-                runs: job.runCount,
-                pins: job.pinsProcessed,
-                budget: job.budgetPins,
-              })}
-              {job.consecutiveFailures > 0 ? ` · ${t('kbStudyFailures', { count: job.consecutiveFailures })}` : ''}
-            </span>
-            {job.summary ? <span className="oac-hint">{job.summary}</span> : null}
-            {job.error ? <span className="oac-error">{job.error}</span> : null}
+            <p className="oac-kb-stats">
+              {`${interpolate(t('kbStudyStats'), { runs: job.runCount, pins: job.pinsProcessed, budget: job.budgetPins })} · ${formatRunAt(t, job.lastRunAt)}`}
+            </p>
+            {job.summary ? <p className="oac-kb-desc">{job.summary}</p> : null}
+            {job.error ? <p className="oac-kb-error" style={{ background: 'none', padding: 0 }}>{job.error}</p> : null}
           </div>
         ))}
       </div>
