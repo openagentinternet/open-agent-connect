@@ -268,7 +268,14 @@ function createKnowledgeBaseIndexStore(filePath) {
                 : await buildFullIndex(rawDir, now);
             await writeIndex(index);
             cache = null;
-            return { docCount: index.docs.length, chunkCount: index.chunks.length };
+            // Learn summary vs the previous index, by raw-content sha256 per relpath
+            // (IDBots' learn {added, updated, removed}). A full rebuild diffs against
+            // the previous index the same way when one exists.
+            const prevByPath = new Map((previous?.docs ?? []).map((doc) => [doc.relpath, doc.sha256]));
+            const added = index.docs.filter((doc) => !prevByPath.has(doc.relpath)).length;
+            const removed = [...prevByPath.keys()].filter((relpath) => !index.docs.some((doc) => doc.relpath === relpath)).length;
+            const updated = index.docs.filter((doc) => prevByPath.get(doc.relpath) !== undefined && prevByPath.get(doc.relpath) !== doc.sha256).length;
+            return { docCount: index.docs.length, chunkCount: index.chunks.length, added, updated, removed };
         },
         query: async (query, options = {}) => {
             const index = await readIndexCached();

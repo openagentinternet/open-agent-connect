@@ -103,6 +103,8 @@ export interface DecideRespondersInput {
     message: Pick<GroupTaskMessage, 'content' | 'mention' | 'senderGlobalMetaId' | 'senderSuspect'>;
     taskStatus: GroupTaskStatus;
     hasOpenCheckpoint: boolean;
+    /** Owner dispatch pause (supervise): workers silent, owner→chair only. */
+    dispatchPaused?: boolean;
     /** Active local seats only (removed and remote members excluded). */
     seats: GroupTaskResponderSeat[];
     ownerGlobalMetaId: string | null;

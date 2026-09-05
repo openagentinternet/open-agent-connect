@@ -163,8 +163,10 @@ function createKnowledgeBaseStore(paths) {
                 return false;
             await writeRegistry(state);
             // Prune the raw corpus AND the derived index so a same-named KB cannot
-            // resurrect old documents or serve stale chunks.
-            if (target?.rawDir) {
+            // resurrect old documents or serve stale chunks. External source
+            // directories (picked at create time) are read in place and are NEVER
+            // deleted — only the managed internal corpus is removed here.
+            if (target?.rawDir && target.rawDir === node_path_1.default.join(rootDir, target.id, 'raw')) {
                 await node_fs_1.promises.rm(target.rawDir, { recursive: true, force: true }).catch(() => undefined);
             }
             await node_fs_1.promises.rm(knowledgeBaseIndexPath(paths, id), { force: true }).catch(() => undefined);

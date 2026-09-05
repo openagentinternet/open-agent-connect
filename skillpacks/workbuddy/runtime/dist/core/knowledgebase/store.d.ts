@@ -21,6 +21,12 @@ export interface KnowledgeBaseRecord {
     lastAutoLearnDate: string | null;
     createdAt: number;
     updatedAt: number;
+    /** Only set on the record a learn call returns (transient, never persisted). */
+    learnSummary?: {
+        added: number;
+        updated: number;
+        removed: number;
+    };
 }
 export interface CreateKnowledgeBaseInput {
     metabotSlug: string;

@@ -2933,6 +2933,8 @@ function createDefaultCliDependencies(context) {
                 supervise: post('/api/grouptask/supervise'),
                 deleteDeliverable: post('/api/grouptask/deliverable/delete'),
                 relayDrain: post('/api/grouptask/relay/drain'),
+                workClaim: post('/api/grouptask/work/claim'),
+                workSubmit: post('/api/grouptask/work/submit'),
                 close: post('/api/grouptask/close'),
                 reopen: post('/api/grouptask/reopen'),
                 kickMember: post('/api/grouptask/member/kick'),
@@ -4195,6 +4197,7 @@ function createDefaultCliDependencies(context) {
                     metabotSlug: node_path_1.default.basename(paths.profileRoot),
                     name: input.name,
                     ...(input.description ? { description: input.description } : {}),
+                    ...(input.rawDir ? { rawDir: input.rawDir } : {}),
                     ...(input.autoLearn !== undefined ? { autoLearn: input.autoLearn } : {}),
                 });
                 return (0, commandResult_1.commandSuccess)({ knowledgeBase });

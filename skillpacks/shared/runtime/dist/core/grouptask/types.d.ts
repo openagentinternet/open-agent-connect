@@ -55,6 +55,63 @@ export interface GroupTaskRecord {
     pinned: boolean;
     /** Local-only archive marker (epoch ms; null = active). */
     archivedAt: number | null;
+    /**
+     * DSH session id of the chat that triggered this task (staffing propose
+     * records it) — the source-session relay returns milestones there.
+     */
+    sourceSessionId: string | null;
+    /**
+     * Owner dispatch pause (epoch ms; null = running). While set, the engine
+     * silences worker turns (owner→chair still answers) and skips planning.
+     */
+    dispatchPausedAt: number | null;
+}
+/** Owner-side supervision signals recorded on a task (IDBots supervise parity). */
+export type GroupTaskSuperviseAction = 'nudge' | 'flag' | 'pause' | 'resume';
+export interface GroupTaskSupervisorSignal {
+    id: number;
+    taskId: number;
+    signalType: GroupTaskSuperviseAction;
+    /** Target member for nudges; null for task-wide signals. */
+    memberGlobalMetaId: string | null;
+    memberName: string | null;
+    /** Free-text owner note (flag context). */
+    note: string | null;
+    createdAt: number;
+}
+/** Milestone kinds the source-session relay forwards to the origin chat. */
+export type GroupTaskRelayKind = 'created' | 'dispatch' | 'checkpoint' | 'review' | 'closed' | 'paused' | 'resumed';
+export interface GroupTaskRelayRow {
+    id: number;
+    taskId: number;
+    groupId: string | null;
+    /** DSH session id of the originating chat (null rows are never emitted). */
+    sessionId: string;
+    kind: GroupTaskRelayKind;
+    title: string;
+    text: string;
+    createdAt: number;
+    drainedAt: number | null;
+}
+export type GroupTaskWorkRequestStatus = 'pending' | 'claimed' | 'completed' | 'failed' | 'expired';
+export interface GroupTaskWorkRequest {
+    id: number;
+    taskId: number;
+    groupId: string | null;
+    /** Local worker profile slug (remote members never get work requests). */
+    workerSlug: string;
+    /** Chain message index this turn responds to (the engine defers here). */
+    targetIndex: number;
+    targetPinId: string | null;
+    status: GroupTaskWorkRequestStatus;
+    createdAt: number;
+    claimedAt: number | null;
+    completedAt: number | null;
+    /** Worker handoff submitted by the host (completed requests). */
+    handoff: string | null;
+    /** Failure reason (failed requests: empty handoff, session error, timeout). */
+    error: string | null;
+    dshSessionId: string | null;
 }
 export interface GroupTaskMember {
     id: number;
@@ -251,6 +308,7 @@ export interface GroupTaskDetail extends GroupTaskRecord {
     stallAfterMinutes: number;
     statusEvents: GroupTaskStatusEvent[];
     checkpoints: GroupTaskCheckpoint[];
+    supervisorSignals: GroupTaskSupervisorSignal[];
     acceptanceSummary: GroupTaskAcceptanceSummary | null;
     /** Tag-free body of the chair's [CHECKPOINT] message that is open now. */
     openCheckpointSummary: string | null;
@@ -267,6 +325,8 @@ export interface CreateGroupTaskInput {
     /** Explicit chair slug; defaults to the machine twin, else fails. */
     chairSlug?: string;
     createdBy?: 'user' | 'twinbot';
+    /** Origin chat session id (staffing flow); enables the source-session relay. */
+    sourceSessionId?: string | null;
 }
 export declare const GROUP_TASK_TERMINAL_STATUSES: ReadonlySet<GroupTaskStatus>;
 /**

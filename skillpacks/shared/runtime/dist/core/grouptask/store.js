@@ -32,6 +32,8 @@ function emptyState() {
         checkpoints: [],
         integrityEvents: [],
         planChanges: [],
+        supervisorSignals: [],
+        workRequests: [],
         acceptanceSummaries: [],
         kv: {},
     };
@@ -92,6 +94,10 @@ function createGroupTaskStore(paths) {
             checkpoints: Array.isArray(parsed.checkpoints) ? parsed.checkpoints : base.checkpoints,
             integrityEvents: Array.isArray(parsed.integrityEvents) ? parsed.integrityEvents : base.integrityEvents,
             planChanges: Array.isArray(parsed.planChanges) ? parsed.planChanges : base.planChanges,
+            supervisorSignals: Array.isArray(parsed.supervisorSignals)
+                ? parsed.supervisorSignals
+                : base.supervisorSignals,
+            workRequests: Array.isArray(parsed.workRequests) ? parsed.workRequests : base.workRequests,
             acceptanceSummaries: Array.isArray(parsed.acceptanceSummaries)
                 ? parsed.acceptanceSummaries
                 : base.acceptanceSummaries,
@@ -149,6 +155,8 @@ function createGroupTaskStore(paths) {
                 displayName: null,
                 pinned: false,
                 archivedAt: null,
+                sourceSessionId: input.sourceSessionId?.trim() || null,
+                dispatchPausedAt: null,
             };
             state.tasks.push(task);
             await writeState(state);
@@ -284,6 +292,14 @@ function createGroupTaskStore(paths) {
             const state = await readState();
             const task = requireTask(state, taskId);
             task.archivedAt = null;
+            await writeState(state);
+            return task;
+        }),
+        setTaskDispatchPaused: (taskId, pausedAt) => enqueue(async () => {
+            const state = await readState();
+            const task = requireTask(state, taskId);
+            task.dispatchPausedAt = pausedAt;
+            task.updatedAt = Date.now();
             await writeState(state);
             return task;
         }),
@@ -579,6 +595,86 @@ function createGroupTaskStore(paths) {
             const state = await readState();
             return state.planChanges.filter((entry) => entry.taskId === taskId);
         },
+        addSupervisorSignal: (input) => enqueue(async () => {
+            const state = await readState();
+            requireTask(state, input.taskId);
+            const signal = {
+                id: nextId(state),
+                taskId: input.taskId,
+                signalType: input.signalType,
+                memberGlobalMetaId: input.memberGlobalMetaId?.trim() || null,
+                memberName: input.memberName?.trim() || null,
+                note: input.note?.trim().slice(0, 500) || null,
+                createdAt: Date.now(),
+            };
+            state.supervisorSignals.push(signal);
+            await writeState(state);
+            return signal;
+        }),
+        listSupervisorSignals: async (taskId) => {
+            const state = await readState();
+            return state.supervisorSignals
+                .filter((entry) => entry.taskId === taskId)
+                .sort((left, right) => left.createdAt - right.createdAt);
+        },
+        createWorkRequest: (input) => enqueue(async () => {
+            const state = await readState();
+            requireTask(state, input.taskId);
+            const request = {
+                id: nextId(state),
+                taskId: input.taskId,
+                groupId: input.groupId,
+                workerSlug: input.workerSlug,
+                targetIndex: input.targetIndex,
+                targetPinId: input.targetPinId,
+                status: 'pending',
+                createdAt: Date.now(),
+                claimedAt: null,
+                completedAt: null,
+                handoff: null,
+                error: null,
+                dshSessionId: null,
+            };
+            state.workRequests.push(request);
+            await writeState(state);
+            return request;
+        }),
+        listWorkRequests: async (filter) => {
+            const state = await readState();
+            return state.workRequests
+                .filter((entry) => {
+                if (filter?.status && entry.status !== filter.status)
+                    return false;
+                if (filter?.workerSlug && entry.workerSlug !== filter.workerSlug)
+                    return false;
+                return true;
+            })
+                .sort((left, right) => left.createdAt - right.createdAt);
+        },
+        getWorkRequest: async (workRequestId) => {
+            const state = await readState();
+            return state.workRequests.find((entry) => entry.id === workRequestId) ?? null;
+        },
+        updateWorkRequest: (workRequestId, patch) => enqueue(async () => {
+            const state = await readState();
+            const request = state.workRequests.find((entry) => entry.id === workRequestId);
+            if (!request)
+                return null;
+            if (patch.status)
+                request.status = patch.status;
+            if (patch.handoff !== undefined)
+                request.handoff = patch.handoff;
+            if (patch.error !== undefined)
+                request.error = patch.error;
+            if (patch.dshSessionId !== undefined)
+                request.dshSessionId = patch.dshSessionId;
+            if (patch.status === 'claimed')
+                request.claimedAt = Date.now();
+            if (patch.status === 'completed' || patch.status === 'failed')
+                request.completedAt = Date.now();
+            await writeState(state);
+            return request;
+        }),
         addAcceptanceSummary: (input) => enqueue(async () => {
             const state = await readState();
             const previous = state.acceptanceSummaries

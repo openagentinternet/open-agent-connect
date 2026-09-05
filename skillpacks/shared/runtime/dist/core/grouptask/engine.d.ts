@@ -19,6 +19,8 @@ export declare const GROUP_TASK_MSG_RETRY_KV_PREFIX = "group_task_msg_retry:";
 export declare const GROUP_TASK_DEP_WAIT_KV_PREFIX = "group_task_dep_wait:";
 export declare const GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = "group_task_planning_deferred:";
 export declare const GROUP_TASK_ROSTER_WAKE_KV_PREFIX = "group_task_roster_wake:";
+export declare const GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = "group_task_nudge_attempts:";
+export declare const GROUP_TASK_WORK_REQ_KV_PREFIX = "group_task_work_req:";
 /** Deliverable re-verification cadence (indexer lag absorption). */
 export declare const GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = "group_task_deliverable_verify:";
 export declare const GROUP_TASK_ACK_PENDING_KV_PREFIX = "group_task_ack_pending:";
@@ -86,6 +88,12 @@ export interface GroupTaskEngineOptions {
         pinId: string;
     }>;
     now?: () => number;
+    /**
+     * Phase 3 worker-session handoff (default on): local worker turns become
+     * work requests the DSH host executes as real sub-sessions. Disable to run
+     * every worker turn through the bare-LLM responder directly.
+     */
+    workerSessions?: boolean;
 }
 export interface GroupTaskEngine {
     start(): void;

@@ -7,10 +7,11 @@
  */
 import type { Signer } from '../signing/signer';
 import { type GroupTaskStore } from './store';
+import { type GroupTaskRelayStore } from './relayStore';
 import { type OpenTeamStore } from './openteamStore';
 import { type StaffingStore } from './staffingStore';
 import { type GroupTaskTransportOptions } from './transport';
-import { type CreateGroupTaskInput, type GroupTaskDetail, type GroupTaskListTab, type GroupTaskMember, type GroupTaskMemberStatus, type GroupTaskMemberSummary, type GroupTaskMemberWorkStatus, type GroupTaskMessage, type GroupTaskRecord, type GroupTaskStatusEventActor, type GroupTaskSummary } from './types';
+import { type CreateGroupTaskInput, type GroupTaskDetail, type GroupTaskListTab, type GroupTaskMember, type GroupTaskMemberStatus, type GroupTaskMemberSummary, type GroupTaskMemberWorkStatus, type GroupTaskMessage, type GroupTaskRecord, type GroupTaskRelayKind, type GroupTaskRelayRow, type GroupTaskStatusEventActor, type GroupTaskSummary, type GroupTaskSuperviseAction } from './types';
 export interface GroupTaskProfileRef {
     slug: string;
     homeDir: string;
@@ -39,6 +40,8 @@ export interface GroupTaskServiceContext {
     openteamStoreForProfile?(profile: GroupTaskProfileRef): OpenTeamStore;
     /** Staffing store seam (tests); default resolves the profile runtime root. */
     staffingStoreForProfile?(profile: GroupTaskProfileRef): StaffingStore;
+    /** Relay store seam (tests); default resolves the profile runtime root. */
+    relayStoreForProfile?(profile: GroupTaskProfileRef): GroupTaskRelayStore;
     /**
      * Send an ECDH private message (/protocols/simplemsg) from a local profile.
      * Wired by the daemon (peer chat pubkey resolver + profile signer); absent
@@ -183,6 +186,106 @@ export declare function reopenGroupTask(ctx: GroupTaskServiceContext, chairSlug:
     actor?: GroupTaskStatusEventActor;
     reason?: string;
 }): Promise<GroupTaskDetail>;
+/** Relay store for a profile (memoization unnecessary: rows are append/drain). */
+export declare function relayStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): GroupTaskRelayStore;
+/** Engine kv carrying a pending owner nudge (supervise → engine chair turn). */
+export declare const GROUP_TASK_NUDGE_REQUEST_KV_PREFIX = "group_task_nudge_request:";
+/**
+ * Record one milestone row for the origin chat. Tasks created outside the
+ * staffing flow have no source session and never emit. Best-effort: relay
+ * failures must never fail the underlying task operation.
+ */
+export declare function emitGroupTaskRelay(ctx: GroupTaskServiceContext, chair: GroupTaskProfileRef, task: GroupTaskRecord, kind: GroupTaskRelayKind, text: string): Promise<void>;
+export interface DrainedGroupTaskRelayRow extends GroupTaskRelayRow {
+    chairSlug: string;
+}
+/**
+ * Drain pending relay rows across every profile (or one chair): returns the
+ * rows and marks them drained atomically per profile. The DSH host calls this
+ * on a timer and injects the rows into their origin sessions.
+ */
+export declare function drainGroupTaskRelay(ctx: GroupTaskServiceContext, chairSlug?: string): Promise<DrainedGroupTaskRelayRow[]>;
+export interface SuperviseGroupTaskInput {
+    action: GroupTaskSuperviseAction;
+    memberSlug?: string;
+    globalMetaId?: string;
+    note?: string;
+}
+export interface SuperviseGroupTaskResult {
+    task: GroupTaskRecord;
+    action: GroupTaskSuperviseAction;
+    notice: string | null;
+    /** Set for nudge: the engine consumes this kv and runs the chair wake turn. */
+    nudgeQueued: boolean;
+}
+/**
+ * Owner-side supervision. `nudge` queues a directive-driven chair turn (the
+ * engine @-mentions the idle member); `flag` records an observation for the
+ * acceptance stage; `pause`/`resume` gate the engine's dispatcher. All actions
+ * are owner-authority, visible in-group through host supervisor notices.
+ */
+export declare function superviseGroupTask(ctx: GroupTaskServiceContext, chairSlug: string, taskId: number, input: SuperviseGroupTaskInput): Promise<SuperviseGroupTaskResult>;
+/** Lightweight task record read (manual-send gating and similar checks). */
+export declare function getGroupTaskRecord(ctx: GroupTaskServiceContext, chairSlug: string, taskId: number): Promise<GroupTaskRecord>;
+/** Owner-side ledger maintenance: drop a mis-reported deliverable row. */
+export declare function deleteGroupTaskDeliverableEntry(ctx: GroupTaskServiceContext, chairSlug: string, taskId: number, deliverableId: number): Promise<{
+    deleted: boolean;
+}>;
+export interface GroupTaskWorkClaim {
+    requestId: number;
+    chairSlug: string;
+    taskId: number;
+    groupId: string | null;
+    workerSlug: string;
+    workerName: string;
+    targetIndex: number;
+    targetPinId: string | null;
+    task: {
+        title: string;
+        goal: string;
+        acceptanceCriteria: string | null;
+        status: string;
+    };
+    roster: Array<{
+        name: string;
+        role: string;
+        remote: boolean;
+    }>;
+    recentMessages: Array<{
+        index: number;
+        sender: string;
+        content: string;
+    }>;
+    targetMessage: {
+        index: number;
+        sender: string;
+        content: string;
+    } | null;
+}
+/**
+ * Claim the oldest pending work request (optionally for one worker) across all
+ * chair profiles, assembling a FRESH turn context at claim time (the request
+ * row stores only the coordinates). Returns null when the queue is empty.
+ */
+export declare function claimGroupTaskWork(ctx: GroupTaskServiceContext, workerSlug?: string): Promise<GroupTaskWorkClaim | null>;
+export interface SubmitGroupTaskWorkInput {
+    requestId: number;
+    handoff?: string;
+    error?: string;
+    dshSessionId?: string;
+}
+export interface SubmitGroupTaskWorkResult {
+    status: 'completed' | 'failed';
+    pinId: string | null;
+    error: string | null;
+}
+/**
+ * Host-side turn completion: a non-empty handoff is posted on-chain AS the
+ * worker (reply-threaded to the target message) and the request completes;
+ * an error or empty handoff fails the request so the engine falls back to its
+ * bare-LLM turn. Posting to a task that closed mid-work fails the request.
+ */
+export declare function submitGroupTaskWork(ctx: GroupTaskServiceContext, input: SubmitGroupTaskWorkInput): Promise<SubmitGroupTaskWorkResult>;
 /** Post-kick on-chain removal re-check cadence. */
 export declare const KICK_CONFIRM_POLL_INTERVAL_MS = 2000;
 export declare const KICK_CONFIRM_MAX_ATTEMPTS = 15;

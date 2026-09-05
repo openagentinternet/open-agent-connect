@@ -13,7 +13,7 @@
  * loader, clock) are injected so tests run fully offline.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = exports.GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_HINT_KV_PREFIX = exports.GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX = exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX = exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = exports.GROUP_TASK_DEP_WAIT_KV_PREFIX = exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_PLANNED_KV_PREFIX = exports.GROUP_TASK_DRIVER_KV_PREFIX = void 0;
+exports.GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = exports.GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_HINT_KV_PREFIX = exports.GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX = exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = exports.GROUP_TASK_WORK_REQ_KV_PREFIX = exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX = exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = exports.GROUP_TASK_DEP_WAIT_KV_PREFIX = exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_PLANNED_KV_PREFIX = exports.GROUP_TASK_DRIVER_KV_PREFIX = void 0;
 exports.createGroupTaskEngine = createGroupTaskEngine;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
@@ -39,6 +39,16 @@ exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = 'group_task_msg_retry:';
 exports.GROUP_TASK_DEP_WAIT_KV_PREFIX = 'group_task_dep_wait:';
 exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = 'group_task_planning_deferred:';
 exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX = 'group_task_roster_wake:';
+exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = 'group_task_nudge_attempts:';
+exports.GROUP_TASK_WORK_REQ_KV_PREFIX = 'group_task_work_req:';
+/**
+ * Worker-session handoff (Phase 3): the engine defers a worker turn while a
+ * DSH work request is outstanding. If the host never claims (plugin off) or
+ * dies mid-turn, the TTLs expire the request and the bare-LLM fallback
+ * replies instead — a missing host can never stall a task.
+ */
+const WORK_REQUEST_PENDING_TTL_MS = 8 * 60_000;
+const WORK_REQUEST_CLAIMED_TTL_MS = 20 * 60_000;
 /** [DEPENDS_ON] holds a worker reply at most this long before proceeding. */
 const DEPENDENCY_WAIT_MAX_MS = 15 * 60_000;
 /**
@@ -276,6 +286,13 @@ function createGroupTaskEngine(options) {
             actor: { kind: 'chair', globalMetaId: message.senderGlobalMetaId, name: message.senderName },
             reason: `[STATUS:${target.toUpperCase()}]`,
         });
+        // Source-session relay: the origin chat learns when dispatch starts.
+        if (target === 'executing' && task.status === 'planning') {
+            await (0, service_1.emitGroupTaskRelay)(ctx, chairProfile, updated, 'dispatch', 'The plan is out and work is underway; members have been @-assigned.');
+        }
+        if (target === 'review') {
+            await (0, service_1.emitGroupTaskRelay)(ctx, chairProfile, updated, 'review', 'The chair entered review — the task awaits your acceptance in the Group Tasks panel.');
+        }
         if (target === 'executing' && task.status === 'review') {
             await store.kvSet(`${service_1.GROUP_TASK_REWORK_AT_KV_PREFIX}${task.id}`, String(now()));
             await (0, service_1.clearGroupTaskReviewDeliveryGuards)(store, task.id);
@@ -674,6 +691,8 @@ function createGroupTaskEngine(options) {
                 const summary = checkpointDecisionSummary(tags.checkpointTopic);
                 await postHostNotice(current, chairSlug, `[GROUP_TASK_NOTICE:checkpoint_open] Task paused — waiting for the owner: ${tags.checkpointTopic}`
                     + (summary ? ` (decision needed: ${summary})` : ''));
+                await (0, service_1.emitGroupTaskRelay)(ctx, chairProfile, current, 'checkpoint', `Paused for your decision: ${tags.checkpointTopic}${summary ? ` (decision needed: ${summary})` : ''}`
+                    + ' — reply in the group or open the Group Tasks panel.');
                 // One private owner report per checkpoint (IDBots parity).
                 if (ownerGmid && ctx.sendPrivateMessage && opened) {
                     await ctx.sendPrivateMessage({
@@ -779,12 +798,75 @@ function createGroupTaskEngine(options) {
      * message is fully handled, 'defer' when a cap/cooldown blocked a decided
      * responder (the cursor must NOT advance so the reply retries next tick).
      */
+    /**
+     * Worker-session handoff for one local-worker decision. Returns 'defer'
+     * (a request is outstanding — wait for the host), 'done' (the host already
+     * posted the reply on-chain; the cursor may advance), or 'fallback' (no
+     * request yet, expired, or failed — run the bare-LLM turn instead).
+     */
+    async function handleWorkerSessionTurn(store, task, seat, message) {
+        const kvKey = `${exports.GROUP_TASK_WORK_REQ_KV_PREFIX}${task.id}:${message.index}:${seat.slug}`;
+        const existingId = await store.kvGet(kvKey);
+        if (!existingId) {
+            const request = await store.createWorkRequest({
+                taskId: task.id,
+                groupId: task.groupId,
+                workerSlug: seat.slug,
+                targetIndex: message.index,
+                targetPinId: message.pinId ?? null,
+            });
+            await store.kvSet(kvKey, String(request.id));
+            log(`[GroupTaskEngine] Task ${task.id}: worker turn for ${seat.slug} `
+                + `(message ${message.index}) deferred to a DSH work request #${request.id}`);
+            return 'defer';
+        }
+        const request = await store.getWorkRequest(Number(existingId));
+        if (!request) {
+            await store.kvDelete(kvKey);
+            return 'fallback';
+        }
+        if (request.status === 'pending') {
+            if (now() - request.createdAt > WORK_REQUEST_PENDING_TTL_MS) {
+                await store.updateWorkRequest(request.id, { status: 'expired', error: 'claim_ttl_expired' });
+                log(`[GroupTaskEngine] Task ${task.id}: work request #${request.id} expired unclaimed; `
+                    + 'falling back to the bare-LLM turn');
+                return 'fallback';
+            }
+            return 'defer';
+        }
+        if (request.status === 'claimed') {
+            const since = request.claimedAt ?? request.createdAt;
+            if (now() - since > WORK_REQUEST_CLAIMED_TTL_MS) {
+                await store.updateWorkRequest(request.id, { status: 'expired', error: 'claimed_ttl_expired' });
+                log(`[GroupTaskEngine] Task ${task.id}: claimed work request #${request.id} timed out; `
+                    + 'falling back to the bare-LLM turn');
+                return 'fallback';
+            }
+            return 'defer';
+        }
+        if (request.status === 'completed') {
+            log(`[GroupTaskEngine] Task ${task.id}: work request #${request.id} completed by the host; `
+                + 'advancing the cursor');
+            return 'done';
+        }
+        return 'fallback'; // failed or expired
+    }
     async function runReplies(input) {
         for (const decision of input.decisions) {
             const seat = input.seats.find((entry) => entry.slug === decision.slug);
             if (!seat)
                 continue;
             const key = seatKey(input.chairSlug, input.task.id, seat.slug);
+            // Worker-session handoff (Phase 3): local worker turns are executed by
+            // the DSH host as real sub-sessions. Chair turns stay bare-LLM by design.
+            if (decision.role === 'worker' && seat.slug && options.workerSessions !== false) {
+                const handling = await handleWorkerSessionTurn(input.store, input.task, seat, input.message);
+                if (handling === 'defer')
+                    return 'defer';
+                if (handling === 'done')
+                    continue;
+                // 'fallback': proceed with the bare-LLM turn below.
+            }
             const spent = replyCounts.get(key) ?? 0;
             if (spent >= replyBudget)
                 continue; // budget exhausted: drop, never defer
@@ -943,6 +1025,36 @@ function createGroupTaskEngine(options) {
         await refreshDriverClaim(store, task.id);
         log(`[GroupTaskEngine] Roster-change wake for task ${task.id} (${joinedName})`);
     }
+    /**
+     * Owner-supervise wake (nudge / resume): ONE directive-driven chair turn.
+     * The request kv is cleared by the caller before the turn; the attempts kv
+     * caps repeated failures so a wedged LLM cannot spin.
+     */
+    async function runSupervisorWake(input) {
+        const directive = (0, prompts_1.buildSupervisorWakeDirective)({
+            task: input.task,
+            kind: input.kind,
+            memberName: input.memberName,
+            memberNote: input.memberNote,
+            recentMessages: input.recentMessages,
+            nowMs: now(),
+        });
+        const reply = (await runSeatTurn({
+            seat: input.chair,
+            task: input.task,
+            promptSeats: input.promptSeats,
+            chairName: input.chairName,
+            ownerGmid: input.ownerGmid,
+            recentMessages: input.recentMessages,
+            target: null,
+            promptOverride: directive,
+        })).trim();
+        if (!reply || (0, tags_1.isNoReplyResponse)(reply))
+            return;
+        await (0, service_1.postGroupTaskMessage)(ctx, input.chairSlug, input.task.id, { content: reply });
+        await refreshDriverClaim(input.store, input.task.id);
+        log(`[GroupTaskEngine] Supervisor ${input.kind} wake for task ${input.task.id}`);
+    }
     // -------------------------------------------------------------------------
     // Per-task drive
     // -------------------------------------------------------------------------
@@ -968,7 +1080,7 @@ function createGroupTaskEngine(options) {
         const chairName = chair?.name ?? profile.name;
         const page = await store.listMessages(task.groupId, { limit: MESSAGE_FETCH_LIMIT });
         let current = task;
-        if (current.status === 'planning' && chair) {
+        if (current.status === 'planning' && chair && current.dispatchPausedAt == null) {
             const settle = await rosterSettledForPlanning(profile, current);
             if (!settle.settled) {
                 // Log the deferral once per task, not once per tick.
@@ -994,6 +1106,39 @@ function createGroupTaskEngine(options) {
                     log(`[GroupTaskEngine] Planning turn failed for task ${current.id}: `
                         + `${error instanceof Error ? error.message : String(error)}`);
                 }
+            }
+        }
+        // Supervisor wake (owner nudge / resume): the service queues a request kv;
+        // the engine turns it into ONE directive-driven chair turn (attempt-capped).
+        const nudgeRaw = await store.kvGet(`${service_1.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${current.id}`);
+        if (nudgeRaw && chair) {
+            await store.kvDelete(`${service_1.GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${current.id}`);
+            try {
+                const request = JSON.parse(nudgeRaw);
+                const attempts = (Number((await store.kvGet(`${exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX}${current.id}`)) ?? '0') || 0) + 1;
+                await store.kvSet(`${exports.GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX}${current.id}`, String(attempts));
+                if (attempts <= 3) {
+                    await runSupervisorWake({
+                        store,
+                        task: current,
+                        chair,
+                        chairSlug: profile.slug,
+                        promptSeats,
+                        chairName,
+                        ownerGmid,
+                        recentMessages: page.messages,
+                        kind: request.kind === 'resume' ? 'resume' : 'nudge',
+                        memberName: request.name ?? null,
+                        memberNote: request.note ?? null,
+                    });
+                }
+                else {
+                    log(`[GroupTaskEngine] Supervisor wake for task ${current.id} dropped after ${attempts - 1} attempts`);
+                }
+            }
+            catch (error) {
+                log(`[GroupTaskEngine] Supervisor wake failed for task ${current.id}: `
+                    + `${error instanceof Error ? error.message : String(error)}`);
             }
         }
         const pending = page.messages.filter((message) => message.index > current.lastProcessedIndex);
@@ -1034,6 +1179,7 @@ function createGroupTaskEngine(options) {
                     message,
                     taskStatus: current.status,
                     hasOpenCheckpoint: await hasOpenCheckpoint(store, current.id),
+                    dispatchPaused: current.dispatchPausedAt != null,
                     seats,
                     ownerGlobalMetaId: ownerGmid,
                 });

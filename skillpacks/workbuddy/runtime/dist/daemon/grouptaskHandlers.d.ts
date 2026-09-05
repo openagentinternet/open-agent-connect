@@ -16,6 +16,11 @@ export interface GroupTaskDaemonHandlers {
     detail: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     messages: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     postMessage: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    supervise: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    deleteDeliverable: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    relayDrain: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    workClaim: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+    workSubmit: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     close: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     reopen: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
     kickMember: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;

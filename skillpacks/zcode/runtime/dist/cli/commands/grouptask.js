@@ -130,9 +130,92 @@ async function runGroupTaskCommand(args, context) {
             content,
             asSlug: asSlug || undefined,
             asOwner: asOwner || undefined,
+            confirmChair: (0, helpers_1.hasFlag)(args, '--confirm-chair') || undefined,
             replyPin: normalizeText((0, helpers_1.readFlagValue)(args, '--reply-pin')) || undefined,
             mention: readCsvFlag(args, '--mention'),
         });
+    }
+    if (action === 'supervise') {
+        const handler = requireHandler(context, 'supervise');
+        if (!handler)
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Group task supervise handler is not configured.');
+        const ref = readTaskRefFlags(args);
+        if (isFailure(ref))
+            return ref;
+        const superviseAction = normalizeText((0, helpers_1.readFlagValue)(args, '--action'));
+        if (!['nudge', 'flag', 'pause', 'resume'].includes(superviseAction)) {
+            return (0, commandResult_1.commandFailed)('invalid_flag', "--action must be one of: nudge, flag, pause, resume.");
+        }
+        const member = normalizeText((0, helpers_1.readFlagValue)(args, '--member'));
+        const globalMetaId = normalizeText((0, helpers_1.readFlagValue)(args, '--global-metaid'));
+        if (member && globalMetaId) {
+            return (0, commandResult_1.commandFailed)('invalid_flag', '--member and --global-metaid are mutually exclusive.');
+        }
+        return handler({
+            ...ref,
+            action: superviseAction,
+            memberSlug: member || undefined,
+            globalMetaId: globalMetaId || undefined,
+            note: normalizeText((0, helpers_1.readFlagValue)(args, '--note')) || undefined,
+        });
+    }
+    if (action === 'deliverable-delete') {
+        const handler = requireHandler(context, 'deleteDeliverable');
+        if (!handler)
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Group task deliverable-delete handler is not configured.');
+        const ref = readTaskRefFlags(args);
+        if (isFailure(ref))
+            return ref;
+        const deliverableId = readIntFlag(args, '--deliverable');
+        if (deliverableId === 'invalid' || typeof deliverableId !== 'number' || deliverableId <= 0) {
+            return (0, commandResult_1.commandFailed)('invalid_flag', '--deliverable must be a positive integer deliverable id.');
+        }
+        return handler({ ...ref, deliverableId });
+    }
+    if (action === 'relay') {
+        const handler = requireHandler(context, 'relayDrain');
+        if (!handler)
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Group task relay handler is not configured.');
+        const sub = normalizeText(args[1]);
+        if (sub !== 'drain') {
+            return (0, helpers_1.commandUnknownSubcommand)(`grouptask relay ${args.slice(1).join(' ')}`.trim());
+        }
+        return handler({ chairSlug: normalizeText((0, helpers_1.readFlagValue)(args, '--chair')) || undefined });
+    }
+    if (action === 'work') {
+        const sub = normalizeText(args[1]);
+        if (sub === 'claim') {
+            const handler = requireHandler(context, 'workClaim');
+            if (!handler)
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Group task work-claim handler is not configured.');
+            return handler({ workerSlug: normalizeText((0, helpers_1.readFlagValue)(args, '--worker')) || undefined });
+        }
+        if (sub === 'submit') {
+            const handler = requireHandler(context, 'workSubmit');
+            if (!handler)
+                return (0, commandResult_1.commandFailed)('not_implemented', 'Group task work-submit handler is not configured.');
+            const payloadFile = (0, helpers_1.readFlagValue)(args, '--payload-file');
+            if (!payloadFile)
+                return (0, helpers_1.commandMissingFlag)('--payload-file');
+            let payload;
+            try {
+                payload = await (0, helpers_1.readJsonFile)(context, payloadFile);
+            }
+            catch (error) {
+                return (0, commandResult_1.commandFailed)('invalid_payload', error instanceof Error ? error.message : String(error));
+            }
+            const requestId = Number(payload.requestId);
+            if (!Number.isInteger(requestId) || requestId <= 0) {
+                return (0, commandResult_1.commandFailed)('invalid_payload', 'payload.requestId must be a positive integer.');
+            }
+            return handler({
+                requestId,
+                handoff: typeof payload.handoff === 'string' ? payload.handoff : undefined,
+                error: typeof payload.error === 'string' ? payload.error : undefined,
+                dshSessionId: typeof payload.dshSessionId === 'string' ? payload.dshSessionId : undefined,
+            });
+        }
+        return (0, helpers_1.commandUnknownSubcommand)(`grouptask work ${args.slice(1).join(' ')}`.trim());
     }
     if (action === 'close') {
         const handler = requireHandler(context, 'close');

@@ -11,7 +11,7 @@
  * queue; the daemon is the only writer (CLI verbs delegate over HTTP).
  */
 import type { MetabotPaths } from '../state/paths';
-import { type GroupTaskAcceptanceSummary, type GroupTaskCheckpoint, type GroupTaskCheckpointStatus, type GroupTaskDeliverable, type GroupTaskDeliverableStatus, type GroupTaskIntegrityEvent, type GroupTaskIntegrityEventType, type GroupTaskMember, type GroupTaskMemberRole, type GroupTaskMemberStatus, type GroupTaskMessage, type GroupTaskPlanChange, type GroupTaskRecord, type GroupTaskStatus, type GroupTaskStatusEvent, type GroupTaskStatusEventActor, type GroupTaskTransition } from './types';
+import { type GroupTaskAcceptanceSummary, type GroupTaskCheckpoint, type GroupTaskCheckpointStatus, type GroupTaskDeliverable, type GroupTaskDeliverableStatus, type GroupTaskIntegrityEvent, type GroupTaskIntegrityEventType, type GroupTaskMember, type GroupTaskMemberRole, type GroupTaskMemberStatus, type GroupTaskMessage, type GroupTaskPlanChange, type GroupTaskRecord, type GroupTaskStatus, type GroupTaskStatusEvent, type GroupTaskStatusEventActor, type GroupTaskSuperviseAction, type GroupTaskSupervisorSignal, type GroupTaskTransition, type GroupTaskWorkRequest, type GroupTaskWorkRequestStatus } from './types';
 export interface GroupTaskStateFile {
     seq: number;
     tasks: GroupTaskRecord[];
@@ -22,6 +22,8 @@ export interface GroupTaskStateFile {
     checkpoints: GroupTaskCheckpoint[];
     integrityEvents: GroupTaskIntegrityEvent[];
     planChanges: GroupTaskPlanChange[];
+    supervisorSignals: GroupTaskSupervisorSignal[];
+    workRequests: GroupTaskWorkRequest[];
     acceptanceSummaries: GroupTaskAcceptanceSummary[];
     kv: Record<string, string>;
 }
@@ -34,6 +36,7 @@ export interface CreateGroupTaskRecordInput {
     chairGlobalMetaId?: string | null;
     createdBy: string;
     createPinId?: string | null;
+    sourceSessionId?: string | null;
 }
 export interface AddGroupTaskMemberInput {
     taskId: number;
@@ -88,6 +91,8 @@ export interface GroupTaskStore {
     setTaskPinned(taskId: number, pinned: boolean): Promise<GroupTaskRecord>;
     archiveTask(taskId: number): Promise<GroupTaskRecord>;
     unarchiveTask(taskId: number): Promise<GroupTaskRecord>;
+    /** Owner dispatch pause: pass epoch ms to pause, null to resume. */
+    setTaskDispatchPaused(taskId: number, pausedAt: number | null): Promise<GroupTaskRecord>;
     addMember(input: AddGroupTaskMemberInput): Promise<GroupTaskMember>;
     listMembers(taskId: number, opts?: {
         includeRemoved?: boolean;
@@ -136,6 +141,32 @@ export interface GroupTaskStore {
         summary: string;
     }): Promise<GroupTaskPlanChange>;
     listPlanChanges(taskId: number): Promise<GroupTaskPlanChange[]>;
+    addSupervisorSignal(input: {
+        taskId: number;
+        signalType: GroupTaskSuperviseAction;
+        memberGlobalMetaId?: string | null;
+        memberName?: string | null;
+        note?: string | null;
+    }): Promise<GroupTaskSupervisorSignal>;
+    listSupervisorSignals(taskId: number): Promise<GroupTaskSupervisorSignal[]>;
+    createWorkRequest(input: {
+        taskId: number;
+        groupId: string | null;
+        workerSlug: string;
+        targetIndex: number;
+        targetPinId: string | null;
+    }): Promise<GroupTaskWorkRequest>;
+    listWorkRequests(filter?: {
+        status?: GroupTaskWorkRequestStatus;
+        workerSlug?: string;
+    }): Promise<GroupTaskWorkRequest[]>;
+    getWorkRequest(workRequestId: number): Promise<GroupTaskWorkRequest | null>;
+    updateWorkRequest(workRequestId: number, patch: {
+        status?: GroupTaskWorkRequestStatus;
+        handoff?: string | null;
+        error?: string | null;
+        dshSessionId?: string | null;
+    }): Promise<GroupTaskWorkRequest | null>;
     addAcceptanceSummary(input: Omit<GroupTaskAcceptanceSummary, 'id' | 'version' | 'generatedAt'> & {
         generatedAt?: number;
     }): Promise<GroupTaskAcceptanceSummary>;

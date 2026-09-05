@@ -72,3 +72,16 @@ export interface BuildRosterChangeDirectiveInput {
  * The chair must reconcile the plan with the current roster in one message.
  */
 export declare function buildRosterChangeDirective(input: BuildRosterChangeDirectiveInput): string;
+export interface BuildSupervisorWakeDirectiveInput {
+    task: Pick<GroupTaskRecord, 'id' | 'title'>;
+    kind: 'nudge' | 'resume';
+    memberName: string | null;
+    memberNote: string | null;
+    recentMessages: GroupTaskMessage[];
+    nowMs?: number;
+}
+/**
+ * One-shot chair instruction after an owner supervise action: nudge a silent
+ * member for an ACK/status, or re-engage the roster after a dispatch pause.
+ */
+export declare function buildSupervisorWakeDirective(input: BuildSupervisorWakeDirectiveInput): string;

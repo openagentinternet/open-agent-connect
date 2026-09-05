@@ -113,6 +113,7 @@ async function createGroupTaskFromProposal(ctx, input) {
             workerSlugs: (0, staffing_1.localSeatSlugs)(plan),
             chairSlug: gate.proposal.chairSlug,
             createdBy: 'twinbot',
+            sourceSessionId: gate.proposal.sourceSessionId,
         });
         await store.markProposalCreated(input.proposalId, created.task.id);
         return {

@@ -49,7 +49,7 @@ export interface KbIndexStore {
     load(): Promise<IndexFile | null>;
     rebuild(rawDir: string, now: () => number, options?: {
         full?: boolean;
-    }): Promise<{
+    }): Promise<KbLearnStats & {
         docCount: number;
         chunkCount: number;
     }>;
@@ -58,6 +58,15 @@ export interface KbIndexStore {
         minScore?: number;
     }): Promise<KbQueryHit[]>;
     clear(): Promise<void>;
+}
+/** What one learn pass did relative to the previous index (IDBots parity). */
+export interface KbLearnStats {
+    /** Documents that were not in the previous index. */
+    added: number;
+    /** Documents whose raw bytes changed since the previous index. */
+    updated: number;
+    /** Documents that vanished from the raw dir. */
+    removed: number;
 }
 export declare const KB_QUERY_DEFAULT_TOP_K = 8;
 export declare const KB_QUERY_DEFAULT_MIN_SCORE = 0.18;

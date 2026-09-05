@@ -251,12 +251,71 @@ function createGroupTaskDaemonHandlers(input) {
             const ref = readTaskRef(body);
             if (isFailure(ref))
                 return ref;
+            // Chair-identity gate (IDBots CHAIR_IDENTITY_CONFIRM_REQUIRED parity):
+            // while the engine drives a non-terminal task, the chair's voice belongs
+            // to the engine. A manual post AS the chair must opt in explicitly.
+            const asSlug = normalizeText(body.asSlug) || undefined;
+            if (asSlug && readBool(body.confirmChair) !== true) {
+                try {
+                    const task = await (0, service_1.getGroupTaskRecord)(ctx, ref.chair, ref.taskId);
+                    if (asSlug === task.chairSlug && task.dispatchPausedAt == null
+                        && task.status !== 'done' && task.status !== 'cancelled') {
+                        return (0, commandResult_1.commandFailed)('CHAIR_IDENTITY_CONFIRM_REQUIRED', `Manual chair sends conflict with the engine while task ${ref.taskId} is ${task.status}. `
+                            + 'Post as the owner or a worker, or pass confirm_chair to override.');
+                    }
+                }
+                catch {
+                    // Task lookup failed: fall through to the normal send path error.
+                }
+            }
             return run(() => (0, service_1.postGroupTaskMessage)(ctx, ref.chair, ref.taskId, {
-                asSlug: normalizeText(body.asSlug) || undefined,
+                asSlug,
                 asOwner: readBool(body.asOwner) ?? false,
                 content: normalizeText(body.content),
                 replyPin: normalizeText(body.replyPin) || undefined,
                 mention: readStringArray(body.mention),
+            }));
+        },
+        supervise: async (body) => {
+            const ref = readTaskRef(body);
+            if (isFailure(ref))
+                return ref;
+            const action = normalizeText(body.action);
+            return run(() => (0, service_1.superviseGroupTask)(ctx, ref.chair, ref.taskId, {
+                action: action,
+                memberSlug: normalizeText(body.memberSlug) || normalizeText(body.slug) || undefined,
+                globalMetaId: normalizeText(body.globalMetaId) || undefined,
+                note: normalizeText(body.note) || undefined,
+            }));
+        },
+        deleteDeliverable: async (body) => {
+            const ref = readTaskRef(body);
+            if (isFailure(ref))
+                return ref;
+            const deliverableId = readInt(body.deliverableId);
+            if (deliverableId == null || deliverableId <= 0) {
+                return (0, commandResult_1.commandFailed)('missing_deliverable', 'deliverableId must be a positive integer');
+            }
+            return run(() => (0, service_1.deleteGroupTaskDeliverableEntry)(ctx, ref.chair, ref.taskId, deliverableId));
+        },
+        relayDrain: async (body) => {
+            const chair = normalizeText(body.chair) || normalizeText(body.chairSlug) || undefined;
+            return run(async () => ({ relayed: await (0, service_1.drainGroupTaskRelay)(ctx, chair) }));
+        },
+        workClaim: async (body) => {
+            const workerSlug = normalizeText(body.workerSlug) || normalizeText(body.worker) || undefined;
+            return run(async () => ({ request: await (0, service_1.claimGroupTaskWork)(ctx, workerSlug) }));
+        },
+        workSubmit: async (body) => {
+            const requestId = readInt(body.requestId);
+            if (requestId == null || requestId <= 0) {
+                return (0, commandResult_1.commandFailed)('missing_request', 'requestId must be a positive integer');
+            }
+            return run(() => (0, service_1.submitGroupTaskWork)(ctx, {
+                requestId,
+                handoff: normalizeText(body.handoff) || undefined,
+                error: normalizeText(body.error) || undefined,
+                dshSessionId: normalizeText(body.dshSessionId) || undefined,
             }));
         },
         close: async (body) => {

@@ -77,6 +77,9 @@ async function runKnowledgeBaseCommand(args, context) {
             ...((0, helpers_1.readFlagValue)(args, '--description')?.trim()
                 ? { description: (0, helpers_1.readFlagValue)(args, '--description').trim() }
                 : {}),
+            ...((0, helpers_1.readFlagValue)(args, '--raw-dir')?.trim()
+                ? { rawDir: (0, helpers_1.readFlagValue)(args, '--raw-dir').trim() }
+                : {}),
             ...(autoLearn !== undefined ? { autoLearn } : {}),
         });
     }

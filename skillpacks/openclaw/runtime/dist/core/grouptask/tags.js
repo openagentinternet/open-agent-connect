@@ -235,7 +235,11 @@ function decideGroupTaskResponders(input) {
     const senderGmid = normalizeId(input.message.senderGlobalMetaId);
     const ownerGmid = normalizeId(input.ownerGlobalMetaId);
     const fromOwner = Boolean(ownerGmid) && senderGmid === ownerGmid;
-    const humanGate = input.taskStatus === 'review' || input.hasOpenCheckpoint;
+    // Human gate: owner dispatch pause behaves like review/checkpoint —
+    // workers never speak, only owner messages reach the chair.
+    const humanGate = input.taskStatus === 'review'
+        || input.hasOpenCheckpoint === true
+        || input.dispatchPaused === true;
     const decisions = [];
     const chair = input.seats.find((seat) => seat.role === 'chair') ?? null;
     const chairIsSender = chair !== null && normalizeId(chair.globalMetaId) === senderGmid;
