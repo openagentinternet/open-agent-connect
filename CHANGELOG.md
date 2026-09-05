@@ -84,11 +84,47 @@ tags for releases.
   shows daemon-enriched names/avatars with live updates and wider selects,
   relative timestamps and status badges match IDBots, clicking an avatar opens
   the Bot page, and select dropdown text no longer clips.
+- Completed DSH group-task chat parity phases 1-3: serve-the-dish deliverable
+  bar and owner-only group-task composer with IME-safe send, owner supervision
+  with source-session relay and a chair-send gate, roster-settle gate, join
+  wake, and protocol-position status tags, and worker turns that run as real
+  DSH sub-sessions (with a TTL fallback). A2A unread badges now cover DSH, and
+  DSH gains a twin-only `group_task` chat tool plus the `oac:group-task` SOP.
+- Completed the IDBots knowledge-base surface: incremental learn with format
+  converters and study tools, a bot-editor Knowledge tab in the IDBots
+  KnowledgeBasePanel card layout (source directory, open dir, learn summary,
+  verbatim copy), `kb` host routes with browse-dir/open-dir, and
+  `metabot knowledge-base create --raw-dir` for ingesting a source directory;
+  the default knowledge base is ensured like IDBots (prompt block + KB list
+  route).
+- Ported IDBots scheduled tasks and memory hygiene to the OAC CLI/daemon with
+  DSH host claiming, and the IDBots account-quota gas credit (traffic) to OAC
+  core and the DSH plugin.
+- Added per-bot chain content history (rounds 1-6): chain writes and reads are
+  recorded with KB cross-marking, an async chain-content summary service feeds
+  chain history into dream input, and `metabot chain_history_recall` exposes
+  recall as a tool and CLI verb.
+- DSH skills now render MetaWeb `metaid://` targets as clickable links, the
+  Bot Browser follows the DSH theme, and a `search_online_bots` native tool
+  keeps online-bot names clickable via the publish catalog.
+- Added `metabot daemon restart` as a single subcommand.
+- Integrated Agent Browser Core 0.5.5 across OAC and all skillpack runtimes
+  (upstream: MetaApp identity grants are remembered to skip repeated consent
+  prompts, and external requests reuse an open tab for their uri).
 
 ### Fixed
 
 - Group tasks: owner identity resolution + group-task panel default tab
   parity with IDBots.
+- Group-task pollers probe daemon liveness before CLI calls, so a DSH web
+  restart window no longer triggers daemon auto-start storms that hang every
+  panel call.
+- ORCH-NOTIFY no longer leaks into unrelated sessions, and local-read actor
+  resolution checks the right match status.
+- DSH plugin: dream LLM idle timeout, dream crash recovery + transcript
+  mirror for DSH 0.1.2-alpha.4, contact names in the Contacts tab, avatar
+  upload/replace/remove in the Bot editor Basic tab, and the `unrun`
+  devDependency required by the tsdown config.
 
 ### Security
 
