@@ -38,6 +38,8 @@ import {
   type GroupTaskSuperviseAction,
   type GroupTaskSupervisorSignal,
   type GroupTaskTransition,
+  type GroupTaskWorkRequest,
+  type GroupTaskWorkRequestStatus,
 } from './types';
 
 export interface GroupTaskStateFile {
@@ -51,6 +53,7 @@ export interface GroupTaskStateFile {
   integrityEvents: GroupTaskIntegrityEvent[];
   planChanges: GroupTaskPlanChange[];
   supervisorSignals: GroupTaskSupervisorSignal[];
+  workRequests: GroupTaskWorkRequest[];
   acceptanceSummaries: GroupTaskAcceptanceSummary[];
   kv: Record<string, string>;
 }
@@ -114,6 +117,7 @@ function emptyState(): GroupTaskStateFile {
     integrityEvents: [],
     planChanges: [],
     supervisorSignals: [],
+    workRequests: [],
     acceptanceSummaries: [],
     kv: {},
   };
@@ -252,6 +256,24 @@ export interface GroupTaskStore {
   }): Promise<GroupTaskSupervisorSignal>;
   listSupervisorSignals(taskId: number): Promise<GroupTaskSupervisorSignal[]>;
 
+  // Worker work requests (Phase 3: DSH sub-session turns)
+  createWorkRequest(input: {
+    taskId: number;
+    groupId: string | null;
+    workerSlug: string;
+    targetIndex: number;
+    targetPinId: string | null;
+  }): Promise<GroupTaskWorkRequest>;
+  listWorkRequests(filter?: { status?: GroupTaskWorkRequestStatus; workerSlug?: string }):
+    Promise<GroupTaskWorkRequest[]>;
+  getWorkRequest(workRequestId: number): Promise<GroupTaskWorkRequest | null>;
+  updateWorkRequest(workRequestId: number, patch: {
+    status?: GroupTaskWorkRequestStatus;
+    handoff?: string | null;
+    error?: string | null;
+    dshSessionId?: string | null;
+  }): Promise<GroupTaskWorkRequest | null>;
+
   // Acceptance summaries
   addAcceptanceSummary(input: Omit<GroupTaskAcceptanceSummary, 'id' | 'version' | 'generatedAt'> & {
     generatedAt?: number;
@@ -315,6 +337,7 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
       supervisorSignals: Array.isArray(parsed.supervisorSignals)
         ? parsed.supervisorSignals
         : base.supervisorSignals,
+      workRequests: Array.isArray(parsed.workRequests) ? parsed.workRequests : base.workRequests,
       acceptanceSummaries: Array.isArray(parsed.acceptanceSummaries)
         ? parsed.acceptanceSummaries
         : base.acceptanceSummaries,
@@ -890,6 +913,59 @@ export function createGroupTaskStore(paths: MetabotPaths): GroupTaskStore {
         .filter((entry) => entry.taskId === taskId)
         .sort((left, right) => left.createdAt - right.createdAt);
     },
+
+    createWorkRequest: (input) => enqueue(async () => {
+      const state = await readState();
+      requireTask(state, input.taskId);
+      const request: GroupTaskWorkRequest = {
+        id: nextId(state),
+        taskId: input.taskId,
+        groupId: input.groupId,
+        workerSlug: input.workerSlug,
+        targetIndex: input.targetIndex,
+        targetPinId: input.targetPinId,
+        status: 'pending',
+        createdAt: Date.now(),
+        claimedAt: null,
+        completedAt: null,
+        handoff: null,
+        error: null,
+        dshSessionId: null,
+      };
+      state.workRequests.push(request);
+      await writeState(state);
+      return request;
+    }),
+
+    listWorkRequests: async (filter) => {
+      const state = await readState();
+      return state.workRequests
+        .filter((entry) => {
+          if (filter?.status && entry.status !== filter.status) return false;
+          if (filter?.workerSlug && entry.workerSlug !== filter.workerSlug) return false;
+          return true;
+        })
+        .sort((left, right) => left.createdAt - right.createdAt);
+    },
+
+    getWorkRequest: async (workRequestId) => {
+      const state = await readState();
+      return state.workRequests.find((entry) => entry.id === workRequestId) ?? null;
+    },
+
+    updateWorkRequest: (workRequestId, patch) => enqueue(async () => {
+      const state = await readState();
+      const request = state.workRequests.find((entry) => entry.id === workRequestId);
+      if (!request) return null;
+      if (patch.status) request.status = patch.status;
+      if (patch.handoff !== undefined) request.handoff = patch.handoff;
+      if (patch.error !== undefined) request.error = patch.error;
+      if (patch.dshSessionId !== undefined) request.dshSessionId = patch.dshSessionId;
+      if (patch.status === 'claimed') request.claimedAt = Date.now();
+      if (patch.status === 'completed' || patch.status === 'failed') request.completedAt = Date.now();
+      await writeState(state);
+      return request;
+    }),
 
     addAcceptanceSummary: (input) => enqueue(async () => {
       const state = await readState();

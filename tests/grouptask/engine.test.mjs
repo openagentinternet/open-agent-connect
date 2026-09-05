@@ -121,6 +121,9 @@ function createHarness(prefix, options = {}) {
     loadPersona: async () => ({}),
     workerCooldownMs: 0,
     chairCooldownMs: 0,
+    // Existing tests exercise the bare-LLM responder (the fallback path);
+    // Phase 3 work-request tests opt in explicitly.
+    workerSessions: options.workerSessions === true,
     ...(options.engineNow ? { now: options.engineNow } : {}),
   });
 
@@ -622,4 +625,84 @@ test('engine: dispatch and review milestones emit relay rows for the source sess
   await h.engine.tick();
   pending = await relayStore.listPending();
   assert.equal(pending.filter((row) => row.taskId === plain.id).length, 0, 'no rows without a source session');
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3: worker work requests (DSH sub-session handoff)
+// ---------------------------------------------------------------------------
+
+test('engine: a worker turn becomes a work request and defers until the host completes it', async () => {
+  const h = createHarness('metabot-gt-engine-work-', { workerSessions: true });
+  const task = await h.seedTask('executing');
+  h.pushHistory('IDTWIN', '@worker 1 please draft the copy', { mention: ['IDWORKER1'] });
+
+  await h.engine.tick();
+  let requests = await h.chairStore.listWorkRequests({ status: 'pending' });
+  assert.equal(requests.length, 1, 'one work request created');
+  assert.equal(requests[0].workerSlug, 'worker-1');
+  assert.equal(requests[0].targetIndex, 0);
+  assert.equal(h.pins.length, 0, 'engine did not reply on its own');
+  assert.equal((await h.chairStore.getTaskById(task.id)).lastProcessedIndex, -1, 'cursor deferred');
+
+  // The host claims it: still deferred, no duplicate request.
+  await h.chairStore.updateWorkRequest(requests[0].id, { status: 'claimed' });
+  await h.engine.tick();
+  requests = await h.chairStore.listWorkRequests({ status: 'pending' });
+  assert.equal(requests.length, 0);
+  assert.equal(h.chairStore.listWorkRequests.length > 0, true);
+  const all = await h.chairStore.listWorkRequests();
+  assert.equal(all.length, 1, 'no duplicate request while claimed');
+  assert.equal(h.llmCalls.length, 0, 'no bare-LLM turn while the session owns the work');
+  assert.equal((await h.chairStore.getTaskById(task.id)).lastProcessedIndex, -1);
+
+  // The host submits: its on-chain reply round-trips; the cursor advances
+  // past the target without a second engine reply.
+  await h.chairStore.updateWorkRequest(requests[0] ? all[0].id : all[0].id, { status: 'completed', handoff: '[WORKING] copy drafted' });
+  h.pushHistory('IDWORKER1', '[WORKING] copy drafted, delivering next');
+  // The worker's round-tripped message may pull a chair floor-control turn.
+  h.llmTurns.push('[NO_REPLY]');
+  await h.engine.tick();
+  const workerTurns = h.llmCalls.filter((call) => call.role === 'worker');
+  assert.equal(workerTurns.length, 0, 'no engine worker reply for a host-completed turn');
+  assert.equal(h.llmCalls.at(-1).role, 'chair', 'only the chair floor-control turn ran');
+  assert.equal((await h.chairStore.getTaskById(task.id)).lastProcessedIndex, 1, 'cursor advanced past the target');
+  const members = await h.chairStore.listMembers(task.id);
+  assert.equal(members.find((member) => member.slug === 'worker-1').status, 'working', 'host reply processed');
+});
+
+test('engine: an unclaimed work request expires (TTL) and the bare-LLM fallback replies', async () => {
+  const h = createHarness('metabot-gt-engine-work-ttl-', {
+    engineNow: () => Date.now() + 9 * 60_000,
+    workerSessions: true,
+  });
+  const task = await h.seedTask('executing');
+  h.pushHistory('IDTWIN', '@worker 1 please draft the copy', { mention: ['IDWORKER1'] });
+
+  // First tick creates the request whose createdAt is already past the TTL.
+  await h.engine.tick();
+  const requests = await h.chairStore.listWorkRequests();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].status, 'pending');
+
+  // Second tick expires it and falls back to the bare-LLM turn.
+  h.llmTurns.push('@worker 1 on it\n[WORKING] drafting');
+  await h.engine.tick();
+  const expired = await h.chairStore.listWorkRequests();
+  assert.equal(expired[0].status, 'expired');
+  assert.equal(h.pins.filter((pin) => pin.label === 'worker-1').length, 1, 'fallback reply posted');
+  assert.equal((await h.chairStore.getTaskById(task.id)).lastProcessedIndex, 0, 'cursor advanced');
+});
+
+test('engine: a failed work request falls back to the bare-LLM turn', async () => {
+  const h = createHarness('metabot-gt-engine-work-fail-', { workerSessions: true });
+  const task = await h.seedTask('executing');
+  h.pushHistory('IDTWIN', '@worker 1 please draft the copy', { mention: ['IDWORKER1'] });
+  await h.engine.tick();
+  const request = (await h.chairStore.listWorkRequests())[0];
+  await h.chairStore.updateWorkRequest(request.id, { status: 'failed', error: 'WORKER_EMPTY_HANDOFF: no handoff text' });
+
+  h.llmTurns.push('[WORKING] taking over the draft');
+  await h.engine.tick();
+  assert.equal(h.pins.filter((pin) => pin.label === 'worker-1').length, 1, 'fallback reply posted');
+  assert.equal((await h.chairStore.getTaskById(task.id)).lastProcessedIndex, 0);
 });

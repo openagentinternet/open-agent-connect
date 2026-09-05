@@ -16,6 +16,7 @@ import {
   closeGroupTask,
   createGroupTask,
   deleteGroupTaskDeliverableEntry,
+  claimGroupTaskWork,
   drainGroupTaskRelay,
   getGroupTaskDetail,
   getGroupTaskRecord,
@@ -27,6 +28,7 @@ import {
   reopenGroupTask,
   setGroupTaskMemberStatus,
   setGroupTaskPinned,
+  submitGroupTaskWork,
   superviseGroupTask,
   unarchiveGroupTask,
   GroupTaskServiceError,
@@ -79,6 +81,8 @@ export interface GroupTaskDaemonHandlers {
   supervise: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   deleteDeliverable: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   relayDrain: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  workClaim: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  workSubmit: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   close: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   reopen: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   kickMember: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
@@ -413,6 +417,24 @@ export function createGroupTaskDaemonHandlers(
     relayDrain: async (body) => {
       const chair = normalizeText(body.chair) || normalizeText(body.chairSlug) || undefined;
       return run(async () => ({ relayed: await drainGroupTaskRelay(ctx, chair) }));
+    },
+
+    workClaim: async (body) => {
+      const workerSlug = normalizeText(body.workerSlug) || normalizeText(body.worker) || undefined;
+      return run(async () => ({ request: await claimGroupTaskWork(ctx, workerSlug) }));
+    },
+
+    workSubmit: async (body) => {
+      const requestId = readInt(body.requestId);
+      if (requestId == null || requestId <= 0) {
+        return commandFailed('missing_request', 'requestId must be a positive integer');
+      }
+      return run(() => submitGroupTaskWork(ctx, {
+        requestId,
+        handoff: normalizeText(body.handoff) || undefined,
+        error: normalizeText(body.error) || undefined,
+        dshSessionId: normalizeText(body.dshSessionId) || undefined,
+      }));
     },
 
     close: async (body) => {

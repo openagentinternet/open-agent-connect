@@ -83,6 +83,15 @@ export const GROUP_TASK_DEP_WAIT_KV_PREFIX = 'group_task_dep_wait:';
 export const GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = 'group_task_planning_deferred:';
 export const GROUP_TASK_ROSTER_WAKE_KV_PREFIX = 'group_task_roster_wake:';
 export const GROUP_TASK_NUDGE_ATTEMPTS_KV_PREFIX = 'group_task_nudge_attempts:';
+export const GROUP_TASK_WORK_REQ_KV_PREFIX = 'group_task_work_req:';
+/**
+ * Worker-session handoff (Phase 3): the engine defers a worker turn while a
+ * DSH work request is outstanding. If the host never claims (plugin off) or
+ * dies mid-turn, the TTLs expire the request and the bare-LLM fallback
+ * replies instead — a missing host can never stall a task.
+ */
+const WORK_REQUEST_PENDING_TTL_MS = 8 * 60_000;
+const WORK_REQUEST_CLAIMED_TTL_MS = 20 * 60_000;
 /** [DEPENDS_ON] holds a worker reply at most this long before proceeding. */
 const DEPENDENCY_WAIT_MAX_MS = 15 * 60_000;
 /**
@@ -198,6 +207,12 @@ export interface GroupTaskEngineOptions {
     filePath: string;
   }) => Promise<{ metafileUri: string; pinId: string }>;
   now?: () => number;
+  /**
+   * Phase 3 worker-session handoff (default on): local worker turns become
+   * work requests the DSH host executes as real sub-sessions. Disable to run
+   * every worker turn through the bare-LLM responder directly.
+   */
+  workerSessions?: boolean;
 }
 
 export interface GroupTaskEngine {
@@ -1005,6 +1020,65 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
    * message is fully handled, 'defer' when a cap/cooldown blocked a decided
    * responder (the cursor must NOT advance so the reply retries next tick).
    */
+  /**
+   * Worker-session handoff for one local-worker decision. Returns 'defer'
+   * (a request is outstanding — wait for the host), 'done' (the host already
+   * posted the reply on-chain; the cursor may advance), or 'fallback' (no
+   * request yet, expired, or failed — run the bare-LLM turn instead).
+   */
+  async function handleWorkerSessionTurn(
+    store: GroupTaskStore,
+    task: GroupTaskRecord,
+    seat: SeatInfo,
+    message: GroupTaskMessage,
+  ): Promise<'defer' | 'done' | 'fallback'> {
+    const kvKey = `${GROUP_TASK_WORK_REQ_KV_PREFIX}${task.id}:${message.index}:${seat.slug}`;
+    const existingId = await store.kvGet(kvKey);
+    if (!existingId) {
+      const request = await store.createWorkRequest({
+        taskId: task.id,
+        groupId: task.groupId,
+        workerSlug: seat.slug,
+        targetIndex: message.index,
+        targetPinId: message.pinId ?? null,
+      });
+      await store.kvSet(kvKey, String(request.id));
+      log(`[GroupTaskEngine] Task ${task.id}: worker turn for ${seat.slug} `
+        + `(message ${message.index}) deferred to a DSH work request #${request.id}`);
+      return 'defer';
+    }
+    const request = await store.getWorkRequest(Number(existingId));
+    if (!request) {
+      await store.kvDelete(kvKey);
+      return 'fallback';
+    }
+    if (request.status === 'pending') {
+      if (now() - request.createdAt > WORK_REQUEST_PENDING_TTL_MS) {
+        await store.updateWorkRequest(request.id, { status: 'expired', error: 'claim_ttl_expired' });
+        log(`[GroupTaskEngine] Task ${task.id}: work request #${request.id} expired unclaimed; `
+          + 'falling back to the bare-LLM turn');
+        return 'fallback';
+      }
+      return 'defer';
+    }
+    if (request.status === 'claimed') {
+      const since = request.claimedAt ?? request.createdAt;
+      if (now() - since > WORK_REQUEST_CLAIMED_TTL_MS) {
+        await store.updateWorkRequest(request.id, { status: 'expired', error: 'claimed_ttl_expired' });
+        log(`[GroupTaskEngine] Task ${task.id}: claimed work request #${request.id} timed out; `
+          + 'falling back to the bare-LLM turn');
+        return 'fallback';
+      }
+      return 'defer';
+    }
+    if (request.status === 'completed') {
+      log(`[GroupTaskEngine] Task ${task.id}: work request #${request.id} completed by the host; `
+        + 'advancing the cursor');
+      return 'done';
+    }
+    return 'fallback'; // failed or expired
+  }
+
   async function runReplies(input: {
     store: GroupTaskStore;
     task: GroupTaskRecord;
@@ -1022,6 +1096,15 @@ export function createGroupTaskEngine(options: GroupTaskEngineOptions): GroupTas
       const seat = input.seats.find((entry) => entry.slug === decision.slug);
       if (!seat) continue;
       const key = seatKey(input.chairSlug, input.task.id, seat.slug);
+
+      // Worker-session handoff (Phase 3): local worker turns are executed by
+      // the DSH host as real sub-sessions. Chair turns stay bare-LLM by design.
+      if (decision.role === 'worker' && seat.slug && options.workerSessions !== false) {
+        const handling = await handleWorkerSessionTurn(input.store, input.task, seat, input.message);
+        if (handling === 'defer') return 'defer';
+        if (handling === 'done') continue;
+        // 'fallback': proceed with the bare-LLM turn below.
+      }
 
       const spent = replyCounts.get(key) ?? 0;
       if (spent >= replyBudget) continue; // budget exhausted: drop, never defer

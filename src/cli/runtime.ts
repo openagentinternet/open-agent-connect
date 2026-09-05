@@ -3743,6 +3743,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         supervise: post('/api/grouptask/supervise'),
         deleteDeliverable: post('/api/grouptask/deliverable/delete'),
         relayDrain: post('/api/grouptask/relay/drain'),
+        workClaim: post('/api/grouptask/work/claim'),
+        workSubmit: post('/api/grouptask/work/submit'),
         close: post('/api/grouptask/close'),
         reopen: post('/api/grouptask/reopen'),
         kickMember: post('/api/grouptask/member/kick'),

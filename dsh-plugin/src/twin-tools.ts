@@ -109,7 +109,7 @@ function failure(code: string, message: string): MetabotCommandResult {
  * global service store and never throws). The direct property read survives
  * only as a fallback for plain-object test contexts.
  */
-function agentsRegistryOf(ctx: HostContext): HostAgentsRegistryLike | undefined {
+export function agentsRegistryOf(ctx: HostContext): HostAgentsRegistryLike | undefined {
   const viaGet = ctx.get?.('agents') as HostAgentsRegistryLike | undefined
   if (viaGet) return viaGet
   try {
@@ -126,7 +126,7 @@ function dataOf(result: MetabotCommandResult): Record<string, unknown> {
   return (result.data ?? {}) as Record<string, unknown>
 }
 
-function textFromAssistantEvents(events: ReadonlyArray<{ type: string; data?: unknown }>): string {
+export function textFromAssistantEvents(events: ReadonlyArray<{ type: string; data?: unknown }>): string {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event?.type !== 'assistant/message') continue
@@ -146,7 +146,7 @@ function textFromAssistantEvents(events: ReadonlyArray<{ type: string; data?: un
 }
 
 /** The last turn's error reason, when the worker turn died before answering (e.g. no model). */
-function errorFromTurnEvents(events: ReadonlyArray<{ type: string; data?: unknown }>): string {
+export function errorFromTurnEvents(events: ReadonlyArray<{ type: string; data?: unknown }>): string {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event?.type !== 'turn/end') continue
@@ -182,7 +182,7 @@ function hostDefaultModelPair(ctx: HostContext): DshModelPair | null {
  * (mirroring how UI-created conversations get theirs). Without either the
  * agent loop cannot run a turn.
  */
-function workerModelPair(ctx: HostContext, profile: Record<string, unknown> | undefined): DshModelPair | null {
+export function workerModelPair(ctx: HostContext, profile: Record<string, unknown> | undefined): DshModelPair | null {
   const provider = typeof profile?.dshLlmProvider === 'string' ? (profile.dshLlmProvider as string).trim() : ''
   const model = typeof profile?.dshLlmModel === 'string' ? (profile.dshLlmModel as string).trim() : ''
   if (provider && model) {

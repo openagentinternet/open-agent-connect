@@ -10,6 +10,7 @@ import {
   commandUnknownSubcommand,
   hasFlag,
   readFlagValue,
+  readJsonFile,
 } from './helpers';
 import type { CliRuntimeContext } from '../types';
 
@@ -186,6 +187,41 @@ export async function runGroupTaskCommand(
       return commandUnknownSubcommand(`grouptask relay ${args.slice(1).join(' ')}`.trim());
     }
     return handler({ chairSlug: normalizeText(readFlagValue(args, '--chair')) || undefined });
+  }
+
+  if (action === 'work') {
+    const sub = normalizeText(args[1]);
+
+    if (sub === 'claim') {
+      const handler = requireHandler(context, 'workClaim');
+      if (!handler) return commandFailed('not_implemented', 'Group task work-claim handler is not configured.');
+      return handler({ workerSlug: normalizeText(readFlagValue(args, '--worker')) || undefined });
+    }
+
+    if (sub === 'submit') {
+      const handler = requireHandler(context, 'workSubmit');
+      if (!handler) return commandFailed('not_implemented', 'Group task work-submit handler is not configured.');
+      const payloadFile = readFlagValue(args, '--payload-file');
+      if (!payloadFile) return commandMissingFlag('--payload-file');
+      let payload: Record<string, unknown>;
+      try {
+        payload = await readJsonFile(context, payloadFile) as Record<string, unknown>;
+      } catch (error) {
+        return commandFailed('invalid_payload', error instanceof Error ? error.message : String(error));
+      }
+      const requestId = Number(payload.requestId);
+      if (!Number.isInteger(requestId) || requestId <= 0) {
+        return commandFailed('invalid_payload', 'payload.requestId must be a positive integer.');
+      }
+      return handler({
+        requestId,
+        handoff: typeof payload.handoff === 'string' ? payload.handoff : undefined,
+        error: typeof payload.error === 'string' ? payload.error : undefined,
+        dshSessionId: typeof payload.dshSessionId === 'string' ? payload.dshSessionId : undefined,
+      });
+    }
+
+    return commandUnknownSubcommand(`grouptask work ${args.slice(1).join(' ')}`.trim());
   }
 
   if (action === 'close') {
