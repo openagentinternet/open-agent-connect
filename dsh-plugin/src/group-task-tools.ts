@@ -30,7 +30,7 @@ Open one when the owner's wish needs several specialists working together toward
 Do NOT open one for single-step jobs (do them yourself or use local_worker_delegate), casual conversation, quick questions, or scheduled automation. When the wish is unclear, ask one short clarifying question first.
 
 ### The flow (wish → slate → confirm → create → invite)
-1. Enrich the wish into a \`title\`, a concrete \`goal\`, and measurable \`acceptanceCriteria\`. Never copy the wish verbatim; research is a basic capability of every seat, not a seat of its own.
+1. Enrich the wish into a \`title\`, a concrete \`goal\`, and measurable \`acceptanceCriteria\`. Never copy the wish verbatim; research is a basic capability of every seat, not a seat of its own. Write acceptance criteria that demand SERVE-THE-DISH deliverables: the owner verifies by CLICKING a link in the UI, never by downloading files — app work must end with a published \`metaapp://\` link (publishing is part of the task, never deferred to the owner), text becomes \`pin://\` notes, \`metafile://\` is only for binaries.
 2. Decompose into coarse seats — one Bot per seat. Seat roles: \`content\`, \`design\` (images and video), \`engineering\` (code, MetaApp, on-chain publish), \`promotion\`, \`domain\` (requires \`domainLabel\`, e.g. legal). Typical team ≤5 including you as chair; hard cap 8.
 3. For each seat call \`{action:"search_candidates", seat}\` once (match-first; local Workers are a tie-break, not a gate), then \`{action:"propose", title, goal, plan, acceptanceCriteria}\`. The plan is {stages:[{id,title,seatRole,dependsOn[]}], seats:[{role, candidateName, candidateSlug?, candidateGlobalMetaId?, source:"local"|"remote", reason, domainLabel?, backupName?}]}.
 4. The propose result carries \`slateText\` — show it to the owner in the owner's language (pass \`language\`), then WAIT. The owner confirms in chat → \`{action:"decide", proposalId, decision:"confirm"}\`; asks for changes → "revise", then propose again; wants staffing skipped → "skip".
@@ -42,7 +42,7 @@ The daemon engine drives the task: it posts the kickoff, runs the planning turn,
 - Follow progress: \`{action:"detail", taskId}\` / \`{action:"messages", taskId}\`.
 - When the task reaches review, walk the owner through the acceptance summary in this chat, then close it: \`{action:"close", taskId, outcome:"done", rating:1-5, comment?}\` — or back to work: \`{action:"reopen", taskId, reason}\`. Cancel with outcome:"cancelled".
 - Roster control: \`{action:"member_status", taskId, status, member|globalMetaId}\`, \`{action:"kick", taskId, member|globalMetaId, reason?}\`, \`{action:"invite", ...}\` to add a remote Bot by GlobalMetaId.
-- Statuses: planning, executing, review, done, cancelled. Deliverables arrive as [DELIVERABLE] messages and are verified on-chain.
+- Statuses: planning, executing, review, done, cancelled. Deliverables arrive as [DELIVERABLE] messages and are verified on-chain; app work must show up as a clickable \`metaapp://\` link — if a worker hands the owner a raw file instead, send it back before review.
 Never fabricate progress or completion; report what detail/messages actually show, refer to tasks by title (not raw ids) in conversation, and point the owner to the Group Tasks panel for the live view.`
 
 /** Tool-level cap: chain writes (create/invite/post) may wait on indexer polls. */

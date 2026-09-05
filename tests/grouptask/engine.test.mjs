@@ -516,10 +516,9 @@ test('engine: an openteam_joined notice after planning wakes the chair exactly o
 
   // The reply round-trips; the consumed notice never wakes again.
   h.pushHistory('IDTWIN', '@Remote Designer please take the cover visual\n[STATUS:EXECUTING]');
-  h.llmTurns.push('[NO_REPLY]');
   await h.engine.tick();
   assert.equal(h.pins.filter((pin) => pin.label === 'twin-bot').length, 1, 'no duplicate wake or reply');
-  assert.equal(h.llmCalls.length, 2, 'second tick only produced the floor-control turn');
+  assert.equal(h.llmCalls.length, 1, 'the chair round-trip is its own message: no further turn');
 });
 
 test('engine: planning with a clean roster is never deferred (no invites, no wait)', async () => {
