@@ -267,6 +267,19 @@ repository's `main` checkout** — never to a feature-branch worktree — so any
 number of feature branches can develop concurrently and merge back to `main`
 without fighting over which worktree the DSH env points at.
 
+> **Agent etiquette: the DSH web lifecycle belongs to the user.** AI agents
+> and automation must NOT restart `dsh web` on their own and must NOT build
+> keep-alive / watchdog wrappers around it (e.g.
+> `tail -f /dev/null | pnpm dsh web`). The user restarts DSH web manually,
+> from their own terminal, when a change needs it. Background restarts and
+> port-squatting wrappers cause EADDRINUSE conflicts with the user's own
+> terminal and churn the OAC daemon (every `dsh web` boot re-runs the plugin
+> bootstrap's daemon start — racing daemons wedge every panel CLI call).
+> The same applies to the OAC daemon: never run loops that auto-start or
+> restart it while it is reloading. When a change ships that needs a restart,
+> tell the user which process to restart (`dsh web` and/or the OAC daemon)
+> and let them do it.
+
 After merging a feature branch into `main` (`git merge --no-ff <branch>`):
 
 ```bash
