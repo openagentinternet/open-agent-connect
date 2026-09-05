@@ -154,6 +154,7 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
    (mask + centered 24px panel) and the conversation row/bubble vocabulary. */
 .oac-a2a-trigger { flex: none; display: flex; align-items: center; gap: 8px; width: calc(100% + 8px); height: 34px; margin: 4px -4px 4px; padding: 6px 2px 6px 10px; box-sizing: border-box; border: none; border-radius: 12px; background: transparent; color: var(--dsw-alias-label-primary); font-family: inherit; font-size: 14px; line-height: 22px; cursor: pointer; overflow: hidden; }
 .oac-a2a-trigger:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-error-primary, #ef4444); box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-3); }
 .oac-a2a-trigger-rail { width: 36px; height: 36px; margin: 8px 0 10px; justify-content: center; gap: 0; padding: 0; border-radius: 50%; }
 .oac-a2a-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; }
 .oac-a2a-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }

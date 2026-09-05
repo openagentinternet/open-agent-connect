@@ -116,11 +116,13 @@ function TaskListRow({
   task,
   active,
   onSelect,
+  unread,
   t,
 }: {
   task: GroupTaskSummaryRow
   active: boolean
   onSelect: () => void
+  unread: boolean
   t: Translate
 }): ReactNode {
   return (
@@ -143,6 +145,7 @@ function TaskListRow({
       <span className="oac-a2a-row-time" title={timestampLabel(task.updatedAt)}>
         {relativeTimeLabel(task.updatedAt)}
       </span>
+      {unread ? <span className="oac-unread-dot" aria-label={t('unread')} /> : null}
     </button>
   )
 }
@@ -178,6 +181,8 @@ export function GroupTaskView({
   t,
   createSignal,
   onOpenBotPage,
+  unreadTaskKeys,
+  onTaskRead,
 }: {
   bots: BotRow[]
   gt: GroupTaskInjectedApi
@@ -185,6 +190,8 @@ export function GroupTaskView({
   createSignal: number
   /** Open one participant's Bot page in the right-sidebar Bot Browser. */
   onOpenBotPage?: (globalMetaId: string) => void
+  unreadTaskKeys?: ReadonlySet<string>
+  onTaskRead?: (key: string) => void
 }): ReactNode {
   // Default to the full list (all statuses, like the IDBots sidebar group
   // tab); the active/done/cancelled tabs remain available in the filter.
@@ -595,7 +602,9 @@ export function GroupTaskView({
               onSelect={() => {
                 setSelectedCollab(null)
                 setSelected({ chair: task.chairSlug, taskId: task.id })
+                onTaskRead?.(`${task.chairSlug}:${task.id}`)
               }}
+              unread={unreadTaskKeys?.has(`${task.chairSlug}:${task.id}`) === true}
               t={t}
             />
           ))}
