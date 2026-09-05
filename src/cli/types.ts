@@ -264,7 +264,7 @@ export interface CliDependencies {
   };
   knowledgeBase?: {
     list?: (input: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
-    create?: (input: { from?: string; name: string; description?: string; autoLearn?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
+    create?: (input: { from?: string; name: string; description?: string; rawDir?: string; autoLearn?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     update?: (input: { from?: string; id: string; name?: string; description?: string; autoLearn?: boolean }) => Awaitable<MetabotCommandResult<unknown>>;
     remove?: (input: { from?: string; id: string }) => Awaitable<MetabotCommandResult<unknown>>;
     query?: (input: { from?: string; text: string; id?: string; topK?: number; minScore?: number }) => Awaitable<MetabotCommandResult<unknown>>;

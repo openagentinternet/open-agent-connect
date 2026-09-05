@@ -92,6 +92,9 @@ export async function runKnowledgeBaseCommand(
       ...(readFlagValue(args, '--description')?.trim()
         ? { description: readFlagValue(args, '--description')!.trim() }
         : {}),
+      ...(readFlagValue(args, '--raw-dir')?.trim()
+        ? { rawDir: readFlagValue(args, '--raw-dir')!.trim() }
+        : {}),
       ...(autoLearn !== undefined ? { autoLearn } : {}),
     });
   }
