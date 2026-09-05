@@ -201,9 +201,8 @@ export function GroupTaskView({
   const [tick, setTick] = useState(0)
   const mdLabels = useMemo(() => markdownLabels(t), [t])
 
-  // Composer
+  // Composer — the owner speaks as the owner (IDBots parity: no sender select).
   const [draft, setDraft] = useState('')
-  const [speakAs, setSpeakAs] = useState('owner')
 
   // Create modal
   const [createOpen, setCreateOpen] = useState(false)
@@ -395,8 +394,7 @@ export function GroupTaskView({
   const onSend = async (): Promise<void> => {
     const content = draft.trim()
     if (!selected || !content || busy) return
-    const sender = speakAs === 'owner' ? { asOwner: true } : { asSlug: speakAs }
-    const sent = await runAction(() => gt.post(selected.chair, selected.taskId, { content, ...sender }), false)
+    const sent = await runAction(() => gt.post(selected.chair, selected.taskId, { content, asOwner: true }), false)
     if (sent) setDraft('')
   }
 
@@ -492,9 +490,6 @@ export function GroupTaskView({
     if (created) setInfoNote(t('gtStaffingCreated'))
   }, [gt, runAction, t])
 
-  const memberBots = detail
-    ? detail.members.filter((member) => member.slug && bots.some((bot) => bot.slug === member.slug))
-    : []
   const terminal = detail !== null && (detail.status === 'done' || detail.status === 'cancelled')
   const twinBot = bots.find((bot) => bot.botType === 'twin') ?? null
 
@@ -1024,28 +1019,15 @@ export function GroupTaskView({
             {!terminal ? (
               <div className="oac-a2a-composer">
                 <div className="oac-a2a-composer-row">
-                  <select
-                    className="oac-input oac-input-select oac-gt-sender-select"
-                    value={speakAs}
-                    aria-label={t('gtPostAs')}
-                    onChange={(event) => setSpeakAs(event.target.value)}
-                  >
-                    <option value="owner">{t('gtPostAsOwner')}</option>
-                    {memberBots.map((member) => {
-                      const bot = bots.find((row) => row.slug === member.slug)
-                      return (
-                        <option key={member.slug ?? member.id} value={member.slug ?? ''}>
-                          {bot?.name ?? member.displayName ?? member.slug}
-                        </option>
-                      )
-                    })}
-                  </select>
                   <Input
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                     placeholder={t('gtMessagePlaceholder')}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
+                      // Enter sends — but never while an IME composition is
+                      // open (Chinese/Japanese candidates commit with Enter).
+                      if (event.key === 'Enter' && !event.shiftKey
+                        && !event.nativeEvent.isComposing) {
                         event.preventDefault()
                         if (!busy) void onSend()
                       }
