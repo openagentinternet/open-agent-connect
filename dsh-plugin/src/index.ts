@@ -49,6 +49,7 @@ import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
 import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
 import { installGroupTaskOnAgent } from './group-task-tools.js'
 import { applyGroupTaskRelayDrain } from './group-task-relay.js'
+import { applyGroupTaskWorkerSessions } from './group-task-worker.js'
 import { slugFromPresetId } from './chip-logic.js'
 import { reconcilePresets } from './preset.js'
 import { dispatchSection } from './sections.js'
@@ -518,6 +519,19 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
     }, 'oac-dsh: group-task relay drain')
   }
 
+  // Worker real-work sessions: claim engine-deferred worker turns and run
+  // them as DSH sub-sessions (Phase 3). Engine-side TTLs fall back to the
+  // bare-LLM turn when the host never claims, so disabling this is safe.
+  if (config.groupTask?.workerSessions?.enabled !== false) {
+    ctx.effect(() => {
+      const runner = applyGroupTaskWorkerSessions(ctx, {
+        pollMs: config.groupTask?.workerSessions?.pollMs,
+        turnTimeoutMs: config.groupTask?.workerSessions?.turnTimeoutMs,
+      })
+      return () => runner.stop()
+    }, 'oac-dsh: group-task worker sessions')
+  }
+
   // Nightly dream scheduler: ticks on a timer while the DSH host is alive;
   // the CLI's due-date arithmetic owns window/catch-up/backoff decisions. The
   // memory-hygiene tail runs right after each tick's dream pass (config
@@ -648,6 +662,7 @@ export {
   installGroupTaskOnAgent,
 } from './group-task-tools.js'
 export { applyGroupTaskRelayDrain } from './group-task-relay.js'
+export { applyGroupTaskWorkerSessions, GROUP_TASK_WORK_SYSTEM_PROMPT } from './group-task-worker.js'
 export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
 export {
   buildChainHistoryRecallToolDefinitions,

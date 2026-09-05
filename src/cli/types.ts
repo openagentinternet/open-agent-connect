@@ -157,6 +157,8 @@ export interface CliDependencies {
     supervise?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     deleteDeliverable?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     relayDrain?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    workClaim?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    workSubmit?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     close?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     reopen?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     kickMember?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

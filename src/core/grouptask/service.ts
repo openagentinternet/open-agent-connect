@@ -1054,6 +1054,160 @@ export async function deleteGroupTaskDeliverableEntry(
 }
 
 // ---------------------------------------------------------------------------
+// Worker work requests (Phase 3): the engine defers a worker turn and the DSH
+// host claims it, runs a real sub-session, and submits the handoff for the
+// on-chain post. Unclaimed requests expire engine-side → bare-LLM fallback.
+// ---------------------------------------------------------------------------
+
+export interface GroupTaskWorkClaim {
+  requestId: number;
+  chairSlug: string;
+  taskId: number;
+  groupId: string | null;
+  workerSlug: string;
+  workerName: string;
+  targetIndex: number;
+  targetPinId: string | null;
+  task: { title: string; goal: string; acceptanceCriteria: string | null; status: string };
+  roster: Array<{ name: string; role: string; remote: boolean }>;
+  recentMessages: Array<{ index: number; sender: string; content: string }>;
+  targetMessage: { index: number; sender: string; content: string } | null;
+}
+
+/**
+ * Claim the oldest pending work request (optionally for one worker) across all
+ * chair profiles, assembling a FRESH turn context at claim time (the request
+ * row stores only the coordinates). Returns null when the queue is empty.
+ */
+export async function claimGroupTaskWork(
+  ctx: GroupTaskServiceContext,
+  workerSlug?: string,
+): Promise<GroupTaskWorkClaim | null> {
+  const profiles = await ctx.listProfiles();
+  const profileBySlug = new Map(profiles.map((profile) => [profile.slug, profile]));
+  for (const profile of profiles) {
+    const store = storeFor(ctx, profile);
+    const pending = await store.listWorkRequests({ status: 'pending', ...(workerSlug ? { workerSlug } : {}) });
+    for (const request of pending) {
+      // Re-read under the write lock: only a still-pending row may be claimed.
+      const fresh = await store.getWorkRequest(request.id);
+      if (!fresh || fresh.status !== 'pending') continue;
+      const claimed = await store.updateWorkRequest(request.id, { status: 'claimed' });
+      if (!claimed) continue;
+      const task = await store.getTaskById(request.taskId);
+      if (!task) {
+        await store.updateWorkRequest(request.id, { status: 'failed', error: 'task_missing' });
+        continue;
+      }
+      const members = await store.listMembers(request.taskId);
+      const workerMember = members.find((member) => member.slug === request.workerSlug);
+      const workerProfile = await ctx.getProfile(request.workerSlug);
+      const page = task.groupId
+        ? await store.listMessages(task.groupId, { limit: 20 })
+        : { messages: [] as GroupTaskMessage[] };
+      const senderOf = (message: GroupTaskMessage): string =>
+        message.senderName?.trim() || message.senderGlobalMetaId || 'unknown';
+      const targetMessage = page.messages.find((message) => message.index === request.targetIndex) ?? null;
+      return {
+        requestId: claimed.id,
+        chairSlug: profile.slug,
+        taskId: request.taskId,
+        groupId: request.groupId,
+        workerSlug: request.workerSlug,
+        workerName: workerMember?.displayName?.trim()
+          || workerProfile?.name?.trim()
+          || request.workerSlug,
+        targetIndex: request.targetIndex,
+        targetPinId: request.targetPinId,
+        task: {
+          title: task.title,
+          goal: task.goal,
+          acceptanceCriteria: task.acceptanceCriteria,
+          status: task.status,
+        },
+        roster: members
+          .filter((member) => member.removedAt == null)
+          .map((member) => ({
+            name: memberDisplayName(member, member.slug ? profileBySlug.get(member.slug)?.name : undefined),
+            role: member.role,
+            remote: member.slug == null,
+          })),
+        recentMessages: page.messages.map((message) => ({
+          index: message.index,
+          sender: senderOf(message),
+          content: message.content,
+        })),
+        targetMessage: targetMessage
+          ? { index: targetMessage.index, sender: senderOf(targetMessage), content: targetMessage.content }
+          : null,
+      };
+    }
+  }
+  return null;
+}
+
+export interface SubmitGroupTaskWorkInput {
+  requestId: number;
+  handoff?: string;
+  error?: string;
+  dshSessionId?: string;
+}
+
+export interface SubmitGroupTaskWorkResult {
+  status: 'completed' | 'failed';
+  pinId: string | null;
+  error: string | null;
+}
+
+/**
+ * Host-side turn completion: a non-empty handoff is posted on-chain AS the
+ * worker (reply-threaded to the target message) and the request completes;
+ * an error or empty handoff fails the request so the engine falls back to its
+ * bare-LLM turn. Posting to a task that closed mid-work fails the request.
+ */
+export async function submitGroupTaskWork(
+  ctx: GroupTaskServiceContext,
+  input: SubmitGroupTaskWorkInput,
+): Promise<SubmitGroupTaskWorkResult> {
+  for (const profile of await ctx.listProfiles()) {
+    const store = storeFor(ctx, profile);
+    const request = await store.getWorkRequest(input.requestId);
+    if (!request) continue;
+    if (request.status === 'completed') {
+      return { status: 'completed', pinId: null, error: null };
+    }
+    const handoff = input.handoff?.trim() ?? '';
+    const fail = async (error: string): Promise<SubmitGroupTaskWorkResult> => {
+      await store.updateWorkRequest(request.id, {
+        status: 'failed',
+        error: error.slice(0, 500),
+        dshSessionId: input.dshSessionId ?? null,
+      });
+      return { status: 'failed', pinId: null, error };
+    };
+    if (input.error?.trim()) return fail(input.error.trim());
+    if (!handoff) return fail('WORKER_EMPTY_HANDOFF: the worker session produced no handoff text');
+    try {
+      const posted = await postGroupTaskMessage(ctx, profile.slug, request.taskId, {
+        asSlug: request.workerSlug,
+        content: handoff,
+        replyPin: request.targetPinId ?? undefined,
+      });
+      await store.updateWorkRequest(request.id, {
+        status: 'completed',
+        handoff,
+        dshSessionId: input.dshSessionId ?? null,
+      });
+      return { status: 'completed', pinId: posted.pinId, error: null };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return await fail(`post_failed: ${message}`);
+    }
+  }
+  throw new GroupTaskServiceError('work_request_not_found', `Work request ${input.requestId} not found`);
+}
+
+// ---------------------------------------------------------------------------
 // Members: kick / status
 // ---------------------------------------------------------------------------
 

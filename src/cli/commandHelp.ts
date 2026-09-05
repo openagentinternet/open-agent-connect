@@ -2534,6 +2534,8 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
       { name: 'supervise', summary: 'Owner supervision: nudge a quiet member, flag an observation, or pause/resume dispatch.' },
       { name: 'deliverable-delete', summary: 'Remove a mis-reported deliverable row from the ledger.' },
       { name: 'relay drain', summary: 'Drain pending source-session relay rows (host-side milestone forwarding).' },
+      { name: 'work claim', summary: 'Host-side: claim the oldest pending worker turn (fresh turn context included).' },
+      { name: 'work submit', summary: 'Host-side: submit a worker handoff (posted on-chain) or a failure reason.' },
       { name: 'close', summary: 'Close a task as done (optionally rated) or cancelled.' },
       { name: 'reopen', summary: 'Send a review task back to executing (rework).' },
       { name: 'kick', summary: 'Remove a member from the task group (chair-signed on-chain).' },

@@ -23,6 +23,8 @@ const POST_VERBS: Record<string, GroupTaskVerb> = {
   '/api/grouptask/supervise': 'supervise',
   '/api/grouptask/deliverable/delete': 'deleteDeliverable',
   '/api/grouptask/relay/drain': 'relayDrain',
+  '/api/grouptask/work/claim': 'workClaim',
+  '/api/grouptask/work/submit': 'workSubmit',
   '/api/grouptask/staffing/propose': 'staffingPropose',
   '/api/grouptask/staffing/decide': 'staffingDecide',
   '/api/grouptask/staffing/create': 'staffingCreate',

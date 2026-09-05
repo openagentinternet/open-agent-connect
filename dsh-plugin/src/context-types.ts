@@ -252,6 +252,14 @@ export interface OacDshConfig {
       /** Drain period in seconds (default 30). */
       tickSeconds?: number
     }
+    /** Worker turns executed as real DSH sub-sessions (Phase 3). */
+    workerSessions?: {
+      enabled?: boolean
+      /** Claim poll period in ms (default 8000). */
+      pollMs?: number
+      /** Per-turn watchdog (default 900_000). */
+      turnTimeoutMs?: number
+    }
   }
   /** User panel + owner binding routes (Phase 5+). */
   user?: {

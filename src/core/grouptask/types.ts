@@ -110,6 +110,36 @@ export interface GroupTaskRelayRow {
   drainedAt: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// Worker work requests (Phase 3): engine-deferred worker turns executed as
+// real DSH sub-sessions by the DSH host plugin, which claims via CLI and
+// submits the handoff back for the on-chain post. The engine owns the state
+// machine: a request the plugin never claims expires (TTL) and the bare-LLM
+// fallback replies instead — a missing host can never stall a task.
+// ---------------------------------------------------------------------------
+
+export type GroupTaskWorkRequestStatus = 'pending' | 'claimed' | 'completed' | 'failed' | 'expired';
+
+export interface GroupTaskWorkRequest {
+  id: number;
+  taskId: number;
+  groupId: string | null;
+  /** Local worker profile slug (remote members never get work requests). */
+  workerSlug: string;
+  /** Chain message index this turn responds to (the engine defers here). */
+  targetIndex: number;
+  targetPinId: string | null;
+  status: GroupTaskWorkRequestStatus;
+  createdAt: number;
+  claimedAt: number | null;
+  completedAt: number | null;
+  /** Worker handoff submitted by the host (completed requests). */
+  handoff: string | null;
+  /** Failure reason (failed requests: empty handoff, session error, timeout). */
+  error: string | null;
+  dshSessionId: string | null;
+}
+
 export interface GroupTaskMember {
   id: number;
   taskId: number;
