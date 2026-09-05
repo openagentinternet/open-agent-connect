@@ -40,7 +40,7 @@ import { apiMethod, readJsonBody, readRawBody, writeJson } from './http.js'
 import { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 import { dispatchGroupTaskRoutes } from './grouptask.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
-import { dispatchKbRoutes } from './kb-routes.js'
+import { dispatchKbRoutes, importKbFile } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
@@ -272,6 +272,19 @@ async function handleFileUpload(req: PluginHttpRequest): Promise<MetabotCommandR
   return uploadFileBytes(from, bytes, contentType || 'application/octet-stream')
 }
 
+/**
+ * Knowledge-base raw document import (`POST /oac/api/kb/import?from=&id=&filename=`,
+ * body = file bytes) — the browser counterpart of IDBots' importFiles picker.
+ */
+async function handleKbImport(req: PluginHttpRequest): Promise<MetabotCommandResult> {
+  const url = new URL(req.url ?? '/', 'http://dsh.internal')
+  const from = url.searchParams.get('from')?.trim() ?? ''
+  const id = url.searchParams.get('id')?.trim() ?? ''
+  const filename = url.searchParams.get('filename')?.trim() ?? 'document.bin'
+  const bytes = await readRawBody(req)
+  return importKbFile(from, id, filename, bytes)
+}
+
 function registerApi(
   ctx: HostContext,
   getHealth: () => HealthPayload,
@@ -344,6 +357,11 @@ function registerApi(
           const result = await handleFileUpload(req)
           const uploadStatus = result.code === 'not-found' ? 404 : 200
           writeJson(res, uploadStatus, result)
+          return
+        }
+        if (method === 'kb/import') {
+          const result = await handleKbImport(req)
+          writeJson(res, result.code === 'not-found' ? 404 : 200, result)
           return
         }
         const payload = await readJsonBody(req)
@@ -557,7 +575,7 @@ export {
 export { dispatchSection } from './sections.js'
 export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
-export { dispatchKbRoutes } from './kb-routes.js'
+export { dispatchKbRoutes, importKbFile } from './kb-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
 export { applyDreamScheduler, runDreamSchedulerTick } from './dream-scheduler.js'
 export {
