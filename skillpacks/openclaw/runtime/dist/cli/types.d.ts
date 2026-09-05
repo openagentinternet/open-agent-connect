@@ -87,6 +87,7 @@ export interface CliDependencies {
     daemon?: {
         start?: () => Awaitable<MetabotCommandResult<unknown>>;
         stop?: () => Awaitable<MetabotCommandResult<unknown>>;
+        restart?: () => Awaitable<MetabotCommandResult<unknown>>;
     };
     doctor?: {
         run?: () => Awaitable<MetabotCommandResult<unknown>>;
@@ -205,6 +206,9 @@ export interface CliDependencies {
         detail?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         messages?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         postMessage?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        supervise?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        deleteDeliverable?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+        relayDrain?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         close?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         reopen?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
         kickMember?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -418,6 +422,50 @@ export interface CliDependencies {
         }) => Awaitable<MetabotCommandResult<unknown>>;
         selfIdentity?: (input: {
             from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+    };
+    knowledgeBase?: {
+        list?: (input: {
+            from?: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        create?: (input: {
+            from?: string;
+            name: string;
+            description?: string;
+            autoLearn?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        update?: (input: {
+            from?: string;
+            id: string;
+            name?: string;
+            description?: string;
+            autoLearn?: boolean;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        remove?: (input: {
+            from?: string;
+            id: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        query?: (input: {
+            from?: string;
+            text: string;
+            id?: string;
+            topK?: number;
+            minScore?: number;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        addDocument?: (input: {
+            from?: string;
+            id?: string;
+            title: string;
+            content: string;
+            sourceType?: string;
+            url?: string;
+            pinId?: string;
+            tags?: string[];
+        }) => Awaitable<MetabotCommandResult<unknown>>;
+        learn?: (input: {
+            from?: string;
+            id?: string;
+            full?: boolean;
         }) => Awaitable<MetabotCommandResult<unknown>>;
     };
     schedule?: {

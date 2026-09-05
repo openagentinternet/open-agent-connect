@@ -91,6 +91,7 @@ const impressionStore_1 = require("../core/memory/impressionStore");
 const contactNames_1 = require("../core/memory/contactNames");
 const knowledgeStore_1 = require("../core/memory/knowledgeStore");
 const knowledgePromptBlocks_1 = require("../core/memory/knowledgePromptBlocks");
+const procedureStore_1 = require("../core/memory/procedureStore");
 const chatPersonaLoader_1 = require("../core/chat/chatPersonaLoader");
 const orchestrationStore_1 = require("../core/memory/orchestrationStore");
 const twinRole_2 = require("../core/bot/twinRole");
@@ -1862,6 +1863,45 @@ async function runHostPersonaProjection(operation) {
         return (0, commandResult_1.commandFailed)('host_persona_projection_failed', error instanceof Error ? error.message : String(error));
     }
 }
+async function runDaemonStartCommand(context) {
+    const baseUrl = await ensureDaemonBaseUrl(context);
+    const daemonRecord = await resolveDaemonRecord(context);
+    const parsed = new URL(baseUrl);
+    return (0, commandResult_1.commandSuccess)({
+        host: parsed.hostname,
+        port: Number(parsed.port || '80'),
+        baseUrl,
+        pid: daemonRecord?.pid ?? null,
+    });
+}
+async function runDaemonStopCommand(context) {
+    const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
+    const daemonStore = (0, daemonStateStore_1.createDaemonStateStore)(systemHomeDir);
+    const daemonRecord = await daemonStore.readDaemon();
+    if (!daemonRecord || !daemonRecord.pid) {
+        return (0, commandResult_1.commandFailed)('daemon_not_running', 'No local daemon process is currently tracked.');
+    }
+    const pid = daemonRecord.pid;
+    try {
+        const stopped = await stopRunningDaemon({
+            daemonRecord,
+            lockPath: (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir).daemonLockPath,
+        });
+        await daemonStore.clearDaemon(pid);
+        return (0, commandResult_1.commandSuccess)({
+            pid,
+            stopped: stopped === 'stopped',
+            alreadyStopped: stopped === 'already_stopped',
+        });
+    }
+    catch (error) {
+        if (error instanceof DaemonOwnershipVerificationError) {
+            return (0, commandResult_1.commandFailed)('daemon_ownership_unverified', error.message);
+        }
+        const code = error.code;
+        return (0, commandResult_1.commandFailed)('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
+    }
+}
 function createDefaultCliDependencies(context) {
     async function requestJsonForSelectedActor(method, routePath, from, body) {
         const requestedFrom = normalizeEnvText(from);
@@ -2573,44 +2613,27 @@ function createDefaultCliDependencies(context) {
             resetApiBase: async () => requestJsonForSelectedActor('POST', '/api/traffic/api-base', undefined, { action: 'reset' }),
         },
         daemon: {
-            start: async () => {
-                const baseUrl = await ensureDaemonBaseUrl(context);
-                const daemonRecord = await resolveDaemonRecord(context);
-                const parsed = new URL(baseUrl);
+            start: () => runDaemonStartCommand(context),
+            stop: () => runDaemonStopCommand(context),
+            restart: async () => {
+                const stopResult = await runDaemonStopCommand(context);
+                // Restart tolerates "nothing was running"; any real stop failure
+                // (stop failed, ownership unverified) propagates untouched.
+                if (!stopResult.ok && stopResult.code !== 'daemon_not_running') {
+                    return stopResult;
+                }
+                const startResult = await runDaemonStartCommand(context);
+                if (!startResult.ok || startResult.state !== 'success') {
+                    return startResult;
+                }
                 return (0, commandResult_1.commandSuccess)({
-                    host: parsed.hostname,
-                    port: Number(parsed.port || '80'),
-                    baseUrl,
-                    pid: daemonRecord?.pid ?? null,
+                    ...startResult.data,
+                    restarted: true,
+                    wasRunning: stopResult.ok,
+                    previousPid: stopResult.ok
+                        ? (stopResult.data.pid ?? null)
+                        : null,
                 });
-            },
-            stop: async () => {
-                const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
-                const daemonStore = (0, daemonStateStore_1.createDaemonStateStore)(systemHomeDir);
-                const daemonRecord = await daemonStore.readDaemon();
-                if (!daemonRecord || !daemonRecord.pid) {
-                    return (0, commandResult_1.commandFailed)('daemon_not_running', 'No local daemon process is currently tracked.');
-                }
-                const pid = daemonRecord.pid;
-                try {
-                    const stopped = await stopRunningDaemon({
-                        daemonRecord,
-                        lockPath: (0, paths_1.resolveMetabotDaemonPaths)(systemHomeDir).daemonLockPath,
-                    });
-                    await daemonStore.clearDaemon(pid);
-                    return (0, commandResult_1.commandSuccess)({
-                        pid,
-                        stopped: stopped === 'stopped',
-                        alreadyStopped: stopped === 'already_stopped',
-                    });
-                }
-                catch (error) {
-                    if (error instanceof DaemonOwnershipVerificationError) {
-                        return (0, commandResult_1.commandFailed)('daemon_ownership_unverified', error.message);
-                    }
-                    const code = error.code;
-                    return (0, commandResult_1.commandFailed)('daemon_stop_failed', `Failed to stop daemon process ${pid}: ${code || error}`);
-                }
             },
         },
         doctor: {
@@ -2907,6 +2930,9 @@ function createDefaultCliDependencies(context) {
                 detail: get('/api/grouptask/detail'),
                 messages: get('/api/grouptask/messages'),
                 postMessage: post('/api/grouptask/message'),
+                supervise: post('/api/grouptask/supervise'),
+                deleteDeliverable: post('/api/grouptask/deliverable/delete'),
+                relayDrain: post('/api/grouptask/relay/drain'),
                 close: post('/api/grouptask/close'),
                 reopen: post('/api/grouptask/reopen'),
                 kickMember: post('/api/grouptask/member/kick'),
@@ -4150,6 +4176,98 @@ function createDefaultCliDependencies(context) {
                 return requestJson(context, 'PUT', `/api/bot/profiles/${encodeURIComponent(input.slug)}`, { ownerGlobalMetaId: input.unbind ? null : ownerGlobalMetaId });
             },
         },
+        knowledgeBase: {
+            list: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const service = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const knowledgeBases = await service.store.listKnowledgeBases();
+                return (0, commandResult_1.commandSuccess)({ knowledgeBases });
+            },
+            create: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const service = (0, service_2.createKnowledgeBaseService)(paths);
+                const knowledgeBase = await service.store.createKnowledgeBase({
+                    metabotSlug: node_path_1.default.basename(paths.profileRoot),
+                    name: input.name,
+                    ...(input.description ? { description: input.description } : {}),
+                    ...(input.autoLearn !== undefined ? { autoLearn: input.autoLearn } : {}),
+                });
+                return (0, commandResult_1.commandSuccess)({ knowledgeBase });
+            },
+            update: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const service = (0, service_2.createKnowledgeBaseService)(paths);
+                const slug = node_path_1.default.basename(paths.profileRoot);
+                const existing = await service.store.getKnowledgeBase(input.id);
+                if (!existing || existing.metabotSlug !== slug) {
+                    return (0, commandResult_1.commandFailed)('kb_not_found', `Knowledge base ${input.id} not found for this Bot.`);
+                }
+                const knowledgeBase = await service.store.updateKnowledgeBase(input.id, {
+                    ...(input.name ? { name: input.name } : {}),
+                    ...(input.description ? { description: input.description } : {}),
+                    ...(input.autoLearn !== undefined ? { autoLearn: input.autoLearn } : {}),
+                });
+                return (0, commandResult_1.commandSuccess)({ knowledgeBase });
+            },
+            remove: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const paths = (0, paths_1.resolveMetabotPaths)(actor.homeDir);
+                const service = (0, service_2.createKnowledgeBaseService)(paths);
+                const slug = node_path_1.default.basename(paths.profileRoot);
+                const existing = await service.store.getKnowledgeBase(input.id);
+                if (!existing || existing.metabotSlug !== slug) {
+                    return (0, commandResult_1.commandFailed)('kb_not_found', `Knowledge base ${input.id} not found for this Bot.`);
+                }
+                const removed = await service.store.removeKnowledgeBase(input.id);
+                return (0, commandResult_1.commandSuccess)({ removed, knowledgeBaseId: input.id });
+            },
+            query: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const service = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const results = await service.queryKnowledgeBase(node_path_1.default.basename((0, paths_1.resolveMetabotPaths)(actor.homeDir).profileRoot), input.text, {
+                    ...(input.id ? { knowledgeBaseId: input.id } : {}),
+                    ...(input.topK != null ? { topK: input.topK } : {}),
+                    ...(input.minScore != null ? { minScore: input.minScore } : {}),
+                });
+                return (0, commandResult_1.commandSuccess)({ results });
+            },
+            addDocument: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const service = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const saved = await service.addDocument(node_path_1.default.basename((0, paths_1.resolveMetabotPaths)(actor.homeDir).profileRoot), {
+                    title: input.title,
+                    content: input.content,
+                    ...(input.id ? { knowledgeBaseId: input.id } : {}),
+                    ...(input.sourceType ? { sourceType: input.sourceType } : {}),
+                    ...(input.url ? { url: input.url } : {}),
+                    ...(input.pinId ? { pinId: input.pinId } : {}),
+                    ...(input.tags ? { tags: input.tags } : {}),
+                });
+                return (0, commandResult_1.commandSuccess)({ knowledgeBase: saved.knowledgeBase, relPath: saved.relPath });
+            },
+            learn: async (input) => {
+                const actor = await resolveActorHomeDir(context, input.from);
+                if (!('homeDir' in actor))
+                    return actor;
+                const service = (0, service_2.createKnowledgeBaseService)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                const knowledgeBase = await service.learnKnowledgeBase(node_path_1.default.basename((0, paths_1.resolveMetabotPaths)(actor.homeDir).profileRoot), input.id, input.full === true);
+                return (0, commandResult_1.commandSuccess)({ knowledgeBase });
+            },
+        },
         twin: {
             current: async () => {
                 const systemHomeDir = normalizeSystemHomeDir(context.env, context.cwd);
@@ -4321,6 +4439,7 @@ function mergeCliDependencies(context) {
         memory: { ...defaults.memory, ...provided.memory },
         chainhistory: { ...defaults.chainhistory, ...provided.chainhistory },
         dream: { ...defaults.dream, ...provided.dream },
+        knowledgeBase: { ...defaults.knowledgeBase, ...provided.knowledgeBase },
         schedule: { ...defaults.schedule, ...provided.schedule },
         twin: { ...defaults.twin, ...provided.twin },
         file: { ...defaults.file, ...provided.file },
@@ -5118,6 +5237,8 @@ async function serveCliDaemonProcess(context) {
                             // Real tools with the pin budget enforced at the executor seam.
                             let savedDocs = 0;
                             const kbService = (0, service_2.createKnowledgeBaseService)(profilePaths);
+                            const studyProcedures = (0, procedureStore_1.createProcedureStore)(profilePaths);
+                            const studyKnowledge = (0, knowledgeStore_1.createKnowledgeStore)(profilePaths);
                             return await (0, studyJobs_1.runStudyTurnWithTools)(prompt, {
                                 runLlm: llm,
                                 tools: {
@@ -5154,6 +5275,74 @@ async function serveCliDaemonProcess(context) {
                                     learnKnowledgeBase: async () => {
                                         const learned = await kbService.learnKnowledgeBase(slug);
                                         return `Learned "${learned.name}": ${learned.docCount} docs, ${learned.chunkCount} chunks.`;
+                                    },
+                                    listKnowledgeBases: async () => {
+                                        const rows = (await kbService.store.listKnowledgeBases())
+                                            .filter((row) => row.metabotSlug === slug);
+                                        if (!rows.length)
+                                            return 'No knowledge bases yet.';
+                                        return rows.map((row) => `- "${row.name}"${row.isDefault ? ' (default)' : ''} `
+                                            + `docs=${row.docCount} chunks=${row.chunkCount}`
+                                            + `${row.description ? ` — ${row.description}` : ''}`).join('\n');
+                                    },
+                                    queryKnowledgeBases: async ({ query, knowledgeBaseId }) => {
+                                        const results = await kbService.queryKnowledgeBase(slug, query, {
+                                            ...(knowledgeBaseId ? { knowledgeBaseId } : {}),
+                                        });
+                                        if (!results.length)
+                                            return 'No hits.';
+                                        return results.map((result) => result.hits.map((hit) => `- [${result.knowledgeBaseName}] ${hit.title}#${hit.ord} (score ${hit.score})\n  ${hit.snippet}`).join('\n')).join('\n');
+                                    },
+                                    saveProcedure: async (input) => {
+                                        const { procedure, created } = await studyProcedures.upsertProcedure({
+                                            title: input.title,
+                                            steps: input.steps,
+                                            ...(input.pitfalls?.length ? { pitfalls: input.pitfalls } : {}),
+                                            ...(input.triggerText ? { triggerText: input.triggerText } : {}),
+                                            ...(input.sourcePinIds?.length ? { sourcePinIds: input.sourcePinIds } : {}),
+                                            origin: 'agent',
+                                        });
+                                        return `${created ? 'Saved' : 'Updated'} procedure "${procedure.title}" `
+                                            + `v${procedure.version} (${procedure.steps.length} steps).`;
+                                    },
+                                    recallProcedures: async ({ query }) => {
+                                        const rows = await studyProcedures.listProcedures({ status: 'active' });
+                                        const scored = (0, procedureStore_1.scoreProceduresForQuery)(rows, query).slice(0, 5);
+                                        if (!scored.length)
+                                            return 'No matching procedures.';
+                                        return scored.map(({ procedure, score }) => `- ${procedure.title} (${score})\n  ${procedure.steps.join(' → ')}`
+                                            + (procedure.pitfalls.length ? `\n  Pitfalls: ${procedure.pitfalls.join('; ')}` : '')).join('\n');
+                                    },
+                                    upsertKnowledge: async ({ topic, summary, kind }) => {
+                                        const validKind = kind && knowledgeStore_1.KNOWLEDGE_KINDS.includes(kind)
+                                            ? kind
+                                            : undefined;
+                                        const result = await studyKnowledge.upsertKnowledge({
+                                            topic,
+                                            summary,
+                                            ...(validKind ? { kind: validKind } : {}),
+                                            origin: 'agent',
+                                        });
+                                        return (0, knowledgePromptBlocks_1.formatKnowledgeUpsertResult)({
+                                            topic: result.entry.topic,
+                                            created: result.created,
+                                            revised: result.revised,
+                                            version: result.entry.version,
+                                            kind: result.entry.kind,
+                                        });
+                                    },
+                                    recallKnowledge: async (input) => {
+                                        const rows = await studyKnowledge.searchKnowledge({
+                                            ...(input.query ? { query: input.query } : {}),
+                                            ...(input.kind && knowledgeStore_1.KNOWLEDGE_KINDS.includes(input.kind)
+                                                ? { kind: input.kind }
+                                                : {}),
+                                            limit: 5,
+                                            touchLastUsed: true,
+                                        });
+                                        if (!rows.length)
+                                            return 'No matching knowledge.';
+                                        return rows.map((row) => `- [${row.kind}] ${row.topic}: ${row.summary}`).join('\n');
                                     },
                                 },
                             });

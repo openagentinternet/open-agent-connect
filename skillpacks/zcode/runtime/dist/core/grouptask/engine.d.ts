@@ -17,6 +17,8 @@ export declare const GROUP_TASK_PLANNED_KV_PREFIX = "group_task_chair_planned:";
 export declare const GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = "group_task_chair_plan_attempts:";
 export declare const GROUP_TASK_MSG_RETRY_KV_PREFIX = "group_task_msg_retry:";
 export declare const GROUP_TASK_DEP_WAIT_KV_PREFIX = "group_task_dep_wait:";
+export declare const GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = "group_task_planning_deferred:";
+export declare const GROUP_TASK_ROSTER_WAKE_KV_PREFIX = "group_task_roster_wake:";
 /** Deliverable re-verification cadence (indexer lag absorption). */
 export declare const GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = "group_task_deliverable_verify:";
 export declare const GROUP_TASK_ACK_PENDING_KV_PREFIX = "group_task_ack_pending:";

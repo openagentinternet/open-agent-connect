@@ -13,7 +13,7 @@
  * loader, clock) are injected so tests run fully offline.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = exports.GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_HINT_KV_PREFIX = exports.GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX = exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = exports.GROUP_TASK_DEP_WAIT_KV_PREFIX = exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_PLANNED_KV_PREFIX = exports.GROUP_TASK_DRIVER_KV_PREFIX = void 0;
+exports.GROUP_TASK_GUEST_SELF_CHECK_KV_PREFIX = exports.GROUP_TASK_REVIEW_SUMMARY_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_OWNER_KV_PREFIX = exports.GROUP_TASK_TIMEOUT_HINT_KV_PREFIX = exports.GROUP_TASK_EXPECTED_DELIVERY_KV_PREFIX = exports.GROUP_TASK_ACK_SEEN_KV_PREFIX = exports.GROUP_TASK_ACK_REMINDED_KV_PREFIX = exports.GROUP_TASK_ACK_PENDING_KV_PREFIX = exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX = exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = exports.GROUP_TASK_DEP_WAIT_KV_PREFIX = exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = exports.GROUP_TASK_PLANNED_KV_PREFIX = exports.GROUP_TASK_DRIVER_KV_PREFIX = void 0;
 exports.createGroupTaskEngine = createGroupTaskEngine;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = require("node:fs");
@@ -37,8 +37,17 @@ exports.GROUP_TASK_PLANNED_KV_PREFIX = 'group_task_chair_planned:';
 exports.GROUP_TASK_PLAN_ATTEMPTS_KV_PREFIX = 'group_task_chair_plan_attempts:';
 exports.GROUP_TASK_MSG_RETRY_KV_PREFIX = 'group_task_msg_retry:';
 exports.GROUP_TASK_DEP_WAIT_KV_PREFIX = 'group_task_dep_wait:';
+exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX = 'group_task_planning_deferred:';
+exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX = 'group_task_roster_wake:';
 /** [DEPENDS_ON] holds a worker reply at most this long before proceeding. */
 const DEPENDENCY_WAIT_MAX_MS = 15 * 60_000;
+/**
+ * IDBots roster-settle cap: the one-shot planning turn waits at most this long
+ * for OpenTeam invites to resolve before planning with whatever roster exists.
+ */
+const ROSTER_SETTLE_MAX_WAIT_MS = 10 * 60_000;
+/** Host notice emitted on every confirmed remote join (see maintainInviterInvites). */
+const OPENTEAM_JOINED_NOTICE_RE = /^\[GROUP_TASK_NOTICE:openteam_joined\]\s*(.+?)\s+joined this task as a remote OpenTeam member(?:\s*\(skills: ([^)]*)\))?/u;
 /** Deliverable re-verification cadence (indexer lag absorption). */
 exports.GROUP_TASK_DELIVERABLE_VERIFY_KV_PREFIX = 'group_task_deliverable_verify:';
 const DELIVERABLE_REVERIFY_INTERVAL_MS = 10 * 60_000;
@@ -871,6 +880,69 @@ function createGroupTaskEngine(options) {
         await store.kvSet(plannedKey, String(now()));
         await refreshDriverClaim(store, task.id);
     }
+    /**
+     * IDBots roster-settle gate: hold the one-shot planning turn while OpenTeam
+     * invites for this task are still pending, so the chair plans with the full
+     * roster instead of a chair-only one (the live DSH round-trip showed the
+     * plan landing seconds after create, before any remote accept, and the
+     * chair committing to self-execute). Bounded by ROSTER_SETTLE_MAX_WAIT_MS
+     * so a never-answering invitee cannot wedge the task in planning.
+     */
+    async function rosterSettledForPlanning(profile, task) {
+        const openteam = (0, service_1.openteamStoreFor)(ctx, profile);
+        const invites = await openteam.listInvites(task.id).catch(() => []);
+        const pending = invites.filter((invite) => invite.status === 'pending');
+        if (pending.length === 0)
+            return { settled: true };
+        if (now() - task.createdAt >= ROSTER_SETTLE_MAX_WAIT_MS)
+            return { settled: true };
+        return { settled: false, reason: `${pending.length} OpenTeam invite(s) pending` };
+    }
+    /**
+     * Wake the chair when a remote member joined after the plan was made: join
+     * notices are host notices that never wake responders on their own, so the
+     * task would otherwise sit in executing with a chair-only plan. One wake
+     * per join notice (kv-guarded; idempotent across message retries).
+     */
+    async function runRosterChangeWake(input) {
+        const { store, task, message } = input;
+        const wakeKey = `${exports.GROUP_TASK_ROSTER_WAKE_KV_PREFIX}${task.id}:${message.index}`;
+        if (await store.kvGet(wakeKey))
+            return;
+        await store.kvSet(wakeKey, String(now()));
+        const match = OPENTEAM_JOINED_NOTICE_RE.exec(message.content.trim());
+        const joinedName = match?.[1]?.trim() || 'a new remote member';
+        const joinedSkills = (match?.[2] ?? '')
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+        const directive = (0, prompts_1.buildRosterChangeDirective)({
+            task,
+            joinedName,
+            joinedSkills,
+            seats: input.promptSeats,
+            recentMessages: input.recentMessages,
+            nowMs: now(),
+        });
+        const reply = (await runSeatTurn({
+            seat: input.chair,
+            task,
+            promptSeats: input.promptSeats,
+            chairName: input.chairName,
+            ownerGmid: input.ownerGmid,
+            recentMessages: input.recentMessages,
+            target: null,
+            promptOverride: directive,
+        })).trim();
+        if (!reply || (0, tags_1.isNoReplyResponse)(reply))
+            return;
+        await (0, service_1.postGroupTaskMessage)(ctx, input.chairSlug, task.id, {
+            content: reply,
+            replyPin: message.pinId ?? undefined,
+        });
+        await refreshDriverClaim(store, task.id);
+        log(`[GroupTaskEngine] Roster-change wake for task ${task.id} (${joinedName})`);
+    }
     // -------------------------------------------------------------------------
     // Per-task drive
     // -------------------------------------------------------------------------
@@ -897,20 +969,31 @@ function createGroupTaskEngine(options) {
         const page = await store.listMessages(task.groupId, { limit: MESSAGE_FETCH_LIMIT });
         let current = task;
         if (current.status === 'planning' && chair) {
-            try {
-                await runPlanningTurn({
-                    store,
-                    task: current,
-                    chair,
-                    chairSlug: profile.slug,
-                    promptSeats,
-                    ownerGmid,
-                    recentMessages: page.messages,
-                });
+            const settle = await rosterSettledForPlanning(profile, current);
+            if (!settle.settled) {
+                // Log the deferral once per task, not once per tick.
+                const deferredKey = `${exports.GROUP_TASK_PLANNING_DEFERRED_KV_PREFIX}${current.id}`;
+                if (!(await store.kvGet(deferredKey))) {
+                    await store.kvSet(deferredKey, String(now()));
+                    log(`[GroupTaskEngine] Planning deferred for task ${current.id}: ${settle.reason}`);
+                }
             }
-            catch (error) {
-                log(`[GroupTaskEngine] Planning turn failed for task ${current.id}: `
-                    + `${error instanceof Error ? error.message : String(error)}`);
+            else {
+                try {
+                    await runPlanningTurn({
+                        store,
+                        task: current,
+                        chair,
+                        chairSlug: profile.slug,
+                        promptSeats,
+                        ownerGmid,
+                        recentMessages: page.messages,
+                    });
+                }
+                catch (error) {
+                    log(`[GroupTaskEngine] Planning turn failed for task ${current.id}: `
+                        + `${error instanceof Error ? error.message : String(error)}`);
+                }
             }
         }
         const pending = page.messages.filter((message) => message.index > current.lastProcessedIndex);
@@ -924,6 +1007,28 @@ function createGroupTaskEngine(options) {
                 if (current.status === 'done' || current.status === 'cancelled') {
                     await store.updateTaskCursor(current.id, message.index);
                     break;
+                }
+                // Remote joins never wake responders on their own (host notices are
+                // skipped by decideGroupTaskResponders); after the plan already ran,
+                // a join is exactly when the chair must re-dispatch.
+                if (chair
+                    && (current.status === 'executing' || current.status === 'review')
+                    && (0, tags_1.isHostNotice)(message.content)
+                    && message.content.includes('[GROUP_TASK_NOTICE:openteam_joined]')) {
+                    await runRosterChangeWake({
+                        store,
+                        task: current,
+                        message,
+                        chair,
+                        chairSlug: profile.slug,
+                        promptSeats,
+                        chairName,
+                        ownerGmid,
+                        recentMessages: page.messages.filter((entry) => entry.index <= message.index),
+                    }).catch((error) => {
+                        log(`[GroupTaskEngine] Roster-change wake failed for task ${current.id}: `
+                            + `${error instanceof Error ? error.message : String(error)}`);
+                    });
                 }
                 const decisions = (0, tags_1.decideGroupTaskResponders)({
                     message,

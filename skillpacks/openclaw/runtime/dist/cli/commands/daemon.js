@@ -18,5 +18,12 @@ async function runDaemonCommand(args, context) {
         }
         return handler();
     }
+    if (args[0] === 'restart') {
+        const handler = context.dependencies.daemon?.restart;
+        if (!handler) {
+            return (0, commandResult_1.commandFailed)('not_implemented', 'Daemon restart handler is not configured.');
+        }
+        return handler();
+    }
     return (0, helpers_1.commandUnknownSubcommand)(`daemon ${args.join(' ')}`.trim());
 }

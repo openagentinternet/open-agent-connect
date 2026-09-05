@@ -22,6 +22,7 @@ const conversations_1 = require("./commands/conversations");
 const memory_1 = require("./commands/memory");
 const chainhistory_1 = require("./commands/chainhistory");
 const dream_1 = require("./commands/dream");
+const knowledge_base_1 = require("./commands/knowledge-base");
 const schedule_1 = require("./commands/schedule");
 const twin_1 = require("./commands/twin");
 const file_1 = require("./commands/file");
@@ -130,6 +131,9 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'dream':
                     result = await (0, dream_1.runDreamCommand)(rest, context);
+                    break;
+                case 'knowledge-base':
+                    result = await (0, knowledge_base_1.runKnowledgeBaseCommand)(rest, context);
                     break;
                 case 'schedule':
                     result = await (0, schedule_1.runScheduleCommand)(rest, context);

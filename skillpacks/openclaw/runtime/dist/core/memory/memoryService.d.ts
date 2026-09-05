@@ -3,6 +3,7 @@ import { type DreamStore } from './dreamStore';
 import { type ExperienceStore } from './experienceStore';
 import { type ImpressionStore } from './impressionStore';
 import { type KnowledgeStore } from './knowledgeStore';
+import type { KnowledgeBaseStore } from '../knowledgebase/store';
 import { type ResolvedMemoryScopes } from './memoryScopeResolver';
 import { type MemoryPolicyStore } from './memoryPolicy';
 import { type MemoryStore } from './memoryStore';
@@ -29,6 +30,7 @@ export declare function buildMemoryBlocksForRequest(paths: MetabotPaths, input: 
     policy?: MemoryPolicyStore;
     dream?: DreamStore;
     knowledge?: KnowledgeStore;
+    knowledgeBases?: KnowledgeBaseStore;
     experience?: ExperienceStore;
     impressions?: ImpressionStore;
 }): Promise<MemoryBlocksResult>;

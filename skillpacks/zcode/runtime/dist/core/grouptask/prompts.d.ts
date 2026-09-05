@@ -58,3 +58,17 @@ export interface BuildPlanningDirectiveInput {
  * [STATUS:EXECUTING]. Does not consume the reply budget or cooldowns.
  */
 export declare function buildPlanningDirective(input: BuildPlanningDirectiveInput): string;
+export interface BuildRosterChangeDirectiveInput {
+    task: Pick<GroupTaskRecord, 'id' | 'title' | 'goal' | 'acceptanceCriteria'>;
+    joinedName: string;
+    joinedSkills: string[];
+    seats: GroupTaskPromptSeat[];
+    recentMessages: GroupTaskMessage[];
+    nowMs?: number;
+}
+/**
+ * Wake-up instruction when a remote member joined after the plan was posted
+ * (the planning turn raced the OpenTeam accepts, or someone joined mid-task).
+ * The chair must reconcile the plan with the current roster in one message.
+ */
+export declare function buildRosterChangeDirective(input: BuildRosterChangeDirectiveInput): string;
