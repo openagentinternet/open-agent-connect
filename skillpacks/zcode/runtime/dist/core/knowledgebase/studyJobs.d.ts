@@ -106,6 +106,30 @@ export interface StudyToolSet {
         pinId?: string;
     }): Promise<string>;
     learnKnowledgeBase(): Promise<string>;
+    listKnowledgeBases(): Promise<string>;
+    queryKnowledgeBases(args: {
+        query: string;
+        knowledgeBaseId?: string;
+    }): Promise<string>;
+    saveProcedure(args: {
+        title: string;
+        steps: string[];
+        pitfalls?: string[];
+        triggerText?: string;
+        sourcePinIds?: string[];
+    }): Promise<string>;
+    recallProcedures(args: {
+        query: string;
+    }): Promise<string>;
+    upsertKnowledge(args: {
+        topic: string;
+        summary: string;
+        kind?: string;
+    }): Promise<string>;
+    recallKnowledge(args: {
+        query?: string;
+        kind?: string;
+    }): Promise<string>;
 }
 export interface StudyLoopDeps {
     /** One LLM completion over the conversation so far; returns model text. */

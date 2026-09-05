@@ -51,7 +51,10 @@ export interface MetabotPaths {
     memoryPolicyPath: string;
     memoryOrchestrationPath: string;
     memoryTranscriptsRoot: string;
+    /** Memory hygiene run ledger (`.runtime/memory/hygiene.json`). */
+    memoryHygienePath: string;
     chainHistoryRoot: string;
+    schedulePath: string;
     llmRoot: string;
     llmRuntimesPath: string;
     llmBindingsPath: string;

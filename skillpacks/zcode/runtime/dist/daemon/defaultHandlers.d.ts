@@ -7,9 +7,11 @@ import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
 import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
 import { type FetchPrivateHistory } from '../core/chat/privateConversation';
+import type { ScheduleStore } from '../core/schedule/store';
 import type { SecretStore } from '../core/secrets/secretStore';
 import type { Signer } from '../core/signing/signer';
 import { uploadLargeFileToChain, type MvcSponsorV2DirectUploadClient, type ProductionLargeFileUploader } from '../core/files/uploadLargeFile';
+import { type TrafficAccountService } from '../core/traffic/trafficAccountService';
 import { createMetaAppManOwnerClient } from '../core/metaapp/manOwnerList';
 import { createSessionStateStore } from '../core/a2a/sessionStateStore';
 import type { PrivateChatAutoReplyConfig } from '../core/chat/privateChatTypes';
@@ -90,6 +92,8 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     providerLargeFileUploader?: ProductionLargeFileUploader | null;
     createProviderLargeFileUploader?: () => ProductionLargeFileUploader;
     createMvcSponsorClient?: () => MvcSponsorV2DirectUploadClient;
+    /** Shared traffic account service (流量); defaults to one instance per daemon process. */
+    trafficAccountService?: TrafficAccountService;
     onProviderPresenceChanged?: (enabled: boolean) => Promise<void> | void;
     onIdentityProfileRegistered?: () => Promise<void> | void;
     onBrowserInfrastructureChanged?: () => Promise<void> | void;
@@ -98,6 +102,16 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     autoReplyConfig?: PrivateChatAutoReplyConfig;
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
     providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
+    /** Scheduled-task verbs: shared per-profile store instances + host leases
+     *  owned by the daemon process (the tick and the routes must mutate the
+     *  same store instances / lease map). */
+    schedule?: {
+        createScheduleStore?: (homeDir: string) => ScheduleStore;
+        hostLeases?: Map<string, {
+            host: string;
+            expiresAtMs: number;
+        }>;
+    };
     providerOrderProgressNoticeIntervalMs?: number;
     testLlmRuntimeReadiness?: typeof testLlmRuntimeReadiness;
     discoverLlmRuntimes?: typeof discoverLlmRuntimes;

@@ -571,6 +571,12 @@ export interface DreamStore {
   writeSelfIdentityMarkdown(text: string): Promise<void>;
   /** Gather one local calendar day's activity from transcripts + A2A stores. */
   gatherActivity(input: { startMs: number; endMs: number }): Promise<DreamDayActivity>;
+  /** Hygiene: hard-delete completed/failed runs and every fragment older than
+   * the retention horizon — pure history the scheduler never reads again. */
+  purgeOldRunsAndFragments(input: { cutoffDateKey: string }): Promise<{
+    runsDeleted: number;
+    fragmentsDeleted: number;
+  }>;
 }
 
 export function createDreamStore(paths: MetabotPaths, deps: {
@@ -791,6 +797,7 @@ export function createDreamStore(paths: MetabotPaths, deps: {
     async gatherActivity({ startMs, endMs }) {
       const sessions: DreamSessionActivity[] = [];
 
+
       // Mirrored DSH transcripts: one session per file.
       let transcriptIds: string[] = [];
       try {
@@ -976,6 +983,26 @@ export function createDreamStore(paths: MetabotPaths, deps: {
         chainWrites,
         chainReads,
       };
+    },
+
+    async purgeOldRunsAndFragments(input) {
+      const cutoffDate = input.cutoffDateKey.trim();
+      if (!cutoffDate) return { runsDeleted: 0, fragmentsDeleted: 0 };
+      return enqueue(async () => {
+        const file = await readRuns();
+        const runsBefore = file.runs.length;
+        const fragmentsBefore = file.fragments.length;
+        file.runs = file.runs.filter((run) => (
+          (run.status !== 'completed' && run.status !== 'failed') || run.dreamDate >= cutoffDate
+        ));
+        file.fragments = file.fragments.filter((fragment) => fragment.dreamDate >= cutoffDate);
+        const runsDeleted = runsBefore - file.runs.length;
+        const fragmentsDeleted = fragmentsBefore - file.fragments.length;
+        if (runsDeleted > 0 || fragmentsDeleted > 0) {
+          await writeJsonAtomic(runsPath, file);
+        }
+        return { runsDeleted, fragmentsDeleted };
+      });
     },
   };
 }

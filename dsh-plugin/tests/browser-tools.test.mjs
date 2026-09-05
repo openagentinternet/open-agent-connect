@@ -158,6 +158,56 @@ test('search_metaapps retries once on abort then returns candidates', async () =
   assert.match(text, new RegExp(`\\[半糖牌局\\]\\(metaapp://${PIN}\\)`))
 })
 
+test('search_online_bots formats CLI presence as markdown links and publishes the catalog', async () => {
+  const { agent, tools } = fakeAgent()
+  const catalogs = []
+  const hub = fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false }))
+  hub.publishCatalog = (apps) => catalogs.push(apps)
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async (args) => {
+      assert.deepEqual(args, ['network', 'bots', '--online', '--limit', '20'])
+      return {
+        ok: true,
+        state: 'success',
+        data: {
+          bots: [{ globalMetaId: 'idq1alice', name: 'TestBot', goal: 'help users', lastSeenAgoSeconds: 12 }],
+        },
+      }
+    },
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const text = await tools.find((tool) => tool.name === 'search_online_bots').execute({}, {})
+  assert.match(text, /\[TestBot\]\(metaid:\/\/idq1alice\)/)
+  assert.match(text, /help users/)
+  assert.match(text, /last seen: 12s/)
+  assert.equal(catalogs.length, 1)
+  assert.deepEqual(catalogs[0], [{ title: 'TestBot', href: 'metaid://idq1alice', uri: 'metaid://idq1alice' }])
+})
+
+test('search_online_bots reports empty presence honestly and publishes no catalog', async () => {
+  const { agent, tools } = fakeAgent()
+  const catalogs = []
+  const hub = fakeHub({ open: false, tabs: [] }, async () => ({ requestId: 'x', ok: false }))
+  hub.publishCatalog = (apps) => catalogs.push(apps)
+  for (const definition of plugin.buildBrowserToolDefinitions({
+    slug: 'alice',
+    hub,
+    cache: plugin.createBrowserSourceCache(),
+    hostAgent: agent,
+    run: async () => ({ ok: true, state: 'success', data: { bots: [] } }),
+  })) {
+    agent.ctx.tools.register(definition)
+  }
+  const text = await tools.find((tool) => tool.name === 'search_online_bots').execute({}, {})
+  assert.match(text, /No online Bots/)
+  assert.equal(catalogs.length, 0)
+})
+
 test('bot_browser_publish_app under policy never requires a same-session preview', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'oac-dsh-publish-never-'))
   await writeFile(join(dir, 'APP.md'), 'A test app.\n', 'utf8')

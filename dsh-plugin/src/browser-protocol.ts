@@ -423,6 +423,41 @@ export function catalogFromMetaAppCandidates(items: readonly MetaAppSearchCandid
   return entries
 }
 
+/** One online Bot row as the CLI `network bots --online` envelope reports it. */
+export type OnlineBotPresence = {
+  globalMetaId: string
+  name?: string
+  goal?: string
+  lastSeenAgoSeconds?: number
+}
+
+/** Human-readable bullet lines for online Bots; bot names stay markdown links. */
+export function formatOnlineBots(items: readonly OnlineBotPresence[]): string {
+  return items.map((item) => {
+    const label = (item.name || item.globalMetaId).replace(/[[\]]/g, '')
+    const goal = item.goal
+      ? ` — ${item.goal.length > 60 ? `${item.goal.slice(0, 60)}…` : item.goal}`
+      : ''
+    const lastSeen = typeof item.lastSeenAgoSeconds === 'number' && Number.isFinite(item.lastSeenAgoSeconds)
+      ? ` (last seen: ${Math.max(0, Math.floor(item.lastSeenAgoSeconds))}s)`
+      : ''
+    return `- [${label}](metaid://${item.globalMetaId})${goal}${lastSeen}`
+  }).join('\n')
+}
+
+/** Catalog entries so the client wraps bot names in replies with clickable Agent-page links. */
+export function catalogFromOnlineBots(items: readonly OnlineBotPresence[]): BrowserCatalogEntry[] {
+  const entries: BrowserCatalogEntry[] = []
+  for (const item of items) {
+    const title = (item.name || '').trim()
+    if (title.length >= 2 && item.globalMetaId) {
+      const uri = `metaid://${item.globalMetaId}`
+      entries.push({ title, href: uri, uri })
+    }
+  }
+  return entries
+}
+
 export function slugifyTitle(title: string): string {
   const slug = title
     .toLowerCase()

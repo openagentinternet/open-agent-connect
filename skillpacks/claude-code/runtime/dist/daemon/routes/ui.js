@@ -17,6 +17,7 @@ const app_8 = require("../../ui/pages/apps/app");
 const app_9 = require("../../ui/pages/metaapps/app");
 const app_10 = require("../../ui/pages/services/app");
 const app_11 = require("../../ui/pages/settings/app");
+const browser_1 = require("@openagentinternet/agent-browser-ui/browser");
 const page_1 = require("../../browser/page");
 const i18n_1 = require("../../ui/i18n");
 const topbarChrome_1 = require("../../ui/topbarChrome");
@@ -246,6 +247,11 @@ async function serveBundledUiAsset(context) {
 }
 const handleUiRoutes = async (context) => {
     const { req, url, handlers } = context;
+    // Browser shell theme: embedding hosts (the DSH Bot Browser sidebar) append
+    // their resolved theme as `?theme=` so the iframe's first paint already
+    // matches; runtime flips arrive as set-theme postMessages and never reload.
+    // Pages opened directly (no param) keep ABC's light default.
+    const browserTheme = (0, browser_1.normalizeBrowserTheme)(url.searchParams.get('theme'));
     const canonicalBareBrowser = canonicalBareBrowserPath(url);
     if (canonicalBareBrowser) {
         if (req.method !== 'GET') {
@@ -263,7 +269,7 @@ const handleUiRoutes = async (context) => {
         }
         const html = handlers.ui?.renderPage
             ? await handlers.ui.renderPage('browser')
-            : await (0, page_1.renderBrowserPageHtml)(undefined, getBrowserLanguagePreference(req));
+            : await (0, page_1.renderBrowserPageHtml)(undefined, getBrowserLanguagePreference(req), { theme: browserTheme });
         context.sendHtml(200, html);
         return true;
     }
@@ -327,7 +333,7 @@ const handleUiRoutes = async (context) => {
     if (page === 'browser') {
         const html = handlers.ui?.renderPage
             ? await handlers.ui.renderPage(page)
-            : await (0, page_1.renderBrowserPageHtml)(undefined, getBrowserLanguagePreference(req));
+            : await (0, page_1.renderBrowserPageHtml)(undefined, getBrowserLanguagePreference(req), { theme: browserTheme });
         context.sendHtml(200, html);
         return true;
     }

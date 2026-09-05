@@ -82,6 +82,7 @@ function normalizeEntry(value) {
         createdAt,
         updatedAt: normalizeFiniteNumber(record.updatedAt, createdAt),
         lastUsedAt: normalizeFiniteNumber(record.lastUsedAt, Number.NaN) || null,
+        archivedAt: normalizeOptionalText(record.archivedAt),
     };
 }
 function normalizeFile(value) {
@@ -238,6 +239,7 @@ function createMemoryStore(paths) {
             createdAt: now,
             updatedAt: now,
             lastUsedAt: null,
+            archivedAt: null,
         };
         addSource(entry, input.source, now);
         file.entries.push(entry);
@@ -261,6 +263,10 @@ function createMemoryStore(paths) {
                 if (!includeDeleted && status === 'all' && entry.status === 'deleted')
                     return false;
                 if (status !== 'all' && entry.status !== status)
+                    return false;
+                // Hygiene-archived rows leave injection and default listings; admin/UI
+                // surfaces opt back in with includeArchived.
+                if (!options.includeArchived && entry.archivedAt != null)
                     return false;
                 if (query && !entry.text.toLowerCase().includes(query))
                     return false;
@@ -411,6 +417,89 @@ function createMemoryStore(paths) {
                     newestSource.isActive = true;
                 await writeFile(file);
                 return true;
+            });
+        },
+        async archiveMemories(input) {
+            const ids = new Set(input.ids.map((id) => id.trim()).filter(Boolean));
+            if (ids.size === 0)
+                return 0;
+            return enqueue(async () => {
+                const file = await readFile();
+                const now = Date.now();
+                let archived = 0;
+                for (const entry of file.entries) {
+                    if (!ids.has(entry.id))
+                        continue;
+                    if (entry.archivedAt != null)
+                        continue;
+                    if (entry.usageClass === 'self_identity' || entry.status !== 'created')
+                        continue;
+                    // The LLM call had an await window: anything edited or injection-
+                    // touched (lastUsedAt/updatedAt bumped) since the inventory snapshot
+                    // must survive the proposal.
+                    if (input.notUsedSince != null && (entry.lastUsedAt ?? entry.updatedAt) > input.notUsedSince)
+                        continue;
+                    entry.archivedAt = input.archivedAt;
+                    entry.updatedAt = now;
+                    archived += 1;
+                }
+                if (archived > 0)
+                    await writeFile(file);
+                return archived;
+            });
+        },
+        async unarchiveMemories(ids) {
+            const idSet = new Set(ids.map((id) => id.trim()).filter(Boolean));
+            if (idSet.size === 0)
+                return 0;
+            return enqueue(async () => {
+                const file = await readFile();
+                let restored = 0;
+                for (const entry of file.entries) {
+                    if (!idSet.has(entry.id) || entry.archivedAt == null)
+                        continue;
+                    entry.archivedAt = null;
+                    entry.updatedAt = Date.now();
+                    restored += 1;
+                }
+                if (restored > 0)
+                    await writeFile(file);
+                return restored;
+            });
+        },
+        async archiveDecayedDreamMemories(input) {
+            const cutoff = Math.floor(input.cutoffMs);
+            return enqueue(async () => {
+                const file = await readFile();
+                let archived = 0;
+                for (const entry of file.entries) {
+                    if (entry.archivedAt != null)
+                        continue;
+                    if (entry.status !== 'created' || entry.origin !== 'dream')
+                        continue;
+                    if (entry.usageClass === 'self_identity')
+                        continue;
+                    if ((entry.lastUsedAt ?? entry.updatedAt) >= cutoff)
+                        continue;
+                    entry.archivedAt = input.archivedAt;
+                    entry.updatedAt = Date.now();
+                    archived += 1;
+                }
+                if (archived > 0)
+                    await writeFile(file);
+                return archived;
+            });
+        },
+        async purgeDeletedMemoryTombstones(cutoffMs) {
+            const cutoff = Math.floor(cutoffMs);
+            return enqueue(async () => {
+                const file = await readFile();
+                const before = file.entries.length;
+                file.entries = file.entries.filter((entry) => (entry.status !== 'deleted' || entry.updatedAt >= cutoff));
+                const purged = before - file.entries.length;
+                if (purged > 0)
+                    await writeFile(file);
+                return purged;
             });
         },
         async addSource(id, scope, sourceInput) {

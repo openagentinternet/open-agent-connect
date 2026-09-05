@@ -186,6 +186,9 @@ export interface MetabotDaemonHttpHandlers {
     detail?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     messages?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     postMessage?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    supervise?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    deleteDeliverable?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    relayDrain?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     close?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     reopen?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     kickMember?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
@@ -225,6 +228,17 @@ export interface MetabotDaemonHttpHandlers {
       local: string;
       signal?: AbortSignal;
     }) => Awaitable<AsyncIterable<unknown>>;
+  };
+  schedule?: {
+    /** Host lease heartbeat: keeps this profile's tasks out of the daemon tick
+     *  while the host is alive. */
+    heartbeat?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    due?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    claim?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    complete?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    list?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    show?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    runs?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
   };
   file?: {
     upload?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;

@@ -198,3 +198,36 @@ test('unknown grouptask methods fail with not-found', async () => {
   assert.equal(result.ok, false)
   assert.equal(result.code, 'not-found')
 })
+
+// ---------------------------------------------------------------------------
+// Phase 2: supervise + deliverable-delete routes
+// ---------------------------------------------------------------------------
+
+test('grouptask/supervise maps to the CLI supervise verb with guards', async () => {
+  const { result, calls } = await capture('grouptask/supervise', {
+    chair: 'twin', taskId: 5, superviseAction: 'nudge', member: 'bob', note: 'quiet too long',
+  })
+  assert.equal(result.ok, true)
+  const { args, options } = calls[0]
+  assert.deepEqual(args.slice(0, 2), ['grouptask', 'supervise'])
+  assert.equal(args[args.indexOf('--action') + 1], 'nudge')
+  assert.equal(args[args.indexOf('--member') + 1], 'bob')
+  assert.equal(args[args.indexOf('--note') + 1], 'quiet too long')
+  assert.ok(options.timeoutMs >= 120_000, 'nudge waits on the chain write')
+
+  const bad = await capture('grouptask/supervise', { chair: 'twin', taskId: 5, superviseAction: 'shout' })
+  assert.equal(bad.result.ok, false)
+  assert.equal(bad.result.code, 'invalid_action')
+})
+
+test('grouptask/deliverable-delete maps the row id and rejects zeros', async () => {
+  const { result, calls } = await capture('grouptask/deliverable-delete', { chair: 'twin', taskId: 5, deliverableId: 12 })
+  assert.equal(result.ok, true)
+  const { args } = calls[0]
+  assert.deepEqual(args.slice(0, 2), ['grouptask', 'deliverable-delete'])
+  assert.equal(args[args.indexOf('--deliverable') + 1], '12')
+
+  const bad = await capture('grouptask/deliverable-delete', { chair: 'twin', taskId: 5 })
+  assert.equal(bad.result.ok, false)
+  assert.equal(bad.result.code, 'missing_deliverable')
+})

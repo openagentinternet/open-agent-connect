@@ -19,6 +19,7 @@ This shared pack installs the host-neutral MetaBot skills into `~/.metabot/skill
 - `metabot-metaapp`
 - `metabot-upload-file`
 - `metabot-wallet-manage`
+- `metabot-schedule`
 
 ## Install
 

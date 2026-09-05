@@ -15,12 +15,15 @@ const buzz_1 = require("./commands/buzz");
 const bot_1 = require("./commands/bot");
 const browser_1 = require("./commands/browser");
 const chain_1 = require("./commands/chain");
+const traffic_1 = require("./commands/traffic");
 const chat_1 = require("./commands/chat");
 const grouptask_1 = require("./commands/grouptask");
 const conversations_1 = require("./commands/conversations");
 const memory_1 = require("./commands/memory");
 const chainhistory_1 = require("./commands/chainhistory");
 const dream_1 = require("./commands/dream");
+const knowledge_base_1 = require("./commands/knowledge-base");
+const schedule_1 = require("./commands/schedule");
 const twin_1 = require("./commands/twin");
 const file_1 = require("./commands/file");
 const trace_1 = require("./commands/trace");
@@ -87,6 +90,9 @@ async function runCli(argv, cliContext = {}) {
                 case 'chain':
                     result = await (0, chain_1.runChainCommand)(rest, context);
                     break;
+                case 'traffic':
+                    result = await (0, traffic_1.runTrafficCommand)(rest, context);
+                    break;
                 case 'daemon':
                     result = await (0, daemon_1.runDaemonCommand)(rest, context);
                     break;
@@ -125,6 +131,12 @@ async function runCli(argv, cliContext = {}) {
                     break;
                 case 'dream':
                     result = await (0, dream_1.runDreamCommand)(rest, context);
+                    break;
+                case 'knowledge-base':
+                    result = await (0, knowledge_base_1.runKnowledgeBaseCommand)(rest, context);
+                    break;
+                case 'schedule':
+                    result = await (0, schedule_1.runScheduleCommand)(rest, context);
                     break;
                 case 'twin':
                     result = await (0, twin_1.runTwinCommand)(rest, context);

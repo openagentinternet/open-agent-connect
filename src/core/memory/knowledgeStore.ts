@@ -292,6 +292,12 @@ export interface KnowledgeStore {
   /** Compact active set handed to the dream prompt for create-vs-revise. */
   listKnowledgeForDream(limit?: number): Promise<DreamKnowledgeView[]>;
   countActive(): Promise<number>;
+  /** Hygiene: per entry keep the newest `keepPerEntry` revisions, physically
+   * drop the rest (live entry and recent undo trail stay). */
+  pruneKnowledgeRevisions(input: { keepPerEntry: number }): Promise<{
+    entriesPruned: number;
+    revisionsDeleted: number;
+  }>;
 }
 
 export function createKnowledgeStore(paths: MetabotPaths): KnowledgeStore {
@@ -544,6 +550,37 @@ export function createKnowledgeStore(paths: MetabotPaths): KnowledgeStore {
     async countActive() {
       const file = await readFile();
       return file.entries.filter((entry) => entry.status === 'active').length;
+    },
+
+    async pruneKnowledgeRevisions(input) {
+      const keep = Math.max(1, Math.min(50, Math.floor(input.keepPerEntry)));
+      return enqueue(async () => {
+        const file = await readFile();
+        let entriesPruned = 0;
+        let revisionsDeleted = 0;
+        for (const entry of file.entries) {
+          if (entry.revisions.length <= keep) continue;
+          const keepIds = new Set(
+            [...entry.revisions]
+              .sort((left, right) => (
+                right.version - left.version
+                || right.createdAt - left.createdAt
+                || left.id.localeCompare(right.id)
+              ))
+              .slice(0, keep)
+              .map((revision) => revision.id),
+          );
+          const before = entry.revisions.length;
+          entry.revisions = entry.revisions.filter((revision) => keepIds.has(revision.id));
+          const removed = before - entry.revisions.length;
+          if (removed > 0) {
+            entriesPruned += 1;
+            revisionsDeleted += removed;
+          }
+        }
+        if (revisionsDeleted > 0) await writeFile(file);
+        return { entriesPruned, revisionsDeleted };
+      });
     },
   };
 }

@@ -215,6 +215,18 @@ export interface OacDshConfig {
     /** Scheduler tick period in minutes (default 10). */
     tickMinutes?: number
   }
+  /** Memory-hygiene tail on the dream scheduler (Phase 6+). */
+  hygiene?: {
+    enabled?: boolean
+  }
+  /** Scheduled-task host claiming (Phase 8+). */
+  schedule?: {
+    enabled?: boolean
+    /** Scheduler tick period in seconds (default 60). */
+    tickSeconds?: number
+    /** Per-run idle watchdog in ms (default 1_800_000, 30 minutes). */
+    runTimeoutMs?: number
+  }
   /** Chain history summary drain: LLM gists for pending ledger records. */
   chainHistory?: {
     summary?: {
@@ -232,6 +244,14 @@ export interface OacDshConfig {
     enabled?: boolean
     /** Delegated worker step watchdog (default 300_000, the IDBots value). */
     stepTimeoutMs?: number
+  }
+  /** Group tasks: source-session relay drain ("哪里发起哪里结束"). */
+  groupTask?: {
+    relay?: {
+      enabled?: boolean
+      /** Drain period in seconds (default 30). */
+      tickSeconds?: number
+    }
   }
   /** User panel + owner binding routes (Phase 5+). */
   user?: {

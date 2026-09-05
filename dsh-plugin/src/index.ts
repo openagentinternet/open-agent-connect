@@ -42,10 +42,13 @@ import { dispatchGroupTaskRoutes } from './grouptask.js'
 import { dispatchMemoryRoutes } from './memory-routes.js'
 import { dispatchKbRoutes, importKbFile } from './kb-routes.js'
 import { applyDreamScheduler } from './dream-scheduler.js'
+import { applyScheduleScheduler } from './schedule-scheduler.js'
 import { applyChainHistorySummaryScheduler } from './chain-history-summary.js'
 import { installMemoryToolsOnAgent } from './memory-tools.js'
 import { installChainHistoryRecallOnAgent } from './chain-history-recall.js'
 import { installTwinOnAgent, liveOacAgents } from './twin-tools.js'
+import { installGroupTaskOnAgent } from './group-task-tools.js'
+import { applyGroupTaskRelayDrain } from './group-task-relay.js'
 import { slugFromPresetId } from './chip-logic.js'
 import { reconcilePresets } from './preset.js'
 import { dispatchSection } from './sections.js'
@@ -477,6 +480,7 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
           const orchestrator = installTwinOnAgent(ctx, agent, slug, {
             stepTimeoutMs: config.twin?.stepTimeoutMs,
           })
+          installGroupTaskOnAgent(agent, slug)
           if (!notifiedBacklogs.has(slug)) {
             notifiedBacklogs.add(slug)
             await orchestrator.clearPendingNotifications(slug)
@@ -503,10 +507,41 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
   bindSimpleNoteToolInstall(ctx)
   bindKnowledgeBaseToolInstall(ctx)
 
+  // Source-session relay: drain group-task milestones back into the chat that
+  // originated each task ("哪里发起哪里结束"), on a host-lifetime timer.
+  if (config.groupTask?.relay?.enabled !== false) {
+    ctx.effect(() => {
+      const drainer = applyGroupTaskRelayDrain(ctx, {
+        tickMs: (config.groupTask?.relay?.tickSeconds ?? 30) * 1000,
+      })
+      return () => drainer.stop()
+    }, 'oac-dsh: group-task relay drain')
+  }
+
   // Nightly dream scheduler: ticks on a timer while the DSH host is alive;
-  // the CLI's due-date arithmetic owns window/catch-up/backoff decisions.
-  if (config.dream?.enabled !== false) {
-    applyDreamScheduler(ctx, { tickMinutes: config.dream?.tickMinutes })
+  // the CLI's due-date arithmetic owns window/catch-up/backoff decisions. The
+  // memory-hygiene tail runs right after each tick's dream pass (config
+  // hygiene.enabled, default on) and stays mounted even when the dream pass
+  // itself is disabled, so hygiene is never coupled to the dream toggle.
+  if (config.dream?.enabled !== false || config.hygiene?.enabled !== false) {
+    applyDreamScheduler(ctx, {
+      tickMinutes: config.dream?.tickMinutes,
+      dreamEnabled: config.dream?.enabled,
+      hygieneEnabled: config.hygiene?.enabled,
+    })
+  }
+
+  // Scheduled-task host claiming: ticks on a timer while the DSH host is
+  // alive, heartbeats each Bot so the daemon tick stands down under the fresh
+  // host lease, and runs claimed `auto`/`host` tasks as new DSH
+  // conversations (the local_worker_delegate session pattern). When the
+  // daemon is unreachable the tick falls back to the `metabot schedule`
+  // CLI verbs — a dead daemon cannot race a claim.
+  if (config.schedule?.enabled !== false) {
+    applyScheduleScheduler(ctx, {
+      tickSeconds: config.schedule?.tickSeconds,
+      runTimeoutMs: config.schedule?.runTimeoutMs,
+    })
   }
 
   // Chain history summary drain: same host-lifetime timer pattern, gated and
@@ -575,7 +610,17 @@ export { dispatchGroupTaskRoutes } from './grouptask.js'
 export { dispatchMemoryRoutes } from './memory-routes.js'
 export { dispatchKbRoutes, importKbFile } from './kb-routes.js'
 export { applyMemoryExtraction, applyMemoryInjection } from './memory-observe.js'
-export { applyDreamScheduler, runDreamSchedulerTick } from './dream-scheduler.js'
+export { applyDreamScheduler, runDreamSchedulerTick, runHygieneTail } from './dream-scheduler.js'
+export {
+  applyScheduleScheduler,
+  createDaemonScheduleTransport,
+  runScheduleSchedulerTick,
+  type ScheduleBotOutcome,
+  type ScheduleDaemonLike,
+  type ScheduleSchedulerOptions,
+  type ScheduleTaskLike,
+  type ScheduleTickDeps,
+} from './schedule-scheduler.js'
 export {
   applyChainHistorySummaryScheduler,
   createDshLlmSummarizerProvider,
@@ -596,6 +641,13 @@ export {
   TWIN_OVERLAY_TEXT,
   WORKER_DELEGATION_SYSTEM_PROMPT,
 } from './twin-tools.js'
+export {
+  buildGroupTaskToolDefinition,
+  createGroupTaskController,
+  GROUP_TASK_SOP_TEXT,
+  installGroupTaskOnAgent,
+} from './group-task-tools.js'
+export { applyGroupTaskRelayDrain } from './group-task-relay.js'
 export { buildMemoryToolDefinitions, installMemoryToolsOnAgent, MEMORY_STRATEGY_TEXT } from './memory-tools.js'
 export {
   buildChainHistoryRecallToolDefinitions,

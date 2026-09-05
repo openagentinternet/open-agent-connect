@@ -21,6 +21,7 @@ import { runMemoryCommand } from './commands/memory';
 import { runChainhistoryCommand } from './commands/chainhistory';
 import { runDreamCommand } from './commands/dream';
 import { runKnowledgeBaseCommand } from './commands/knowledge-base';
+import { runScheduleCommand } from './commands/schedule';
 import { runTwinCommand } from './commands/twin';
 import { runFileCommand } from './commands/file';
 import { runTraceCommand } from './commands/trace';
@@ -139,6 +140,9 @@ export async function runCli(argv: string[], cliContext: CliContext = {}): Promi
           break;
         case 'knowledge-base':
           result = await runKnowledgeBaseCommand(rest, context);
+          break;
+        case 'schedule':
+          result = await runScheduleCommand(rest, context);
           break;
         case 'twin':
           result = await runTwinCommand(rest, context);

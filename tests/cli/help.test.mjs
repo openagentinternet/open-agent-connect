@@ -1294,6 +1294,7 @@ test('runCli machine-readable help resolves every public leaf command to its exa
     ['doctor'],
     ['daemon', 'start'],
     ['daemon', 'stop'],
+    ['daemon', 'restart'],
     ['identity', 'create'],
     ['identity', 'who'],
     ['identity', 'list'],

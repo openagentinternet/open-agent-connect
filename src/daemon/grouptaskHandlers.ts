@@ -15,7 +15,10 @@ import {
   archiveGroupTask,
   closeGroupTask,
   createGroupTask,
+  deleteGroupTaskDeliverableEntry,
+  drainGroupTaskRelay,
   getGroupTaskDetail,
+  getGroupTaskRecord,
   kickGroupTaskMember,
   listGroupTaskMessages,
   listGroupTaskSummaries,
@@ -24,6 +27,7 @@ import {
   reopenGroupTask,
   setGroupTaskMemberStatus,
   setGroupTaskPinned,
+  superviseGroupTask,
   unarchiveGroupTask,
   GroupTaskServiceError,
   type GroupTaskOwnerRef,
@@ -72,6 +76,9 @@ export interface GroupTaskDaemonHandlers {
   detail: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   messages: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   postMessage: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  supervise: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  deleteDeliverable: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
+  relayDrain: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   close: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   reopen: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
   kickMember: (input: Record<string, unknown>) => Promise<MetabotCommandResult<unknown>>;
@@ -353,13 +360,59 @@ export function createGroupTaskDaemonHandlers(
     postMessage: async (body) => {
       const ref = readTaskRef(body);
       if (isFailure(ref)) return ref;
+      // Chair-identity gate (IDBots CHAIR_IDENTITY_CONFIRM_REQUIRED parity):
+      // while the engine drives a non-terminal task, the chair's voice belongs
+      // to the engine. A manual post AS the chair must opt in explicitly.
+      const asSlug = normalizeText(body.asSlug) || undefined;
+      if (asSlug && readBool(body.confirmChair) !== true) {
+        try {
+          const task = await getGroupTaskRecord(ctx, ref.chair, ref.taskId);
+          if (asSlug === task.chairSlug && task.dispatchPausedAt == null
+            && task.status !== 'done' && task.status !== 'cancelled') {
+            return commandFailed(
+              'CHAIR_IDENTITY_CONFIRM_REQUIRED',
+              `Manual chair sends conflict with the engine while task ${ref.taskId} is ${task.status}. `
+              + 'Post as the owner or a worker, or pass confirm_chair to override.',
+            );
+          }
+        } catch {
+          // Task lookup failed: fall through to the normal send path error.
+        }
+      }
       return run(() => postGroupTaskMessage(ctx, ref.chair, ref.taskId, {
-        asSlug: normalizeText(body.asSlug) || undefined,
+        asSlug,
         asOwner: readBool(body.asOwner) ?? false,
         content: normalizeText(body.content),
         replyPin: normalizeText(body.replyPin) || undefined,
         mention: readStringArray(body.mention),
       }));
+    },
+
+    supervise: async (body) => {
+      const ref = readTaskRef(body);
+      if (isFailure(ref)) return ref;
+      const action = normalizeText(body.action);
+      return run(() => superviseGroupTask(ctx, ref.chair, ref.taskId, {
+        action: action as 'nudge' | 'flag' | 'pause' | 'resume',
+        memberSlug: normalizeText(body.memberSlug) || normalizeText(body.slug) || undefined,
+        globalMetaId: normalizeText(body.globalMetaId) || undefined,
+        note: normalizeText(body.note) || undefined,
+      }));
+    },
+
+    deleteDeliverable: async (body) => {
+      const ref = readTaskRef(body);
+      if (isFailure(ref)) return ref;
+      const deliverableId = readInt(body.deliverableId);
+      if (deliverableId == null || deliverableId <= 0) {
+        return commandFailed('missing_deliverable', 'deliverableId must be a positive integer');
+      }
+      return run(() => deleteGroupTaskDeliverableEntry(ctx, ref.chair, ref.taskId, deliverableId));
+    },
+
+    relayDrain: async (body) => {
+      const chair = normalizeText(body.chair) || normalizeText(body.chairSlug) || undefined;
+      return run(async () => ({ relayed: await drainGroupTaskRelay(ctx, chair) }));
     },
 
     close: async (body) => {

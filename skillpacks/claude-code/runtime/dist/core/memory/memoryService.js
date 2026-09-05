@@ -1,7 +1,11 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildMemoryBlocksForRequest = buildMemoryBlocksForRequest;
 exports.applyTurnMemoryExtraction = applyTurnMemoryExtraction;
+const node_path_1 = __importDefault(require("node:path"));
 const chatPersonaLoader_1 = require("../chat/chatPersonaLoader");
 const cognitionContext_1 = require("./cognitionContext");
 const dreamStore_1 = require("./dreamStore");
@@ -10,6 +14,8 @@ const experiencePromptBlocks_1 = require("./experiencePromptBlocks");
 const impressionStore_1 = require("./impressionStore");
 const knowledgePromptBlocks_1 = require("./knowledgePromptBlocks");
 const knowledgeStore_1 = require("./knowledgeStore");
+const promptBlocks_1 = require("../knowledgebase/promptBlocks");
+const service_1 = require("../knowledgebase/service");
 const memoryExtractor_1 = require("./memoryExtractor");
 const memoryJudge_1 = require("./memoryJudge");
 const memoryPromptBlocks_1 = require("./memoryPromptBlocks");
@@ -112,6 +118,7 @@ async function buildMemoryBlocksForRequest(paths, input, stores = {}) {
     // Knowledge hot layer: local (owner) sessions only, matching the IDBots
     // cowork channel — A2A replies do not get the knowledge block.
     let knowledgeXml = '';
+    let knowledgeBasesXml = '';
     if (resolution.ownerReadPolicy === 'all') {
         const knowledgeEntries = await knowledge.listKnowledge({
             status: 'active',
@@ -119,6 +126,19 @@ async function buildMemoryBlocksForRequest(paths, input, stores = {}) {
             touchLastUsed: true,
         });
         knowledgeXml = (0, knowledgePromptBlocks_1.buildKnowledgeBlock)(knowledgeEntries);
+        // Knowledge-base hot layer: which document corpora this bot owns (name,
+        // description, counts) so the model knows where to query and save. The
+        // default KB is ensured right here (IDBots parity: the prompt block
+        // ensures it every turn), so every bot always has a place to save finds
+        // and the block lists it even at 0 documents.
+        if (stores.knowledgeBases) {
+            knowledgeBasesXml = (0, promptBlocks_1.buildKnowledgeBasesPromptBlock)(await stores.knowledgeBases.listKnowledgeBases());
+        }
+        else {
+            const kbService = (0, service_1.createKnowledgeBaseService)(paths);
+            await kbService.ensureDefaultKnowledgeBase(node_path_1.default.basename(paths.profileRoot));
+            knowledgeBasesXml = (0, promptBlocks_1.buildKnowledgeBasesPromptBlock)(await kbService.store.listKnowledgeBases());
+        }
     }
     // Person-anchor cognition block for direct external (A2A 1:1) conversations.
     let cognitionXml = '';
@@ -132,7 +152,7 @@ async function buildMemoryBlocksForRequest(paths, input, stores = {}) {
         }
     }
     return {
-        xml: [scopedXml, experienceXml, knowledgeXml, cognitionXml].filter(Boolean).join('\n\n'),
+        xml: [scopedXml, experienceXml, knowledgeXml, knowledgeBasesXml, cognitionXml].filter(Boolean).join('\n\n'),
         policy,
         resolution,
     };

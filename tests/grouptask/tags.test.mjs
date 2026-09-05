@@ -79,6 +79,33 @@ test('parseGroupTaskTags: full grammar in one message', () => {
   assert.equal(parsed.checkpointResolved, false);
 });
 
+test('parseGroupTaskTags: status tags only count at protocol positions; the last one wins', () => {
+  // The exact live-incident shape (2026-09-05 task 42): a prose mention of
+  // [STATUS:REVIEW] before the real final-line tag must not flip to review.
+  const proseMention = parseGroupTaskTags([
+    '分工如下，完成后我会汇总 [STATUS:REVIEW] 给 owner；',
+    '现在开始执行。',
+    '[STATUS:EXECUTING]',
+  ].join('\n'));
+  assert.equal(proseMention.status, 'executing');
+
+  const proseOnly = parseGroupTaskTags('稍后我会汇总 [STATUS:REVIEW]；上链留 owner 拍板。');
+  assert.equal(proseOnly.status, null, 'a mid-line mention with no real tag transitions nothing');
+
+  const trailing = parseGroupTaskTags('All acceptance criteria met. [STATUS:REVIEW]');
+  assert.equal(trailing.status, 'review', 'a tag ending the final line is honored');
+
+  const lineStart = parseGroupTaskTags('[STATUS:REVIEW] wrapping up.');
+  assert.equal(lineStart.status, 'review');
+
+  const lastWins = parseGroupTaskTags([
+    '[STATUS:EXECUTING]',
+    '…work done…',
+    '[STATUS:REVIEW]',
+  ].join('\n'));
+  assert.equal(lastWins.status, 'review');
+});
+
 test('parseGroupTaskTags: checkpoint open vs resolved are distinct', () => {
   const open = parseGroupTaskTags('[CHECKPOINT: budget approval needed]');
   assert.equal(open.checkpointTopic, 'budget approval needed');

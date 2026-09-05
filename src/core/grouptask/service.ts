@@ -9,6 +9,7 @@
 import { resolveMetabotPaths } from '../state/paths';
 import type { Signer } from '../signing/signer';
 import { createGroupTaskStore, type GroupTaskStore } from './store';
+import { createGroupTaskRelayStore, type GroupTaskRelayStore } from './relayStore';
 import { createOpenTeamStore, type OpenTeamStore } from './openteamStore';
 import { createStaffingStore, type StaffingStore } from './staffingStore';
 import { recordKickImpression, recordTaskCloseImpressions } from './impressions';
@@ -35,8 +36,11 @@ import {
   type GroupTaskMemberWorkStatus,
   type GroupTaskMessage,
   type GroupTaskRecord,
+  type GroupTaskRelayKind,
+  type GroupTaskRelayRow,
   type GroupTaskStatusEventActor,
   type GroupTaskSummary,
+  type GroupTaskSuperviseAction,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -73,6 +77,8 @@ export interface GroupTaskServiceContext {
   openteamStoreForProfile?(profile: GroupTaskProfileRef): OpenTeamStore;
   /** Staffing store seam (tests); default resolves the profile runtime root. */
   staffingStoreForProfile?(profile: GroupTaskProfileRef): StaffingStore;
+  /** Relay store seam (tests); default resolves the profile runtime root. */
+  relayStoreForProfile?(profile: GroupTaskProfileRef): GroupTaskRelayStore;
   /**
    * Send an ECDH private message (/protocols/simplemsg) from a local profile.
    * Wired by the daemon (peer chat pubkey resolver + profile signer); absent
@@ -359,6 +365,7 @@ export async function createGroupTask(
     chairGlobalMetaId: chair.globalMetaId,
     createdBy: input.createdBy ?? 'user',
     createPinId: pinId,
+    sourceSessionId: input.sourceSessionId ?? null,
   });
 
   // Chair is implicitly a member via the create pin.
@@ -430,6 +437,9 @@ export async function createGroupTask(
       + `${error instanceof Error ? error.message : String(error)}`,
     );
   }
+
+  await emitGroupTaskRelay(ctx, chair, task, 'created',
+    `Task created and the on-chain group is open. The engine posts the kickoff and runs planning next.`);
 
   return { chairSlug: chair.slug, task: await getGroupTaskDetail(ctx, chair.slug, task.id) };
 }
@@ -617,6 +627,7 @@ export async function getGroupTaskDetail(
     stallAfterMinutes: stall.stallAfterMinutes,
     statusEvents: await store.listStatusEvents(taskId),
     checkpoints,
+    supervisorSignals: await store.listSupervisorSignals(taskId),
     acceptanceSummary: await store.getLatestAcceptanceSummary(taskId),
     openCheckpointSummary,
     openTeam: members.some((member) => member.slug == null),
@@ -763,6 +774,11 @@ export async function closeGroupTask(
       + `${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  await emitGroupTaskRelay(ctx, chair, closed, 'closed',
+    `Task closed as ${opts.status}`
+    + (opts.rating ? ` · owner rating ${opts.rating}/5` : '')
+    + (opts.ratingComment ? ` · "${opts.ratingComment}"` : '')
+    + (opts.status === 'done' ? ' — thank the members and wrap up.' : ''));
   return getGroupTaskDetail(ctx, chairSlug, taskId, { sync: false });
 }
 
@@ -803,6 +819,238 @@ export async function reopenGroupTask(
     );
   }
   return getGroupTaskDetail(ctx, chairSlug, taskId, { sync: false });
+}
+
+// ---------------------------------------------------------------------------
+// Source-session relay ("哪里发起哪里结束")
+// ---------------------------------------------------------------------------
+
+/** Relay store for a profile (memoization unnecessary: rows are append/drain). */
+export function relayStoreFor(ctx: GroupTaskServiceContext, profile: GroupTaskProfileRef): GroupTaskRelayStore {
+  if (ctx.relayStoreForProfile) return ctx.relayStoreForProfile(profile);
+  return createGroupTaskRelayStore(resolveMetabotPaths(profile.homeDir));
+}
+
+/** Engine kv carrying a pending owner nudge (supervise → engine chair turn). */
+export const GROUP_TASK_NUDGE_REQUEST_KV_PREFIX = 'group_task_nudge_request:';
+
+/**
+ * Record one milestone row for the origin chat. Tasks created outside the
+ * staffing flow have no source session and never emit. Best-effort: relay
+ * failures must never fail the underlying task operation.
+ */
+export async function emitGroupTaskRelay(
+  ctx: GroupTaskServiceContext,
+  chair: GroupTaskProfileRef,
+  task: GroupTaskRecord,
+  kind: GroupTaskRelayKind,
+  text: string,
+): Promise<void> {
+  const sessionId = task.sourceSessionId?.trim();
+  if (!sessionId) return;
+  try {
+    await relayStoreFor(ctx, chair).add({
+      taskId: task.id,
+      groupId: task.groupId,
+      sessionId,
+      kind,
+      title: task.title,
+      text,
+    });
+  } catch (error) {
+    logOf(ctx)(
+      `[GroupTask] Relay emit failed for task ${task.id} (${kind}): `
+      + `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export interface DrainedGroupTaskRelayRow extends GroupTaskRelayRow {
+  chairSlug: string;
+}
+
+/**
+ * Drain pending relay rows across every profile (or one chair): returns the
+ * rows and marks them drained atomically per profile. The DSH host calls this
+ * on a timer and injects the rows into their origin sessions.
+ */
+export async function drainGroupTaskRelay(
+  ctx: GroupTaskServiceContext,
+  chairSlug?: string,
+): Promise<DrainedGroupTaskRelayRow[]> {
+  const profiles = chairSlug?.trim()
+    ? [await requireProfile(ctx, chairSlug.trim())]
+    : await ctx.listProfiles();
+  const drained: DrainedGroupTaskRelayRow[] = [];
+  for (const profile of profiles) {
+    try {
+      const rows = await relayStoreFor(ctx, profile).drain();
+      for (const row of rows) drained.push({ ...row, chairSlug: profile.slug });
+    } catch (error) {
+      logOf(ctx)(
+        `[GroupTask] Relay drain failed for profile ${profile.slug}: `
+        + `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return drained.sort((left, right) => left.createdAt - right.createdAt);
+}
+
+// ---------------------------------------------------------------------------
+// Owner supervision (IDBots supervise parity): nudge / flag / pause / resume
+// ---------------------------------------------------------------------------
+
+export interface SuperviseGroupTaskInput {
+  action: GroupTaskSuperviseAction;
+  memberSlug?: string;
+  globalMetaId?: string;
+  note?: string;
+}
+
+export interface SuperviseGroupTaskResult {
+  task: GroupTaskRecord;
+  action: GroupTaskSuperviseAction;
+  notice: string | null;
+  /** Set for nudge: the engine consumes this kv and runs the chair wake turn. */
+  nudgeQueued: boolean;
+}
+
+/**
+ * Owner-side supervision. `nudge` queues a directive-driven chair turn (the
+ * engine @-mentions the idle member); `flag` records an observation for the
+ * acceptance stage; `pause`/`resume` gate the engine's dispatcher. All actions
+ * are owner-authority, visible in-group through host supervisor notices.
+ */
+export async function superviseGroupTask(
+  ctx: GroupTaskServiceContext,
+  chairSlug: string,
+  taskId: number,
+  input: SuperviseGroupTaskInput,
+): Promise<SuperviseGroupTaskResult> {
+  const action = input.action;
+  if (!['nudge', 'flag', 'pause', 'resume'].includes(action)) {
+    throw new GroupTaskServiceError('invalid_action', "action must be 'nudge', 'flag', 'pause', or 'resume'");
+  }
+  const chair = await requireProfile(ctx, chairSlug);
+  const store = storeFor(ctx, chair);
+  const task = await requireTask(store, taskId);
+  if (GROUP_TASK_TERMINAL_STATUSES.has(task.status)) {
+    throw new GroupTaskServiceError('already_closed', `Group task ${taskId} is already ${task.status}`);
+  }
+
+  if (action === 'pause') {
+    if (task.dispatchPausedAt != null) {
+      return { task, action, notice: null, nudgeQueued: false };
+    }
+    const updated = await store.setTaskDispatchPaused(taskId, Date.now());
+    await store.addSupervisorSignal({ taskId, signalType: action, note: input.note });
+    const notice = '[GROUP_TASK_NOTICE:supervisor] Task paused by the owner — '
+      + 'dispatch is suspended until they resume it.';
+    await postGroupTaskMessage(ctx, chairSlug, taskId, { content: notice }).catch(() => undefined);
+    await emitGroupTaskRelay(ctx, chair, updated, 'paused', 'The owner paused this task; dispatch is suspended.');
+    return { task: updated, action, notice, nudgeQueued: false };
+  }
+
+  if (action === 'resume') {
+    if (task.dispatchPausedAt == null) {
+      return { task, action, notice: null, nudgeQueued: false };
+    }
+    const updated = await store.setTaskDispatchPaused(taskId, null);
+    await store.addSupervisorSignal({ taskId, signalType: action, note: input.note });
+    const notice = '[GROUP_TASK_NOTICE:supervisor] Task resumed by the owner — work continues.';
+    await postGroupTaskMessage(ctx, chairSlug, taskId, { content: notice }).catch(() => undefined);
+    // The chair must re-engage the roster: queue a resume wake turn.
+    await store.kvSet(`${GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${taskId}`, JSON.stringify({
+      kind: 'resume',
+      at: Date.now(),
+      attempts: 0,
+    }));
+    await emitGroupTaskRelay(ctx, chair, updated, 'resumed', 'The owner resumed this task; work continues.');
+    return { task: updated, action, notice, nudgeQueued: true };
+  }
+
+  // nudge + flag address a member (nudge) or the whole room (flag).
+  const members = await store.listMembers(taskId);
+  let member: GroupTaskMember | null = null;
+  const memberSlug = input.memberSlug?.trim();
+  const globalMetaId = input.globalMetaId?.trim();
+  if (memberSlug || globalMetaId) {
+    member = members.find((entry) => (memberSlug
+      ? entry.slug === memberSlug
+      : (entry.globalMetaId ?? '').trim().toLowerCase() === (globalMetaId ?? '').toLowerCase())) ?? null;
+    if (!member) {
+      throw new GroupTaskServiceError('member_not_found', `Member not found in group task ${taskId}`);
+    }
+  }
+  if (action === 'flag') {
+    const note = input.note?.trim() || '';
+    const signal = await store.addSupervisorSignal({
+      taskId,
+      signalType: action,
+      memberGlobalMetaId: member?.globalMetaId ?? null,
+      memberName: member?.displayName ?? null,
+      note,
+    });
+    const notice = `[GROUP_TASK_NOTICE:supervisor] Owner observation recorded`
+      + `${member?.displayName ? ` on ${member.displayName}` : ''}${note ? `: ${note}` : '.'}`;
+    await postGroupTaskMessage(ctx, chairSlug, taskId, { content: notice }).catch(() => undefined);
+    return { task, action, notice, nudgeQueued: false };
+  }
+
+  // nudge: default target = the least-recently-active non-standby worker.
+  const target = member ?? members
+    .filter((entry) => entry.role === 'worker' && entry.status !== 'standby')
+    .sort((left, right) => (left.statusChangedAt ?? left.createdAt) - (right.statusChangedAt ?? right.createdAt))[0]
+    ?? null;
+  if (!target) {
+    throw new GroupTaskServiceError('no_member_to_nudge', 'No worker member available to nudge');
+  }
+  await store.addSupervisorSignal({
+    taskId,
+    signalType: action,
+    memberGlobalMetaId: target.globalMetaId,
+    memberName: target.displayName,
+    note: input.note,
+  });
+  const nudge = {
+    kind: 'nudge' as const,
+    memberSlug: target.slug,
+    globalMetaId: target.globalMetaId,
+    name: target.displayName ?? target.slug ?? target.globalMetaId,
+    note: input.note?.trim() || null,
+    at: Date.now(),
+    attempts: 0,
+  };
+  await store.kvSet(`${GROUP_TASK_NUDGE_REQUEST_KV_PREFIX}${taskId}`, JSON.stringify(nudge));
+  return { task, action, notice: null, nudgeQueued: true };
+}
+
+// ---------------------------------------------------------------------------
+// Deliverables: owner ledger maintenance
+// ---------------------------------------------------------------------------
+
+/** Lightweight task record read (manual-send gating and similar checks). */
+export async function getGroupTaskRecord(
+  ctx: GroupTaskServiceContext,
+  chairSlug: string,
+  taskId: number,
+): Promise<GroupTaskRecord> {
+  const chair = await requireProfile(ctx, chairSlug);
+  const store = storeFor(ctx, chair);
+  return requireTask(store, taskId);
+}
+
+/** Owner-side ledger maintenance: drop a mis-reported deliverable row. */
+export async function deleteGroupTaskDeliverableEntry(
+  ctx: GroupTaskServiceContext,
+  chairSlug: string,
+  taskId: number,
+  deliverableId: number,
+): Promise<{ deleted: boolean }> {
+  const chair = await requireProfile(ctx, chairSlug);
+  const store = storeFor(ctx, chair);
+  await requireTask(store, taskId);
+  return { deleted: await store.deleteDeliverable(deliverableId) };
 }
 
 // ---------------------------------------------------------------------------

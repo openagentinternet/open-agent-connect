@@ -697,6 +697,24 @@ function createDreamStore(paths, deps = {}) {
                 chainReads,
             };
         },
+        async purgeOldRunsAndFragments(input) {
+            const cutoffDate = input.cutoffDateKey.trim();
+            if (!cutoffDate)
+                return { runsDeleted: 0, fragmentsDeleted: 0 };
+            return enqueue(async () => {
+                const file = await readRuns();
+                const runsBefore = file.runs.length;
+                const fragmentsBefore = file.fragments.length;
+                file.runs = file.runs.filter((run) => ((run.status !== 'completed' && run.status !== 'failed') || run.dreamDate >= cutoffDate));
+                file.fragments = file.fragments.filter((fragment) => fragment.dreamDate >= cutoffDate);
+                const runsDeleted = runsBefore - file.runs.length;
+                const fragmentsDeleted = fragmentsBefore - file.fragments.length;
+                if (runsDeleted > 0 || fragmentsDeleted > 0) {
+                    await writeJsonAtomic(runsPath, file);
+                }
+                return { runsDeleted, fragmentsDeleted };
+            });
+        },
     };
 }
 /** sha256 fingerprint of one fragment's source content (resumability anchor). */

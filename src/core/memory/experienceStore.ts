@@ -37,6 +37,8 @@ export interface ExperienceEpisode {
   metadata: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
+  /** Hygiene soft-archive mark (ISO 8601); archived episodes leave hot paths. */
+  archivedAt: string | null;
 }
 
 export interface ExperienceParticipant {
@@ -206,6 +208,7 @@ function normalizeEpisode(value: unknown): ExperienceFile['episodes'][number] | 
     metadata: normalizeMetadata(record.metadata),
     createdAt: num(record.createdAt),
     updatedAt: num(record.updatedAt),
+    archivedAt: text(record.archivedAt) || null,
     participants: Array.isArray(record.participants)
       ? record.participants.map(normalizeParticipant).filter((p): p is ExperienceParticipant => p !== null)
       : [],
@@ -234,6 +237,8 @@ export interface ExperienceStore {
     subjectGlobalMetaId?: string;
     fromTime?: number;
     toTime?: number;
+    /** When set, hygiene-archived episodes join the listing (default excludes them). */
+    includeArchived?: boolean;
     limit?: number;
   }): Promise<ExperienceEpisode[]>;
   listParticipants(episodeId: string): Promise<ExperienceParticipant[]>;
@@ -242,6 +247,17 @@ export interface ExperienceStore {
     toTime?: number;
     limit?: number;
   }): Promise<ExperienceEvidence[]>;
+  /** Hygiene: soft-archive terminal episodes past the retention horizon. */
+  archiveEpisodes(input: { cutoffMs: number; archivedAt: string }): Promise<number>;
+  /** Hygiene: settle open episodes whose source of truth already reached a
+   * terminal state — orders completed/refunded/failed, group tasks
+   * done/cancelled, direct interactions dormant past the cutoff. Idempotent:
+   * terminal rows are never re-touched. */
+  reconcileOpenEpisodes(input: { nowMs: number; dormantCutoffMs: number }): Promise<{
+    serviceOrdersSettled: number;
+    taskEpisodesSettled: number;
+    dormantInteractionsClosed: number;
+  }>;
 }
 
 export function createExperienceStore(paths: MetabotPaths): ExperienceStore {
@@ -291,6 +307,54 @@ export function createExperienceStore(paths: MetabotPaths): ExperienceStore {
     return rest;
   }
 
+  /** Terminal seller-order states from runtime-state.json, keyed by the
+   * episode sourceKey (`order:<id>`). Best effort: missing/corrupt file
+   * yields an empty map and those episodes wait for the next pass. */
+  async function readTerminalOrderStates(): Promise<Map<string, 'completed' | 'failed'>> {
+    const states = new Map<string, 'completed' | 'failed'>();
+    try {
+      const parsed = JSON.parse(await fs.readFile(paths.runtimeStatePath, 'utf8')) as Record<string, unknown>;
+      const orders = Array.isArray(parsed.sellerOrders) ? parsed.sellerOrders as Record<string, unknown>[] : [];
+      for (const order of orders) {
+        const id = text(order.id);
+        if (!id) continue;
+        const state = text(order.state);
+        if (state === 'failed') states.set(`order:${id}`, 'failed');
+        else if (state === 'completed' || state === 'refunded') states.set(`order:${id}`, 'completed');
+      }
+    } catch {
+      // Best effort: a missing/corrupt runtime state leaves orders unreconciled.
+    }
+    return states;
+  }
+
+  /** Terminal group-task states from `.runtime/grouptask/state.json`, keyed by
+   * task id (episodes carry `taskId`). Best effort like readTerminalOrderStates. */
+  async function readTerminalTaskStates(): Promise<Map<string, 'completed' | 'abandoned'>> {
+    const states = new Map<string, 'completed' | 'abandoned'>();
+    try {
+      const parsed = JSON.parse(
+        await fs.readFile(path.join(paths.runtimeRoot, 'grouptask', 'state.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      const tasks = Array.isArray(parsed.tasks) ? parsed.tasks as Record<string, unknown>[] : [];
+      for (const task of tasks) {
+        if (task.id === undefined || task.id === null) continue;
+        const status = text(task.status);
+        if (status === 'cancelled') states.set(String(task.id), 'abandoned');
+        else if (status === 'done') states.set(String(task.id), 'completed');
+      }
+    } catch {
+      // Best effort.
+    }
+    return states;
+  }
+
+  /** Newest evidence timestamp for an episode — the source-of-truth anchor for
+   * when an open episode actually went quiet (IDBots `COALESCE(MAX(ev.occurred_at), …)`). */
+  function newestEvidenceAt(episode: ExperienceFile['episodes'][number]): number {
+    return episode.evidence.reduce((max, evidence) => Math.max(max, evidence.occurredAt || 0), 0);
+  }
+
   return {
     async createEpisode(input) {
       return enqueue(async () => {
@@ -305,7 +369,17 @@ export function createExperienceStore(paths: MetabotPaths): ExperienceStore {
           && episode.sourceChannel === sourceChannel
           && episode.sourceKey === sourceKey
         ));
-        if (existing) return strip(existing);
+        if (existing) {
+          // Recurring activity on the same source key revives a
+          // hygiene-archived episode — new evidence means the episode is hot
+          // again, not a ghost row that stays invisible to hot paths.
+          if (existing.archivedAt != null) {
+            existing.archivedAt = null;
+            existing.updatedAt = Date.now();
+            await writeFile(file);
+          }
+          return strip(existing);
+        }
         const now = Date.now();
         const episode: ExperienceFile['episodes'][number] = {
           id: `ep_${crypto.randomUUID()}`,
@@ -323,6 +397,7 @@ export function createExperienceStore(paths: MetabotPaths): ExperienceStore {
           metadata: normalizeMetadata(input.metadata),
           createdAt: now,
           updatedAt: now,
+          archivedAt: null,
           participants: [],
           evidence: [],
         };
@@ -423,6 +498,9 @@ export function createExperienceStore(paths: MetabotPaths): ExperienceStore {
         if (owner && episode.ownerGlobalMetaId !== owner) return false;
         if (options.fromTime !== undefined && episode.startedAt < options.fromTime) return false;
         if (options.toTime !== undefined && episode.startedAt >= options.toTime) return false;
+        // Hygiene-archived episodes leave hot paths (dream candidates, contact
+        // views, cognition context); explicit recall opts back in.
+        if (!options.includeArchived && episode.archivedAt != null) return false;
         if (subject && !episode.participants.some((participant) => participant.globalMetaId === subject)) return false;
         return true;
       });
@@ -448,6 +526,73 @@ export function createExperienceStore(paths: MetabotPaths): ExperienceStore {
       });
       filtered.sort((left, right) => right.occurredAt - left.occurredAt || left.id.localeCompare(right.id));
       return filtered.slice(0, limit);
+    },
+
+    async archiveEpisodes(input) {
+      const cutoff = Math.floor(input.cutoffMs);
+      return enqueue(async () => {
+        const file = await readFile();
+        let archived = 0;
+        for (const episode of file.episodes) {
+          if (episode.archivedAt != null) continue;
+          if (episode.status !== 'completed' && episode.status !== 'failed' && episode.status !== 'abandoned') continue;
+          const anchor = episode.endedAt ?? episode.startedAt ?? episode.createdAt;
+          if (anchor >= cutoff) continue;
+          episode.archivedAt = input.archivedAt;
+          episode.updatedAt = Date.now();
+          archived += 1;
+        }
+        if (archived > 0) await writeFile(file);
+        return archived;
+      });
+    },
+
+    async reconcileOpenEpisodes(input) {
+      const now = Math.floor(input.nowMs);
+      const dormantCutoff = Math.floor(input.dormantCutoffMs);
+      return enqueue(async () => {
+        const file = await readFile();
+        const orderStates = await readTerminalOrderStates();
+        const taskStates = await readTerminalTaskStates();
+        let serviceOrdersSettled = 0;
+        let taskEpisodesSettled = 0;
+        let dormantInteractionsClosed = 0;
+        for (const episode of file.episodes) {
+          if (episode.status !== 'open' || episode.archivedAt != null) continue;
+          if (episode.episodeType === 'service_order') {
+            const terminal = orderStates.get(episode.sourceKey);
+            if (!terminal) continue;
+            episode.status = terminal;
+            episode.endedAt = newestEvidenceAt(episode) || episode.startedAt || episode.createdAt;
+            episode.updatedAt = now;
+            serviceOrdersSettled += 1;
+            continue;
+          }
+          if (episode.episodeType === 'task_participation') {
+            const terminal = episode.taskId ? taskStates.get(episode.taskId) : undefined;
+            if (!terminal) continue;
+            episode.status = terminal;
+            episode.endedAt = newestEvidenceAt(episode) || episode.startedAt || episode.createdAt;
+            episode.updatedAt = now;
+            taskEpisodesSettled += 1;
+            continue;
+          }
+          if (episode.episodeType === 'direct_interaction') {
+            if (episode.startedAt >= dormantCutoff) continue;
+            const lastActivity = newestEvidenceAt(episode);
+            if (lastActivity >= dormantCutoff) continue;
+            episode.status = 'completed';
+            episode.endedAt = lastActivity || episode.startedAt || episode.createdAt;
+            episode.updatedAt = now;
+            dormantInteractionsClosed += 1;
+            continue;
+          }
+        }
+        if (serviceOrdersSettled + taskEpisodesSettled + dormantInteractionsClosed > 0) {
+          await writeFile(file);
+        }
+        return { serviceOrdersSettled, taskEpisodesSettled, dormantInteractionsClosed };
+      });
     },
   };
 }

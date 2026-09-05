@@ -86,8 +86,11 @@ function buildMetabotPaths(input) {
         memoryPolicyPath: node_path_1.default.join(memoryRoot, 'policy.json'),
         memoryOrchestrationPath: node_path_1.default.join(memoryRoot, 'orchestration.json'),
         memoryTranscriptsRoot: node_path_1.default.join(memoryRoot, 'transcripts'),
+        memoryHygienePath: node_path_1.default.join(memoryRoot, 'hygiene.json'),
         // Per-bot chain history store root (`.runtime/chain-history/`).
         chainHistoryRoot: node_path_1.default.join(input.runtimeRoot, 'chain-history'),
+        // Per-bot scheduled-task store (`.runtime/schedule/schedule.json`).
+        schedulePath: node_path_1.default.join(input.runtimeRoot, 'schedule', 'schedule.json'),
         // LLM paths.
         llmRoot: input.llmRoot,
         llmRuntimesPath: input.llmRuntimesPath,
