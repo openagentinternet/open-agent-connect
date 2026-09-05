@@ -41,7 +41,7 @@ test('relay drain delivers into the live origin session exactly once', async () 
     session: { id: 'sess-origin' },
     followup: (message) => delivered.push(message),
   })
-  const drainer = plugin.applyGroupTaskRelayDrain(ctx, { run: async () => ({ ok: true, data: { relayed: rows } }) })
+  const drainer = plugin.applyGroupTaskRelayDrain(ctx, { daemonAlive: async () => true, run: async () => ({ ok: true, data: { relayed: rows } }) })
   const count = await drainer.drainOnce()
   assert.equal(count, 2)
   assert.equal(delivered.length, 2)
@@ -57,7 +57,7 @@ test('relay drain delivers into the live origin session exactly once', async () 
 
 test('relay rows for closed sessions wait and inject on the next turn', async () => {
   const { ctx, preStepHandlers } = fakeCtx()
-  const drainer = plugin.applyGroupTaskRelayDrain(ctx, { run: async () => ({ ok: true, data: { relayed: [row()] } }) })
+  const drainer = plugin.applyGroupTaskRelayDrain(ctx, { daemonAlive: async () => true, run: async () => ({ ok: true, data: { relayed: [row()] } }) })
   await drainer.drainOnce()
 
   assert.equal(preStepHandlers.length, 1, 'pre-step waterfall mounted')

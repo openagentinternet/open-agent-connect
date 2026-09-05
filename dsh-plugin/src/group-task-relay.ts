@@ -9,6 +9,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import { liveOacAgents } from './twin-tools.js'
 import type {
   HostContext,
@@ -36,6 +37,8 @@ const READ_TIMEOUT_MS = 60_000
 export interface GroupTaskRelayOptions {
   run?: RunFn
   tickMs?: number
+  /** Daemon liveness probe override (tests). */
+  daemonAlive?: () => Promise<boolean>
 }
 
 export interface GroupTaskRelayDrainer {
@@ -63,6 +66,7 @@ export function applyGroupTaskRelayDrain(
 ): GroupTaskRelayDrainer {
   const run = options.run ?? runMetabot
   const tickMs = options.tickMs ?? DEFAULT_TICK_MS
+  const daemonAlive = options.daemonAlive ?? daemonAliveByHttp
   /** Rows that could not be delivered live, keyed by origin session id. */
   const pendingBySession = new Map<string, string[]>()
   /** Delivered-row dedupe across scheduler ticks and pre-step races. */
@@ -88,7 +92,20 @@ export function applyGroupTaskRelayDrain(
     return false
   }
 
+  /** Raw-HTTP daemon probe: never auto-start a daemon from a poller. */
+  async function daemonAliveByHttp(): Promise<boolean> {
+    try {
+      const base = await resolveDaemonBaseUrl()
+      if (!base) return false
+      const response = await fetch(`${base}/api/grouptask/health`, { signal: AbortSignal.timeout(2_500) })
+      return response.ok
+    } catch {
+      return false
+    }
+  }
+
   async function drainOnce(): Promise<number> {
+    if (!(await daemonAlive())) return 0
     const result: MetabotCommandResult = await run(['grouptask', 'relay', 'drain'], {
       timeoutMs: READ_TIMEOUT_MS,
     })

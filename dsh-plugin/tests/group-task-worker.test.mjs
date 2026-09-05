@@ -89,7 +89,7 @@ function harness(options = {}) {
 
 test('worker session: claim → ACK → sub-session → handoff submitted on-chain', async () => {
   const h = harness()
-  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { run: h.run, pollMs: 600_000 })
+  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { daemonAlive: async () => true, run: h.run, pollMs: 600_000 })
   const worked = await runner.claimOnce()
   console.error('DEBUG calls:', JSON.stringify(h.calls))
   console.error('DEBUG worked:', worked)
@@ -119,7 +119,7 @@ test('worker session: claim → ACK → sub-session → handoff submitted on-cha
 
 test('worker session: empty handoff fails the request with WORKER_EMPTY_HANDOFF', async () => {
   const h = harness({ handoffText: '' })
-  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { run: h.run, pollMs: 600_000 })
+  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { daemonAlive: async () => true, run: h.run, pollMs: 600_000 })
   await runner.claimOnce()
   assert.equal(h.submits.length, 1)
   assert.match(h.submits[0].error, /WORKER_EMPTY_HANDOFF/)
@@ -129,14 +129,14 @@ test('worker session: empty handoff fails the request with WORKER_EMPTY_HANDOFF'
 
 test('worker session: spawn failure and timeouts fail the request gracefully', async () => {
   const failing = harness({ spawnFails: true })
-  const failingRunner = plugin.applyGroupTaskWorkerSessions(failing.ctx, { run: failing.run, pollMs: 600_000 })
+  const failingRunner = plugin.applyGroupTaskWorkerSessions(failing.ctx, { daemonAlive: async () => true, run: failing.run, pollMs: 600_000 })
   await failingRunner.claimOnce()
   assert.match(failing.submits[0].error, /worker_session_spawn_failed/)
   failingRunner.stop()
 
   const wedged = harness({ handoffText: 'never' })
   const wedgedRunner = plugin.applyGroupTaskWorkerSessions(wedged.ctx, {
-    run: wedged.run, pollMs: 600_000, turnTimeoutMs: 30,
+    daemonAlive: async () => true, run: wedged.run, pollMs: 600_000, turnTimeoutMs: 30,
   })
   await wedgedRunner.claimOnce()
   assert.match(wedged.submits[0].error, /WORKER_TURN_TIMED_OUT/)
@@ -145,7 +145,7 @@ test('worker session: spawn failure and timeouts fail the request gracefully', a
 
 test('worker session: the (task, worker) session is reused across turns', async () => {
   const h = harness()
-  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { run: h.run, pollMs: 600_000 })
+  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, { daemonAlive: async () => true, run: h.run, pollMs: 600_000 })
   await runner.claimOnce()
   h.setClaim({ ok: true, data: { request: claim({ requestId: 10, targetMessage: { index: 14, sender: 'Alice', content: 'next step' } }) } })
   await runner.claimOnce()
