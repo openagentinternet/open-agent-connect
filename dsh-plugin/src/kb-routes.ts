@@ -8,6 +8,7 @@
  * them into the KB's raw corpus. Indexing is a separate, explicit Learn click
  * (IDBots parity) or the nightly auto-learn.
  */
+import { execFile } from 'node:child_process'
 import { mkdtemp, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -45,6 +46,79 @@ type KbServiceLike = {
     listKnowledgeBases(): Promise<Array<Record<string, unknown>>>
   }
   importFiles(slug: string, knowledgeBaseId: string, filePaths: string[]): Promise<number>
+}
+
+function success(data: unknown): MetabotCommandResult {
+  return { ok: true, state: 'success', data }
+}
+
+/** One spawned command; exit code normalized to a number (spawn errors → 1). */
+function runCommand(command: string, args: string[], timeoutMs = 180_000): Promise<{
+  code: number
+  stdout: string
+  stderr: string
+}> {
+  return new Promise((resolve) => {
+    execFile(command, args, { encoding: 'utf8', timeout: timeoutMs }, (error, stdout, stderr) => {
+      const code = error
+        ? typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : 1
+        : 0
+      resolve({ code, stdout: stdout || '', stderr: stderr || '' })
+    })
+  })
+}
+
+/**
+ * Open the host OS directory chooser (IDBots' native picker equivalent for
+ * this local deployment): macOS osascript, Linux Zenity. Resolves
+ * `{ path: null }` when the operator cancels.
+ */
+export async function browseForDirectory(): Promise<MetabotCommandResult> {
+  try {
+    if (process.platform === 'darwin') {
+      const { code, stdout, stderr } = await runCommand('osascript', [
+        '-e', 'set selectedFolder to choose folder with prompt "Select Knowledge Base Directory"',
+        '-e', 'POSIX path of selectedFolder',
+      ])
+      if (code !== 0) {
+        if (/(?:User canceled|-128)/i.test(stderr)) return success({ path: null })
+        return failure('browse_failed', stderr.trim() || `osascript exited ${code}`)
+      }
+      return success({ path: stdout.trim() })
+    }
+    if (process.platform === 'linux') {
+      const { code, stdout, stderr } = await runCommand('zenity', ['--file-selection', '--directory'])
+      if (code !== 0) {
+        if (code === 1) return success({ path: null })
+        return failure('browse_failed', stderr.trim() || `zenity exited ${code}`)
+      }
+      return success({ path: stdout.trim() })
+    }
+    return failure('unsupported_platform', `Directory picking is not supported on ${process.platform}.`)
+  } catch (error) {
+    return failure('browse_failed', error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * Reveal one knowledge base's raw corpus directory in the OS file manager.
+ * The path always comes from the validated store row, never from the request.
+ */
+export async function openKbDirectory(from: string, knowledgeBaseId: string): Promise<MetabotCommandResult> {
+  const homeDir = await localActorHomeDir(from)
+  if (!homeDir) return failure('kb_unavailable', 'knowledge bases are only manageable locally')
+  const service = kbServiceFor(homeDir)
+  const slug = basename(pathsOf(homeDir).profileRoot)
+  const kb = await service.store.getKnowledgeBase(knowledgeBaseId)
+  if (!kb || kb.metabotSlug !== slug) {
+    return failure('kb_not_found', `Knowledge base ${knowledgeBaseId} not found for this Bot.`)
+  }
+  const dir = typeof (kb as { rawDir?: unknown }).rawDir === 'string' ? (kb as { rawDir: string }).rawDir : ''
+  if (!dir) return failure('kb_not_found', 'Knowledge base has no raw directory.')
+  const command = process.platform === 'darwin' ? 'open' : process.platform === 'linux' ? 'xdg-open' : 'explorer'
+  const args = process.platform === 'win32' ? [dir] : [dir]
+  execFile(command, args, () => undefined)
+  return success({ opened: true, path: dir })
 }
 
 const serviceCache = new Map<string, KbServiceLike>()
@@ -133,13 +207,23 @@ export async function dispatchKbRoutes(
   deps: KbRouteDeps = {},
 ): Promise<MetabotCommandResult | undefined> {
   if (method !== 'kb/list' && method !== 'kb/create' && method !== 'kb/update' && method !== 'kb/remove'
-    && method !== 'kb/learn' && method !== 'study/list') {
+    && method !== 'kb/learn' && method !== 'study/list' && method !== 'kb/browse-dir' && method !== 'kb/open-dir') {
     return undefined
   }
   const run = deps.run ?? runMetabot
   const body = payloadObject(payload)
+
+  // The native directory chooser needs no bot context.
+  if (method === 'kb/browse-dir') return browseForDirectory()
+
   const from = trimmed(body, 'from')
   if (!from) return failure('missing_from', 'from is required')
+
+  if (method === 'kb/open-dir') {
+    const id = trimmed(body, 'id')
+    if (!id) return failure('missing_id', 'id is required')
+    return openKbDirectory(from, id)
+  }
 
   if (method === 'kb/list') {
     const local = await localKbList(from)
@@ -158,6 +242,7 @@ export async function dispatchKbRoutes(
     if (!name) return failure('missing_name', 'name is required')
     const args = ['knowledge-base', 'create', '--from', from, '--name', name]
     if (trimmed(body, 'description')) args.push('--description', trimmed(body, 'description'))
+    if (trimmed(body, 'rawDir')) args.push('--raw-dir', trimmed(body, 'rawDir'))
     if (typeof body.autoLearn === 'boolean') args.push('--autolearn', body.autoLearn ? 'on' : 'off')
     return runKbCli(run, args)
   }

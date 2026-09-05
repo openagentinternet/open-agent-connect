@@ -4988,6 +4988,7 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
           metabotSlug: path.basename(paths.profileRoot),
           name: input.name,
           ...(input.description ? { description: input.description } : {}),
+          ...(input.rawDir ? { rawDir: input.rawDir } : {}),
           ...(input.autoLearn !== undefined ? { autoLearn: input.autoLearn } : {}),
         });
         return commandSuccess({ knowledgeBase });
