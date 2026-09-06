@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import os from 'node:os';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
@@ -526,7 +527,20 @@ async function defaultRuntimeReadinessProbe(input: {
     }, input.timeoutMs);
   });
 
-  const backend = factory(binaryPath, compactEnv(input.env));
+  // Codex app-server records every thread it starts. Readiness is an internal
+  // capability check, so run it with an ephemeral CODEX_HOME to keep the
+  // synthetic probe turn out of the user's conversation history.
+  let probeHome: string | undefined;
+  let backendEnv = compactEnv(input.env);
+  if (input.runtime.provider === 'codex') {
+    probeHome = await fs.mkdtemp(path.join(os.tmpdir(), 'oac-codex-probe-'));
+    const sourceHome = backendEnv.CODEX_HOME ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+    for (const fileName of ['auth.json', 'config.toml']) {
+      await fs.copyFile(path.join(sourceHome, fileName), path.join(probeHome, fileName)).catch(() => undefined);
+    }
+    backendEnv = { ...backendEnv, CODEX_HOME: probeHome };
+  }
+  const backend = factory(binaryPath, backendEnv);
   const outputParts: string[] = [];
   const probe = backend.execute({
     runtimeId: input.runtime.id,
@@ -571,6 +585,7 @@ async function defaultRuntimeReadinessProbe(input: {
   } finally {
     if (timer) clearTimeout(timer);
     if (fallbackTimer) clearTimeout(fallbackTimer);
+    if (probeHome) await fs.rm(probeHome, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
