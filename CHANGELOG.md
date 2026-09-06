@@ -111,6 +111,12 @@ tags for releases.
 - Integrated Agent Browser Core 0.5.5 across OAC and all skillpack runtimes
   (upstream: MetaApp identity grants are remembered to skip repeated consent
   prompts, and external requests reuse an open tab for their uri).
+- DSH plugin 0.4.1 adapts the dependency contract to DSH kernel
+  0.1.3-alpha.1 while keeping 0.1.2-alpha.2 clients working (dual peer ranges
+  on all `@deepseek-ai/dsh-*` packages; zero code changes).
+- Agent Browser packages bumped to 0.5.6 (host-contract, core,
+  name-resolvers, ui, test-harness) across the root package and all skillpack
+  runtimes.
 
 ### Fixed
 
@@ -134,6 +140,10 @@ tags for releases.
   high, and moderate advisories.
 - Removed the standard BIP39 test mnemonic from production source and added a
   tracked-source guard test.
+- Switched `xlsx` to 0.20.3 via the SheetJS CDN tarball (root and skillpack
+  runtimes) so production installs no longer pull the npm-registry `xlsx`
+  version carrying the outstanding ReDoS advisory; this unblocked the release
+  pipeline's production audit gate.
 
 ### Project Governance
 

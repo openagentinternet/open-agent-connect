@@ -747,7 +747,7 @@ Recommended structure:
 Example shape when a Twin Bot already exists:
 
 ```text
-Install complete (v0.3.8). `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
+Install complete (v0.3.9). `metabot doctor` reports daemon_reachable, and related skills are bound and ready to use.
 
      _                    _     ___       _                       _
     / \   __ _  ___ _ __ | |_  |_ _|_ __ | |_ ___ _ __ _ __   ___| |_
@@ -776,7 +776,7 @@ Or open directly:
 Example shape when no Twin Bot exists yet:
 
 ```text
-Install complete (v0.3.8). The Open Agent Connect CLI and related skills are installed and bound for this host.
+Install complete (v0.3.9). The Open Agent Connect CLI and related skills are installed and bound for this host.
 
      _                    _     ___       _                       _
     / \   __ _  ___ _ __ | |_  |_ _|_ __ | |_ ___ _ __ _ __   ___| |_
@@ -837,7 +837,7 @@ detected platform homes.
 To update to a pinned package version:
 
 ```bash
-metabot system update --target-version v0.3.8
+metabot system update --target-version v0.3.9
 ```
 
 Notes:
