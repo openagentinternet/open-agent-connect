@@ -8,7 +8,8 @@
  * closed chat still catches up when the owner returns to it.
  */
 import { randomUUID } from 'node:crypto'
-import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { type MetabotCommandResult } from './cli-bridge.js'
+import { runMetabotPinned } from './daemon-pinned-run.js'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import { liveOacAgents } from './twin-tools.js'
 import type {
@@ -64,7 +65,7 @@ export function applyGroupTaskRelayDrain(
   ctx: HostContext,
   options: GroupTaskRelayOptions = {},
 ): GroupTaskRelayDrainer {
-  const run = options.run ?? runMetabot
+  const run = options.run ?? runMetabotPinned
   const tickMs = options.tickMs ?? DEFAULT_TICK_MS
   const daemonAlive = options.daemonAlive ?? daemonAliveByHttp
   /** Rows that could not be delivered live, keyed by origin session id. */

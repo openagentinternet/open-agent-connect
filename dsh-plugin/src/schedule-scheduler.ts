@@ -11,7 +11,8 @@
  */
 import { randomUUID } from 'node:crypto'
 import { request as httpRequest, get as httpGet } from 'node:http'
-import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { type MetabotCommandResult } from './cli-bridge.js'
+import { runMetabotPinned } from './daemon-pinned-run.js'
 import type { RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
 import type { AgentPresetsLike, HostAgentsRegistryLike, HostContext } from './context-types.js'
@@ -446,7 +447,7 @@ export function applyScheduleScheduler(ctx: HostContext, options: ScheduleSchedu
   const agents = options.agents ?? agentsRegistryOf(ctx)
   const agentPresets = options.agentPresets ?? ctx.agentPresets
   if (!agents?.create || !agentPresets?.mount) return // the host cannot spawn sessions
-  const run = options.run ?? runMetabot
+  const run = options.run ?? runMetabotPinned
   const daemon = options.daemon ?? createDaemonScheduleTransport()
   const modelPair = options.modelPair ?? ((profile) => workerModelPair(ctx, profile))
   const tickSeconds = Math.max(1, options.tickSeconds ?? DEFAULT_TICK_SECONDS)
