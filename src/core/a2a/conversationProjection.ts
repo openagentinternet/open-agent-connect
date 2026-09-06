@@ -206,6 +206,60 @@ async function readJsonFile(filePath: string): Promise<unknown | null> {
   }
 }
 
+// Parsed-conversation cache, keyed by absolute file path and validated against
+// mtime+size. Every list/messages call used to re-read and re-parse every
+// `chat-*.json` under the A2A root (whole histories, tens of MB on chatty
+// machines), which made each call cost seconds; unchanged files now parse once
+// per process. Cached states are shared by reference and must be treated as
+// read-only — callers only project, sort copies, or spread-map them.
+interface CachedConversationFile {
+  mtimeMs: number;
+  size: number;
+  conversation: A2AConversationState | null;
+}
+
+const conversationFileCache = new Map<string, CachedConversationFile>();
+const CONVERSATION_FILE_CACHE_LIMIT = 512;
+
+function rememberConversationFile(filePath: string, entry: CachedConversationFile): void {
+  conversationFileCache.delete(filePath);
+  conversationFileCache.set(filePath, entry);
+  while (conversationFileCache.size > CONVERSATION_FILE_CACHE_LIMIT) {
+    const oldest = conversationFileCache.keys().next().value;
+    if (oldest === undefined) return;
+    conversationFileCache.delete(oldest);
+  }
+}
+
+/** Drop every cached conversation parse (test helper; production never needs it). */
+export function clearConversationProjectionCache(): void {
+  conversationFileCache.clear();
+}
+
+async function readConversationFileCached(filePath: string): Promise<A2AConversationState | null> {
+  let stat: { mtimeMs: number; size: number };
+  try {
+    const raw = await fs.stat(filePath);
+    stat = { mtimeMs: Math.floor(raw.mtimeMs), size: raw.size };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      conversationFileCache.delete(filePath);
+      return null;
+    }
+    throw error;
+  }
+  const cached = conversationFileCache.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    conversationFileCache.delete(filePath);
+    conversationFileCache.set(filePath, cached);
+    return cached.conversation;
+  }
+  const conversation = normalizeConversationState(await readJsonFile(filePath));
+  rememberConversationFile(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, conversation });
+  return conversation;
+}
+
 async function listConversationFiles(homeDir: string): Promise<string[]> {
   const paths = resolveMetabotPaths(homeDir);
   try {
@@ -227,7 +281,7 @@ async function readConversations(homeDir: string): Promise<A2AConversationState[
   const files = await listConversationFiles(homeDir);
   const conversations: A2AConversationState[] = [];
   for (const filePath of files) {
-    const conversation = normalizeConversationState(await readJsonFile(filePath));
+    const conversation = await readConversationFileCached(filePath);
     if (conversation) {
       conversations.push(conversation);
     }
