@@ -5,7 +5,7 @@
  * the dream through `ctx.llm`. Serial by design: one dream at a time, per
  * process. Missed nights are caught up by the due-date algorithm itself.
  */
-import { runMetabot } from './cli-bridge.js'
+import { runMetabotPinned } from './daemon-pinned-run.js'
 import type { RunFn } from './cli-payload.js'
 import type { HostContext } from './context-types.js'
 import type { LlmStreamLike } from './llm-generate.js'
@@ -177,7 +177,7 @@ export function applyDreamScheduler(ctx: HostContext, options: DreamSchedulerOpt
   const dreamEnabled = options.dreamEnabled !== false
   const hygieneEnabled = options.hygieneEnabled !== false
   if (!dreamEnabled && !hygieneEnabled) return
-  const run = options.run ?? runMetabot
+  const run = options.run ?? runMetabotPinned
   const llm = options.llm ?? (ctx.llm as unknown as LlmStreamLike | undefined)
   if (dreamEnabled && !llm) return
   const tickMs = Math.max(1, options.tickMinutes ?? DEFAULT_TICK_MINUTES) * 60_000

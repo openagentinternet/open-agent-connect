@@ -14,7 +14,7 @@
  * future local small-parameter model only needs a new provider implementation
  * — the scheduler and the CLI bookkeeping stay untouched.
  */
-import { runMetabot } from './cli-bridge.js'
+import { runMetabotPinned } from './daemon-pinned-run.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import type { HostContext } from './context-types.js'
 import { generateLlmText, type LlmStreamLike } from './llm-generate.js'
@@ -316,7 +316,7 @@ export interface ChainHistorySummarySchedulerOptions {
 export function applyChainHistorySummaryScheduler(ctx: HostContext, options: ChainHistorySummarySchedulerOptions = {}): void {
   if (!ctx.llm) return
   if (options.enabled === false) return
-  const run = options.run ?? runMetabot
+  const run = options.run ?? runMetabotPinned
   const llm = options.llm ?? (ctx.llm as unknown as LlmStreamLike)
   const tickMs = Math.max(1, options.tickMinutes ?? DEFAULT_TICK_MINUTES) * 60_000
   const dailyCap = Math.max(1, options.dailyCap ?? DEFAULT_DAILY_CAP)

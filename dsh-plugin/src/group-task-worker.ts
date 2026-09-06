@@ -12,7 +12,8 @@
  * stall a task. Chair turns are NOT session-executed (orchestration text).
  */
 import { randomUUID } from 'node:crypto'
-import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { type MetabotCommandResult } from './cli-bridge.js'
+import { runMetabotPinned } from './daemon-pinned-run.js'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { presetIdForSlug } from './chip-logic.js'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
@@ -110,7 +111,7 @@ export function applyGroupTaskWorkerSessions(
   ctx: HostContext,
   options: GroupTaskWorkerOptions = {},
 ): GroupTaskWorkerRunner {
-  const run = options.run ?? runMetabot
+  const run = options.run ?? runMetabotPinned
   const enabled = options.enabled !== false
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS
   const turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS

@@ -27,6 +27,7 @@ import {
   streamDaemonConversationEvents,
 } from './conversation-bridge.js'
 import { CliBridgeError, runMetabot, type MetabotCommandResult } from './cli-bridge.js'
+import { runMetabotPinned } from './daemon-pinned-run.js'
 import {
   localBotList,
   localBotShow,
@@ -473,7 +474,10 @@ export async function apply(ctx: HostContext, config: OacDshConfig = {}): Promis
           installMemoryToolsOnAgent(agent, slug)
           installChainHistoryRecallOnAgent(ctx, agent)
           if (config.twin?.enabled === false) return
-          const shown = await runMetabot(['bot', 'show', '--from', slug], { timeoutMs: 30_000 })
+          // Daemon-pinned: this fires on every oac-* session creation, i.e. at
+          // chat-open frequency — it must never probe-and-replace a busy
+          // daemon (see daemon-pinned-run.ts).
+          const shown = await runMetabotPinned(['bot', 'show', '--from', slug], { timeoutMs: 30_000 })
           const profile = shown.ok
             ? (shown.data as { profile?: { botType?: string } } | undefined)?.profile
             : undefined
@@ -597,6 +601,7 @@ export {
 } from './browser-protocol.js'
 export { BrowserEventHub, resolveDaemonBaseUrl, type BrowserOpenEvent } from './browser-bridge.js'
 export { parseMetabotStdout, resolveCli, resolveMetabotCliPath, runMetabot } from './cli-bridge.js'
+export { DAEMON_PINNED_SKIP, runMetabotPinned } from './daemon-pinned-run.js'
 export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'
 export { bootstrapHealth } from './bootstrap.js'
