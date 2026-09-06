@@ -8,12 +8,15 @@ dsh plugin --profile web add open-agent-connect-dsh
 
 End-user install, Node `>=20 <25`, first Bot, and first chat: `docs/hosts/dsh.md`.
 
-Host kernel requirement: plugin 0.4.0 is built against the DSH **0.1.2-alpha.2**
-client surface (npm `alpha` dist-tag) — the `@Remote` gateway faces, the split
-client packages, and the 0.1.2 locale keys — and verified in lockstep through
-**0.1.2-alpha.3** (no plugin API changes in that patch release). It will not
-load on 0.1.0-rc-era kernels; hosts still there should stay on plugin 0.3.x
-until their kernel is upgraded.
+Host kernel requirement: plugin 0.4.1 is built against the DSH **0.1.2-alpha.2**
+client surface — the `@Remote` gateway faces, the split client packages, and the
+0.1.2 locale keys — verified in lockstep through **0.1.2-rc.1** (npm `next`
+dist-tag) and against the **0.1.3-alpha.1** source tree (the attachment rename,
+file-upload split, and session format v2 all miss this plugin; 0.1.3-alpha.1 is
+not on npm yet, so that verification runs against the harness checkout's built
+packages). Peer ranges `^0.1.2-alpha.2 || ^0.1.3-alpha.1` cover both kernel
+lines. It will not load on 0.1.0-rc-era kernels; hosts still there should stay
+on plugin 0.3.x until their kernel is upgraded.
 
 After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
 
