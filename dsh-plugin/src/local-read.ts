@@ -13,6 +13,7 @@
  * on the CLI.
  */
 import { createRequire } from 'node:module'
+import { basename } from 'node:path'
 import { dirname, join } from 'node:path'
 import { resolveCli } from './cli-bridge.js'
 import type { MetabotCommandResult } from './cli-bridge.js'
@@ -496,7 +497,9 @@ async function resolveProfileRecord(from: string): Promise<{ homeDir: string; gl
   const home = systemHomeDir()
   const profiles = await list(home).catch(() => [])
   const resolved = match(from, profiles)
-  return resolved.status === 'ok' && resolved.match ? resolved.match : null
+  // resolveProfileNameMatch answers 'matched' | 'not_found' | 'ambiguous' (same
+  // contract note as resolveActorHomeDir above).
+  return resolved.status === 'matched' && resolved.match ? resolved.match : null
 }
 
 export function localConversationsList(from: string, limit?: number): Promise<MetabotCommandResult | null> {
@@ -535,5 +538,79 @@ export function localConversationsMessages(
       ...(typeof options.after === 'number' ? { after: options.after } : {}),
     })
     return success(result)
+  })
+}
+
+// ---- chat skills ------------------------------------------------------------
+// In-process port of the CLI's `services skills` (listPublishSkills): a pure
+// local catalog read — profile resolution, runtime stores, and the platform
+// skill catalog. Spawning the CLI for this cost ~1s per Bot-editor open.
+
+export function localChatSkills(from: string): Promise<MetabotCommandResult | null> {
+  return attempt(async () => {
+    const homeDir = await resolveActorHomeDir(from)
+    if (!homeDir) return null
+    const paths = resolvePaths(homeDir) as { systemHomeDir: string; profileRoot: string }
+    const stateStore = core('core/state/runtimeStateStore.js')
+    const createState = fn<(dir: string) => { readState: () => Promise<{ identity?: Record<string, unknown> }> }>(
+      stateStore,
+      'createRuntimeStateStore',
+    )
+    const state = await createState(homeDir).readState()
+    if (!state.identity) return null
+    const llmRuntime = core('core/llm/llmRuntimeStore.js')
+    const llmBinding = core('core/llm/llmBindingStore.js')
+    const catalogModule = core('core/services/platformSkillCatalog.js')
+    const createRuntimeStore = fn<(input: unknown) => unknown>(llmRuntime, 'createLlmRuntimeStore')
+    const createBindingStore = fn<(input: unknown) => unknown>(llmBinding, 'createLlmBindingStore')
+    const createCatalog = fn<(options: Record<string, unknown>) => {
+      listPrimaryRuntimeSkills: (opts: { metaBotSlug: string }) => Promise<{
+        ok: boolean
+        code?: string
+        message?: string
+        runtime: Record<string, unknown>
+        platform: unknown
+        skills: unknown
+        rootDiagnostics: unknown
+      }>
+    }>(catalogModule, 'createPlatformSkillCatalog')
+    const catalog = createCatalog({
+      runtimeStore: createRuntimeStore(paths),
+      bindingStore: createBindingStore(paths),
+      systemHomeDir: paths.systemHomeDir,
+      projectRoot: paths.profileRoot,
+      env: process.env,
+    })
+    const metaBotSlug = basename(paths.profileRoot)
+    const result = await catalog.listPrimaryRuntimeSkills({ metaBotSlug })
+    if (!result.ok) {
+      // A definitive catalog answer (e.g. primary_runtime_unavailable) is what
+      // the CLI would return too — answer directly instead of spawning it.
+      return {
+        ok: false,
+        state: 'failed',
+        ...(result.code ? { code: result.code } : {}),
+        ...(result.message ? { message: result.message } : {}),
+      }
+    }
+    return success({
+      metaBotSlug,
+      identity: {
+        metabotId: state.identity.metabotId,
+        name: state.identity.name,
+        globalMetaId: state.identity.globalMetaId,
+      },
+      runtime: {
+        id: result.runtime.id,
+        provider: result.runtime.provider,
+        displayName: result.runtime.displayName,
+        health: result.runtime.health,
+        version: result.runtime.version,
+        logoPath: result.runtime.logoPath,
+      },
+      platform: result.platform,
+      skills: result.skills,
+      rootDiagnostics: result.rootDiagnostics,
+    })
   })
 }

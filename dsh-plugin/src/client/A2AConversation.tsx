@@ -474,7 +474,20 @@ export function A2AConversation({
   const localAvatar = currentBot?.avatarDataUrl
   const localGlobalMetaId = selectedSummary?.localGlobalMetaId || currentBot?.globalMetaId || ''
   const peerLabel = selectedSummary?.peerName ?? selectedPeer
-  const peerAvatar = selectedSummary?.peerAvatar ?? undefined
+  // Conversation payloads carry peer avatars as small chain references (rendered
+  // through the daemon avatar proxy). When the peer is one of the local Bots,
+  // its fresh data-URL avatar is already in the Bot list — resolve it here
+  // instead of paying a proxy round trip per row.
+  const localAvatarByMetaId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const row of profiles) {
+      if (row.globalMetaId && row.avatarDataUrl) map.set(row.globalMetaId, row.avatarDataUrl)
+    }
+    return map
+  }, [profiles])
+  const peerAvatar = selectedSummary
+    ? localAvatarByMetaId.get(selectedSummary.peerGlobalMetaId) ?? selectedSummary.peerAvatar ?? undefined
+    : undefined
 
   return (
     <>
@@ -578,7 +591,7 @@ export function A2AConversation({
                     >
                       <BotAvatar
                         name={row.peerName ?? row.peerGlobalMetaId}
-                        src={row.peerAvatar ?? undefined}
+                        src={localAvatarByMetaId.get(row.peerGlobalMetaId) ?? row.peerAvatar ?? undefined}
                         className="oac-a2a-row-avatar"
                       />
                       <span className="oac-a2a-row-main">

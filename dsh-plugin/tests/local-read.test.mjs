@@ -81,6 +81,54 @@ test('per-bot reads return null (CLI fallback) for an unknown profile', async ()
     assert.equal(await localRead.localBotShow('no-such-bot'), null)
     assert.equal(await localRead.localConversationsList('no-such-bot'), null)
     assert.equal(await localRead.localConversationsMessages('no-such-bot', 'idpeer'), null)
+    assert.equal(await localRead.localChatSkills('no-such-bot'), null)
+  } finally {
+    process.env.HOME = ORIGINAL_HOME
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('localChatSkills returns null (CLI fallback) when the Bot has no primary runtime binding', async () => {
+  const home = await makeHome()
+  process.env.HOME = home
+  try {
+    // Hand-written profile fixture (same pattern as the grouptask test): the
+    // identity exists, but no enabled primary LLM runtime binding does, so the
+    // catalog read must defer to the CLI, which renders the friendly error.
+    const profilesRoot = join(home, '.metabot', 'profiles')
+    const homeDir = join(profilesRoot, 'skiller')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(join(home, '.metabot', 'manager'), { recursive: true })
+    writeFileSync(
+      join(home, '.metabot', 'manager', 'identity-profiles.json'),
+      JSON.stringify({
+        profiles: [{
+          name: 'Skiller',
+          slug: 'skiller',
+          homeDir,
+          globalMetaId: 'idlocaskiller00000000000000000000000000',
+          mvcAddress: 'addr-local-skiller',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }],
+      }),
+    )
+    const paths = require('../../dist/core/state/paths.js').resolveMetabotPaths(homeDir)
+    mkdirSync(join(homeDir, '.runtime', 'state'), { recursive: true })
+    writeFileSync(paths.runtimeStatePath, JSON.stringify({
+      identity: {
+        metabotId: 1,
+        name: 'Skiller',
+        globalMetaId: 'idlocaskiller00000000000000000000000000',
+      },
+    }))
+
+    assert.deepEqual(await localRead.localChatSkills('skiller'), {
+      ok: false,
+      state: 'failed',
+      code: 'primary_runtime_missing',
+      message: 'The selected MetaBot has no enabled primary runtime binding.',
+    })
   } finally {
     process.env.HOME = ORIGINAL_HOME
     await rm(home, { recursive: true, force: true })

@@ -307,16 +307,20 @@ test('default conversation handlers prefer current local profile identity over s
     limit: 50,
   });
 
+  // Names always follow the current profile; the fresh data-URL avatar is
+  // merged once at thread level. Row- and message-level avatars keep the small
+  // stored reference instead of duplicating the profile's inline data URL
+  // (payload policy, see mergeConversationRowAvatar).
   assert.equal(listed.ok, true);
   assert.equal(listed.data.conversations[0].peerName, 'Alice');
-  assert.equal(listed.data.conversations[0].peerAvatar, 'data:image/png;base64,current-alice');
+  assert.equal(listed.data.conversations[0].peerAvatar, '/content/stale-alice-avatar');
   assert.equal(messages.ok, true);
   assert.equal(messages.data.peerBot.name, 'Alice');
   assert.equal(messages.data.peerBot.avatar, 'data:image/png;base64,current-alice');
   assert.equal(messages.data.messages[0].sender.name, 'Alice');
-  assert.equal(messages.data.messages[0].sender.avatar, 'data:image/png;base64,current-alice');
+  assert.equal(messages.data.messages[0].sender.avatar, '/content/stale-alice-avatar');
   assert.equal(messages.data.messages[1].recipient.name, 'Alice');
-  assert.equal(messages.data.messages[1].recipient.avatar, 'data:image/png;base64,current-alice');
+  assert.equal(messages.data.messages[1].recipient.avatar, '/content/stale-alice-avatar');
 });
 
 test('default conversation handlers enrich remote LLM providers from the public profile API', async (t) => {
