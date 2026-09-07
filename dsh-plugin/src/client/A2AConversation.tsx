@@ -47,6 +47,14 @@ type UnreadState = {
 
 const UNREAD_STORAGE_KEY = 'oac-dsh:a2a-unread:v1'
 const UNREAD_POLL_MS = 15_000
+// The unread badge is DISABLED (user decision 2026-09-07). Its warm-up poll
+// pulled EVERY Bot's conversation list plus EVERY thread every 15s —
+// O(bots × threads) background requests that starved the browser's
+// per-origin connection pool (6 on HTTP/1.1), so every panel open queued
+// behind them for seconds and the tab's renderer burned a core. Re-enable
+// only after rewriting it to ride the conversation SSE stream (push, not
+// poll); the polling implementation below must not come back as-is.
+const UNREAD_BADGE_ENABLED = false
 
 function readUnreadState(): UnreadState {
   const fallback: UnreadState = { private: {}, group: {}, privateSeen: {}, groupSeen: {} }
@@ -194,7 +202,9 @@ export function A2AConversation({
   const [guidanceOpen, setGuidanceOpen] = useState(false)
   const [guidanceDraft, setGuidanceDraft] = useState('')
   const [guidanceStatus, setGuidanceStatus] = useState<string | null>(null)
-  const [unread, setUnread] = useState<UnreadState>(() => readUnreadState())
+  const [unread, setUnread] = useState<UnreadState>(() => (
+    UNREAD_BADGE_ENABLED ? readUnreadState() : { private: {}, group: {}, privateSeen: {}, groupSeen: {} }
+  ))
   const unreadRef = useRef(unread)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const guidanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -252,7 +262,7 @@ export function A2AConversation({
   // establishes a baseline so installing/upgrading the plugin does not mark
   // every historical message as new.
   useEffect(() => {
-    if (profiles.length === 0) return undefined
+    if (!UNREAD_BADGE_ENABLED || profiles.length === 0) return undefined
     let current = true
     let timer: ReturnType<typeof setInterval> | null = null
     const poll = async (): Promise<void> => {
@@ -500,7 +510,8 @@ export function A2AConversation({
       >
         <IconNewChatOutline16 />
         {wide ? <span>{t('nav')}</span> : null}
-        {Object.keys(unread.private).length > 0 || Object.keys(unread.group).length > 0
+        {UNREAD_BADGE_ENABLED
+        && (Object.keys(unread.private).length > 0 || Object.keys(unread.group).length > 0)
           ? <span className="oac-unread-dot" aria-label={t('unread')} />
           : null}
       </button>
