@@ -1738,10 +1738,23 @@ async function resolvePeerChatPublicKeyFromLocalProfiles(systemHomeDir, globalMe
     return null;
 }
 function createPeerChatPublicKeyResolver(input) {
+    // Long-lived daemon processes resolve the same peers' chat keys on every
+    // private-chat sweep (hub Bots carry 100+ peers). Without a cache each
+    // resolution is a chain HTTP round trip — and a miss falls back to a full
+    // local profile scan — which turns every sweep into hundreds of requests.
+    // Chat keys are identity-bound and effectively static; a short TTL cache
+    // collapses repeat resolutions to zero I/O.
+    const cache = new Map();
+    const cacheTtlMs = input.cacheTtlMs ?? 10 * 60_000;
+    const negativeCacheTtlMs = input.negativeCacheTtlMs ?? 60_000;
     return async (globalMetaId) => {
         const normalizedGlobalMetaId = normalizeEnvText(globalMetaId);
         if (!normalizedGlobalMetaId) {
             return null;
+        }
+        const cached = cache.get(normalizedGlobalMetaId);
+        if (cached && cached.expiresAt > Date.now()) {
+            return cached.value;
         }
         const primary = input.fetchPeerChatPublicKey
             ? await input.fetchPeerChatPublicKey(normalizedGlobalMetaId)
@@ -1750,9 +1763,18 @@ function createPeerChatPublicKeyResolver(input) {
             });
         const primaryChatPublicKey = normalizeEnvText(primary);
         if (primaryChatPublicKey) {
+            cache.set(normalizedGlobalMetaId, {
+                value: primaryChatPublicKey,
+                expiresAt: Date.now() + cacheTtlMs,
+            });
             return primaryChatPublicKey;
         }
-        return resolvePeerChatPublicKeyFromLocalProfiles(input.systemHomeDir, normalizedGlobalMetaId);
+        const fromLocal = await resolvePeerChatPublicKeyFromLocalProfiles(input.systemHomeDir, normalizedGlobalMetaId);
+        cache.set(normalizedGlobalMetaId, {
+            value: fromLocal,
+            expiresAt: Date.now() + (fromLocal ? cacheTtlMs : negativeCacheTtlMs),
+        });
+        return fromLocal;
     };
 }
 function createTestMetaWebReplyWaiter(env) {

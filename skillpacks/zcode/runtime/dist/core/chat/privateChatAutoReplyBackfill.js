@@ -14,6 +14,10 @@ const privateConversation_1 = require("./privateConversation");
 const CURSOR_STATE_VERSION = 1;
 const DEFAULT_INTERVAL_MS = 15_000;
 const DEFAULT_RECENT_LIMIT = 100;
+/** Ceiling for the quiet-pass backoff (15s → 30 → 60 → 120 → 240 → 300s). */
+const DEFAULT_MAX_IDLE_INTERVAL_MS = 5 * 60_000;
+/** Max peers swept per pass (0 = unlimited); bounds hub Bots with 100+ peers. */
+const DEFAULT_PEER_SWEEP_CAP = 32;
 const DEFAULT_STARTUP_CATCH_UP_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_MAX_OUTBOUND_RECOVERY_ATTEMPTS = 3;
 const DEFAULT_PEER_CONCURRENCY = 4;
@@ -26,8 +30,15 @@ function normalizeGlobalMetaId(value) {
     return normalizeText(value).toLowerCase();
 }
 function normalizePositiveInteger(value, fallback) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : fallback;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0 || Math.floor(parsed) !== parsed) {
+        return fallback;
+    }
+    return parsed;
+}
+/** Like normalizePositiveInteger but also accepts 0 (cap disabled). */
+function normalizeNonNegativeInteger(value, fallback) {
+    return value === 0 ? 0 : normalizePositiveInteger(value, fallback);
 }
 function normalizeEpochSeconds(value) {
     const numeric = Number(value);
@@ -360,6 +371,18 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
     const getNow = deps.now ?? (() => Date.now());
     let timer = null;
     let syncing = false;
+    let running = false;
+    // Rotating offset into the (sorted) peer list for the per-pass sweep cap.
+    let sweepRotation = 0;
+    const peerSweepCap = normalizeNonNegativeInteger(options.peerSweepCap, DEFAULT_PEER_SWEEP_CAP);
+    // Idle backoff: one daemon runs this loop per profile, and each pass polls
+    // the chain history for every known peer. On multi-Bot machines (80+ live
+    // profiles) a flat 15s cadence means dozens of chain requests per second,
+    // with per-message ECDH decryption — enough to starve the whole machine.
+    // Quiet passes (nothing processed, nothing recovered) double the next delay
+    // up to a cap; any activity returns to the base cadence immediately.
+    let idleStreak = 0;
+    const maxIdleIntervalMs = Math.max(intervalMs, normalizePositiveInteger(options.maxIdleIntervalMs, DEFAULT_MAX_IDLE_INTERVAL_MS));
     const syncOnce = async () => {
         const selfGlobalMetaId = normalizeText(await deps.selfGlobalMetaId());
         if (!selfGlobalMetaId) {
@@ -385,7 +408,32 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
             const rightHasCursor = Boolean(cursorState.peers[normalizeGlobalMetaId(right)]);
             return Number(leftHasCursor) - Number(rightHasCursor);
         });
-        await runWithConcurrency(orderedPeers, peerConcurrency, async (peerGlobalMetaId) => {
+        // Sweep cap with rotation: bound the work per pass independently of how
+        // many peers a Bot knows. Continuously-active hub Bots never idle-backoff
+        // (every pass has new messages), and without a cap one 150-peer hub meant
+        // 150 chain requests back-to-back forever. Cursor-less peers (first sight)
+        // are always swept so bootstrapping is never delayed; the rotation windows
+        // over the cursor-carrying rest in key-stable order, covering all peers
+        // across successive passes. Realtime delivery still comes from the
+        // simplemsg socket push — this loop is the missed-push safety net.
+        const cursorlessPeers = orderedPeers.filter((peer) => !cursorState.peers[normalizeGlobalMetaId(peer)]);
+        const cursoredPeers = orderedPeers
+            .filter((peer) => cursorState.peers[normalizeGlobalMetaId(peer)])
+            .sort((left, right) => normalizeGlobalMetaId(left).localeCompare(normalizeGlobalMetaId(right)));
+        const cappedCursored = peerSweepCap > 0 && cursoredPeers.length > peerSweepCap
+            ? (() => {
+                const offset = sweepRotation % cursoredPeers.length;
+                sweepRotation = offset + peerSweepCap;
+                return [
+                    ...cursoredPeers.slice(offset, offset + peerSweepCap),
+                    ...(offset + peerSweepCap > cursoredPeers.length
+                        ? cursoredPeers.slice(0, (offset + peerSweepCap) % cursoredPeers.length)
+                        : []),
+                ];
+            })()
+            : cursoredPeers;
+        const cappedPeers = [...cursorlessPeers, ...cappedCursored];
+        await runWithConcurrency(cappedPeers, peerConcurrency, async (peerGlobalMetaId) => {
             const peerKey = normalizeGlobalMetaId(peerGlobalMetaId);
             const peerChatPublicKey = normalizeText(await deps.resolvePeerChatPublicKey(peerGlobalMetaId));
             if (!peerChatPublicKey) {
@@ -534,7 +582,7 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
             await writeCursorState(cursorPath, cursorState);
         }
         return {
-            peers: peers.length,
+            peers: cappedPeers.length,
             processed,
             skipped,
             failed,
@@ -542,34 +590,55 @@ function createPrivateChatAutoReplyBackfillLoop(deps, options = {}) {
         };
     };
     const runBackgroundSync = () => {
-        if (syncing)
+        if (syncing) {
+            scheduleNext();
             return;
+        }
         syncing = true;
         void syncOnce()
+            .then((result) => {
+            const idle = result.processed === 0 && result.recovered === 0;
+            idleStreak = idle ? idleStreak + 1 : 0;
+        })
             .catch((error) => {
+            // A failing pass (e.g. chain API unreachable) backs off like a quiet
+            // one instead of hammering the endpoint at the base cadence.
+            idleStreak += 1;
             deps.onError?.(error instanceof Error ? error : new Error(String(error)));
         })
             .finally(() => {
             syncing = false;
+            scheduleNext();
         });
+    };
+    const scheduleNext = () => {
+        if (!timer && !running)
+            return;
+        const delay = idleStreak === 0
+            ? intervalMs
+            : Math.min(intervalMs * 2 ** Math.min(idleStreak, 6), maxIdleIntervalMs);
+        if (timer)
+            clearTimeout(timer);
+        timer = setTimeout(runBackgroundSync, delay);
+        timer.unref?.();
     };
     return {
         syncOnce,
         start() {
-            if (timer)
+            if (running)
                 return;
+            running = true;
             runBackgroundSync();
-            timer = setInterval(runBackgroundSync, intervalMs);
-            timer.unref?.();
         },
         stop() {
+            running = false;
             if (!timer)
                 return;
-            clearInterval(timer);
+            clearTimeout(timer);
             timer = null;
         },
         isRunning() {
-            return timer !== null;
+            return running;
         },
     };
 }

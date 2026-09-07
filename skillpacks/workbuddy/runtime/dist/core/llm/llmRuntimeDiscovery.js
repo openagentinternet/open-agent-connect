@@ -12,6 +12,7 @@ exports.discoverProvider = discoverProvider;
 exports.testLlmRuntimeReadiness = testLlmRuntimeReadiness;
 exports.discoverLlmRuntimes = discoverLlmRuntimes;
 const node_child_process_1 = require("node:child_process");
+const node_os_1 = __importDefault(require("node:os"));
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const platformRegistry_1 = require("../platform/platformRegistry");
@@ -420,7 +421,20 @@ async function defaultRuntimeReadinessProbe(input) {
             }, WORKBUDDY_READINESS_ABORT_SETTLE_GRACE_MS);
         }, input.timeoutMs);
     });
-    const backend = factory(binaryPath, compactEnv(input.env));
+    // Codex app-server records every thread it starts. Readiness is an internal
+    // capability check, so run it with an ephemeral CODEX_HOME to keep the
+    // synthetic probe turn out of the user's conversation history.
+    let probeHome;
+    let backendEnv = compactEnv(input.env);
+    if (input.runtime.provider === 'codex') {
+        probeHome = await node_fs_1.promises.mkdtemp(node_path_1.default.join(node_os_1.default.tmpdir(), 'oac-codex-probe-'));
+        const sourceHome = backendEnv.CODEX_HOME ?? process.env.CODEX_HOME ?? node_path_1.default.join(node_os_1.default.homedir(), '.codex');
+        for (const fileName of ['auth.json', 'config.toml']) {
+            await node_fs_1.promises.copyFile(node_path_1.default.join(sourceHome, fileName), node_path_1.default.join(probeHome, fileName)).catch(() => undefined);
+        }
+        backendEnv = { ...backendEnv, CODEX_HOME: probeHome };
+    }
+    const backend = factory(binaryPath, backendEnv);
     const outputParts = [];
     const probe = backend.execute({
         runtimeId: input.runtime.id,
@@ -464,6 +478,8 @@ async function defaultRuntimeReadinessProbe(input) {
             clearTimeout(timer);
         if (fallbackTimer)
             clearTimeout(fallbackTimer);
+        if (probeHome)
+            await node_fs_1.promises.rm(probeHome, { recursive: true, force: true }).catch(() => undefined);
     }
 }
 async function discoverProvider(provider, pathDirs, options) {

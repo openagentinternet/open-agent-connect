@@ -40,6 +40,10 @@ export interface PrivateChatAutoReplyBackfillDependencies {
 }
 export interface PrivateChatAutoReplyBackfillOptions {
     intervalMs?: number;
+    /** Ceiling for the quiet-pass backoff delay; defaults to 5 minutes. */
+    maxIdleIntervalMs?: number;
+    /** Max peers polled per pass with rotation; 0 disables the cap. Default 32. */
+    peerSweepCap?: number;
     recentLimit?: number;
     startupCatchUpMs?: number;
     outboundRecoveryDelayMs?: number;

@@ -139,12 +139,32 @@ function getPrivateKeyBufferFromWallet(wallet) {
     const privateKey = meta_contract_1.mvc.PrivateKey.fromWIF(privateKeyWIF);
     return Buffer.from(privateKey.bn.toArray('be', 32));
 }
+// Same reuse rationale as the identity memo above (single PBKDF2 per call).
+const privateKeyDerivationCache = new Map();
 async function derivePrivateKeyHex(options = {}) {
-    const mnemonic = options.mnemonic?.trim() || bip39.generateMnemonic(english_1.wordlist);
+    const providedMnemonic = options.mnemonic?.trim() ?? '';
     const path = options.path?.trim() || exports.DEFAULT_DERIVATION_PATH;
-    const addressIndex = parseAddressIndexFromPath(path);
-    const mvcWallet = await getMvcWallet(mnemonic, addressIndex);
-    return getPrivateKeyBufferFromWallet(mvcWallet).toString('hex');
+    if (!providedMnemonic) {
+        const addressIndex = parseAddressIndexFromPath(path);
+        const mvcWallet = await getMvcWallet(bip39.generateMnemonic(english_1.wordlist), addressIndex);
+        return getPrivateKeyBufferFromWallet(mvcWallet).toString('hex');
+    }
+    const key = cacheKey(providedMnemonic, path);
+    let derivation = privateKeyDerivationCache.get(key);
+    if (!derivation) {
+        const addressIndex = parseAddressIndexFromPath(path);
+        derivation = getMvcWallet(providedMnemonic, addressIndex)
+            .then((mvcWallet) => getPrivateKeyBufferFromWallet(mvcWallet).toString('hex'));
+        derivation.catch(() => privateKeyDerivationCache.delete(key));
+        privateKeyDerivationCache.set(key, derivation);
+        while (privateKeyDerivationCache.size > IDENTITY_DERIVATION_CACHE_LIMIT) {
+            const oldest = privateKeyDerivationCache.keys().next().value;
+            if (oldest === undefined)
+                break;
+            privateKeyDerivationCache.delete(oldest);
+        }
+    }
+    return derivation;
 }
 async function deriveChatPublicKey(mnemonic, addressIndex) {
     const wallet = await getMvcWallet(mnemonic, addressIndex);
@@ -414,9 +434,29 @@ function convertToGlobalMetaId(address) {
         throw new Error(`Unsupported address format: ${address}`);
     }
 }
-async function deriveIdentity(options = {}) {
-    const mnemonic = options.mnemonic?.trim() || bip39.generateMnemonic(english_1.wordlist);
-    const path = options.path ?? exports.DEFAULT_DERIVATION_PATH;
+// Derivation memo, keyed by `${mnemonic}\n${path}`. One deriveIdentity call
+// runs four wallet derivations (MVC/BTC/Doge + chat key), each a full
+// PBKDF2 mnemonic-to-seed (~100ms+ of CPU); long-lived processes that derive
+// per use (the daemon's grouptask engine sweeps every profile per tick) would
+// otherwise burn whole cores re-deriving the same pure function. Randomly
+// generated mnemonics are never cached. Callers get a shallow copy, so
+// mutating a returned identity cannot poison the cache.
+const identityDerivationCache = new Map();
+const IDENTITY_DERIVATION_CACHE_LIMIT = 128;
+function cacheKey(mnemonic, path) {
+    return `${mnemonic}\n${path}`;
+}
+function rememberDerivation(key, derivation) {
+    derivation.catch(() => identityDerivationCache.delete(key));
+    identityDerivationCache.set(key, derivation);
+    while (identityDerivationCache.size > IDENTITY_DERIVATION_CACHE_LIMIT) {
+        const oldest = identityDerivationCache.keys().next().value;
+        if (oldest === undefined)
+            return;
+        identityDerivationCache.delete(oldest);
+    }
+}
+async function deriveIdentityUncached(mnemonic, path) {
     const addressIndex = parseAddressIndexFromPath(path);
     const [mvcWallet, btcWallet, dogeWallet, chatPublicKey] = await Promise.all([
         getMvcWallet(mnemonic, addressIndex),
@@ -448,4 +488,20 @@ async function deriveIdentity(options = {}) {
         metaId: computeMetaId(mvcAddress),
         globalMetaId
     };
+}
+async function deriveIdentity(options = {}) {
+    const providedMnemonic = options.mnemonic?.trim() ?? '';
+    const path = options.path ?? exports.DEFAULT_DERIVATION_PATH;
+    if (!providedMnemonic) {
+        // Fresh random identity — caching a one-off derivation has no reuse.
+        return deriveIdentityUncached(bip39.generateMnemonic(english_1.wordlist), path);
+    }
+    const key = cacheKey(providedMnemonic, path);
+    let derivation = identityDerivationCache.get(key);
+    if (!derivation) {
+        derivation = deriveIdentityUncached(providedMnemonic, path);
+        rememberDerivation(key, derivation);
+    }
+    const identity = await derivation;
+    return { ...identity, addresses: { ...identity.addresses } };
 }

@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.clearConversationProjectionCache = clearConversationProjectionCache;
 exports.listPeerConversationSummaries = listPeerConversationSummaries;
 exports.readPeerConversationMessages = readPeerConversationMessages;
 const node_fs_1 = require("node:fs");
@@ -134,6 +135,46 @@ async function readJsonFile(filePath) {
         throw error;
     }
 }
+const conversationFileCache = new Map();
+const CONVERSATION_FILE_CACHE_LIMIT = 512;
+function rememberConversationFile(filePath, entry) {
+    conversationFileCache.delete(filePath);
+    conversationFileCache.set(filePath, entry);
+    while (conversationFileCache.size > CONVERSATION_FILE_CACHE_LIMIT) {
+        const oldest = conversationFileCache.keys().next().value;
+        if (oldest === undefined)
+            return;
+        conversationFileCache.delete(oldest);
+    }
+}
+/** Drop every cached conversation parse (test helper; production never needs it). */
+function clearConversationProjectionCache() {
+    conversationFileCache.clear();
+}
+async function readConversationFileCached(filePath) {
+    let stat;
+    try {
+        const raw = await node_fs_1.promises.stat(filePath);
+        stat = { mtimeMs: Math.floor(raw.mtimeMs), size: raw.size };
+    }
+    catch (error) {
+        const code = error.code;
+        if (code === 'ENOENT') {
+            conversationFileCache.delete(filePath);
+            return null;
+        }
+        throw error;
+    }
+    const cached = conversationFileCache.get(filePath);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+        conversationFileCache.delete(filePath);
+        conversationFileCache.set(filePath, cached);
+        return cached.conversation;
+    }
+    const conversation = normalizeConversationState(await readJsonFile(filePath));
+    rememberConversationFile(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, conversation });
+    return conversation;
+}
 async function listConversationFiles(homeDir) {
     const paths = (0, paths_1.resolveMetabotPaths)(homeDir);
     try {
@@ -155,7 +196,7 @@ async function readConversations(homeDir) {
     const files = await listConversationFiles(homeDir);
     const conversations = [];
     for (const filePath of files) {
-        const conversation = normalizeConversationState(await readJsonFile(filePath));
+        const conversation = await readConversationFileCached(filePath);
         if (conversation) {
             conversations.push(conversation);
         }

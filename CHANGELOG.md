@@ -117,6 +117,11 @@ tags for releases.
 - Agent Browser packages bumped to 0.5.6 (host-contract, core,
   name-resolvers, ui, test-harness) across the root package and all skillpack
   runtimes.
+- DSH plugin 0.4.2: the preset chip in the DSH panel now shows the Bot's
+  persona role and lists the Twin Bot first.
+- Added MetaID protocol specs under `docs/metaid_protocols`: the SimpleQuestion/
+  SimpleAnswer Q&A protocol and the `/info/owner` owner-binding protocol,
+  both synced from the IDBots metaweb-qa worktree.
 
 ### Fixed
 
@@ -131,6 +136,21 @@ tags for releases.
   mirror for DSH 0.1.2-alpha.4, contact names in the Contacts tab, avatar
   upload/replace/remove in the Bot editor Basic tab, and the `unrun`
   devDependency required by the tsdown config.
+- DSH panel performance program: A2A payloads slimmed (no more multi-MB JSON
+  through the panel), per-view projection caching, and daemon-direct reads
+  replace per-call CLI spawns.
+- DSH pollers now pin daemon CLI runs to the live daemon, so a DSH web
+  restart window no longer auto-starts storm daemons that hang every panel
+  call.
+- Memoized wallet derivations in the daemon, fixing the constant ~183% CPU
+  burn from repeated derivation on every request.
+- Private-chat backfill loops idle backoff, TTL-cached peer chat public-key
+  resolution, and a per-pass peer sweep cap with rotation, ending the chain
+  polling storm during backfill.
+- The A2A unread badge poller is disabled (browser connection-pool
+  starvation); a full SSE-based badge rewrite is planned as the follow-up.
+- Codex readiness probe history is isolated so probes no longer pollute
+  shared session history.
 
 ### Security
 

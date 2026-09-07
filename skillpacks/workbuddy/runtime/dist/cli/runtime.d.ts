@@ -129,6 +129,10 @@ export declare function createPeerChatPublicKeyResolver(input: {
     systemHomeDir: string;
     fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
     chainApiBaseUrl?: string;
+    /** Cache TTL for resolved keys (default 10 minutes; tests may shorten it). */
+    cacheTtlMs?: number;
+    /** Cache TTL for unresolved lookups so unknown peers do not hammer the chain (default 60s). */
+    negativeCacheTtlMs?: number;
 }): (globalMetaId: string) => Promise<string | null>;
 export declare function createDefaultCliDependencies(context: CliRuntimeContext): CliDependencies;
 export declare function mergeCliDependencies(context: CliRuntimeContext): CliDependencies;

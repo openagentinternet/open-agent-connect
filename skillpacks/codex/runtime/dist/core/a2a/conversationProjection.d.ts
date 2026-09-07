@@ -54,5 +54,7 @@ export interface ReadPeerConversationMessagesResult {
         hasMoreBefore: boolean;
     };
 }
+/** Drop every cached conversation parse (test helper; production never needs it). */
+export declare function clearConversationProjectionCache(): void;
 export declare function listPeerConversationSummaries(input: ListPeerConversationSummariesInput): Promise<ListPeerConversationSummariesResult>;
 export declare function readPeerConversationMessages(input: ReadPeerConversationMessagesInput): Promise<ReadPeerConversationMessagesResult>;

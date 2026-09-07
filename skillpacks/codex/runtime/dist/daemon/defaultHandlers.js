@@ -4859,7 +4859,11 @@ function createDefaultMetabotDaemonHandlers(input) {
         return {
             globalMetaId,
             name: indexed?.name || cachedChainProfile?.name || '',
-            avatar: indexed?.avatar || cachedChainProfile?.avatar || '',
+            // Chain-cache avatar first: it is a small renderable reference, while the
+            // local profile index carries the Bot's full inline `avatarDataUrl` —
+            // row/message-level consumers must not duplicate that payload (see
+            // mergeConversationRowAvatar); thread-level keeps it as the fallback.
+            avatar: cachedChainProfile?.avatar || indexed?.avatar || '',
             llmPrimaryProvider: cachedChainProfile?.llmPrimaryProvider || indexed?.llmPrimaryProvider || '',
             llmFallbackProvider: cachedChainProfile?.llmFallbackProvider || indexed?.llmFallbackProvider || '',
         };
@@ -4875,11 +4879,32 @@ function createDefaultMetabotDaemonHandlers(input) {
             || (isUsableAvatarReference(currentAvatar) ? normalizeText(currentAvatar) : '')
             || null;
     }
+    function isInlineAvatarPayload(value) {
+        return normalizeText(value).toLowerCase().startsWith('data:');
+    }
+    /**
+     * Row- and message-level avatar policy: keep the small stored reference (or
+     * the chain-profile reference), but never the local profile's inline data-URL
+     * avatar — one Bot's 40–90 KB `avatarDataUrl` repeated per row and per
+     * message turned the conversations payloads into multiple megabytes and made
+     * every list/switch take seconds. Thread-level `localBot`/`peerBot` keep the
+     * full `mergeConversationAvatar` (one copy each); clients already fall back
+     * to those (or to their own Bot list) when a row avatar is null.
+     */
+    function mergeConversationRowAvatar(currentAvatar, profile) {
+        if (isUsableAvatarReference(currentAvatar) && !isInlineAvatarPayload(currentAvatar)) {
+            return normalizeText(currentAvatar);
+        }
+        if (isUsableAvatarReference(profile?.avatar) && !isInlineAvatarPayload(profile?.avatar)) {
+            return normalizeText(profile?.avatar);
+        }
+        return null;
+    }
     function enrichConversationActor(actor, profile) {
         return {
             ...actor,
             name: mergeConversationName(actor.name, actor.globalMetaId, profile),
-            avatar: mergeConversationAvatar(actor.avatar, profile),
+            avatar: mergeConversationRowAvatar(actor.avatar, profile),
         };
     }
     async function enrichConversationListResult(result, selectedProfile) {
@@ -4914,9 +4939,9 @@ function createDefaultMetabotDaemonHandlers(input) {
             return {
                 ...summary,
                 localName: mergeConversationName(summary.localName, summary.localGlobalMetaId, summaryLocalProfile) ?? localBot.name,
-                localAvatar: mergeConversationAvatar(summary.localAvatar, summaryLocalProfile) ?? localBot.avatar,
+                localAvatar: mergeConversationRowAvatar(summary.localAvatar, summaryLocalProfile),
                 peerName: mergeConversationName(summary.peerName, summary.peerGlobalMetaId, peerProfile),
-                peerAvatar: mergeConversationAvatar(summary.peerAvatar, peerProfile),
+                peerAvatar: mergeConversationRowAvatar(summary.peerAvatar, peerProfile),
                 peerLlmPrimaryProvider: peerProfile?.llmPrimaryProvider || null,
                 peerLlmFallbackProvider: peerProfile?.llmFallbackProvider || null,
             };
