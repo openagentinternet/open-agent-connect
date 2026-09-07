@@ -162,10 +162,10 @@ export function BotPanel({
                   <span className="oac-bot-name">{bot.name}</span>
                   {bot.botType === 'twin' ? <span className="oac-memory-badge oac-memory-badge-twin">Twin</span> : null}
                 </div>
-                {bot.bio ? <p className="oac-bot-bio">{bot.bio}</p> : null}
-                {bot.dshLlmProvider && bot.dshLlmModel ? (
-                  <div className="oac-bot-model">{bot.dshLlmProvider}/{bot.dshLlmModel}</div>
-                ) : null}
+                <p className="oac-bot-bio">{bot.bio ?? ''}</p>
+                <div className="oac-bot-model">
+                  {bot.dshLlmProvider && bot.dshLlmModel ? `${bot.dshLlmProvider}/${bot.dshLlmModel}` : ''}
+                </div>
                 <div className="oac-bot-foot">
                   <div className="oac-bot-foot-left">
                     {bot.globalMetaId ? (
