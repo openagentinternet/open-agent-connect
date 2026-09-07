@@ -9,7 +9,16 @@ import {
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
-import type { BotRow, LlmDirectory, AutoReplyConfig, ChatSkillsPayload } from './api.ts'
+import type { MetaAppListPayload } from '../apps.ts'
+import type {
+  AutoReplyConfig,
+  BotBackupPayload,
+  BotHomepageUploadPayload,
+  BotRow,
+  BotWalletPayload,
+  ChatSkillsPayload,
+  LlmDirectory,
+} from './api.ts'
 import { sortBotsTwinFirst } from '../bot-order.ts'
 import { BotAvatar } from './BotAvatar.tsx'
 import { BotEditor } from './BotEditor.tsx'
@@ -32,6 +41,15 @@ export interface BotPanelInjected {
   ) => Promise<AutoReplyConfig>
   /** Open the right-sidebar Bot Browser; no URI opens its home. Resolves once the sidebar has visibly reacted; never rejects. */
   browserOpen: (uri?: string) => Promise<void>
+  botWallet: (slug: string) => Promise<BotWalletPayload>
+  botBackup: (slug: string) => Promise<BotBackupPayload>
+  botHomepageUpload: (
+    slug: string,
+    fileName: string,
+    contentType: string,
+    base64: string,
+  ) => Promise<BotHomepageUploadPayload>
+  metaappList: (from: string, size?: number, cursor?: string) => Promise<MetaAppListPayload>
 }
 
 export function BotPanel({
@@ -44,6 +62,10 @@ export function BotPanel({
   loadAutoReplyStatus,
   autoReplyConfig,
   browserOpen,
+  botWallet,
+  botBackup,
+  botHomepageUpload,
+  metaappList,
   close,
   t,
 }: BotPanelInjected & { close: () => void; t: Translate }): ReactNode {
@@ -100,6 +122,11 @@ export function BotPanel({
         chatSkills={chatSkills}
         loadAutoReplyStatus={loadAutoReplyStatus}
         autoReplyConfig={autoReplyConfig}
+        browserOpen={browserOpen}
+        botWallet={botWallet}
+        botBackup={botBackup}
+        botHomepageUpload={botHomepageUpload}
+        metaappList={metaappList}
         onBack={() => { setEditing(null); reload() }}
         onSave={async (patch) => {
           setBusy(true)

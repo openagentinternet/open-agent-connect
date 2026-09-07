@@ -15,13 +15,13 @@ export function apiMethod(req: PluginHttpRequest, prefix: string): string | unde
 
 const MAX_BODY_BYTES = 1 << 20
 
-export async function readJsonBody(req: PluginHttpRequest): Promise<unknown> {
+export async function readJsonBody(req: PluginHttpRequest, cap = MAX_BODY_BYTES): Promise<unknown> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of req) {
     const buffer = Buffer.from(chunk)
     total += buffer.length
-    if (total > MAX_BODY_BYTES) {
+    if (total > cap) {
       throw new Error('request body too large')
     }
     chunks.push(buffer)

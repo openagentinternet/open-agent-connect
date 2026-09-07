@@ -149,6 +149,50 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-note.warn { color: var(--dsw-alias-state-warn-label); }
 .oac-note.error { color: var(--dsw-alias-state-error-primary); }
 
+/* Advanced tab (IDBots edit > 高级 parity): homepage source editor with the
+   protocol-prefix inputs, the Chain & Wallet + Danger Zone cards, wallet
+   chain rows, the MetaApp picker list, and the mnemonic grid/box. */
+.oac-adv-card { border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-3); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.oac-adv-card-head { font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
+.oac-adv-card-divider { height: 1px; background: var(--dsw-alias-border-l2); }
+.oac-adv-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.oac-adv-danger { border-color: rgba(239, 68, 68, .4); background: rgba(239, 68, 68, .05); }
+.oac-adv-danger .oac-adv-card-head { color: var(--dsw-alias-state-error-primary); }
+.oac-adv-danger .oac-adv-card-divider { background: rgba(239, 68, 68, .3); }
+.oac-adv-danger-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.oac-adv-danger-row .oac-hint { flex: 1; min-width: 200px; }
+.oac-homepage-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.oac-protocol-input { display: flex; align-items: stretch; flex: 1; min-width: 220px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); overflow: hidden; }
+.oac-protocol-input:focus-within { border-color: var(--dsw-alias-brand-primary); }
+.oac-protocol-prefix { flex: none; display: inline-flex; align-items: center; padding: 0 8px; border-right: 1px solid var(--dsw-alias-border-l2); font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; color: var(--dsw-alias-label-tertiary); user-select: none; }
+.oac-protocol-field { flex: 1; min-width: 0; border: none; background: transparent; padding: 8px; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-primary); }
+.oac-protocol-field:focus { outline: none; }
+.oac-protocol-field::placeholder { color: var(--dsw-alias-label-dimmed); }
+.oac-homepage-picker-error { display: flex; flex-direction: column; gap: 8px; }
+.oac-homepage-picker-empty { display: flex; flex-direction: column; gap: 6px; }
+.oac-homepage-app-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 288px; overflow: auto; }
+.oac-homepage-app-item { box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font: inherit; text-align: left; cursor: pointer; }
+.oac-homepage-app-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-homepage-app-name { font-size: 13px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-homepage-app-pin { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; }
+.oac-wallet-rows { display: flex; flex-direction: column; gap: 8px; }
+.oac-wallet-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font-size: 12px; line-height: 18px; }
+.oac-wallet-chain { flex: none; width: 44px; font-weight: 600; color: var(--dsw-alias-label-secondary); }
+.oac-wallet-address { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); color: var(--dsw-alias-label-secondary); }
+.oac-wallet-balance { flex: none; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
+.oac-backup-warn { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid rgba(245, 158, 11, .35); border-radius: 10px; background: rgba(245, 158, 11, .08); color: var(--dsw-alias-state-warn-label); font-size: 12px; line-height: 18px; }
+.oac-backup-warn svg { flex: none; margin-top: 1px; }
+.oac-backup-warn p { margin: 0; }
+.oac-mnemonic-box { padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.oac-mnemonic-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
+.oac-mnemonic-grid li { display: flex; gap: 6px; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-primary); }
+.oac-mnemonic-index { flex: none; color: var(--dsw-alias-label-tertiary); }
+.oac-mnemonic-paragraph { margin: 0; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; color: var(--dsw-alias-label-primary); }
+.oac-delete-mnemonic { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.oac-link-button { align-self: flex-start; padding: 0; border: none; background: none; font: inherit; font-size: 12px; line-height: 18px; color: var(--dsw-alias-brand-primary); cursor: pointer; }
+.oac-link-button:hover { text-decoration: underline; }
+.oac-link-button:disabled { opacity: .6; cursor: default; text-decoration: none; }
+
 /* A2A conversation panel: the sidebar-foot trigger row above Settings and a
    floating two-column dialog. Geometry and tokens follow the Settings shell
    (mask + centered 24px panel) and the conversation row/bubble vocabulary. */

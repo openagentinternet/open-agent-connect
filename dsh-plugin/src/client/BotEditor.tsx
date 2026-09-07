@@ -8,16 +8,21 @@ import {
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CommonKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
+import type { MetaAppListPayload } from '../apps.ts'
 import {
   AUTO_REPLY_COOLDOWN_MS_OPTIONS,
   AUTO_REPLY_MAX_TURNS_OPTIONS,
   DEFAULT_AUTO_REPLY_COOLDOWN_MS,
   DEFAULT_AUTO_REPLY_MAX_TURNS,
   type AutoReplyConfig,
+  type BotBackupPayload,
+  type BotHomepageUploadPayload,
   type BotRow,
+  type BotWalletPayload,
   type ChatSkillsPayload,
   type LlmDirectory,
 } from './api.ts'
+import { BotAdvancedSection } from './BotAdvancedSection.tsx'
 import { BotAvatar } from './BotAvatar.tsx'
 import { LlmPicker } from './LlmPicker.tsx'
 import type { BotsLocaleKey } from './locale.ts'
@@ -26,6 +31,8 @@ import { KnowledgeTab } from './KnowledgeTab.tsx'
 type Translate = (key: BotsLocaleKey | CommonKeyOf, vars?: Record<string, string | number>) => string
 type TabKey = 'basic' | 'behavior' | 'chat' | 'knowledge' | 'advanced'
 type NoteTone = 'saving' | 'success' | 'warn' | 'error'
+
+const DELETE_CONFIRM_COUNTDOWN_SECONDS = 5
 
 const TABS: Array<{ id: TabKey; label: BotsLocaleKey }> = [
   { id: 'basic', label: 'tabBasic' },
@@ -66,6 +73,11 @@ export function BotEditor({
   chatSkills,
   loadAutoReplyStatus,
   autoReplyConfig,
+  browserOpen,
+  botWallet,
+  botBackup,
+  botHomepageUpload,
+  metaappList,
   onBack,
   onSave,
   onDelete,
@@ -83,12 +95,27 @@ export function BotEditor({
     from: string,
     patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
   ) => Promise<AutoReplyConfig>
+  browserOpen: (uri?: string) => Promise<void>
+  botWallet: (slug: string) => Promise<BotWalletPayload>
+  botBackup: (slug: string) => Promise<BotBackupPayload>
+  botHomepageUpload: (
+    slug: string,
+    fileName: string,
+    contentType: string,
+    base64: string,
+  ) => Promise<BotHomepageUploadPayload>
+  metaappList: (from: string, size?: number, cursor?: string) => Promise<MetaAppListPayload>
   onBack: () => void
   onSave: (patch: Record<string, unknown>) => Promise<void>
   onDelete: () => Promise<void>
 }): ReactNode {
   const [tab, setTab] = useState<TabKey>('basic')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteCountdown, setDeleteCountdown] = useState(DELETE_CONFIRM_COUNTDOWN_SECONDS)
+  const [deleteMnemonic, setDeleteMnemonic] = useState<string | null>(null)
+  const [deleteMnemonicOpen, setDeleteMnemonicOpen] = useState(false)
+  const [deleteMnemonicLoading, setDeleteMnemonicLoading] = useState(false)
+  const deleteTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [twinAction, setTwinAction] = useState<'promote' | 'demote' | null>(null)
   const [name, setName] = useState(bot.name)
   const [bio, setBio] = useState(bot.bio ?? '')
@@ -216,6 +243,61 @@ export function BotEditor({
     )
     return () => { current = false }
   }, [tab, bot.slug, chatSkills, loadAutoReplyStatus])
+
+  // Safe delete (IDBots parity): the confirm button unlocks only after a
+  // 5-second countdown that starts when the modal opens and resets when it
+  // closes; the mnemonic loads lazily behind the Show/Hide toggle.
+  useEffect(() => {
+    if (deleteTimerRef.current !== null) {
+      clearInterval(deleteTimerRef.current)
+      deleteTimerRef.current = null
+    }
+    if (!confirmDelete) {
+      setDeleteCountdown(DELETE_CONFIRM_COUNTDOWN_SECONDS)
+      setDeleteMnemonic(null)
+      setDeleteMnemonicOpen(false)
+      setDeleteMnemonicLoading(false)
+      return
+    }
+    setDeleteCountdown(DELETE_CONFIRM_COUNTDOWN_SECONDS)
+    deleteTimerRef.current = setInterval(() => {
+      setDeleteCountdown((value) => {
+        if (value <= 1) {
+          if (deleteTimerRef.current !== null) {
+            clearInterval(deleteTimerRef.current)
+            deleteTimerRef.current = null
+          }
+          return 0
+        }
+        return value - 1
+      })
+    }, 1000)
+    return () => {
+      if (deleteTimerRef.current !== null) {
+        clearInterval(deleteTimerRef.current)
+        deleteTimerRef.current = null
+      }
+    }
+  }, [confirmDelete])
+
+  const toggleDeleteMnemonic = (): void => {
+    if (deleteMnemonic !== null) {
+      setDeleteMnemonicOpen(!deleteMnemonicOpen)
+      return
+    }
+    if (deleteMnemonicLoading) return
+    setDeleteMnemonicLoading(true)
+    void botBackup(bot.slug).then(
+      (payload) => {
+        const words = payload.words.filter(Boolean)
+        if (words.length > 0) {
+          setDeleteMnemonic(words.join(' '))
+          setDeleteMnemonicOpen(true)
+        }
+      },
+      () => undefined,
+    ).finally(() => setDeleteMnemonicLoading(false))
+  }
 
   const toggleAutoReply = (): void => {
     if (autoReply === null || autoReplyStatus !== 'ready') return
@@ -667,11 +749,18 @@ export function BotEditor({
                 <code className="oac-info-value">{bot.mvcAddress ?? ''}</code>
               </div>
             </div>
-            <div className="oac-form-actions">
-              <Button type="button" variant="outline" className="oac-danger-outline" onClick={() => setConfirmDelete(true)}>
-                {t('remove')}
-              </Button>
-            </div>
+            <BotAdvancedSection
+              bot={bot}
+              t={t}
+              busy={busy}
+              browserOpen={browserOpen}
+              botWallet={botWallet}
+              botBackup={botBackup}
+              botHomepageUpload={botHomepageUpload}
+              metaappList={metaappList}
+              onSave={onSave}
+              onRequestDelete={() => setConfirmDelete(true)}
+            />
           </div>
         </div>
       ) : null}
@@ -690,10 +779,17 @@ export function BotEditor({
               type="button"
               variant="outline"
               className="oac-danger-outline"
-              disabled={busy}
+              disabled={busy || deleteCountdown > 0}
               onClick={() => { void onDelete() }}
             >
-              {busy ? t('removing') : t('confirmRemove')}
+              {busy
+                ? t('removing')
+                : deleteCountdown > 0
+                  ? interpolate(
+                    t('confirmDeleteCountdown', { count: deleteCountdown }),
+                    { count: deleteCountdown },
+                  )
+                  : t('confirmDeleteBackedUp')}
             </Button>
           </>
         )}
@@ -701,6 +797,25 @@ export function BotEditor({
         <p className="oac-dialog-body">
           {interpolate(t('removeConfirm', { name: bot.name, slug: bot.slug }), { name: bot.name, slug: bot.slug })}
         </p>
+        <div className="oac-delete-mnemonic">
+          <button
+            type="button"
+            className="oac-link-button"
+            disabled={deleteMnemonicLoading}
+            onClick={toggleDeleteMnemonic}
+          >
+            {deleteMnemonicLoading
+              ? t('balanceLoading')
+              : deleteMnemonicOpen && deleteMnemonic !== null
+                ? t('hideMnemonic')
+                : t('showMnemonic')}
+          </button>
+          {deleteMnemonicOpen && deleteMnemonic !== null ? (
+            <div className="oac-mnemonic-box">
+              <p className="oac-mnemonic-paragraph">{deleteMnemonic}</p>
+            </div>
+          ) : null}
+        </div>
       </Modal>
       <Modal
         closeLabel={t('close')}

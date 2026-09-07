@@ -25,6 +25,12 @@ export class OacApiError extends Error {
   }
 }
 
+export type BotHomepageRef = {
+  uri: string
+  renderer: string
+  contentType: string
+}
+
 export type BotRow = {
   name: string
   slug: string
@@ -38,6 +44,7 @@ export type BotRow = {
   bio?: string
   avatarDataUrl?: string
   allowChatSkills?: string[]
+  homepage?: BotHomepageRef | null
   dshLlmProvider?: string | null
   dshLlmModel?: string | null
   dshLlmReasoningEffort?: string | null
@@ -69,6 +76,25 @@ export type AutoReplyConfig = {
   enabled: boolean
   maxTurns: number
   cooldownMs: number
+}
+
+/** `bots/wallet` payload: per-chain addresses plus the latest balance rows. */
+export type BotWalletPayload = {
+  addresses: { btc?: string; mvc?: string; doge?: string; opcat?: string }
+  balances: Record<string, { totalSatoshis?: number } | undefined>
+}
+
+/** `bots/backup` payload: the Bot's mnemonic words (never persisted locally). */
+export type BotBackupPayload = {
+  slug: string
+  name: string
+  words: string[]
+}
+
+/** `bots/homepage-upload` result, normalized to the on-chain file reference. */
+export type BotHomepageUploadPayload = {
+  uri: string
+  contentType: string
 }
 
 export type MemoryEntryRow = {
@@ -456,6 +482,50 @@ export const api = {
     profileOf(await post('bots/update', { slug, patch })),
   remove: async (slug: string): Promise<void> => {
     await post('bots/delete', { slug })
+  },
+  botWallet: async (slug: string): Promise<BotWalletPayload> => {
+    const data = await post<{ wallet?: unknown }>('bots/wallet', { slug })
+    const wallet = recordOf(data.wallet)
+    const addresses = recordOf(wallet.addresses)
+    const rawBalances = recordOf(wallet.balances)
+    const balances: BotWalletPayload['balances'] = {}
+    for (const [chain, value] of Object.entries(rawBalances)) {
+      const balance = recordOf(value)
+      balances[chain] = typeof balance.totalSatoshis === 'number'
+        ? { totalSatoshis: balance.totalSatoshis }
+        : undefined
+    }
+    return {
+      addresses: {
+        ...(textOf(addresses.btc) ? { btc: textOf(addresses.btc) } : {}),
+        ...(textOf(addresses.mvc) ? { mvc: textOf(addresses.mvc) } : {}),
+        ...(textOf(addresses.doge) ? { doge: textOf(addresses.doge) } : {}),
+        ...(textOf(addresses.opcat) ? { opcat: textOf(addresses.opcat) } : {}),
+      },
+      balances,
+    }
+  },
+  botBackup: async (slug: string): Promise<BotBackupPayload> => {
+    const data = await post<{ backup?: unknown }>('bots/backup', { slug })
+    const backup = recordOf(data.backup)
+    const words = Array.isArray(backup.words)
+      ? backup.words.map((word) => textOf(word)).filter(Boolean)
+      : []
+    return { slug: textOf(backup.slug), name: textOf(backup.name), words }
+  },
+  botHomepageUpload: async (
+    slug: string,
+    fileName: string,
+    contentType: string,
+    base64: string,
+  ): Promise<BotHomepageUploadPayload> => {
+    const data = await post<Record<string, unknown>>('bots/homepage-upload', { slug, fileName, contentType, base64 })
+    const pinId = textOf(data.pinId)
+    const uri = textOf(data.uri) || textOf(data.metafileUri) || (pinId ? `metafile://${pinId}` : '')
+    if (!uri) {
+      throw new OacApiError('homepage_upload_failed', 'homepage upload returned no metafile uri', data)
+    }
+    return { uri, contentType: textOf(data.contentType) || contentType }
   },
   llmDirectory: async (): Promise<LlmDirectory> => post('llm/directory'),
   chatSkills: async (from: string): Promise<ChatSkillsPayload> => {

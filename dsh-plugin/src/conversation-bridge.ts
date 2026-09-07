@@ -10,7 +10,7 @@
  * unreachable the readers return null and the caller falls back to the
  * in-process read and then the CLI.
  */
-import { get as httpGet } from 'node:http'
+import { get as httpGet, request as httpRequest } from 'node:http'
 import { resolveDaemonBaseUrl } from './browser-bridge.js'
 import type { MetabotCommandResult } from './cli-bridge.js'
 import type { PluginHttpRequest, PluginHttpResponse } from './context-types.js'
@@ -20,6 +20,9 @@ const DAEMON_JSON_TIMEOUT_MS = 10_000
 // The daemon itself may walk several upstream content URLs (4.5 s each)
 // before an avatar resolves, so this proxy has to outlast that worst case.
 const AVATAR_PROXY_TIMEOUT_MS = 30_000
+// Homepage upload inscribes on-chain (direct or chunked), so this POST has to
+// outlive the JSON reads by a wide margin.
+const DAEMON_UPLOAD_TIMEOUT_MS = 300_000
 
 function isEnvelope(value: unknown): value is MetabotCommandResult {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -73,6 +76,73 @@ export async function daemonConversationsMessages(from: string, peer: string): P
   if (baseUrl === null) return null
   const params = new URLSearchParams({ local: from, peer })
   return daemonGetJson(baseUrl, `/api/conversations/messages?${params.toString()}`)
+}
+
+/** POST a raw body to one daemon JSON endpoint. Null means "transport failed". */
+function daemonPostRawJson(
+  baseUrl: string,
+  path: string,
+  body: Buffer,
+  contentType: string,
+  timeoutMs: number,
+): Promise<MetabotCommandResult | null> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (value: MetabotCommandResult | null): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(value)
+    }
+    const request = httpRequest(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': contentType, 'content-length': body.length },
+    }, (response) => {
+      response.setEncoding('utf8')
+      let text = ''
+      response.on('data', (chunk: string) => { text += chunk })
+      response.on('end', () => {
+        try {
+          const parsed: unknown = JSON.parse(text)
+          finish(isEnvelope(parsed) ? parsed : null)
+        } catch {
+          finish(null)
+        }
+      })
+      response.on('error', () => finish(null))
+    })
+    const timer = setTimeout(() => {
+      request.destroy()
+      finish(null)
+    }, timeoutMs)
+    request.on('error', () => finish(null))
+    request.write(body)
+    request.end()
+  })
+}
+
+/**
+ * Bot homepage file upload (`POST /api/bot/profiles/:slug/homepage/upload`):
+ * the daemon inscribes the raw bytes and answers with the upload envelope
+ * (its `data` carries `metafileUri` / `pinId` / `contentType`). Null when the
+ * daemon cannot be reached.
+ */
+export async function daemonBotHomepageUpload(
+  slug: string,
+  fileName: string,
+  contentType: string,
+  bytes: Buffer,
+): Promise<MetabotCommandResult | null> {
+  const baseUrl = await resolveDaemonBaseUrl()
+  if (baseUrl === null) return null
+  const params = new URLSearchParams({ fileName })
+  return daemonPostRawJson(
+    baseUrl,
+    `/api/bot/profiles/${encodeURIComponent(slug)}/homepage/upload?${params.toString()}`,
+    bytes,
+    contentType,
+    DAEMON_UPLOAD_TIMEOUT_MS,
+  )
 }
 
 /**
