@@ -6,6 +6,8 @@ import type { ChainWriteResult } from '../chain/writePin';
 import type { Signer } from '../signing/signer';
 import { type ProfilePublishPayloadInput } from './profilePublishState';
 import { type MetabotBotType } from './botRole';
+/** Hard cap on local MetaBot profiles per machine (enforced by the daemon create route). */
+export declare const MAX_LOCAL_BOT_PROFILES = 100;
 export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 export interface MetabotProfileFull extends IdentityProfileRecord {
     bio: string;

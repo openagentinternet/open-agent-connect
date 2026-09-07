@@ -15214,6 +15214,11 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 const name = createInput.name;
                 const profiles = await (0, identityProfiles_1.listIdentityProfiles)(normalizedSystemHomeDir).catch(() => []);
+                // Hard cap on local Bots: creating beyond the limit fails before any
+                // home directory or chain work is reserved.
+                if (profiles.length >= metabotProfileManager_1.MAX_LOCAL_BOT_PROFILES) {
+                    return (0, commandResult_1.commandFailed)('bot_limit_reached', `MetaBot count cannot exceed ${metabotProfileManager_1.MAX_LOCAL_BOT_PROFILES}.`);
+                }
                 const resolvedHome = (0, profileWorkspace_1.resolveIdentityCreateProfileHome)({
                     systemHomeDir: normalizedSystemHomeDir,
                     requestedName: name,

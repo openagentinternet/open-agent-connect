@@ -207,6 +207,7 @@ const COMMAND_HELP_SPECS = [
             { name: 'config', summary: 'Get or set one MetaBot profile config.' },
             { name: 'wallet', summary: 'Show wallet metadata for one MetaBot profile.' },
             { name: 'backup', summary: 'Show mnemonic backup material for one MetaBot profile.' },
+            { name: 'setup-retry', summary: 'Retry the on-chain setup for one local MetaBot profile.' },
             { name: 'runtimes', summary: 'List or discover LLM runtimes for a MetaBot profile.' },
             { name: 'sessions', summary: 'List runtime sessions for a MetaBot profile.' },
         ],
@@ -360,6 +361,14 @@ const COMMAND_HELP_SPECS = [
         summary: 'Show mnemonic backup material for one MetaBot profile.',
         usage: 'metabot bot backup --from <bot-slug>',
         requiredFlags: [FROM_BOT_FLAG],
+    },
+    {
+        commandPath: ['bot', 'setup-retry'],
+        summary: 'Retry the on-chain setup (gas subsidy and identity/info chain sync) for one local MetaBot profile.',
+        usage: 'metabot bot setup-retry --from <bot-slug>',
+        requiredFlags: [FROM_BOT_FLAG],
+        successFields: ['profile', 'setup'],
+        examples: ['metabot bot setup-retry --from alice'],
     },
     {
         commandPath: ['bot', 'runtimes'],

@@ -679,6 +679,9 @@ export interface CliDependencies {
         getBackup?: (input: {
             slug: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        retryProfileSetup?: (input: {
+            slug: string;
+        }) => Awaitable<MetabotCommandResult<unknown>>;
         listRuntimes?: (input?: {
             from?: string;
         }) => Awaitable<MetabotCommandResult<unknown>>;

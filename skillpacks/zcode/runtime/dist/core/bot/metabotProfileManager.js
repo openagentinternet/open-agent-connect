@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.validateAvatarDataUrl = void 0;
+exports.validateAvatarDataUrl = exports.MAX_LOCAL_BOT_PROFILES = void 0;
 exports.readTextFile = readTextFile;
 exports.runtimeAvailabilityTier = runtimeAvailabilityTier;
 exports.selectRuntimeForProvider = selectRuntimeForProvider;
@@ -41,6 +41,8 @@ const dshLlm_1 = require("./dshLlm");
 const botRole_1 = require("./botRole");
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
+/** Hard cap on local MetaBot profiles per machine (enforced by the daemon create route). */
+exports.MAX_LOCAL_BOT_PROFILES = 100;
 var avatarChainWrite_2 = require("../identity/avatarChainWrite");
 Object.defineProperty(exports, "validateAvatarDataUrl", { enumerable: true, get: function () { return avatarChainWrite_2.validateAvatarDataUrl; } });
 function normalizeText(value) {
