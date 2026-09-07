@@ -1692,3 +1692,110 @@ test('host LLM chat runner runs the turn in chatWorkspaceDir when provided', asy
   assert.equal(Object.hasOwn(executorCalls[0], 'skillIsolation'), false);
   await fs.access(chatWorkspaceDir);
 });
+
+// ---- host LLM executor (DSH pair delegation) --------------------------------
+
+function createHostGenerate(outcomes) {
+  const calls = [];
+  const generate = async (input) => {
+    calls.push(input);
+    const next = outcomes.length > 0 ? outcomes.shift() : { ok: true, output: 'host reply' };
+    return typeof next === 'function' ? next(input) : next;
+  };
+  return { generate, calls };
+}
+
+test('host LLM attempt wins before local runtimes for plain turns', async () => {
+  const resolverCalls = {};
+  const host = createHostGenerate([{ ok: true, output: 'Host brain reply.' }]);
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver({
+      id: 'llm-runtime-1',
+      provider: 'codex',
+      health: 'healthy',
+    }, resolverCalls),
+    llmExecutor: {
+      async execute() { throw new Error('local executor must not run'); },
+      async getSession() { return null; },
+    },
+    metaBotSlug: 'alice',
+    hostLlmGenerate: host.generate,
+  });
+  const result = await runner(makeInput());
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'Host brain reply.');
+  assert.equal(host.calls.length, 1);
+  assert.equal(host.calls[0].metaBotSlug, 'alice');
+  assert.match(host.calls[0].prompt, /## Chat History/);
+  assert.equal(resolverCalls.resolveRuntime, undefined);
+});
+
+test('host LLM output goes through the Bye close-marker parsing', async () => {
+  const host = createHostGenerate([{ ok: true, output: 'Great talking — goodbye!\nBye' }]);
+  const runner = createHostLlmChatReplyRunner({
+    hostLlmGenerate: host.generate,
+    metaBotSlug: 'alice',
+  });
+  const result = await runner(makeInput());
+  assert.equal(result.state, 'end_conversation');
+  assert.equal(result.content, 'Great talking — goodbye!\nBye');
+});
+
+test('host LLM failure falls back to the local runtime chain', async () => {
+  const runtime = { id: 'llm-runtime-1', provider: 'codex', health: 'healthy' };
+  const host = createHostGenerate([{ ok: false, error: 'provider down' }]);
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor: {
+      async execute() { return 's1'; },
+      async getSession() {
+        return { sessionId: 's1', status: 'completed', result: { status: 'completed', output: 'Local runtime reply.' } };
+      },
+    },
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    hostLlmGenerate: host.generate,
+  });
+  const result = await runner(makeInput());
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'Local runtime reply.');
+  assert.equal(host.calls.length, 1);
+});
+
+test('host LLM empty output falls through instead of ending the turn', async () => {
+  const runtime = { id: 'llm-runtime-1', provider: 'codex', health: 'healthy' };
+  const host = createHostGenerate([{ ok: true, output: '   ' }]);
+  const runner = createHostLlmChatReplyRunner({
+    runtimeResolver: createFakeRuntimeResolver(runtime),
+    llmExecutor: {
+      async execute() { return 's1'; },
+      async getSession() {
+        return { sessionId: 's1', status: 'completed', result: { status: 'completed', output: 'Local runtime reply.' } };
+      },
+    },
+    metaBotSlug: 'alice',
+    pollIntervalMs: 1,
+    hostLlmGenerate: host.generate,
+  });
+  const result = await runner(makeInput());
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'Local runtime reply.');
+});
+
+test('without a resolver, the host LLM runs before the template fallback', async () => {
+  const host = createHostGenerate([{ ok: true, output: 'Host-only reply.' }]);
+  const runner = createHostLlmChatReplyRunner({
+    metaBotSlug: 'alice',
+    hostLlmGenerate: host.generate,
+  });
+  const result = await runner(makeInput());
+  assert.equal(result.state, 'reply');
+  assert.equal(result.content, 'Host-only reply.');
+});
+
+test('without a resolver or host LLM, the template fallback stays', async () => {
+  const runner = createHostLlmChatReplyRunner({ metaBotSlug: 'alice' });
+  const result = await runner(makeInput());
+  assert.equal(result.state, 'reply');
+  assert.match(result.content, /Thanks for/);
+});

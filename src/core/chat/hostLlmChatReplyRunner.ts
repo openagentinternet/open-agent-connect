@@ -13,6 +13,7 @@ import type {
   ChatReplyRunnerInput,
   ChatReplyRunnerResult,
 } from './privateChatTypes';
+import type { HostLlmGenerateForRunner } from '../llm/hostLlmExecutorBridge';
 import { METABOT_AGENT_INTERNET_WORLDVIEW } from './metaBotWorldview';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -562,6 +563,15 @@ export function createHostLlmChatReplyRunner(options?: {
    * fire-and-forget, never awaited; the turn still falls back as before.
    */
   requestAvailabilityRecovery?: (input: { metaBotSlug?: string }) => void;
+  /**
+   * Optional generation through a connected host executor (the DSH plugin's
+   * ctx.llm with the Bot's DSH LLM pair). Returns null when no host executor
+   * is connected or the Bot has no DSH pair — the local-runtime chain then
+   * behaves exactly as before. A host attempt is a plain completion: it never
+   * executes chat skills, so turns with an allowed-skill scope keep the
+   * local-runtime chain first and use the host LLM only as a fallback.
+   */
+  hostLlmGenerate?: HostLlmGenerateForRunner;
 }): ChatReplyRunner {
   const runtimeResolver = options?.runtimeResolver;
   const llmExecutor = options?.llmExecutor;
@@ -572,6 +582,7 @@ export function createHostLlmChatReplyRunner(options?: {
   const chatWorkspaceDir = normalizeText(options?.chatWorkspaceDir);
   const logWarning = options?.logWarning;
   const allowTemplateFallback = options?.allowTemplateFallback ?? true;
+  const hostLlmGenerate = options?.hostLlmGenerate;
   const fallbackRunner = createDefaultChatReplyRunner();
   // Remember the runtime that produced the last successful reply and try it
   // first on the next turn; a failure clears the preference immediately. The
@@ -600,13 +611,42 @@ export function createHostLlmChatReplyRunner(options?: {
     },
   };
 
-  // If no resolver provided, either fall back to template-only replies or skip.
+  // Host-executor attempt (DSH LLM pair): one plain completion per turn. The
+  // prompt is built with an empty skill scope — host generation cannot
+  // execute chat skills — and any failure falls through to the caller's
+  // normal chain.
+  const runHostGeneration = async (
+    input: ChatReplyRunnerInput,
+  ): Promise<ChatReplyRunnerResult | null> => {
+    if (!hostLlmGenerate) return null;
+    try {
+      const outcome = await hostLlmGenerate({
+        ...(metaBotSlug ? { metaBotSlug } : {}),
+        prompt: buildChatPrompt(input, emptyPrivateChatAllowedSkillScope(), { metaBotSlug }),
+        systemPrompt: buildChatSystemPrompt(input),
+      });
+      if (outcome && outcome.ok && typeof outcome.output === 'string') {
+        const parsed = parseRunnerOutput(outcome.output);
+        if (parsed.state !== 'skip') return parsed;
+      } else if (outcome && !outcome.ok) {
+        logWarning?.('[private chat host llm]', outcome.error ?? 'Host LLM generation failed.');
+      }
+    } catch (error) {
+      logWarning?.('[private chat host llm]', error instanceof Error ? error.message : String(error));
+    }
+    return null;
+  };
+
+  // If no resolver provided, try the host executor, then either fall back to
+  // template-only replies or skip.
   if (!runtimeResolver || !llmExecutor) {
-    return async (input: ChatReplyRunnerInput): Promise<ChatReplyRunnerResult> => (
-      allowTemplateFallback && !normalizeText(input.operatorGuidanceText)
+    return async (input: ChatReplyRunnerInput): Promise<ChatReplyRunnerResult> => {
+      const hostResult = await runHostGeneration(input);
+      if (hostResult) return hostResult;
+      return allowTemplateFallback && !normalizeText(input.operatorGuidanceText)
         ? fallbackRunner(input)
-        : { state: 'skip' }
-    );
+        : { state: 'skip' };
+    };
   }
 
   return async (input: ChatReplyRunnerInput): Promise<ChatReplyRunnerResult> => {
@@ -648,7 +688,17 @@ export function createHostLlmChatReplyRunner(options?: {
       }
       : undefined;
 
-    // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
+    // Try up to MAX_FALLBACK_ATTEMPTS different runtimes. Plain turns with a
+    // usable host LLM (DSH pair + connected executor) prefer it first — it is
+    // the Bot's explicitly configured brain; turns with an allowed-skill
+    // scope keep the local-runtime chain first (only it can execute skills)
+    // and fall back to the host LLM after it.
+    let hostGenerationAttempted = false;
+    if (hostLlmGenerate && allowedSkillScope.skills.length === 0) {
+      hostGenerationAttempted = true;
+      const hostResult = await runHostGeneration(input);
+      if (hostResult) return hostResult;
+    }
     for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
       const outcome = await tryExecute(
         runtimeResolver,
@@ -687,7 +737,12 @@ export function createHostLlmChatReplyRunner(options?: {
       }
     }
 
-    // All runtimes failed — either fall back to template-only reply or skip.
+    // All runtimes failed — give the host LLM its skill-turn fallback slot,
+    // then either fall back to template-only reply or skip.
+    if (!hostGenerationAttempted) {
+      const hostResult = await runHostGeneration(input);
+      if (hostResult) return hostResult;
+    }
     return templateFallbackAllowedForTurn ? fallbackRunner(input) : { state: 'skip' };
   };
 }

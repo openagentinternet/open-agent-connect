@@ -1,10 +1,22 @@
 # Open Agent Connect on DeepSeek Harness
 
-DSH is a **skill-bind host only**. It is not an OAC LLM executor. OAC never
-discovers or spawns a `dsh` binary. Conversation models on DSH come from DSH
-`ctx.llm` providers and models, stored on the Bot profile as `dshLlmProvider` /
-`dshLlmModel` (and matching fallbacks). `--host dsh` on CLI create does not
-select an OAC runtime.
+DSH is a **skill-bind host only** for runtime discovery: OAC never discovers or
+spawns a `dsh` binary, and `--host dsh` on CLI create does not select an OAC
+runtime. Conversation models on DSH come from DSH `ctx.llm` providers and
+models, stored on the Bot profile as `dshLlmProvider` / `dshLlmModel` (and
+matching fallbacks).
+
+**LLM resolution on DSH (two chains, one rule of thumb).** Daemon-side replies
+(A2A private chats, guided turns, buyer-rating replies) resolve an LLM in this
+order: the Bot's DSH pair — generated through the running DSH host via the
+host-executor bridge — then local CLI runtimes (per-Bot bindings, then any
+healthy runtime in the shared store), and finally fixed template replies. The
+one exception: a Bot with allowed chat skills keeps the local CLI chain first,
+because only a local runtime can execute skills; the DSH pair is its fallback.
+So a Bot created and configured entirely inside DSH (DSH pair set, no local
+LLM CLIs) now replies with its DeepSeek brain instead of degrading to the
+template. `metabot llm host-executor` reports whether a DSH host executor is
+connected to the daemon.
 
 The unified OAC runtime install is still:
 

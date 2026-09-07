@@ -69,5 +69,11 @@ export async function runLlmCommand(args: string[], context: CliRuntimeContext):
       : commandFailed('not_implemented', 'LLM preferred runtime handler not configured.');
   }
 
+  if (subcommand === 'host-executor') {
+    return llm?.hostExecutorStatus
+      ? llm.hostExecutorStatus()
+      : commandFailed('not_implemented', 'LLM host executor handler not configured.');
+  }
+
   return commandUnknownSubcommand(`llm ${args.join(' ')}`.trim());
 }

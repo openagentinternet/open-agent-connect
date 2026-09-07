@@ -18,6 +18,7 @@ import type {
   BotWalletPayload,
   ChatSkillsPayload,
   LlmDirectory,
+  LlmHostStatus,
 } from './api.ts'
 import { sortBotsTwinFirst } from '../bot-order.ts'
 import { BotAvatar } from './BotAvatar.tsx'
@@ -33,6 +34,7 @@ export interface BotPanelInjected {
   update: (slug: string, patch: Record<string, unknown>) => Promise<BotRow>
   remove: (slug: string) => Promise<void>
   llmDirectory: () => Promise<LlmDirectory>
+  llmHostStatus: () => Promise<LlmHostStatus | null>
   chatSkills: (from: string) => Promise<ChatSkillsPayload>
   loadAutoReplyStatus: (from: string) => Promise<AutoReplyConfig>
   autoReplyConfig: (
@@ -58,6 +60,7 @@ export function BotPanel({
   update,
   remove,
   llmDirectory,
+  llmHostStatus,
   chatSkills,
   loadAutoReplyStatus,
   autoReplyConfig,
@@ -116,6 +119,7 @@ export function BotPanel({
         hasOtherTwin={Boolean(otherTwin)}
         otherTwinName={otherTwin?.name ?? ''}
         directory={directory}
+        llmHostStatus={llmHostStatus}
         t={t}
         busy={busy}
         error={error}

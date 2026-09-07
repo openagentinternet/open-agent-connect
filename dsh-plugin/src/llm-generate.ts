@@ -16,6 +16,7 @@ export interface LlmStreamLike {
     messages: Array<{ role: 'system' | 'user'; content: Array<{ type: 'text'; text: string }> }>
     maxTokens?: number
     purpose?: string
+    reasoningEffort?: string
   }): AsyncIterable<LlmStreamChunkLike>
 }
 
@@ -25,6 +26,10 @@ export interface GenerateTextOptions {
   system: string
   user: string
   maxTokens?: number
+  /** Optional reasoning effort (DSH adapter vocabulary: off/low/high/max). */
+  reasoningEffort?: string
+  /** Billing/diagnostics purpose tag forwarded to the host llm service. */
+  purpose?: string
   /**
    * Idle timeout per stream chunk in milliseconds. When a provider silently
    * stalls (no chunk ever arrives, or the socket stays half-open), the plain
@@ -49,7 +54,8 @@ export async function generateLlmText(llm: LlmStreamLike, options: GenerateTextO
     model: options.model,
     messages,
     ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
-    purpose: 'oac-dream',
+    ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+    purpose: options.purpose ?? 'oac-dream',
   })
   const iterator = iterable[Symbol.asyncIterator]()
   let text = ''

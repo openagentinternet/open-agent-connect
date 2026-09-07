@@ -279,6 +279,12 @@ export interface MetabotDaemonHttpHandlers {
     cancelSession?: (input: { sessionId: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listSessions?: (input: { limit: number }) => Awaitable<MetabotCommandResult<unknown>>;
     streamSessionEvents?: (input: { sessionId: string }) => AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
+    /** Host-executor bridge: connected status (GET status route + CLI verb). */
+    hostExecutorStatus?: () => Awaitable<MetabotCommandResult<unknown>>;
+    /** Host-executor bridge: one posted generation result. */
+    hostExecutorSubmitResult?: (input: Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
+    /** Host-executor bridge: the SSE stream of generation requests (null = not configured). */
+    hostExecutorEvents?: () => AsyncIterable<unknown> | null | Promise<AsyncIterable<unknown> | null>;
   };
   bot?: {
     getStats?: () => Awaitable<MetabotCommandResult<unknown>>;

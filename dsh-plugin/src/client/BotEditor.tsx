@@ -21,6 +21,7 @@ import {
   type BotWalletPayload,
   type ChatSkillsPayload,
   type LlmDirectory,
+  type LlmHostStatus,
 } from './api.ts'
 import { BotAdvancedSection } from './BotAdvancedSection.tsx'
 import { BotAvatar } from './BotAvatar.tsx'
@@ -67,6 +68,7 @@ export function BotEditor({
   hasOtherTwin,
   otherTwinName,
   directory,
+  llmHostStatus,
   t,
   busy,
   error,
@@ -86,6 +88,7 @@ export function BotEditor({
   hasOtherTwin: boolean
   otherTwinName: string
   directory: LlmDirectory | null
+  llmHostStatus: () => Promise<LlmHostStatus | null>
   t: Translate
   busy: boolean
   error: string | null
@@ -132,6 +135,17 @@ export function BotEditor({
   const [soul, setSoul] = useState(bot.soul ?? '')
   const [goal, setGoal] = useState(bot.goal ?? '')
   const fallbackSet = Boolean(fallbackProvider && fallbackModel)
+  const [hostStatus, setHostStatus] = useState<LlmHostStatus | null>(null)
+
+  // Daemon-side host-executor status for the reply-model status lines; read
+  // once per editor open, best-effort (null hides the online/offline detail).
+  useEffect(() => {
+    let current = true
+    void llmHostStatus().then((status) => {
+      if (current) setHostStatus(status)
+    })
+    return () => { current = false }
+  }, [llmHostStatus])
 
   // Chat settings: the auto-reply state lives server-side and is written on
   // every toggle/param change; the allowed-skill list is a local draft that
@@ -532,6 +546,21 @@ export function BotEditor({
                 </button>
               )}
               <span className="oac-hint">{t('llmFallbackHint')}</span>
+            </div>
+            <div className="oac-field">
+              <span className="oac-field-label">{t('llmReplyStatus')}</span>
+              <span className="oac-hint">
+                {provider && model
+                  ? (hostStatus && hostStatus.connected > 0
+                    ? t('llmReplyBrainActive')
+                    : t('llmReplyBrainOffline'))
+                  : t('llmReplyBrainUnset')}
+              </span>
+              <span className="oac-hint">
+                {bot.primaryProvider
+                  ? t('llmReplyLocalBound', { provider: bot.primaryProvider })
+                  : t('llmReplyLocalUnbound')}
+              </span>
             </div>
             <div className="oac-info-row">
               <span className="oac-info-label">{t('globalMetaId')}</span>

@@ -20,6 +20,33 @@ on plugin 0.3.x until their kernel is upgraded.
 
 After a DSH restart, Settings left nav gains these sibling sections: **Bots**, **Memory**, **User**, **Apps**, and **Traffic** (流量 — the account-quota billing panel: mode toggle, balance, free grant, redeem codes, usage, and ledger, backed by `metabot traffic *`; the **Services** section is hidden until the service plugin matures; **A2A Chat** is a sidebar-footer action). New conversations pick a Bot from the shadowed agent-preset chip (`oac-<slug>` rows show the Bot name/avatar; stock DSH presets stay visible).
 
+## LLM resolution: who generates what
+
+Two LLM chains coexist, and every generation site uses exactly one of them:
+
+- **DSH host chain** — the Bot's DSH LLM pair (`dshLlmProvider`/`dshLlmModel`
+  plus optional fallback pair, set in Settings → Bots or via
+  `metabot bot create/update --dsh-llm-*`), executed by the DSH host's
+  `ctx.llm`. Used for DSH `oac-*` conversations, dreams, chain-history
+  summaries, scheduled tasks while DSH runs, and twin worker sub-sessions.
+- **OAC daemon chain** — local LLM CLI runtimes (claude-code, codex, …),
+  auto-discovered at Bot create and bound per Bot. Used by group-task chair
+  turns, memory deep consolidation, and headless scheduled tasks.
+
+**A2A private-chat replies (and guided turns, buyer-rating replies) bridge the
+two:** the daemon's reply runner tries the Bot's DSH pair first through the
+**host LLM executor** — the plugin holds one long-lived SSE lease on the
+daemon's `/api/llm/host-executor/events` stream, executes each pushed
+`generate` request via `ctx.llm` (primary pair, fallback pair retried once),
+and POSTs the result back. If no executor is connected (DSH closed) or the
+pair is unset, resolution continues down the daemon chain — per-Bot bindings,
+then any healthy local runtime, then fixed template replies. One exception: a
+Bot with allowed **chat skills** keeps the local CLI chain first (only a local
+runtime can execute skills); the DSH pair is its fallback. The Bot editor
+shows both lines ("私聊回复（A2A）"); `metabot llm host-executor` reports the
+connected-executor count. Gate the executor with the cordis.yml config toggle
+`llmExecutor.enabled` (default on).
+
 The **Bots → edit** dialog gains a **Knowledge** tab (a DSH port of IDBots'
 `KnowledgeBasePanel`): one card per document knowledge base — name with a
 Default badge, description, raw-corpus path, doc/chunk counts with the last
@@ -310,6 +337,7 @@ All under `/oac/api/*`, same browser-trust fence as better-sidebar (loopback Hos
 | GET or POST | `/oac/api/health` | `{ cliPath, daemon, skillBind }` |
 | POST | `/oac/api/who` | `metabot identity who` JSON envelope |
 | POST | `/oac/api/chat/*` | `metabot chat conversations`, `messages`, `private` |
+| POST | `/oac/api/llm/host-status` | daemon `/api/llm/host-executor/status` (connected-executor count) for the Bot editor's reply-model lines |
 | GET | `/oac/api/chat/events?from=<slug>` | SSE proxy of the daemon's `/api/conversations/events` (`conversation-update` on stored-row changes and chain-profile warm-up completions) |
 | GET | `/oac/api/file/avatar?ref=<pin>` | same-origin proxy of the daemon's `/api/file/avatar`, so chain avatar pin references render in the panels |
 | POST | `/oac/api/services/*` | `metabot services owned`, `publish`, `call` |

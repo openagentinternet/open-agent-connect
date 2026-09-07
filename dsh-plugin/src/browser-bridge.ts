@@ -160,17 +160,17 @@ export async function resolveDaemonBaseUrl(
   return null
 }
 
-type SseCallbacks = {
+export type SseCallbacks = {
   onEvent: (eventName: string, data: string) => void
   onClose: () => void
   onError: (message: string) => void
 }
 
-/** Subscribe to the daemon's `agent-browser:open-tab` SSE stream. */
-function subscribeToBrowserEvents(baseUrl: string, callbacks: SseCallbacks): () => void {
-  const request = httpGet(`${baseUrl}/api/browser/events`, (response) => {
+/** Subscribe to one daemon SSE endpoint (frames: `event:`/`data:` lines). */
+export function subscribeDaemonSse(url: string, callbacks: SseCallbacks, label = 'daemon sse'): () => void {
+  const request = httpGet(url, (response) => {
     if (response.statusCode !== 200) {
-      callbacks.onError(`daemon browser events returned HTTP ${response.statusCode ?? 0}`)
+      callbacks.onError(`${label} returned HTTP ${response.statusCode ?? 0}`)
       response.resume()
       return
     }
@@ -196,6 +196,11 @@ function subscribeToBrowserEvents(baseUrl: string, callbacks: SseCallbacks): () 
   })
   request.on('error', (error) => callbacks.onError(error.message))
   return () => { request.destroy() }
+}
+
+/** Subscribe to the daemon's `agent-browser:open-tab` SSE stream. */
+function subscribeToBrowserEvents(baseUrl: string, callbacks: SseCallbacks): () => void {
+  return subscribeDaemonSse(`${baseUrl}/api/browser/events`, callbacks, 'daemon browser events')
 }
 
 function parseOpenTabData(data: string): string | null {

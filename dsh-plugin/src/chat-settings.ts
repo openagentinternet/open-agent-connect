@@ -104,3 +104,13 @@ export async function setAutoReplyConfig(input: {
   if (typeof input.cooldownMs === 'number') args.push('--cooldown-ms', String(input.cooldownMs))
   return runMetabot(args)
 }
+
+/** Daemon host-LLM-executor status: connected count for the Bots editor's reply-LLM status line. */
+export async function getLlmHostStatus(): Promise<MetabotCommandResult> {
+  const baseUrl = await resolveDaemonBaseUrl()
+  if (baseUrl !== null) {
+    const direct = await daemonJson(baseUrl, '/api/llm/host-executor/status', 'GET')
+    if (direct) return direct
+  }
+  return runMetabot(['llm', 'host-executor'])
+}
