@@ -301,6 +301,7 @@ export function apply(ctx: ClientContext): void {
         ...(bot.botType === undefined || bot.botType === null ? {} : { botType: bot.botType }),
         dshLlmProvider: bot.dshLlmProvider,
         dshLlmModel: bot.dshLlmModel,
+        ...(bot.role === undefined || bot.role === null ? {} : { role: bot.role }),
       })),
       (): SeatSessionSummary | undefined => {
         const state = scope.sessions.list.getSnapshot()

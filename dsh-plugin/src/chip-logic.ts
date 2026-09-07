@@ -31,6 +31,8 @@ export type ChipBot = {
   dshLlmModel?: string | null
   /** Local Twin/Worker role; the Twin is the default for new blank sessions. */
   botType?: 'twin' | 'worker' | null
+  /** Persona role (ROLE.md) — shown under the Bot name in the preset chip. */
+  role?: string | null
 }
 
 export type ChipSession = {
@@ -64,6 +66,38 @@ export function chipDisplayName(
     if (botName) return botName
   }
   return option.name?.trim() || option.id
+}
+
+/**
+ * OAC presets show the Bot's persona role under the name (the roster copy is a
+ * static plugin-time description, identical for every Bot); every other preset
+ * keeps its own roster description. Falls back to `fallback` when this Bot has
+ * no role text.
+ */
+export function chipDescription(
+  option: Pick<ChipPresetOption, 'id' | 'description'>,
+  botsBySlug: Readonly<Record<string, Pick<ChipBot, 'role'>>>,
+  fallback: string,
+): string {
+  const slug = slugFromPresetId(option.id)
+  if (slug !== undefined) {
+    const role = botsBySlug[slug]?.role?.trim()
+    if (role) return role
+  }
+  return option.description?.trim() || fallback
+}
+
+/** The Twin Bot's preset row goes first: new blank sessions default to it. */
+export function orderPresetsTwinFirst(
+  options: readonly ChipPresetOption[],
+  botsBySlug: Readonly<Record<string, Pick<ChipBot, 'botType'>>>,
+): ChipPresetOption[] {
+  const twinSlug = Object.entries(botsBySlug).find(([, bot]) => bot.botType === 'twin')?.[0]
+  if (!twinSlug) return [...options]
+  const twinId = presetIdForSlug(twinSlug)
+  const twin = options.find((option) => option.id === twinId)
+  if (!twin) return [...options]
+  return [twin, ...options.filter((option) => option.id !== twinId)]
 }
 
 export function chipAvatar(

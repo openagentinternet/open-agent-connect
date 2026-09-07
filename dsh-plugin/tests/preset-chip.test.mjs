@@ -76,3 +76,55 @@ test('blank sessions default to the Twin Bot preset once', async () => {
   const logic = await readFile(join(root, 'src/chip-logic.ts'), 'utf8')
   assert.match(logic, /botType\?: 'twin' \| 'worker' \| null/)
 })
+
+test('chip description shows the Bot persona role over the static preset copy', async () => {
+  const { chipDescription } = await import('../lib/chip-logic.js')
+  const botsBySlug = {
+    bob: { role: 'Chief of staff: plans group tasks and delegates work' },
+    bare: { role: '   ' },
+  }
+  assert.equal(
+    chipDescription(
+      { id: 'oac-bob', description: 'Open Agent Connect Bot' },
+      botsBySlug,
+      'fallback',
+    ),
+    'Chief of staff: plans group tasks and delegates work',
+  )
+  // Blank role falls back to the roster description, then to the fallback.
+  assert.equal(
+    chipDescription({ id: 'oac-bare', description: 'Open Agent Connect Bot' }, botsBySlug, 'fallback'),
+    'Open Agent Connect Bot',
+  )
+  assert.equal(
+    chipDescription({ id: 'oac-bare', description: undefined }, botsBySlug, 'no description'),
+    'no description',
+  )
+  // Non-OAC presets always keep their own description.
+  assert.equal(
+    chipDescription({ id: 'standard', description: 'Stock DSH preset' }, botsBySlug, 'fallback'),
+    'Stock DSH preset',
+  )
+})
+
+test('preset dropdown lists the Twin Bot first', async () => {
+  const { orderPresetsTwinFirst } = await import('../lib/chip-logic.js')
+  const botsBySlug = {
+    worker1: { botType: 'worker' },
+    bob: { botType: 'twin' },
+    worker2: { botType: 'worker' },
+  }
+  const options = [
+    { id: 'standard', trust: 'system' },
+    { id: 'oac-worker1', trust: 'user' },
+    { id: 'oac-bob', trust: 'user' },
+    { id: 'oac-worker2', trust: 'user' },
+  ]
+  const ordered = orderPresetsTwinFirst(options, botsBySlug)
+  assert.deepEqual(ordered.map((option) => option.id), ['oac-bob', 'standard', 'oac-worker1', 'oac-worker2'])
+  // No twin / twin preset absent: order unchanged.
+  assert.deepEqual(
+    orderPresetsTwinFirst(options, { worker1: { botType: 'worker' } }).map((option) => option.id),
+    ['standard', 'oac-worker1', 'oac-bob', 'oac-worker2'],
+  )
+})
