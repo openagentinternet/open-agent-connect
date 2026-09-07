@@ -80,10 +80,12 @@ Every Bot gets the ported IDBots memory system automatically:
   is stored once per machine at `~/.metabot/owner/identity.json` (mode 0600)
   and is separate from every Bot profile. Bots can bind it as their owner
   (`metabot bot bind-owner` defaults to this identity).
-- **Twin / Worker**: Bots default to `worker`; exactly one Bot per machine is
-  the **Twin**. Toggle it on the Bot edit page (Basic tab, "Twin Bot"
-  switch); the one-twin invariant is enforced automatically (promoting a Bot
-  demotes the previous twin, demoting re-promotes the earliest remaining Bot).
+- **Twin / Worker**: Bots default to `worker`; at most one Bot per machine is
+  the **Twin**. The switch shows on the Bot edit page (Basic tab, "Twin Bot")
+  only on the current Twin's own page or, on any Bot's page, while no Twin
+  exists — Worker pages hide it once a Twin is set. Promoting a Bot demotes
+  the previous twin; demoting the twin leaves the machine twin-less until
+  another Bot is promoted (Bot create/delete still repair a missing twin).
   The twin is badged in the Bots tile list. Equivalent CLI: `metabot bot
   update --from <slug> --payload-file {"botType":"twin"}` or `bot create
   --type twin`. The Twin gains the local delegation toolset

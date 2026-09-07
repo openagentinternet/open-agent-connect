@@ -1,8 +1,10 @@
 // Twin/Worker role machinery, ported from IDBots metabotStore.ts
 // (demoteOtherTwins / ensureTwinExists) and twinWorkerDirectoryService.ts
 // (sanitized roster). At most one Bot on a machine may carry botType 'twin':
-// promoting one demotes the previous twin, and deleting/losing the twin
-// repairs the invariant by promoting the earliest-created remaining Bot.
+// promoting one demotes the previous twin. An explicit demote leaves the
+// machine twin-less until another Bot is promoted (IDBots parity); only
+// Bot create/delete repair a missing twin by promoting the earliest-created
+// remaining Bot.
 import {
   listMetabotProfiles,
   type MetabotProfileFull,

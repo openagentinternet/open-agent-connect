@@ -14,6 +14,7 @@ const {
   updateMetabotProfile,
 } = require('../../dist/core/bot/metabotProfileManager.js');
 const { readBotRoleInfo, writeBotRoleInfo } = require('../../dist/core/bot/botRole.js');
+const { resolveCurrentTwinSlug } = require('../../dist/core/bot/twinRole.js');
 const { listIdentityProfiles, upsertIdentityProfile } = require('../../dist/core/identity/identityProfiles.js');
 const { createLlmBindingStore } = require('../../dist/core/llm/llmBindingStore.js');
 const { createLlmRuntimeStore } = require('../../dist/core/llm/llmRuntimeStore.js');
@@ -328,6 +329,39 @@ test('default bot handlers designate the twin Bot through updateProfile botType'
   assert.equal(reBySlug.get(eric.slug).isActive, false);
   const demotedRole = await readBotRoleInfo(resolveMetabotPaths(eric.homeDir).botRoleStatePath);
   assert.equal(demotedRole.botType, 'worker');
+});
+
+test('demoting the twin leaves the machine twin-less until another Bot is promoted (IDBots parity)', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-handlers-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  const alice = await createMetabotProfile(systemHomeDir, { name: 'Alice Bot' });
+  const eric = await createMetabotProfile(systemHomeDir, { name: 'Eric Bot' });
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  await handlers.bot.updateProfile({ slug: alice.slug, botType: 'twin' });
+  const demoted = await handlers.bot.updateProfile({ slug: alice.slug, botType: 'worker' });
+  assert.equal(demoted.ok, true);
+
+  // No auto-repair on an explicit demote: both Bots are workers and no twin
+  // resolves, so every Bot edit page may offer the Twin switch again.
+  const aliceRole = await readBotRoleInfo(resolveMetabotPaths(alice.homeDir).botRoleStatePath);
+  const ericRole = await readBotRoleInfo(resolveMetabotPaths(eric.homeDir).botRoleStatePath);
+  assert.equal(aliceRole.botType, 'worker');
+  assert.notEqual(ericRole.botType, 'twin');
+  assert.equal(await resolveCurrentTwinSlug(systemHomeDir), null);
+
+  // The next twin is a deliberate promotion, not a repair side effect.
+  const promoted = await handlers.bot.updateProfile({ slug: eric.slug, botType: 'twin' });
+  assert.equal(promoted.ok, true);
+  assert.equal(await resolveCurrentTwinSlug(systemHomeDir), eric.slug);
 });
 
 test('default bot config handlers persist chain config per MetaBot profile', async (t) => {
