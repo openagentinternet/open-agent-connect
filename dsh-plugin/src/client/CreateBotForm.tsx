@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutline16, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { LlmDirectory } from './api.ts'
 import type { BotsLocaleKey } from './locale.ts'
+import { LlmPicker } from './LlmPicker.tsx'
 
 type Translate = (key: BotsLocaleKey, vars?: Record<string, string | number>) => string
 
@@ -9,8 +10,10 @@ export type CreateBotInput = {
   name: string
   dshLlmProvider: string
   dshLlmModel: string
+  dshLlmReasoningEffort?: string
   dshLlmFallbackProvider?: string
   dshLlmFallbackModel?: string
+  dshLlmFallbackReasoningEffort?: string
 }
 
 export function CreateBotForm({
@@ -19,6 +22,7 @@ export function CreateBotForm({
   busy,
   error,
   formId,
+  existingNames,
   onValidityChange,
   onSubmit,
 }: {
@@ -27,36 +31,48 @@ export function CreateBotForm({
   busy: boolean
   error: string | null
   formId: string
+  /** Names of the Bots already on this machine, for the duplicate pre-check. */
+  existingNames: string[]
   onValidityChange: (valid: boolean) => void
   onSubmit: (input: CreateBotInput) => Promise<void>
 }): ReactNode {
-  const providers = directory?.providers ?? []
   const [name, setName] = useState('')
-  const [provider, setProvider] = useState(providers[0]?.id ?? '')
+  const [nameTouched, setNameTouched] = useState(false)
+  const [provider, setProvider] = useState('')
   const [model, setModel] = useState('')
+  const [reasoningEffort, setReasoningEffort] = useState('')
   const [fallbackProvider, setFallbackProvider] = useState('')
   const [fallbackModel, setFallbackModel] = useState('')
+  const [fallbackReasoningEffort, setFallbackReasoningEffort] = useState('')
+  const fallbackSet = Boolean(fallbackProvider && fallbackModel)
 
-  useEffect(() => {
-    if (!provider && providers[0]) setProvider(providers[0].id)
-  }, [provider, providers])
-
-  const models = directory?.modelsByProvider[provider] ?? []
-  const fallbackModels = fallbackProvider ? directory?.modelsByProvider[fallbackProvider] ?? [] : []
+  // Name duplicate pre-check (the daemon stays authoritative via name_taken);
+  // the message shows on blur/submit, the submit gate applies immediately.
+  const trimmedName = name.trim()
+  const nameDuplicate = trimmedName !== ''
+    && existingNames.some((existing) => existing.trim().toLowerCase() === trimmedName.toLowerCase())
+  const showNameError = nameDuplicate && nameTouched
 
   // The modal footer owns the actions; it needs the same gating this form
   // computes, so the validity travels up through the injected callback.
-  const canSubmit = Boolean(name.trim() && provider && model) && !busy
+  const canSubmit = Boolean(trimmedName && provider && model) && !nameDuplicate && !busy
   useEffect(() => { onValidityChange(canSubmit) }, [canSubmit, onValidityChange])
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
+    setNameTouched(true)
+    if (nameDuplicate || !canSubmit) return
     await onSubmit({
-      name: name.trim(),
+      name: trimmedName,
       dshLlmProvider: provider,
       dshLlmModel: model,
+      ...(reasoningEffort ? { dshLlmReasoningEffort: reasoningEffort } : {}),
       ...(fallbackProvider && fallbackModel
-        ? { dshLlmFallbackProvider: fallbackProvider, dshLlmFallbackModel: fallbackModel }
+        ? {
+          dshLlmFallbackProvider: fallbackProvider,
+          dshLlmFallbackModel: fallbackModel,
+          ...(fallbackReasoningEffort ? { dshLlmFallbackReasoningEffort: fallbackReasoningEffort } : {}),
+        }
         : {}),
     })
   }
@@ -69,64 +85,77 @@ export function CreateBotForm({
         <Input
           value={name}
           onChange={(event) => setName(event.target.value)}
+          onBlur={() => setNameTouched(true)}
           placeholder={t('fieldNamePlaceholder')}
           autoFocus
         />
+        {showNameError ? <span className="oac-error" role="alert">{t('nameDuplicate')}</span> : null}
       </label>
-      <label className="oac-field">
-        <span className="oac-field-label">{t('fieldProvider')}</span>
-        <select
-          className="oac-input oac-input-select"
-          value={provider}
-          onChange={(event) => { setProvider(event.target.value); setModel('') }}
-        >
-          <option value="">{t('fieldProvider')}</option>
-          {providers.map((row) => (
-            <option key={row.id} value={row.id}>{row.name}</option>
-          ))}
-        </select>
-      </label>
-      <label className="oac-field">
-        <span className="oac-field-label">{t('fieldModel')}</span>
-        <select
-          className="oac-input oac-input-select"
-          value={model}
-          disabled={!provider}
-          onChange={(event) => setModel(event.target.value)}
-        >
-          <option value="">{t('fieldModel')}</option>
-          {models.map((row) => (
-            <option key={row.id} value={row.id}>{row.name}</option>
-          ))}
-        </select>
-      </label>
-      <label className="oac-field">
-        <span className="oac-field-label">{t('fieldFallbackProvider')}</span>
-        <select
-          className="oac-input oac-input-select"
-          value={fallbackProvider}
-          onChange={(event) => { setFallbackProvider(event.target.value); setFallbackModel('') }}
-        >
-          <option value=""></option>
-          {providers.map((row) => (
-            <option key={row.id} value={row.id}>{row.name}</option>
-          ))}
-        </select>
-      </label>
-      <label className="oac-field">
-        <span className="oac-field-label">{t('fieldFallbackModel')}</span>
-        <select
-          className="oac-input oac-input-select"
-          value={fallbackModel}
-          disabled={!fallbackProvider}
-          onChange={(event) => setFallbackModel(event.target.value)}
-        >
-          <option value=""></option>
-          {fallbackModels.map((row) => (
-            <option key={row.id} value={row.id}>{row.name}</option>
-          ))}
-        </select>
-      </label>
+      <div className="oac-field">
+        <span className="oac-field-label">{t('llmBrain')}</span>
+        <LlmPicker
+          value={{ provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) }}
+          directory={directory}
+          locked={busy}
+          invalid={!provider || !model}
+          onChange={(next) => {
+            setProvider(next.provider)
+            setModel(next.model)
+            setReasoningEffort(next.reasoningEffort ?? '')
+          }}
+          t={t}
+        />
+      </div>
+      <div className="oac-field">
+        <span className="oac-field-label">{t('llmFallback')}</span>
+        {fallbackSet ? (
+          <div className="oac-llm-fallback-row">
+            <LlmPicker
+              value={{
+                provider: fallbackProvider,
+                model: fallbackModel,
+                ...(fallbackReasoningEffort ? { reasoningEffort: fallbackReasoningEffort } : {}),
+              }}
+              directory={directory}
+              locked={busy}
+              onChange={(next) => {
+                setFallbackProvider(next.provider)
+                setFallbackModel(next.model)
+                setFallbackReasoningEffort(next.reasoningEffort ?? '')
+              }}
+              t={t}
+            />
+            <button
+              type="button"
+              className="oac-llm-clear"
+              aria-label={t('llmClearFallback')}
+              title={t('llmClearFallback')}
+              disabled={busy}
+              onClick={() => {
+                setFallbackProvider('')
+                setFallbackModel('')
+                setFallbackReasoningEffort('')
+              }}
+            >
+              <IconCloseOutline16 size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="oac-a2a-guidance-toggle"
+            disabled={busy || !provider || !model}
+            onClick={() => {
+              setFallbackProvider(provider)
+              setFallbackModel(model)
+              setFallbackReasoningEffort(reasoningEffort)
+            }}
+          >
+            {t('llmSetFallback')}
+          </button>
+        )}
+        <span className="oac-hint">{t('llmFallbackHint')}</span>
+      </div>
     </form>
   )
 }

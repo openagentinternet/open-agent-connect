@@ -31,6 +31,13 @@ export type BotHomepageRef = {
   contentType: string
 }
 
+/** On-chain setup state attached to Bot rows on list/create/setup-retry (absent on show). */
+export type BotSetupStatus = {
+  state: 'pending' | 'subsidy_failed' | 'sync_failed' | 'ready'
+  retryable: boolean
+  error: string | null
+}
+
 export type BotRow = {
   name: string
   slug: string
@@ -55,6 +62,7 @@ export type BotRow = {
   primaryProvider?: string | null
   botType?: 'twin' | 'worker' | null
   ownerGlobalMetaId?: string | null
+  setup?: BotSetupStatus | null
 }
 
 /** Daemon host-LLM-executor status (the DSH-side bridge for A2A replies). */
@@ -497,16 +505,39 @@ async function post<T>(method: string, body: unknown = {}): Promise<T> {
   return envelope.data as T
 }
 
+function setupOf(value: unknown): BotSetupStatus | null {
+  const record = recordOf(value)
+  const state = textOf(record.state)
+  if (state !== 'pending' && state !== 'subsidy_failed' && state !== 'sync_failed' && state !== 'ready') {
+    return null
+  }
+  return {
+    state,
+    retryable: record.retryable === true,
+    error: typeof record.error === 'string' && record.error.trim() !== '' ? record.error : null,
+  }
+}
+
+/** Read the `setup` sibling off an envelope data payload (create / setup-retry). */
+export function botSetupFromData(data: unknown): BotSetupStatus | null {
+  return setupOf(recordOf(data).setup)
+}
+
 function profilesOf(data: unknown): BotRow[] {
   if (data && typeof data === 'object' && Array.isArray((data as { profiles?: unknown }).profiles)) {
-    return (data as { profiles: BotRow[] }).profiles
+    return (data as { profiles: BotRow[] }).profiles.map((row) => {
+      const setup = setupOf(row.setup)
+      return setup ? { ...row, setup } : row
+    })
   }
   return []
 }
 
 function profileOf(data: unknown): BotRow {
   if (data && typeof data === 'object' && 'profile' in data) {
-    return (data as { profile: BotRow }).profile
+    const profile = (data as { profile: BotRow }).profile
+    const setup = botSetupFromData(data)
+    return setup ? { ...profile, setup } : profile
   }
   return data as BotRow
 }
@@ -528,6 +559,9 @@ export const api = {
   remove: async (slug: string): Promise<void> => {
     await post('bots/delete', { slug })
   },
+  /** Re-run the on-chain setup (subsidy + info sync) for a locally-created Bot. */
+  botSetupRetry: async (slug: string): Promise<BotRow> =>
+    profileOf(await post('bots/setup-retry', { slug })),
   botWallet: async (slug: string): Promise<BotWalletPayload> => {
     const data = await post<{ wallet?: unknown }>('bots/wallet', { slug })
     const wallet = recordOf(data.wallet)

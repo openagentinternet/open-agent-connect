@@ -45,6 +45,31 @@ test('bots/backup rejects a missing slug without spawning the CLI', async () => 
   assert.deepEqual(calls, [])
 })
 
+test('bots/setup-retry spawns bot setup-retry --from <slug> with the write timeout', async () => {
+  const calls = []
+  const result = await plugin.dispatchBotAdvancedRoutes(
+    'bots/setup-retry',
+    { slug: 'alice' },
+    async (args, options) => {
+      calls.push({ args, options })
+      return { ok: true, state: 'success', data: { profile: { slug: 'alice' }, setup: { state: 'ready', retryable: false, error: null } } }
+    },
+  )
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls, [{ args: ['bot', 'setup-retry', '--from', 'alice'], options: { timeoutMs: 180_000 } }])
+})
+
+test('bots/setup-retry rejects a missing slug without spawning the CLI', async () => {
+  const calls = []
+  const result = await plugin.dispatchBotAdvancedRoutes('bots/setup-retry', {}, async (args) => {
+    calls.push(args)
+    return { ok: true, state: 'success' }
+  })
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'missing_slug')
+  assert.deepEqual(calls, [])
+})
+
 test('bots/homepage-upload validates slug and base64 before touching the daemon', async () => {
   const uploads = []
   const upload = async (...args) => {

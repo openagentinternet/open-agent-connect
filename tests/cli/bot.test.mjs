@@ -169,7 +169,7 @@ test('runCli forwards DSH LLM fields on bot create and update', async () => {
   ]);
 });
 
-test('runCli dispatches bot config, wallet, backup, runtime, and session commands', async () => {
+test('runCli dispatches bot config, wallet, backup, setup-retry, runtime, and session commands', async () => {
   const tempDir = await mkdtempTempRoot('metabot-cli-bot-config-');
   const configFile = path.join(tempDir, 'config.json');
   await writeFile(configFile, JSON.stringify({ chain: { defaultWriteNetwork: 'doge' } }), 'utf8');
@@ -180,6 +180,7 @@ test('runCli dispatches bot config, wallet, backup, runtime, and session command
     ['bot', 'config', 'set', '--from', 'alice', '--payload-file', configFile],
     ['bot', 'wallet', '--from', 'alice'],
     ['bot', 'backup', '--from', 'alice'],
+    ['bot', 'setup-retry', '--from', 'alice'],
     ['bot', 'runtimes', 'list', '--from', 'alice'],
     ['bot', 'runtimes', 'discover', '--from', 'alice'],
     ['bot', 'sessions', '--from', 'alice', '--limit', '50'],
@@ -200,6 +201,10 @@ test('runCli dispatches bot config, wallet, backup, runtime, and session command
       },
       getBackup: async (input) => {
         calls.push(['backup', input]);
+        return commandSuccess({});
+      },
+      retryProfileSetup: async (input) => {
+        calls.push(['setup-retry', input]);
         return commandSuccess({});
       },
       listRuntimes: async (input) => {
@@ -231,6 +236,7 @@ test('runCli dispatches bot config, wallet, backup, runtime, and session command
     ['config:set', { slug: 'alice', chain: { defaultWriteNetwork: 'doge' } }],
     ['wallet', { slug: 'alice' }],
     ['backup', { slug: 'alice' }],
+    ['setup-retry', { slug: 'alice' }],
     ['runtimes:list', { from: 'alice' }],
     ['runtimes:discover', { from: 'alice' }],
     ['sessions', { slug: 'alice', limit: 50 }],

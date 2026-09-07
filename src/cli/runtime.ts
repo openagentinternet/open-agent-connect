@@ -5126,6 +5126,8 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
         requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/wallet`),
       getBackup: async (input) =>
         requestJson(context, 'GET', `/api/bot/profiles/${encodeURIComponent(input.slug)}/backup`),
+      retryProfileSetup: async (input) =>
+        requestJson(context, 'POST', `/api/bot/profiles/${encodeURIComponent(input.slug)}/setup/retry`),
       listRuntimes: async (input = {}) => {
         const query = new URLSearchParams();
         if (input.from) query.set('from', input.from);

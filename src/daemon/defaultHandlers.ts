@@ -48,6 +48,7 @@ import type {
 } from '../core/llm/llmTypes';
 import type { LlmExecutor, LlmExecutionRequest } from '../core/llm/executor';
 import {
+  MAX_LOCAL_BOT_PROFILES,
   buildMetabotProfileDraftFromIdentity,
   buildMetabotInfoPublishTargets,
   createMetabotProfileFromIdentity,
@@ -17759,6 +17760,11 @@ export function createDefaultMetabotDaemonHandlers(input: {
         }
         const name = createInput.name;
         const profiles = await listIdentityProfiles(normalizedSystemHomeDir).catch(() => []);
+        // Hard cap on local Bots: creating beyond the limit fails before any
+        // home directory or chain work is reserved.
+        if (profiles.length >= MAX_LOCAL_BOT_PROFILES) {
+          return commandFailed('bot_limit_reached', `MetaBot count cannot exceed ${MAX_LOCAL_BOT_PROFILES}.`);
+        }
         const resolvedHome = resolveIdentityCreateProfileHome({
           systemHomeDir: normalizedSystemHomeDir,
           requestedName: name,

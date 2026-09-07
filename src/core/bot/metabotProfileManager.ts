@@ -71,6 +71,9 @@ import {
 const CHAIN_SYNC_DELAY_MS = 3_000;
 const PROFILE_INFO_FIELDS = new Set(['bio', 'role', 'soul', 'goal', 'primaryProvider', 'fallbackProvider', 'allowChatSkills', 'homepage']);
 
+/** Hard cap on local MetaBot profiles per machine (enforced by the daemon create route). */
+export const MAX_LOCAL_BOT_PROFILES = 100;
+
 export { validateAvatarDataUrl } from '../identity/avatarChainWrite';
 
 export interface MetabotProfileFull extends IdentityProfileRecord {

@@ -1,9 +1,9 @@
 /**
- * Advanced-tab Bot routes: wallet/backup CLI reads plus the homepage upload.
- * The upload arrives as base64 JSON from the browser, is size-checked here,
- * and is forwarded as raw bytes to the daemon's on-chain inscribe route (the
- * CLI has no homepage-upload verb). Unknown methods return undefined so the
- * caller keeps dispatching.
+ * Advanced-tab Bot routes: wallet/backup CLI reads, the setup-retry chain
+ * write, plus the homepage upload. The upload arrives as base64 JSON from the
+ * browser, is size-checked here, and is forwarded as raw bytes to the daemon's
+ * on-chain inscribe route (the CLI has no homepage-upload verb). Unknown
+ * methods return undefined so the caller keeps dispatching.
  */
 import { runMetabot, type MetabotCommandResult } from './cli-bridge.js'
 import { missing, readTrimmed, type RunFn } from './cli-payload.js'
@@ -12,6 +12,8 @@ import { daemonBotHomepageUpload } from './conversation-bridge.js'
 export const HOMEPAGE_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 /** base64 inflates the file bytes ~4/3, plus JSON envelope overhead. */
 export const HOMEPAGE_UPLOAD_REQUEST_MAX_BYTES = 72 * 1024 * 1024
+/** Setup retry re-runs the subsidy plus chain sync; give it the write budget. */
+const SETUP_RETRY_TIMEOUT_MS = 180_000
 
 export type HomepageUploadFn = (
   slug: string,
@@ -70,6 +72,11 @@ export async function dispatchBotAdvancedRoutes(
     const slug = readSlug(payload)
     if (typeof slug !== 'string') return slug
     return run(['bot', 'backup', '--from', slug])
+  }
+  if (method === 'bots/setup-retry') {
+    const slug = readSlug(payload)
+    if (typeof slug !== 'string') return slug
+    return run(['bot', 'setup-retry', '--from', slug], { timeoutMs: SETUP_RETRY_TIMEOUT_MS })
   }
   if (method === 'bots/homepage-upload') {
     return handleHomepageUpload(payload, upload)

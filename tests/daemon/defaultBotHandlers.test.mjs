@@ -1421,6 +1421,37 @@ test('default bot createProfile rejects missing or duplicate names', async (t) =
   assert.equal(duplicate.code, 'name_taken');
 });
 
+test('default bot createProfile refuses a 101st local MetaBot profile', async (t) => {
+  const homeDir = await createProfileHome('metabot-default-bot-limit-');
+  t.after(async () => {
+    await cleanupProfileHome(homeDir);
+  });
+  const systemHomeDir = deriveSystemHome(homeDir);
+  // Seed the identity index directly: 100 existing profiles must gate the
+  // create before any home directory or chain work is reserved.
+  for (let i = 0; i < 100; i += 1) {
+    await upsertIdentityProfile({
+      systemHomeDir,
+      name: `Limit Bot ${i}`,
+      homeDir: path.join(systemHomeDir, '.metabot', 'profiles', `limit-bot-${i}`),
+      globalMetaId: `gm-limit-${i}`,
+      mvcAddress: `mvc-limit-${i}`,
+    });
+  }
+  const handlers = createDefaultMetabotDaemonHandlers({
+    homeDir,
+    systemHomeDir,
+    getDaemonRecord: () => null,
+    ...makeChainedCreateOverrides(),
+  });
+
+  const result = await handlers.bot.createProfile({ name: 'One Too Many' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'bot_limit_reached');
+  assert.equal(result.message, 'MetaBot count cannot exceed 100.');
+});
+
 test('default bot createProfile and updateProfile persist DSH LLM fields without publishing them', async (t) => {
   const homeDir = await createProfileHome('metabot-default-bot-dsh-llm-');
   t.after(async () => {

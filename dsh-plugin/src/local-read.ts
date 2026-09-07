@@ -125,12 +125,68 @@ export function localUserWho(): Promise<MetabotCommandResult | null> {
 
 // ---- bots -----------------------------------------------------------------
 
+type RuntimeIdentitySetupFields = {
+  subsidyState?: string
+  subsidyError?: string | null
+  syncState?: string
+  syncError?: string | null
+}
+
+/**
+ * Local mirror of the daemon's `buildMetabotSetupStatus` (defaultHandlers.ts):
+ * the daemon attaches this per profile row on list/create, so the in-process
+ * list read does the same — one runtime-state read per profile, same cost
+ * class as the grouptask context below.
+ */
+function buildSetupStatus(identity: RuntimeIdentitySetupFields | null): {
+  state: 'pending' | 'subsidy_failed' | 'sync_failed' | 'ready'
+  retryable: boolean
+  error: string | null
+} {
+  const errorText = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+  if (!identity || (!identity.subsidyState && !identity.syncState)) {
+    return { state: 'ready', retryable: false, error: null }
+  }
+  if (identity.subsidyState !== 'claimed') {
+    return {
+      state: identity.subsidyState === 'failed' ? 'subsidy_failed' : 'pending',
+      retryable: identity.subsidyState === 'failed',
+      error: errorText(identity.subsidyError),
+    }
+  }
+  if (identity.syncState !== 'synced' && identity.syncState !== 'partial') {
+    return {
+      state: identity.syncState === 'failed' ? 'sync_failed' : 'pending',
+      retryable: true,
+      error: errorText(identity.syncError),
+    }
+  }
+  return { state: 'ready', retryable: false, error: null }
+}
+
+async function readSetupStatus(homeDir: string): Promise<ReturnType<typeof buildSetupStatus>> {
+  const stateStore = core('core/state/runtimeStateStore.js')
+  const createState = fn<(dir: string) => { readState: () => Promise<{ identity?: RuntimeIdentitySetupFields }> }>(
+    stateStore,
+    'createRuntimeStateStore',
+  )
+  const state = await createState(homeDir).readState().catch(() => null)
+  return buildSetupStatus(state?.identity ?? null)
+}
+
 export function localBotList(): Promise<MetabotCommandResult | null> {
   return attempt(async () => {
     const manager = core('core/bot/metabotProfileManager.js')
-    const list = fn<(dir: string) => Promise<unknown[]>>(manager, 'listMetabotProfiles')
+    const list = fn<(dir: string) => Promise<Array<Record<string, unknown>>>>(manager, 'listMetabotProfiles')
     const profiles = await list(systemHomeDir())
-    return success({ profiles })
+    const profilesWithSetup = await Promise.all(profiles.map(async (profile) => ({
+      ...profile,
+      setup: typeof profile.homeDir === 'string'
+        ? await readSetupStatus(profile.homeDir)
+        : buildSetupStatus(null),
+    })))
+    return success({ profiles: profilesWithSetup })
   })
 }
 

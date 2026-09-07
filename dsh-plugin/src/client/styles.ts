@@ -266,6 +266,24 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-a2a-guidance-input { flex: 1; min-width: 0; }
 .oac-a2a-guidance-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 14px; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
 .oac-a2a-guidance-close:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+
+/* Create-Bot chain phases (the AppsPanel publish overlay pattern): a pending
+   spinner block, a centered success result, and the amber setup-pending
+   panel with the Bot's MVC address + copy affordance. */
+.oac-create-result { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0; text-align: center; }
+.oac-create-result-icon { font-size: 36px; line-height: 1; }
+.oac-create-result-name { font-size: 15px; line-height: 22px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
+.oac-create-result-sub { margin: 0; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
+.oac-create-setup { display: flex; flex-direction: column; gap: 12px; }
+.oac-create-badge-warn { background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 16%, transparent); color: var(--dsw-alias-state-warn-label); }
+.oac-create-address { display: flex; flex-direction: column; gap: 6px; }
+.oac-create-address-row { display: flex; align-items: center; gap: 6px; }
+.oac-create-address-row code { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; color: var(--dsw-alias-label-secondary); }
+
+/* Amber setup-pending badge on Bot cards whose on-chain setup is incomplete. */
+.oac-setup-badge { background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 16%, transparent); color: var(--dsw-alias-state-warn-label); }
+.oac-spin { animation: oac-spin 1s linear infinite; }
+@keyframes oac-spin { to { transform: rotate(360deg); } }
 `
 
 export const APPS_CSS = `
