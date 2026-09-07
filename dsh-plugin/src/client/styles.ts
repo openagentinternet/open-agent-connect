@@ -221,7 +221,7 @@ textarea.oac-input { resize: vertical; min-height: 76px; }
 .oac-a2a-row-name { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-a2a-row-text { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oac-a2a-row-time { flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
-.oac-a2a-thread { min-width: 0; display: flex; flex-direction: column; }
+.oac-a2a-thread { position: relative; min-width: 0; display: flex; flex-direction: column; }
 .oac-a2a-thread-head { flex: none; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 16px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .oac-a2a-thread-avatar { flex: none; width: 32px; height: 32px; }
 .oac-a2a-participants { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; }
@@ -473,6 +473,82 @@ body[data-ds-dark-theme] .oac-gt-deliverable-rejected { background: rgba(127, 29
 .oac-gt-worker-picks { display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
 .oac-gt-worker-pick { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 8px; font-size: 13px; color: var(--dsw-alias-label-primary); cursor: pointer; }
 .oac-gt-worker-pick:hover { background: var(--dsw-alias-interactive-bg-hover); }
+/* Task drawer: the IDBots group-task right rail (members / status history /
+   transitions / integrity events / deliverables) ported as a floating drawer —
+   absolutely positioned over the thread's right edge, never taking layout
+   space. Toggled from the thread head; closed by its own header button. */
+.oac-gt-drawer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 5; width: min(300px, 88%); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-2); border-left: 1px solid var(--dsw-alias-border-l2); box-shadow: var(--dsw-shadow-lv3); animation: oac-gt-drawer-in .18s cubic-bezier(.4, 0, .2, 1); }
+@keyframes oac-gt-drawer-in { from { transform: translateX(100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .oac-gt-drawer { animation: none; } }
+.oac-gt-drawer-head { flex: none; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 8px 0 14px; box-sizing: border-box; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-gt-drawer-title { flex: 1; min-width: 0; font-size: 13px; line-height: 20px; font-weight: 600; color: var(--dsw-alias-label-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oac-gt-drawer-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.oac-gt-drawer-close:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.oac-gt-drawer-body { flex: 1; min-height: 0; overflow-y: auto; }
+.oac-gt-drawer-section { padding: 10px 14px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.oac-gt-drawer-heading { margin: 0 0 8px; font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
+summary.oac-gt-drawer-heading { cursor: pointer; }
+.oac-gt-drawer-empty { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-dimmed); }
+.oac-gt-drawer-members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.oac-gt-drawer-member { display: flex; align-items: flex-start; gap: 8px; }
+.oac-gt-drawer-member-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.oac-gt-drawer-member-badges { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.oac-gt-drawer-member-meta { font-size: 11px; line-height: 14px; color: var(--dsw-alias-label-dimmed); }
+.oac-gt-drawer-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.oac-gt-drawer-event-sub { color: var(--dsw-alias-label-dimmed); }
+.oac-gt-integrity { display: block; width: 100%; padding: 4px 6px; border: none; border-radius: 6px; background: none; font: inherit; text-align: left; color: inherit; }
+button.oac-gt-integrity:not(:disabled) { cursor: pointer; }
+button.oac-gt-integrity:not(:disabled):hover { background: var(--dsw-alias-interactive-bg-hover); }
+.oac-gt-integrity-detail { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--dsw-alias-label-tertiary); }
+.oac-gt-integrity-correction { font-weight: 600; color: #b45309; }
+.oac-gt-integrity-honest { font-weight: 600; color: #047857; }
+body[data-ds-dark-theme] .oac-gt-integrity-correction { color: #fcd34d; }
+body[data-ds-dark-theme] .oac-gt-integrity-honest { color: #6ee7b7; }
+/* workStatus + member state-machine pills: the IDBots rail palette. */
+.oac-gt-workbadge-working { background: #fef3c7; color: #b45309; }
+.oac-gt-workbadge-error { background: #fee2e2; color: #b91c1c; }
+.oac-gt-workbadge-timeout { background: #ffedd5; color: #c2410c; }
+.oac-gt-workbadge-idle { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); }
+body[data-ds-dark-theme] .oac-gt-workbadge-working { background: rgba(120, 53, 15, .4); color: #fcd34d; }
+body[data-ds-dark-theme] .oac-gt-workbadge-error { background: rgba(127, 29, 29, .4); color: #fca5a5; }
+body[data-ds-dark-theme] .oac-gt-workbadge-timeout { background: rgba(124, 45, 18, .4); color: #fdba74; }
+.oac-gt-mstatus-working { background: #dbeafe; color: #1d4ed8; }
+.oac-gt-mstatus-standby { background: #e2e8f0; color: #475569; }
+.oac-gt-mstatus-done { background: #d1fae5; color: #047857; }
+.oac-gt-mstatus-unreachable { background: #fee2e2; color: #b91c1c; }
+.oac-gt-mstatus-assigned { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); }
+body[data-ds-dark-theme] .oac-gt-mstatus-working { background: rgba(30, 58, 138, .4); color: #93c5fd; }
+body[data-ds-dark-theme] .oac-gt-mstatus-standby { background: rgba(51, 65, 85, .5); color: #cbd5e1; }
+body[data-ds-dark-theme] .oac-gt-mstatus-done { background: rgba(6, 78, 59, .4); color: #6ee7b7; }
+body[data-ds-dark-theme] .oac-gt-mstatus-unreachable { background: rgba(127, 29, 29, .4); color: #fca5a5; }
+/* Deliverable cards: kind pill + acceptance status + on-chain confirmation /
+   verification pill, full copyable URI (clickable when openable), author. */
+.oac-gt-dcards { display: flex; flex-direction: column; gap: 8px; }
+.oac-gt-dcard { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; }
+.oac-gt-dcard-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.oac-gt-dstatus { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.oac-gt-dkind-metafile { background: #e0f2fe; color: #0369a1; }
+.oac-gt-dkind-metaapp { background: #ede9fe; color: #6d28d9; }
+.oac-gt-dkind-url { background: #dbeafe; color: #1d4ed8; }
+.oac-gt-dkind-pinid { background: #cffafe; color: #0e7490; }
+.oac-gt-dkind-text { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); }
+body[data-ds-dark-theme] .oac-gt-dkind-metafile { background: rgba(12, 74, 110, .4); color: #7dd3fc; }
+body[data-ds-dark-theme] .oac-gt-dkind-metaapp { background: rgba(76, 29, 149, .4); color: #c4b5fd; }
+body[data-ds-dark-theme] .oac-gt-dkind-url { background: rgba(30, 58, 138, .4); color: #93c5fd; }
+body[data-ds-dark-theme] .oac-gt-dkind-pinid { background: rgba(21, 94, 117, .4); color: #67e8f9; }
+.oac-gt-dconfirm, .oac-gt-dverify-verified { background: #d1fae5; color: #047857; }
+.oac-gt-dverify-pending { background: #fef3c7; color: #b45309; }
+.oac-gt-dverify-unverified { background: #fee2e2; color: #b91c1c; }
+body[data-ds-dark-theme] .oac-gt-dconfirm, body[data-ds-dark-theme] .oac-gt-dverify-verified { background: rgba(6, 78, 59, .4); color: #6ee7b7; }
+body[data-ds-dark-theme] .oac-gt-dverify-pending { background: rgba(120, 53, 15, .4); color: #fcd34d; }
+body[data-ds-dark-theme] .oac-gt-dverify-unverified { background: rgba(127, 29, 29, .4); color: #fca5a5; }
+.oac-gt-duri { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+.oac-gt-duri code, .oac-gt-duri-link { flex: 1; min-width: 0; font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; word-break: break-all; }
+.oac-gt-duri-link { padding: 0; border: none; background: none; color: var(--dsw-alias-brand-primary); text-align: left; cursor: pointer; }
+.oac-gt-duri-link:hover { text-decoration: underline; }
+.oac-gt-dsource summary { cursor: pointer; font-size: 11px; line-height: 16px; color: var(--dsw-alias-brand-primary); }
+.oac-gt-dsource-body { margin-top: 4px; max-height: 160px; overflow-y: auto; padding: 6px 8px; border-radius: 6px; background: var(--dsw-alias-bg-layer-3); font-size: 11px; line-height: 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dsw-alias-label-secondary); }
+.oac-gt-dmeta { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-dimmed); }
 `
 
 export const USER_CSS = `

@@ -452,6 +452,13 @@ export function A2AConversation({
     void browserOpen(`metaid://${gmid}`).then(() => setOpen(false))
   }, [browserOpen])
 
+  // Group-task drawer: open one deliverable/resource URI in the Bot Browser.
+  const openResource = useCallback((uri: string): void => {
+    const target = uri.trim()
+    if (!target) return
+    void browserOpen(target).then(() => setOpen(false))
+  }, [browserOpen])
+
   const onSend = async (): Promise<void> => {
     const peer = selectedPeer || peerDraft.trim()
     const content = draft.trim()
@@ -601,6 +608,7 @@ export function A2AConversation({
                 t={t}
                 createSignal={gtCreateSignal}
                 onOpenBotPage={openBotPage}
+                onOpenUri={openResource}
                 unreadTaskKeys={new Set(Object.keys(unread.group))}
                 onTaskRead={clearGroupUnread}
               />

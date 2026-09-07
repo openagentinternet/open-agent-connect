@@ -306,6 +306,40 @@ export type GroupTaskDeliverableRow = {
   uri: string | null
   status: string
   msgPinId: string | null
+  authorGlobalMetaId: string | null
+  /** JSON verification report (sources + outcomes), when a pass ran. */
+  verification: string | null
+  /** On-chain pin confirmation — orthogonal to the acceptance status. */
+  confirmation: 'unconfirmed' | 'confirmed'
+  createdAt: number
+}
+
+/** State-machine status event (newest first from the store). */
+export type GroupTaskStatusEventRow = {
+  id: number
+  fromStatus: string
+  toStatus: string
+  actorKind: string
+  actorName: string | null
+  createdAt: number
+}
+
+/** Transition ledger row (oldest first), with the free-text actor/reason. */
+export type GroupTaskTransitionRow = {
+  id: number
+  fromStatus: string | null
+  toStatus: string
+  actor: string | null
+  reason: string | null
+  createdAt: number
+}
+
+export type GroupTaskIntegrityEventRow = {
+  id: number
+  msgPinId: string | null
+  authorGlobalMetaId: string | null
+  eventType: 'correction' | 'honest_report'
+  detail: string | null
   createdAt: number
 }
 
@@ -344,6 +378,9 @@ export type GroupTaskDetailPayload = {
   closedAt: number | null
   members: GroupTaskMemberRow[]
   deliverables: GroupTaskDeliverableRow[]
+  statusEvents: GroupTaskStatusEventRow[]
+  transitions: GroupTaskTransitionRow[]
+  integrityEvents: GroupTaskIntegrityEventRow[]
   messages: GroupTaskMessageRow[]
   openCheckpointSummary: string | null
 }
@@ -1230,6 +1267,48 @@ function normalizeGroupTaskDetail(value: unknown): GroupTaskDetailPayload {
           uri: textOf(entry.uri) || null,
           status: textOf(entry.status) || 'pending',
           msgPinId: textOf(entry.msgPinId) || null,
+          authorGlobalMetaId: textOf(entry.authorGlobalMetaId) || null,
+          verification: textOf(entry.verification) || null,
+          confirmation: textOf(entry.confirmation) === 'confirmed' ? 'confirmed' as const : 'unconfirmed' as const,
+          createdAt: toNumber(entry.createdAt),
+        }
+      })
+      : [],
+    statusEvents: Array.isArray(record.statusEvents)
+      ? record.statusEvents.map((row) => {
+        const entry = recordOf(row)
+        return {
+          id: Math.trunc(toNumber(entry.id)),
+          fromStatus: textOf(entry.fromStatus),
+          toStatus: textOf(entry.toStatus),
+          actorKind: textOf(entry.actorKind) || 'system',
+          actorName: textOf(entry.actorName) || null,
+          createdAt: toNumber(entry.createdAt),
+        }
+      })
+      : [],
+    transitions: Array.isArray(record.transitions)
+      ? record.transitions.map((row) => {
+        const entry = recordOf(row)
+        return {
+          id: Math.trunc(toNumber(entry.id)),
+          fromStatus: textOf(entry.fromStatus) || null,
+          toStatus: textOf(entry.toStatus),
+          actor: textOf(entry.actor) || null,
+          reason: textOf(entry.reason) || null,
+          createdAt: toNumber(entry.createdAt),
+        }
+      })
+      : [],
+    integrityEvents: Array.isArray(record.integrityEvents)
+      ? record.integrityEvents.map((row) => {
+        const entry = recordOf(row)
+        return {
+          id: Math.trunc(toNumber(entry.id)),
+          msgPinId: textOf(entry.msgPinId) || null,
+          authorGlobalMetaId: textOf(entry.authorGlobalMetaId) || null,
+          eventType: textOf(entry.eventType) === 'correction' ? 'correction' as const : 'honest_report' as const,
+          detail: textOf(entry.detail) || null,
           createdAt: toNumber(entry.createdAt),
         }
       })

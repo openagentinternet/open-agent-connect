@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Button,
+  IconCloseOutline16,
+  IconPanelLeftOutline16,
   IconPlusOutline16,
   IconRefreshOutline16,
   IconSendOutline16,
@@ -14,6 +16,7 @@ import {
   timestampLabel,
   txidPreview,
   type BotRow,
+  type GroupTaskDeliverableRow,
   type GroupTaskDetailPayload,
   type GroupTaskHealthPayload,
   type GroupTaskListTab,
@@ -97,6 +100,127 @@ function workStatusKey(workStatus: GroupTaskMemberRow['workStatus']): Conversati
   }
 }
 
+/** Localized status label for the event ledgers (raw value as fallback). */
+function eventStatusLabel(status: string | null, t: Translate): string {
+  if (status == null || status === '') return '—'
+  switch (status) {
+    case 'planning':
+    case 'executing':
+    case 'review':
+    case 'done':
+    case 'cancelled':
+      return t(statusKey(status))
+    default: return status
+  }
+}
+
+function eventActorLabel(name: string | null, kind: string | null, t: Translate): string {
+  if (name) return name
+  if (kind == null || kind === 'system') return t('gtSystem')
+  return kind
+}
+
+function memberStatusKey(status: string): ConversationsLocaleKey {
+  switch (status) {
+    case 'working': return 'gtMStatusWorking'
+    case 'standby': return 'gtMStatusStandby'
+    case 'done': return 'gtMStatusDone'
+    case 'unreachable': return 'gtMStatusUnreachable'
+    default: return 'gtMStatusAssigned'
+  }
+}
+
+/** Known state-machine statuses get their own pill class; rest fall back. */
+function memberStatusClass(status: string): string {
+  return status === 'working' || status === 'standby' || status === 'done' || status === 'unreachable'
+    ? status
+    : 'assigned'
+}
+
+function deliverableStatusKey(status: string): ConversationsLocaleKey {
+  switch (status) {
+    case 'delivered': return 'gtDStatusDelivered'
+    case 'accepted': return 'gtDStatusAccepted'
+    case 'rejected': return 'gtDStatusRejected'
+    default: return 'gtDStatusPending'
+  }
+}
+
+function deliverableStatusHintKey(status: string): ConversationsLocaleKey {
+  switch (status) {
+    case 'delivered': return 'gtDStatusDeliveredHint'
+    case 'accepted': return 'gtDStatusAcceptedHint'
+    case 'rejected': return 'gtDStatusRejectedHint'
+    default: return 'gtDStatusPendingHint'
+  }
+}
+
+function deliverableKindKey(kind: string | null): ConversationsLocaleKey {
+  switch (kind) {
+    case 'metafile': return 'gtKindMetafile'
+    case 'metaapp': return 'gtKindMetaapp'
+    case 'link':
+    case 'url': return 'gtKindUrl'
+    case 'pin':
+    case 'pinid': return 'gtKindPinid'
+    default: return 'gtKindText'
+  }
+}
+
+function deliverableKindClass(kind: string | null): string {
+  switch (kind) {
+    case 'metafile':
+    case 'metaapp': return kind
+    case 'link':
+    case 'url': return 'url'
+    case 'pin':
+    case 'pinid': return 'pinid'
+    default: return 'text'
+  }
+}
+
+/**
+ * The 64-hex+iN pinid token IS the on-chain artifact identity (IDBots Task
+ * #63): `pin://X` / `metaapp://X` / `…X.zip` are the same object.
+ */
+function deliverablePinidKey(uri: string | null): string | null {
+  const match = /[0-9a-f]{64}i\d+/i.exec(String(uri ?? ''))
+  return match ? match[0].toLowerCase() : null
+}
+
+/** Display dedupe — one artifact, one card; keep the FIRST row per pinid. */
+function dedupeDeliverablesByPinid(rows: GroupTaskDeliverableRow[]): GroupTaskDeliverableRow[] {
+  const seen = new Set<string>()
+  return rows.filter((row) => {
+    const key = deliverablePinidKey(row.uri)
+    if (!key) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/** Summarize a stored verification report (IDBots P0-4 port). */
+function deliverableVerificationState(
+  verification: string | null,
+): 'verified' | 'pending-sync' | 'unverified' | 'unknown' {
+  if (!verification) return 'unknown'
+  let report: unknown
+  try {
+    report = JSON.parse(verification)
+  } catch {
+    return 'unknown'
+  }
+  const sources = (report as { sources?: unknown } | null)?.sources
+  const entries = Array.isArray(sources) ? sources as Array<{ outcome?: unknown }> : []
+  if ((report as { verified?: unknown } | null)?.verified === true) return 'verified'
+  if (entries.some((entry) => entry?.outcome === 'not_found')
+    && entries.some((entry) => entry?.outcome === 'found')) {
+    return 'pending-sync'
+  }
+  return 'unverified'
+}
+
 function guestInviteStatusKey(status: OpenTeamGuestInviteRow['status']): ConversationsLocaleKey {
   switch (status) {
     case 'accepted': return 'gtGuestInviteAccepted'
@@ -170,9 +294,273 @@ function Stars({ value, onChange }: { value: number; onChange?: (value: number) 
 }
 
 /**
+ * The IDBots group-task right rail (members, status history, transitions,
+ * integrity events, deliverables) ported as a floating drawer: an absolute
+ * overlay above the thread that never takes layout space. All data comes from
+ * the host-recorded detail payload (the daemon engine's ledgers), kept fresh
+ * by the view's detail poll. Read-only — writes stay in the thread surface.
+ */
+function GroupTaskDrawer({
+  detail,
+  bots,
+  t,
+  onClose,
+  onJumpToMessage,
+  onOpenUri,
+}: {
+  detail: GroupTaskDetailPayload
+  bots: BotRow[]
+  t: Translate
+  onClose: () => void
+  onJumpToMessage: (pinId: string) => void
+  onOpenUri?: (uri: string) => void
+}): ReactNode {
+  const memberName = (member: GroupTaskMemberRow): string => {
+    const bot = member.slug ? bots.find((row) => row.slug === member.slug) : undefined
+    return member.displayName ?? bot?.name ?? member.slug ?? member.globalMetaId ?? '?'
+  }
+  const authorName = (gmid: string | null): string => {
+    if (!gmid) return '?'
+    const member = detail.members.find((row) => (row.globalMetaId ?? '').toLowerCase() === gmid.toLowerCase())
+    return member ? memberName(member) : `${gmid.slice(0, 10)}…`
+  }
+  const uriOpenable = (uri: string): boolean => {
+    const trimmed = uri.trim()
+    return /^https?:\/\//i.test(trimmed)
+      || /^(metaapp|metafile|pin|metaid):/i.test(trimmed)
+      || /^[0-9a-f]{64}i\d+$/i.test(trimmed)
+  }
+  const openUri = (uri: string): void => {
+    const trimmed = uri.trim()
+    if (/^https?:\/\//i.test(trimmed)) {
+      window.open(trimmed, '_blank', 'noopener,noreferrer')
+      return
+    }
+    const normalized = /^[0-9a-f]{64}i\d+$/i.test(trimmed) ? `pin://${trimmed}` : trimmed
+    if (/^(metaapp|metafile|pin|metaid):/i.test(normalized)) onOpenUri?.(normalized)
+  }
+  const deliverables = dedupeDeliverablesByPinid(detail.deliverables)
+  const sourceOf = (msgPinId: string | null): string | null => {
+    if (!msgPinId) return null
+    return detail.messages.find((message) => message.pinId === msgPinId)?.content ?? null
+  }
+  return (
+    <div className="oac-gt-drawer">
+      <div className="oac-gt-drawer-head">
+        <span className="oac-gt-drawer-title">{taskLabel(detail)}</span>
+        <button type="button" className="oac-gt-drawer-close" aria-label={t('close')} onClick={onClose}>
+          <IconCloseOutline16 size={14} />
+        </button>
+      </div>
+      <div className="oac-gt-drawer-body">
+        <section className="oac-gt-drawer-section">
+          <h3 className="oac-gt-drawer-heading">{t('gtMembers')}</h3>
+          <ul className="oac-gt-drawer-members">
+            {detail.members.map((member) => {
+              const bot = member.slug ? bots.find((row) => row.slug === member.slug) : undefined
+              const name = member.displayName ?? bot?.name ?? member.slug ?? member.globalMetaId ?? '?'
+              const workHint = member.workStatus === 'error'
+                ? t('gtWorkErrorHint')
+                : member.workStatus === 'timeout' ? t('gtWorkTimeoutHint') : undefined
+              return (
+                <li key={member.id} className="oac-gt-drawer-member">
+                  <BotAvatar
+                    name={name}
+                    src={member.avatar ?? bot?.avatarDataUrl}
+                    className="oac-gt-member-avatar"
+                  />
+                  <span className="oac-gt-drawer-member-main">
+                    <span className="oac-gt-member-name">
+                      {name}
+                      {member.role === 'chair' ? <span className="oac-gt-badge oac-gt-chair">{t('gtChair')}</span> : null}
+                      {member.slug == null ? <span className="oac-gt-badge oac-gt-openteam">{t('gtRemote')}</span> : null}
+                    </span>
+                    <span className="oac-gt-drawer-member-badges">
+                      {member.workStatus !== 'unknown' ? (
+                        <span className={`oac-gt-badge oac-gt-workbadge-${member.workStatus}`} title={workHint}>
+                          {t(workStatusKey(member.workStatus))}
+                        </span>
+                      ) : null}
+                      <span
+                        className={`oac-gt-badge oac-gt-mstatus-${memberStatusClass(member.status)}`}
+                      >
+                        {t(memberStatusKey(member.status))}
+                      </span>
+                    </span>
+                    {member.lastSpeakAt != null ? (
+                      <span className="oac-gt-drawer-member-meta" title={timestampLabel(member.lastSpeakAt)}>
+                        {t('gtLastActive', { time: relativeTimeLabel(member.lastSpeakAt) })}
+                      </span>
+                    ) : null}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+        <section className="oac-gt-drawer-section">
+          <details>
+            <summary className="oac-gt-drawer-heading">{t('gtStatusHistory')}</summary>
+            {detail.statusEvents.length === 0 ? (
+              <p className="oac-gt-drawer-empty">{t('gtNoStatusEvents')}</p>
+            ) : (
+              <ul className="oac-gt-drawer-events">
+                {detail.statusEvents.map((event) => (
+                  <li key={event.id}>
+                    <span>{eventStatusLabel(event.fromStatus, t)} → {eventStatusLabel(event.toStatus, t)}</span>
+                    <span className="oac-gt-drawer-event-sub" title={timestampLabel(event.createdAt)}>
+                      {` · ${eventActorLabel(event.actorName, event.actorKind, t)} · ${relativeTimeLabel(event.createdAt)}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </details>
+        </section>
+        <section className="oac-gt-drawer-section">
+          <h3 className="oac-gt-drawer-heading">{t('gtTransitions')}</h3>
+          {detail.transitions.length === 0 ? (
+            <p className="oac-gt-drawer-empty">{t('gtNoTransitions')}</p>
+          ) : (
+            <ul className="oac-gt-drawer-events">
+              {detail.transitions.map((transition) => (
+                <li key={transition.id}>
+                  <span>
+                    {eventStatusLabel(transition.fromStatus, t)} → {eventStatusLabel(transition.toStatus, t)}
+                    {transition.reason ? ` — ${transition.reason}` : ''}
+                  </span>
+                  <div className="oac-gt-drawer-event-sub" title={timestampLabel(transition.createdAt)}>
+                    {transition.actor ?? t('gtSystem')} · {relativeTimeLabel(transition.createdAt)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="oac-gt-drawer-section">
+          <h3 className="oac-gt-drawer-heading">{t('gtIntegrityEvents')}</h3>
+          {detail.integrityEvents.length === 0 ? (
+            <p className="oac-gt-drawer-empty">{t('gtNoIntegrityEvents')}</p>
+          ) : (
+            <ul className="oac-gt-drawer-events">
+              {detail.integrityEvents.map((event) => (
+                <li key={event.id}>
+                  <button
+                    type="button"
+                    className="oac-gt-integrity"
+                    disabled={!event.msgPinId}
+                    title={event.msgPinId ? t('gtJumpToMessage') : undefined}
+                    onClick={() => { if (event.msgPinId) onJumpToMessage(event.msgPinId) }}
+                  >
+                    <span className={event.eventType === 'correction'
+                      ? 'oac-gt-integrity-correction'
+                      : 'oac-gt-integrity-honest'}
+                    >
+                      {t(event.eventType === 'correction' ? 'gtIntegrityCorrection' : 'gtIntegrityHonest')}
+                    </span>
+                    {event.detail ? <div className="oac-gt-integrity-detail">{event.detail}</div> : null}
+                    <div className="oac-gt-drawer-event-sub" title={timestampLabel(event.createdAt)}>
+                      {relativeTimeLabel(event.createdAt)}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="oac-gt-drawer-section">
+          <h3 className="oac-gt-drawer-heading">{t('gtDeliverables')}</h3>
+          {deliverables.length === 0 ? (
+            <p className="oac-gt-drawer-empty">{t('gtNoDeliverables')}</p>
+          ) : (
+            <div className="oac-gt-dcards">
+              {deliverables.map((deliverable) => {
+                const verificationState = deliverable.confirmation === 'confirmed'
+                  ? null
+                  : deliverableVerificationState(deliverable.verification)
+                const source = deliverable.uri ? null : sourceOf(deliverable.msgPinId)
+                return (
+                  <div key={deliverable.id} className="oac-gt-dcard">
+                    <div className="oac-gt-dcard-head">
+                      <span className={`oac-gt-badge oac-gt-dkind-${deliverableKindClass(deliverable.kind)}`}>
+                        {t(deliverableKindKey(deliverable.kind))}
+                      </span>
+                      <span className="oac-gt-dstatus" title={t(deliverableStatusHintKey(deliverable.status))}>
+                        {t(deliverableStatusKey(deliverable.status))}
+                      </span>
+                      {deliverable.confirmation === 'confirmed' ? (
+                        <span
+                          className="oac-gt-badge oac-gt-dconfirm"
+                          title={deliverable.verification ?? t('gtDConfirmedHint')}
+                        >
+                          {t('gtDConfirmed')}
+                        </span>
+                      ) : verificationState != null && verificationState !== 'unknown' ? (
+                        <span
+                          className={`oac-gt-badge ${verificationState === 'verified'
+                            ? 'oac-gt-dverify-verified'
+                            : verificationState === 'pending-sync'
+                              ? 'oac-gt-dverify-pending'
+                              : 'oac-gt-dverify-unverified'}`}
+                          title={deliverable.verification ?? ''}
+                        >
+                          {t(verificationState === 'verified'
+                            ? 'gtDVerified'
+                            : verificationState === 'pending-sync' ? 'gtDPendingSync' : 'gtDUnverified')}
+                        </span>
+                      ) : null}
+                    </div>
+                    {deliverable.uri ? (
+                      <div className="oac-gt-duri">
+                        {uriOpenable(deliverable.uri) ? (
+                          <button
+                            type="button"
+                            className="oac-gt-duri-link"
+                            title={t('gtOpenUri')}
+                            onClick={() => openUri(deliverable.uri ?? '')}
+                          >
+                            {deliverable.uri}
+                          </button>
+                        ) : (
+                          <code>{deliverable.uri}</code>
+                        )}
+                        <CopyIconButton
+                          value={deliverable.uri}
+                          label={`${t('copy')}: ${deliverable.uri}`}
+                          copiedLabel={t('copied')}
+                        />
+                      </div>
+                    ) : (
+                      // Text deliverable (no uri): fold the producing message
+                      // body from the loaded transcript page, when present.
+                      <details className="oac-gt-dsource">
+                        <summary>{t('gtDViewSource')}</summary>
+                        <div className="oac-gt-dsource-body">{source?.trim() || t('gtDNoSource')}</div>
+                      </details>
+                    )}
+                    <div className="oac-gt-dmeta">
+                      {authorName(deliverable.authorGlobalMetaId)}
+                      {' · '}
+                      <span title={timestampLabel(deliverable.createdAt)}>
+                        {relativeTimeLabel(deliverable.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  )
+}
+
+/**
  * Group Task surface inside the A2A panel: task list on the left, task detail
  * (info, members, deliverables, checkpoint banner, transcript, composer) on
- * the right — the OAC port of the IDBots Bot Home group-task page.
+ * the right, plus the floating task drawer (the IDBots right-rail port)
+ * toggled from the thread head.
  * `createSignal` increments when the panel header's New button is pressed.
  */
 export function GroupTaskView({
@@ -181,6 +569,7 @@ export function GroupTaskView({
   t,
   createSignal,
   onOpenBotPage,
+  onOpenUri,
   unreadTaskKeys,
   onTaskRead,
 }: {
@@ -190,6 +579,8 @@ export function GroupTaskView({
   createSignal: number
   /** Open one participant's Bot page in the right-sidebar Bot Browser. */
   onOpenBotPage?: (globalMetaId: string) => void
+  /** Open one deliverable/resource URI in the right-sidebar Bot Browser. */
+  onOpenUri?: (uri: string) => void
   unreadTaskKeys?: ReadonlySet<string>
   onTaskRead?: (key: string) => void
 }): ReactNode {
@@ -206,6 +597,9 @@ export function GroupTaskView({
   const [infoNote, setInfoNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
+  // Task drawer (the IDBots right-rail port): hidden by default, floats above
+  // the thread when toggled from the thread head.
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const mdLabels = useMemo(() => markdownLabels(t), [t])
 
   // Composer — the owner speaks as the owner (IDBots parity: no sender select).
@@ -252,6 +646,7 @@ export function GroupTaskView({
   const [inviteSkills, setInviteSkills] = useState('')
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const detailScrollRef = useRef<HTMLDivElement | null>(null)
   const lastCreateSignal = useRef(createSignal)
 
   const reload = useCallback((): void => setTick((value) => value + 1), [])
@@ -397,6 +792,18 @@ export function GroupTaskView({
       setBusy(false)
     }
   }, [selected, loadDetail, reload, t])
+
+  // Drawer integrity-event jump: close the drawer and scroll the transcript
+  // to the producing message; it may be outside the loaded 50-message page.
+  const jumpToMessage = useCallback((pinId: string): void => {
+    setDrawerOpen(false)
+    const node = detailScrollRef.current?.querySelector(`[data-pin-id="${pinId}"]`)
+    if (node instanceof HTMLElement) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } else {
+      setInfoNote(t('gtAnchorNotFound'))
+    }
+  }, [t])
 
   const onSend = async (): Promise<void> => {
     const content = draft.trim()
@@ -846,9 +1253,19 @@ export function GroupTaskView({
                     {t('gtReopen')}
                   </Button>
                 ) : null}
+                <Button
+                  type="button"
+                  variant={drawerOpen ? 'primary' : 'outline'}
+                  size="sm"
+                  icon={<IconPanelLeftOutline16 />}
+                  aria-expanded={drawerOpen}
+                  onClick={() => setDrawerOpen((value) => !value)}
+                >
+                  {t('gtDrawerToggle')}
+                </Button>
               </div>
             </div>
-            <div className="oac-gt-detail">
+            <div className="oac-gt-detail" ref={detailScrollRef}>
               {actionNote ? <p className="oac-note error">{actionNote}</p> : null}
               {infoNote ? <p className="oac-note">{infoNote}</p> : null}
               <section className="oac-gt-section">
@@ -975,7 +1392,11 @@ export function GroupTaskView({
                     ? t('gtSuspectSender')
                     : (message.senderName ?? message.senderGlobalMetaId ?? '?')
                   return (
-                    <div key={message.pinId ?? `idx-${message.index}`} className="oac-a2a-msg oac-a2a-msg-peer oac-gt-msg">
+                    <div
+                      key={message.pinId ?? `idx-${message.index}`}
+                      className="oac-a2a-msg oac-a2a-msg-peer oac-gt-msg"
+                      data-pin-id={message.pinId ?? undefined}
+                    >
                       {!message.senderSuspect && message.senderGlobalMetaId && onOpenBotPage
                         ? (
                           <BotAvatarButton
@@ -1055,6 +1476,16 @@ export function GroupTaskView({
                   </Button>
                 </div>
               </div>
+            ) : null}
+            {drawerOpen ? (
+              <GroupTaskDrawer
+                detail={detail}
+                bots={bots}
+                t={t}
+                onClose={() => setDrawerOpen(false)}
+                onJumpToMessage={jumpToMessage}
+                onOpenUri={onOpenUri}
+              />
             ) : null}
           </>
         ) : null}
