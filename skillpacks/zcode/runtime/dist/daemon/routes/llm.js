@@ -199,6 +199,52 @@ const handleLlmRoutes = async (context) => {
         context.sendJson(200, result);
         return true;
     }
+    // GET /api/llm/host-executor/status
+    if (url.pathname === '/api/llm/host-executor/status' && req.method === 'GET') {
+        const result = handlers.llm?.hostExecutorStatus
+            ? await handlers.llm.hostExecutorStatus()
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Host LLM executor handler not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    // POST /api/llm/host-executor/result
+    if (url.pathname === '/api/llm/host-executor/result' && req.method === 'POST') {
+        const body = await context.readJsonBody();
+        const result = handlers.llm?.hostExecutorSubmitResult
+            ? await handlers.llm.hostExecutorSubmitResult(body)
+            : (0, commandResult_1.commandFailed)('not_implemented', 'Host LLM executor handler not configured.');
+        context.sendJson(200, result);
+        return true;
+    }
+    // GET /api/llm/host-executor/events (SSE stream of generation requests)
+    if (url.pathname === '/api/llm/host-executor/events' && req.method === 'GET') {
+        const stream = handlers.llm?.hostExecutorEvents
+            ? await handlers.llm.hostExecutorEvents()
+            : null;
+        if (!stream) {
+            context.sendJson(404, (0, commandResult_1.commandFailed)('llm_host_executor_not_available', 'Host LLM executor stream is not configured.'));
+            return true;
+        }
+        const { req, res } = context;
+        let closed = false;
+        req.on('close', () => {
+            closed = true;
+        });
+        res.writeHead(200, {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-cache',
+            connection: 'keep-alive',
+        });
+        res.write('retry: 3000\n\n');
+        for await (const event of stream) {
+            if (closed)
+                break;
+            res.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+        if (!closed)
+            res.end();
+        return true;
+    }
     return false;
 };
 exports.handleLlmRoutes = handleLlmRoutes;

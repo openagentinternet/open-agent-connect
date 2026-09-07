@@ -158,6 +158,7 @@ const llmBindingStore_1 = require("../core/llm/llmBindingStore");
 const llmRuntimeResolver_1 = require("../core/llm/llmRuntimeResolver");
 const llmRuntimeDiscovery_1 = require("../core/llm/llmRuntimeDiscovery");
 const llmAvailabilityRecovery_1 = require("../core/llm/llmAvailabilityRecovery");
+const hostLlmExecutorBridge_1 = require("../core/llm/hostLlmExecutorBridge");
 const platformSkillCatalog_1 = require("../core/services/platformSkillCatalog");
 const executor_1 = require("../core/llm/executor");
 const llmRuntimeExecution_1 = require("../core/llm/llmRuntimeExecution");
@@ -1326,6 +1327,7 @@ function createPrivateChatReplyRunnerForProfile(input) {
         runtimeResolver: input.runtimeResolver,
         llmExecutor: input.llmExecutor,
         metaBotSlug: input.metaBotSlug,
+        hostLlmGenerate: (0, hostLlmExecutorBridge_1.createDshPairHostLlmGenerate)({ dshLlmPath: input.paths.dshLlmPath }),
         chatWorkspaceDir: node_path_1.default.join(input.paths.profileRoot, '.runtime', 'private-chat-work'),
         requestAvailabilityRecovery: () => {
             activeLlmAvailabilityRecovery?.requestSoon(input.paths.profileRoot);
@@ -4290,6 +4292,7 @@ function createDefaultCliDependencies(context) {
                     return actor;
                 return requestJsonForSelectedActor('PUT', `/api/llm/preferred-runtime/${encodeURIComponent(actor.slug)}`, input.from, { runtimeId: input.runtimeId });
             },
+            hostExecutorStatus: async () => requestJson(context, 'GET', '/api/llm/host-executor/status'),
         },
         bot: {
             listProfiles: async () => requestJson(context, 'GET', '/api/bot/profiles'),
@@ -4720,6 +4723,7 @@ async function serveCliDaemonProcess(context) {
         runtimeResolver: daemonRuntimeResolver,
         llmExecutor,
         metaBotSlug: daemonMetaBotSlug,
+        hostLlmGenerate: (0, hostLlmExecutorBridge_1.createDshPairHostLlmGenerate)({ dshLlmPath: paths.dshLlmPath }),
     });
     const buyerRatingReplyRunner = createTestBuyerRatingReplyRunner(context.env) ?? buyerRatingHostReplyRunner;
     const orderProtocolTextGenerator = (0, orderProtocolTextGenerator_1.createLlmOrderProtocolTextGenerator)({
@@ -4747,9 +4751,15 @@ async function serveCliDaemonProcess(context) {
         return store;
     };
     const scheduleHostLeases = new Map();
+    // Host LLM executor bridge: the DSH host leases generation work from the
+    // daemon over the /api/llm/host-executor/* routes; the private-chat reply
+    // runners consult it (per Bot DSH pair) before falling back to templates.
+    const hostLlmExecutorBridge = (0, hostLlmExecutorBridge_1.createHostLlmExecutorBridge)();
+    (0, hostLlmExecutorBridge_1.setActiveHostLlmExecutorBridge)(hostLlmExecutorBridge);
     const handlers = (0, defaultHandlers_1.createDefaultMetabotDaemonHandlers)({
         homeDir,
         systemHomeDir,
+        hostLlmExecutorBridge,
         getDaemonRecord: () => daemonRecord,
         secretStore,
         signer,

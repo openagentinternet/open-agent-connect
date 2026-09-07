@@ -61,5 +61,10 @@ async function runLlmCommand(args, context) {
             ? llm.getPreferredRuntime({ from: from ?? undefined, slug })
             : (0, commandResult_1.commandFailed)('not_implemented', 'LLM preferred runtime handler not configured.');
     }
+    if (subcommand === 'host-executor') {
+        return llm?.hostExecutorStatus
+            ? llm.hostExecutorStatus()
+            : (0, commandResult_1.commandFailed)('not_implemented', 'LLM host executor handler not configured.');
+    }
     return (0, helpers_1.commandUnknownSubcommand)(`llm ${args.join(' ')}`.trim());
 }

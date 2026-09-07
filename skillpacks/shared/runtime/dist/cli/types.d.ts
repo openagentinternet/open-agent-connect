@@ -652,6 +652,7 @@ export interface CliDependencies {
             slug?: string;
             runtimeId: string | null;
         }) => Awaitable<MetabotCommandResult<unknown>>;
+        hostExecutorStatus?: () => Awaitable<MetabotCommandResult<unknown>>;
     };
     bot?: {
         listProfiles?: () => Awaitable<MetabotCommandResult<unknown>>;

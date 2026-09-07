@@ -454,6 +454,7 @@ function createHostLlmChatReplyRunner(options) {
     const chatWorkspaceDir = normalizeText(options?.chatWorkspaceDir);
     const logWarning = options?.logWarning;
     const allowTemplateFallback = options?.allowTemplateFallback ?? true;
+    const hostLlmGenerate = options?.hostLlmGenerate;
     const fallbackRunner = (0, defaultChatReplyRunner_1.createDefaultChatReplyRunner)();
     // Remember the runtime that produced the last successful reply and try it
     // first on the next turn; a failure clears the preference immediately. The
@@ -481,11 +482,44 @@ function createHostLlmChatReplyRunner(options) {
             consecutivePollDeadlineTimeouts.delete(runtimeId);
         },
     };
-    // If no resolver provided, either fall back to template-only replies or skip.
+    // Host-executor attempt (DSH LLM pair): one plain completion per turn. The
+    // prompt is built with an empty skill scope — host generation cannot
+    // execute chat skills — and any failure falls through to the caller's
+    // normal chain.
+    const runHostGeneration = async (input) => {
+        if (!hostLlmGenerate)
+            return null;
+        try {
+            const outcome = await hostLlmGenerate({
+                ...(metaBotSlug ? { metaBotSlug } : {}),
+                prompt: buildChatPrompt(input, (0, privateChatAllowedSkills_1.emptyPrivateChatAllowedSkillScope)(), { metaBotSlug }),
+                systemPrompt: buildChatSystemPrompt(input),
+            });
+            if (outcome && outcome.ok && typeof outcome.output === 'string') {
+                const parsed = parseRunnerOutput(outcome.output);
+                if (parsed.state !== 'skip')
+                    return parsed;
+            }
+            else if (outcome && !outcome.ok) {
+                logWarning?.('[private chat host llm]', outcome.error ?? 'Host LLM generation failed.');
+            }
+        }
+        catch (error) {
+            logWarning?.('[private chat host llm]', error instanceof Error ? error.message : String(error));
+        }
+        return null;
+    };
+    // If no resolver provided, try the host executor, then either fall back to
+    // template-only replies or skip.
     if (!runtimeResolver || !llmExecutor) {
-        return async (input) => (allowTemplateFallback && !normalizeText(input.operatorGuidanceText)
-            ? fallbackRunner(input)
-            : { state: 'skip' });
+        return async (input) => {
+            const hostResult = await runHostGeneration(input);
+            if (hostResult)
+                return hostResult;
+            return allowTemplateFallback && !normalizeText(input.operatorGuidanceText)
+                ? fallbackRunner(input)
+                : { state: 'skip' };
+        };
     }
     return async (input) => {
         let allowedSkillScope = (0, privateChatAllowedSkills_1.emptyPrivateChatAllowedSkillScope)();
@@ -526,7 +560,18 @@ function createHostLlmChatReplyRunner(options) {
                 }
             }
             : undefined;
-        // Try up to MAX_FALLBACK_ATTEMPTS different runtimes.
+        // Try up to MAX_FALLBACK_ATTEMPTS different runtimes. Plain turns with a
+        // usable host LLM (DSH pair + connected executor) prefer it first — it is
+        // the Bot's explicitly configured brain; turns with an allowed-skill
+        // scope keep the local-runtime chain first (only it can execute skills)
+        // and fall back to the host LLM after it.
+        let hostGenerationAttempted = false;
+        if (hostLlmGenerate && allowedSkillScope.skills.length === 0) {
+            hostGenerationAttempted = true;
+            const hostResult = await runHostGeneration(input);
+            if (hostResult)
+                return hostResult;
+        }
         for (let attempt = 0; attempt < MAX_FALLBACK_ATTEMPTS; attempt++) {
             const outcome = await tryExecute(runtimeResolver, llmExecutor, metaBotSlug, prompt, systemPrompt, timeoutMs, pollIntervalMs, excludeRuntimeIds, allowedSkillScope, !allowedChatSkillsResolver, stickyRuntime, pollDeadlineTracker, turnState, notifySkillExecutionStart, chatWorkspaceDir || undefined);
             if (outcome) {
@@ -548,7 +593,13 @@ function createHostLlmChatReplyRunner(options) {
                 // Recovery hints must never affect the reply path.
             }
         }
-        // All runtimes failed — either fall back to template-only reply or skip.
+        // All runtimes failed — give the host LLM its skill-turn fallback slot,
+        // then either fall back to template-only reply or skip.
+        if (!hostGenerationAttempted) {
+            const hostResult = await runHostGeneration(input);
+            if (hostResult)
+                return hostResult;
+        }
         return templateFallbackAllowedForTurn ? fallbackRunner(input) : { state: 'skip' };
     };
 }

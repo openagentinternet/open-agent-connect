@@ -2,6 +2,7 @@ import type { LlmRuntimeResolver } from '../llm/llmRuntimeResolver';
 import type { LlmExecutionEvent, LlmExecutionRequest, LlmSessionRecord } from '../llm/executor';
 import { type PrivateChatAllowedSkillScope, type PrivateChatAllowedSkillsResolver } from './privateChatAllowedSkills';
 import type { ChatReplyRunner, ChatReplyRunnerInput, ChatReplyRunnerResult } from './privateChatTypes';
+import type { HostLlmGenerateForRunner } from '../llm/hostLlmExecutorBridge';
 export declare const PRIVATE_CHAT_REPLY_GENERATION_ENV = "METABOT_PRIVATE_CHAT_REPLY_GENERATION";
 declare function isPlanningPreambleLine(line: string): boolean;
 declare function stripPlanningPreamble(value: string): string;
@@ -39,5 +40,14 @@ export declare function createHostLlmChatReplyRunner(options?: {
     requestAvailabilityRecovery?: (input: {
         metaBotSlug?: string;
     }) => void;
+    /**
+     * Optional generation through a connected host executor (the DSH plugin's
+     * ctx.llm with the Bot's DSH LLM pair). Returns null when no host executor
+     * is connected or the Bot has no DSH pair — the local-runtime chain then
+     * behaves exactly as before. A host attempt is a plain completion: it never
+     * executes chat skills, so turns with an allowed-skill scope keep the
+     * local-runtime chain first and use the host LLM only as a fallback.
+     */
+    hostLlmGenerate?: HostLlmGenerateForRunner;
 }): ChatReplyRunner;
 export { buildChatPrompt, buildChatSystemPrompt, parseRunnerOutput, stripPlanningPreamble, isPlanningPreambleLine, };

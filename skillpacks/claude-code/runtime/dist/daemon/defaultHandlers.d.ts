@@ -5,6 +5,7 @@ import type { LlmExecutor } from '../core/llm/executor';
 import type { MetabotDaemonHttpHandlers } from './routes/types';
 import type { SessionTraceRecord } from '../core/chat/sessionTrace';
 import { exportSessionArtifacts } from '../core/chat/transcriptExport';
+import type { HostLlmExecutorBridge } from '../core/llm/hostLlmExecutorBridge';
 import type { ChatReplyRunner } from '../core/chat/privateChatTypes';
 import { type FetchPrivateHistory } from '../core/chat/privateConversation';
 import type { ScheduleStore } from '../core/schedule/store';
@@ -101,6 +102,8 @@ export declare function createDefaultMetabotDaemonHandlers(input: {
     createSignerForHome?: (homeDir: string) => Signer;
     autoReplyConfig?: PrivateChatAutoReplyConfig;
     llmExecutor?: Pick<LlmExecutor, 'execute' | 'getSession' | 'cancel' | 'listSessions' | 'streamEvents'>;
+    /** Host LLM executor bridge (DSH host delegation); shared with the private-chat reply runners. */
+    hostLlmExecutorBridge?: HostLlmExecutorBridge;
     providerRuntimeCanStart?: (runtime: LlmRuntime) => Promise<boolean> | boolean;
     /** Scheduled-task verbs: shared per-profile store instances + host leases
      *  owned by the daemon process (the tick and the routes must mutate the

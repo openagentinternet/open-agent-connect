@@ -60,6 +60,7 @@ const privateChat_1 = require("../core/chat/privateChat");
 const chatPersonaLoader_1 = require("../core/chat/chatPersonaLoader");
 const defaultChatReplyRunner_1 = require("../core/chat/defaultChatReplyRunner");
 const hostLlmChatReplyRunner_1 = require("../core/chat/hostLlmChatReplyRunner");
+const hostLlmExecutorBridge_1 = require("../core/llm/hostLlmExecutorBridge");
 const privateChatAllowedSkills_1 = require("../core/chat/privateChatAllowedSkills");
 const chatStrategyStore_1 = require("../core/chat/chatStrategyStore");
 const privateChatAutoReply_1 = require("../core/chat/privateChatAutoReply");
@@ -5265,6 +5266,9 @@ function createDefaultMetabotDaemonHandlers(input) {
                     llmExecutor: input.llmExecutor,
                     metaBotSlug: profileMetaBotSlug,
                     allowTemplateFallback: false,
+                    hostLlmGenerate: input.hostLlmExecutorBridge
+                        ? (0, hostLlmExecutorBridge_1.createDshPairHostLlmGenerate)({ dshLlmPath: profileRuntimeStateStore.paths.dshLlmPath })
+                        : undefined,
                     chatWorkspaceDir: node_path_1.default.join(profileRuntimeStateStore.paths.profileRoot, '.runtime', 'private-chat-work'),
                     allowedChatSkillsResolver: (0, privateChatAllowedSkills_1.createPrivateChatAllowedSkillsResolver)({
                         paths: profileRuntimeStateStore.paths,
@@ -15927,6 +15931,75 @@ function createDefaultMetabotDaemonHandlers(input) {
                 await node_fs_1.promises.mkdir(node_path_1.default.dirname(paths.preferredLlmRuntimePath), { recursive: true });
                 await node_fs_1.promises.writeFile(paths.preferredLlmRuntimePath, JSON.stringify({ runtimeId }, null, 2) + '\n', 'utf8');
                 return (0, commandResult_1.commandSuccess)({ runtimeId });
+            },
+            hostExecutorStatus: async () => {
+                if (!input.hostLlmExecutorBridge) {
+                    return (0, commandResult_1.commandFailed)('host_executor_not_configured', 'Host LLM executor bridge is not configured.');
+                }
+                return (0, commandResult_1.commandSuccess)(input.hostLlmExecutorBridge.status());
+            },
+            hostExecutorSubmitResult: async (body) => {
+                if (!input.hostLlmExecutorBridge) {
+                    return (0, commandResult_1.commandFailed)('host_executor_not_configured', 'Host LLM executor bridge is not configured.');
+                }
+                const requestId = normalizeText(body.requestId);
+                if (!requestId) {
+                    return (0, commandResult_1.commandFailed)('missing_request_id', 'requestId is required.');
+                }
+                const accepted = input.hostLlmExecutorBridge.submitResult({
+                    requestId,
+                    ok: body.ok === true,
+                    ...(typeof body.output === 'string' ? { output: body.output } : {}),
+                    ...(typeof body.error === 'string' ? { error: body.error } : {}),
+                });
+                if (!accepted) {
+                    return (0, commandResult_1.commandFailed)('host_executor_result_unknown', `No pending host LLM request: ${requestId}`);
+                }
+                return (0, commandResult_1.commandSuccess)({ accepted: true });
+            },
+            hostExecutorEvents: () => {
+                const bridge = input.hostLlmExecutorBridge;
+                if (!bridge)
+                    return Promise.resolve(null);
+                // Pushable queue: the bridge sink fills it, the SSE route drains it.
+                // The periodic wake bounds how long a queued generator return() (route
+                // disconnect) can stay parked on the wait promise before the finally
+                // detach runs — a bare await would leak the sink forever.
+                const HOST_EXECUTOR_STREAM_WAKE_MS = 20_000;
+                return Promise.resolve((async function* hostExecutorEventStream() {
+                    const queue = [];
+                    let wake = null;
+                    const detach = bridge.attach((request) => {
+                        queue.push(request);
+                        try {
+                            wake?.();
+                        }
+                        catch {
+                            // A dead wake must not break the broadcast.
+                        }
+                    });
+                    try {
+                        for (;;) {
+                            while (queue.length > 0) {
+                                const next = queue.shift();
+                                if (next)
+                                    yield next;
+                            }
+                            await new Promise((resolve) => {
+                                let timer = setTimeout(resolve, HOST_EXECUTOR_STREAM_WAKE_MS);
+                                wake = () => {
+                                    clearTimeout(timer);
+                                    timer = undefined;
+                                    resolve();
+                                };
+                            });
+                            wake = null;
+                        }
+                    }
+                    finally {
+                        detach();
+                    }
+                })());
             },
         },
     };
