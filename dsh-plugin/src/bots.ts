@@ -12,6 +12,9 @@ export type LlmDirectory = {
   modelsByProvider: Record<string, Array<{ id: string; name: string }>>
 }
 
+/** Create waits on the gas subsidy plus chain writes; mirror the grouptask write budget. */
+const WRITE_TIMEOUT_MS = 180_000
+
 function profileFromResult(result: MetabotCommandResult): unknown {
   const data = result.data
   if (data && typeof data === 'object' && 'profile' in data) {
@@ -72,7 +75,7 @@ export async function createBot(
       args.push('--dsh-llm-fallback-reasoning-effort', parsed.value.dshLlmFallbackReasoningEffort)
     }
   }
-  const result = await run(args)
+  const result = await run(args, { timeoutMs: WRITE_TIMEOUT_MS })
   if (result.ok && result.state === 'success') {
     const bot = parseBotPersona(profileFromResult(result))
     if (bot) await generatePreset(ctx, bot)

@@ -159,6 +159,16 @@ export async function runBotCommand(args: string[], context: CliRuntimeContext):
     return handler({ slug });
   }
 
+  if (subcommand === 'setup-retry') {
+    const slug = readFromSlug(args);
+    if (!slug) return missingFrom();
+    const handler = context.dependencies.bot?.retryProfileSetup;
+    if (!handler) {
+      return commandFailed('not_implemented', 'Bot setup retry handler is not configured.');
+    }
+    return handler({ slug });
+  }
+
   if (subcommand === 'runtimes' && nested === 'list') {
     const from = readFromSlug(args) || undefined;
     const handler = context.dependencies.bot?.listRuntimes;

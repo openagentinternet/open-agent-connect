@@ -382,6 +382,7 @@ export interface CliDependencies {
     setConfig?: (input: { slug: string } & Record<string, unknown>) => Awaitable<MetabotCommandResult<unknown>>;
     getWallet?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     getBackup?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
+    retryProfileSetup?: (input: { slug: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listRuntimes?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     discoverRuntimes?: (input?: { from?: string }) => Awaitable<MetabotCommandResult<unknown>>;
     listSessions?: (input: { slug?: string; limit: number }) => Awaitable<MetabotCommandResult<unknown>>;

@@ -109,8 +109,8 @@ test('createBot passes --host dsh and DSH LLM flags then generates preset', asyn
     const result = await plugin.createBot(
       ctx,
       { name: 'Alice', dshLlmProvider: 'deepseek', dshLlmModel: 'v3', dshLlmReasoningEffort: 'high' },
-      async (args) => {
-        calls.push(args)
+      async (args, options) => {
+        calls.push({ args, options })
         return {
           ok: true,
           state: 'success',
@@ -119,7 +119,7 @@ test('createBot passes --host dsh and DSH LLM flags then generates preset', asyn
       },
     )
     assert.equal(result.ok, true)
-    assert.deepEqual(calls[0], [
+    assert.deepEqual(calls[0].args, [
       'bot', 'create',
       '--name', 'Alice',
       '--host', 'dsh',
@@ -127,11 +127,44 @@ test('createBot passes --host dsh and DSH LLM flags then generates preset', asyn
       '--dsh-llm-model', 'v3',
       '--dsh-llm-reasoning-effort', 'high',
     ])
+    // Chain writes + subsidy claim outlive the 30s CLI default budget.
+    assert.equal(calls[0].options.timeoutMs, 180_000)
     assert.equal(copies.length, 1)
     assert.equal(copies[0].id, 'oac-alice')
   } finally {
     await rm(tmp, { recursive: true, force: true })
   }
+})
+
+test('createBot forwards the fallback DSH LLM flags together', async () => {
+  const calls = []
+  const result = await plugin.createBot(
+    { agentPresets: { copy: async () => {}, remove: async () => {}, list: async () => [] } },
+    {
+      name: 'Alice',
+      dshLlmProvider: 'deepseek',
+      dshLlmModel: 'v3',
+      dshLlmFallbackProvider: 'openai',
+      dshLlmFallbackModel: 'gpt-4.1',
+      dshLlmFallbackReasoningEffort: 'low',
+    },
+    async (args, options) => {
+      calls.push({ args, options })
+      return { ok: true, state: 'success', data: {} }
+    },
+  )
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls[0].args, [
+    'bot', 'create',
+    '--name', 'Alice',
+    '--host', 'dsh',
+    '--dsh-llm-provider', 'deepseek',
+    '--dsh-llm-model', 'v3',
+    '--dsh-llm-fallback-provider', 'openai',
+    '--dsh-llm-fallback-model', 'gpt-4.1',
+    '--dsh-llm-fallback-reasoning-effort', 'low',
+  ])
+  assert.equal(calls[0].options.timeoutMs, 180_000)
 })
 
 test('deleteBot calls CLI --confirm then removes the preset', async () => {
