@@ -9,7 +9,7 @@
 import path from 'node:path'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import type { HostAgentLike, HostApproval, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
-import { approvalOf, oacSlugOf } from './browser-tools.js'
+import { agentSessionCwd, approvalOf, oacSlugOf } from './browser-tools.js'
 import { isPathInsideDir } from './oac-core-gate.js'
 
 const PUBLISH_TIMEOUT_MS = 240_000
@@ -176,10 +176,7 @@ export function bindSimpleNoteToolInstall(ctx: HostContext): void {
     host: ctx,
     hostAgent,
     approval: approvalOf(ctx),
-    getWorkspaceDir: (exec) => {
-      const cwd = (exec.agent as { ctx?: { options?: { cwd?: string } } } | undefined)?.ctx?.options?.cwd
-      return typeof cwd === 'string' && cwd.trim() ? cwd : undefined
-    },
+    getWorkspaceDir: (exec) => agentSessionCwd(exec.agent),
   })) {
     try {
       ctx.tools?.register(definition)

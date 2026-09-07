@@ -14,7 +14,7 @@ import path from 'node:path'
 import { runMetabotWithPayloadFile, type RunFn } from './cli-payload.js'
 import { core } from './local-read.js'
 import type { HostAgentLike, HostApproval, HostContext, HostToolDefinition, HostToolExec } from './context-types.js'
-import { approvalOf, oacSlugOf } from './browser-tools.js'
+import { agentSessionCwd, approvalOf, oacSlugOf } from './browser-tools.js'
 import { isPathInsideDir } from './oac-core-gate.js'
 
 const PUBLISH_TIMEOUT_MS = 240_000
@@ -142,6 +142,9 @@ export function buildQaToolDefinitions(input: {
     if (relative.length > 0) {
       return `${toolName} requires ABSOLUTE local file paths (or metafile:// URIs). Relative: ${relative.join(', ')}.`
     }
+    // No local absolute paths (the common no-attachment call) never touches
+    // the session/workspace resolution at all.
+    if (localPaths.length === 0) return null
     const workspaceDir = input.getWorkspaceDir?.(exec)
     const external = localPaths.filter((item) => !workspaceDir || !isPathInsideDir(item, workspaceDir))
     if (external.length === 0) return null
@@ -531,10 +534,7 @@ export function bindQaToolInstall(ctx: HostContext): void {
     host: ctx,
     hostAgent,
     approval: approvalOf(ctx),
-    getWorkspaceDir: (exec) => {
-      const cwd = (exec.agent as { ctx?: { options?: { cwd?: string } } } | undefined)?.ctx?.options?.cwd
-      return typeof cwd === 'string' && cwd.trim() ? cwd : undefined
-    },
+    getWorkspaceDir: (exec) => agentSessionCwd(exec.agent),
   })) {
     try {
       ctx.tools?.register(definition)
