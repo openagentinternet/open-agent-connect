@@ -63,6 +63,8 @@ export const GROUP_TASK_WORK_SYSTEM_PROMPT =
 
 const DEFAULT_POLL_MS = 8_000
 const DEFAULT_TURN_TIMEOUT_MS = 900_000
+/** work-submit retries: transient daemon hiccups must not silently drop a finished turn. */
+const SUBMIT_RETRY_DELAYS_MS = [0, 2_000, 5_000]
 
 interface ActiveWorkerSession {
   agent: HostAgentLike
@@ -78,6 +80,8 @@ export interface GroupTaskWorkerOptions {
   turnTimeoutMs?: number
   /** Daemon liveness probe override (tests). */
   daemonAlive?: () => Promise<boolean>
+  /** work-submit retry delays in ms (tests pass [0] to disable retries). */
+  submitRetryDelaysMs?: number[]
 }
 
 export interface GroupTaskWorkerRunner {
@@ -138,11 +142,18 @@ export function applyGroupTaskWorkerSessions(
   ctx: HostContext,
   options: GroupTaskWorkerOptions = {},
 ): GroupTaskWorkerRunner {
-  const run = options.run ?? runMetabotPinned
+  const run: RunFn = options.run
+    ?? ((args, runOptions) => runMetabotPinned(
+      args,
+      runOptions,
+      undefined,
+      (reason) => ctx.logger?.warn?.(`[oac-dsh] ${reason}`),
+    ))
   const enabled = options.enabled !== false
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS
   const turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS
   const daemonAlive = options.daemonAlive ?? daemonAliveByHttp
+  const submitRetryDelaysMs = options.submitRetryDelaysMs ?? SUBMIT_RETRY_DELAYS_MS
 
   /** Live sub-sessions keyed by `${taskId}:${workerSlug}` (reused across turns). */
   const activeSessions = new Map<string, ActiveWorkerSession>()
@@ -157,6 +168,25 @@ export function applyGroupTaskWorkerSessions(
       [],
       run,
     )
+  }
+
+  /**
+   * Checked submit (task-67 lesson): a failed work-submit used to be swallowed,
+   * leaving a FINISHED turn stuck in "claimed" until the engine's 20-min TTL.
+   * Retry short bursts and warn loudly; the engine TTL stays the final backstop.
+   */
+  async function submitChecked(payload: Record<string, unknown>): Promise<MetabotCommandResult> {
+    let last: MetabotCommandResult | null = null
+    for (let attempt = 0; attempt < submitRetryDelaysMs.length; attempt++) {
+      const delay = submitRetryDelaysMs[attempt]!
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
+      last = await submit(payload)
+      if (last.ok) return last
+      ctx.logger?.warn?.(
+        `[oac-dsh] group-task work submit failed (request ${String(payload.requestId)}, attempt ${attempt + 1}/${submitRetryDelaysMs.length}): ${last.message ?? last.code ?? 'unknown error'}`,
+      )
+    }
+    return last!
   }
 
   /**
@@ -233,7 +263,7 @@ export function applyGroupTaskWorkerSessions(
     const preset = presetIdForSlug(claim.workerSlug)
     const sessionKey = `${claim.taskId}:${claim.workerSlug}`
     const fail = async (error: string): Promise<void> => {
-      await submit({ requestId: claim.requestId, error, dshSessionId: null })
+      await submitChecked({ requestId: claim.requestId, error, dshSessionId: null })
     }
     if (!registry?.create || !ctx.agentPresets?.mount) {
       await fail('worker_session_unavailable: the DSH agent registry or preset service is unavailable')
@@ -332,7 +362,7 @@ export function applyGroupTaskWorkerSessions(
     }
 
     if (timedOut) {
-      await submit({
+      await submitChecked({
         requestId: claim.requestId,
         error: `WORKER_TURN_TIMED_OUT after ${Math.round(turnTimeoutMs / 1000)}s (dshSessionId ${session.sessionId})`,
         dshSessionId: session.sessionId,
@@ -340,14 +370,14 @@ export function applyGroupTaskWorkerSessions(
       return
     }
     if (failureText) {
-      await submit({ requestId: claim.requestId, error: failureText, dshSessionId: session.sessionId })
+      await submitChecked({ requestId: claim.requestId, error: failureText, dshSessionId: session.sessionId })
       return
     }
     if (!handoff) {
       if (session.midTurnSends > 0) {
         // IDBots task #66-A parity: an empty final reply after mid-turn group
         // sends is a DELIVERED turn — complete without re-posting.
-        await submit({
+        await submitChecked({
           requestId: claim.requestId,
           handoff: '[NO_REPLY]',
           dshSessionId: session.sessionId,
@@ -355,7 +385,7 @@ export function applyGroupTaskWorkerSessions(
         return
       }
       const turnError = errorFromTurnEvents(sessionEvents)
-      await submit({
+      await submitChecked({
         requestId: claim.requestId,
         error: `WORKER_EMPTY_HANDOFF: no handoff text${turnError ? ` — ${turnError}` : ''} (dshSessionId ${session.sessionId}; the session stays live)`,
         dshSessionId: session.sessionId,
@@ -363,7 +393,7 @@ export function applyGroupTaskWorkerSessions(
       return
     }
     // A [NO_REPLY] final reply completes WITHOUT an on-chain post (service-side).
-    await submit({
+    await submitChecked({
       requestId: claim.requestId,
       handoff,
       dshSessionId: session.sessionId,

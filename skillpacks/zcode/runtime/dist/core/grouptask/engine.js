@@ -423,7 +423,8 @@ function createGroupTaskEngine(options) {
     /** Bare local path (no URI scheme) that the upload seam can upgrade. */
     function looksLikeLocalFilePath(uri) {
         const value = (uri ?? '').trim();
-        if (!value || /^[a-z][a-z0-9+.-]*:/i.test(value))
+        // "//…" is a scheme-relative URI (or a stripped "pin://" payload), never a local path.
+        if (!value || value.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(value))
             return false;
         return value.startsWith('/') || value.startsWith('./') || value.startsWith('~/');
     }
@@ -906,8 +907,14 @@ function createGroupTaskEngine(options) {
                     // Inviter-side upgrade: a local-file deliverable is uploaded as a
                     // metafile and the row rewritten to the on-chain URI (IDBots
                     // parity). Bare paths stay in the payload (uri null). Best-effort
-                    // — the raw path row survives on failure.
-                    const payloadPath = candidate.payload.replace(/^[a-z]+:\s*/i, '').trim();
+                    // — the raw path row survives on failure. The payload fallback only
+                    // applies when the tag carried NO uri at all: a candidate that
+                    // already has a classified uri (pin/metaapp/metafile/link) is
+                    // on-chain and must never be re-read as a file — stripping its
+                    // scheme ("pin://…" → "//…") would fake an absolute path.
+                    const payloadPath = candidate.uri == null
+                        ? candidate.payload.replace(/^file:\s*/i, '').trim()
+                        : '';
                     const localPath = (looksLikeLocalFilePath(candidate.uri) ? candidate.uri : null)
                         ?? (looksLikeLocalFilePath(payloadPath) ? payloadPath : null);
                     if (localPath) {
@@ -1112,6 +1119,31 @@ function createGroupTaskEngine(options) {
             return workers.some((worker) => (0, tags_1.isMentioned)(message, worker));
         });
     }
+    /** Planning coverage guard: the posted plan must NAME every seated worker —
+     *  an assignment or an explicit [STANDBY]. A plan that silently drops a seat
+     *  leaves that member waiting forever (they only act when addressed), so the
+     *  gap goes to the chair as a host note for a follow-up turn — the host
+     *  never posts into the group. */
+    async function notePlanningCoverage(store, task, promptSeats, planText) {
+        const plan = planText.toLowerCase();
+        const uncovered = promptSeats
+            .filter((seat) => seat.role === 'worker')
+            .map((seat) => seat.name)
+            .filter((name) => !plan.includes(name.toLowerCase()));
+        if (uncovered.length === 0)
+            return;
+        await store.recordHostNote({
+            taskId: task.id,
+            kind: 'plan_coverage',
+            target: uncovered.join(', '),
+            body: 'Your posted plan never mentioned these seated workers: ' + uncovered.join(', ')
+                + '. Every seated worker must be either assigned a subtask or explicitly put on [STANDBY] '
+                + 'by name — members only act when addressed. Post a short follow-up covering them now.',
+            dedupeKey: `plan_coverage:${task.id}`,
+        });
+        log(`[GroupTaskEngine] Task ${task.id}: plan never mentioned ${uncovered.length} seated worker(s) `
+            + `(${uncovered.join(', ')}); plan_coverage host note recorded`);
+    }
     async function runPlanningTurn(input) {
         const { store, task } = input;
         const plannedKey = `${exports.GROUP_TASK_PLANNED_KV_PREFIX}${task.id}`;
@@ -1175,7 +1207,9 @@ function createGroupTaskEngine(options) {
         })).trim();
         if (!reply || (0, tags_1.isNoReplyResponse)(reply))
             return; // counts as a failed attempt
-        await enginePost(store, task, { content: ensurePlanningStatusFooter(reply) });
+        const postedPlan = ensurePlanningStatusFooter(reply);
+        await enginePost(store, task, { content: postedPlan });
+        await notePlanningCoverage(store, task, input.promptSeats, postedPlan);
         await store.kvSet(plannedKey, String(now()));
         await refreshDriverClaim(store, task.id);
     }

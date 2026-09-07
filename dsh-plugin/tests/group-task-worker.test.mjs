@@ -30,8 +30,11 @@ function harness(options = {}) {
   const calls = []
   const created = []
   const submits = []
+  const submitAttempts = []
   const acks = []
   const tools = []
+  const warnings = []
+  let submitFailuresLeft = options.submitFailures ?? 0
   let claimResult = { ok: true, data: { request: options.claim === undefined ? claim() : options.claim } }
   const run = async (args) => {
     calls.push(args)
@@ -47,6 +50,11 @@ function harness(options = {}) {
       if (args[2] === 'submit') {
         const file = args[args.indexOf('--payload-file') + 1]
         const payload = JSON.parse(await readFile(file, 'utf8'))
+        submitAttempts.push(payload)
+        if (submitFailuresLeft > 0) {
+          submitFailuresLeft -= 1
+          return { ok: false, state: 'failed', code: 'daemon_record_rejected', message: 'foreign daemon' }
+        }
         submits.push(payload)
         return { ok: true, state: 'success', data: { status: 'completed', pinId: 'pin-reply' } }
       }
@@ -55,6 +63,7 @@ function harness(options = {}) {
   }
   const handoffText = options.handoffText === undefined ? '封面做好了 [DELIVERABLE] metaapp://pin-1' : options.handoffText
   const ctx = {
+    logger: { warn: (message) => warnings.push(message) },
     agentPresets: { mount: async (agentCtx, id) => created.push({ mount: id }) },
     get: (key) => (key === 'agentDefaultModel' && options.hostModel
       ? { currentSelection: () => options.hostModel }
@@ -93,7 +102,7 @@ function harness(options = {}) {
       }
     })(),
   }
-  return { calls, created, submits, acks, tools, ctx, run, setClaim: (r) => { claimResult = r } }
+  return { calls, created, submits, submitAttempts, acks, tools, warnings, ctx, run, setClaim: (r) => { claimResult = r } }
 }
 
 test('worker session: claim → sub-session → handoff submitted on-chain (no host-posted ACK)', async () => {
@@ -218,5 +227,32 @@ test('worker session: the (task, worker) session is reused across turns', async 
   const creations = h.created.filter((entry) => entry.create)
   assert.equal(creations.length, 1, 'second turn reused the live session')
   assert.equal(h.submits.length, 2)
+  runner.stop()
+})
+
+test('worker session: a failed work submit is retried and logged, never silently dropped', async () => {
+  const h = harness({ submitFailures: 2 })
+  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, {
+    daemonAlive: async () => true, run: h.run, pollMs: 600_000, submitRetryDelaysMs: [0, 0, 0],
+  })
+  const worked = await runner.claimOnce()
+  assert.equal(worked, true)
+  assert.equal(h.submitAttempts.length, 3, 'submit retried until it landed')
+  assert.equal(h.submits.length, 1, 'the finished turn eventually submitted')
+  assert.equal(h.warnings.length, 2, 'every failed attempt logged')
+  assert.match(h.warnings[0], /work submit failed/)
+  assert.match(h.warnings[0], /request 9/)
+  runner.stop()
+})
+
+test('worker session: a permanently failing submit exhausts retries with loud warnings', async () => {
+  const h = harness({ submitFailures: 99 })
+  const runner = plugin.applyGroupTaskWorkerSessions(h.ctx, {
+    daemonAlive: async () => true, run: h.run, pollMs: 600_000, submitRetryDelaysMs: [0, 0],
+  })
+  await runner.claimOnce()
+  assert.equal(h.submitAttempts.length, 2, 'retries capped by the delay list')
+  assert.equal(h.submits.length, 0, 'never lands while the daemon rejects')
+  assert.equal(h.warnings.length, 2, 'both attempts logged')
   runner.stop()
 })
