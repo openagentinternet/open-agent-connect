@@ -146,7 +146,7 @@ oac install
 To pin a specific package version:
 
 ```bash
-metabot system update --target-version v0.5.0
+metabot system update --target-version v0.5.1
 ```
 
 Manual fallback, only when `metabot system update` is unavailable but `npm` and

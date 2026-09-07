@@ -5,6 +5,20 @@ All notable changes to Open Agent Connect should be documented in this file.
 This project follows the spirit of Keep a Changelog and uses semantic version
 tags for releases.
 
+## 0.5.1 - 2026-09-08
+
+### Changed
+
+- Follow-up release: ships the DSH plugin `open-agent-connect-dsh` 0.5.0, which
+  was not published with 0.5.0 (plugin version was left unchanged there and the
+  workflow's duplicate-version guard skipped it). The core package content is
+  identical to 0.5.0; only the version is bumped to drive the tag-based release
+  pipeline. DSH plugin 0.5.0 carries everything merged since the 0.4.2 release:
+  the IDBots-style create-bot flow with setup recovery and the 100-bot cap,
+  the group-task detail drawer (IDBots right-rail port), the host LLM executor
+  bridge, the Bot editor Advanced tab, native on-chain Q&A tools plus qa-surf
+  recurring jobs, the cordis session-cwd fix, and group-task hardening.
+
 ## 0.5.0 - 2026-09-08
 
 ### Added
