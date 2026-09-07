@@ -13,6 +13,7 @@ import {
   botsBySlugFromList,
   filterSelectablePresets,
   modelSelectionToApply,
+  orderPresetsTwinFirst,
   presetIdForSlug,
   shouldApplyStagedPreset,
 } from '../chip-logic.ts'
@@ -101,7 +102,8 @@ export class BotPresetSeatController {
       const { presets } = roster.value
       this.fallback = presets.find((preset) => preset.isDefault)?.id ?? presets[0]?.id ?? ''
       this.set({
-        options: filterSelectablePresets(presets),
+        // The Twin Bot leads the dropdown: new blank sessions default to it.
+        options: orderPresetsTwinFirst(filterSelectablePresets(presets), botsBySlug),
         current: this.staged ?? this.currentSession()?.agentPreset ?? this.fallback,
         error: null,
         botsBySlug,

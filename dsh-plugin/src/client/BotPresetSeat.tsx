@@ -10,7 +10,7 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import { IconAgentPresetOutline16, IconChevronDownOutline14, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-agent-preset/client'
-import { chipAvatar, slugFromPresetId, type ChipBot, type ChipPresetOption } from '../chip-logic.ts'
+import { chipAvatar, chipDescription, slugFromPresetId, type ChipBot, type ChipPresetOption } from '../chip-logic.ts'
 import type { BotPresetSeatState } from './preset-seat-store.ts'
 import { presetDisplayText, type AgentPresetTranslate } from './preset-display.ts'
 
@@ -70,7 +70,6 @@ export function BotPresetSeat({
       open={open}
       onClose={() => { setOpen(false) }}
       items={state.options.map((option) => {
-        const text = presetDisplayText(option, t)
         return {
           id: option.id,
           icon: (
@@ -82,7 +81,7 @@ export function BotPresetSeat({
           label: (
             <span className="oac-preset-seat-item">
               <span className="oac-preset-seat-item-name">{optionLabel(option, state.botsBySlug, t)}</span>
-              <span className="oac-preset-seat-item-desc">{text.description ?? t('noDescription')}</span>
+              <span className="oac-preset-seat-item-desc">{chipDescription(option, state.botsBySlug, t('noDescription'))}</span>
             </span>
           ),
         }
