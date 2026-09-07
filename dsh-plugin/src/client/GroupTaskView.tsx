@@ -713,7 +713,6 @@ export function GroupTaskView({
                       <span className="oac-gt-field-label">{t('gtTranscript')}</span>
                       {collabDetail.messages.length === 0 ? <p className="oac-note">{t('gtNoMessages')}</p> : null}
                       {collabDetail.messages.map((message) => {
-                        const isMarkdown = message.contentType === 'text/markdown'
                         const ownMessage = guestGmid !== ''
                           && (message.senderGlobalMetaId ?? '').toLowerCase() === guestGmid
                         const senderName = message.senderName ?? message.senderGlobalMetaId ?? '?'
@@ -762,9 +761,11 @@ export function GroupTaskView({
                                 </span>
                               </div>
                               <div className="oac-a2a-bubble oac-a2a-bubble-peer">
-                                {isMarkdown
-                                  ? <MarkdownText text={message.content} labels={mdLabels} />
-                                  : <span className="oac-a2a-msg-text">{message.content}</span>}
+                                {/* Group-chat pins are always written as
+                                    text/plain, but chair/worker replies are
+                                    LLM-authored Markdown — render every
+                                    bubble through the safe GFM renderer. */}
+                                <MarkdownText text={message.content} labels={mdLabels} />
                               </div>
                             </div>
                           </div>
@@ -970,7 +971,6 @@ export function GroupTaskView({
                 <span className="oac-gt-field-label">{t('gtTranscript')}</span>
                 {detail.messages.length === 0 ? <p className="oac-note">{t('gtNoMessages')}</p> : null}
                 {detail.messages.map((message) => {
-                  const isMarkdown = message.contentType === 'text/markdown'
                   const senderName = message.senderSuspect
                     ? t('gtSuspectSender')
                     : (message.senderName ?? message.senderGlobalMetaId ?? '?')
@@ -1015,9 +1015,11 @@ export function GroupTaskView({
                           </span>
                         </div>
                         <div className="oac-a2a-bubble oac-a2a-bubble-peer">
-                          {isMarkdown
-                            ? <MarkdownText text={message.content} labels={mdLabels} />
-                            : <span className="oac-a2a-msg-text">{message.content}</span>}
+                          {/* Group-chat pins are always written as
+                              text/plain, but chair/worker replies are
+                              LLM-authored Markdown — render every bubble
+                              through the safe GFM renderer. */}
+                          <MarkdownText text={message.content} labels={mdLabels} />
                         </div>
                       </div>
                     </div>
