@@ -71,3 +71,50 @@ test('local profile chat public key resolver falls back to identity secrets', as
   );
   assert.equal(await resolvePeerChatPublicKeyFromLocalProfiles(systemHomeDir, 'idq-missing'), null);
 });
+
+test('peer chat public key resolver caches chain lookups and local-profile misses', async () => {
+  const systemHomeDir = await mkdtempTempRoot('metabot-peer-key-resolver-cache-');
+  await createProfile(systemHomeDir, 'carol', 'idq-carol');
+  await createRuntimeStateStore(path.join(systemHomeDir, '.metabot', 'profiles', 'carol')).writeState({
+    identity: {
+      metabotId: 1,
+      name: 'carol',
+      createdAt: 1_779_000_000_000,
+      path: "m/44'/10001'/0'/0/0",
+      publicKey: 'carol-public-key',
+      chatPublicKey: 'carol-chat-public-key',
+      addresses: { mvc: 'carol-mvc-address' },
+      mvcAddress: 'carol-mvc-address',
+      metaId: 'carol-meta-id',
+      globalMetaId: 'idq-carol',
+    },
+    services: [],
+    traces: [],
+    sellerOrders: [],
+  });
+
+  const { createPeerChatPublicKeyResolver } = require('../../dist/cli/runtime.js');
+  let chainCalls = 0;
+  const resolve = createPeerChatPublicKeyResolver({
+    systemHomeDir,
+    fetchPeerChatPublicKey: async (globalMetaId) => {
+      chainCalls += 1;
+      return globalMetaId === 'idq-remote' ? 'remote-chat-public-key' : null;
+    },
+  });
+
+  // Chain hit: cached after the first resolution.
+  assert.equal(await resolve('idq-remote'), 'remote-chat-public-key');
+  assert.equal(await resolve('idq-remote'), 'remote-chat-public-key');
+  assert.equal(chainCalls, 1);
+
+  // Chain miss + local hit: resolved once, then cached.
+  assert.equal(await resolve('idq-carol'), 'carol-chat-public-key');
+  assert.equal(await resolve('idq-carol'), 'carol-chat-public-key');
+  assert.equal(chainCalls, 2);
+
+  // Chain miss + local miss: negative-cached so sweeps do not hammer the chain.
+  assert.equal(await resolve('idq-nobody'), null);
+  assert.equal(await resolve('idq-nobody'), null);
+  assert.equal(chainCalls, 3);
+});

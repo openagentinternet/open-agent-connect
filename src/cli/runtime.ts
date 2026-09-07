@@ -2274,11 +2274,29 @@ export function createPeerChatPublicKeyResolver(input: {
   systemHomeDir: string;
   fetchPeerChatPublicKey?: (globalMetaId: string) => Promise<string | null>;
   chainApiBaseUrl?: string;
+  /** Cache TTL for resolved keys (default 10 minutes; tests may shorten it). */
+  cacheTtlMs?: number;
+  /** Cache TTL for unresolved lookups so unknown peers do not hammer the chain (default 60s). */
+  negativeCacheTtlMs?: number;
 }): (globalMetaId: string) => Promise<string | null> {
+  // Long-lived daemon processes resolve the same peers' chat keys on every
+  // private-chat sweep (hub Bots carry 100+ peers). Without a cache each
+  // resolution is a chain HTTP round trip — and a miss falls back to a full
+  // local profile scan — which turns every sweep into hundreds of requests.
+  // Chat keys are identity-bound and effectively static; a short TTL cache
+  // collapses repeat resolutions to zero I/O.
+  const cache = new Map<string, { value: string | null; expiresAt: number }>();
+  const cacheTtlMs = input.cacheTtlMs ?? 10 * 60_000;
+  const negativeCacheTtlMs = input.negativeCacheTtlMs ?? 60_000;
   return async (globalMetaId: string) => {
     const normalizedGlobalMetaId = normalizeEnvText(globalMetaId);
     if (!normalizedGlobalMetaId) {
       return null;
+    }
+
+    const cached = cache.get(normalizedGlobalMetaId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
     }
 
     const primary = input.fetchPeerChatPublicKey
@@ -2288,13 +2306,22 @@ export function createPeerChatPublicKeyResolver(input: {
       });
     const primaryChatPublicKey = normalizeEnvText(primary);
     if (primaryChatPublicKey) {
+      cache.set(normalizedGlobalMetaId, {
+        value: primaryChatPublicKey,
+        expiresAt: Date.now() + cacheTtlMs,
+      });
       return primaryChatPublicKey;
     }
 
-    return resolvePeerChatPublicKeyFromLocalProfiles(
+    const fromLocal = await resolvePeerChatPublicKeyFromLocalProfiles(
       input.systemHomeDir,
       normalizedGlobalMetaId,
     );
+    cache.set(normalizedGlobalMetaId, {
+      value: fromLocal,
+      expiresAt: Date.now() + (fromLocal ? cacheTtlMs : negativeCacheTtlMs),
+    });
+    return fromLocal;
   };
 }
 
