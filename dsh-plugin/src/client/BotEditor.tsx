@@ -157,10 +157,13 @@ export function BotEditor({
   })
   const saveBehavior = (): Promise<void> => onSave({ role, soul, goal })
 
-  // Twin/Worker role. The daemon enforces the one-twin invariant: promoting
-  // this Bot demotes the previous twin, and demoting/clearing re-promotes the
-  // earliest-created remaining Bot, so the switch never leaves zero twins.
+  // Twin/Worker role (IDBots parity). The switch shows only on the current
+  // Twin's own page (so it can step down) or, on any Bot's page, while no
+  // Twin exists — Worker pages hide it once a Twin is set. Promoting a Bot
+  // demotes the previous twin; demoting the twin leaves the machine twin-less
+  // until another Bot is promoted here.
   const isTwin = bot.botType === 'twin'
+  const showTwinSwitch = isTwin || !hasOtherTwin
   const toggleTwin = (): void => {
     if (busy) return
     if (isTwin) {
@@ -452,25 +455,27 @@ export function BotEditor({
               <span className="oac-info-label">{t('globalMetaId')}</span>
               <code className="oac-info-value">{bot.globalMetaId ?? ''}</code>
             </div>
-            <div className="oac-section-card">
-              <div className="oac-section-head">
-                <div className="oac-section-text">
-                  <span className="oac-section-title">{t('twinToggle')}</span>
-                  <span className="oac-section-hint">{t('twinHint')}</span>
+            {showTwinSwitch ? (
+              <div className="oac-section-card">
+                <div className="oac-section-head">
+                  <div className="oac-section-text">
+                    <span className="oac-section-title">{t('twinToggle')}</span>
+                    <span className="oac-section-hint">{t('twinHint')}</span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isTwin}
+                    className={isTwin ? 'oac-switch on' : 'oac-switch'}
+                    disabled={busy}
+                    onClick={toggleTwin}
+                  >
+                    <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
+                    <span className="oac-switch-text">{isTwin ? t('twinOn') : t('twinOff')}</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isTwin}
-                  className={isTwin ? 'oac-switch on' : 'oac-switch'}
-                  disabled={busy}
-                  onClick={toggleTwin}
-                >
-                  <span className="oac-switch-track"><span className="oac-switch-thumb" /></span>
-                  <span className="oac-switch-text">{isTwin ? t('twinOn') : t('twinOff')}</span>
-                </button>
               </div>
-            </div>
+            ) : null}
             <div className="oac-form-actions">
               <Button type="button" variant="primary" disabled={busy} onClick={() => { void saveBasic() }}>
                 {busy ? t('saving') : t('save')}

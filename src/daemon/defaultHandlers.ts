@@ -17928,12 +17928,14 @@ export function createDefaultMetabotDaemonHandlers(input: {
             ? await syncCodexPersonaProjection(profile)
             : undefined;
           // Role changes re-assert the one-twin invariant: a new twin demotes
-          // the previous one; demoting/clearing the twin repairs by promoting
-          // the earliest-created remaining Bot. Best-effort, never blocks.
-          const twinInvariant = update.botType !== undefined
+          // the previous one. An explicit demote/clear leaves the machine
+          // twin-less (IDBots parity) — picking the next Twin is a deliberate
+          // act from a Worker Bot's edit page. Create/delete still repair a
+          // missing twin. Best-effort, never blocks.
+          const twinInvariant = update.botType === 'twin'
             ? await applyTwinInvariant(
               normalizedSystemHomeDir,
-              update.botType === 'twin' ? { preferredTwinSlug: profile.slug } : {},
+              { preferredTwinSlug: profile.slug },
             ).catch(() => null)
             : null;
           return commandSuccess({
