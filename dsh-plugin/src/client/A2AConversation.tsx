@@ -211,6 +211,9 @@ export function A2AConversation({
   const guidanceTokenRef = useRef(0)
   const lastFromRef = useRef('')
   const selectedPeerRef = useRef('')
+  const messagesRef = useRef<HTMLDivElement | null>(null)
+  const pinnedToBottomRef = useRef(true)
+  const forceScrollRef = useRef(false)
 
   const reloadList = useCallback((): void => setTick((value) => value + 1), [])
 
@@ -362,6 +365,30 @@ export function A2AConversation({
     if (open && selectedPeer) void loadThread(selectedPeer)
   }, [open, selectedPeer, loadThread])
 
+  // Newest messages live at the bottom of the scroll container. Switching
+  // conversations forces a pin to the bottom; quiet live reloads only follow
+  // when the user is already near the bottom, so reading history is never
+  // yanked away.
+  useEffect(() => {
+    forceScrollRef.current = true
+  }, [selectedPeer])
+
+  const onMessagesScroll = useCallback((): void => {
+    const el = messagesRef.current
+    if (!el) return
+    pinnedToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }, [])
+
+  useEffect(() => {
+    const el = messagesRef.current
+    if (!el || threadStatus !== 'ready' || threadData === null) return
+    if (forceScrollRef.current || pinnedToBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+      pinnedToBottomRef.current = true
+    }
+    forceScrollRef.current = false
+  }, [threadData, threadStatus])
+
   // Live updates: the host pipes the daemon's per-Bot conversation SSE
   // (stored-row changes + chain-profile warm-up completions) into
   // /oac/api/chat/events. One debounced reload per burst refreshes the list
@@ -407,7 +434,11 @@ export function A2AConversation({
 
   const selectPeer = (peer: string): void => {
     clearPrivateUnread(peer)
-    if (peer === selectedPeer) return
+    if (peer === selectedPeer) {
+      const el = messagesRef.current
+      if (el) el.scrollTop = el.scrollHeight
+      return
+    }
     setSelectedPeer(peer)
     setGuidanceStatus(null)
     setGuidanceOpen(false)
@@ -430,7 +461,10 @@ export function A2AConversation({
       await send(from, peer, content)
       setDraft('')
       setPeerDraft('')
-      if (selectedPeer) void loadThread(selectedPeer)
+      if (selectedPeer) {
+        forceScrollRef.current = true
+        void loadThread(selectedPeer)
+      }
       reloadList()
     } catch (cause) {
       setThreadError(errorText(cause))
@@ -678,7 +712,7 @@ export function A2AConversation({
                     <span className="oac-note">{t('selectConversation')}</span>
                   )}
                 </div>
-                <div className="oac-a2a-messages">
+                <div className="oac-a2a-messages" ref={messagesRef} onScroll={onMessagesScroll}>
                   {threadStatus === 'loading' ? <p className="oac-note saving">{t('loadingMessages')}</p> : null}
                   {threadStatus === 'error' ? <p className="oac-note error">{threadError ?? t('error')}</p> : null}
                   {threadStatus === 'ready' && threadData !== null && threadData.messages.length === 0 ? (
