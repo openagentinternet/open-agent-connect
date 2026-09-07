@@ -158,6 +158,11 @@ export function apply(ctx: ClientContext): void {
         patch: { enabled?: boolean; maxTurns?: number; cooldownMs?: number },
       ) => api.autoReplyConfig(from, patch),
       browserOpen: (uri?: string) => openBrowser(browserStore, uri ?? null),
+      botWallet: (slug: string) => api.botWallet(slug),
+      botBackup: (slug: string) => api.botBackup(slug),
+      botHomepageUpload: (slug: string, fileName: string, contentType: string, base64: string) =>
+        api.botHomepageUpload(slug, fileName, contentType, base64),
+      metaappList: (from: string, size?: number, cursor?: string) => api.metaappList(from, size, cursor),
     }),
   }, BotPanel))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({

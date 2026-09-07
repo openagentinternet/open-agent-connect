@@ -5,6 +5,7 @@
  * routes). The browser half is `src/client/index.ts`.
  */
 import { bootstrapHealth } from './bootstrap.js'
+import { dispatchBotAdvancedRoutes, HOMEPAGE_UPLOAD_REQUEST_MAX_BYTES } from './bot-advanced.js'
 import { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
 import { BrowserEventHub } from './browser-bridge.js'
 import { applyBrowserInjection } from './browser-context.js'
@@ -153,6 +154,8 @@ async function dispatchPost(
     if (!slug) return { ok: false, state: 'failed', code: 'missing_slug', message: 'slug is required' }
     return deleteBot(ctx, slug)
   }
+  const botAdvanced = await dispatchBotAdvancedRoutes(method, payload)
+  if (botAdvanced !== undefined) return botAdvanced
   if (method === 'llm/directory') {
     return { ok: true, state: 'success', data: await listLlmDirectory(ctx) }
   }
@@ -369,7 +372,10 @@ function registerApi(
           writeJson(res, result.code === 'not-found' ? 404 : 200, result)
           return
         }
-        const payload = await readJsonBody(req)
+        const payload = await readJsonBody(
+          req,
+          method === 'bots/homepage-upload' ? HOMEPAGE_UPLOAD_REQUEST_MAX_BYTES : undefined,
+        )
         const result = await dispatchPost(ctx, method, payload, browserHub)
         const status = result.code === 'not-found' ? 404 : 200
         writeJson(res, status, result)
@@ -608,6 +614,7 @@ export { isSupportedNodeVersion, resolveNodeBinary } from './node-runtime.js'
 export { isTrustedApiRequest } from './trust-fence.js'
 export { bootstrapHealth } from './bootstrap.js'
 export { createBot, deleteBot, listLlmDirectory, updateBot } from './bots.js'
+export { dispatchBotAdvancedRoutes, HOMEPAGE_UPLOAD_MAX_BYTES } from './bot-advanced.js'
 export { getAutoReplyStatus, listChatSkills, setAutoReplyConfig } from './chat-settings.js'
 export { getConversationMessages, listConversations, runConversationGuidance } from './a2a.js'
 export { validateCreatePayload } from './bots-input.js'
