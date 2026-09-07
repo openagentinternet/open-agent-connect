@@ -113,6 +113,12 @@ function createCodexBackend(binaryPath, env) {
                 shell: false,
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
+            // A child that exits immediately (broken binary, probe race) can close
+            // its stdin pipe while our writes are still in flight, surfacing an
+            // async EPIPE 'error' event on the stream. The close/exit promises and
+            // the RPC timeout below own the failure path; swallow the stream error
+            // so it does not become an uncaught exception.
+            child.stdin?.on('error', () => { });
             let nextId = 1;
             const pending = new Map();
             const outputParts = [];
