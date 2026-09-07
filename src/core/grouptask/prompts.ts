@@ -10,6 +10,7 @@
  * runtime.
  */
 
+import { QA_BEHAVIOR_RULE } from '../qanda/behaviorPrompt';
 import type { GroupTaskMessage, GroupTaskRecord } from './types';
 
 export const GROUP_TASK_CONTEXT_MESSAGE_COUNT = 20;
@@ -167,6 +168,10 @@ export function buildGroupTaskSystemPrompt(input: BuildGroupTaskSystemPromptInpu
     ? [...SHARED_PLAYBOOK, ...CHAIR_PLAYBOOK]
     : [...SHARED_PLAYBOOK, ...WORKER_PLAYBOOK];
   sections.push(['## Group Task Playbook', ...playbook].join('\n'));
+
+  // Q&A behavior rule (IDBots feat/metaweb-qa parity): group-task turns get
+  // the same search-before-ask self-discipline as cowork sessions.
+  sections.push(QA_BEHAVIOR_RULE);
 
   return sections.join('\n\n');
 }

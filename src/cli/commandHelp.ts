@@ -1718,7 +1718,7 @@ const COMMAND_HELP_SPECS: CommandHelpSpec[] = [
     summary: 'MetaWeb knowledge access: unified cross-protocol search and generic pin read (so.metaid.io aggregation node).',
     usage: 'metabot metaweb search --query <text> [--protocols a,b] [--publisher <id>] [--since-days N] [--until-days N] [--newest] [--size N] [--cursor <c>] | metabot metaweb read --pin <pinId>',
     subcommands: [
-      { name: 'search', summary: 'Unified keyword search across simplenote, simplebuzz, metaapp, metabot-skill, skill-service, metaprotocol pins.' },
+      { name: 'search', summary: 'Unified keyword search across simplenote, simplebuzz, metaapp, metabot-skill, skill-service, metaprotocol, simplequestion, simpleanswer pins.' },
       { name: 'read', summary: 'Generic pin read: any version id resolves to the latest; returns an LLM-ready body plus attachments and follow-up hints.' },
     ],
     optionalFlags: [HELP_JSON_FLAG],

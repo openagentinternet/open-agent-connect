@@ -892,6 +892,48 @@ function resolveLocalBrowserPath(uri: string): string {
   return `/browser?${query.toString()}`;
 }
 
+// ---------------------------------------------------------------------------
+// On-chain Q&A question routing (IDBots feat/metaweb-qa parity): a bare
+// pin:// URI that IS a simplequestion pin opens the bundled qanda app's
+// question page instead of the generic pin reader. The probe checks the Q&A
+// index: definitive negatives (40400) are cached — non-question pins skip
+// re-probing; positives are NOT cached so the page always opens fresh
+// counts/answers; indeterminate failures (indexer outage) fall through to the
+// generic pin reader without caching.
+// ---------------------------------------------------------------------------
+
+const QA_QUESTION_PIN_URI_PATTERN = /^pin:\/\/([0-9a-f]{64}i0)$/iu;
+const qaQuestionPinNegativeCache = new Set<string>();
+
+function qaQuestionAppBrowserPath(pinId: string): string {
+  return `/ui/qanda/app/index.html#q/${encodeURIComponent(pinId)}`;
+}
+
+/** Test seam: probe-and-route one pin:// URI to the qanda question page. */
+export async function tryQaQuestionBrowserPath(uri: string): Promise<string | null> {
+  const match = QA_QUESTION_PIN_URI_PATTERN.exec(uri.trim());
+  if (!match) return null;
+  const pinId = match[1]!.toLowerCase();
+  if (qaQuestionPinNegativeCache.has(pinId)) return null;
+  const baseOverride = normalizeEnvText(process.env.METABOT_METAWEB_API_BASE_URL);
+  try {
+    await qaQuestionDetail(pinId, {
+      ...(baseOverride ? { baseUrl: baseOverride } : {}),
+      timeoutMs: 4_000,
+    });
+    return qaQuestionAppBrowserPath(pinId);
+  } catch (error) {
+    if (error instanceof QaRecallNotFoundError) {
+      qaQuestionPinNegativeCache.add(pinId);
+      if (qaQuestionPinNegativeCache.size > 500) {
+        const oldest = qaQuestionPinNegativeCache.values().next().value;
+        if (oldest) qaQuestionPinNegativeCache.delete(oldest);
+      }
+    }
+    return null;
+  }
+}
+
 /**
  * Best-effort daemon base URL for decorating read-only results with clickable
  * http links. Unlike ensureDaemonBaseUrl this never starts or restarts a
@@ -2618,10 +2660,11 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     const browserPath = input.uri
       ? resolveLocalBrowserPath(input.uri)
       : '/browser';
+    const qaPath = input.uri ? await tryQaQuestionBrowserPath(input.uri) : null;
     const resolve = input.uri ? await probeMetaAppResolve(input.uri) : null;
     return commandSuccess({
       ...(input.uri ? { uri: input.uri } : {}),
-      localUiUrl: `${baseUrl}${browserPath}`,
+      localUiUrl: `${baseUrl}${qaPath ?? browserPath}`,
       ...(resolve ? { resolve } : {}),
     });
   }
@@ -2649,11 +2692,12 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     }
     const data = response.data ?? {};
     const resultUri = typeof data.uri === 'string' ? data.uri : input.uri;
+    const qaPath = await tryQaQuestionBrowserPath(resultUri);
     return commandSuccess({
       uri: resultUri,
       // Same clickable path-form link as `browser open`/`browser link`, so the
       // agent never has to hand-build a Browser URL (preview-metaapp included).
-      ...(baseUrl ? { localUiUrl: `${baseUrl}${resolveLocalBrowserPath(resultUri)}` } : {}),
+      ...(baseUrl ? { localUiUrl: `${baseUrl}${qaPath ?? resolveLocalBrowserPath(resultUri)}` } : {}),
       pagesReached: typeof data.pagesReached === 'number' ? data.pagesReached : 0,
       ...(data.note ? { note: data.note } : {}),
       ...(resolve ? { resolve } : {}),
@@ -2671,9 +2715,10 @@ export function createDefaultCliDependencies(context: CliRuntimeContext): CliDep
     if (!baseUrl) {
       return commandSuccess({ uri: input.uri });
     }
+    const qaPath = await tryQaQuestionBrowserPath(input.uri);
     return commandSuccess({
       uri: input.uri,
-      localUiUrl: `${baseUrl}${resolveLocalBrowserPath(input.uri)}`,
+      localUiUrl: `${baseUrl}${qaPath ?? resolveLocalBrowserPath(input.uri)}`,
     });
   }
 
