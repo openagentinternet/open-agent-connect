@@ -79,6 +79,10 @@ const ownerIdentity_1 = require("../core/owner/ownerIdentity");
 const mvcSponsorWritePin_1 = require("../core/subsidy/mvcSponsorWritePin");
 const postBuzz_1 = require("../core/buzz/postBuzz");
 const publish_1 = require("../core/simplenote/publish");
+const publish_2 = require("../core/qanda/publish");
+const ledger_1 = require("../core/qanda/ledger");
+const recall_1 = require("../core/qanda/recall");
+const format_1 = require("../core/qanda/format");
 const profileUploadGate_1 = require("../core/files/profileUploadGate");
 const localMnemonicSigner_2 = require("../core/signing/localMnemonicSigner");
 const writeAttempts_1 = require("../core/chain/writeAttempts");
@@ -86,7 +90,7 @@ const previewSessions_1 = require("../core/metaapp/previewSessions");
 const localCache_1 = require("../core/metaapp/localCache");
 const ownerService_1 = require("../core/metaapp/ownerService");
 const manOwnerList_1 = require("../core/metaapp/manOwnerList");
-const publish_2 = require("../core/metaapp/publish");
+const publish_3 = require("../core/metaapp/publish");
 const skillPublish_1 = require("../core/skills/skillPublish");
 const share_1 = require("../core/metaapp/share");
 const bootstrapFlow_1 = require("../core/bootstrap/bootstrapFlow");
@@ -3863,6 +3867,16 @@ function createDefaultMetabotDaemonHandlers(input) {
                 + `The content may already be on-chain — verify those txids before publishing again.`);
         }
         return (0, commandResult_1.commandFailed)(fallbackCode, error instanceof Error ? error.message : String(error));
+    }
+    /** Q&A write failure mapping: QandaPublishError codes ride through, broadcast-unknown stays protected. */
+    async function qandaFailedOrBroadcastUnknown(error, kind, hashParts) {
+        const fallbackCode = error instanceof publish_2.QandaPublishError ? error.code : `${kind}_failed`;
+        return await commandFailedOrBroadcastUnknown(error, kind, (0, writeAttempts_1.stableChainWriteHash)(kind, hashParts), fallbackCode);
+    }
+    /** Q&A recall options from the daemon process env (test/staging override). */
+    function qaRecallOptionsForDaemon() {
+        const override = normalizeText(process.env[recall_1.QA_RECALL_BASE_URL_ENV]);
+        return override ? { baseUrl: override } : {};
     }
     const secretStore = input.secretStore ?? (0, fileSecretStore_1.createFileSecretStore)(input.homeDir);
     // Create default adapter registry if none provided (backward compat)
@@ -11083,7 +11097,7 @@ function createDefaultMetabotDaemonHandlers(input) {
         metaapp: {
             preview: async (rawInput) => {
                 try {
-                    const result = await (0, publish_2.previewMetaAppProject)({
+                    const result = await (0, publish_3.previewMetaAppProject)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         open: rawInput.open === true,
@@ -11131,7 +11145,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actor.homeDir);
                 try {
-                    const result = await (0, publish_2.publishMetaApp)({
+                    const result = await (0, publish_3.publishMetaApp)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         confirm: rawInput.confirm === true,
@@ -11204,7 +11218,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                 }
                 const cache = (0, localCache_1.createMetaAppLocalCacheStore)(actor.homeDir);
                 try {
-                    const result = await (0, publish_2.updateMetaApp)({
+                    const result = await (0, publish_3.updateMetaApp)({
                         projectDir: typeof rawInput.projectDir === 'string' ? rawInput.projectDir : '',
                         manifestFile: typeof rawInput.manifestFile === 'string' ? rawInput.manifestFile : undefined,
                         confirm: rawInput.confirm === true,
@@ -11309,7 +11323,7 @@ function createDefaultMetabotDaemonHandlers(input) {
             },
             share: async (rawInput) => {
                 try {
-                    const share = await (0, publish_2.shareMetaApp)({
+                    const share = await (0, publish_3.shareMetaApp)({
                         pinId: typeof rawInput.pinId === 'string' ? rawInput.pinId : '',
                     });
                     if (rawInput.announce !== true) {
@@ -11356,7 +11370,7 @@ function createDefaultMetabotDaemonHandlers(input) {
                     return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before writing comments.');
                 }
                 try {
-                    const result = await (0, publish_2.commentMetaApp)({
+                    const result = await (0, publish_3.commentMetaApp)({
                         pinId: typeof rawInput.pinId === 'string' ? rawInput.pinId : '',
                         comment: typeof rawInput.comment === 'string' ? rawInput.comment : '',
                         network: await resolveWriteNetworkForHome(rawInput.network, actor.homeDir),
@@ -11515,6 +11529,173 @@ function createDefaultMetabotDaemonHandlers(input) {
                         const code = error.code;
                         return typeof code === 'string' ? code : 'simplenote_post_failed';
                     })());
+                }
+            },
+        },
+        qanda: {
+            // post_simplequestion: publish one on-chain question end to end.
+            question: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before publishing a question.');
+                }
+                try {
+                    const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+                    const gatedUpload = (0, profileUploadGate_1.createProfileScopedUpload)({
+                        profileHomeDir: async () => actor.homeDir,
+                        signerForSlug: async () => actor.signer,
+                        confirmExternalUpload: rawInput.confirmExternalUpload === true,
+                    });
+                    const result = await (0, publish_2.publishSimpleQuestion)(actor.signer, async ({ filePath, network: uploadNetwork }) => gatedUpload({
+                        slug: normalizeText(rawInput.from) || 'actor',
+                        filePath,
+                        network: uploadNetwork,
+                    }), {
+                        title: normalizeText(rawInput.title),
+                        content: typeof rawInput.content === 'string' ? rawInput.content : undefined,
+                        contentType: normalizeText(typeof rawInput.contentType === 'string' ? rawInput.contentType : rawInput.content_type) || undefined,
+                        tags: readStringArray(rawInput.tags),
+                        attachments: readStringArray(rawInput.attachments),
+                        network: network,
+                    });
+                    return (0, commandResult_1.commandSuccess)({
+                        ...result,
+                        formatted: (0, publish_2.formatSimpleQuestionResult)(result),
+                        localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/qanda/app/index.html', { q: result.pinId }) ?? `/ui/qanda/app/index.html?q=${encodeURIComponent(result.pinId)}`,
+                    });
+                }
+                catch (error) {
+                    return qandaFailedOrBroadcastUnknown(error, 'qanda_question', [
+                        normalizeText(rawInput.title),
+                        await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+                        ...readStringArray(rawInput.attachments).sort(),
+                    ]);
+                }
+            },
+            // post_simpleanswer: fact-first repeat notice before spending sats, then
+            // publish + record into the local ledger.
+            answer: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before publishing an answer.');
+                }
+                const slug = normalizeText(rawInput.from) || 'actor';
+                const questionPinId = normalizeText(rawInput.answerTo ?? rawInput.answer_to);
+                try {
+                    const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+                    const ledger = (0, ledger_1.createQaAnswerLedger)((0, paths_1.resolveMetabotPaths)(actor.homeDir));
+                    // Fact-first repeat notice (host bookkeeping only, never a protocol
+                    // constraint): surface prior answers BEFORE spending sats; the bot
+                    // decides whether to proceed with allowRepeat=true.
+                    if (questionPinId && rawInput.allowRepeat !== true && rawInput.allow_repeat !== true) {
+                        const publisher = normalizeText(state.identity.globalMetaId);
+                        const { answers: priorAnswers, source: priorSource } = await (0, ledger_1.collectPriorAnswers)({
+                            local: await ledger.listAnswers(slug, questionPinId),
+                            fetchRemote: publisher
+                                ? () => (0, recall_1.qaQuestionAnswers)({ pinId: questionPinId, publisher }, qaRecallOptionsForDaemon()).then((page) => page.items)
+                                : null,
+                        });
+                        if (priorAnswers.length) {
+                            return (0, commandResult_1.commandSuccess)({
+                                published: false,
+                                alreadyAnswered: true,
+                                notice: (0, format_1.formatAlreadyAnsweredNotice)(questionPinId, priorAnswers, priorSource),
+                                priorAnswerCount: priorAnswers.length,
+                            });
+                        }
+                    }
+                    const gatedUpload = (0, profileUploadGate_1.createProfileScopedUpload)({
+                        profileHomeDir: async () => actor.homeDir,
+                        signerForSlug: async () => actor.signer,
+                        confirmExternalUpload: rawInput.confirmExternalUpload === true,
+                    });
+                    const result = await (0, publish_2.publishSimpleAnswer)(actor.signer, async ({ filePath, network: uploadNetwork }) => gatedUpload({
+                        slug,
+                        filePath,
+                        network: uploadNetwork,
+                    }), {
+                        answerTo: questionPinId,
+                        content: normalizeText(rawInput.content),
+                        contentType: normalizeText(typeof rawInput.contentType === 'string' ? rawInput.contentType : rawInput.content_type) || undefined,
+                        tags: readStringArray(rawInput.tags),
+                        attachments: readStringArray(rawInput.attachments),
+                        network: network,
+                    });
+                    await ledger.recordAnswer(slug, result.questionPinId, {
+                        answerPinId: result.pinId,
+                        content: result.content,
+                        postedAt: Date.now(),
+                        network: String(result.network),
+                    });
+                    return (0, commandResult_1.commandSuccess)({
+                        ...result,
+                        formatted: (0, publish_2.formatSimpleAnswerResult)({
+                            pinId: result.pinId,
+                            txids: result.txids,
+                            totalCost: result.totalCost,
+                            questionPinId: result.questionPinId,
+                            attachments: result.attachments,
+                            priorAnswerCount: 0,
+                        }),
+                        localUiUrl: buildDaemonLocalUiUrl(input.getDaemonRecord(), '/ui/qanda/app/index.html', { q: result.questionPinId }) ?? `/ui/qanda/app/index.html?q=${encodeURIComponent(result.questionPinId)}`,
+                    });
+                }
+                catch (error) {
+                    return qandaFailedOrBroadcastUnknown(error, 'qanda_answer', [
+                        questionPinId,
+                        normalizeText(rawInput.content),
+                        await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+                        ...readStringArray(rawInput.attachments).sort(),
+                    ]);
+                }
+            },
+            // like_pin: one paylike reaction pin (payload-only write, no upload).
+            like: async (rawInput) => {
+                const actor = await resolveActorWriteContext(rawInput.from);
+                if ('failure' in actor) {
+                    return actor.failure;
+                }
+                const state = await actor.runtimeStateStore.readState();
+                if (!state.identity) {
+                    return (0, commandResult_1.commandFailed)('identity_missing', 'Create a local MetaBot identity before publishing a reaction.');
+                }
+                try {
+                    const network = await resolveWriteNetworkForHome(rawInput.network, actor.homeDir);
+                    const isLikeRaw = rawInput.isLike ?? rawInput.is_like;
+                    const isLike = isLikeRaw === 1 || isLikeRaw === '1' ? 1
+                        : isLikeRaw === -1 || isLikeRaw === '-1' ? -1
+                            : isLikeRaw === 0 || isLikeRaw === '0' ? 0
+                                : NaN;
+                    const result = await (0, publish_2.publishLikePin)(actor.signer, {
+                        pinId: normalizeText(rawInput.pinId ?? rawInput.pin_id),
+                        isLike: isLike,
+                        network: network,
+                    });
+                    return (0, commandResult_1.commandSuccess)({
+                        ...result,
+                        formatted: (0, publish_2.formatLikePinResult)({
+                            reactionPinId: result.pinId,
+                            txids: result.txids,
+                            totalCost: result.totalCost,
+                            targetPinId: result.targetPinId,
+                            isLike: result.isLike,
+                        }),
+                    });
+                }
+                catch (error) {
+                    return qandaFailedOrBroadcastUnknown(error, 'qanda_like', [
+                        normalizeText(rawInput.pinId ?? rawInput.pin_id),
+                        String(rawInput.isLike ?? rawInput.is_like ?? ''),
+                        await resolveWriteNetworkForHome(rawInput.network, actor.homeDir).catch(() => 'mvc'),
+                    ]);
                 }
             },
         },
@@ -15373,10 +15554,12 @@ function createDefaultMetabotDaemonHandlers(input) {
                         ? await syncCodexPersonaProjection(profile)
                         : undefined;
                     // Role changes re-assert the one-twin invariant: a new twin demotes
-                    // the previous one; demoting/clearing the twin repairs by promoting
-                    // the earliest-created remaining Bot. Best-effort, never blocks.
-                    const twinInvariant = update.botType !== undefined
-                        ? await (0, twinRole_1.applyTwinInvariant)(normalizedSystemHomeDir, update.botType === 'twin' ? { preferredTwinSlug: profile.slug } : {}).catch(() => null)
+                    // the previous one. An explicit demote/clear leaves the machine
+                    // twin-less (IDBots parity) — picking the next Twin is a deliberate
+                    // act from a Worker Bot's edit page. Create/delete still repair a
+                    // missing twin. Best-effort, never blocks.
+                    const twinInvariant = update.botType === 'twin'
+                        ? await (0, twinRole_1.applyTwinInvariant)(normalizedSystemHomeDir, { preferredTwinSlug: profile.slug }).catch(() => null)
                         : null;
                     return (0, commandResult_1.commandSuccess)({
                         profile,

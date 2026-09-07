@@ -47,6 +47,8 @@ export declare function getDaemonRuntimeFingerprint(rootDir?: string): string;
 export declare function buildDaemonConfigHash(env: NodeJS.ProcessEnv, options?: {
     runtimeFingerprint?: string;
 }): string;
+/** Test seam: probe-and-route one pin:// URI to the qanda question page. */
+export declare function tryQaQuestionBrowserPath(uri: string): Promise<string | null>;
 export interface DaemonStatusProbe {
     reachable: boolean;
     ownerId: string | null;

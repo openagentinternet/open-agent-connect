@@ -18,6 +18,7 @@ exports.buildPlanningDirective = buildPlanningDirective;
 exports.buildMinimalPlanningDirective = buildMinimalPlanningDirective;
 exports.buildHostNotesDirective = buildHostNotesDirective;
 exports.buildSupervisorWakeDirective = buildSupervisorWakeDirective;
+const behaviorPrompt_1 = require("../qanda/behaviorPrompt");
 exports.GROUP_TASK_CONTEXT_MESSAGE_COUNT = 20;
 const FIELD_CAP = 200;
 function cap(text, max = FIELD_CAP) {
@@ -138,6 +139,9 @@ function buildGroupTaskSystemPrompt(input) {
         ? [...SHARED_PLAYBOOK, ...CHAIR_PLAYBOOK]
         : [...SHARED_PLAYBOOK, ...WORKER_PLAYBOOK];
     sections.push(['## Group Task Playbook', ...playbook].join('\n'));
+    // Q&A behavior rule (IDBots feat/metaweb-qa parity): group-task turns get
+    // the same search-before-ask self-discipline as cowork sessions.
+    sections.push(behaviorPrompt_1.QA_BEHAVIOR_RULE);
     return sections.join('\n\n');
 }
 function transcriptLine(message) {

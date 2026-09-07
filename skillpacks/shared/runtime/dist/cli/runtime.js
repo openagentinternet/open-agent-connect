@@ -42,6 +42,7 @@ exports.createServiceRefundSyncLoop = createServiceRefundSyncLoop;
 exports.getDefaultDaemonPort = getDefaultDaemonPort;
 exports.getDaemonRuntimeFingerprint = getDaemonRuntimeFingerprint;
 exports.buildDaemonConfigHash = buildDaemonConfigHash;
+exports.tryQaQuestionBrowserPath = tryQaQuestionBrowserPath;
 exports.probeDaemonStatus = probeDaemonStatus;
 exports.createPrivateChatReplyRunnerForProfile = createPrivateChatReplyRunnerForProfile;
 exports.replayUnhandledA2AOrderMessagesForProfiles = replayUnhandledA2AOrderMessagesForProfiles;
@@ -112,6 +113,8 @@ const search_1 = require("../core/metaweb/search");
 const pinRead_1 = require("../core/metaweb/pinRead");
 const format_1 = require("../core/metaweb/format");
 const uri_1 = require("../core/metaweb/uri");
+const recall_1 = require("../core/qanda/recall");
+const format_2 = require("../core/qanda/format");
 const skillInstall_1 = require("../core/skills/skillInstall");
 const platformRegistry_1 = require("../core/platform/platformRegistry");
 const fileSecretStore_1 = require("../core/secrets/fileSecretStore");
@@ -659,6 +662,48 @@ function resolveLocalBrowserPath(uri) {
     const query = new URLSearchParams();
     query.set('uri', uri);
     return `/browser?${query.toString()}`;
+}
+// ---------------------------------------------------------------------------
+// On-chain Q&A question routing (IDBots feat/metaweb-qa parity): a bare
+// pin:// URI that IS a simplequestion pin opens the bundled qanda app's
+// question page instead of the generic pin reader. The probe checks the Q&A
+// index: definitive negatives (40400) are cached — non-question pins skip
+// re-probing; positives are NOT cached so the page always opens fresh
+// counts/answers; indeterminate failures (indexer outage) fall through to the
+// generic pin reader without caching.
+// ---------------------------------------------------------------------------
+const QA_QUESTION_PIN_URI_PATTERN = /^pin:\/\/([0-9a-f]{64}i0)$/iu;
+const qaQuestionPinNegativeCache = new Set();
+function qaQuestionAppBrowserPath(pinId) {
+    return `/ui/qanda/app/index.html#q/${encodeURIComponent(pinId)}`;
+}
+/** Test seam: probe-and-route one pin:// URI to the qanda question page. */
+async function tryQaQuestionBrowserPath(uri) {
+    const match = QA_QUESTION_PIN_URI_PATTERN.exec(uri.trim());
+    if (!match)
+        return null;
+    const pinId = match[1].toLowerCase();
+    if (qaQuestionPinNegativeCache.has(pinId))
+        return null;
+    const baseOverride = normalizeEnvText(process.env.METABOT_METAWEB_API_BASE_URL);
+    try {
+        await (0, recall_1.qaQuestionDetail)(pinId, {
+            ...(baseOverride ? { baseUrl: baseOverride } : {}),
+            timeoutMs: 4_000,
+        });
+        return qaQuestionAppBrowserPath(pinId);
+    }
+    catch (error) {
+        if (error instanceof recall_1.QaRecallNotFoundError) {
+            qaQuestionPinNegativeCache.add(pinId);
+            if (qaQuestionPinNegativeCache.size > 500) {
+                const oldest = qaQuestionPinNegativeCache.values().next().value;
+                if (oldest)
+                    qaQuestionPinNegativeCache.delete(oldest);
+            }
+        }
+        return null;
+    }
 }
 /**
  * Best-effort daemon base URL for decorating read-only results with clickable
@@ -1993,10 +2038,11 @@ function createDefaultCliDependencies(context) {
         const browserPath = input.uri
             ? resolveLocalBrowserPath(input.uri)
             : '/browser';
+        const qaPath = input.uri ? await tryQaQuestionBrowserPath(input.uri) : null;
         const resolve = input.uri ? await probeMetaAppResolve(input.uri) : null;
         return (0, commandResult_1.commandSuccess)({
             ...(input.uri ? { uri: input.uri } : {}),
-            localUiUrl: `${baseUrl}${browserPath}`,
+            localUiUrl: `${baseUrl}${qaPath ?? browserPath}`,
             ...(resolve ? { resolve } : {}),
         });
     }
@@ -2013,11 +2059,12 @@ function createDefaultCliDependencies(context) {
         }
         const data = response.data ?? {};
         const resultUri = typeof data.uri === 'string' ? data.uri : input.uri;
+        const qaPath = await tryQaQuestionBrowserPath(resultUri);
         return (0, commandResult_1.commandSuccess)({
             uri: resultUri,
             // Same clickable path-form link as `browser open`/`browser link`, so the
             // agent never has to hand-build a Browser URL (preview-metaapp included).
-            ...(baseUrl ? { localUiUrl: `${baseUrl}${resolveLocalBrowserPath(resultUri)}` } : {}),
+            ...(baseUrl ? { localUiUrl: `${baseUrl}${qaPath ?? resolveLocalBrowserPath(resultUri)}` } : {}),
             pagesReached: typeof data.pagesReached === 'number' ? data.pagesReached : 0,
             ...(data.note ? { note: data.note } : {}),
             ...(resolve ? { resolve } : {}),
@@ -2032,9 +2079,10 @@ function createDefaultCliDependencies(context) {
         if (!baseUrl) {
             return (0, commandResult_1.commandSuccess)({ uri: input.uri });
         }
+        const qaPath = await tryQaQuestionBrowserPath(input.uri);
         return (0, commandResult_1.commandSuccess)({
             uri: input.uri,
-            localUiUrl: `${baseUrl}${resolveLocalBrowserPath(input.uri)}`,
+            localUiUrl: `${baseUrl}${qaPath ?? resolveLocalBrowserPath(input.uri)}`,
         });
     }
     // MetaApp aggregation search/forks run directly against the metaso-p2p API:
@@ -2224,6 +2272,101 @@ function createDefaultCliDependencies(context) {
             }
             const message = error instanceof Error ? error.message : String(error);
             return (0, commandResult_1.commandFailed)('metaweb_read_failed', message);
+        }
+    }
+    // `metabot qanda search|latest|detail|answers` — read-only Q&A recall over
+    // the metaso-p2p Q&A APIs, in-process like `metaweb search/read`. The data
+    // envelope carries the raw rows plus a model-ready `formatted` block (the
+    // same renderer the DSH tools use).
+    async function runQandaSearch(input) {
+        try {
+            const q = normalizeEnvText(typeof input.query === 'string' ? input.query : undefined);
+            if (!q)
+                return (0, commandResult_1.commandFailed)('missing_query', '--query is required.');
+            const page = await (0, recall_1.qaSearch)({
+                q,
+                ...(Array.isArray(input.tags) ? { tags: input.tags.map((tag) => String(tag ?? '')) } : {}),
+                ...(normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) ? { publisher: normalizeEnvText(input.publisher) } : {}),
+                ...(input.answered === true || input.answered === false ? { answered: input.answered } : {}),
+                ...(input.sort === 'newest' ? { sort: 'newest' } : {}),
+                ...(readPositiveField(input.size) ? { size: readPositiveField(input.size) } : {}),
+                ...(normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) ? { cursor: normalizeEnvText(input.cursor) } : {}),
+            }, metawebServiceOptions());
+            const bullets = (0, format_2.formatQaQuestionBullets)(page.items);
+            const ordering = input.sort === 'newest' ? 'newest first' : 'best match first';
+            const formatted = bullets
+                ? `${page.items.length} on-chain question(s) matching "${q}", ${ordering}:\n${bullets}`
+                : `No on-chain Q&A matched "${q}".`;
+            return (0, commandResult_1.commandSuccess)({ ...page, formatted });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return (0, commandResult_1.commandFailed)('qanda_search_failed', message);
+        }
+    }
+    async function runQandaLatest(input) {
+        try {
+            const page = await (0, recall_1.qaLatestQuestions)({
+                ...(Array.isArray(input.tags) ? { tags: input.tags.map((tag) => String(tag ?? '')) } : {}),
+                ...(readPositiveField(input.minAnswers) != null ? { minAnswers: readPositiveField(input.minAnswers) } : {}),
+                ...(Number.isFinite(Number(input.maxAnswers)) && Number(input.maxAnswers) >= 0 ? { maxAnswers: Number(input.maxAnswers) } : {}),
+                ...(input.sort === 'hot' ? { sort: 'hot' } : {}),
+                ...(readPositiveField(input.size) ? { size: readPositiveField(input.size) } : {}),
+                ...(normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) ? { cursor: normalizeEnvText(input.cursor) } : {}),
+            }, metawebServiceOptions());
+            const bullets = (0, format_2.formatQaQuestionBullets)(page.items);
+            const formatted = bullets
+                ? `${page.items.length} on-chain question(s), ${input.sort === 'hot' ? 'hot-ranked (last 7 days)' : 'newest first'}:\n${bullets}`
+                : 'No on-chain questions matched this filter.';
+            return (0, commandResult_1.commandSuccess)({ ...page, formatted });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return (0, commandResult_1.commandFailed)('qanda_latest_failed', message);
+        }
+    }
+    async function runQandaDetail(input) {
+        try {
+            const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+            if (!pinId)
+                return (0, commandResult_1.commandFailed)('missing_pin', '--pin is required.');
+            const detail = await (0, recall_1.qaQuestionDetail)(pinId, metawebServiceOptions());
+            return (0, commandResult_1.commandSuccess)({
+                ...detail,
+                formatted: (0, format_2.formatQaQuestionDetail)({ question: detail.question, answers: detail.answers }),
+            });
+        }
+        catch (error) {
+            if (error instanceof recall_1.QaRecallNotFoundError) {
+                return (0, commandResult_1.commandFailed)('question_not_found', error.message);
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            return (0, commandResult_1.commandFailed)('qanda_detail_failed', message);
+        }
+    }
+    async function runQandaAnswers(input) {
+        try {
+            const pinId = normalizeEnvText(typeof input.pinId === 'string' ? input.pinId : undefined);
+            if (!pinId)
+                return (0, commandResult_1.commandFailed)('missing_pin', '--pin is required.');
+            const page = await (0, recall_1.qaQuestionAnswers)({
+                pinId,
+                ...(normalizeEnvText(typeof input.publisher === 'string' ? input.publisher : undefined) ? { publisher: normalizeEnvText(input.publisher) } : {}),
+                ...(readPositiveField(input.size) ? { size: readPositiveField(input.size) } : {}),
+                ...(normalizeEnvText(typeof input.cursor === 'string' ? input.cursor : undefined) ? { cursor: normalizeEnvText(input.cursor) } : {}),
+            }, metawebServiceOptions());
+            const bullets = (0, format_2.formatQaAnswerBullets)(page.items);
+            return (0, commandResult_1.commandSuccess)({
+                ...page,
+                formatted: bullets || 'No answers matched this filter.',
+            });
+        }
+        catch (error) {
+            if (error instanceof recall_1.QaRecallNotFoundError) {
+                return (0, commandResult_1.commandFailed)('question_not_found', error.message);
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            return (0, commandResult_1.commandFailed)('qanda_answers_failed', message);
         }
     }
     function sharedSkillsRoot() {
@@ -2604,6 +2747,15 @@ function createDefaultCliDependencies(context) {
         },
         simplenote: {
             post: async (input) => requestJsonForSelectedActor('POST', '/api/simplenote/post', typeof input.from === 'string' ? input.from : undefined, input),
+        },
+        qanda: {
+            question: async (input) => requestJsonForSelectedActor('POST', '/api/qanda/question', typeof input.from === 'string' ? input.from : undefined, input),
+            answer: async (input) => requestJsonForSelectedActor('POST', '/api/qanda/answer', typeof input.from === 'string' ? input.from : undefined, input),
+            like: async (input) => requestJsonForSelectedActor('POST', '/api/qanda/like', typeof input.from === 'string' ? input.from : undefined, input),
+            search: async (input) => runQandaSearch(input),
+            latest: async (input) => runQandaLatest(input),
+            detail: async (input) => runQandaDetail(input),
+            answers: async (input) => runQandaAnswers(input),
         },
         browser: {
             open: async (input) => openLocalBrowserPage(input),
@@ -4450,6 +4602,7 @@ function mergeCliDependencies(context) {
         metaid: { ...defaults.metaid, ...provided.metaid },
         metaweb: { ...defaults.metaweb, ...provided.metaweb },
         simplenote: { ...defaults.simplenote, ...provided.simplenote },
+        qanda: { ...defaults.qanda, ...provided.qanda },
         chain: { ...defaults.chain, ...provided.chain },
         traffic: { ...defaults.traffic, ...provided.traffic },
         daemon: { ...defaults.daemon, ...provided.daemon },
@@ -5225,7 +5378,7 @@ async function serveCliDaemonProcess(context) {
                         // Auto-learn failures never block the study drain.
                     }
                     await (0, studyJobs_1.runStudyTick)(studyStoreFor(profile.homeDir), {
-                        runStudyTurn: async ({ slug, prompt, budgetPins }) => {
+                        runStudyTurn: async ({ slug, kind, prompt, budgetPins }) => {
                             const homeDir = (await (0, metabotProfileManager_1.getMetabotProfile)(systemHomeDir, slug))?.homeDir ?? '';
                             const profilePaths = (0, paths_1.resolveMetabotPaths)(homeDir);
                             const runtimeResolver = (0, llmRuntimeResolver_1.createLlmRuntimeResolver)({
@@ -5265,6 +5418,7 @@ async function serveCliDaemonProcess(context) {
                             const studyProcedures = (0, procedureStore_1.createProcedureStore)(profilePaths);
                             const studyKnowledge = (0, knowledgeStore_1.createKnowledgeStore)(profilePaths);
                             return await (0, studyJobs_1.runStudyTurnWithTools)(prompt, {
+                                kind,
                                 runLlm: llm,
                                 tools: {
                                     searchMetaweb: async ({ query }) => {
@@ -5369,6 +5523,103 @@ async function serveCliDaemonProcess(context) {
                                             return 'No matching knowledge.';
                                         return rows.map((row) => `- [${row.kind}] ${row.topic}: ${row.summary}`).join('\n');
                                     },
+                                    // Q&A surfing seams (qa-surf jobs only): recall runs against
+                                    // the Q&A index, writes go through the in-process daemon
+                                    // handlers (already-answered check + ledger included).
+                                    searchQa: kind === 'qa-surf'
+                                        ? async ({ query, tags, answered, sort, size, cursor }) => {
+                                            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                                            const page = await (0, recall_1.qaSearch)({
+                                                q: query,
+                                                ...(tags?.length ? { tags } : {}),
+                                                ...(answered === true || answered === false ? { answered } : {}),
+                                                ...(sort === 'newest' ? { sort: 'newest' } : {}),
+                                                ...(size ? { size } : {}),
+                                                ...(cursor ? { cursor } : {}),
+                                            }, baseUrl ? { baseUrl } : undefined);
+                                            const bullets = (0, format_2.formatQaQuestionBullets)(page.items);
+                                            if (!bullets) {
+                                                return `No on-chain Q&A matched "${query}". Do NOT invent questions or answers.`;
+                                            }
+                                            const sections = [
+                                                `${page.items.length} on-chain question(s) matching "${query}":`,
+                                                bullets,
+                                            ];
+                                            if (page.hasMore && page.nextCursor) {
+                                                sections.push(`More results: call search_qa again with cursor="${page.nextCursor}".`);
+                                            }
+                                            return sections.join('\n');
+                                        }
+                                        : undefined,
+                                    listLatestQuestions: kind === 'qa-surf'
+                                        ? async ({ tags, minAnswers, maxAnswers, sort, size, cursor }) => {
+                                            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                                            const page = await (0, recall_1.qaLatestQuestions)({
+                                                ...(tags?.length ? { tags } : {}),
+                                                ...(minAnswers != null ? { minAnswers } : {}),
+                                                ...(maxAnswers != null ? { maxAnswers } : {}),
+                                                ...(sort === 'hot' ? { sort: 'hot' } : {}),
+                                                ...(size ? { size } : {}),
+                                                ...(cursor ? { cursor } : {}),
+                                            }, baseUrl ? { baseUrl } : undefined);
+                                            const bullets = (0, format_2.formatQaQuestionBullets)(page.items);
+                                            if (!bullets)
+                                                return 'No on-chain questions matched this filter.';
+                                            const sections = [
+                                                `${page.items.length} on-chain question(s):`,
+                                                bullets,
+                                            ];
+                                            if (page.hasMore && page.nextCursor) {
+                                                sections.push(`More questions: call list_latest_questions again with cursor="${page.nextCursor}".`);
+                                            }
+                                            return sections.join('\n');
+                                        }
+                                        : undefined,
+                                    getQuestionAnswers: kind === 'qa-surf'
+                                        ? async ({ questionPinId, publisher, size, cursor }) => {
+                                            const baseUrl = normalizeEnvText(context.env.METABOT_METAWEB_API_BASE_URL) || undefined;
+                                            const detail = await (0, recall_1.qaQuestionDetail)(questionPinId, baseUrl ? { baseUrl } : undefined);
+                                            return (0, format_2.formatQaQuestionDetail)({ question: detail.question, answers: detail.answers });
+                                        }
+                                        : undefined,
+                                    postSimpleAnswer: kind === 'qa-surf'
+                                        ? async ({ answerTo, content, tags }) => {
+                                            const answerHandler = handlers.qanda?.answer;
+                                            if (!answerHandler)
+                                                throw new Error('qanda answer handler is not configured.');
+                                            const result = await answerHandler({
+                                                from: slug,
+                                                answerTo,
+                                                content,
+                                                ...(tags?.length ? { tags } : {}),
+                                            });
+                                            if (!result.ok) {
+                                                throw new Error(result.message || 'answer publish failed');
+                                            }
+                                            const data = (result.data ?? {});
+                                            if (typeof data.notice === 'string' && data.notice) {
+                                                return data.notice;
+                                            }
+                                            return typeof data.formatted === 'string' && data.formatted
+                                                ? data.formatted
+                                                : 'Answer published on-chain.';
+                                        }
+                                        : undefined,
+                                    likePin: kind === 'qa-surf'
+                                        ? async ({ pinId, isLike }) => {
+                                            const likeHandler = handlers.qanda?.like;
+                                            if (!likeHandler)
+                                                throw new Error('qanda like handler is not configured.');
+                                            const result = await likeHandler({ from: slug, pinId, isLike });
+                                            if (!result.ok) {
+                                                throw new Error(result.message || 'reaction publish failed');
+                                            }
+                                            const data = (result.data ?? {});
+                                            return typeof data.formatted === 'string' && data.formatted
+                                                ? data.formatted
+                                                : 'Reaction published on-chain.';
+                                        }
+                                        : undefined,
                                 },
                             });
                         },

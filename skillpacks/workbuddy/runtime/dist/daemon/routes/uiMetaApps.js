@@ -16,6 +16,10 @@ const BUNDLED_META_APPS = {
         entryRelativePath: 'app/chat.html',
         baseHref: '/ui/chat/app/',
     },
+    qanda: {
+        entryRelativePath: 'app/index.html',
+        baseHref: '/ui/qanda/app/',
+    },
 };
 const MIME_TYPES = {
     '.css': 'text/css; charset=utf-8',
@@ -200,11 +204,17 @@ function matchBundledMetaAppPath(pathname) {
     if (pathname === '/ui/chat' || pathname === '/ui/chat/') {
         return { appId: 'chat', relativePath: null };
     }
+    if (pathname === '/ui/qanda' || pathname === '/ui/qanda/') {
+        return { appId: 'qanda', relativePath: null };
+    }
     if (pathname.startsWith('/ui/buzz/')) {
         return { appId: 'buzz', relativePath: pathname.slice('/ui/buzz/'.length) };
     }
     if (pathname.startsWith('/ui/chat/')) {
         return { appId: 'chat', relativePath: pathname.slice('/ui/chat/'.length) };
+    }
+    if (pathname.startsWith('/ui/qanda/')) {
+        return { appId: 'qanda', relativePath: pathname.slice('/ui/qanda/'.length) };
     }
     return null;
 }
